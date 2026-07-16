@@ -721,17 +721,22 @@ class AdminPage {
             const cur = this._supportFilter || '';
             // Clickable KPI cards → switch to the matching tab; active state mirrors the open tab.
             const card = (v, l, cls, icon, filter) => `<div class="sup-card ${cls || ''} ${filter !== undefined && filter === cur ? 'is-active' : ''}"${filter !== undefined ? ` role="button" tabindex="0" data-filter="${filter}" title="Voir ces tickets"` : ''}><div class="ic">${icon}</div><div><div class="v">${v}</div><div class="l">${l}</div></div></div>`;
+            // Every clickable card's count uses the SAME predicate as the list filter it opens
+            // (the old 'open'/'in_progress' counts covered open+pending → number ≠ list length).
             el.innerHTML = [
-                card(n(c.open), 'Tickets ouverts', '', '🎫', 'open'),
+                card(n(c.open), 'Tickets actifs', '', '🎫', 'active'),
                 card(n(c.needs_reply), 'À répondre', Number(c.needs_reply) > 0 ? 'alert' : 'ok', '⏳', 'needs_reply'),
-                card(n(c.in_progress), 'En cours', '', '🔄', 'pending'),
+                card(n(c.pending_exact), 'En attente client', '', '🔄', 'pending'),
                 card(n(c.resolved_7d), 'Résolus 7 j', 'ok', '✅', 'closed'),
                 card(n(c.resolved_30d), 'Résolus 30 j', '', '📅')
             ].join('');
+            // "Résolus 7 j" opens the full closed list (no 7-day list filter exists) — say so.
+            const r7 = el.querySelector('.sup-card[data-filter="closed"]');
+            if (r7) r7.title = 'Fermés ces 7 derniers jours — ouvre tous les tickets fermés';
             el.querySelectorAll('.sup-card[data-filter]').forEach(cd => cd.addEventListener('click', () => this._pageSupport(cd.dataset.filter)));
             // Tab counts + urgency dot on "À répondre".
             const setCount = (k, val) => { const s = document.getElementById('sup-count-' + k); if (s) s.textContent = AdminPage.n(val); };
-            setCount('needs_reply', c.needs_reply); setCount('open', c.open); setCount('in_progress', c.in_progress);
+            setCount('needs_reply', c.needs_reply); setCount('active', c.open); setCount('pending_exact', c.pending_exact);
             const nrTab = document.querySelector('.sup-tab[data-filter="needs_reply"]');
             if (nrTab) nrTab.classList.toggle('urgent', Number(c.needs_reply) > 0);
             // Header status line: à répondre · ouverts · résolus 7 j.
@@ -830,6 +835,9 @@ class AdminPage {
         // Remember where a fiche was opened from so its back button returns there (not always Clients).
         // Keep the original entry across chained fiche→fiche hops (source row → another fiche).
         if (route.startsWith('client:') && from && !from.startsWith('client:')) this._ficheReturn = from;
+        // Same for tickets: opened from a fiche (panel tickets) → back returns to that fiche,
+        // not to the Support inbox (the back target used to be hardcoded 'support').
+        if (route.startsWith('ticket:') && from && !from.startsWith('ticket:')) this._ticketReturn = from.startsWith('client:') ? from : 'support';
         this._route = route;
         this._nav = (this._nav || 0) + 1; // monotonic token — stale async page/panel loads bail on mismatch
         this._setActiveNav(route);
@@ -1239,8 +1247,12 @@ class AdminPage {
         const ae = document.activeElement;
         const tabHadFocus = !!(ae && ae.classList && ae.classList.contains('sup-tab'));
         const v = this._view();
-        const tabs = [['needs_reply', 'À répondre'], ['open', 'Ouverts'], ['pending', 'En attente'], ['closed', 'Fermés'], ['', 'Tous']];
-        const countKey = { needs_reply: 'needs_reply', open: 'open', pending: 'in_progress' }; // tab → admin_support_counts key
+        // 'active' = tout non-fermé (le compteur `open` du RPC) ; 'pending' = status exact.
+        // L'ancien onglet 'Ouverts' (status='open' strict) doublonnait « À répondre » et son
+        // compteur (open+pending) ne correspondait pas à sa liste — remplacé par Actifs.
+        const tabs = [['needs_reply', 'À répondre'], ['active', 'Actifs'], ['pending', 'En attente client'], ['closed', 'Fermés'], ['', 'Tous']];
+        const countKey = { needs_reply: 'needs_reply', active: 'active', pending: 'pending_exact' }; // tab → admin_support_counts key (mêmes prédicats que la liste)
+        if (this._supportFilter === 'open') this._supportFilter = 'active'; // état hérité d'une session avant le renommage
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎫 Support</h1>
             <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
@@ -1253,12 +1265,18 @@ class AdminPage {
             </div>
             <input class="sup-search" id="sup-search" type="search" placeholder="Rechercher : client, sujet, message…" autocomplete="off" value="${AdminPage.esc(this._supportSearch || '')}" aria-label="Rechercher un ticket" />
             <div id="sup-list" role="tabpanel" aria-label="Tickets — ${AdminPage.esc(this._supportFilter || 'tous')}"><div class="ssub">Chargement…</div></div>
+            <div class="users-pager" id="sup-pager" style="display:none"><button id="sup-prev">← Précédents</button><span id="sup-range"></span><button id="sup-next">Suivants →</button></div>
         </div>`;
+        // Server-side search (email / sujet / corps) — the old client-side filter only saw the
+        // loaded page, so anything beyond it was silently unfindable.
         const searchEl = document.getElementById('sup-search');
         if (searchEl) searchEl.addEventListener('input', () => {
             clearTimeout(this._supSearchDeb);
-            this._supSearchDeb = setTimeout(() => { this._supportSearch = searchEl.value.trim(); this._renderSupportList(this._supportRows || []); }, 200);
+            this._supSearchDeb = setTimeout(() => { this._supportSearch = searchEl.value.trim(); this._supportPage = 0; this._reloadSupportList(); }, 300);
         });
+        const prev = document.getElementById('sup-prev'), next = document.getElementById('sup-next');
+        if (prev) prev.addEventListener('click', () => { if (this._supportPage > 0) { this._supportPage--; this._reloadSupportList(); } });
+        if (next) next.addEventListener('click', () => { this._supportPage++; this._reloadSupportList(); });
         const tabEls = Array.from(v.querySelectorAll('.sup-tab'));
         tabEls.forEach(b => b.addEventListener('click', () => this._pageSupport(b.dataset.filter)));
         // Roving focus + Arrow/Home/End on the tablist (activation follows focus).
@@ -1280,11 +1298,46 @@ class AdminPage {
         this._dressHeader();   // tabs call this method directly (not via _navigate) — re-dress the header
         this._refreshSupportBadge();
         this._loadSupportKpis();
+        if (filter !== undefined) this._supportPage = 0; // tab switch resets pagination
+        await this._reloadSupportList(seq);
+        // Continuous refresh: a new ticket / client reply now shows up without re-navigating.
+        // The interval self-guards on route + visibility (a stale one just no-ops), and is
+        // cleared/recreated on each page entry so they never stack.
+        clearInterval(this._supportPoll);
+        this._supportPoll = setInterval(() => {
+            if (this._route !== 'support' || document.visibilityState !== 'visible') return;
+            this._refreshSupportBadge(); this._loadSupportKpis(); this._reloadSupportList();
+        }, 60000);
+    }
+
+    // Fetch + render the current support page (filter × search × pagination). `seq` lets the
+    // caller thread its supersede token; standalone calls (pager, search, poll) mint their own.
+    async _reloadSupportList(seq) {
+        if (seq === undefined) seq = (this._supportSeq = (this._supportSeq || 0) + 1);
+        const PER = 50;
+        const page = this._supportPage || 0;
         try {
-            const res = await this._rpc('admin_support_list', { p_status: this._supportFilter || null, p_limit: 100, p_offset: 0 });
-            if (seq !== this._supportSeq) return; // a newer tab switch superseded this fetch
+            const res = await this._rpc('admin_support_list', {
+                p_status: this._supportFilter || null, p_limit: PER, p_offset: page * PER,
+                p_search: this._supportSearch || null,
+            });
+            if (seq !== this._supportSeq) return; // a newer tab switch / search superseded this fetch
             this._supportRows = (res && res.rows) || [];
+            this._supportTotal = Number(res && res.total) || 0;
             this._renderSupportList(this._supportRows);
+            // Pager: only shown when there is more than one page — total was previously ignored
+            // and everything beyond a hard 100-cap was silently invisible.
+            const pager = document.getElementById('sup-pager');
+            if (pager) {
+                const from = this._supportTotal ? page * PER + 1 : 0;
+                const to = Math.min((page + 1) * PER, this._supportTotal);
+                pager.style.display = this._supportTotal > PER ? 'flex' : 'none';
+                const range = document.getElementById('sup-range');
+                if (range) range.textContent = `${from}–${to} sur ${this._supportTotal}`;
+                const prev = document.getElementById('sup-prev'), next = document.getElementById('sup-next');
+                if (prev) prev.disabled = page === 0;
+                if (next) next.disabled = to >= this._supportTotal;
+            }
         } catch (e) {
             if (seq !== this._supportSeq) return;
             const el = document.getElementById('sup-list');
@@ -1296,11 +1349,9 @@ class AdminPage {
         const el = document.getElementById('sup-list');
         if (!el) return;
         rows = Array.isArray(rows) ? rows : [];
-        // Client-side search across client email, subject and last message body.
-        const q = (this._supportSearch || '').toLowerCase();
-        if (q) rows = rows.filter(t => [t.email, t.user_id, t.subject, t.last_body].some(x => String(x || '').toLowerCase().includes(q)));
+        // Search happens server-side now (admin_support_list p_search) — rows arrive filtered.
         if (!rows.length) {
-            el.innerHTML = q
+            el.innerHTML = this._supportSearch
                 ? `<div class="card"><span class="badge gray">∅</span> Aucun ticket ne correspond à « ${AdminPage.esc(this._supportSearch)} ».</div>`
                 : '<div class="card"><span class="badge green">✓</span> Aucun ticket dans cette vue.</div>';
             return;
@@ -1312,9 +1363,13 @@ class AdminPage {
         const rowCls = (t) => { if (!awaiting(t)) return ''; const a = ageH(t); return a >= 48 ? 'urgent' : a >= 24 ? 'warn' : ''; };
         const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
             : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
+        // Priority chip only when it carries signal (non-normal) — the column existed in the
+        // schema but was never surfaced anywhere in the UI.
+        const prio = (t) => t.priority === 'high' ? '<span class="badge red" title="Priorité haute">⬆ haute</span>'
+            : t.priority === 'low' ? '<span class="badge gray" title="Priorité basse">⬇ basse</span>' : '';
         el.innerHTML = `<div class="inbox">` + rows.map(t => `
             <div class="inbox-row ${rowCls(t)}" data-ticket-id="${AdminPage.esc(t.id)}" role="button" tabindex="0" aria-label="Ouvrir le ticket : ${AdminPage.esc(t.subject)}" title="Ouvrir le ticket">
-                <div class="inbox-st">${chip(t)}${sla(t)}</div>
+                <div class="inbox-st">${chip(t)}${prio(t)}${sla(t)}</div>
                 <div class="inbox-main">
                     <div class="inbox-subj">${AdminPage.esc(t.subject || '(sans sujet)')}</div>
                     <div class="inbox-prev">${AdminPage.esc(t.last_body || '')}</div>
@@ -1325,14 +1380,15 @@ class AdminPage {
                     <div class="inbox-msgs">${AdminPage.n(t.msg_count)} msg · ${t.last_from === 'user' ? 'client' : 'nous'}</div>
                 </div>
             </div>`).join('') + `</div>`;
+        // Keyboard activation comes from the root delegated keydown (Enter/Space → click on
+        // [data-ticket-id]) — a per-row keydown here would double-fire the navigation.
         el.querySelectorAll('.inbox-row[data-ticket-id]').forEach(r => {
             r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId));
-            r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._navigate('ticket:' + r.dataset.ticketId); } });
         });
     }
 
     // ── Page: single ticket (thread + reply + status) ──
-    async _pageTicket(ticketId) {
+    async _pageTicket(ticketId, opts) {
         this._setCrumb('Support › ticket');
         const nav = this._nav;
         const v = this._view();
@@ -1341,11 +1397,11 @@ class AdminPage {
             <div class="ssub" style="margin-top:10px">Chargement…</div>
         </div></div>`;
         const back = v.querySelector('[data-back]');
-        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
+        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate(this._ticketReturn || 'support'); });
         try {
             const d = await this._rpc('admin_support_ticket', { p_id: ticketId });
             if (this._nav !== nav) return; // navigated away while the ticket loaded — don't paint stale
-            this._renderTicket(d || {});
+            this._renderTicket(d || {}, opts);
         } catch (e) {
             if (this._nav !== nav) return;
             const b = document.getElementById('ticket-body');
@@ -1353,10 +1409,20 @@ class AdminPage {
         }
     }
 
-    _renderTicket(d) {
+    _renderTicket(d, opts) {
         const body = document.getElementById('ticket-body');
         if (!body) return;
-        const t = d.ticket || {};
+        // Unknown id → the RPC returns {ticket:null} without raising. Rendering an actionable
+        // ghost shell here (empty subject, live reply box, Close button) sent replies with an
+        // empty ticket_id → cryptic 404. Hard-stop on a real error state instead.
+        if (!d || !d.ticket || !d.ticket.id) {
+            body.innerHTML = `<button class="crm-back" data-back="support">Retour aux tickets</button>
+                <div class="admin-err" role="alert" style="margin-top:12px">Ticket introuvable — il a peut-être été supprimé.</div>`;
+            const bk = body.querySelector('[data-back]');
+            if (bk) bk.addEventListener('click', () => this._navigate(this._ticketReturn || 'support'));
+            return;
+        }
+        const t = d.ticket;
         const msgs = Array.isArray(d.messages) ? d.messages : [];
         this._setCrumb('Support › ' + (t.subject || 'ticket'));
         const closed = t.status === 'closed';
@@ -1379,20 +1445,28 @@ class AdminPage {
             // otherwise the source indentation would leak into the rendered message.
             return `<div class="ticket-msg ticket-msg--${admin ? 'admin' : 'client'}"><div class="ticket-msg-h"><span class="tk-av">${admin ? '🛟' : AdminPage.esc(initial(who))}</span>${AdminPage.esc(who)} · ${AdminPage.esc(AdminPage.timeAgo(m.created_at))}</div><div class="ticket-msg-b">${AdminPage.esc(m.body)}</div></div>`;
         }).join('');
-        // Quick-reply templates (replies email the client in English).
+        // Quick-reply templates (replies email the client in English). The refund one is
+        // deliberately in PRESENT tense ("we're processing") — sending this template does NOT
+        // refund anything (the real action is the fiche's Rembourser button); the old past-tense
+        // wording promised a refund that might never have been issued.
         const TEMPLATES = [
             ['💳 Paiement', "Hi,\n\nWe've looked into the payment issue on your account. "],
             ['✉️ Confirmation', "Hi,\n\nWe've just re-sent your confirmation email — please check your inbox (and spam). "],
             ['📡 Source', "Hi,\n\nAbout your source/playlist: "],
-            ['↩︎ Remboursement', "Hi,\n\nWe've processed your refund; it should appear on your statement within a few business days. "],
+            ['↩︎ Remboursement', "Hi,\n\nWe're processing your refund — once issued it should appear on your statement within a few business days. "],
             ['❓ Infos', "Hi,\n\nCould you share a bit more detail (device, and a screenshot if possible) so we can help faster? "]
         ];
         this._ticketTemplates = TEMPLATES.map(x => x[1]);
         const filterLabel = { needs_reply: 'À répondre', open: 'Ouverts', pending: 'En attente', closed: 'Fermés', '': 'Tous' }[this._supportFilter || ''] || 'Support';
+        const prioSel = `<select id="tk-priority" aria-label="Priorité du ticket" title="Priorité (visible dans la liste)" class="mini-btn" style="padding:4px 8px">
+              <option value="low"${t.priority === 'low' ? ' selected' : ''}>⬇ basse</option>
+              <option value="normal"${!t.priority || t.priority === 'normal' ? ' selected' : ''}>priorité normale</option>
+              <option value="high"${t.priority === 'high' ? ' selected' : ''}>⬆ haute</option>
+            </select>`;
         body.innerHTML = `
             <div class="tk-back-bar">
-              <button class="crm-back" data-back="support">Retour · ${AdminPage.esc(filterLabel)}</button>
-              ${statusChip}
+              <button class="crm-back" data-back="support">Retour · ${AdminPage.esc(this._ticketReturn && this._ticketReturn.startsWith('client:') ? 'Fiche client' : filterLabel)}</button>
+              ${statusChip} ${prioSel}
             </div>
             <div class="fiche-head" style="margin-bottom:6px">
               <div><div class="fiche-title" style="font-size:18px">${AdminPage.esc(t.subject || '—')}</div>
@@ -1402,15 +1476,18 @@ class AdminPage {
             ${banner}
             <div class="tk-cols">
               <div>
-                <div class="card" style="margin-bottom:14px"><div class="ticket-thread">${thread || '<div class="ssub">Aucun message.</div>'}</div></div>
+                <div class="card" style="margin-bottom:14px"><div class="ticket-thread" role="log" aria-live="polite">${thread || '<div class="ssub">Aucun message.</div>'}</div></div>
                 <div class="card">
-                  <textarea id="tk-reply" class="ticket-reply" rows="3" placeholder="Répondre au client (le message part par email en anglais côté client — écris en anglais)…"></textarea>
-                  <div class="tk-templates">${TEMPLATES.map((tp, i) => `<button class="tk-tpl" data-tpl="${i}" title="Insérer un modèle">${AdminPage.esc(tp[0])}</button>`).join('')}</div>
+                  <textarea id="tk-reply" class="ticket-reply" rows="3" maxlength="8000" aria-label="Réponse au client" aria-describedby="tk-count" placeholder="Répondre au client (le message part par email en anglais côté client — écris en anglais)…"></textarea>
+                  <div class="field-row" style="display:flex;justify-content:space-between;align-items:baseline">
+                    <div class="tk-templates">${TEMPLATES.map((tp, i) => `<button class="tk-tpl" data-tpl="${i}" title="Insérer un modèle">${AdminPage.esc(tp[0])}</button>`).join('')}</div>
+                    <span class="ssub" id="tk-count" aria-live="polite" style="font-variant-numeric:tabular-nums">0 / 8000</span>
+                  </div>
                   <div class="act-row" style="margin-top:8px">
-                    <button class="act-btn" id="tk-send" style="background:#5b7cfa;border-color:#5b7cfa">📤 Envoyer la réponse</button>
+                    <button class="act-btn" id="tk-send" style="background:#5b7cfa;border-color:#5b7cfa" title="Ctrl+Entrée">📤 Envoyer la réponse</button>
                     ${!closed ? '<button class="act-btn act-danger" id="tk-close">✔ Fermer le ticket</button>' : '<button class="act-btn act-unsuspend" id="tk-reopen">↺ Rouvrir</button>'}
                   </div>
-                  <div class="ssub" style="margin-top:8px">Envoyer une réponse passe le ticket « en attente client » et lui envoie un email.</div>
+                  <div class="ssub" style="margin-top:8px">Envoyer une réponse passe le ticket « en attente client » et lui envoie un email. Ctrl+Entrée pour envoyer.</div>
                 </div>
               </div>
               <div class="card tk-ctx" id="tk-ctx">
@@ -1421,16 +1498,43 @@ class AdminPage {
               </div>
             </div>`;
         const back = body.querySelector('[data-back]');
-        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
+        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate(this._ticketReturn || 'support'); });
         const openFiche = document.getElementById('tk-open-fiche');
         if (openFiche && t.user_id) openFiche.addEventListener('click', () => this._navigate('client:' + t.user_id));
-        // Templates: insert into the reply box (append, don't clobber a draft).
+        // Templates: insert into the reply box (append, don't clobber a draft). When appending
+        // to an existing draft, strip the template's "Hi," greeting — two clicks used to
+        // produce "Hi,… Hi,…".
         body.querySelectorAll('.tk-tpl').forEach(b => b.addEventListener('click', () => {
             const ta = document.getElementById('tk-reply'); if (!ta) return;
             const tpl = this._ticketTemplates[Number(b.dataset.tpl)] || '';
-            ta.value = ta.value ? (ta.value.replace(/\s*$/, '') + '\n\n' + tpl) : tpl;
+            ta.value = ta.value ? (ta.value.replace(/\s*$/, '') + '\n\n' + tpl.replace(/^Hi,\s*/, '')) : tpl;
+            ta.dispatchEvent(new Event('input'));
             ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length;
         }));
+        // Reply char counter (the edge silently truncates at 8000 — maxlength + counter make
+        // the limit visible) + Ctrl/Cmd+Enter to send.
+        const replyTa = document.getElementById('tk-reply');
+        const countEl = document.getElementById('tk-count');
+        if (replyTa && countEl) {
+            const upd = () => {
+                countEl.textContent = replyTa.value.length + ' / 8000';
+                countEl.style.color = replyTa.value.length >= 7200 ? '#fbbf24' : '';
+            };
+            replyTa.addEventListener('input', upd); upd();
+            replyTa.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); document.getElementById('tk-send')?.click(); }
+            });
+        }
+        // Priority selector → RPC + refresh (chip shows up in the inbox list).
+        const prioEl = document.getElementById('tk-priority');
+        if (prioEl) prioEl.addEventListener('change', async () => {
+            prioEl.disabled = true;
+            try { await this._rpc('admin_support_set_priority', { p_id: t.id, p_priority: prioEl.value }); this._toast('Priorité mise à jour.', 'ok'); }
+            catch (e) { this._toast('Erreur priorité : ' + e.message, 'err'); }
+            prioEl.disabled = false;
+        });
+        // Post-reply: land on the reply box instead of the top of a long thread.
+        if (opts && opts.scrollReply && replyTa) setTimeout(() => replyTa.scrollIntoView({ block: 'center' }), 30);
         if (t.user_id) this._loadTicketContext(t.user_id);
         const client = document.getElementById('tk-client');
         if (client && t.user_id) client.addEventListener('click', (e) => { e.preventDefault(); this._navigate('client:' + t.user_id); });
@@ -1440,7 +1544,7 @@ class AdminPage {
             const text = ta ? ta.value.trim() : '';
             if (text.length < 2) { this._toast('Écris une réponse avant d\'envoyer.', 'err'); if (ta) ta.focus(); return; }
             send.disabled = true; send.textContent = 'Envoi…';
-            try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); this._toast('Réponse envoyée au client.', 'ok'); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id, { scrollReply: true }); this._refreshSupportBadge(); }
             catch (e) { send.disabled = false; send.textContent = '📤 Envoyer la réponse'; this._toast('Échec de l\'envoi : ' + e.message, 'err'); }
         });
         const closeBtn = document.getElementById('tk-close');
@@ -1453,7 +1557,7 @@ class AdminPage {
         const reopen = document.getElementById('tk-reopen');
         if (reopen) reopen.addEventListener('click', async () => {
             reopen.disabled = true; reopen.textContent = '…';
-            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); this._toast('Ticket rouvert.', 'ok'); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
             catch (e) { reopen.disabled = false; reopen.textContent = '↺ Rouvrir'; this._toast('Erreur : ' + e.message, 'err'); }
         });
     }
@@ -1977,7 +2081,9 @@ class AdminPage {
             const res = await this._rpc('admin_support_list', { p_user_id: userId, p_limit: 10, p_offset: 0 });
             if (this._crmUser !== userId) return; // navigated away mid-fetch
             const rows = (res && res.rows) || [];
-            const openCount = rows.filter(t => t.status !== 'closed').length;
+            // Server-side count (open_total) — the old client-side filter only saw the 10 loaded
+            // rows, so a heavy-ticket client's chip under-counted.
+            const openCount = Number(res && res.open_total) || 0;
             this._setFicheChip('fs-tickets', '🎫', AdminPage.n(openCount), 'Tickets ouverts', openCount > 0 ? 'warn' : 'ok');
             if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun ticket.</div>'; return; }
             const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
