@@ -381,7 +381,11 @@ class App {
             this.maybeShowTrialBanner();
             this.maybeShowBillingIssueBanner();
             this.maybeShowRegionPrompt();
+            this.maybeShowSupportReplyBanner();
         });
+        // Support replies can land mid-session — re-check every 5 min (the banner id-guard
+        // and the seen-watermark make repeat calls cheap no-ops).
+        setInterval(() => this.maybeShowSupportReplyBanner(), 5 * 60 * 1000);
 
         // Keep the catalogue fresh: a few seconds after launch, silently re-sync
         // any provider that's gone stale. Non-blocking, and cheap when nothing
@@ -1221,6 +1225,84 @@ class App {
             close.style.cssText = 'background:transparent;border:0;color:#d9c08a;font-size:16px;cursor:pointer;line-height:1';
             close.addEventListener('click', () => {
                 try { sessionStorage.setItem('norva-billing-banner-dismissed', '1'); } catch (_) { }
+                bar.remove();
+            });
+
+            bar.appendChild(span);
+            bar.appendChild(link);
+            bar.appendChild(close);
+            document.body.appendChild(bar);
+        } catch (_) { /* never break the app over a banner */ }
+    }
+
+    // In-app notice when support replied to one of the user's tickets — the email is easy
+    // to miss mid-session. The banner deep-links straight into the ticket (support.html
+    // auto-expands & scrolls ?ticket=). "Seen" watermark = 'norva-support-seen' in
+    // localStorage: the newest server last_message_at the user has seen — written by
+    // support.html on every load/poll, and by dismissing this banner (dismiss = read).
+    // Server timestamps only (string-compared ISO), so client clock skew can't hide a reply.
+    async maybeShowSupportReplyBanner() {
+        try {
+            // Not on the empty onboarding screen (same collision rule as the other banners).
+            if (this.sourceHealthSummary && ['not_configured', 'unknown'].includes(this.sourceHealthSummary.state)) return;
+            if (document.getElementById('norva-support-banner')) return;
+            if (!(window.NorvaAuth && NorvaAuth.getSession && NorvaAuth.getSession())) return;
+            const token = await NorvaAuth.getAccessToken();
+            if (!token) return;
+            const base = ((NorvaAuth.supabaseUrl || '')).replace(/\/+$/, '');
+            const res = await fetch(base + '/functions/v1/norva-support/mine?tickets=only', {
+                headers: { apikey: NorvaAuth.publishableKey || '', Authorization: 'Bearer ' + token }
+            });
+            if (!res.ok) return;
+            const data = await res.json().catch(() => ({}));
+            const tickets = Array.isArray(data.tickets) ? data.tickets : [];
+            const seen = localStorage.getItem('norva-support-seen') || '';
+            // A reply on a since-closed ticket still counts — the user hasn't read it.
+            const unseen = tickets.filter(t => t.last_from === 'admin' && String(t.last_message_at || '') > seen);
+            // Unread dot on the Settings "Contact support" button, kept in sync either way.
+            const supportBtn = document.getElementById('settings-support-btn');
+            if (supportBtn) {
+                let dot = supportBtn.querySelector('.support-unread-dot');
+                if (unseen.length && !dot) {
+                    dot = document.createElement('span');
+                    dot.className = 'support-unread-dot';
+                    dot.setAttribute('aria-label', 'New reply from support');
+                    dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:#fb7185;vertical-align:middle;margin-left:7px';
+                    supportBtn.appendChild(dot);
+                } else if (!unseen.length && dot) dot.remove();
+            }
+            if (!unseen.length) return;
+            const newest = unseen.reduce((m, t) => (String(t.last_message_at) > m ? String(t.last_message_at) : m), '');
+
+            const here = location.pathname + location.search + location.hash;
+            const bar = document.createElement('div');
+            bar.id = 'norva-support-banner';
+            bar.setAttribute('role', 'status');
+            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#0f2418;border:1px solid #2c6e49;color:#c9f2da;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
+
+            const span = document.createElement('span');
+            span.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+            const firstSubject = String(unseen[0].subject || '').slice(0, 60);
+            span.textContent = unseen.length === 1
+                ? `💬 Support replied to “${firstSubject}”`
+                : `💬 Support replied to ${unseen.length} of your tickets`;
+
+            const link = document.createElement('a');
+            // One reply → straight into that thread; several → the support page (all of them).
+            link.href = '/support.html?' + (unseen.length === 1 ? 'ticket=' + encodeURIComponent(unseen[0].id) + '&' : '') + 'returnTo=' + encodeURIComponent(here);
+            link.textContent = 'Read reply';
+            link.style.cssText = 'color:#7ef2b0;text-decoration:none;font-weight:700;white-space:nowrap';
+
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.textContent = '✕';
+            close.style.cssText = 'background:transparent;border:0;color:#8fc9a8;font-size:16px;cursor:pointer;line-height:1';
+            close.addEventListener('click', () => {
+                // Dismiss = acknowledged: advance the watermark so this reply never re-nags
+                // (a NEWER reply will still notify).
+                try { localStorage.setItem('norva-support-seen', newest); } catch (_) { }
+                document.querySelector('#settings-support-btn .support-unread-dot')?.remove();
                 bar.remove();
             });
 

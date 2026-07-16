@@ -200,10 +200,13 @@ Deno.serve(async (req) => {
   }
 
   // ── USER: my tickets with threads ──────────────────────────────────────────
+  // ?tickets=only returns just the ticket rows (no thread bodies) — the in-app
+  // "support replied" notification polls this cheaply from every app boot.
   if (req.method === "GET" && path === "/mine") {
     const { data: tickets } = await db.from("cloud_support_tickets")
       .select("id,subject,status,last_from,last_message_at,created_at")
       .eq("user_id", user.id).order("last_message_at", { ascending: false }).limit(50);
+    if (url.searchParams.get("tickets") === "only") return json({ ok: true, tickets: tickets ?? [] });
     const ids = (tickets ?? []).map((t) => t.id);
     let messages: JsonRecord[] = [];
     if (ids.length) {

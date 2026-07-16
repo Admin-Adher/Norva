@@ -258,6 +258,15 @@
         try {
           const data = await call('/mine', { method: 'GET' });
           renderTickets(el, data.tickets || [], data.messages || [], opts);
+          // "Seen" watermark for the in-app "support replied" notification (app.js reads
+          // it): the newest server timestamp on screen — the user has now seen every
+          // reply up to this point. Server time only (client clocks can skew).
+          try {
+            const maxTs = (data.tickets || []).reduce(function (m, t) {
+              return (t.last_message_at || '') > m ? t.last_message_at : m;
+            }, '');
+            if (maxTs) localStorage.setItem('norva-support-seen', maxTs);
+          } catch (_) { /* private mode */ }
         } catch (e) {
           // Non-destructive on a post-action refresh: keep whatever is on screen, surface a note.
           if (el.children.length && !el.querySelector('.skeleton')) {
