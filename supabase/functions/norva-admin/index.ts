@@ -415,7 +415,7 @@ Deno.serve(async (req) => {
 
       // Load the target payment, scoped to THIS user (no cross-user refunds).
       const { data: pay, error: payErr } = await admin
-        .from("cloud_stancer_payments")
+        .from("cloud_billing_ledger")
         .select("pi_id,user_id,kind,amount,currency,status,provider,order_id,provider_payment_id")
         .eq("pi_id", piId).eq("user_id", userId).maybeSingle();
       if (payErr) return json(req, { error: "lookup failed: " + payErr.message }, 500);
@@ -434,7 +434,7 @@ Deno.serve(async (req) => {
       // Idempotency: one refund ledger row per order → refuse a re-refund (guards double money-out).
       const refundPi = `rfnd_${orderId}`;
       const { data: existing } = await admin
-        .from("cloud_stancer_payments").select("pi_id").eq("pi_id", refundPi).maybeSingle();
+        .from("cloud_billing_ledger").select("pi_id").eq("pi_id", refundPi).maybeSingle();
       if (existing) return json(req, { error: "Ce paiement a déjà été remboursé." }, 409);
 
       const r = await revolutRefund(orderId, amountCents);
@@ -446,7 +446,7 @@ Deno.serve(async (req) => {
 
       // Journal the refund (kind='refund' → excluded from `collected`, shown in the fiche history).
       // supabase-js resolves with { error } rather than throwing; the money already moved either way.
-      const { error: insErr } = await admin.from("cloud_stancer_payments").insert({
+      const { error: insErr } = await admin.from("cloud_billing_ledger").insert({
         pi_id: refundPi, user_id: userId, kind: "refund",
         amount: amountCents, currency: (pay.currency ?? "usd"), status: "refunded",
         provider: "revolut", order_id: orderId, provider_payment_id: pay.provider_payment_id ?? null,

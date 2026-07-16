@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`projection upsert failed: ${error.message}`);
     }
 
-    // Journal the mobile charge into the shared payments ledger (cloud_stancer_payments,
+    // Journal the mobile charge into the shared payments ledger (cloud_billing_ledger,
     // rail-tagged) so collected / conversions / recent-payments / by-rail KPIs see
     // Play & Apple revenue alongside the web rail's own order journal.
     await journalRcPayment(admin, userId, eventType, event);
@@ -302,7 +302,7 @@ async function journalRcPayment(
   const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.id);
   if (!txId) return;
 
-  const { error } = await db.from("cloud_stancer_payments").upsert({
+  const { error } = await db.from("cloud_billing_ledger").upsert({
     pi_id: `rc_${txId}`,
     user_id: userId,
     kind: type === "RENEWAL" ? "renewal" : "first_charge",

@@ -61,20 +61,23 @@ from admin_feature_flags;
 select 'B1 projection par statut' as check, status, count(*) as n
 from cloud_entitlement_projection group by status order by n desc;
 
-select 'B2 ledger cross-rail (pi_id, PAS payment_id)' as check,
+-- Ledger renommé en cloud_billing_ledger (20260716170000) ; cloud_stancer_payments est
+-- désormais une VUE de compat qui pointe dessus (les deux noms fonctionnent en lecture).
+select 'B2 ledger cross-rail (cloud_billing_ledger, pi_id PAS payment_id)' as check,
   (select count(*) from cloud_stancer_customers) as customers,
-  (select count(*) from cloud_stancer_payments)  as payments,
-  (select max(created_at) from cloud_stancer_payments) as last_payment,
-  (select count(*) from cloud_stancer_payments where pi_id like 'rc_%')  as rc_mobile_rows,
-  (select count(*) from cloud_stancer_payments where provider = 'revolut') as revolut_rows,
-  (select count(*) from cloud_stancer_payments where kind = 'refund')      as refund_rows;
+  (select count(*) from cloud_billing_ledger)  as payments,
+  (select max(created_at) from cloud_billing_ledger) as last_payment,
+  (select count(*) from cloud_billing_ledger where pi_id like 'rc_%')  as rc_mobile_rows,
+  (select count(*) from cloud_billing_ledger where provider = 'revolut') as revolut_rows,
+  (select count(*) from cloud_billing_ledger where kind = 'refund')      as refund_rows;
 
 -- ★ contrainte provider du ledger DOIT autoriser 'revolut' (bug corrigé en 20260716140000 —
 -- sinon le journaling des charges Revolut échoue en silence → collected/funnel à 0).
 select 'B2b provider check autorise revolut' as check,
        (pg_get_constraintdef(oid) like '%revolut%') as pass,
        pg_get_constraintdef(oid) as def
-from pg_constraint where conname = 'cloud_stancer_payments_provider_check';
+from pg_constraint
+where conname in ('cloud_billing_ledger_provider_check', 'cloud_stancer_payments_provider_check');
 
 select 'B3 rail revolut' as check,
   (select count(*) from cloud_revolut_customers) as customers,
