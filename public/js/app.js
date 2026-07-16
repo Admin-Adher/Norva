@@ -354,9 +354,16 @@ class App {
             console.warn('Background EPG load failed:', err.message);
         });
 
-        // Navigate to the page from URL hash, or default to home
+        // Navigate to the page from URL hash, or default to home. Sub-routes use
+        // "#page/sub" (e.g. #admin/client:<id>): the page key is the first segment.
         const hash = window.location.hash.slice(1); // Remove #
-        const requestedInitialPage = hash && this.pages[hash] ? hash : 'home';
+        const hashKey = hash.split('/')[0];
+        // Stash the admin sub-route BEFORE navigateTo rewrites the hash to "#admin" —
+        // AdminPage.show() consumes it to restore the exact CRM view (fiche, ticket…).
+        this._adminSubRoute = hashKey === 'admin' ? hash.slice('admin/'.length) : '';
+        // `in` (not truthiness): lazy pages register as null until loaded (this.pages.admin),
+        // which used to send a refresh on #admin back to home.
+        const requestedInitialPage = hashKey && (hashKey in this.pages) ? hashKey : 'home';
         if (requestedInitialPage !== 'home') await healthReady;
         const initialPage = this.guardCatalogPage(requestedInitialPage);
         // Capture any fiche open before a refresh BEFORE navigating (applyPage may clear
@@ -2276,7 +2283,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=54';
+                s.src = '/js/pages/AdminPage.js?v=55';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

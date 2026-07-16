@@ -36,6 +36,14 @@ class AdminPage {
         try { return (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || ''; }
         catch (_) { return ''; }
     }
+    // Current admin's user id, decoded from the JWT (sub claim) — client-side gate only
+    // (UX: hide self-destructive actions); the edge enforces the real anti-lock-out rules.
+    _meId() {
+        try {
+            const part = this._token().split('.')[1] || '';
+            return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))).sub || '';
+        } catch (_) { return ''; }
+    }
     async _rpc(fn, params) {
         const res = await fetch(`${this._sbUrl()}/rest/v1/rpc/${fn}`, {
             method: 'POST',
@@ -65,9 +73,25 @@ class AdminPage {
     async show() {
         if (!(await this.isAdmin())) { this.app.navigateTo('home'); return; }
         this._ensureLayout();
-        this._navigate(this._route || 'cockpit');
+        // Deep-link / F5: restore the exact CRM view from "#admin/<route>". The app's
+        // navigateTo rewrites the hash to "#admin" before we run, so init stashes the
+        // sub-route on the app (consumed once); fall back to reading the live hash
+        // (covers being called while the sub-hash is still intact), then to memory.
+        let sub = null;
+        if (this.app && this.app._adminSubRoute) { sub = AdminPage.validRoute(this.app._adminSubRoute); this.app._adminSubRoute = ''; }
+        if (!sub) { const m = String(location.hash || '').match(/^#admin\/(.+)$/); if (m) sub = AdminPage.validRoute(decodeURIComponent(m[1])); }
+        this._navigate(sub || this._route || 'cockpit');
     }
     hide() { }
+
+    // Whitelist CRM routes coming from the URL (never trust a raw hash): static pages by
+    // name, entity pages only as client:<uuid> / ticket:<uuid>.
+    static validRoute(r) {
+        r = String(r || '');
+        if (['cockpit', 'finance', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+        const m = r.match(/^(client|ticket):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+        return m ? (m[1] + ':' + m[2]) : null;
+    }
 
     // ── CRM shell ──
     static NAV() {
@@ -839,6 +863,10 @@ class AdminPage {
         // not to the Support inbox (the back target used to be hardcoded 'support').
         if (route.startsWith('ticket:') && from && !from.startsWith('ticket:')) this._ticketReturn = from.startsWith('client:') ? from : 'support';
         this._route = route;
+        // Reflect the CRM sub-route in the URL (#admin/<route>) so F5 / bookmarks / shared
+        // links restore the exact view (fiche, ticket…). replaceState — the app's own history
+        // stack (one entry per app page) stays untouched, Back behaves exactly as before.
+        try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/' + route); } catch (_) { /* non-navigable contexts */ }
         this._nav = (this._nav || 0) + 1; // monotonic token — stale async page/panel loads bail on mismatch
         this._setActiveNav(route);
         const main = document.querySelector('#page-admin .crm-main');
@@ -1611,7 +1639,7 @@ class AdminPage {
             <div class="filter-bar">
               <div class="fb-h">🔎 Filtres & recherche</div>
               <div class="users-controls">
-                <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
+                <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un UUID complet…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" title="La recherche par identifiant exige l'UUID complet (l'email peut être partiel)" />
                 <select id="admin-users-sort">
                   <option value="created_desc">Plus récents</option>
                   <option value="created_asc">Plus anciens</option>
@@ -1913,6 +1941,9 @@ class AdminPage {
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
             btn.textContent = `✓ ${list.length}`;
+            // The RPC caps at 10 000 rows — say so instead of silently truncating the export.
+            const total = Number(this._users && this._users.total) || 0;
+            if (total > list.length) this._toast(`Export tronqué : ${list.length} lignes sur ${total} (plafond serveur 10 000). Affine la recherche/le filtre pour le reste.`, 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
         } catch (e) {
             btn.textContent = '✗ erreur';
@@ -1955,6 +1986,8 @@ class AdminPage {
         } catch (e) {
             if (this._crmUser !== userId) return;
             el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            // The summary chip is only set by the successful render — resolve its "…" spinner too.
+            this._setFicheChip('fs-sub', '💳', '—', 'Abonnement', 'alert');
         }
     }
 
@@ -1965,10 +1998,13 @@ class AdminPage {
         const pays = Array.isArray(b.payments) ? b.payments : [];
         const feedback = Array.isArray(b.cancel_feedback) ? b.cancel_feedback : [];
         const money = AdminPage.money, esc = AdminPage.esc;
-        // Résumé-client "Abonnement" chip (payment risk surfaces red).
+        // Résumé-client "Abonnement" chip (payment risk surfaces red). Internal accounts get
+        // their own label — a family/system VIP shown as "Actif payant" polluted the executive
+        // read (it's a test/comp account, not revenue).
         const subMap = { active: ['Actif payant', 'ok'], trialing: ['En essai', 'ok'], past_due: ['Échec paiement', 'alert'], grace: ['Échec paiement', 'alert'], cancelled_at_period_end: ['Annulation prévue', 'warn'], expired: ['Expiré', 'alert'] };
-        const sm = p ? (subMap[p.status] || [esc(p.status || '—'), '']) : ['Gratuit', ''];
-        this._setFicheChip('fs-sub', '💳', sm[0], 'Abonnement', sm[1]);
+        const sm = b.is_internal && p && p.status === 'active' ? ['VIP interne', '']
+            : p ? (subMap[p.status] || [esc(p.status || '—'), '']) : ['Gratuit', ''];
+        this._setFicheChip('fs-sub', b.is_internal ? '⭐' : '💳', sm[0], 'Abonnement', sm[1]);
         const dt = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
         const row = (label, val) => `<div class="kv-row"><span class="kv-l">${label}</span><span class="kv-v">${val}</span></div>`;
@@ -2036,7 +2072,7 @@ class AdminPage {
             ${showRailCol ? `<td>${AdminPage.railBadge(x.provider)}</td>` : ''}
             <td>${KIND_LABELS[x.kind] || esc(x.kind)}</td>
             <td>${payBadge(x.status)}</td>
-            <td class="num">${money(x.amount)}</td>
+            <td class="num">${money(x.amount)}${x.currency && String(x.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(x.currency).toUpperCase())}</span>` : ''}</td>
             ${showRefundCol ? `<td class="num">${canRefund(x) ? `<button class="mini-btn refund-btn" data-pi="${esc(x.pi_id)}" data-amount="${Number(x.amount) || 0}" title="Rembourser ce paiement">↩︎ Rembourser</button>` : ''}</td>` : ''}
         </tr>`).join('');
 
@@ -2101,6 +2137,7 @@ class AdminPage {
         } catch (e) {
             if (this._crmUser !== userId) return;
             el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            this._setFicheChip('fs-tickets', '🎫', '—', 'Tickets ouverts', 'alert');
         }
     }
 
@@ -2117,6 +2154,7 @@ class AdminPage {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
             });
+            this._setFicheChip('fs-tags', '🏷️', '—', 'Segments', 'alert');
         }
     }
 
@@ -2200,7 +2238,11 @@ class AdminPage {
         const ta = document.getElementById('crm-note-input');
         const body = ta ? ta.value.trim() : '';
         if (!body) { this._toast('La note est vide.', 'err'); if (ta) ta.focus(); return; }
-        await this._crmMutate('admin_note_add', { p_user_id: this._crmUser, p_body: body });
+        // admin_note_add inserts on every call — a fast double-click created the note twice.
+        const btn = document.getElementById('crm-note-add');
+        if (btn) { if (btn.disabled) return; btn.disabled = true; }
+        try { await this._crmMutate('admin_note_add', { p_user_id: this._crmUser, p_body: body }); }
+        finally { const b2 = document.getElementById('crm-note-add'); if (b2) b2.disabled = false; }
     }
     async _crmCreateTag() {
         const userId = this._crmUser; // pin: the prompts are async, the fiche could change under us
@@ -2243,7 +2285,13 @@ class AdminPage {
         const commonActions = !u.email_confirmed
             ? `<div class="act-row"><button class="act-btn act-resend" data-user-id="${uid}">✉️ Renvoyer la confirmation</button></div>`
             : '<div class="ssub">Aucune action courante en attente.</div>';
-        const sensitiveActions = `<div class="act-zone">
+        // Own account: don't offer self-demote / self-suspend at all (the edge refuses them
+        // anyway, but the UI shouldn't propose an action that can only fail — or lock you out).
+        const isSelf = uid && uid === this._meId();
+        const sensitiveActions = isSelf
+            ? `<div class="act-zone"><div class="act-zone-h">⚠️ Zone sensible</div>
+               <div class="ssub">C'est votre propre compte — le changement de rôle et la suspension sont désactivés (anti-lock-out).</div></div>`
+            : `<div class="act-zone">
             <div class="act-zone-h">⚠️ Zone sensible</div>
             <div class="act-row">
               <button class="act-btn act-role" data-user-id="${uid}" data-role="${roleTarget}">🔑 Passer ${roleTarget}</button>
@@ -3422,7 +3470,7 @@ class AdminPage {
     }
     // Payment rail (provider) → human label + badge. Separates web (Revolut) from mobile stores.
     static railLabel(p) {
-        const map = { revolut: 'Revolut · web', google_play: 'Google Play · mobile', apple_app_store: 'App Store · mobile', system: 'Comp / système', manual: 'Manuel', revenuecat: 'RevenueCat', web: 'Web', stripe: 'Stripe' };
+        const map = { revolut: 'Revolut · web', google_play: 'Google Play · mobile', apple_app_store: 'App Store · mobile', system: 'Comp / système', manual: 'Manuel', revenuecat: 'RevenueCat', web: 'Web', stripe: 'Stripe', stancer: 'Stancer · retiré' };
         return map[p] || (p ? AdminPage.esc(p) : '—');
     }
     static railBadge(p) {
