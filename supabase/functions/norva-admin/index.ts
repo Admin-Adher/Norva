@@ -263,6 +263,37 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   };
 }
 
+// ── Weekly business digest (pg_cron → /weekly-digest, Monday 07:00) ────────────────────────────
+// A proactive founder digest on Telegram: growth, revenue, support — read entirely from the
+// precomputed admin_dashboard_cache overview (no extra queries). Cheap, once a week.
+async function sendWeeklyDigest(): Promise<JsonRecord> {
+  const { data: cache } = await admin.from("admin_dashboard_cache")
+    .select("overview, refreshed_at").eq("id", 1).maybeSingle();
+  const ov = (cache?.overview ?? {}) as JsonRecord;
+  const n = (v: unknown) => Number(v) || 0;
+  const usd = (c: unknown) => `$${(n(c) / 100).toFixed(2)}`;
+  const mrr = n(ov.billing_mrr_cents);
+
+  const parts: string[] = [
+    "📊 <b>Norva — Résumé hebdo</b>",
+    "",
+    "👥 <b>Croissance</b>",
+    `• Nouveaux inscrits : ${n(ov.users_new_7d)} (7 j) · ${n(ov.users_new_30d)} (30 j)`,
+    `• Actifs 7 j : ${n(ov.users_active_7d)}`,
+    "",
+    "💶 <b>Revenu</b>",
+    `• MRR : <b>${usd(mrr)}</b> · ARR ${usd(mrr * 12)}`,
+    `• Payants : ${n(ov.billing_active)} · en essai : ${n(ov.billing_trialing)}`,
+    `• Conversions (7 j) : ${n(ov.billing_conversions_7d)} · encaissé 30 j : ${usd(ov.billing_collected_30d_cents)}`,
+  ];
+  if (n(ov.billing_past_due)) parts.push(`• ⚠️ Échecs de paiement : ${n(ov.billing_past_due)}`);
+  parts.push("", "🎫 <b>Support</b>", `• Ouverts : ${n(ov.support_open)} · à répondre : ${n(ov.support_needs_reply)}`);
+  if (n(ov.sources_error)) parts.push(`• 🔧 Sources en erreur : ${n(ov.sources_error)}`);
+
+  const sent = await sendTelegram(parts.join("\n"));
+  return { ok: true, sent, mrr_cents: mrr };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
   try {
@@ -283,6 +314,18 @@ Deno.serve(async (req) => {
       }
       if (!authed) return json(req, { error: "not authorized" }, 403);
       return json(req, await runOpsAlertSweep());
+    }
+
+    // ── route: /weekly-digest — business digest to Telegram (pg_cron Monday). Same dual auth. ──
+    if (segments[segments.length - 1] === "weekly-digest") {
+      const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+      let authed = Boolean(expected) && timingSafeEqual(token, expected);
+      if (!authed) {
+        const { data: sa } = await admin.auth.getUser(token);
+        authed = ((sa?.user?.app_metadata as JsonRecord | undefined)?.role) === "admin";
+      }
+      if (!authed) return json(req, { error: "not authorized" }, 403);
+      return json(req, await sendWeeklyDigest());
     }
 
     // ── admin gate (all other routes) ──

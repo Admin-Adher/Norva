@@ -28,6 +28,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { renderReceipt } from "../_shared/lifecycle-email.ts";
+import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -95,6 +96,42 @@ async function sendReceipt(db: SupabaseClient, userId: string, planLabel: string
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: FROM, to: [email], subject: r.subject, html: r.html }),
     });
+  } catch (_) { /* best-effort */ }
+}
+
+// Is this the owner's own test account? Internal accounts must NEVER trigger a founder
+// Telegram ping (a test conversion/failure is not business signal).
+async function isInternal(db: SupabaseClient, userId: string): Promise<boolean> {
+  try {
+    const { data } = await db.from("admin_internal_accounts").select("user_id").eq("user_id", userId).maybeSingle();
+    return Boolean(data);
+  } catch (_) { return false; }
+}
+async function userEmail(db: SupabaseClient, userId: string): Promise<string> {
+  try { const { data } = await db.auth.admin.getUserById(userId); return data?.user?.email ?? userId; }
+  catch (_) { return userId; }
+}
+
+// 🎉 A REAL (non-internal) customer just converted from trial → first paid charge. Highest-signal
+// moment for the founder → instant Telegram. Best-effort, never blocks the billing action.
+async function pingConversion(db: SupabaseClient, userId: string, planLabel: string, amountCents: number, period: string): Promise<void> {
+  try {
+    if (await isInternal(db, userId)) return;
+    const email = await userEmail(db, userId);
+    await sendTelegram(
+      `🎉 <b>Nouvelle conversion Norva</b>\n${tgEscape(email)}\n${tgEscape(planLabel)} · ${tgEscape(period)}\n💶 <b>$${(amountCents / 100).toFixed(2)}</b> encaissés (1ᵉʳ prélèvement)`,
+    );
+  } catch (_) { /* best-effort */ }
+}
+// 💳 A real subscriber's charge was DECLINED → past_due. Individual dunning alert (vs the ops
+// sweep's ≥3-simultaneous threshold), so a single lost renewal is caught early.
+async function pingChargeFailed(db: SupabaseClient, userId: string, planLabel: string, kind: "first_charge" | "renewal"): Promise<void> {
+  try {
+    if (await isInternal(db, userId)) return;
+    const email = await userEmail(db, userId);
+    await sendTelegram(
+      `💳 <b>Échec de paiement Norva</b>\n${tgEscape(email)}\n${tgEscape(planLabel)} · ${kind === "first_charge" ? "conversion trial" : "renouvellement"}\n→ passé en <b>past_due</b>, dunning enclenché.`,
+    );
   } catch (_) { /* best-effort */ }
 }
 
@@ -214,11 +251,14 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
       }, { onConflict: "pi_id", ignoreDuplicates: true });
     } catch (_) { /* ledger is reporting-only */ }
     await sendReceipt(db, row.user_id, discountPct ? `${planLabel} (${discountPct}% off applied)` : planLabel, chargeAmount, nextEnd);
+    // 🎉 Trial → first paid charge = a real customer went paying. Ping the founder (non-internal only).
+    if (kind === "first_charge") await pingConversion(db, row.user_id, planLabel, chargeAmount, period);
     return "charged";
   }
 
   // Failed → past_due (dunning handled by norva-lifecycle), keep a grace window open.
   await db.from("cloud_entitlement_projection").update({ status: "past_due", last_event_at: nowIso, fail_open_until: addHours(nowIso, 72) }).eq("user_id", row.user_id);
+  await pingChargeFailed(db, row.user_id, planLabel, kind);
   return "failed";
 }
 
