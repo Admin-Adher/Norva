@@ -352,7 +352,11 @@ class AdminPage {
 #page-admin .sla-chip.amber{background:rgba(251,191,36,.18);color:#fcd34d;}
 @media(max-width:640px){#page-admin .inbox-row{grid-template-columns:1fr auto;}#page-admin .inbox-st{flex-direction:row;grid-column:1/-1;}}
 /* Ticket view: sticky back bar, state banner, class-based thread, context sidebar, templates */
-#page-admin .tk-back-bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;margin-bottom:6px;background:linear-gradient(180deg,var(--adm-bg) 70%,transparent);}
+/* Sticks BELOW the .crm-topbar (also sticky top:0, z-index:5, ~60px tall) — both live in the
+   same .crm-main scroll container, so top:0 here would overlap the topbar and its opaque
+   gradient painted over the Rafraîchir button. Offset by the topbar height + a lower z-index
+   (4 < 5) so the topbar always wins any residual 1px touch, and a solid bg (no transparent bleed). */
+#page-admin .tk-back-bar{position:sticky;top:68px;z-index:4;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;margin-bottom:6px;background:var(--adm-bg);}
 #page-admin .tk-cols{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start;}
 @media(max-width:960px){#page-admin .tk-cols{grid-template-columns:1fr;}}
 #page-admin .tk-banner{display:flex;align-items:center;gap:9px;padding:11px 15px;border-radius:12px;font-size:13px;font-weight:600;margin-bottom:14px;}
@@ -626,6 +630,7 @@ class AdminPage {
   #page-admin .crm-nav-item.has-alerts::after{content:"";position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#e50914;box-shadow:0 0 0 2px var(--color-bg-primary,#0d0d0f);}
   #page-admin .crm-page{padding:20px 16px 80px;}
   #page-admin .crm-topbar{padding:12px 16px;}
+  #page-admin .tk-back-bar{top:66px;}  /* mobile topbar measures ~66px */
   #page-admin .crm-crumb{max-width:56vw;}
   #page-admin .users-controls input{min-width:0;}
 }
