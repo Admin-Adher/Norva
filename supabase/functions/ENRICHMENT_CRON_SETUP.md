@@ -12,7 +12,23 @@ Like `norva-source-sync/CRON_SETUP.md`, this is **not a migration**: apply with
 secret value appears here. `cron.schedule(name, …)` is idempotent (re-running
 updates the existing job), so this file is the source of truth for the cadences.
 
+## 🔄 2026-07-16 — Fenêtres jour RESTAURÉES + Ninja 24/7 (cap 60/h) + ordre récent-d'abord
+
+> **État live actuel** (script `ops/hetzner/scripts/09-reopen-probe-windows.sql`). Le 2026-07-10
+> (incident 458, `docs/LIVE-TV-458-SLOT-CONTENTION.md`), tous les crons films-audio avaient été
+> resserrés en fenêtre d'urgence `1-4 UTC` → débit effondré à ~3-5k sondes/jour pendant que
+> l'intake tournait à ~25k titres/jour (diag `08-enrichment-audio-diag.sql` : couverture 38 % et
+> en RECUL). Les protections durables étant actives (verrou « compte occupé » tick+titre,
+> crawl-yield mi-tick ON, circuit breakers, cap horaire low_footprint), les fenêtres **jour
+> 6-23** ci-dessous sont **redevenues la vérité live** le 2026-07-16. Ninja tourne en **24/7**
+> (`4-59/12 * * * *` films, `9-59/12 * * * *` séries) — son régulateur est le **cap horaire**
+> (monté **40 → 60/h** ; observer 48 h — « provider muet », 401 gateway — avant d'envisager 80).
+> Les candidats sont désormais servis **récents d'abord** (`release_year desc nulls last`,
+> migration `20260716200000` + chemin inline edge) → la couverture *utile* monte plus vite.
+
 ## ⛔ 2026-07-03 — Ninja (`operator1.barfik.org`) PAUSÉ en lazy-only (anti-ban)
+> **Obsolète depuis le 2026-07-05** : les crons audio Ninja (films + séries) ont été réactivés en
+> mode faible empreinte (section suivante) et tournent en 24/7 capé depuis le 2026-07-16 (§ ci-dessus).
 
 > **Les 4 crons Ninja sont DÉSACTIVÉS live** (`cron.unschedule`) — NE PAS les ré-appliquer tant que
 > le « mode faible empreinte » n'est pas livré : `norva-audio-airo-ninja` (jobid 61),

@@ -251,10 +251,19 @@ IDLE — set NORVA_EDGE_CALLBACK_BASE…`.
 ## 8. Suivi restant
 
 - [x] Point 1 + Point 2 implémentés, revus, déployés.
+- [x] **Fenêtres films-audio ré-élargies** (2026-07-16, script
+      `ops/hetzner/scripts/09-reopen-probe-windows.sql`) : la fenêtre d'urgence
+      `1-4` avait fait chuter le débit à ~3-5k sondes/j pendant un intake ~25k
+      titres/j (couverture audio en recul). Retour au design `6-23` (Ninja
+      24/7 capé 60/h) — sûr car le verrou + crawl-yield font skipper toute
+      sonde qui croise un viewer. Le « prêt » de fenêtre est donc soldé.
 - [ ] **Poser la valeur de `NORVA_EDGE_CALLBACK_BASE`** dans `.env.media`
-      (Hetzner) ou Railway + redéployer (câblage compose/`.env.example` déjà en
-      place ; couverture complète).
+      de la machine gateway + `docker compose --env-file .env.media -f
+      docker-compose.media.yml up -d`. Valeur self-host :
+      `https://api.norva.tv/functions/v1/norva-playback`. (Câblage compose
+      déjà en place ; sans elle le verrou reste fail-open sur le cas
+      « viewer web > 5 min » — à poser AVANT ou juste après le ré-élargissement.)
 - [ ] Différable : keepalive session lecture native ; signalement des
       téléchargements (slot tenu des heures, zéro télémétrie).
-- [ ] Fin du prêt : réactiver crons 79/80 (`cron.alter_job(job_id:=79/80,
-      active:=true)`).
+- [x] ~~Fin du prêt : réactiver crons 79/80~~ — réactivés le 2026-07-05
+      (jobids **35/36** après la restauration Hetzner), 24/7 depuis 2026-07-16.

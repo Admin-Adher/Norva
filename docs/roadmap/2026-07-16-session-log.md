@@ -125,3 +125,51 @@ Audit à trois volets (tunnel support utilisateur / Support admin / Clients admi
 5. **Fiche Revolut des 2 trials** : maintenant sur le rail `system`, leur fiche n'affiche plus de carte Revolut (c'est attendu — ils ont changé de rail).
 6. **Sécurité — roter le token bot Telegram** (déjà #2) : reste la seule action « à faire » côté secret.
 7. **Web** : déployé **automatiquement** par la CI à chaque push `main`. Ne pas chercher à lancer `wrangler` sur la box. Recharger le CRM dans un **nouvel onglet** pour récupérer `AdminPage.js?v=52`.
+
+---
+
+## §11 — Moteur d'enrichissement : diagnostic « 38 % » + 4 leviers (commits 14-15)
+
+**Demande** : « 38 % c'est trop faible, vérifie pourquoi » → diagnostic complet, puis « applique
+les 4 leviers ».
+
+**Diagnostic** (`ops/hetzner/scripts/08-enrichment-audio-diag.sql`, read-only, sortie live du
+16/07) — 412 559 titres des comptes pilotes : **38,3 % résolus · 40,7 % jamais sondés (167 980) ·
+20,9 % sondés-sans-langue (86 392)**. Causes par impact :
+1. **Fenêtre d'urgence 458** : depuis le 10/07 les crons films-audio tournaient en `1-4 UTC`
+   → ~3-5k sondes/j au lieu de ~15-20k. Les protections durables (verrou compte-occupé,
+   crawl-yield, breakers) étant actives, la fenêtre étroite était devenue le goulot n°1.
+2. **Intake >> drain** : 177 257 nouveaux titres en 7 j (nouveaux panels IPTV Ferran ~60k,
+   AtlasPro ~14,5k ; chiffre partiellement gonflé par la réparation dédup du 14/07) contre
+   14 225 résolus → la couverture RECULAIT mécaniquement.
+3. **Ninja** : 118 124 jamais sondés à ~80 sondes/j réelles (cap 40/h × fenêtre 4 h) → 3-4 ans.
+4. **Trou noir « sondés sans langue »** : 86 388/86 392 sans AUCUNE piste stockée → invisibles de
+   whisper (4 candidats !), gelés 180 j. Strng 8K 30 771 (43 % de ses films), Ferran 20 152 (45 %).
+- Le « 1 cron KO » = `norva-enrich-titles-from-catalog`, un unique deadlock le 15/07 20:03,
+  **déjà corrigé** le matin même par `20260716120000_enrich_titles_skip_locked.sql` (sort de la
+  fenêtre 24 h tout seul). Flotte audio : 25 jobs actifs, 0 échec, 0 breaker ouvert.
+
+**Leviers appliqués** :
+- **A — fenêtres restaurées** : `ops/hetzner/scripts/09-reopen-probe-windows.sql` (runtime,
+  alter par jobname) : films-audio retour `6-23 UTC`, **Ninja 24/7** (`4-59/12` films,
+  `9-59/12` séries — le cap horaire régule, design « ré-activation domptée »). Nuit 0-5
+  (séries/ST/whisper) inchangée. Préalable recommandé : `NORVA_EDGE_CALLBACK_BASE=`
+  `https://api.norva.tv/functions/v1/norva-playback` dans `.env.media` gateway + up -d.
+- **B — échantillonnage du trou noir** : `ops/hetzner/scripts/10-sample-reprobe-empty.sh` —
+  re-sonde N titres (déf. 12) des 2 panels les plus touchés via le mode diag `titleIds`
+  (langues vod + header-probe par titre), bilan « récupérables vs morts » automatique.
+  À lancer à une heure creuse ; décidera d'un re-probe ciblé (reset `audio_probed_at`).
+- **C — cap Ninja 40 → 60/h** (dans le script 09) ; observer 48 h avant d'envisager 80.
+- **D — récents d'abord** : migration `20260716200000_audio_candidates_recent_first.sql`
+  (RPC `audio_backfill_candidates` : `order by release_year desc nulls last, id`) + même ordre
+  dans le chemin account-wide inline de `norva-playback` (préservé `order by id` quand un
+  `afterId` de pagination manuelle est passé). Sans risque : les crons n'envoient jamais
+  `afterId`, la progression repose sur le marquage. Testé sur PG16 jetable (ordre
+  2026→2020→1994→NULL vérifié) ; `deno check` : 3 erreurs préexistantes inchangées, 0 nouvelle.
+
+**Docs** : note « état live 2026-07-16 » dans `ENRICHMENT_CRON_SETUP.md` (+ ⛔ Ninja marqué
+obsolète), §8 du doc 458 mis à jour (fenêtres soldées, valeur callback self-host, jobids 35/36).
+
+**Attendu sous 24-48 h** (re-lancer le diag 08) : sondes/jour ×4-6, `jamais_sonde` en baisse
+nette, Ninja `hits_24h` ~1 200-1 400 sans 401/ban. Si un re-ban Ninja se manifeste malgré tout :
+rollback = re-poser `1-4` (état AVANT imprimé par le script 09) + cap 40.
