@@ -15,6 +15,7 @@ Chantier unique cette session : **valider et durcir le dashboard admin après la
 | 7 | Comptes internes = plan `family`, durée indéterminée (invariant VIP) | `1b14496` | `20260716150000_internal_accounts_family_vip.sql` |
 | 8 | Value-adds Telegram : ping conversion + alerte échec renouvellement + digest hebdo | `d2b9354` | `norva-revolut-billing/index.ts`, `norva-admin/index.ts`, `20260716160000_weekly_business_digest_cron.sql` |
 | 9 | Rename ledger `cloud_stancer_payments` → `cloud_billing_ledger` (vue de compat) | `5721570` | `20260716170000_rename_ledger_cloud_billing.sql`, `norva-revolut-billing/index.ts`, `norva-admin/index.ts`, `norva-billing-webhook/index.ts`, healthcheck |
+| 10 | Finance : cartes par rail (Revolut web vs stores mobiles) — vue canal complète | `3adf0fe` | `20260716180000_admin_finance_rail_cards.sql`, `AdminPage.js`, `app.js` (`?v=53`) |
 
 Bump `?v=52` de `AdminPage.js` inclus dans le commit 6. (Le commit `22a9dab` / merge PR #206 « devices popover navbar » du même jour n'est **pas** de cette session.) Commits 8-9 ajoutés en fin de session (value-adds Telegram + nettoyage Stancer) — détail §8-9.
 
@@ -89,6 +90,10 @@ Trois notifications proactives sur le même canal `sendTelegram()` :
 ## 9. Rename du ledger : `cloud_stancer_payments` → `cloud_billing_ledger` (`5721570`)
 
 Le rail Stancer est retiré ; le nom était trompeur (c'est le ledger CROSS-RAIL). Renommé avec une **vue de compat** `cloud_stancer_payments` → `cloud_billing_ledger` (auto-updatable). Les **écrivains** edge (upserts revolut-billing + billing-webhook, insert refund admin) sont repointés sur la table réelle ; les **lecteurs SQL** (admin_finance, refresh_admin_dashboard, snapshot_admin_metrics, norva_funnel_daily, admin_user_billing) + norva-lifecycle passent par la vue, sans ré-emission. Vérifié sur PG16 : rename, SELECT via vue, upsert (table ET vue — l'`ON CONFLICT` passe même via la vue auto-updatable en PG16, donc zéro risque de fenêtre au déploiement), contrainte provider sous le nouveau nom, index renommés. ⚠️ **Ordre** : appliquer la migration PUIS déployer les edge.
+
+## 10. Finance : cartes par rail — vue canal complète (`3adf0fe`)
+
+L'onglet Finance avait une table rail (MRR payants + encaissé) avec 4 angles morts : essais sans rail (page vide avant la 1ʳᵉ conversion), conversions globales seulement, remboursements ignorés, à-venir mélangeant les prélèvements du cron Norva (Revolut) et ceux gérés par Google. **SQL** (`20260716180000`, re-emission additive d'`admin_finance`) : `by_rail` + `trialing_n`/`mrr_trial_cents` (full outer join payants×essais), + `conversions_by_rail` (7 j), `collected_by_rail` + `refunded_cents`, + `upcoming_by_rail` (essais <48 h / renouvellements <7 j par provider), lectures basculées sur `cloud_billing_ledger`. **Front** (`?v=53`) : la table devient des **cartes rail** en section 2 — par canal : MRR + part %, **net estimé après commission** (constantes front : ~1 % Revolut, 15 % stores palier Small Business, tooltip « estimation »), payants + essais ($ potentiels), encaissé 30 j (− remboursé), conversions 7 j, à-venir, et note explicite « prélevé par NOTRE cron » vs « facturé par le store ». Vérifié : replay PG16 ordre prod (140000→170000→180000) + seed deux-rails (toutes les clés exactes, internes exclus, globaux inchangés) + **test de rendu headless Chromium** de `_renderFinance` avec ce payload exact (2 cartes, parts 50 %, lignes net, badge remboursement, ancienne table disparue).
 
 ---
 
