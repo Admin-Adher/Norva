@@ -489,7 +489,6 @@ services:
       # payment lost in the window is reconstructible from the PSP + webhook), and
       # 300s would ship ~288 mostly-empty 16MB segments/day vs ~96, tripling archive
       # churn for a 10-minute RPO gain that buys nothing at this write volume.
-      - -c
       # zstd (vs pglz, faible) compresse les full-page writes DANS le WAL → nettement
       # moins de segments générés par le churn du moteur d'enrichissement (8,9 M
       # updates/sem sur cloud_titles) → moins de volume à archiver/syncer sur R2.
