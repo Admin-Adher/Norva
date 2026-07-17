@@ -13,12 +13,19 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 | 5 | Fix chemin réel `card.card_country` (étape 0 live) + backfill de rattrapage | `b3d06d1` | `20260717140000_revolut_card_country_backfill_fix.sql`, `norva-revolut`, `norva-revolut-webhook`, docs |
 | 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | `ec18f06` | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
 | 7 | Cockpit TVA niveau 2 : calcul TVA due par pays + total à reverser + couche de confiance | `0119971` | `AdminPage.js` (`?v=61`), `app.js` |
-| 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `4f92319` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
+| 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `0d57317` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
 | 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | `eaa3ef6` | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |
 | 10 | Lot A « mode guidé » : profil d'entreprise, parcours, action requise, démarches guidées par statut | `a5fd576` | `AdminPage.js` (`?v=64`), `app.js` |
 | 11 | Lot B : profil serveur (durable/multi-appareils) + journal des dépôts (registre) + référence de virement réelle | `0fe8ab2` | `20260717180000_vat_business_profile.sql` (⚠ NOTIFY pgrst — 4 fonctions neuves), `AdminPage.js` (`?v=65`), `app.js` |
 | 12 | Lot B-notify : alertes Telegram TVA (seuil OSS 80 %, taux BCE à figer) + ligne digest hebdo | `5d32a92` | `20260717190000_vat_alert_signals.sql`, `norva-admin/index.ts` |
-| 13 | Certificats de dépôt : bucket Storage privé `vat-certificates` + upload assistant + 📄 sur le journal | *(ce commit)* | `20260717200000_vat_certificates_storage.sql` (⚠ NOTIFY pgrst — signature `admin_vat_filing_record` étendue), `AdminPage.js` (`?v=66`), `app.js` |
+| 13 | Certificats de dépôt : bucket Storage privé `vat-certificates` + upload assistant + 📄 sur le journal | `add3405` | `20260717200000_vat_certificates_storage.sql` (⚠ NOTIFY pgrst — signature `admin_vat_filing_record` étendue), `AdminPage.js` (`?v=66`), `app.js` |
+
+> **Statut de déploiement (2026-07-17)** : les 8 migrations TVA/pays sont appliquées
+> en `supabase_admin` sur la box, edge redéployées, front en `?v=66`. Tout est **live
+> et vérifié** (dernière vérif : bucket `vat-certificates` privé + PDF-only confirmé).
+> ⚠️ Collision de préfixe de timestamp avec des migrations d'autres sessions
+> (`120000`/`150000`/`160000` existent aussi pour sous-titres/watch-history — noms de
+> fichiers distincts, sans impact ; juste ne pas s'étonner de les voir côte à côte).
 
 ## Certificats de dépôt (commit 13) — dernier morceau du registre
 

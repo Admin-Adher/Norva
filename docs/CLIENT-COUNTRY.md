@@ -121,15 +121,44 @@ Tous les agrégats appliquent le prédicat canonique d'exclusion
 
 ## Déploiement
 
-1. **Migration d'abord** (la colonne doit exister avant les fonctions) :
-   `docker exec -i norva-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20260717120000_customer_country_vat.sql`
-2. **Edge** : `git pull && ops/hetzner/scripts/04-deploy-edge-functions.sh`
-   (norva-revolut, norva-revolut-webhook, norva-billing-webhook, norva-revolut-billing).
+⚠️ **Toujours `psql -U supabase_admin`** (pas `postgres`) : le dump Hetzner a laissé
+`postgres` non-owner de certaines tables (`cloud_revolut_customers`…), donc une
+migration lancée en `postgres` échoue à mi-chemin sous `ON_ERROR_STOP`.
+⚠️ **`NOTIFY pgrst, 'reload schema'`** après toute migration qui **change une
+signature** ou **crée une fonction** (sinon PostgREST renvoie 404 `PGRST202`).
+
+**Statut : tout est déployé et vérifié sur la box (2026-07-17).** Séquence de
+référence (migrations dans l'ordre, en `supabase_admin`) :
+
+1. **Pays (socle + fix + logiques)** — puis redéploiement edge :
+   ```
+   for m in 20260717120000_customer_country_vat \
+            20260717140000_revolut_card_country_backfill_fix \
+            20260717150000_vat_refund_country_corrections; do
+     docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+       < supabase/migrations/${m}.sql; done
+   ops/hetzner/scripts/04-deploy-edge-functions.sh
+   ```
+   (edge : norva-revolut, norva-revolut-webhook, norva-billing-webhook,
+   norva-revolut-billing, norva-admin.)
+2. **Cockpit TVA (niveaux 3, registre, profil, alertes, certificats)** :
+   ```
+   for m in 20260717160000_vat_rates_fx_server_calc \
+            20260717170000_vat_transactions_rpc \
+            20260717180000_vat_business_profile \
+            20260717190000_vat_alert_signals \
+            20260717200000_vat_certificates_storage; do
+     docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+       < supabase/migrations/${m}.sql; done
+   docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
+   ```
+   (190000 ré-émet `refresh_admin_dashboard` → redéployer aussi norva-admin pour le
+   sweep d'alertes.)
 3. **Web** : merge sur `main` → GitHub Actions → Cloudflare Pages
-   (`AdminPage.js` bumpé `?v=58` dans `app.js`).
-4. Recette : un client RC et un client Revolut fraîchement confirmés affichent leur
-   pays partout ; `by_country` n'inclut aucun compte interne ; le bucket Inconnu
-   reflète le count de l'étape 0.
+   (`AdminPage.js` bumpé `?v=66` dans `app.js` — le `?v=` est **manuel**).
+4. **Recette** : un client RC et un client Revolut confirmés affichent leur pays
+   partout ; `by_country` n'inclut aucun compte interne ; onglet 🇪🇺 : profil qui
+   persiste après F5 (serveur), journal des dépôts, bucket `vat-certificates` privé.
 
 ## Hors périmètre (pistes actées, non construites)
 
