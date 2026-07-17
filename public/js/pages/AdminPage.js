@@ -1954,11 +1954,24 @@ class AdminPage {
         if (range) range.textContent = '…';
         if (!el.children.length || el.querySelector('.admin-err')) el.innerHTML = '<div class="ssub">Chargement…</div>';
         try {
-            const res = await this._rpc('admin_users_page', {
-                p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
-                p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null,
-                p_country: s.country || null
-            });
+            let res;
+            try {
+                res = await this._rpc('admin_users_page', {
+                    p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
+                    p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null,
+                    p_country: s.country || null
+                });
+            } catch (e) {
+                // PGRST202 = la DB n'a pas encore admin_users_page(p_country) — migration
+                // 20260717120000 pas appliquée, ou cache de schéma PostgREST à recharger
+                // (NOTIFY pgrst, 'reload schema'). Dégrader : liste sans le filtre pays.
+                if (!String((e && e.message) || '').includes('PGRST202')) throw e;
+                if (s.country) { s.country = ''; const cs = document.getElementById('admin-users-country'); if (cs) cs.value = ''; }
+                res = await this._rpc('admin_users_page', {
+                    p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
+                    p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
+                });
+            }
             if (seq !== this._usersSeq) return; // superseded by a newer load
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
@@ -2096,12 +2109,23 @@ class AdminPage {
         const orig = btn.textContent;
         btn.disabled = true; btn.textContent = '…';
         try {
-            const rows = await this._rpc('admin_users_export', {
-                p_search: this._users.search || null,
-                p_tag_id: this._users.tagId || null,
-                p_billing_status: this._users.billing || null,
-                p_country: this._users.country || null
-            });
+            let rows;
+            try {
+                rows = await this._rpc('admin_users_export', {
+                    p_search: this._users.search || null,
+                    p_tag_id: this._users.tagId || null,
+                    p_billing_status: this._users.billing || null,
+                    p_country: this._users.country || null
+                });
+            } catch (e) {
+                // Même fallback pré-migration que _loadUsers (PGRST202 → sans p_country).
+                if (!String((e && e.message) || '').includes('PGRST202')) throw e;
+                rows = await this._rpc('admin_users_export', {
+                    p_search: this._users.search || null,
+                    p_tag_id: this._users.tagId || null,
+                    p_billing_status: this._users.billing || null
+                });
+            }
             const list = Array.isArray(rows) ? rows : [];
             // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
             // A leading =/+/-/@ is neutralized with a single quote so Excel/Sheets can't evaluate
