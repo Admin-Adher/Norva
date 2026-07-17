@@ -486,6 +486,21 @@ lecture 134 ms / écriture 54 ms, p99 182 ms, max 420 ms, load 15-min 1,33. **La
 1000 users simultanés avec une marge énorme — dossier clos.** Le plafond réel post-fix n'a
 pas été sondé (aucune saturation) ; si besoin un jour : `STRESS=1` le re-mesurera.
 
+**Capacité concrète & plan de scaling (à jour du 17/07 soir)** :
+- 1000 users réels ≈ ~130 req/s au pic (navigation + 100 heartbeats/s). Seul plafond dur
+  connu : le routeur edge-runtime, ~95-100 req/s PAR conteneur (monothread) → 2 conteneurs
+  ≈ 190-200 req/s. **Sans rien toucher : ~1500 (confortable) à ~2000 simultanés.**
+- Au-delà : **+1 conteneur edge = +~95-100 req/s ≈ +700-1000 simultanés, opération de
+  ~5 min** (dupliquer le bloc `functions2` → `functions3` + volume `deno-cache-3` + une
+  target dans l'upstream `edge-functions-pool` de kong.yml, `up -d functions3` puis restart
+  kong). Prochains candidats-goulots vers ~3-4000 : GoTrue sur les PICS DE LOGIN (le régime
+  établi ne le touche plus) et le pool PostgREST (40) — réglables sans changer de machine ;
+  la DB est très loin (cache 99,94 %, 8 tx/s au repos).
+- Traduction business : 1000 simultanés au pic ≈ ~5-10k abonnés actifs (concurrence de
+  pointe ≈ 10-20 % des utilisateurs quotidiens). Et les FLUX VIDÉO ne transitent pas par la
+  box (providers direct / gateway Railway / relay CF) — l'axe streaming se dimensionne côté
+  sources/gateway, indépendamment de cette capacité API.
+
 **Leçons de terrain (consignées au README loadtest)** : token à re-copier FRAIS avant chaque
 run (5 dernières min du run 2 = 100 % 403, expiration pile à 15:55:29Z) ; tout passer par
 `Read-Host` en PowerShell (un collage multiligne dans `$env:APIKEY` → `invalid header field

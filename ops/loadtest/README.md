@@ -1,5 +1,12 @@
 # Test de charge — « la box tient-elle 1000 users simultanés ? »
 
+> **Verdict (mesuré le 2026-07-17, run réaliste + WRITE)** : OUI — 0,00 % d'échec,
+> p95 lecture 134 ms, box à ~8 % pendant le palier. Capacité actuelle : **~1500-2000
+> simultanés sans rien toucher** (plafond = routeur edge ~95-100 req/s × 2 conteneurs) ;
+> au-delà, **+1 conteneur edge = +~700-1000 users, ~5 min d'opération** (bloc `functions3`
+> + target Kong — voir le commentaire du service `functions2` dans le compose). Détail
+> complet : session log 2026-07-16 §19.
+
 Valide sous burst réel le seul composant que l'audit du 2026-07-17 n'a pas pu
 chiffrer au repos : **edge-runtime** (les isolates Deno de norva-cloud), derrière
 la chaîne complète Caddy → Kong → PostgREST → Postgres. Tout le reste est déjà
