@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>How Modern Offline Playback Works | Norva Blog</title>
+  <meta name="description" content="Learn the stages of offline playback, from eligibility and local storage to playback and later sync, with the limits that matter.">
+  <link rel="canonical" href="https://norva.tv/blog/offline-playback-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="How Modern Offline Playback Works | Norva Blog">
+  <meta property="og:description" content="Learn the stages of offline playback, from eligibility and local storage to playback and later sync, with the limits that matter.">
+  <meta property="og:url" content="https://norva.tv/blog/offline-playback-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How Modern Offline Playback Works | Norva Blog">
+  <meta name="twitter:description" content="Learn the stages of offline playback, from eligibility and local storage to playback and later sync, with the limits that matter.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How Offline Playback Works in a Modern Media Player",
+  "description": "Learn the stages of offline playback, from eligibility and local storage to playback and later sync, with the limits that matter.",
+  "inLanguage": "en",
+  "datePublished": "2026-07-17T06:00:00+02:00",
+  "dateModified": "2026-07-17T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/offline-playback-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How Offline Playback Works in a Modern Media Player",
+      "item": "https://norva.tv/blog/offline-playback-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How Offline Playback Works in a Modern Media Player</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Offline &amp; Mobile Viewing</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-07-17T06:00:00+02:00">17 July 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How Offline Playback Works in a Modern Media Player</h1>
+      <p class="lede">Offline playback is a controlled local-copy workflow whose availability depends on the device, source, media, and associated rights.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#state-1-determine-eligibility">State 1: determine eligibility</a></li><li><a href="#state-2-create-and-verify-the-local-copy">State 2: create and verify the local copy</a></li><li><a href="#state-3-play-without-a-connection">State 3: play without a connection</a></li><li><a href="#state-4-reconnect-and-reconcile">State 4: reconnect and reconcile</a></li><li><a href="#storage-and-data-trade-offs">Storage and data trade-offs</a></li><li><a href="#original-evidence-four-state-lifecycle-card">Original evidence: four-state lifecycle card</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Offline playback normally requires four successful states: the item is eligible, a complete local copy is prepared, the app can open that copy without a connection, and account state can reconcile later. In Norva, availability depends on the device, compatible source, media, and associated rights. Eligible offline items are encrypted and stored on the device, not uploaded to Norva.</blockquote>
+<p>Offline playback is not simply connected playback with the network switched off. It is a separate lifecycle involving permission, storage, verification, and later cleanup. Understanding those states prevents the most common travel surprise: seeing a title in a library but discovering that it was never ready locally.</p>
+<h2 id="state-1-determine-eligibility">State 1: determine eligibility</h2>
+<p>An item can appear in a connected library without being available offline. Eligibility may depend on:</p>
+<ul><li>the device and app capability;</li><li>what the connected source supports;</li><li>the exact media item or version;</li><li>account state;</li><li>rights associated with that media;</li><li>available device storage.</li></ul>
+<p>Do not infer eligibility from artwork, a favourite marker, or past playback. Use the current offline control exposed for that exact item. Norva's public product information states that offline access applies when the device, source, and associated rights permit it.</p>
+<h2 id="state-2-create-and-verify-the-local-copy">State 2: create and verify the local copy</h2>
+<p>Preparing an item usually needs a stable connection, enough free storage, and time for the transfer to finish. Keep the app available until it reports completion. A partially filled progress indicator is not proof that the item can be played offline.</p>
+<p>After completion:</p>
+<ol><li>note the item and selected version;</li><li>check the app's offline area;</li><li>enable airplane mode or otherwise disconnect in a controlled test;</li><li>open the item and play a short section;</li><li>confirm expected audio and subtitle options are present;</li><li>reconnect after the test.</li></ol>
+<p>Test before departure, not at the gate. The travel checklist for offline viewing turns this into a pre-journey routine.</p>
+<h2 id="state-3-play-without-a-connection">State 3: play without a connection</h2>
+<p>During a disconnected session, the player reads the prepared copy from device storage. Norva states that eligible offline items are encrypted and stored on the device and are not uploaded to Norva.</p>
+<p>Local does not mean permanent or unrestricted. Availability can remain subject to the source, rights, account state, and product rules. Do not move, rename, or modify app-managed files through a file manager unless official instructions explicitly support it. App-managed storage may not be visible as an ordinary video file.</p>
+<p>If an item fails offline, reconnect when possible and recheck its status. The download-failed checklist separates source, storage, and network causes.</p>
+<h2 id="state-4-reconnect-and-reconcile">State 4: reconnect and reconcile</h2>
+<p>Once connected again, the app may update account state such as playback progress. Do not assume immediate or conflict-free reconciliation. Use the same account, profile, item, and version, then allow the app time to connect before comparing another device.</p>
+<p>If two devices were used independently while disconnected, decide which progress state is meaningful before making more changes. A media player cannot reliably infer your intent from two conflicting local sessions.</p>
+<h2 id="storage-and-data-trade-offs">Storage and data trade-offs</h2>
+<p>Offline preparation shifts network use earlier and consumes local storage. Connected playback avoids keeping a complete offline copy but depends on a usable connection during the session.</p>
+<p>Quality choices can affect transfer size, yet there is no universal amount of storage per hour. Encoding, resolution, audio tracks, duration, and source packaging all matter. Use a representative item on your own device and measure the observed size. The offline storage budgeting guide provides a worksheet without relying on generic estimates.</p>
+<h2 id="original-evidence-four-state-lifecycle-card">Original evidence: four-state lifecycle card</h2>
+<p>Record one item through the complete lifecycle:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>State</th><th>Evidence to observe</th><th>Result</th></tr></thead>
+<tbody><tr><td>Eligible</td><td>Offline control exists for exact version</td><td>Yes / No</td></tr><tr><td>Prepared</td><td>App reports completion and storage changes</td><td>Pass / Recheck</td></tr><tr><td>Disconnected</td><td>Item opens and plays in airplane mode</td><td>Pass / Recheck</td></tr><tr><td>Reconciled</td><td>Intended progress appears after reconnection</td><td>Pass / Recheck</td></tr></tbody>
+</table></div>
+<p>The card proves only what happened for that item, device, source, and test date. It is a reusable diagnostic, not a compatibility promise.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Assuming every library item is downloadable.</li><li>Starting a large transfer immediately before leaving.</li><li>Failing to test with the network genuinely unavailable.</li><li>Filling device storage so completely that the app or operating system lacks working space.</li><li>Expecting every audio or subtitle track to be included.</li><li>Deleting or offloading the app and expecting its offline items to remain.</li><li>Treating offline access as a transfer of rights or ownership.</li></ul>
+<p>Platform storage controls differ. On Apple and Android devices, review the current official storage instructions for your operating-system version.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="does-offline-playback-use-mobile-data">Does offline playback use mobile data?</h3>
+<p>Playing a completed local copy should not require the media transfer again, but the app or operating system may use connectivity for account or background functions. Test in airplane mode and review device data controls.</p>
+<h3 id="are-norva-offline-items-stored-in-the-cloud">Are Norva offline items stored in the cloud?</h3>
+<p>Norva states that eligible offline items are encrypted and stored on the device, not uploaded to Norva. Account information such as progress can be a separate synced state.</p>
+<h3 id="can-an-offline-item-stop-being-available">Can an offline item stop being available?</h3>
+<p>Availability can remain conditional on the device, source, media, account state, and associated rights. Review the current item status before travel.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Explore how Norva works</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">Apple: Check storage on iPhone and iPad</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">Android Help: Free up space</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">Explore How Norva Works</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">https://support.apple.com/en-gb/108429</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">https://support.google.com/android/answer/7431795?hl=en</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
