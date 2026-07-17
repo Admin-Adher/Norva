@@ -166,6 +166,15 @@ function projectionPatch(userId: string, type: string, event: JsonRecord): JsonR
     patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
   }
 
+  // Storefront country (RC top-level `country_code`) — high-trust source for the
+  // customer's country. Only stamp when present so country-less events (some
+  // cancels/expirations) never null an already-known country.
+  const country = countryOf(event);
+  if (country) {
+    patch.country_code = country;
+    patch.country_source = "store";
+  }
+
   // Recurring price + cadence for the cross-rail finance rollup. The web rail keeps its
   // own price/cadence separately; this gives the mobile rails
   // (Play/Apple) the equivalent so admin_finance can compute their MRR. Only stamp
@@ -271,6 +280,12 @@ function currencyOf(event: JsonRecord): string {
   return c ? c.toLowerCase() : "usd";
 }
 
+// ISO 3166-1 alpha-2 storefront country of the subscriber, or null.
+function countryOf(event: JsonRecord): string | null {
+  const c = stringOrNull(event.country_code);
+  return c && /^[A-Za-z]{2}$/.test(c) ? c.toUpperCase() : null;
+}
+
 // monthly | annual, from the product id, else the purchased→expiration span.
 function billPeriodForEvent(event: JsonRecord): string {
   const pid = (stringOrNull(event.product_id) ?? "").toLowerCase();
@@ -311,6 +326,9 @@ async function journalRcPayment(
     status: "captured",
     provider: providerForStore(stringOrNull(event.store)),
     order_id: txId,
+    // Transaction-time country (VAT/OSS record). NB: for store rails the STORE is the
+    // deemed supplier for EU VAT — this is analytics/audit context, not a tax base.
+    country_code: countryOf(event),
   }, { onConflict: "pi_id", ignoreDuplicates: true });
   if (error && (error as { code?: string }).code !== "23505") {
     throw new Error(`rc payment journal failed: ${error.message}`);

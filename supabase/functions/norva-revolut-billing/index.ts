@@ -181,9 +181,9 @@ interface Row { user_id: string; plan_code: string | null; trial_ends_at: string
 
 async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null, errors: unknown[]): Promise<string> {
   const { data: cust } = await db.from("cloud_revolut_customers")
-    .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct").eq("user_id", row.user_id).maybeSingle();
+    .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct,card_country").eq("user_id", row.user_id).maybeSingle();
   const c = cust as {
-    revolut_customer_id?: string; payment_method_id?: string; plan?: string; period?: string; amount_cents?: number; discount_next_pct?: number;
+    revolut_customer_id?: string; payment_method_id?: string; plan?: string; period?: string; amount_cents?: number; discount_next_pct?: number; card_country?: string;
   } | null;
   const customerId = c?.revolut_customer_id ?? null;
   const pmId = c?.payment_method_id ?? null;
@@ -250,6 +250,9 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
         provider: "revolut",
         order_id: orderId ?? null,
         provider_payment_id: paymentId ?? null,
+        // Pays au moment de la transaction (base TVA/OSS) : pays d'émission de la
+        // carte sauvegardée. Nullable — le bucket « Inconnu » des vues admin l'assume.
+        country_code: (typeof c?.card_country === "string" && /^[A-Z]{2}$/.test(c.card_country)) ? c.card_country : null,
       }, { onConflict: "pi_id", ignoreDuplicates: true });
     } catch (_) { /* ledger is reporting-only */ }
     await sendReceipt(db, row.user_id, discountPct ? `${planLabel} (${discountPct}% off applied)` : planLabel, chargeAmount, nextEnd);

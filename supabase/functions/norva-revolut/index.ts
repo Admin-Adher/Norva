@@ -92,6 +92,21 @@ function orderCustomerId(order: JsonRecord): string | null {
   return null;
 }
 
+// Card ISSUING country from the order's payment details (ISO alpha-2) — the customer-
+// country proxy for the web rail (~95 % for consumer cards; decided 2026-07-17).
+// The field's location differs across Merchant API generations, so try every known
+// path; null when the order carries no payment details (e.g. still pending).
+function cardCountryFromOrder(order: JsonRecord): string | null {
+  const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+  for (const p of payments) {
+    const pm = (p.payment_method && typeof p.payment_method === "object") ? p.payment_method as JsonRecord : {};
+    const card = (pm.card && typeof pm.card === "object") ? pm.card as JsonRecord : {};
+    const raw = pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
+    if (typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim())) return raw.trim().toUpperCase();
+  }
+  return null;
+}
+
 // Retrieve the card the customer just saved (for merchant-initiated renewals) — the
 // order carries the customer, the saved token lives on the customer. Best-effort:
 // display + renewal enrichment, never blocks starting the trial.
@@ -100,7 +115,7 @@ function orderCustomerId(order: JsonRecord): string | null {
 // call — no retry: Revolut attaches the method a moment AFTER the order authorizes,
 // so /confirm often misses it; /profile captures it lazily once it's there (off the
 // user's critical path, so the edge wall-clock limit is never a factor).
-async function savedCard(customerId: string): Promise<{ id?: string; last4?: string; brand?: string; exp?: string } | null> {
+async function savedCard(customerId: string): Promise<{ id?: string; last4?: string; brand?: string; exp?: string; country?: string } | null> {
   if (!customerId) return null;
   const res = await revolut("GET", `/api/1.0/customers/${encodeURIComponent(customerId)}/payment-methods`);
   if (!res.ok) return null;
@@ -114,11 +129,16 @@ async function savedCard(customerId: string): Promise<{ id?: string; last4?: str
   const md = (card.method_details && typeof card.method_details === "object") ? card.method_details as JsonRecord : card;
   const em = md.expiry_month ?? md.exp_month;
   const ey = md.expiry_year ?? md.exp_year;
+  // Issuing country if the payment-method shape carries it (field name varies / may be
+  // absent — the order's payment details are the primary source, this is a fallback).
+  const ccRaw = md.card_country_code ?? md.country_code ?? md.country ?? md.issuer_country;
+  const country = (typeof ccRaw === "string" && /^[A-Za-z]{2}$/.test(ccRaw.trim())) ? ccRaw.trim().toUpperCase() : undefined;
   return {
     id: card.id ? String(card.id) : undefined,
     last4: md.last4 ? String(md.last4) : undefined,
     brand: md.brand ? String(md.brand).toUpperCase() : undefined,
     exp: (em && ey) ? `${String(em).padStart(2, "0")}/${String(ey).slice(-2)}` : undefined,
+    country,
   };
 }
 
@@ -336,11 +356,24 @@ Deno.serve(async (req) => {
       const card = await savedCard(customerId);
       if (card) { pmId = card.id; last4 = card.last4; brand = card.brand; cardExp = card.exp; }
     }
+    // Country = card issuing country, read on the order we already fetched. Stamped on
+    // the mapping (renewal cron copies it onto ledger rows) AND on the projection.
+    const cardCountry = cardCountryFromOrder(order);
     await db.from("cloud_revolut_customers").upsert({
       user_id: user.id, revolut_customer_id: customerId ?? undefined, payment_method_id: pmId ?? undefined,
       card_last4: last4 ?? undefined, card_brand: brand ?? undefined, card_exp: cardExp ?? undefined,
+      card_country: cardCountry ?? undefined,
       updated_at: nowIso,
     });
+    if (cardCountry) {
+      // Best-effort: no-op for a first trial_setup (row created below, which carries
+      // the country itself); updates the existing row for every other kind — including
+      // card_update, where a NEW card legitimately moves the country.
+      try {
+        await db.from("cloud_entitlement_projection")
+          .update({ country_code: cardCountry, country_source: "card" }).eq("user_id", user.id);
+      } catch (_) { /* analytics must never block checkout */ }
+    }
     try { await db.from("cloud_revolut_orders").update({ state: order.state }).eq("order_id", orderId); } catch (_) { /* noop */ }
 
     // Void the validation hold now that the card is saved — nothing should stay held.
@@ -394,6 +427,7 @@ Deno.serve(async (req) => {
       plan_code: plan, trial_ends_at: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
       trial_consumed_at: nowIso, current_period_end: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
       last_event_at: nowIso,
+      ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
     });
     return json({ ok: true, status: "trialing", kind });
   }
@@ -415,12 +449,19 @@ Deno.serve(async (req) => {
     if (profile && profile.revolut_customer_id && !profile.payment_method_id) {
       const card = await savedCard(String(profile.revolut_customer_id));
       if (card?.id) {
-        const patch = {
+        const patch: JsonRecord = {
           payment_method_id: card.id, card_last4: card.last4 ?? null,
           card_brand: card.brand ?? null, card_exp: card.exp ?? null,
           updated_at: new Date().toISOString(),
         };
+        if (card.country) patch.card_country = card.country;
         await db.from("cloud_revolut_customers").update(patch).eq("user_id", user.id);
+        if (card.country) {
+          try {
+            await db.from("cloud_entitlement_projection")
+              .update({ country_code: card.country, country_source: "card" }).eq("user_id", user.id);
+          } catch (_) { /* best-effort */ }
+        }
         profile = { ...profile, ...patch };
       }
     }
