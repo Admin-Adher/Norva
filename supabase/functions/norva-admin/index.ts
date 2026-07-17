@@ -416,7 +416,7 @@ Deno.serve(async (req) => {
       // Load the target payment, scoped to THIS user (no cross-user refunds).
       const { data: pay, error: payErr } = await admin
         .from("cloud_billing_ledger")
-        .select("pi_id,user_id,kind,amount,currency,status,provider,order_id,provider_payment_id")
+        .select("pi_id,user_id,kind,amount,currency,status,provider,order_id,provider_payment_id,country_code")
         .eq("pi_id", piId).eq("user_id", userId).maybeSingle();
       if (payErr) return json(req, { error: "lookup failed: " + payErr.message }, 500);
       if (!pay) return json(req, { error: "Paiement introuvable pour ce client." }, 404);
@@ -444,12 +444,23 @@ Deno.serve(async (req) => {
         return json(req, { error: `Revolut a refusé le remboursement (HTTP ${r.status}).`, detail }, 502);
       }
 
+      // Le remboursement HÉRITE du pays de la vente d'origine (base TVA/OSS : la
+      // correction doit réduire le bon pays) ; fallback : pays de la carte sauvegardée.
+      let refundCountry: string | null = (typeof pay.country_code === "string" && /^[A-Z]{2}$/.test(pay.country_code)) ? pay.country_code : null;
+      if (!refundCountry) {
+        const { data: rcRow } = await admin.from("cloud_revolut_customers")
+          .select("card_country").eq("user_id", userId).maybeSingle();
+        const cc = (rcRow as { card_country?: string } | null)?.card_country;
+        if (typeof cc === "string" && /^[A-Z]{2}$/.test(cc)) refundCountry = cc;
+      }
+
       // Journal the refund (kind='refund' → excluded from `collected`, shown in the fiche history).
       // supabase-js resolves with { error } rather than throwing; the money already moved either way.
       const { error: insErr } = await admin.from("cloud_billing_ledger").insert({
         pi_id: refundPi, user_id: userId, kind: "refund",
         amount: amountCents, currency: (pay.currency ?? "usd"), status: "refunded",
         provider: "revolut", order_id: orderId, provider_payment_id: pay.provider_payment_id ?? null,
+        country_code: refundCountry,
       });
       if (insErr) console.error("[norva-admin] refund ledger insert failed", insErr.message);
 

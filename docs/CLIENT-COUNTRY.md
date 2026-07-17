@@ -101,7 +101,15 @@ chemins dans une migration de rattrapage ET dans les fonctions edge Revolut
 | Clients | colonne Pays, **filtre pays** (facette serveur + « Inconnu » `'??'`), CSV (`pays`, `source_pays`) | `admin_users_page(+p_country)` / `admin_users_export(+p_country)` — **signatures étendues, anciennes DROPpées** |
 | Fiche + sidebar ticket | ligne Pays avec provenance (« storefront » vs « pays d'émission carte ») | `admin_user_billing` |
 | Finance | bloc 🌍 (barres MRR par pays), table pays×rail, colonne Pays des 50 derniers paiements + CSV | `admin_finance` (`by_country`, `by_country_rail`, `recent_payments.country_code`) |
-| Finance | panneau 🇪🇺 TVA : base trimestrielle par pays, jauges 10 000 € UE et 37 500/41 250 € FR, alerte UK, export CSV | `admin_vat_report(p_year, p_quarter)` — périmètre **rail web uniquement** (Play = fournisseur présumé) |
+| Finance | panneau 🇪🇺 TVA : base trimestrielle par pays, jauges 10 000 € UE et 37 500/41 250 € FR, alerte UK, **corrections OSS** (remboursements de trimestres antérieurs, routés vers leur période d'origine), export CSV | `admin_vat_report(p_year, p_quarter)` — périmètre **rail web uniquement** (Play = fournisseur présumé) |
+
+Remboursements : la ligne `refund` du ledger hérite du pays de la vente d'origine
+(écrit par norva-admin `/refund` ; en lecture, `admin_vat_report` re-joint aussi la
+vente via `order_id` pour l'historique). Même trimestre → netting de la base ;
+trimestre antérieur → clé `corrections` (rubrique dédiée de la déclaration OSS).
+**Limites connues** : les litiges/chargebacks ne sont journalisés par aucun rail,
+et un remboursement fait directement depuis le dashboard Revolut n'atterrit pas
+dans le ledger — toujours rembourser via la fiche admin.
 | Cockpit | carte Top pays (cache, cron 10 min) | `refresh_admin_dashboard` → `overview.billing_countries/-_n/-_unknown_n` |
 
 Front : helper `AdminPage.flag(cc)` (drapeau emoji + code). Conversion EUR du

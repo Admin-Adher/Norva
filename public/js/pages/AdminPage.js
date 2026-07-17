@@ -1352,6 +1352,7 @@ class AdminPage {
             `<option value="${y2}-${q2}"${y2 === vat.year && q2 === vat.quarter ? ' selected' : ''}>T${q2} ${y2}</option>`).join('');
 
         const rows = Array.isArray(vat.rows) ? vat.rows : [];
+        const corrections = Array.isArray(vat.corrections) ? vat.corrections : [];
         const tot = vat.totals || {};
         const rowsHtml = rows.map(r => `<tr>
             <td>${r.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(r.country_code)}</td>
@@ -1386,6 +1387,11 @@ class AdminPage {
             </div>
             ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Tx</th><th class="num">Brut</th><th class="num">Remb.</th><th class="num">Net</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
                 : '<div class="ssub">Aucune vente web sur ce trimestre.</div>'}
+            ${corrections.length ? `<div class="kpi-gtitle" style="margin:12px 0 6px">Corrections OSS — remboursements de trimestres antérieurs</div>
+            <div class="scroll"><table><thead><tr><th>Période d'origine</th><th>Pays</th><th class="num">À corriger</th></tr></thead><tbody>
+            ${corrections.map(c => `<tr><td>T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))}</td><td>${c.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(c.country_code)}</td><td class="num">−${money(c.refund_cents)}</td></tr>`).join('')}
+            </tbody></table></div>
+            <div class="ssub" style="margin-top:4px">À reporter dans la <b>rubrique corrections</b> de la déclaration OSS, sur la période d'origine (pas en négatif du trimestre courant — délai 3 ans).</div>` : ''}
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — pays à récupérer avant déclaration.</div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
             <div class="ssub" style="margin-top:8px">Montants en USD (cents ledger). Déclaration OSS : convertir en EUR au taux BCE du <b>dernier jour du trimestre</b> (art. 369h dir. 2006/112) et appliquer le taux standard de chaque pays (source officielle : base TEDB de la Commission). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
@@ -1409,8 +1415,9 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const lines = [['pays', 'zone', 'devise', 'nb_transactions', 'brut_cents', 'rembourse_cents', 'net_cents'].map(q).join(',')]
-                .concat(rows.map(r => [r.country_code, r.is_eu ? 'UE' : (r.country_code === '??' ? '' : 'hors_UE'), r.currency, r.n_tx, r.gross_cents, r.refunded_cents, r.net_cents].map(q).join(',')));
+            const lines = [['pays', 'zone', 'devise', 'nb_transactions', 'brut_cents', 'rembourse_cents', 'net_cents', 'correction_de'].map(q).join(',')]
+                .concat(rows.map(r => [r.country_code, r.is_eu ? 'UE' : (r.country_code === '??' ? '' : 'hors_UE'), r.currency, r.n_tx, r.gross_cents, r.refunded_cents, r.net_cents, ''].map(q).join(',')))
+                .concat(corrections.map(c => [c.country_code, 'correction', c.currency, '', '', c.refund_cents, -Number(c.refund_cents) || 0, `T${c.orig_quarter} ${c.orig_year}`].map(q).join(',')));
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);

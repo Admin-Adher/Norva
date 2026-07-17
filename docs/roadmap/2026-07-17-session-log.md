@@ -8,7 +8,10 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 |---|---|---|---|
 | 1 | Socle pays + TVA : colonnes, backfill, ré-émissions RPC, `admin_vat_report`, capture live, UI complète | `7b5cae0` | `20260717120000_customer_country_vat.sql`, `norva-revolut/index.ts`, `norva-revolut-webhook/index.ts`, `norva-billing-webhook/index.ts`, `norva-revolut-billing/index.ts`, `AdminPage.js` |
 | 2 | Runbook TVA + panneau Finance aligné sur la recherche (jauge franchise FR, alerte UK, notes BCE/TEDB/DES) | `6918294` | `docs/TVA-OSS.md`, `AdminPage.js` |
-| 3 | Docs pays + journal de session + bump `?v=58` (oubli du commit 1) | *(ce commit)* | `docs/CLIENT-COUNTRY.md`, ce fichier, `README.md` (index), `app.js` |
+| 3 | Docs pays + journal de session + bump `?v=58` (oubli du commit 1) | `8640002` | `docs/CLIENT-COUNTRY.md`, ce fichier, `README.md` (index), `app.js` |
+| 4 | Fallback pré-migration PGRST202 (liste Clients vivante avant la migration) | `5153abd` | `AdminPage.js` (`?v=59`), `app.js` |
+| 5 | Fix chemin réel `card.card_country` (étape 0 live) + backfill de rattrapage | `b3d06d1` | `20260717140000_revolut_card_country_backfill_fix.sql`, `norva-revolut`, `norva-revolut-webhook`, docs |
+| 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | *(ce commit)* | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
 
 ---
 
