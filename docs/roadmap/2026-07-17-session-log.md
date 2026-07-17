@@ -11,7 +11,15 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 | 3 | Docs pays + journal de session + bump `?v=58` (oubli du commit 1) | `8640002` | `docs/CLIENT-COUNTRY.md`, ce fichier, `README.md` (index), `app.js` |
 | 4 | Fallback pré-migration PGRST202 (liste Clients vivante avant la migration) | `5153abd` | `AdminPage.js` (`?v=59`), `app.js` |
 | 5 | Fix chemin réel `card.card_country` (étape 0 live) + backfill de rattrapage | `b3d06d1` | `20260717140000_revolut_card_country_backfill_fix.sql`, `norva-revolut`, `norva-revolut-webhook`, docs |
-| 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | *(ce commit)* | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
+| 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | `ec18f06` | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
+| 7 | Cockpit TVA niveau 2 : calcul TVA due par pays + total à reverser + couche de confiance | *(ce commit)* | `AdminPage.js` (`?v=61`), `app.js` |
+
+## Cockpit TVA — échelle d'accompagnement (brainstorm UX)
+
+Cible = **niveau 3** (assistant de saisie guidé + couche de confiance), construit en 2 temps :
+- **Niveau 2 — FAIT (commit 7, front)** : table des taux TVA standard 2026 des 27 États (constante JS, source TEDB), chaîne `net USD → base EUR (fx indicatif 0,92) → TVA due (taux du pays)` pour les pays **UE hors France**, ligne de total « à reverser via l'OSS », couche de confiance (total marqué **incomplet** si des transactions n'ont pas de pays), CSV enrichi (base_eur, taux, tva_due). fx EUR reste **indicatif** et clairement labellisé.
+- **Niveau 3 — À FAIRE (phase serveur)** : (a) déplacer la table des taux + le **taux BCE réel figé par trimestre** côté SQL (nouvelles tables `eu_vat_standard_rates` + `oss_fx_rates`, ré-émission `admin_vat_report` pour calculer base EUR + TVA côté serveur, dispo dans le CSV/exports) ; (b) **assistant de dépôt** champ par champ dans l'ordre du portail OSS ; (c) couche de confiance complète (résolution obligatoire du bucket Inconnu avant génération, preuve par ligne). Maquette de référence : cockpit `🧾` (2 états démarrage/activité).
+- **Niveau 4 (dépôt auto) : exclu volontairement** — pas d'API de dépôt tiers, et une déclaration engage la responsabilité du dirigeant (validation humaine obligatoire).
 
 ---
 

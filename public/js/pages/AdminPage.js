@@ -1354,14 +1354,33 @@ class AdminPage {
         const rows = Array.isArray(vat.rows) ? vat.rows : [];
         const corrections = Array.isArray(vat.corrections) ? vat.corrections : [];
         const tot = vat.totals || {};
-        const rowsHtml = rows.map(r => `<tr>
-            <td>${r.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(r.country_code)}</td>
-            <td>${r.is_eu ? '<span class="badge blue">UE</span>' : (r.country_code === '??' ? '<span class="ssub">—</span>' : '<span class="badge gray">hors UE</span>')}</td>
-            <td class="num">${n(r.n_tx)}</td>
-            <td class="num">${money(r.gross_cents)}</td>
-            <td class="num">${Number(r.refunded_cents) > 0 ? '−' + money(r.refunded_cents) : '—'}</td>
-            <td class="num"><b>${money(r.net_cents)}</b></td>
+        // Taux de TVA standard 2026 des 27 États UE (source TEDB — aucun changement de taux
+        // standard en 2026 ; un abonnement streaming prend le taux standard partout). Grèce
+        // = 'GR' côté carte/ledger (le portail OSS l'affiche 'EL'). Phase 3 : déplacer cette
+        // table + le taux BCE réel côté serveur (admin_vat_report).
+        const EU_VAT_RATES = { AT:20, BE:21, BG:20, HR:25, CY:19, CZ:21, DK:25, EE:24, FI:25.5, FR:20, DE:19, GR:24, HU:27, IE:23, IT:22, LV:21, LT:21, LU:17, MT:18, NL:21, PL:23, PT:23, RO:21, SK:23, SI:22, ES:21, SE:25 };
+        const eurCents = (usdCents) => Math.round((Number(usdCents) || 0) * EUR_PER_USD);
+        const eurFmt = (c) => (Number(c) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+        // Chaîne de calcul (niveau 2) : net USD → base EUR (taux indicatif) → TVA due (taux du
+        // pays). La TVA n'est due que pour les pays UE HORS France (FR = franchise, hors UE = hors OSS).
+        let ossBaseEur = 0, ossVatEur = 0;
+        const rowsCalc = rows.map(r => {
+            const cc = r.country_code, isEu = !!r.is_eu, isFr = cc === 'FR', unknown = cc === '??';
+            const baseEur = eurCents(r.net_cents);
+            const rate = (isEu && !isFr) ? (EU_VAT_RATES[cc] ?? null) : null;
+            const vatDue = (rate != null) ? Math.round(baseEur * rate / 100) : 0;
+            if (isEu && !isFr) { ossBaseEur += baseEur; ossVatEur += vatDue; }
+            return { r, cc, isEu, isFr, unknown, baseEur, rate, vatDue };
+        });
+        const rowsHtml = rowsCalc.map(x => `<tr>
+            <td>${x.unknown ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(x.cc)}</td>
+            <td>${x.isEu ? (x.isFr ? '<span class="ssub">France · franchise</span>' : '<span class="badge blue">UE · OSS</span>') : (x.unknown ? '<span class="ssub">—</span>' : '<span class="badge gray">hors UE</span>')}</td>
+            <td class="num" title="${n(x.r.n_tx)} tx · brut ${money(x.r.gross_cents)}${Number(x.r.refunded_cents) > 0 ? ' · remb. −' + money(x.r.refunded_cents) : ''}">${money(x.r.net_cents)}</td>
+            <td class="num">${eurFmt(x.baseEur)}</td>
+            <td class="num">${x.rate != null ? x.rate.toLocaleString('fr-FR') + ' %' : '<span class="ssub">—</span>'}</td>
+            <td class="num">${x.rate != null ? '<b>' + eurFmt(x.vatDue) + '</b>' : (x.isFr ? '<span class="ssub">franchise</span>' : x.unknown ? '<span class="ssub">?</span>' : '<span class="ssub">hors OSS</span>')}</td>
         </tr>`).join('');
+        const vatFoot = `<tfoot><tr><td colspan="3">Total OSS — UE hors France</td><td class="num">${eurFmt(ossBaseEur)}</td><td class="num"></td><td class="num" style="color:#34d399"><b>${eurFmt(ossVatEur)}</b></td></tr></tfoot>`;
 
         el.innerHTML = `
             <div class="ssub">Périmètre : ventes web directes (Revolut). Les ventes Play/App Store sont déclarées par le store (fournisseur présumé) — hors OSS.</div>
@@ -1385,16 +1404,17 @@ class AdminPage {
                 <select id="vat-quarter" title="Trimestre (cadence de déclaration OSS)">${qSel}</select>
                 <button id="vat-csv" class="mini-btn" title="Exporter la base du trimestre par pays (CSV)">⬇ CSV</button>
             </div>
-            ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Tx</th><th class="num">Brut</th><th class="num">Remb.</th><th class="num">Net</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+            ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Net (USD)</th><th class="num">Base (EUR)</th><th class="num">Taux</th><th class="num">TVA due</th></tr></thead><tbody>${rowsHtml}</tbody>${vatFoot}</table></div>
+            <div class="ssub" style="margin-top:6px">TVA due = base convertie × taux du pays. <b>Total à reverser via l'OSS</b> pour ${esc('T' + vat.quarter + ' ' + vat.year)} : <b style="color:#34d399">${eurFmt(ossVatEur)}</b>${Number(tot.unknown_n) > 0 ? ' — <span style="color:#fbbf24">⚠ incomplet (voir ci-dessous)</span>' : ''}.</div>`
                 : '<div class="ssub">Aucune vente web sur ce trimestre.</div>'}
             ${corrections.length ? `<div class="kpi-gtitle" style="margin:12px 0 6px">Corrections OSS — remboursements de trimestres antérieurs</div>
             <div class="scroll"><table><thead><tr><th>Période d'origine</th><th>Pays</th><th class="num">À corriger</th></tr></thead><tbody>
             ${corrections.map(c => `<tr><td>T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))}</td><td>${c.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(c.country_code)}</td><td class="num">−${money(c.refund_cents)}</td></tr>`).join('')}
             </tbody></table></div>
             <div class="ssub" style="margin-top:4px">À reporter dans la <b>rubrique corrections</b> de la déclaration OSS, sur la période d'origine (pas en négatif du trimestre courant — délai 3 ans).</div>` : ''}
-            ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — pays à récupérer avant déclaration.</div>` : ''}
+            ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer (ces transactions n'entrent pas dans le total tant que leur pays est inconnu).</div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
-            <div class="ssub" style="margin-top:8px">Montants en USD (cents ledger). Déclaration OSS : convertir en EUR au taux BCE du <b>dernier jour du trimestre</b> (art. 369h dir. 2006/112) et appliquer le taux standard de chaque pays (source officielle : base TEDB de la Commission). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
+            <div class="ssub" style="margin-top:8px">Conversion EUR <b>indicative</b> (1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) : le taux BCE <b>définitif</b> se fige au dernier jour du trimestre (art. 369h dir. 2006/112) — figé côté serveur en phase suivante. Taux de TVA standard de chaque pays : base TEDB (aucun changement 2026). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
 
         const sel = document.getElementById('vat-quarter');
         if (sel) sel.addEventListener('change', async () => {
@@ -1415,9 +1435,9 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const lines = [['pays', 'zone', 'devise', 'nb_transactions', 'brut_cents', 'rembourse_cents', 'net_cents', 'correction_de'].map(q).join(',')]
-                .concat(rows.map(r => [r.country_code, r.is_eu ? 'UE' : (r.country_code === '??' ? '' : 'hors_UE'), r.currency, r.n_tx, r.gross_cents, r.refunded_cents, r.net_cents, ''].map(q).join(',')))
-                .concat(corrections.map(c => [c.country_code, 'correction', c.currency, '', '', c.refund_cents, -Number(c.refund_cents) || 0, `T${c.orig_quarter} ${c.orig_year}`].map(q).join(',')));
+            const lines = [['pays', 'zone', 'devise', 'nb_transactions', 'brut_usd_cents', 'rembourse_usd_cents', 'net_usd_cents', 'base_eur_cents', 'taux_tva', 'tva_due_eur_cents', 'correction_de'].map(q).join(',')]
+                .concat(rowsCalc.map(x => [x.cc, x.isEu ? (x.isFr ? 'FR_franchise' : 'UE_OSS') : (x.unknown ? '' : 'hors_UE'), x.r.currency, x.r.n_tx, x.r.gross_cents, x.r.refunded_cents, x.r.net_cents, x.baseEur, x.rate != null ? x.rate : '', x.vatDue, ''].map(q).join(',')))
+                .concat(corrections.map(c => [c.country_code, 'correction', c.currency, '', '', c.refund_cents, '', '', '', '', `T${c.orig_quarter} ${c.orig_year}`].map(q).join(',')));
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
