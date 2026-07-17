@@ -14,19 +14,25 @@ const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const SUPABASE_JWKS = parseJwks(Deno.env.get('SUPABASE_JWKS'))
 const VERIFY_JWT = Deno.env.get('VERIFY_JWT') === 'true'
 
-// --- Worker pool (audit capacité 2026-07-17, voir le bloc dans le handler) ---
-// Taille de pool par fonction USER-FACING chaude. Tout ce qui n'est pas listé =
-// 1 worker (comportement historique) — notamment norva-source-sync, dont la
-// chaîne discover/finalize par self-invoke suppose un isolate stable.
-// 6+4+4 isolates × ~1 cœur pèsent au pire ~14 des 16 threads de l'AX42 — les
-// crons/le reste gardent de la place, et la RAM (256 MB × 14 max) est négligeable
-// sur 61 GB.
+// --- Worker pool par ALIAS de chemin (audit capacité 2026-07-17, v2) -----------
+// Un isolate V8 est monothread : avec UN worker par fonction, norva-cloud
+// plafonnait à ~32 req/s sur UN cœur (k6 : 82 % de rejets à 1000 VUs). La v1 du
+// pool gardait des HANDLES de workers — un handle mort ne se rafraîchit pas dans
+// ce runtime, chaque erreur déclenchait un forceCreate de plus (constaté : ~660
+// recréations par slot pendant le run STRESS → effondrement en timeouts). La v2
+// travaille AVEC la sémantique upstream : chaque fonction chaude a N-1 modules
+// « lane » d'une ligne (norva-cloud--p2..p6 → import du vrai index.ts) ; un
+// chemin distinct = un worker distinct que le RUNTIME gère (création par
+// requête, dédoublonnage par chemin, respawn transparent d'un worker recyclé).
+// Le routeur fait un simple round-robin d'alias — zéro état conservé.
+// Tout ce qui n'est pas listé garde le mono-worker historique (crons,
+// norva-source-sync et sa chaîne self-invoke, webhooks).
 const HOT_POOL_SIZES: Record<string, number> = {
   'norva-cloud': 6,
   'norva-catalog': 4,
   'norva-playback': 4,
 }
-const workerPools = new Map<string, { slots: ({ worker: { fetch(r: Request): Promise<Response> } } | null)[]; next: number }>()
+const rrCounters = new Map<string, number>()
 // Hoisted une fois : l'env ne change pas pendant la vie du conteneur (l'ancien
 // code refaisait Deno.env.toObject() + map à CHAQUE requête).
 const ENV_VARS = Object.entries(Deno.env.toObject())
@@ -167,7 +173,18 @@ Deno.serve(async (req: Request) => {
     })
   }
 
-  const servicePath = `/home/deno/functions/${service_name}`
+  // Round-robin des lanes : lane 0 = le dossier réel, lanes 1..N-1 = les modules
+  // alias --p2..--pN (voir HOT_POOL_SIZES). Un compteur par service suffit —
+  // aucun handle de worker n'est conservé (la leçon de la v1).
+  const poolSize = HOT_POOL_SIZES[service_name] ?? 1
+  let laneName = service_name
+  if (poolSize > 1) {
+    const n = (rrCounters.get(service_name) ?? 0) + 1
+    rrCounters.set(service_name, n)
+    const lane = n % poolSize
+    if (lane > 0) laneName = `${service_name}--p${lane + 1}`
+  }
+  const servicePath = `/home/deno/functions/${laneName}`
 
   // Must comfortably exceed the sync engine's per-isolate work budget
   // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 90s finalize
@@ -180,56 +197,23 @@ Deno.serve(async (req: Request) => {
   const workerTimeoutMs = 3 * 60 * 1000
   const noModuleCache = false
   const importMapPath = null
-
-  // Worker POOL (audit capacité 2026-07-17) : un isolate V8 est monothread — avec
-  // UN worker par fonction, norva-cloud plafonnait à ~32 req/s authentifiées sur
-  // UN cœur pendant que les 15 autres dormaient (k6 1000 VUs : 82 % de rejets en
-  // 500/401, débit de succès constant à 31,5/s sur deux runs). Les fonctions
-  // user-facing chaudes reçoivent N isolates round-robin (N cœurs utilisables,
-  // mémoire par worker relevée — elles brassent du gros JSON) ; tout le reste
-  // (crons, sync self-invoke, webhooks) garde exactement l'ancien comportement
-  // mono-worker. Un worker recyclé (timeout 180 s) est respawné en transparence.
-  const poolSize = HOT_POOL_SIZES[service_name] ?? 1
+  // Les lanes chaudes brassent du gros JSON sous concurrence — un peu plus d'air
+  // que les 150 MB historiques (la RAM totale reste négligeable sur 61 GB).
   const memoryLimitMb = poolSize > 1 ? 256 : 150
 
-  const createWorker = () =>
-    EdgeRuntime.userWorkers.create({
+  try {
+    // Sémantique upstream STRICTE : create() à chaque requête — le runtime rend le
+    // worker vivant de ce chemin ou en respawne un, sans handle à périmer chez nous.
+    const worker = await EdgeRuntime.userWorkers.create({
       servicePath,
       memoryLimitMb,
       workerTimeoutMs,
       noModuleCache,
       importMapPath,
       envVars: ENV_VARS,
-      // Several LIVE isolates for one servicePath need forceCreate; the default
-      // (reuse-by-path) is kept for pool size 1 — the exact pre-pool semantics.
-      forceCreate: poolSize > 1,
     })
-
-  let pool = workerPools.get(servicePath)
-  if (!pool) {
-    pool = { slots: new Array(poolSize).fill(null), next: 0 }
-    workerPools.set(servicePath, pool)
-  }
-  const slot = pool.next
-  pool.next = (pool.next + 1) % pool.slots.length
-
-  try {
-    if (!pool.slots[slot]) {
-      console.error(`creating worker ${slot + 1}/${pool.slots.length} for ${servicePath}`)
-      pool.slots[slot] = { worker: await createWorker() }
-    }
-    try {
-      return await pool.slots[slot]!.worker.fetch(req)
-    } catch (workerErr) {
-      // Dead/recycled worker → one transparent respawn+retry, but never replay a
-      // request whose body was already consumed (a POST half-read by the dying
-      // worker must fail loudly, not double-apply).
-      if (req.bodyUsed) throw workerErr
-      pool.slots[slot] = { worker: await createWorker() }
-      return await pool.slots[slot]!.worker.fetch(req)
-    }
+    return await worker.fetch(req)
   } catch (e) {
-    pool.slots[slot] = null // next hit on this slot respawns from scratch
     const error = { msg: e.toString() }
     return new Response(JSON.stringify(error), {
       status: 500,
