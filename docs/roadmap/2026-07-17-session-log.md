@@ -14,7 +14,18 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 | 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | `ec18f06` | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
 | 7 | Cockpit TVA niveau 2 : calcul TVA due par pays + total à reverser + couche de confiance | `0119971` | `AdminPage.js` (`?v=61`), `app.js` |
 | 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `4f92319` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
-| 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | *(ce commit)* | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |
+| 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | `eaa3ef6` | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |
+| 10 | Lot A « mode guidé » : profil d'entreprise, parcours, action requise, démarches guidées par statut | *(ce commit)* | `AdminPage.js` (`?v=64`), `app.js` |
+
+## Cockpit TVA — Lot A « mode guidé » (commit 10, front pur, localStorage)
+
+Refonte de l'onglet en **assistant de conformité** (ton professionnel — « qu'un enfant peut suivre » était le principe de design, jamais du texte à l'écran ; wording sobre, adapté à une due diligence) :
+- **Profil d'entreprise** (`norva-vat-profile` : forme juridique micro/EI-réel/EURL/SASU/SAS-SARL + raison sociale + SIREN) — pilote les modèles de courriers (société vs individuel, signature Président/Gérant), l'affichage du plafond micro, et le parcours ;
+- **Action requise** : UNE priorité à la fois (bloquant pays inconnus > inscription OSS > déclaration due > intracom > approche seuil > rien à faire), avec bouton CTA qui ouvre la bonne démarche/section ;
+- **Parcours de conformité** : fil d'Ariane 6 étapes dérivé des données (localisation ✓ → mise en conformité → 1ʳᵉˢ ventes UE → seuil 10 k€ → OSS → déclarations), étape courante = 1ʳᵉ non acquise ;
+- **Démarches guidées** (`<details>` par démarche, état `norva-vat-checklist`) : intracom (courrier pré-rédigé selon le statut + boutons copier + liens profonds impots/douane/HMRC), DES (verrouillée tant que l'intracom n'est pas fait), Royaume-Uni, OSS (verrouillée sous le seuil), et guide de changement de statut ;
+- **Données détaillées repliées** en `<details>` mode expert (ouvert seulement si une déclaration est due) : les jauges de seuils, la table de déclaration, l'assistant de dépôt et le registre restent intacts, mais ne dominent plus l'écran.
+- **Reste (Lot B)** : table serveur `admin_business_profile` (durable, multi-appareils, pré-remplissage de la vraie référence de virement), notifications Telegram (« trimestre clos → figez le taux », « seuil à 80 % »), upload du certificat de dépôt (registre).
 
 ## Cockpit TVA — échelle d'accompagnement (brainstorm UX)
 

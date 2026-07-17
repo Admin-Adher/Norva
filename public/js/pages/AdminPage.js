@@ -1433,23 +1433,120 @@ class AdminPage {
         const nextDl = dlCands.find(c => c.d > tNow);
         const dlDays = nextDl ? Math.ceil((nextDl.d - tNow) / 86400000) : null;
         const fmtD = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
-        // Hero de statut : LA réponse à « suis-je en règle ? » — priorité aux blocages.
-        const heroBox = (color, ic, t, s) => `<div style="display:flex;gap:12px;align-items:center;background:${color}14;border:1px solid ${color}55;border-radius:10px;padding:12px 14px;margin:10px 0 14px">
-            <span style="font-size:22px;line-height:1">${ic}</span><div><div style="font-weight:700">${t}</div><div class="ssub" style="margin-top:2px">${s}</div></div></div>`;
+        // ── Profil d'entreprise + état des démarches (localStorage — mono-admin ; table
+        // serveur au Lot B). Le profil pilote les modèles de courriers et les jauges.
+        const PROFILE_FORMS = {
+            micro: { label: 'Micro-entreprise (EI)', societe: false, micro: true },
+            ei_reel: { label: 'EI au réel', societe: false, micro: false },
+            eurl: { label: 'EURL', societe: true, sig: 'Le Gérant', micro: false },
+            sasu: { label: 'SASU', societe: true, sig: 'Le Président', micro: false },
+            sas_sarl: { label: 'SAS / SARL', societe: true, sig: 'Le représentant légal', micro: false },
+        };
+        let profile = { form: 'micro', name: '', siren: '' };
+        try { profile = { ...profile, ...(JSON.parse(localStorage.getItem('norva-vat-profile') || '{}')) }; } catch (_) { /* défaut */ }
+        const pf = PROFILE_FORMS[profile.form] || PROFILE_FORMS.micro;
+        let vatCk = {};
+        try { vatCk = JSON.parse(localStorage.getItem('norva-vat-checklist') || '{}'); } catch (_) { /* défaut */ }
+
+        // ── Action requise : UNE seule priorité à la fois (bloquant > légal > préparation). ──
+        const statusBox = (color, ic, t, s, cta) => `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:${color}14;border:1px solid ${color}55;border-radius:10px;padding:12px 14px;margin:10px 0 14px">
+            <span style="font-size:22px;line-height:1">${ic}</span><div style="flex:1;min-width:230px"><div style="font-weight:700">${t}</div><div class="ssub" style="margin-top:2px">${s}</div></div>${cta || ''}</div>`;
+        const ctaBtn = (id, label) => `<button id="${id}" class="mini-btn" style="font-weight:700">${label}</button>`;
         let heroHtml;
         if (unknownN > 0) {
-            heroHtml = heroBox('#f87171', '🚫', 'Pays inconnus à résoudre avant tout dépôt',
-                `${n(unknownN)} transaction(s) du trimestre sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation du client.`);
+            heroHtml = statusBox('#f87171', '⛔', 'Action requise : localiser les transactions sans pays',
+                `${n(unknownN)} transaction(s) du trimestre sans pays (${money(tot.unknown_gross_cents)}) — la réglementation exige la localisation du client avant tout dépôt.`,
+                ctaBtn('vat-cta-unknown', 'Voir les transactions'));
+        } else if (ossApplies && !vatCk.oss) {
+            heroHtml = statusBox('#fbbf24', '🇪🇺', 'Action requise : inscription au guichet OSS',
+                'Le seuil de 10 000 € de ventes UE est franchi — l\'inscription conditionne le dépôt des déclarations (rétroactivité possible si demandée avant le 10 du mois suivant la première vente concernée).',
+                ctaBtn('vat-cta-oss', 'Ouvrir la démarche'));
         } else if (ossApplies) {
-            heroHtml = heroBox('#fbbf24', '📅', `Déclaration OSS à préparer — échéance ${nextDl ? fmtD(nextDl.d) : '—'}${dlDays != null ? ` (dans ${dlDays} j)` : ''}`,
-                `Seuil 10 000 € franchi — TVA due dans le pays de chaque client UE. Total estimé du trimestre affiché : <b>${eurFmt(ossVatEur)}</b>${fxFixed ? '' : ' (indicatif — figez le taux BCE)'}.`);
+            heroHtml = statusBox('#fbbf24', '🧾', `Déclaration OSS à préparer — échéance ${nextDl ? fmtD(nextDl.d) : '—'}${dlDays != null ? ` (dans ${dlDays} j)` : ''}`,
+                `Montant à reverser (trimestre affiché) : <b>${eurFmt(ossVatEur)}</b>${fxFixed ? '' : ' — montant indicatif tant que le taux BCE n\'est pas figé'}.`,
+                ctaBtn('vat-cta-declare', 'Ouvrir l\'assistant'));
+        } else if (!vatCk.intracom) {
+            heroHtml = statusBox('#7c93ff', '✉️', 'Une démarche à effectuer : numéro de TVA intracommunautaire',
+                'Gratuit, ~10 minutes, sans effet sur la franchise en base. Requis pour les reversements Google Play (prestation B2B intra-UE) et préalable à la DES.',
+                ctaBtn('vat-cta-intracom', 'Ouvrir la démarche'));
         } else if (nearThresh) {
-            heroHtml = heroBox('#fbbf24', '📈', `Seuil UE en approche — ${pctT} % des 10 000 €`,
-                'Anticipez : inscription au guichet OSS (rétroactivité possible si demandée avant le 10 du mois suivant la 1ʳᵉ vente concernée) ou régime PME UE (n° EX).');
+            heroHtml = statusBox('#fbbf24', '📈', `Seuil UE en approche — ${pctT} % des 10 000 €`,
+                'À anticiper : inscription au guichet OSS, ou régime PME UE (n° EX) pour maintenir l\'exonération. Les deux démarches sont prêtes ci-dessous.');
         } else {
-            heroHtml = heroBox('#34d399', '✅', 'Rien à déclarer — vous êtes sous tous les seuils',
-                'Franchise en base FR active · OSS non applicable · le cockpit surveille les seuils et les échéances pour vous.');
+            heroHtml = statusBox('#34d399', '✅', 'Aucune action requise',
+                `Franchise en base active · OSS non applicable · surveillance automatique des seuils et échéances.${pf.micro ? ` Plafond micro 83 600 € également suivi.` : ''}`);
         }
+
+        // ── Parcours de conformité (6 étapes de vie ; l'étape courante = 1ʳᵉ non acquise). ──
+        const journeySteps = [
+            { l: 'Localisation des ventes', done: true, w: 'capture active sur les 2 canaux' },
+            { l: 'Mise en conformité', done: !!(vatCk.intracom && vatCk.uk), w: (vatCk.intracom && vatCk.uk) ? 'démarches effectuées' : 'démarches en cours' },
+            { l: 'Premières ventes UE', done: Number(ys.eu_cross_cents) > 0, w: Number(ys.eu_cross_cents) > 0 ? 'en cours' : 'surveillance automatique' },
+            { l: 'Seuil 10 000 €', done: ossApplies, w: ossApplies ? 'franchi' : 'alerte anticipée à 80 %' },
+            { l: 'Guichet OSS', done: !!vatCk.oss, w: vatCk.oss ? 'inscrit' : 'guide prêt le moment venu' },
+            { l: 'Déclarations trimestrielles', done: false, w: '30/04 · 31/07 · 31/10 · 31/01' },
+        ];
+        const nowIdx = journeySteps.findIndex(s => !s.done);
+        const journeyHtml = `<div class="kpi-gtitle" style="margin:0 0 8px">Parcours de conformité</div>
+            <div style="display:flex;gap:0;overflow-x:auto;margin-bottom:14px">${journeySteps.map((s, i) => `
+                <div style="flex:1;min-width:104px;position:relative;text-align:center;padding-top:4px">
+                    <div style="position:absolute;top:16px;left:${i === 0 ? '50%' : '0'};right:${i === journeySteps.length - 1 ? '50%' : '0'};height:2px;background:#2a2a38"></div>
+                    <span style="position:relative;z-index:1;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;${s.done ? 'background:rgba(52,211,153,.15);border:2px solid #34d399;color:#34d399' : i === nowIdx ? 'background:#7c93ff;border:2px solid #7c93ff;color:#0e0e13;box-shadow:0 0 0 4px rgba(124,147,255,.18)' : 'background:#181820;border:2px solid #2a2a38;color:#6b7280'}">${s.done ? '✓' : i + 1}</span>
+                    <div style="font-size:11px;margin-top:6px;${i === nowIdx ? 'color:#f2f3f7;font-weight:700' : 'color:#9aa3b2'}">${s.l}</div>
+                    <div style="font-size:10px;color:#6b7280;margin-top:1px">${s.w}</div>
+                </div>`).join('')}</div>`;
+        // ── Barre de profil (forme juridique + raison sociale/SIREN) ──────────────
+        const inp = 'background:#0e0e13;border:1px solid #2a2a38;color:#f2f3f7;border-radius:8px;padding:7px 11px;font-size:12.5px';
+        const profileBar = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#181820;border:1px solid #2a2a38;border-radius:11px;padding:12px 14px;margin-bottom:8px">
+            <span style="font-size:18px">🏢</span>
+            <div style="flex:1;min-width:160px"><div style="font-weight:650;font-size:13px">Profil de l'entreprise</div><div class="ssub" style="font-size:12px">Adapte les courriers, les seuils et le parcours.</div></div>
+            <input id="vat-prof-name" placeholder="Raison sociale" value="${esc(profile.name || '')}" style="${inp};width:150px"/>
+            <input id="vat-prof-siren" placeholder="SIREN" value="${esc(profile.siren || '')}" style="${inp};width:104px"/>
+            <select id="vat-prof-form" style="${inp}">${Object.entries(PROFILE_FORMS).map(([k, vv]) => `<option value="${k}"${profile.form === k ? ' selected' : ''}>${esc(vv.label)}</option>`).join('')}</select>
+        </div>`;
+
+        // ── Démarches guidées (courriers pré-rédigés par statut, liens profonds) ───
+        const openSelf = pf.micro ? 'Micro-entrepreneur' : 'Entrepreneur individuel';
+        const intracomLetter = pf.societe
+            ? `Bonjour,\n\nNotre société ${profile.name || '[Raison sociale]'}, ${pf.label} immatriculée sous le SIREN ${profile.siren || '[SIREN]'}, bénéficie de la franchise en base de TVA (art. 293 B du CGI). Elle fournit des prestations de services électroniques à un preneur assujetti établi dans l'Union européenne (Google Ireland — reversements de la plateforme Google Play).\n\nÀ ce titre, nous vous demandons l'attribution d'un numéro de TVA intracommunautaire, conformément à l'article 286 ter du CGI, sans remise en cause de la franchise en base.\n\nNous vous en remercions par avance.\n\n${pf.sig}`
+            : `Bonjour,\n\n${openSelf} sous franchise en base de TVA (art. 293 B du CGI), je fournis des prestations de services électroniques à un preneur assujetti établi dans l'Union européenne (Google Ireland — reversements de la plateforme Google Play).\n\nÀ ce titre, je vous demande l'attribution d'un numéro de TVA intracommunautaire, conformément à l'article 286 ter du CGI, sans remise en cause de la franchise en base.\n\nJe vous en remercie par avance.`;
+        const letters = { intracom: intracomLetter };
+        const link = (url, label) => `<a href="${url}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:rgba(124,147,255,.13);border:1px solid rgba(124,147,255,.4);color:#a9bcff;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:650;text-decoration:none">↗ ${label}</a>`;
+        const gstep = (num, html) => `<div style="display:flex;gap:11px;margin:11px 0;align-items:flex-start"><span style="flex:none;width:23px;height:23px;border-radius:50%;background:#1e1e2a;border:1px solid #2a2a38;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#a9bcff">${num}</span><div style="padding-top:1px">${html}</div></div>`;
+        const letterBox = (key) => `<div style="background:#0e0e13;border:1px dashed #2a2a38;border-radius:9px;padding:12px 12px 12px;margin-top:8px;position:relative;white-space:pre-wrap;font-size:12.5px;color:#9aa3b2;line-height:1.55"><button class="vat-letter mini-btn" data-letter="${key}" style="position:absolute;top:8px;right:8px">📋 Copier</button>${esc(letters[key])}</div>`;
+        const doneBtn = (id, label) => `<button class="vat-done mini-btn" data-dem="${id}"${vatCk[id] ? ' style="background:#34d399;color:#0e0e13;border-color:#34d399"' : ''}>${vatCk[id] ? '✓ Effectué' : (label || '✓ Marquer comme effectué')}</button>`;
+        const demarche = (id, ic, title, meta, locked, body) => `<details class="vat-dem" id="dem-${id}" style="border:1px solid #2a2a38;border-radius:11px;margin-top:10px;overflow:hidden;background:#181820">
+            <summary style="display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer;font-weight:650;font-size:14px">
+                <span style="width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:rgba(124,147,255,.14);font-size:15px">${ic}</span>
+                <span>${title}</span><span class="ssub" style="font-size:12px;font-weight:500">${meta}</span>
+                ${vatCk[id] ? '<span class="badge green" style="margin-left:auto">✓ Effectué</span>' : (locked ? '<span class="badge gray" style="margin-left:auto">🔒</span>' : '')}
+            </summary>
+            <div style="padding:2px 15px 15px;font-size:13.5px;color:#9aa3b2">${locked ? `<div class="ssub">${locked}</div>` : body}</div></details>`;
+        const demarchesHtml = `<div class="kpi-gtitle" style="margin:16px 0 6px">Démarches</div>
+            ${demarche('intracom', '✉️', 'Numéro de TVA intracommunautaire', '~10 min · gratuit · sans effet sur la franchise', null,
+                gstep(1, `Connectez-vous à l'espace professionnel : ${link('https://cfspro-idp.impots.gouv.fr', 'impots.gouv.fr')}`)
+                + gstep(2, `Rubrique <b>Messagerie sécurisée</b> → <b>Écrire</b> → thème « TVA » → « Demande de numéro de TVA intracommunautaire ».`)
+                + gstep(3, `Courrier pré-rédigé pour votre statut (${esc(pf.label)}) — bouton copier :${letterBox('intracom')}`)
+                + gstep(4, `Le numéro (FR + 11 caractères) est communiqué sous 1 à 2 semaines via la messagerie.`)
+                + gstep(5, `Une fois reçu : ${doneBtn('intracom')} — la DES se débloquera.`))}
+            ${demarche('des', '📮', 'Déclaration Européenne de Services (DES)', 'mensuelle · versements Google',
+                vatCk.intracom ? null : 'Se débloque une fois le numéro de TVA intracommunautaire reçu (démarche ci-dessus), et dès le premier versement Google Play.',
+                gstep(1, `Portail douane : ${link('https://www.douane.gouv.fr/service-en-ligne/declaration-europeenne-de-services-des', 'douane.gouv.fr / DES')}`)
+                + gstep(2, `Une ligne par mois de versement — le montant sera pré-calculé ici depuis les relevés Play.`)
+                + gstep(3, `Échéance : 10ᵉ jour ouvrable du mois suivant (750 € par déclaration manquante). ${doneBtn('des', '✓ DES en place')}`))}
+            ${demarche('uk', '🇬🇧', 'Position Royaume-Uni', 'décision', null,
+                `<div class="ssub">Au Royaume-Uni, la TVA (20 %) est due dès la première vente à un consommateur — aucun seuil pour un vendeur non établi. Deux options :</div>`
+                + gstep('A', `Ne pas vendre au Royaume-Uni : blocage des clients britanniques au paiement (activable dans le checkout).`)
+                + gstep('B', `S'immatriculer auprès de ${link('https://www.gov.uk/guidance/the-vat-rules-if-you-supply-digital-services-to-private-consumers', 'HMRC')} et déclarer la TVA UK.`)
+                + `<div style="margin-top:10px">${doneBtn('uk', '✓ Position arrêtée')}</div>`)}
+            ${demarche('oss', '🇪🇺', 'Inscription au guichet OSS', ossApplies ? 'action requise' : 'à l\'approche du seuil',
+                ossApplies ? null : 'Se déverrouille à l\'approche des 10 000 € de ventes UE — inutile tant que vous êtes sous le seuil.',
+                gstep(1, `${link('https://cfspro-idp.impots.gouv.fr', 'impots.gouv.fr')} → Mes services → Gérer mon guichet unique de TVA UE → « Je choisis le régime UE ».`)
+                + gstep(2, `Alternative : le <b>régime PME UE</b> (n° EX) maintient l'exonération jusqu'à 100 000 € de CA UE, avec un simple état trimestriel — à arbitrer avec votre expert-comptable.`)
+                + gstep(3, `${doneBtn('oss', '✓ Inscrit à l\'OSS')}`))}
+            ${demarche('switch', '🔄', 'Changement de forme juridique', 'guide de transition', null,
+                `<div class="ssub">Un changement de statut crée une nouvelle personne morale (nouveau SIREN) : il faut refaire le numéro intracommunautaire, ré-inscrire l'OSS, basculer la DES sur le nouveau SIREN, et mettre à jour Revolut Merchant et Google Play Console. La franchise en base reste accessible en société (mêmes seuils — elle dépend du chiffre d'affaires, pas du statut). Modifiez alors le profil ci-dessus : jauges, courriers et échéances s'adaptent automatiquement.</div>`)}`;
+
         const dlCard = (v, l, cls, tip) => `<div class="kpi ${cls || ''}"${tip ? ` title="${esc(tip)}"` : ''}><div class="kpi-hd"><div class="v" style="font-size:15px">${v}</div></div><div class="l">${l}</div></div>`;
         const deadlinesHtml = `<div class="kpi-gtitle" style="margin:0 0 8px">⏱ Prochaines échéances</div><div class="admin-cards fin-mini" style="margin-bottom:14px">
             ${dlCard(ossApplies && nextDl ? `${fmtD(nextDl.d)}` : 'Sans objet', ossApplies && nextDl ? `Déclaration OSS T${nextDl.q} ${nextDl.y} — dans ${dlDays} j` : 'OSS — sous le seuil 10 k€', ossApplies && dlDays != null && dlDays <= 14 ? 'alert' : '', 'Trimestrielle : 30/04, 31/07, 31/10, 31/01 — sans report, déclaration néant obligatoire une fois inscrit')}
@@ -1458,9 +1555,15 @@ class AdminPage {
         </div>`;
 
         el.innerHTML = `
-            <div class="ssub">Périmètre : ventes web directes (Revolut). Les ventes Play/App Store sont déclarées par le store (fournisseur présumé) — hors OSS.</div>
+            ${profileBar}
             ${heroHtml}
+            ${journeyHtml}
             ${deadlinesHtml}
+            ${demarchesHtml}
+            <details class="vat-expert" ${ossApplies ? 'open' : ''} style="margin-top:18px;border-top:1px solid #2a2a38;padding-top:12px">
+            <summary style="cursor:pointer;font-size:12.5px;color:#6b7280;font-weight:650">Données détaillées &amp; déclaration ${ossApplies ? '' : '(mode expert)'}</summary>
+            <div style="margin-top:12px">
+            <div class="ssub">Périmètre : ventes web directes (Revolut). Les ventes Play/App Store sont déclarées par le store (fournisseur présumé) — hors OSS.</div>
             <div class="kpi-gtitle" style="margin:12px 0 6px">Seuil UE 10 000 € — B2C transfrontalier UE, ${esc(String(ys.year || vat.year))}</div>
             <div class="hbar" title="Ventes B2C vers d'autres pays UE (hors France) sur l'année civile">
                 <div class="hbar-l">≈ ${eur(ys.eu_cross_cents)}</div>
@@ -1500,12 +1603,39 @@ class AdminPage {
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer. <button class="mini-btn" id="vat-tx-unknown">Voir les transactions sans pays</button></div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
             <div id="vat-assist" style="display:none;margin-top:14px;border:1px solid #2a2a38;border-radius:10px;padding:14px;background:rgba(124,147,255,.05)"></div>
-            <div class="kpi-gtitle" style="margin:16px 0 6px">📋 Checklist de conformité</div>
-            <div id="vat-checklist" class="ssub" style="display:grid;gap:6px"></div>
             <div class="ssub" style="margin-top:10px">${fxFixed
                 ? `Montants EUR <b>définitifs</b> — taux BCE ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} figé au dernier jour du trimestre (art. 369h dir. 2006/112).`
                 : `Conversion EUR <b>indicative</b> (1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) : figez le taux BCE à la clôture du trimestre pour des montants définitifs (art. 369h dir. 2006/112).`}
-            Taux de TVA standard : table serveur <code>eu_vat_standard_rates</code> (source TEDB — à rafraîchir avant chaque dépôt si un taux change). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
+            Taux de TVA standard : table serveur <code>eu_vat_standard_rates</code> (source TEDB — à rafraîchir avant chaque dépôt si un taux change). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>
+            </div></details>`;
+
+        // ── Profil : persistance + re-render au changement ──────────────────────────
+        const saveProfile = () => { try { localStorage.setItem('norva-vat-profile', JSON.stringify(profile)); } catch (_) { /* plein */ } };
+        const pForm = document.getElementById('vat-prof-form');
+        if (pForm) pForm.addEventListener('change', () => { profile.form = pForm.value; saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+        const pName = document.getElementById('vat-prof-name');
+        if (pName) pName.addEventListener('change', () => { profile.name = pName.value.trim(); saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+        const pSiren = document.getElementById('vat-prof-siren');
+        if (pSiren) pSiren.addEventListener('change', () => { profile.siren = pSiren.value.trim(); saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+
+        // ── Démarches : copie de courrier + « effectué » (persistant) ───────────────
+        const saveCk = () => { try { localStorage.setItem('norva-vat-checklist', JSON.stringify(vatCk)); } catch (_) { /* plein */ } };
+        el.querySelectorAll('.vat-letter').forEach(b => b.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(letters[b.dataset.letter] || ''); this._toast('✓ Courrier copié dans le presse-papier', 'ok'); }
+            catch (_) { this._toast('Copie impossible — sélectionnez le texte manuellement.', 'err'); }
+        }));
+        el.querySelectorAll('.vat-done').forEach(b => b.addEventListener('click', () => {
+            const k = b.dataset.dem; vatCk[k] = !vatCk[k]; saveCk();
+            if (this._route === 'finance') this._renderVatPanel(vat);
+        }));
+
+        // ── CTA de la carte « Action requise » → ouvre la bonne démarche/section ─────
+        const openDem = (id) => { const d = document.getElementById('dem-' + id); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } };
+        const wire = (btnId, fn) => { const b = document.getElementById(btnId); if (b) b.addEventListener('click', fn); };
+        wire('vat-cta-intracom', () => openDem('intracom'));
+        wire('vat-cta-oss', () => openDem('oss'));
+        wire('vat-cta-unknown', () => { const d = document.querySelector('.vat-expert'); if (d) d.open = true; const u = document.getElementById('vat-tx-unknown'); if (u) { u.click(); u.scrollIntoView({ behavior: 'smooth', block: 'center' }); } });
+        wire('vat-cta-declare', () => { const d = document.querySelector('.vat-expert'); if (d) d.open = true; const a = document.getElementById('vat-assist-btn'); if (a && !a.disabled) { a.click(); a.scrollIntoView({ behavior: 'smooth', block: 'center' }); } });
 
         const sel = document.getElementById('vat-quarter');
         if (sel) sel.addEventListener('change', async () => {
@@ -1571,27 +1701,6 @@ class AdminPage {
         el.querySelectorAll('.vat-cc-row').forEach(tr => tr.addEventListener('click', () => loadTx(tr.dataset.cc)));
         const unkBtn = document.getElementById('vat-tx-unknown');
         if (unkBtn) unkBtn.addEventListener('click', () => loadTx('??'));
-
-        // ── Checklist de conformité (persistée en localStorage — outil mono-admin) ──
-        const ckEl = document.getElementById('vat-checklist');
-        if (ckEl) {
-            const CK = [
-                ['intracom', 'Numéro de TVA intracommunautaire demandé au SIE (gratuit, ne fait pas perdre la franchise)'],
-                ['des', 'DES mensuelle en place sur douane.gouv.fr — dès le 1ᵉʳ versement Google'],
-                ['uk', 'Décision Royaume-Uni prise (bloquer au checkout, ou immatriculation HMRC — seuil nul)'],
-                ['oss', 'Inscription au guichet OSS sur impots.gouv.fr — requise une fois le seuil 10 k€ franchi'],
-            ];
-            let ck = {};
-            try { ck = JSON.parse(localStorage.getItem('norva-vat-checklist') || '{}'); } catch (_) { /* reset */ }
-            ckEl.innerHTML = CK.map(([k, l]) =>
-                `<label style="display:flex;gap:8px;align-items:baseline;cursor:pointer"><input type="checkbox" class="vat-ck" data-k="${k}" ${ck[k] ? 'checked' : ''}/> <span${ck[k] ? ' style="opacity:.55;text-decoration:line-through"' : ''}>${l}</span></label>`).join('');
-            ckEl.querySelectorAll('.vat-ck').forEach(cb => cb.addEventListener('change', () => {
-                ck[cb.dataset.k] = cb.checked;
-                try { localStorage.setItem('norva-vat-checklist', JSON.stringify(ck)); } catch (_) { /* plein */ }
-                const sp = cb.nextElementSibling;
-                if (sp) { sp.style.opacity = cb.checked ? '.55' : ''; sp.style.textDecoration = cb.checked ? 'line-through' : ''; }
-            }));
-        }
 
         // ── Assistant de dépôt : champ par champ, dans l'ordre du portail OSS ──
         const assistBtn = document.getElementById('vat-assist-btn');
