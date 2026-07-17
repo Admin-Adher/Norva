@@ -183,6 +183,12 @@ services:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,storage,graphql_public}
       PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      # Capacité (audit 2026-07-17) : TOUTES les fonctions edge passent par PostgREST —
+      # son pool est LE plafond réel de concurrence DB, pas max_connections (200). Le
+      # défaut (10) suffit aujourd'hui (pic observé 30 connexions tous services) mais
+      # ferait la queue à ~1000 users simultanés (~100 heartbeats/s). 40 = ~4× la marge,
+      # loin des 200 de Postgres une fois GoTrue/Realtime/Storage/cron comptés.
+      PGRST_DB_POOL: ${PGRST_DB_POOL:-40}
       PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
       PGRST_DB_ANON_ROLE: anon
       PGRST_ADMIN_SERVER_PORT: 3001
@@ -483,6 +489,13 @@ services:
       # payment lost in the window is reconstructible from the PSP + webhook), and
       # 300s would ship ~288 mostly-empty 16MB segments/day vs ~96, tripling archive
       # churn for a 10-minute RPO gain that buys nothing at this write volume.
+      - -c
+      # zstd (vs pglz, faible) compresse les full-page writes DANS le WAL → nettement
+      # moins de segments générés par le churn du moteur d'enrichissement (8,9 M
+      # updates/sem sur cloud_titles) → moins de volume à archiver/syncer sur R2.
+      # Transparent pour la restauration (les segments restent des WAL standards).
+      - -c
+      - wal_compression=zstd
       - -c
       - archive_mode=on
       - -c

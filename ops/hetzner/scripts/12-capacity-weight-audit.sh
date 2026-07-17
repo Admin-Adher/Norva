@@ -44,12 +44,12 @@ docker ps --format '{{.Names}}' | while read -r c; do
 done; echo "  (rien au-dessus = 0 restart partout)"
 docker system df 2>/dev/null | head -5
 
-section "[4] R2 — qui pèse dans les 51 GB (par préfixe)"
-if [ -r /etc/norva-backup.env ]; then
-  bash -c 'set -a; . /etc/norva-backup.env; set +a
+section "[4] R2 — qui pèse (par préfixe)"
+if [ -r /etc/norva-backup.env ] && [ -r "$SCRIPT_DIR/../backup/lib.sh" ]; then
+  # lib.sh construit le remote rclone "r2:" depuis les variables d'env (pas de rclone.conf).
+  bash -c 'set -a; . /etc/norva-backup.env; . "'"$SCRIPT_DIR"'/../backup/lib.sh"
     for p in db selfhost/dumps selfhost/base selfhost/wal; do
-      printf "%-16s : " "$p"
-      rclone size "r2:${R2_BUCKET}/$p" 2>/dev/null | tr "\n" "  " ; echo
+      printf "%-16s : %s\n" "$p" "$(rclone size "r2:${R2_BUCKET}/$p" 2>/dev/null | tr "\n" "  ")"
     done' 2>/dev/null
 else
   echo "(sudo requis pour lire /etc/norva-backup.env)"
