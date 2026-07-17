@@ -1333,6 +1333,15 @@ class AdminPage {
         const crossEurCents = Math.round((Number(ys.eu_cross_cents) || 0) * EUR_PER_USD);
         const pctT = Math.min(100, Math.round(100 * crossEurCents / THRESH_EUR_CENTS));
         const nearThresh = pctT >= 80;
+        // Franchise en base FR 2026 : 37 500 € (majoré 41 250 €). Base = opérations
+        // localisées en France (art. 293 D CGI) : ventes web FR + ventes web autres-UE
+        // tant que le seuil 10 k€ n'est pas franchi. Google Play EXCLU (B2B Irlande).
+        // Détail complet : docs/TVA-OSS.md.
+        const FR_THRESH_EUR_CENTS = 3750000, FR_THRESH_MAJ_EUR_CENTS = 4125000;
+        const frBaseEurCents = Math.round(((Number(ys.fr_cents) || 0) + (Number(ys.eu_cross_cents) || 0)) * EUR_PER_USD);
+        const pctF = Math.min(100, Math.round(100 * frBaseEurCents / FR_THRESH_EUR_CENTS));
+        const nearFr = frBaseEurCents >= 3500000; // alerte préparatoire ~35 000 €
+        const overFrMaj = frBaseEurCents >= FR_THRESH_MAJ_EUR_CENTS;
 
         // Sélecteur de trimestre : 8 derniers trimestres, plus récent en premier.
         const nowD = new Date();
@@ -1362,7 +1371,13 @@ class AdminPage {
                 <div class="hbar-v">${pctT} % du seuil</div>
             </div>
             <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (conversion indicative 1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) · année précédente : ${money(ys.eu_cross_prev_cents)}.
-            Au-delà du seuil (année en cours OU précédente) : TVA du pays du client via le guichet OSS.</div>
+            Au-delà du seuil (année en cours OU précédente) : TVA du pays du client via l'OSS — ou régime PME UE (n° EX) pour rester exonéré. Voir docs/TVA-OSS.md.</div>
+            <div class="kpi-gtitle" style="margin:12px 0 6px">Franchise en base FR — 37 500 € (majoré 41 250 €)</div>
+            <div class="hbar" title="Base : ventes web localisées en France (clients FR + autres-UE tant que le seuil 10 k€ n'est pas franchi). Google Play exclu (B2B Irlande).">
+                <div class="hbar-l">≈ ${(frBaseEurCents / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div class="hbar-track"><div class="hbar-fill ${overFrMaj || nearFr ? 'warn' : ''}" style="width:${Math.max(2, pctF)}%"></div></div>
+                <div class="hbar-v">${pctF} % du seuil${overFrMaj ? ' ⚠ majoré dépassé' : nearFr ? ' ⚠ ~35 k€' : ''}</div>
+            </div>
             <div class="ssub" style="margin-top:4px">Année ${esc(String(ys.year || vat.year))} — 🇫🇷 France : <b>${money(ys.fr_cents)}</b> · 🌍 hors UE : ${money(ys.non_eu_cents)}${Number(ys.unknown_cents) > 0 ? ` · <span title="Transactions sans pays capturé — à résorber, la TVA exige la localisation">pays inconnu : <b>${money(ys.unknown_cents)}</b> ⚠</span>` : ''}</div>
             <div style="display:flex;gap:10px;align-items:center;margin:14px 0 8px;flex-wrap:wrap">
                 <span class="kpi-gtitle" style="margin:0">Base par pays de consommation</span>
@@ -1372,7 +1387,8 @@ class AdminPage {
             ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Tx</th><th class="num">Brut</th><th class="num">Remb.</th><th class="num">Net</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
                 : '<div class="ssub">Aucune vente web sur ce trimestre.</div>'}
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — pays à récupérer avant déclaration.</div>` : ''}
-            <div class="ssub" style="margin-top:8px">Montants en USD (cents ledger). Pour déclarer : convertir en EUR au taux BCE du dernier jour du trimestre, appliquer le taux de TVA de chaque pays.</div>`;
+            ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
+            <div class="ssub" style="margin-top:8px">Montants en USD (cents ledger). Déclaration OSS : convertir en EUR au taux BCE du <b>dernier jour du trimestre</b> (art. 369h dir. 2006/112) et appliquer le taux standard de chaque pays (source officielle : base TEDB de la Commission). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
 
         const sel = document.getElementById('vat-quarter');
         if (sel) sel.addEventListener('change', async () => {
