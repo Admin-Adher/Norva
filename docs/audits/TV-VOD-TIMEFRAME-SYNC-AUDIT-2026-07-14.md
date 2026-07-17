@@ -26,5 +26,6 @@ Autre effet : le callback natif envoyait très peu de métadonnées (`sourceId` 
 
 ## Limites restantes
 
-- La progression TV reste essentiellement persistée à la fermeture du player natif. Pour un sync quasi temps réel façon Netflix entre appareils pendant que le player TV est encore ouvert, il faudrait un heartbeat natif périodique vers le WebView ou vers l'API cloud.
+- ~~La progression TV reste essentiellement persistée à la fermeture du player natif. Pour un sync quasi temps réel façon Netflix entre appareils pendant que le player TV est encore ouvert, il faudrait un heartbeat natif périodique vers le WebView ou vers l'API cloud.~~ **Levée le 2026-07-17** (versionCode 19) : `PlayerActivity.maybePersistProgress` relaie la position toutes les ~45 s vers la WebView de `MainActivity` (`relayNativeHeartbeat` → `__norvaNative.onProgress`), qui réutilise intégralement le chemin d'écriture cloud existant. Même session : le filet SharedPreferences n'est plus purgé par `finish()` mais consommé à la CONFIRMATION du save (`onProgressSaved(token)`), et le flush post-crash retry au lieu de consommer-perdre. Voir `docs/roadmap/2026-07-16-session-log.md` §17.
 - Ce correctif cible la justesse du timeframe enregistré après sortie / changement d'épisode, pas l'affichage interne ExoPlayer pendant la lecture.
+- Le `durationHint` capturé en mémoire de page ne survit pas à un reload WebView pendant une lecture native ; depuis le 2026-07-17, `onProgress` n'écrase plus jamais un hint connu par un 0 (le merge serveur préserve la valeur d'un save antérieur).

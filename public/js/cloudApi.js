@@ -869,6 +869,16 @@
             ? await response.json().catch(() => ({}))
             : { error: await response.text().catch(() => '') };
 
+        // The server silently served the DEFAULT profile because the requested one is LOCKED by
+        // the plan (post-downgrade). Surface it once — without this, the displayed profile and
+        // the profile actually read/written diverge with zero signal (sync audit 2026-07-17 P2).
+        try {
+            if (response.headers.get('x-norva-profile-fallback') === 'locked' && !requestToBase._profileFallbackToasted) {
+                requestToBase._profileFallbackToasted = true;
+                window.NorvaModal?.toast?.('This profile is locked by your current plan — showing the main profile instead.', { tone: 'warn' });
+            }
+        } catch (_) { /* purely informative */ }
+
         NorvaTrace.log('net ← ' + _trLabel, response.status + ' (' + Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0) - _trT0) + 'ms)' + (_trRefreshed ? ' [after 401→refresh]' : ''));
 
         if (!response.ok) {
@@ -1104,7 +1114,10 @@
             getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                 () => request('GET', `/history${query(params)}`)),
             save: (item) => request('POST', '/history', item, { keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
-            remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`).then((r) => { invalidateCache('hist'); return r; })
+            remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`).then((r) => { invalidateCache('hist'); return r; }),
+            // Keyed removal (sourceId+itemId+itemType) — one round-trip, immune to the stale
+            // list-then-find that missed rows written by another device (same fix as favorites).
+            removeByKeys: (params = {}) => request('DELETE', `/history${query(params)}`).then((r) => { invalidateCache('hist'); return r; })
         },
 
         pairing: {
@@ -1211,7 +1224,8 @@
                 getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                     () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
                 save: (item) => request('POST', '/device/history', item, { token: getDeviceToken(), keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
-                remove: (id) => request('DELETE', `/device/history/${encodeURIComponent(id)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; })
+                remove: (id) => request('DELETE', `/device/history/${encodeURIComponent(id)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; }),
+                removeByKeys: (params = {}) => request('DELETE', `/device/history${query(params)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; })
             }
         }
     };

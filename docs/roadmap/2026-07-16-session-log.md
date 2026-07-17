@@ -334,3 +334,79 @@ header-probe, 0 par vod** → mode vod aveugle sur ce panel. Opérations live : 
 (probe, jour 6-23), job 12 vod **scopé sur AtlasPro**. Détail dans ENRICHMENT_CRON_SETUP.md
 §2026-07-17. Attendu : +6-7k titres résolus sur Ferran d'ici le week-end. Au passage : la
 migration ST-IA (20260717120000) est appliquée et l'edge redéployé par Adrien à 06:15.
+
+### §17 — Deux lots de fixes issus des audits ST-IA + synchro multi-appareils (2026-07-17)
+
+Suite aux deux audits workflow du 17/07 (tunnel « Generate AI subtitles » chronométré, 8 agents ;
+synchro web/mobile/TV, 9 agents), TOUTES les recommandations ont été appliquées d'un bloc.
+
+**Lot A — tunnel sous-titres IA (notifications & réactivité)** :
+- CLIENT (WatchPage v122) : feedback optimiste au clic — état `processing`/stage `checking`
+  posé AVANT tout réseau (le seul trou d'UI du tunnel : ~0,3-1 s de silence) ; le choix
+  poursuivre-ou-enqueue se décide sur le STATUS de la réponse cache (l'état optimiste aurait
+  avalé l'enqueue) ; poll adaptatif 20 s (extraction/transcription — les partiels ne changent
+  pas) / 60 s (deferred, queued pos>0) → ~2/3 de GET en moins sur les longues attentes, chaîne
+  setTimeout + jeton de génération (un stop en plein tick ne se re-planifie pas).
+- EDGE (norva-playback) : deep link email — le bouton devient « Watch with AI subtitles » et
+  pointe `app.html#movies/open:src:id:titre` (ou `#series/open:src:seriesId:titre` — les
+  épisodes sont cachés par id d'épisode mais la fiche s'ouvre par id de série, d'où la colonne
+  series_id stockée à l'opt-in) ; opt-in ready-check — s'abonner sur un job déjà terminal
+  répond MAINTENANT (ready+speech → email immédiat + cloche ; no-speech/failed → refus honnête,
+  la chip se révoque) → ferme la race de la fenêtre de poll ET rattrape les orphelins ; les 4
+  chemins d'échec d'enqueue (transcribe/ocr/translate/chaînage) résolvent désormais les pending
+  via dispatch ; cloche in-app : `cloud_content_events` kind `subtitle_ready|empty|failed` par
+  souscripteur, payload.watch = deep link (le bell d'app.js les rend cliquables, navigation
+  in-app sans reload via openFicheFromRoute).
+- APP.JS (v45) : route de deep link `#movies/open:…`/`#series/open:…` au boot (même resolver
+  openByItem que la recherche globale — le titre voyage dans l'URL pour une fiche pleine).
+- MIGRATION 20260717150000 : colonnes source_id/series_id sur les notifications ; reaper
+  ré-émis — il résout les pending en `failed` + insère l'événement cloche (CTE reaped→resolved→
+  insert, testé sur PG16 jetable : job vivant intact, morts résolus+cloche) ; purge 30 j
+  (03:25).
+
+**Lot B — synchro multi-appareils (les 4 P1 + P2/P3 de l'audit)** :
+- P1 carte périmée : WatchPage consulte TOUJOURS la position serveur à l'ouverture (plus
+  seulement offset=0) — un 0 RÉPONDU (fini/retiré ailleurs) redémarre honnêtement, un échec
+  réseau garde l'offset de la carte (`_fetchServerResumeInfo` distingue les deux) ; les cibles
+  de seek explicites (restore de session) restent prioritaires ; même fix dans l'override
+  natif TV (standalone.js v8).
+- P1 TV filet durable : `finish()` PERSISTE la position finale dans SharedPreferences au lieu
+  de la purger ; le record n'est consommé qu'à la CONFIRMATION du save cloud (pont
+  `onProgressSaved(token)` sur les deux bridges, `onProgress` confirme après le .then du save) ;
+  pump retry 20×/1,5 s façon deep-link ; staleness 7 j. Ferme aussi le drop du retour variante.
+- P1 webAppReady honnête : false sur onPageStarted, true seulement si l'URL finie EST le shell
+  app (app.html / racine du serveur embarqué — cloud-pair.html et pages d'erreur ne comptent
+  plus) — le flush ne consomme plus de position contre une page sans bridge.
+- P1 heartbeat cloud TV : PlayerActivity relaie la position toutes les ~45 s vers la WebView de
+  MainActivity (`relayNativeHeartbeat`, VOD only) → les autres appareils voient la TV avancer
+  PENDANT le film. Lève la « limite actée » du 14/07. **TV versionCode 19 (3.8.6-hybrid) — AAB
+  à rebuilder.**
+- P2 garde temporelle serveur : les clients envoient `watchedAt` (capture du tick — la TV envoie
+  celle de la persistance native) ; saveHistory n'écrase progress que si plus récent, force
+  passe, clients legacy inchangés. Un paquet retardé ne régresse plus une position plus fraîche.
+- P2 DELETE historique par clés : `DELETE /history?sourceId&itemId&itemType` (user + device,
+  purge aussi les orphelins source_id=null du même titre), client api.js/cloudApi câblés,
+  SeriesPage mark-unwatched keyed (l'ancien list-then-find sur cache 20 s « supprimait » dans le
+  vide) ; mark-watched envoie désormais `completed:true` explicite.
+- P2 récentes live : re-pull TTL 5 min + refocus + tick 10 min (plus une-fois-par-session) et
+  MERGE par fraîcheur avec le miroir local (`at` sur chaque entrée) au lieu d'écraser.
+- P2 parité data TV : le save natif porte playbackPreferences + nextEpisode (calculé du payload
+  de lancement) → un binge TV alimente la carte « up next » des autres appareils ; durationHint
+  jamais écrasé par 0 (régression timeframe fermée).
+- P2 signal profil verrouillé : header `x-norva-profile-fallback: locked` (exposé CORS) + toast
+  une-fois côté client — fini la désynchronisation silencieuse post-downgrade.
+- P3 completed préservé : plus de reset à false par heartbeat ; un vrai re-watch (≥60 s)
+  l'efface honnêtement, un clic accidentel (<60 s) non.
+- P3 hub local self-hosted : history.js MERGE data + préserve duration (le delta-heartbeat web
+  écrasait le blob riche par {} dès le 2e tick en mode hub).
+- MIGRATION 20260717160000 : dédoublonnage des lignes source_id NULL (renouvellement de source)
+  + index unique `NULLS NOT DISTINCT` — l'ON CONFLICT de saveHistory matche désormais les
+  orphelins (upsert testé sur PG16 jetable).
+
+**Vérifié** : deno check norva-playback/norva-cloud (0 nouvelle erreur — 3+3 pré-existantes
+identiques sur l'arbre propre), node --check sur les 8 JS touchés, javac -proc:none (0 erreur de
+syntaxe, bruit SDK Android seul), 2 migrations rejouées sur PG16 jetable avec fixtures, smoke
+headless Chromium (optimiste→enqueue non avalé, label checking, cadences 60/20/60 s).
+
+**Déploiement** : web auto (push main → Cloudflare) ; edge à redéployer sur la box + 2
+migrations à appliquer ; TV = rebuild AAB v19.

@@ -66,14 +66,23 @@ public class MainActivity extends Activity {
     // loaded; pumped with retries because the SPA needs a moment to boot.
     private String pendingJs;
     private int pendingJsTries;
-    // True once the web app has finished loading and its __norvaNative bridge is
-    // available, so a pending native-progress flush only fires against a ready page.
+    // True once the web app SHELL has finished loading and its __norvaNative bridge is
+    // available, so a pending native-progress flush only fires against a ready page. Reset on
+    // every navigation start and set only when the finished URL IS the app shell — it used to
+    // flip true on ANY onPageFinished (cloud-pair.html, error pages) and never back to false,
+    // which made the flush consume-and-lose positions against pages with no bridge.
     private volatile boolean webAppReady = false;
+    // Retry counter for the pending-progress pump (mirrors the deep-link pump's 20×/1.5s).
+    private int pendingProgressTries = 0;
+    // Live instance for PlayerActivity's in-playback heartbeat relay (same-process, single
+    // instance by design — cleared in onDestroy).
+    static volatile MainActivity current;
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        current = this;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         root = new FrameLayout(this);
@@ -185,12 +194,22 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                // Honest readiness: navigating away (pairing screen, error page, redirect)
+                // means the bridge is gone until the next app-shell finishes loading.
+                webAppReady = false;
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 hideSplash();
-                webAppReady = true;
+                webAppReady = isAppShellUrl(url);
+                if (!webAppReady) return; // no bridge on this page — nothing to flush against
                 // Flush any position the native player persisted before a non-graceful
                 // exit (power-off/standby/crash). Small delay lets standalone.js install
-                // window.__norvaNative before we call onProgress.
+                // window.__norvaNative before we call onProgress; the pump then retries
+                // like the deep-link pump, and only a CONFIRMED cloud save clears the record.
                 view.postDelayed(new Runnable() {
                     @Override public void run() { flushPendingNativeProgress(); }
                 }, 1500);
@@ -393,6 +412,26 @@ public class MainActivity extends Activity {
      * exact staleness.) The cloud-pair.html shell also re-appends `_cb` to its
      * returnTo app.html redirect, so the second hop is refetched too.
      */
+    /**
+     * The SPA shell — the only pages where standalone.js installs __norvaNative: norva.tv (or a
+     * custom server's) /app.html, or the embedded/LAN server root. cloud-pair.html, the landing
+     * page and error documents do NOT count: flushing progress against them silently no-ops.
+     */
+    private static boolean isAppShellUrl(String url) {
+        if (url == null) return false;
+        try {
+            Uri u = Uri.parse(url);
+            String path = u.getPath();
+            if (path == null || path.isEmpty()) path = "/";
+            if (path.endsWith("/app.html")) return true;
+            String host = u.getHost();
+            boolean norva = "norva.tv".equalsIgnoreCase(host);
+            // Embedded (127.0.0.1) and LAN "server" mode serve the app at their root.
+            if (!norva && ("/".equals(path) || path.endsWith("/index.html"))) return true;
+        } catch (Exception ignored) { /* fall through */ }
+        return false;
+    }
+
     private static String withShellCacheBust(String url) {
         if (url == null) return null;
         try {
@@ -473,6 +512,13 @@ public class MainActivity extends Activity {
                                                final String sourceId, final String itemType, final String itemId,
                                                final int resumeSeconds) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl);
+        }
+
+        // The web layer's history save SUCCEEDED for the pending record carrying this token —
+        // safe to drop the SharedPreferences safety net (see pumpPendingProgress).
+        @android.webkit.JavascriptInterface
+        public void onProgressSaved(final String token) {
+            MainActivity.this.confirmProgressSaved(token);
         }
 
         // ---- Billing (Google Play Billing via RevenueCat) ----
@@ -566,6 +612,13 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        // The web layer's history save SUCCEEDED for the pending record carrying this token —
+        // safe to drop the SharedPreferences safety net (see pumpPendingProgress).
+        @android.webkit.JavascriptInterface
+        public void onProgressSaved(final String token) {
+            MainActivity.this.confirmProgressSaved(token);
+        }
     }
 
     private static final int REQ_PLAYER = 1001;
@@ -655,7 +708,9 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_PLAYER || data == null || webView == null) return;
         // Viewer picked a different quality variant in the native player: ask the web to
-        // re-select it (resolves a fresh stream + relaunches native playback).
+        // re-select it (resolves a fresh stream + relaunches native playback). The position of
+        // the segment watched before the switch sits in the prefs net (finish() persists it now)
+        // — pump it instead of dropping it with the early return (audit P3 n°14).
         final String pickedVariant = data.getStringExtra("selectedVariantStreamId");
         if (pickedVariant != null && !pickedVariant.isEmpty()) {
             final String pickedSource = data.getStringExtra("selectedVariantSourceId");
@@ -667,6 +722,7 @@ public class MainActivity extends Activity {
                     try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
                 }
             });
+            flushPendingNativeProgress();
             return;
         }
         final String sourceId = data.getStringExtra("sourceId");
@@ -678,16 +734,10 @@ public class MainActivity extends Activity {
         final boolean playNext = data.getBooleanExtra("playNext", false);
         final boolean openEpisodes = data.getBooleanExtra("openEpisodes", false);
         if (sourceId == null || itemId == null) return;
-        if (pos > 0) {
-            final String js = "window.__norvaNative && window.__norvaNative.onProgress("
-                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
-                }
-            });
-        }
+        // finish() persisted this same final position into the prefs net; deliver it through the
+        // confirmed pump (retry + onProgressSaved-clears) instead of the old one-shot
+        // evaluateJavascript that rendered false silently on a page without the bridge.
+        if (pos > 0) flushPendingNativeProgress();
 
         // Launcher "Play Next": keep the row in sync with real progress. A title
         // watched to (nearly) the end leaves the row; an in-progress one joins it.
@@ -758,38 +808,106 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * H1 recovery: the native PlayerActivity persists its live position to
-     * SharedPreferences on a heartbeat + onPause/onStop. When it exits without a
-     * graceful result (power-off, standby, OOM, crash) that position is stranded;
-     * here we relay it to the web app's onProgress bridge (which writes cloud
-     * history), then consume it. Guarded on webAppReady so a cold-start onResume
-     * (bridge not yet installed) doesn't drop the record.
+     * H1 recovery, confirmed edition: the native PlayerActivity persists its position (heartbeat,
+     * onPause/onStop, and now the graceful finish() too) to SharedPreferences. Here we relay it
+     * to the web app's onProgress bridge — with retries like the deep-link pump — and the record
+     * is only cleared when the web layer echoes the token back through onProgressSaved(), i.e.
+     * when the CLOUD save actually succeeded. The old flush consumed the prefs BEFORE evaluating
+     * the JS: one boot landing on cloud-pair.html, one 401, one network blip → position gone.
      */
     private void flushPendingNativeProgress() {
+        pendingProgressTries = 0;
+        pumpPendingProgress();
+    }
+
+    private void pumpPendingProgress() {
         try {
-            if (!webAppReady || webView == null) return;
+            if (webView == null) return;
             SharedPreferences p = prefs();
-            String itemId = p.getString("pending_progress_itemId", null);
+            final String itemId = p.getString("pending_progress_itemId", null);
             if (itemId == null || itemId.isEmpty()) return;
             final String sourceId = p.getString("pending_progress_sourceId", "");
             final String itemType = p.getString("pending_progress_itemType", "");
             final long pos = p.getLong("pending_progress_pos", 0);
             final long dur = p.getLong("pending_progress_dur", 0);
-            // Consume it — a stale record shouldn't replay on every foreground.
-            p.edit()
+            final long savedAt = p.getLong("pending_progress_savedAt", 0);
+            final String token = p.getString("pending_progress_token", "");
+            if (pos <= 0) { clearPendingProgressPrefs(); return; }
+            // A record nothing could deliver for a week is dead (signed-out TV, permanent 401):
+            // stop replaying it on every foreground.
+            if (savedAt > 0 && System.currentTimeMillis() - savedAt > 7L * 24 * 3600 * 1000L) {
+                clearPendingProgressPrefs();
+                return;
+            }
+            if (!webAppReady) return; // the next app-shell onPageFinished re-pumps
+            if (pendingProgressTries++ > 20) return; // keep the record; next foreground retries
+            final String js = "(window.__norvaNative && window.__norvaNative.onProgress) ? "
+                    + "(window.__norvaNative.onProgress(" + jsStr(sourceId) + "," + jsStr(itemType) + ","
+                    + jsStr(itemId) + "," + pos + "," + dur + "," + savedAt + "," + jsStr(token) + "), 'ok') : 'retry'";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (webView == null) return;
+                        webView.evaluateJavascript(js, new ValueCallback<String>() {
+                            @Override
+                            public void onReceiveValue(String value) {
+                                // 'ok' = delivered to the bridge; the SAVE confirmation arrives
+                                // separately via onProgressSaved (which clears the record). Not
+                                // delivered yet (SPA still booting) → retry shortly.
+                                if (value != null && value.contains("ok")) return;
+                                uiHandler.postDelayed(new Runnable() {
+                                    @Override public void run() { pumpPendingProgress(); }
+                                }, 1500);
+                            }
+                        });
+                    } catch (Exception ignored) { }
+                }
+            });
+        } catch (Exception ignored) { /* flush is best-effort */ }
+    }
+
+    private void clearPendingProgressPrefs() {
+        try {
+            prefs().edit()
                     .remove("pending_progress_sourceId").remove("pending_progress_itemType")
                     .remove("pending_progress_itemId").remove("pending_progress_pos")
-                    .remove("pending_progress_dur").apply();
-            if (pos <= 0) return;
+                    .remove("pending_progress_dur").remove("pending_progress_savedAt")
+                    .remove("pending_progress_token").apply();
+        } catch (Exception ignored) { }
+    }
+
+    /** Web layer confirmed the cloud save of the pending record carrying this token. */
+    void confirmProgressSaved(String token) {
+        try {
+            if (token == null || token.isEmpty()) return;
+            String currentToken = prefs().getString("pending_progress_token", "");
+            // Only clear the record the confirmation is FOR — a newer pending write (different
+            // token) must survive an old confirmation arriving late.
+            if (token.equals(currentToken)) clearPendingProgressPrefs();
+        } catch (Exception ignored) { }
+    }
+
+    /**
+     * In-playback heartbeat from PlayerActivity (~45s): relay the live position into the WebView
+     * so the cloud history advances DURING native playback — other devices used to see the
+     * position from BEFORE the film started until the player closed (sync audit P1 n°4). No
+     * token: this is best-effort telemetry, the SharedPreferences net stays authoritative.
+     */
+    void relayNativeHeartbeat(final String sourceId, final String itemType, final String itemId,
+                              final long pos, final long dur) {
+        try {
+            if (!webAppReady || webView == null || itemId == null || itemId.isEmpty() || pos <= 0) return;
             final String js = "window.__norvaNative && window.__norvaNative.onProgress("
-                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ","
+                    + pos + "," + dur + "," + System.currentTimeMillis() + ")";
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
                 }
             });
-        } catch (Exception ignored) { /* flush is best-effort */ }
+        } catch (Exception ignored) { /* heartbeat is best-effort */ }
     }
 
     private static String jsStr(String value) {
@@ -990,6 +1108,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (current == this) current = null;
         if (webView != null) {
             webView.destroy();
         }

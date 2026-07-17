@@ -2640,6 +2640,10 @@ async function transcribeEnqueue(
   } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+    // An enqueue failure is terminal like a callback failure: resolve any pending email/bell
+    // subscriptions instead of leaving them orphaned forever (audit 2026-07-17, gap n°3).
+    try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "transcript", lang: "src", status: "failed" }); }
+    catch (_) { /* best-effort */ }
     return { status: "error", jobId, providerKey: pkey, gatewayStatus: gwStatus, gateway: gwBody };
   }
   // One budget event per REAL accepted enqueue (a full provider read will follow) — never for
@@ -2718,6 +2722,8 @@ async function ocrEnqueue(
   } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+    try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "ocr", lang: cacheLang, status: "failed" }); }
+    catch (_) { /* best-effort */ }
     return { status: "error", jobId, providerKey: pkey, kind: "ocr", lang, gatewayStatus: gwStatus, gateway: gwBody };
   }
   if (origin === "viewer") await recordViewerTranscribeRequest(db, userId, pkey, "ocr");
@@ -2805,6 +2811,8 @@ async function translateEnqueue(
   } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `translate gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+    try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "translation", lang: target, status: "failed" }); }
+    catch (_) { /* best-effort */ }
     return { status: "error", jobId, providerKey: pkey, gatewayStatus: gwStatus, gateway: gwBody, kind: "translation", lang: target };
   }
   return { status: "processing", jobId, providerKey: pkey, kind: "translation", lang: target };
@@ -3121,18 +3129,101 @@ async function setGeneratedSubtitleNotify(req: Request, userId: string, db: Supa
   if (!email) return { ok: false, enabled: false, reason: "no email on account" };
 
   const nowIso = new Date().toISOString();
-  const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
+  const titleLabel = stringOr(body.titleLabel, "").slice(0, 300) || null;
+  const seriesId = stringOr(body.seriesId, "").slice(0, 100) || null;
+  const subRow = {
     user_id: userId, email, provider_key: pkey, item_type: itemType, external_id: externalId,
-    kind, lang, title_label: stringOr(body.titleLabel, "").slice(0, 300) || null,
-    status: "pending", created_at: nowIso, sent_at: null,
+    kind, lang, title_label: titleLabel, source_id: sourceId || null, series_id: seriesId,
+  };
+
+  // Late-opt-in race + orphan rescue (audit 2026-07-17): the client polls every 20-60 s, so a
+  // viewer can flip the chip AFTER the callback already fan-outed — the pending row would then
+  // never resolve (the dispatch only fires once, at the terminal callback). If the cache row is
+  // ALREADY terminal, answer NOW instead of registering a promise nobody will keep: ready with
+  // speech → send the email immediately (+ bell); no speech / failed → refuse honestly so the
+  // client reverts the chip. Only reachable in that race window (the chip renders only while the
+  // client believes 'processing'), so the immediate send can't be farmed for email spam.
+  const { data: cacheRow } = await db.from("catalog_generated_subtitles")
+    .select("status, segments")
+    .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .eq("kind", kind).eq("lang", lang).maybeSingle();
+  const cacheStatus = stringOr((cacheRow as JsonRecord | null)?.status, "");
+  if (cacheStatus === "ready" || cacheStatus === "failed") {
+    const hasSpeech = cacheStatus === "ready" && Number((cacheRow as JsonRecord | null)?.segments ?? 0) > 0;
+    if (!hasSpeech) {
+      return { ok: false, enabled: false, reason: cacheStatus === "ready" ? "finished — no speech detected" : "generation already failed" };
+    }
+    const sent = await sendSubtitleReadyEmail(email, titleLabel ?? "", subtitleWatchRoute(subRow as unknown as JsonRecord) || undefined);
+    try { await insertSubtitleBellEvents(db, [subRow as unknown as JsonRecord], "ready"); } catch (_) { /* best-effort */ }
+    const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
+      ...subRow, status: sent ? "sent" : "failed", created_at: nowIso, sent_at: nowIso,
+    }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" });
+    if (error) throwDb(error, "notify registration failed");
+    return { ok: true, enabled: true, already: "ready", emailed: sent };
+  }
+
+  const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
+    ...subRow, status: "pending", created_at: nowIso, sent_at: null,
   }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" });
   if (error) throwDb(error, "notify registration failed");
   return { ok: true, enabled: true };
 }
 
+// Deep-link route to a title's fiche (no origin, no leading slash): the app resolves
+// "#movies/open:<sourceId>:<streamId>:<title>" / "#series/open:<sourceId>:<seriesId>:<title>" at
+// boot via openFicheFromRoute (app.js). Episodes are cached by EPISODE id but the fiche opens by
+// SERIES id — series_id is stored at opt-in for exactly this; rows that predate it (or a
+// non-cloud source id) return "" and the caller falls back to the site root.
+function subtitleWatchRoute(sub: JsonRecord): string {
+  const src = stringOr(sub.source_id, "");
+  if (!/^[0-9a-f-]{36}$/i.test(src)) return "";
+  const title = stringOr(sub.title_label, "").slice(0, 120);
+  const enc = (s: string) => encodeURIComponent(s);
+  if (stringOr(sub.item_type, "") === "series") {
+    const seriesId = stringOr(sub.series_id, "");
+    return seriesId ? `series/open:${enc(src)}:${enc(seriesId)}:${enc(title)}` : "";
+  }
+  const extId = stringOr(sub.external_id, "");
+  return extId ? `movies/open:${enc(src)}:${enc(extId)}:${enc(title)}` : "";
+}
+
+// In-app bell entries (second notification channel — the email used to be the ONLY one; a closed
+// tab with no email opt-in learned nothing). One cloud_content_events row per subscriber; the
+// bell's catalog branch renders them as-is, and payload.watch makes the entry a deep link into
+// the fiche. Also rings on 'empty'/'failed' — the silent-outcome gap of the 2026-07-17 audit.
+async function insertSubtitleBellEvents(db: SupabaseClient, subs: JsonRecord[], outcome: "ready" | "empty" | "failed"): Promise<void> {
+  const rows = subs
+    .map((s) => {
+      const title = stringOr(s.title_label, "") || "your film";
+      const summary = outcome === "ready"
+        ? `AI subtitles ready — ${title}`
+        : outcome === "empty"
+          ? `AI subtitles finished for “${title}” — no speech detected`
+          : `AI subtitles for “${title}” failed — you can retry from the captions menu`;
+      const src = stringOr(s.source_id, "");
+      const route = subtitleWatchRoute(s);
+      return {
+        user_id: stringOr(s.user_id, ""),
+        source_id: /^[0-9a-f-]{36}$/i.test(src) ? src : null,
+        kind: `subtitle_${outcome}`,
+        summary: summary.slice(0, 300),
+        payload: {
+          itemType: stringOr(s.item_type, ""), externalId: stringOr(s.external_id, ""),
+          kind: stringOr(s.kind, "transcript"), lang: stringOr(s.lang, "src"),
+          ...(route && outcome === "ready" ? { watch: route } : {}),
+        },
+      };
+    })
+    .filter((r) => r.user_id);
+  if (!rows.length) return;
+  const { error } = await db.from("cloud_content_events").insert(rows);
+  if (error) console.error("[norva-playback] subtitle bell event insert failed", error.message);
+}
+
 // Branded, email-client-safe "your subtitles are ready" HTML (tables + inline styles, dark theme),
-// mirroring norva-auth-email so the two transactional senders look like one product.
-function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string): string {
+// mirroring norva-auth-email so the two transactional senders look like one product. `ctaUrl` deep
+// links straight to the title's fiche when the subscription carries enough identity for one.
+function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string, ctaUrl?: string): string {
   const title = (titleLabel || "your film").replace(/[<>]/g, "");
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -3151,7 +3242,7 @@ function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string): string {
           We finished transcribing <strong style="color:#dbe3f4">${title}</strong>. Re-open the film on Norva and pick <strong style="color:#dbe3f4">✨ AI subtitles</strong> in the captions menu to watch with them.
         </td></tr>
         <tr><td align="center" style="padding:8px 0 28px">
-          <a href="${siteUrl}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">Open Norva</a>
+          <a href="${ctaUrl || siteUrl}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${ctaUrl ? "Watch with AI subtitles" : "Open Norva"}</a>
         </td></tr>
         <tr><td style="padding:18px 32px 28px;border-top:1px solid #1f2733;color:#5f6b85;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;text-align:center">
           You're getting this because you asked to be notified when these subtitles finished. They're cached, so they'll load instantly next time.
@@ -3165,17 +3256,20 @@ function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string): string {
 
 // Send one "subtitles ready" email through Resend (same key/sender as norva-auth-email; secrets are
 // project-wide). Returns true on a 2xx; never throws (a send failure must not break the callback).
-async function sendSubtitleReadyEmail(to: string, titleLabel: string): Promise<boolean> {
+// `watchRoute` (from subtitleWatchRoute) turns the CTA into a deep link to the title's fiche —
+// without it the button lands on the site root and the viewer has to find the film by hand.
+async function sendSubtitleReadyEmail(to: string, titleLabel: string, watchRoute?: string): Promise<boolean> {
   const key = Deno.env.get("RESEND_API_KEY") ?? "";
   const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
   const site = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
   if (!key || !to) return false;
+  const ctaUrl = watchRoute ? `${site}/app.html#${watchRoute}` : "";
   const subject = `Your AI subtitles for “${titleLabel || "your film"}” are ready — Norva`;
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject, html: subtitleReadyEmailHtml(titleLabel, site) }),
+      body: JSON.stringify({ from, to: [to], subject, html: subtitleReadyEmailHtml(titleLabel, site, ctaUrl || undefined) }),
     });
     if (!res.ok) { console.error("[norva-playback] subtitle-ready email failed", res.status, await res.text().catch(() => "")); return false; }
     return true;
@@ -3183,8 +3277,10 @@ async function sendSubtitleReadyEmail(to: string, titleLabel: string): Promise<b
 }
 
 // Fan out pending "email me" subscriptions for a transcript that just finished. Ready WITH speech
-// → email each subscriber and mark 'sent'. Ready but EMPTY (no dialogue) → mark 'skipped' (there's
-// nothing to show, so no email). Failed → mark 'failed' (silent — we don't nag on failure).
+// → email each subscriber (deep-linked to the fiche) and mark 'sent'. Ready but EMPTY (no
+// dialogue) → mark 'skipped' (nothing to show, so no email). Failed → mark 'failed'. Every
+// outcome ALSO rings the in-app bell — email stops being the only channel, and a subscriber whose
+// generation ended without speech/failed finally learns the result somewhere.
 async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord | null): Promise<void> {
   if (!row) return;
   const status = stringOr(row.status, "");
@@ -3193,7 +3289,7 @@ async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord
   const externalId = stringOr(row.external_id, ""), kind = stringOr(row.kind, "transcript"), lang = stringOr(row.lang, "src");
   if (!providerKey || !externalId) return;
   const { data: subs } = await db.from("catalog_generated_subtitle_notifications")
-    .select("id, email, title_label")
+    .select("id, user_id, email, title_label, source_id, series_id, item_type, external_id, kind, lang")
     .eq("provider_key", providerKey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", kind).eq("lang", lang).eq("status", "pending");
   const rows = (subs ?? []) as JsonRecord[];
@@ -3204,13 +3300,17 @@ async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord
     await db.from("catalog_generated_subtitle_notifications")
       .update({ status: status === "ready" ? "skipped" : "failed", sent_at: nowIso })
       .in("id", rows.map((s) => String(s.id)));
+    try { await insertSubtitleBellEvents(db, rows, status === "ready" ? "empty" : "failed"); }
+    catch (e) { console.error("[norva-playback] bell fan-out failed", String(e)); }
     return;
   }
   for (const s of rows) {
-    const ok = await sendSubtitleReadyEmail(stringOr(s.email, ""), stringOr(s.title_label, ""));
+    const ok = await sendSubtitleReadyEmail(stringOr(s.email, ""), stringOr(s.title_label, ""), subtitleWatchRoute(s) || undefined);
     await db.from("catalog_generated_subtitle_notifications")
       .update({ status: ok ? "sent" : "failed", sent_at: nowIso }).eq("id", String(s.id));
   }
+  try { await insertSubtitleBellEvents(db, rows, "ready"); }
+  catch (e) { console.error("[norva-playback] bell fan-out failed", String(e)); }
 }
 
 // Phase 3 (3a): the gateway calls this back when an async transcription finishes (auth = the shared
@@ -3302,6 +3402,9 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
         .update({ status: "failed", error: msg.slice(0, 300), updated_at: nowIso })
         .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
         .eq("kind", "translation").eq("lang", target).eq("status", "pending-transcript");
+      // A dead chained translation is terminal for its subscribers too — resolve, don't orphan.
+      try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "translation", lang: target, status: "failed" }); }
+      catch (_) { /* best-effort */ }
     };
     if (NON_TRANSLATABLE_LANGS.has(target.toLowerCase())) { await failPending("unsupported translation target (no language model)"); continue; }
     if (!ready) { await failPending("source transcript failed"); continue; }

@@ -2499,16 +2499,18 @@ class SeriesPage {
             };
             const saved = await API.history.save({
                 id: eid, type: 'episode', sourceId: series.sourceId,
-                progress: duration, duration, data,
+                progress: duration, duration, completed: true, data,
             });
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
             // Keep the server's DB id so a later unwatch deletes THIS exact row.
             this.historyItems.push({ id: saved?.id ?? saved?.item?.id ?? null, item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
         } else {
-            // Delete the exact row by its DB id when known — item_id alone is ambiguous
-            // (shared VOD/episode namespace) and the server only scans the newest 500 rows.
+            // Keyed delete (source+type+item): reaches the server row even when it was written
+            // by ANOTHER device (the old list-then-find scanned a 20s-stale 500-row window and
+            // could silently delete nothing — the card came back at reload).
             const existing = (this.historyItems || []).find(sameEp);
-            await API.history.remove(existing?.id != null ? existing.id : eid);
+            await API.history.remove(existing?.id != null ? existing.id : eid,
+                { sourceId: series.sourceId, itemType: 'episode', itemId: eid });
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
         }
         // Keep the grid's "started" set in sync for BOTH mark and unmark (mirrors how

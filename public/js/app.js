@@ -361,6 +361,10 @@ class App {
         // Stash the admin sub-route BEFORE navigateTo rewrites the hash to "#admin" —
         // AdminPage.show() consumes it to restore the exact CRM view (fiche, ticket…).
         this._adminSubRoute = hashKey === 'admin' ? hash.slice('admin/'.length) : '';
+        // Fiche deep link (subtitle-ready emails, bell entries): #movies/open:… or #series/open:…
+        // — stashed the same way, consumed by openFicheFromRoute after the page has landed.
+        this._openFicheRoute = ((hashKey === 'movies' || hashKey === 'series') && hash.slice(hashKey.length + 1).startsWith('open:'))
+            ? hash.slice(hashKey.length + 1) : '';
         // `in` (not truthiness): lazy pages register as null until loaded (this.pages.admin),
         // which used to send a refresh on #admin back to home.
         const requestedInitialPage = hashKey && (hashKey in this.pages) ? hashKey : 'home';
@@ -371,6 +375,7 @@ class App {
         const pendingFiche = this.readOpenFiche();
         this.navigateTo(initialPage, true); // true = replace history (don't add)
         this.restoreOpenFiche(initialPage, pendingFiche);
+        this.openFicheFromRoute(initialPage);
 
         // Defer the trial / billing nudges AND the region prompt until source
         // health is known. None of them belong on the pre-catalog onboarding
@@ -524,12 +529,23 @@ class App {
         // Support entries are links straight into their ticket (support.html auto-expands
         // & scrolls ?ticket=); catalog entries stay informational.
         const here = location.pathname + location.search + location.hash;
+        // Subtitle-ready events carry payload.watch ("movies/open:…") — render them as deep
+        // links into the fiche (handled in-app below; the href keeps middle-click working).
+        const watchRoute = (e) => {
+            const w = e.kind !== 'support' && e.payload && typeof e.payload.watch === 'string' ? e.payload.watch : '';
+            return /^(movies|series)\/open:/.test(w) ? w : '';
+        };
         const item = (e) => e.kind === 'support'
             ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/support.html?ticket=${encodeURIComponent(e.ticket_id)}&returnTo=${encodeURIComponent(here)}">
                     <div class="norva-notif-summary">💬 ${esc(e.summary || 'Support replied')}</div>
                     <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · tap to open the ticket</div>
                 </a>`
-            : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
+            : watchRoute(e)
+                ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/app.html#${esc(watchRoute(e))}" data-watch="${esc(watchRoute(e))}">
+                    <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · tap to open</div>
+                </a>`
+                : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
                     <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
                     <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
                 </div>`;
@@ -539,6 +555,19 @@ class App {
                 ${events.length ? events.map(item).join('') : '<div class="norva-notif-empty">No notifications yet.</div>'}
             </div>`;
         document.body.appendChild(panel);
+        // Watch deep links navigate IN-APP (a hash-only href would not reload the SPA): route to
+        // the catalogue page and reuse the same openFicheFromRoute the boot deep link goes through.
+        panel.querySelectorAll('[data-watch]').forEach((a) => a.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const w = a.getAttribute('data-watch') || '';
+            const page = w.split('/')[0];
+            if (!this.pages?.[page]) return;
+            this._openFicheRoute = w.slice(page.length + 1);
+            panel.remove();
+            bell?.setAttribute('aria-expanded', 'false');
+            this.navigateTo(page);
+            this.openFicheFromRoute(page);
+        }));
         // Position under the bell.
         try {
             const r = bell.getBoundingClientRect();
@@ -1983,6 +2012,30 @@ class App {
 
     fichePageFor(fiche) {
         return fiche?.type === 'series' ? 'series' : 'movies';
+    }
+
+    // Fiche deep link: "open:<sourceId>:<id>:<title>" (segments encodeURIComponent-encoded) —
+    // the URL shape the subtitle-ready email button and the bell entries carry. Opens the fiche
+    // via the same openByItem resolver the global search and the Home rails use (the title makes
+    // the sibling-versions lookup work, so the fiche arrives full, not sparse). Best-effort: a
+    // stale/foreign id just leaves the catalogue page open.
+    openFicheFromRoute(pageName) {
+        const route = String(this._openFicheRoute || '');
+        this._openFicheRoute = '';
+        if (!route.startsWith('open:')) return;
+        const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (_) { return ''; } };
+        const [rawSourceId, id, title] = route.slice('open:'.length).split(':').map(dec);
+        const pageObj = this.pages?.[pageName];
+        if (!rawSourceId || !id || typeof pageObj?.openByItem !== 'function') return;
+        // The link carries the CLOUD source UUID; the catalog pages key on the LOCAL alias.
+        const sourceId = window.API?.localSourceIdFor ? window.API.localSourceIdFor(rawSourceId) : rawSourceId;
+        // Defer so the page's show()/DOM has settled (mirrors restoreOpenFiche).
+        setTimeout(() => {
+            const item = pageName === 'series'
+                ? { sourceId, series_id: id, name: title, ...(title ? { tmdb: { name: title } } : {}) }
+                : { sourceId, stream_id: id, name: title, ...(title ? { tmdb: { title } } : {}) };
+            Promise.resolve(pageObj.openByItem(item)).catch(() => {});
+        }, 200);
     }
 
     // Re-open the saved fiche once, on the page it belongs to, after a refresh.

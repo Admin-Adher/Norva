@@ -43,12 +43,21 @@
     const nativeProgressKey = (sourceId, itemType, itemId) =>
         [String(sourceId || ''), String(itemType || ''), String(itemId || '')].join('|');
 
-    // The native player reports its final position here when it closes. Persist
-    // it to the cloud history so other devices resume from it. Defined on window
-    // up-front: MainActivity calls it via evaluateJavascript after the player
-    // activity returns, which can happen before/after DOMContentLoaded.
+    // The native player reports its position here — at close (final position), on the
+    // in-playback heartbeat relay (~45 s, so other devices see the TV advance DURING the film,
+    // not hours later), and from the crash-recovery flush. Persist to the cloud history so other
+    // devices resume from it. Defined on window up-front: MainActivity calls it via
+    // evaluateJavascript, which can happen before/after DOMContentLoaded.
+    //
+    // savedAtMs (optional): epoch ms when the native side CAPTURED the position — a recovery
+    // flush can run hours later, and the server's temporal guard must judge the capture time,
+    // not the delivery time. token (optional): when present, a SUCCESSFUL save is confirmed
+    // back through bridge.onProgressSaved(token) — the native side keeps its SharedPreferences
+    // safety net until that confirmation lands (fire-and-forget used to lose the position on a
+    // network error at exactly the wrong moment). Older APKs pass neither arg and behave as
+    // before.
     window.__norvaNative = window.__norvaNative || {};
-    window.__norvaNative.onProgress = (sourceId, itemType, itemId, positionSeconds, durationSeconds) => {
+    window.__norvaNative.onProgress = (sourceId, itemType, itemId, positionSeconds, durationSeconds, savedAtMs, token) => {
         try {
             const progress = Math.max(0, Math.floor(Number(positionSeconds) || 0));
             const meta = nativeProgressMeta.get(nativeProgressKey(sourceId, itemType, itemId)) || {};
@@ -56,23 +65,35 @@
             const fallbackDuration = Math.max(0, Math.floor(Number(meta.duration) || 0));
             const duration = reportedDuration || fallbackDuration;
             if (!sourceId || !itemId || progress <= 0) return;
+            const capturedAt = Number(savedAtMs) > 0 ? Number(savedAtMs) : Date.now();
             const payload = {
                 id: String(itemId),
                 type: itemType || 'movie',
                 sourceId: String(sourceId),
                 progress,
-                duration
+                duration,
+                watchedAt: new Date(capturedAt).toISOString()
             };
+            // durationHint only when we actually KNOW one: ExoPlayer sometimes reports 0 and the
+            // in-memory meta dies with a WebView reload — sending durationHint:0 would clobber
+            // the good hint an earlier save persisted (the server merges data shallowly).
             if (meta.data) {
-                payload.data = {
-                    ...meta.data,
-                    sourceId: String(sourceId),
-                    durationHint: duration || meta.data.durationHint || 0
-                };
+                payload.data = { ...meta.data, sourceId: String(sourceId) };
+                const hint = duration || Math.max(0, Math.floor(Number(meta.data.durationHint) || 0));
+                if (hint > 0) payload.data.durationHint = hint; else delete payload.data.durationHint;
             } else {
-                payload.data = { sourceId: String(sourceId), durationHint: duration || 0 };
+                payload.data = { sourceId: String(sourceId) };
+                if (duration > 0) payload.data.durationHint = duration;
             }
-            window.API?.history?.save?.(payload)?.catch?.(() => { });
+            const save = window.API?.history?.save?.(payload);
+            if (token != null && save && typeof save.then === 'function') {
+                save.then(
+                    () => { try { bridge.onProgressSaved?.(String(token)); } catch (_) { /* older APK */ } },
+                    () => { /* not confirmed → the native side keeps its net and retries */ }
+                );
+            } else if (save && typeof save.catch === 'function') {
+                save.catch(() => { });
+            }
         } catch (err) {
             console.warn('[Native] onProgress save failed:', err?.message || err);
         }
@@ -433,36 +454,78 @@
             return parts.join(' — ') || 'Norva';
         };
 
+        // Structured next episode for the history blob, computed from the LAUNCH payload
+        // (content.seriesInfo travels with the fiche's play call) — the web player computes the
+        // same thing from instance state, but the native override never sets that state. Without
+        // this, a binge on the TV never advanced the "up next" card of the other devices.
+        const computeNextEpisode = (content) => {
+            try {
+                const info = content?.seriesInfo;
+                if (content?.type !== 'series' || !info?.episodes || !content.currentSeason || !content.currentEpisode) return null;
+                const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+                const cur = info.episodes[content.currentSeason] || [];
+                const i = cur.findIndex(ep => parseInt(ep.episode_num) === parseInt(content.currentEpisode));
+                let nextEp = null;
+                if (i >= 0 && i < cur.length - 1) {
+                    nextEp = { ...cur[i + 1], seasonNum: content.currentSeason };
+                } else {
+                    const si = seasons.indexOf(String(content.currentSeason));
+                    const nx = (si >= 0 && si < seasons.length - 1) ? info.episodes[seasons[si + 1]] : null;
+                    if (nx && nx.length) nextEp = { ...nx[0], seasonNum: seasons[si + 1] };
+                }
+                if (!nextEp) return null;
+                return {
+                    id: nextEp.id || null,
+                    season: nextEp.seasonNum || null,
+                    episode: nextEp.episode_num || null,
+                    title: nextEp.title || null,
+                    containerExtension: nextEp.container_extension || 'mp4',
+                    duration: nextEp.duration || null
+                };
+            } catch (_) { return null; }
+        };
+
         if (window.WatchPage) {
             WatchPage.prototype.play = async function (content, streamUrl, playback) {
-                // Cross-device resume backfill for the native player. It only receives
-                // content.resumeTime, which comes from the loaded Continue-Watching
-                // window; when that is 0 (deep link, title outside the window, or a
-                // second device) recover the saved position from the server so native
-                // TV/phone resume like the web player. Best-effort, only when needed.
+                // Cross-device resume for the native player. content.resumeTime comes from the
+                // launcher card, which can be up to ~80 s stale (or days, via the SWR paint) —
+                // ALWAYS ask the server and prefer its answer when it responds (audit 2026-07-17
+                // P1: the stale card used to short-circuit a fresher position written by another
+                // device). An ANSWERED 0 restarts honestly (finished/removed elsewhere); no
+                // answer (offline, older backend) keeps the transmitted offset.
                 let effectiveResume = Math.max(0, Math.floor(Number(content.resumeTime) || 0));
-                if (effectiveResume <= 0 && typeof this._fetchServerResumePosition === 'function') {
-                    try {
+                try {
+                    if (typeof this._fetchServerResumeInfo === 'function') {
+                        const server = await this._fetchServerResumeInfo(content);
+                        if (server && server.answered) effectiveResume = Math.max(0, Math.floor(Number(server.position) || 0));
+                    } else if (effectiveResume <= 0 && typeof this._fetchServerResumePosition === 'function') {
                         const serverPos = await this._fetchServerResumePosition(content);
                         if (Number(serverPos) > 0) effectiveResume = Math.floor(Number(serverPos));
-                    } catch (_) { /* best-effort */ }
-                }
+                    }
+                } catch (_) { /* best-effort */ }
                 try {
                     const meta = contentMeta(content);
+                    // Data parity with the web player's history blob (audit 2026-07-17 P2): the
+                    // native path also carries playbackPreferences + nextEpisode, so audio/subtitle
+                    // choices and the "up next" card follow the user off the TV.
+                    const nextEpisode = computeNextEpisode(content);
+                    const dataBlob = {
+                        title: content.title,
+                        subtitle: content.subtitle || '',
+                        poster: content.poster,
+                        sourceId: content.sourceId,
+                        seriesId: content.seriesId || null,
+                        currentSeason: content.currentSeason || null,
+                        currentEpisode: content.currentEpisode || null,
+                        containerExtension: content.containerExtension || 'mp4',
+                        ...(Number(content.durationHint) > 0 ? { durationHint: Math.floor(Number(content.durationHint)) } : {}),
+                        ...(content.playbackPreferences ? { playbackPreferences: content.playbackPreferences } : {}),
+                        ...(nextEpisode ? { nextEpisode } : {})
+                    };
                     if (meta) {
                         nativeProgressMeta.set(nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId), {
                             duration: content.durationHint || 0,
-                            data: {
-                                title: content.title,
-                                subtitle: content.subtitle || '',
-                                poster: content.poster,
-                                sourceId: content.sourceId,
-                                seriesId: content.seriesId || null,
-                                currentSeason: content.currentSeason || null,
-                                currentEpisode: content.currentEpisode || null,
-                                containerExtension: content.containerExtension || 'mp4',
-                                durationHint: content.durationHint || 0
-                            }
+                            data: { ...dataBlob, durationHint: content.durationHint || 0 }
                         });
                     }
                     // Seed history so Continue Watching shows the title even if
@@ -473,16 +536,8 @@
                         sourceId: content.sourceId,
                         progress: effectiveResume,
                         duration: Math.max(0, Math.floor(Number(content.durationHint) || 0)),
-                        data: {
-                            title: content.title,
-                            subtitle: content.subtitle || '',
-                            poster: content.poster,
-                            sourceId: content.sourceId,
-                            seriesId: content.seriesId || null,
-                            currentSeason: content.currentSeason || null,
-                            currentEpisode: content.currentEpisode || null,
-                            containerExtension: content.containerExtension || 'mp4'
-                        }
+                        watchedAt: new Date().toISOString(),
+                        data: dataBlob
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const resolved = await resolveStreamPayload(streamUrl);

@@ -1986,6 +1986,20 @@ const CloudAdapter = (() => {
             return mapHistory(payload.item);
         }
         if (method === 'DELETE') {
+            // Keyed removal (audit 2026-07-17 P2): the list-then-find below scans a list served
+            // by a 20s cache and capped at 500 rows — an entry written by another device was
+            // missed and the DELETE silently did nothing (the card came back at reload). When
+            // the caller provides the natural keys, delete by them in one round-trip (same fix
+            // the favorites DELETE got in 7cd1219).
+            const keyedItemId = query.get('itemId') || query.get('item_id');
+            if (keyedItemId && typeof hist.removeByKeys === 'function') {
+                const cloudSourceId = query.get('sourceId') ? await resolveSourceId(query.get('sourceId')) : null;
+                return hist.removeByKeys({
+                    itemId: String(keyedItemId),
+                    itemType: cloudTypeFromLocal(query.get('itemType') || query.get('type') || 'movie'),
+                    ...(cloudSourceId ? { sourceId: cloudSourceId } : {})
+                });
+            }
             const itemId = decodeURIComponent(path.split('/').pop());
             const payload = await hist.list({ limit: 500 });
             const item = (payload.history || []).find(entry => String(entry.id) === itemId || String(entry.item_id) === itemId);
@@ -2104,6 +2118,7 @@ const CloudAdapter = (() => {
         isCloudMode: _shouldUseCloud,
         hasUserSession,
         resolveSourceId,
+        localSourceId,
         cloudSourcesApi,
         cloudMediaApi,
         cloudLiveApi,
@@ -2157,6 +2172,13 @@ const API = {
     // cloud edge route keys off. Mirrors what getStreamUrl does internally. Returns the input
     // unchanged when not in cloud mode or already a UUID.
     resolveCloudSourceId: (id) => (_shouldUseCloud() ? CloudAdapter.resolveSourceId(id) : Promise.resolve(id)),
+
+    // The reverse: a CLOUD source UUID (from an email deep link or a bell event) to the LOCAL
+    // alias the catalog pages key on. Identity outside cloud mode / for non-UUID input.
+    localSourceIdFor: (cloudId) => {
+        const raw = String(cloudId || '');
+        return (_shouldUseCloud() && raw.includes('-')) ? CloudAdapter.localSourceId(raw) : cloudId;
+    },
 
     // Synchronous catalog signature (max catalog_version across loaded sources) used to
     // version the persistent first-screen cache; null outside cloud mode / before load.
@@ -2524,7 +2546,12 @@ const API = {
     history: {
         getAll: (limit = 200) => API.request('GET', `/history?limit=${limit}`),
         save: (data) => API.request('POST', '/history', data),
-        remove: (itemId) => API.request('DELETE', `/history/${itemId}`)
+        // keys {sourceId,itemType,itemId} → keyed server-side delete (reliable cross-device);
+        // without keys, legacy row-id/list-then-find path.
+        remove: (itemId, keys = null) => {
+            const params = keys ? new URLSearchParams(Object.fromEntries(Object.entries(keys).filter(([, v]) => v != null && v !== ''))).toString() : '';
+            return API.request('DELETE', `/history/${itemId}${params ? `?${params}` : ''}`);
+        }
     },
 
     // TMDB enrichment

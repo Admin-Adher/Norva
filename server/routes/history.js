@@ -52,6 +52,19 @@ router.post('/', (req, res) => {
         const compositeId = `${userId}:${id}`;
         const timestamp = Date.now();
 
+        // MERGE like the cloud edge does (audit 2026-07-17 P2): the web player's delta
+        // heartbeat omits `data` on steady ticks precisely because it assumes the server
+        // preserves the rich blob (title/poster/nextEpisode/prefs) from an earlier save —
+        // `data = excluded.data` was wiping it to {} on the 2nd tick in hub mode, degrading
+        // Continue Watching cards and breaking episode chaining. Duration likewise survives
+        // an update that doesn't carry one (native exit before the player resolved it).
+        const existing = db.prepare('SELECT duration, data FROM watch_history WHERE id = ?').get(compositeId);
+        let mergedData = data || {};
+        if (existing) {
+            try { mergedData = { ...JSON.parse(existing.data || '{}'), ...(data || {}) }; } catch (_) { /* keep incoming */ }
+        }
+        const effectiveDuration = Number(duration) > 0 ? Number(duration) : (Number(existing?.duration) || 0);
+
         const stmt = db.prepare(`
             INSERT INTO watch_history (id, user_id, source_id, item_type, item_id, parent_id, progress, duration, updated_at, data)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -71,9 +84,9 @@ router.post('/', (req, res) => {
             id.toString(),
             parentId ? parentId.toString() : null,
             progress || 0,
-            duration || 0,
+            effectiveDuration,
             timestamp,
-            JSON.stringify(data || {})
+            JSON.stringify(mergedData)
         );
 
         res.json({ success: true, timestamp });

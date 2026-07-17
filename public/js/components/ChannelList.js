@@ -1354,7 +1354,8 @@ class ChannelList {
         try {
             let recents = this.getRecentChannels()
                 .filter(r => !(r.id === channel.id && r.sourceId === channel.sourceId));
-            recents.unshift({ id: channel.id, sourceId: channel.sourceId, name: channel.name });
+            // `at` lets the cloud pull merge by freshness instead of overwriting the mirror.
+            recents.unshift({ id: channel.id, sourceId: channel.sourceId, name: channel.name, at: Date.now() });
             recents = recents.slice(0, 8);
             localStorage.setItem('norva-recent-channels', JSON.stringify(recents));
             this._recentKeys?.add(`${channel.sourceId}:${channel.id}`);
@@ -1381,19 +1382,49 @@ class ChannelList {
         }, 2500);
     }
 
-    // On load, pull the account's cloud recent channels into the localStorage mirror so a
-    // fresh device shows the recents watched elsewhere. Best-effort; never blocks the UI.
+    // Cloud recents re-pull gate: TTL + window refocus + a slow interval. The old guard pulled
+    // ONCE per session — a TV left running never saw the channels zapped on the phone until the
+    // next app restart (sync audit 2026-07-17 P2).
+    maybeSyncRecentsFromCloud(force = false) {
+        const now = Date.now();
+        if (!force && this._recentsSyncedAt && now - this._recentsSyncedAt < 5 * 60 * 1000) return;
+        this._recentsSyncedAt = now;
+        this.syncRecentChannelsFromCloud();
+        if (!this._recentsResyncArmed) {
+            this._recentsResyncArmed = true;
+            window.addEventListener('focus', () => this.maybeSyncRecentsFromCloud());
+            // An always-on TV never refocuses — a slow tick keeps its recents rail alive.
+            setInterval(() => this.maybeSyncRecentsFromCloud(), 10 * 60 * 1000);
+        }
+    }
+
+    // Pull the account's cloud recent channels and MERGE them into the localStorage mirror by
+    // freshness — the old pull-and-overwrite could replace fresher local zaps with older cloud
+    // rows at boot. Best-effort; never blocks the UI.
     async syncRecentChannelsFromCloud() {
         if (!window.API?.request) return;
         try {
             const rows = await window.API.request('GET', '/history?itemType=channel&limit=8');
             if (!Array.isArray(rows) || !rows.length) return;
             const cloud = rows
-                .map(r => ({ id: String(r.itemId ?? r.item_id ?? ''), sourceId: r.sourceId ?? r.source_id, name: r.itemName ?? r.item_name ?? '' }))
+                .map(r => ({
+                    id: String(r.itemId ?? r.item_id ?? ''),
+                    sourceId: r.sourceId ?? r.source_id,
+                    name: r.itemName ?? r.item_name ?? '',
+                    at: Date.parse(r.watched_at || r.updated_at || '') || 0
+                }))
                 .filter(r => r.id && r.sourceId != null);
             if (!cloud.length) return;
-            localStorage.setItem('norva-recent-channels', JSON.stringify(cloud.slice(0, 8)));
-            this._recentKeys = new Set(cloud.map(r => `${r.sourceId}:${r.id}`));
+            const merged = new Map();
+            const locals = this.getRecentChannels().map(l => ({ ...l, at: Number(l.at) || 0 }));
+            for (const r of [...locals, ...cloud]) {
+                const k = `${r.sourceId}:${r.id}`;
+                const prev = merged.get(k);
+                if (!prev || (r.at || 0) > (prev.at || 0)) merged.set(k, r);
+            }
+            const out = [...merged.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 8);
+            localStorage.setItem('norva-recent-channels', JSON.stringify(out));
+            this._recentKeys = new Set(out.map(r => `${r.sourceId}:${r.id}`));
         } catch (_) { /* offline / not linked — keep localStorage */ }
     }
 
@@ -2067,9 +2098,9 @@ class ChannelList {
         } finally {
             this.isLoading = false;
             this.hasLoadedOnce = true;
-            // Once per session: pull cloud recent channels into the local mirror so a
-            // fresh device shows recents watched elsewhere. Fire-and-forget.
-            if (!this._recentsSyncedOnce) { this._recentsSyncedOnce = true; this.syncRecentChannelsFromCloud(); }
+            // Pull cloud recent channels into the local mirror (TTL-gated + refocus + slow
+            // interval — no longer once per session). Fire-and-forget.
+            this.maybeSyncRecentsFromCloud();
         }
     }
 

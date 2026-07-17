@@ -116,10 +116,14 @@ Deno.serve(async (req) => {
       return await proxyImage(req, url);
     }
     const result = await route(req, url, segments, supabase);
-    if (req.method === "GET" && typeof result.cache === "number" && result.cache > 0) {
-      return jsonCached(req, result.body, result.cache, result.status ?? 200);
-    }
-    return json(req, result.body, result.status ?? 200);
+    const res = (req.method === "GET" && typeof result.cache === "number" && result.cache > 0)
+      ? jsonCached(req, result.body, result.cache, result.status ?? 200)
+      : json(req, result.body, result.status ?? 200);
+    // The request named a profile the plan has LOCKED (post-downgrade) and was silently served
+    // the default profile instead — say so, so the client can tell the user rather than let two
+    // profiles look inexplicably "desynchronized" (sync audit 2026-07-17 P2).
+    if (lockedProfileFallbacks.has(req)) res.headers.set("x-norva-profile-fallback", "locked");
+    return res;
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -271,6 +275,9 @@ async function route(
         return { body: await listHistory(req, url, device.user_id, db) };
       }
       if (req.method === "POST" && !action) return { status: 201, body: await saveHistory(req, device.user_id, db) };
+      if (req.method === "DELETE" && !action && (url.searchParams.get("itemId") || url.searchParams.get("item_id"))) {
+        return { body: await deleteHistoryByKeys(req, url, device.user_id, db) };
+      }
       if (req.method === "DELETE" && action) return { body: await deleteOwned("cloud_watch_history", action, device.user_id, db) };
     }
     // Account profiles: a paired TV lists the account's profiles (to land on the
@@ -559,6 +566,11 @@ async function route(
       return { body: await listHistory(req, url, user.id, db) };
     }
     if (req.method === "POST" && !id) return { status: 201, body: await saveHistory(req, user.id, db) };
+    // DELETE /history?sourceId&itemId&itemType — keyed removal (one round-trip, no stale cache);
+    // DELETE /history/:id — legacy delete by row UUID.
+    if (req.method === "DELETE" && !id && (url.searchParams.get("itemId") || url.searchParams.get("item_id"))) {
+      return { body: await deleteHistoryByKeys(req, url, user.id, db) };
+    }
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_watch_history", id, user.id, db) };
   }
 
@@ -742,6 +754,10 @@ function activeProfileIdSet(
   return new Set(ordered.slice(0, cap).map((p) => p.id));
 }
 
+// Requests that asked for a LOCKED profile and were served the default instead — flagged per
+// request so the serve wrapper can expose the fallback in a response header.
+const lockedProfileFallbacks = new WeakSet<Request>();
+
 // Resolve the active profile from the request header, validating it belongs to the
 // account AND is not LOCKED by the plan limit. A locked profile (over the cap after a
 // downgrade) is refused even if the client forces the header — it falls back to the
@@ -763,6 +779,7 @@ async function resolveProfileId(req: Request, userId: string, db: SupabaseClient
         const limit = limitNumber(decision.limits, "profiles", 1);
         const activeSet = activeProfileIdSet(rows, limit);
         if (activeSet && !activeSet.has(headerId)) {
+          lockedProfileFallbacks.add(req); // surfaced as x-norva-profile-fallback: locked
           return await getOrCreateDefaultProfileId(userId, db);
         }
       }
@@ -2497,6 +2514,34 @@ async function deleteFavoriteByKeys(req: Request, url: URL, userId: string, db: 
   return { success: true };
 }
 
+// DELETE /history?sourceId&itemId&itemType — remove a Continue Watching entry by its natural
+// keys, one round-trip. Same motif as deleteFavoriteByKeys (the client's old list-then-find
+// missed rows written by another device against a 20s-stale cache and "deleted" nothing —
+// sync audit 2026-07-17 P2). Also clears the same title's rows orphaned to source_id=null by a
+// source renewal, so the card can't resurrect from the fallback read.
+async function deleteHistoryByKeys(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
+  const sourceId = stringOr(url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"), "");
+  const itemType = stringOr(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"), "");
+  const itemId = stringOr(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"), "");
+  if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
+  // sourceId feeds a PostgREST .or() filter string — only a UUID shape may pass.
+  if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) throw new HttpError(400, "invalid sourceId");
+  let q = db
+    .from("cloud_watch_history")
+    .delete()
+    .eq("user_id", userId)
+    .eq("profile_id", profileId)
+    .eq("item_type", itemType)
+    .eq("item_id", itemId);
+  // With a sourceId: that source's row + null-source orphans of the same title.
+  // Without: every row of the title on this profile.
+  if (sourceId) q = q.or(`source_id.eq.${sourceId},source_id.is.null`);
+  const { error } = await q;
+  if (error) throwDb(error, "Unable to delete history entry");
+  return { success: true };
+}
+
 async function getRating(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   const itemType = stringOr(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"), "");
@@ -2707,7 +2752,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   // after a cross-device resume.
   let existingQuery = db
     .from("cloud_watch_history")
-    .select("item_name,parent_item_id,duration_seconds,data")
+    .select("item_name,parent_item_id,duration_seconds,data,progress_seconds,completed,watched_at")
     .eq("profile_id", profileId)
     .eq("item_type", itemType)
     .eq("item_id", itemId);
@@ -2718,6 +2763,28 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
 
   const mergedData = { ...recordOrEmpty(existing?.data), ...recordOrEmpty(body.data) };
   const incomingDuration = boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000);
+  const incomingProgress = boundedInt(body.progressSeconds ?? body.progress_seconds ?? body.progress, 0, 0, 10_000_000);
+
+  // Temporal guard (sync audit 2026-07-17 P2): with two devices heartbeating the same title,
+  // arrival order at Postgres used to decide — a delayed packet could REGRESS a fresher
+  // position. A tick that stamps when it was CAPTURED (watchedAt) only overwrites progress if
+  // it is newer than what's stored; force saves (pause/seek/exit) always pass, and legacy
+  // clients that send no watchedAt keep the old last-write-wins.
+  const incomingWatchedAt = stringOrNull(body.watchedAt ?? body.watched_at);
+  const incomingWatchedAtMs = incomingWatchedAt ? (Date.parse(incomingWatchedAt) || 0) : 0;
+  const existingWatchedAtMs = Date.parse(stringOr(existing?.watched_at, "")) || 0;
+  const stale = body.force !== true
+    && incomingWatchedAtMs > 0
+    && existingWatchedAtMs > 0
+    && incomingWatchedAtMs < existingWatchedAtMs;
+
+  // `completed` is the manual "mark watched" flag: preserved when the save doesn't mention it
+  // (heartbeats used to reset it to false on every tick — audit P3), except that a REAL
+  // re-watch (≥60s of progress) honestly clears it, so cross-device resume works again while a
+  // 30-second accidental open still can't undo a deliberate mark.
+  const completed = body.completed !== undefined
+    ? Boolean(body.completed)
+    : (Boolean(existing?.completed) && incomingProgress < 60);
 
   const row = {
     user_id: userId,
@@ -2729,15 +2796,17 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
       ?? stringOrNull(existing?.parent_item_id),
     item_name: stringOrNull(body.itemName ?? body.item_name ?? body.name)
       ?? stringOrNull(existing?.item_name),
-    progress_seconds: boundedInt(body.progressSeconds ?? body.progress_seconds ?? body.progress, 0, 0, 10_000_000),
+    progress_seconds: stale ? boundedInt(existing?.progress_seconds, 0, 0, 10_000_000) : incomingProgress,
     // Keep a known duration if this update doesn't carry one (e.g. native exit
     // before the player resolved the duration).
     duration_seconds: incomingDuration > 0
       ? incomingDuration
       : boundedInt(existing?.duration_seconds, 0, 0, 10_000_000),
-    completed: Boolean(body.completed ?? false),
+    completed: stale ? Boolean(existing?.completed ?? false) : completed,
     data: mergedData,
-    watched_at: stringOrNull(body.watchedAt ?? body.watched_at) ?? new Date().toISOString(),
+    watched_at: stale
+      ? stringOr(existing?.watched_at, new Date().toISOString())
+      : (incomingWatchedAt ?? new Date().toISOString()),
   };
 
   const { data, error } = await db
@@ -4295,6 +4364,8 @@ function corsHeaders(req: Request) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    // Lets browser JS read the locked-profile fallback signal (resolveProfileId).
+    "Access-Control-Expose-Headers": "x-norva-profile-fallback",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };

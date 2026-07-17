@@ -193,6 +193,9 @@ public class PlayerActivity extends Activity {
     // heartbeat and on onPause/onStop; MainActivity flushes any pending position
     // to cloud history on its next foreground (see flushPendingNativeProgress).
     private long lastProgressPersistMs = 0L;
+    // Throttle for the in-playback cloud relay (via MainActivity's WebView) — coarser than the
+    // local 10s persist: cross-device visibility needs ~45s, not a request per tick.
+    private long lastCloudRelayMs = 0L;
     private boolean gracefulResultEmitted = false;
 
     private final Runnable tick = new Runnable() {
@@ -1550,26 +1553,36 @@ public class PlayerActivity extends Activity {
             if (pos <= 0) return;
             long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
             lastProgressPersistMs = now;
-            getSharedPreferences("norva", MODE_PRIVATE).edit()
-                    .putString("pending_progress_sourceId", sourceId == null ? "" : sourceId)
-                    .putString("pending_progress_itemType", itemType == null ? "" : itemType)
-                    .putString("pending_progress_itemId", itemId)
-                    .putLong("pending_progress_pos", pos)
-                    .putLong("pending_progress_dur", dur)
-                    .apply();
+            writePendingProgress(pos, dur);
+            // Cloud heartbeat relay (~45s): while the native player is on top, MainActivity's
+            // WebView is idle — relay the live position into it so other devices see this TV
+            // advance DURING the film, not hours later at close (sync audit 2026-07-17 P1 n°4).
+            // VOD only: a live channel would write a junk history row per tick.
+            if (!"channel".equals(itemType) && now - lastCloudRelayMs >= 45000L) {
+                lastCloudRelayMs = now;
+                MainActivity main = MainActivity.current;
+                if (main != null) main.relayNativeHeartbeat(sourceId, itemType, itemId, pos, dur);
+            }
         } catch (Exception ignored) { /* progress persistence is best-effort */ }
     }
 
-    private void clearPendingProgress() {
-        try {
-            getSharedPreferences("norva", MODE_PRIVATE).edit()
-                    .remove("pending_progress_sourceId")
-                    .remove("pending_progress_itemType")
-                    .remove("pending_progress_itemId")
-                    .remove("pending_progress_pos")
-                    .remove("pending_progress_dur")
-                    .apply();
-        } catch (Exception ignored) { }
+    /**
+     * The SharedPreferences safety net. savedAt doubles as the delivery token: the web layer
+     * echoes it back through onProgressSaved() once the CLOUD save succeeded, and only that
+     * confirmation clears the record (MainActivity.confirmProgressSaved) — a fire-and-forget
+     * failure no longer loses the position.
+     */
+    private void writePendingProgress(long pos, long dur) {
+        long savedAt = System.currentTimeMillis();
+        getSharedPreferences("norva", MODE_PRIVATE).edit()
+                .putString("pending_progress_sourceId", sourceId == null ? "" : sourceId)
+                .putString("pending_progress_itemType", itemType == null ? "" : itemType)
+                .putString("pending_progress_itemId", itemId)
+                .putLong("pending_progress_pos", pos)
+                .putLong("pending_progress_dur", dur)
+                .putLong("pending_progress_savedAt", savedAt)
+                .putString("pending_progress_token", Long.toString(savedAt))
+                .apply();
     }
 
     @Override
@@ -1605,10 +1618,15 @@ public class PlayerActivity extends Activity {
                 data.putExtra("ended", endedNaturally);
                 data.putExtra("playNext", playNextChosen);
                 data.putExtra("openEpisodes", openEpisodesChosen);
-                // Graceful exit: onActivityResult will persist this position, so drop
-                // any heartbeat-pending copy and stop onPause/onStop re-persisting.
+                // Graceful exit: persist the FINAL position into the SharedPreferences net and
+                // KEEP it there — it is only cleared once the web layer confirms the cloud save
+                // (onProgressSaved). Clearing here used to lose the position whenever the
+                // fire-and-forget save failed: network blip at exit, WebView sitting on
+                // cloud-pair.html after a device-token revoke, PiP closed as the process died
+                // (sync audit 2026-07-17 P1 n°1). gracefulResultEmitted stops onPause/onStop
+                // from re-writing an older heartbeat position over this final one.
                 gracefulResultEmitted = true;
-                clearPendingProgress();
+                if (pos > 0) writePendingProgress(pos, dur);
             }
             // A variant pick returns here so MainActivity can ask the web to re-select it.
             if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {

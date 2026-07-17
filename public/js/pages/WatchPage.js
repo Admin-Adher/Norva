@@ -954,20 +954,28 @@ class WatchPage {
     // lookup. Returns 0 on any failure or if the backend lookup isn't available
     // (older backend returns {history:[...]} with no .item → treated as 0).
     async _fetchServerResumePosition(content) {
+        return (await this._fetchServerResumeInfo(content)).position;
+    }
+
+    // Same lookup, but distinguishes "the server ANSWERED 0" (finished ≥95% elsewhere, removed
+    // from Continue Watching, <12 s) from "we couldn't ask" (offline, older backend). Only an
+    // answered 0 may override a position the launcher card transmitted.
+    async _fetchServerResumeInfo(content) {
         try {
-            if (!window.API?.request || !content?.id) return 0;
+            if (!window.API?.request || !content?.id) return { answered: false, position: 0 };
             const itemType = content.type === 'movie' ? 'movie' : 'episode';
             const params = new URLSearchParams({ itemId: String(content.id), itemType });
             if (content.sourceId) params.set('sourceId', String(content.sourceId));
             const res = await window.API.request('GET', `/history?${params.toString()}`);
-            const item = res && res.item;
-            if (!item || item.completed) return 0;
+            if (!res || typeof res !== 'object' || !('item' in res)) return { answered: false, position: 0 };
+            const item = res.item;
+            if (!item || item.completed) return { answered: true, position: 0 };
             const progress = Number(item.progress_seconds ?? item.progress ?? 0);
             const duration = Number(item.duration_seconds ?? item.duration ?? 0);
-            return this.getResumeRestorePosition(progress, duration);
+            return { answered: true, position: this.getResumeRestorePosition(progress, duration) };
         } catch (err) {
             console.warn('[WatchPage] Server resume fetch failed:', err?.message || err);
-            return 0;
+            return { answered: false, position: 0 };
         }
     }
 
@@ -1274,18 +1282,29 @@ class WatchPage {
             playbackMetadata.startOffset ??
             0
         );
-        // The catalog item often opens without a resume position (stale progress).
-        // Recover it with a two-tier fallback so reopening resumes at the saved spot:
-        //   1) authoritative server position (continue-watching) — works cross-device
-        //   2) durable per-title store on this device — offline / server unavailable
-        if (!(requestedResumeTime > 0) && content?.id && content?.sourceId) {
-            const serverPos = await this._fetchServerResumePosition(content);
-            if (serverPos > 0) {
-                requestedResumeTime = serverPos;
-                console.log(`[WatchPage] Resume from server: ${serverPos}s`);
+        // Cross-device resume (audit 2026-07-17 P1): ALWAYS ask the server, no longer only when
+        // the transmitted offset is 0. A Continue Watching card can be up to ~80 s stale (60 s
+        // warm-DOM + 20 s hist cache) — or days, via the SWR paint — and used to short-circuit
+        // the lookup, so the stale card WON over a fresher position written by another device.
+        // Precedence: explicit seek target (session restore) > server answer (even an answered 0
+        // — finished/removed elsewhere restarts honestly) > transmitted card offset > durable
+        // local store (offline / older backend only).
+        const explicitSeekTarget = Number(
+            playbackMetadata.resumeTarget ?? playbackMetadata.resume_target ??
+            playbackMetadata.seekOffset ?? playbackMetadata.startOffset ?? 0
+        ) > 0;
+        let serverAnswered = false;
+        if (!explicitSeekTarget && content?.id && content?.sourceId) {
+            const server = await this._fetchServerResumeInfo(content);
+            if (server.answered) {
+                serverAnswered = true;
+                if (server.position !== requestedResumeTime) {
+                    console.log(`[WatchPage] Resume from server: ${server.position}s (card carried ${requestedResumeTime}s)`);
+                }
+                requestedResumeTime = server.position;
             }
         }
-        if (!(requestedResumeTime > 0) && content?.id && content?.sourceId) {
+        if (!serverAnswered && !(requestedResumeTime > 0) && content?.id && content?.sourceId) {
             const stored = this._loadResumePosition(content);
             if (stored > 0) {
                 requestedResumeTime = stored;
@@ -7372,6 +7391,8 @@ class WatchPage {
         const stage = String(this._aiStage || '');
         const pos = Number(this._aiQueuePos);
         if (this._aiPollExpired) return `⏳ ${this.escapeHtml('Still queued — enable email below, we\'ll let you know')}`;
+        // Optimistic pre-network state: the click was registered, the cache lookup is in flight.
+        if (stage === 'checking') return `✨ ${this.escapeHtml('Checking for existing subtitles…')}`;
         if (stage === 'deferred') {
             return this._aiDeferredByYou
                 ? `⏸ ${this.escapeHtml('Waiting for your playback to stop (your provider allows one connection)')}`
@@ -7508,9 +7529,13 @@ class WatchPage {
                 const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
                 if (cloudId) params.sourceId = String(cloudId);
             } catch (_) { /* fall back to the raw id */ }
+            const c = this.content || {};
             const res = await window.NorvaCloud.playback.notifyGeneratedSubtitle({
                 sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
                 titleId: params.titleId, titleLabel: this._aiTitleLabel(), enabled,
+                // Episodes are cached by EPISODE id but the email deep link opens the SERIES fiche
+                // — the server stores this alongside the subscription for exactly that.
+                ...(params.itemType === 'series' ? { seriesId: String(c.seriesId || c.series_id || '') } : {}),
                 // A language was picked at click time → the email should fire when the TRANSLATED
                 // subtitles are ready (the server chain produces them right after the transcript).
                 ...(this._pendingTranslateTarget ? { kind: 'translation', lang: this._pendingTranslateTarget } : {}),
@@ -7529,8 +7554,11 @@ class WatchPage {
     }
 
     stopAiSubtitlePolling() {
+        // Invalidate the whole tick chain, not just the pending timer: a terminal response calls
+        // this from INSIDE a tick (timer already fired) — without the bump, that tick reschedules.
+        this._aiPollGen = (this._aiPollGen || 0) + 1;
         if (this._aiSubtitlePollTimer) {
-            clearInterval(this._aiSubtitlePollTimer);
+            clearTimeout(this._aiSubtitlePollTimer);
             this._aiSubtitlePollTimer = null;
         }
         this._stopAiCountdown();
@@ -7613,13 +7641,25 @@ class WatchPage {
 
     startAiSubtitlePolling(params, key) {
         this.stopAiSubtitlePolling();
+        const gen = (this._aiPollGen = (this._aiPollGen || 0) + 1);
         const startedAt = Date.now();
         // 2h cap, aligned with the server's stale-job reaper: below it, a live job could still be
         // running (long film + queue). At expiry the job is NOT declared failed (that was a lie —
         // guaranteed for any >1h watch): we stop hammering and point at the email toggle.
         const MAX_MS = 2 * 60 * 60 * 1000;
         this._aiPollExpired = false;
-        this._aiSubtitlePollTimer = setInterval(async () => {
+        // Adaptive cadence: 20 s while the job is actually producing (extraction/transcription —
+        // partial VTTs land between polls), 60 s while it merely WAITS (deferred slot, queued
+        // behind other jobs: nothing can change for minutes). Over a 2 h deferred wait that is
+        // ~120 GETs instead of ~360, without delaying a single partial delivery.
+        const delayMs = () => {
+            const stage = String(this._aiStage || '');
+            if (stage === 'deferred') return 60000;
+            if (stage === '' && Number(this._aiQueuePos) > 0) return 60000;
+            return 20000;
+        };
+        const tick = async () => {
+            if (this._aiPollGen !== gen) return; // superseded by a newer poll (or stopped)
             if (this._aiSubtitleKey() !== key) { this.stopAiSubtitlePolling(); return; }
             if (Date.now() - startedAt > MAX_MS) {
                 this._aiPollExpired = true;
@@ -7631,7 +7671,10 @@ class WatchPage {
                 const got = await window.NorvaCloud.playback.generatedSubtitle(params);
                 this._applyAiSubtitleResponse(got, key);
             } catch (_) { /* transient — keep polling */ }
-        }, 20000);
+            if (this._aiPollGen !== gen) return; // a terminal state stopped the poll mid-tick
+            this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
+        };
+        this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
     }
 
     // One-shot cache probe per title. A transcript produced in a PRIOR session — or by another
@@ -7686,15 +7729,7 @@ class WatchPage {
         const key = this._aiSubtitleKey();
         const api = window.NorvaCloud.playback;
 
-        // The edge keys every cloud route off the CLOUD source UUID, but content.sourceId may be a
-        // local/provider alias (e.g. "900016", a browser-local id). Resolve it the same way the
-        // playback path does, so the edge can find the title. The in-session key stays on the raw id.
-        try {
-            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
-            if (cloudId) params.sourceId = String(cloudId);
-        } catch (_) { /* fall back to the raw id */ }
-
-        // Same title, already produced this session → just (re)attach from cache.
+        // Same title, already produced this session → just (re)attach from cache (no network).
         if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === key && !targetLang) {
             this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
             this.updateCaptionsTracks();
@@ -7720,6 +7755,22 @@ class WatchPage {
         // AFTER _resetTranslations (it clears the pending) — the language picked at click time.
         if (targetLang) this._pendingTranslateTarget = targetLang;
 
+        // Optimistic: acknowledge the click BEFORE any network. Until here the menu stayed on the
+        // idle chooser for the whole source-resolve + cache lookup (~0.3–1 s, worse on a cold edge)
+        // — the only silent hole in the funnel. Every path below replaces this state honestly:
+        // cache hit → ready, terminal error → failed, nothing cached → enqueue keeps 'processing'.
+        this.aiSubtitleState = 'processing';
+        this._aiStage = 'checking';
+        this.updateCaptionsTracks();
+
+        // The edge keys every cloud route off the CLOUD source UUID, but content.sourceId may be a
+        // local/provider alias (e.g. "900016", a browser-local id). Resolve it the same way the
+        // playback path does, so the edge can find the title. The in-session key stays on the raw id.
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+
         console.log('[WatchPage] AI subtitles request', params, targetLang || 'src');
         // 0) A target language was picked and its translation is already cached → attach directly.
         if (targetLang) {
@@ -7740,7 +7791,10 @@ class WatchPage {
         try {
             const got = await api.generatedSubtitle(params);
             if (this._applyAiSubtitleResponse(got, key)) return;
-            if (this.aiSubtitleState === 'processing') { this.startAiSubtitlePolling(params, key); return; }
+            // Decide on the RESPONSE status, not this.aiSubtitleState — the optimistic 'processing'
+            // above would otherwise swallow the enqueue when the cache answers 'none'.
+            const gotStatus = String(got?.status || 'none');
+            if (gotStatus === 'processing' || gotStatus === 'pending-transcript') { this.startAiSubtitlePolling(params, key); return; }
         } catch (err) {
             console.warn('[WatchPage] AI subtitles GET failed:', err?.status, err?.message || err, err?.details || '');
             /* fall through to trigger */
@@ -9283,7 +9337,12 @@ class WatchPage {
                 type: this.content.type === 'movie' ? 'movie' : 'episode',
                 sourceId: this.content.sourceId,
                 progress,
-                duration
+                duration,
+                // Temporal guard (audit 2026-07-17 P2): the server only lets a NEWER tick
+                // overwrite progress — a delayed packet from a second device can no longer
+                // regress a fresher position. Force saves (pause/seek/exit) always pass.
+                watchedAt: new Date().toISOString(),
+                ...(options.force ? { force: true } : {})
             };
             if (sendMeta) {
                 payload.data = {
