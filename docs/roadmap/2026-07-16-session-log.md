@@ -413,3 +413,29 @@ headless Chromium (optimiste→enqueue non avalé, label checking, cadences 60/2
 
 **Déploiement** : web auto (push main → Cloudflare) ; edge à redéployer sur la box + 2
 migrations à appliquer ; TV = rebuild AAB v19.
+
+### §18 — Audit capacité box (1000 users) + incident compose de 3 min (2026-07-17 après-midi)
+
+**Audit (script 12, nouveau)** : box AX42 à ~2 % de charge — load 0,2/16 threads, 10/61 GB RAM,
+8 tx/s, pic 30/200 connexions, cache hit 99,94 %, disque 27/437 GB. **Verdict : 1000 users
+simultanés tiennent large** (les flux vidéo ne transitent pas par la box ; 1000 viewers ≈
+~100 heartbeats/s ≈ 400-600 QPS simples sur des tables en RAM). Seul goulot réel : le pool
+PostgREST au défaut (10) — toutes les fonctions edge passent par lui → `PGRST_DB_POOL=40`.
+**Poids** : DB 4,7 GB = le catalogue lui-même (media_items 1,4 GB dont 872 MB d'index,
+titles 1 GB, catalog_titles 794 MB dont 657 MB TOAST) ; les « suspects silencieux » innocents
+(job_run_details 25 MB, pg_net auto-nettoyé, VTT 5 MB). Croissance backup +45 %/6 j = churn du
+moteur d'enrichissement (8,9 M updates/sem sur cloud_titles) — plateau attendu en fin de
+couverture audio. **R2 51,3 GB expliqué** : ~39 GB de WAL brut (2 435 segments × 16 Mo),
+rétention 35 j pour des bases devenues QUOTIDIENNES ×8 (8 j d'ancres PITR) → correctifs :
+`wal_compression=zstd` (compose), `KEEP_WAL_DAYS=14` (env box), `docker builder prune` (4,5 GB).
+Restent ouverts : préfixe R2 `db/` (workflow GitHub du managé dormant — couper si résilié),
+REINDEX CONCURRENTLY optionnel (~300-400 MB), test de charge k6 avant push marketing.
+
+**Incident (~3 min d'indispo API, ma faute)** : l'insertion de `wal_compression=zstd` dans les
+args du service db s'était ancrée sur `- archive_mode=on` en laissant son `- -c` d'origine
+orphelin → la liste d'arguments contenait `-c -c` → Postgres refusait de démarrer, conteneur
+unhealthy, norva-rest bloqué par la dépendance. Indétectable en validation YAML (liste valide).
+Fix `8af7e5e` + **validation d'appariement ajoutée** (chaque `-c` doit être suivi d'un
+name=value — à rejouer à chaque édition de ce fichier) :
+`python3 -c "import yaml; c=yaml.safe_load(open('ops/hetzner/docker-compose.supabase.yml'))['services']['db']['command']; [print('BAD',i) for i,a in enumerate(c) if a=='-c' and (i+1>=len(c) or c[i+1]=='-c' or '=' not in c[i+1])]"`
+Recovery : git pull → up -d db (healthy 5 s) → up -d rest → `show wal_compression` = zstd. ✅
