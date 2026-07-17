@@ -46,7 +46,11 @@ k6 run -e APIKEY="$APIKEY" -e TOKEN="$TOKEN" k6-capacity.js
 k6 run -e APIKEY="$APIKEY" -e TOKEN="$TOKEN" -e WRITE=1 k6-capacity.js
 ```
 
-Variables : `USERS=500` pour viser moins, `BASE_URL=` pour un autre environnement.
+Variables : `USERS=500` pour viser moins, `BASE_URL=` pour un autre environnement,
+`STRESS=1` pour l'ancien mode torture (cold start /boot complet à CHAQUE itération —
+un plafond de stress ~5-10× plus brutal que 1000 vrais users, pas un modèle réaliste).
+Depuis le 17/07 le mode par défaut est RÉALISTE : boot 1× par session (par VU) puis
+navigation légère — combiné à WRITE=1, c'est LE profil « 1000 users réels ».
 
 ## 4. Pendant le run — sur la box, dans un autre terminal
 

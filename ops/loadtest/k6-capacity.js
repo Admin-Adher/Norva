@@ -28,6 +28,11 @@ const TOKEN = __ENV.TOKEN || '';   // access_token du COMPTE DE TEST (README §2
 const WRITE = __ENV.WRITE === '1';
 const USERS = Number(__ENV.USERS || 1000);
 const SMOKE = __ENV.SMOKE === '1';
+// STRESS=1 : l'ancien mode torture — chaque VU refait le cold start /boot complet À CHAQUE
+// itération (~13 s). Aucun vrai utilisateur ne fait ça : c'est un plafond de stress, pas un
+// modèle de 1000 users. Le mode par défaut est RÉALISTE : boot 1× par session (par VU), puis
+// navigation légère (le vrai profil à 1000 simultanés est dominé par les heartbeats WRITE=1).
+const STRESS = __ENV.STRESS === '1';
 
 const target = SMOKE ? Math.min(50, USERS) : USERS;
 
@@ -74,22 +79,33 @@ const headers = () => ({
 
 export function browse() {
   if (TOKEN) {
-    // Le vrai cold start de l'app : l'agrégat /boot (profil+profils+entitlements+
-    // sources+trial en un appel) — l'endpoint le plus lourd du parcours réel.
-    const boot = http.get(`${BASE}/functions/v1/norva-cloud/boot`, { headers: headers(), tags: { kind: 'read', ep: 'boot' } });
-    check(boot, { 'boot 200': (r) => r.status === 200 });
-    sleep(1 + Math.random() * 2);
-    const hist = http.get(`${BASE}/functions/v1/norva-cloud/history?limit=60`, { headers: headers(), tags: { kind: 'read', ep: 'history' } });
-    check(hist, { 'history 200': (r) => r.status === 200 });
-    const fav = http.get(`${BASE}/functions/v1/norva-cloud/favorites`, { headers: headers(), tags: { kind: 'read', ep: 'favorites' } });
-    check(fav, { 'favorites 200': (r) => r.status === 200 });
+    // Cold start /boot : l'endpoint le plus lourd. RÉALISTE = une fois par session (par VU),
+    // comme la vraie app ; STRESS = à chaque itération (l'ancien plafond de torture).
+    if (STRESS || __ITER === 0) {
+      const boot = http.get(`${BASE}/functions/v1/norva-cloud/boot`, { headers: headers(), tags: { kind: 'read', ep: 'boot' } });
+      check(boot, { 'boot 200': (r) => r.status === 200 });
+      sleep(1 + Math.random() * 2);
+    }
+    if (STRESS) {
+      const hist = http.get(`${BASE}/functions/v1/norva-cloud/history?limit=60`, { headers: headers(), tags: { kind: 'read', ep: 'history' } });
+      check(hist, { 'history 200': (r) => r.status === 200 });
+      const fav = http.get(`${BASE}/functions/v1/norva-cloud/favorites`, { headers: headers(), tags: { kind: 'read', ep: 'favorites' } });
+      check(fav, { 'favorites 200': (r) => r.status === 200 });
+    } else {
+      // Navigation d'un user installé : le refetch Home au refocus (throttlé 60 s dans la
+      // vraie app) — une lecture légère par itération, en alternance history/favorites.
+      const ep = __ITER % 2 === 0 ? 'history?limit=60' : 'favorites';
+      const r = http.get(`${BASE}/functions/v1/norva-cloud/${ep}`, { headers: headers(), tags: { kind: 'read', ep: ep.split('?')[0] } });
+      check(r, { 'read 200': (x) => x.status === 200 });
+    }
   } else {
     // Sans token : /health traverse quand même toute la chaîne (Caddy→Kong→
     // edge-runtime→lecture DB) — utile pour un premier smoke sans compte.
     const h = http.get(`${BASE}/functions/v1/norva-cloud/health`, { headers: headers(), tags: { kind: 'read', ep: 'health' } });
     check(h, { 'health 200': (r) => r.status === 200 });
   }
-  sleep(5 + Math.random() * 10); // temps de lecture humain entre deux actions
+  // Temps humain : 5-15 s en torture, 15-40 s en réaliste (browsing épars, caches client).
+  sleep(STRESS ? 5 + Math.random() * 10 : 15 + Math.random() * 25);
 }
 
 export function heartbeat() {
