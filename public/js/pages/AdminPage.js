@@ -1442,7 +1442,7 @@ class AdminPage {
             sasu: { label: 'SASU', societe: true, sig: 'Le Président', micro: false },
             sas_sarl: { label: 'SAS / SARL', societe: true, sig: 'Le représentant légal', micro: false },
         };
-        let profile = { form: 'micro', name: '', siren: '' };
+        let profile = { form: 'micro', name: '', siren: '', vat_number: '' };
         try { profile = { ...profile, ...(JSON.parse(localStorage.getItem('norva-vat-profile') || '{}')) }; } catch (_) { /* défaut */ }
         const pf = PROFILE_FORMS[profile.form] || PROFILE_FORMS.micro;
         let vatCk = {};
@@ -1500,8 +1500,9 @@ class AdminPage {
         const profileBar = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#181820;border:1px solid #2a2a38;border-radius:11px;padding:12px 14px;margin-bottom:8px">
             <span style="font-size:18px">🏢</span>
             <div style="flex:1;min-width:160px"><div style="font-weight:650;font-size:13px">Profil de l'entreprise</div><div class="ssub" style="font-size:12px">Adapte les courriers, les seuils et le parcours.</div></div>
-            <input id="vat-prof-name" placeholder="Raison sociale" value="${esc(profile.name || '')}" style="${inp};width:150px"/>
-            <input id="vat-prof-siren" placeholder="SIREN" value="${esc(profile.siren || '')}" style="${inp};width:104px"/>
+            <input id="vat-prof-name" placeholder="Raison sociale" value="${esc(profile.name || '')}" style="${inp};width:140px"/>
+            <input id="vat-prof-siren" placeholder="SIREN" value="${esc(profile.siren || '')}" style="${inp};width:100px"/>
+            <input id="vat-prof-vat" placeholder="N° TVA intracom" value="${esc(profile.vat_number || '')}" title="Ex. FR12345678901 — renseigné une fois reçu ; sert à composer la référence de virement OSS" style="${inp};width:130px"/>
             <select id="vat-prof-form" style="${inp}">${Object.entries(PROFILE_FORMS).map(([k, vv]) => `<option value="${k}"${profile.form === k ? ' selected' : ''}>${esc(vv.label)}</option>`).join('')}</select>
         </div>`;
 
@@ -1603,23 +1604,50 @@ class AdminPage {
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer. <button class="mini-btn" id="vat-tx-unknown">Voir les transactions sans pays</button></div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
             <div id="vat-assist" style="display:none;margin-top:14px;border:1px solid #2a2a38;border-radius:10px;padding:14px;background:rgba(124,147,255,.05)"></div>
+            <div class="kpi-gtitle" style="margin:16px 0 6px">📓 Journal des dépôts <span class="ssub" style="font-weight:500">— votre registre (conservation 10 ans)</span></div>
+            <div id="vat-filings"><div class="ssub">Chargement…</div></div>
             <div class="ssub" style="margin-top:10px">${fxFixed
                 ? `Montants EUR <b>définitifs</b> — taux BCE ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} figé au dernier jour du trimestre (art. 369h dir. 2006/112).`
                 : `Conversion EUR <b>indicative</b> (1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) : figez le taux BCE à la clôture du trimestre pour des montants définitifs (art. 369h dir. 2006/112).`}
             Taux de TVA standard : table serveur <code>eu_vat_standard_rates</code> (source TEDB — à rafraîchir avant chaque dépôt si un taux change). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>
             </div></details>`;
 
-        // ── Profil : persistance + re-render au changement ──────────────────────────
-        const saveProfile = () => { try { localStorage.setItem('norva-vat-profile', JSON.stringify(profile)); } catch (_) { /* plein */ } };
+        // ── Profil : localStorage (cache instantané) + serveur (durable, multi-appareils) ──
+        const pushProfile = (patch) => { try { this._rpc('admin_business_profile_set', { p_patch: patch }).catch(() => {}); } catch (_) { /* best-effort */ } };
+        const saveProfile = (patch) => { try { localStorage.setItem('norva-vat-profile', JSON.stringify(profile)); } catch (_) { /* plein */ } if (patch) pushProfile(patch); };
         const pForm = document.getElementById('vat-prof-form');
-        if (pForm) pForm.addEventListener('change', () => { profile.form = pForm.value; saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+        if (pForm) pForm.addEventListener('change', () => { profile.form = pForm.value; saveProfile({ legal_form: profile.form }); if (this._route === 'finance') this._renderVatPanel(vat); });
         const pName = document.getElementById('vat-prof-name');
-        if (pName) pName.addEventListener('change', () => { profile.name = pName.value.trim(); saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+        if (pName) pName.addEventListener('change', () => { profile.name = pName.value.trim(); saveProfile({ company_name: profile.name }); if (this._route === 'finance') this._renderVatPanel(vat); });
         const pSiren = document.getElementById('vat-prof-siren');
-        if (pSiren) pSiren.addEventListener('change', () => { profile.siren = pSiren.value.trim(); saveProfile(); if (this._route === 'finance') this._renderVatPanel(vat); });
+        if (pSiren) pSiren.addEventListener('change', () => { profile.siren = pSiren.value.trim(); saveProfile({ siren: profile.siren }); if (this._route === 'finance') this._renderVatPanel(vat); });
+        const pVat = document.getElementById('vat-prof-vat');
+        if (pVat) pVat.addEventListener('change', () => { profile.vat_number = pVat.value.trim().toUpperCase(); saveProfile({ vat_number: profile.vat_number }); if (this._route === 'finance') this._renderVatPanel(vat); });
 
-        // ── Démarches : copie de courrier + « effectué » (persistant) ───────────────
-        const saveCk = () => { try { localStorage.setItem('norva-vat-checklist', JSON.stringify(vatCk)); } catch (_) { /* plein */ } };
+        // Sync serveur au premier rendu de l'onglet : si le serveur a un profil, il fait
+        // foi (→ localStorage + re-render) ; sinon on l'amorce depuis le cache local.
+        if (!this._vatProfileSynced) {
+            this._vatProfileSynced = true;
+            this._rpc('admin_business_profile_get').then((p) => {
+                if (!p || typeof p !== 'object') return;
+                const hasServer = p.company_name || p.siren || p.vat_number || (p.demarches && Object.keys(p.demarches).length) || p.legal_form && p.legal_form !== 'micro';
+                if (hasServer) {
+                    const srvProf = { form: p.legal_form || 'micro', name: p.company_name || '', siren: p.siren || '', vat_number: p.vat_number || '' };
+                    const srvDem = (p.demarches && typeof p.demarches === 'object') ? p.demarches : {};
+                    const changed = JSON.stringify(srvProf) !== JSON.stringify({ form: profile.form, name: profile.name || '', siren: profile.siren || '', vat_number: profile.vat_number || '' })
+                        || JSON.stringify(srvDem) !== JSON.stringify(vatCk);
+                    if (changed) {
+                        try { localStorage.setItem('norva-vat-profile', JSON.stringify(srvProf)); localStorage.setItem('norva-vat-checklist', JSON.stringify(srvDem)); } catch (_) { /* plein */ }
+                        if (this._route === 'finance') this._renderVatPanel(vat);
+                    }
+                } else if (profile.name || profile.siren || profile.vat_number || Object.keys(vatCk).length || profile.form !== 'micro') {
+                    pushProfile({ legal_form: profile.form, company_name: profile.name || '', siren: profile.siren || '', vat_number: profile.vat_number || '', demarches: vatCk });
+                }
+            }).catch(() => { /* serveur absent (pré-migration) → localStorage seul */ });
+        }
+
+        // ── Démarches : copie de courrier + « effectué » (localStorage + serveur) ────
+        const saveCk = () => { try { localStorage.setItem('norva-vat-checklist', JSON.stringify(vatCk)); } catch (_) { /* plein */ } pushProfile({ demarches: vatCk }); };
         el.querySelectorAll('.vat-letter').forEach(b => b.addEventListener('click', async () => {
             try { await navigator.clipboard.writeText(letters[b.dataset.letter] || ''); this._toast('✓ Courrier copié dans le presse-papier', 'ok'); }
             catch (_) { this._toast('Copie impossible — sélectionnez le texte manuellement.', 'err'); }
@@ -1702,6 +1730,27 @@ class AdminPage {
         const unkBtn = document.getElementById('vat-tx-unknown');
         if (unkBtn) unkBtn.addEventListener('click', () => loadTx('??'));
 
+        // ── Journal des dépôts (le registre — durable, serveur) ─────────────────────
+        const loadFilings = async () => {
+            const fEl = document.getElementById('vat-filings');
+            if (!fEl) return;
+            try {
+                const list = await this._rpc('admin_vat_filings', {});
+                const arr = Array.isArray(list) ? list : [];
+                if (!arr.length) { fEl.innerHTML = '<div class="ssub">Aucun dépôt enregistré. Après chaque déclaration, l\'assistant propose de l\'ajouter ici.</div>'; return; }
+                const dt = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+                fEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Période</th><th>Déposé le</th><th class="num">TVA reversée</th><th>Référence</th></tr></thead><tbody>${arr.map(f => `<tr>
+                    <td>T${esc(String(f.quarter))} ${esc(String(f.year))}</td>
+                    <td>${esc(dt(f.filed_at))}</td>
+                    <td class="num">${f.vat_eur_cents != null ? eurFmt(f.vat_eur_cents) : '—'}</td>
+                    <td class="ssub">${esc(f.reference || f.note || '—')}</td>
+                </tr>`).join('')}</tbody></table></div>`;
+            } catch (e) {
+                fEl.innerHTML = `<div class="ssub">Journal indisponible${/PGRST202/.test(String(e.message)) ? ' — déployez la migration 20260717180000 + NOTIFY pgrst.' : ' : ' + esc(e.message)}</div>`;
+            }
+        };
+        loadFilings();
+
         // ── Assistant de dépôt : champ par champ, dans l'ordre du portail OSS ──
         const assistBtn = document.getElementById('vat-assist-btn');
         const assistEl = document.getElementById('vat-assist');
@@ -1722,6 +1771,9 @@ class AdminPage {
                 <b>Rubrique « Corrections de périodes précédentes »</b><br/>
                 ${corrections.map(c => `<div class="ssub" style="margin-top:4px">Période T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))} · ${c.country_code === '??' ? 'Inconnu' : AdminPage.flag(c.country_code)} · montant à corriger : ${cp('-' + frVal(Math.round(Number(c.refund_cents) * (Number(c.orig_usd_eur_rate) || FX))))}${c.orig_usd_eur_rate ? '' : ' <span style="color:#fbbf24">(fx d\'origine non figé — indicatif)</span>'}</div>`).join('')}
             </div>` : '';
+            // Référence de virement RÉELLE dès que le n° de TVA intracom est au profil.
+            const vatNum = (profile.vat_number || '').replace(/\s+/g, '').toUpperCase();
+            const payRef = vatNum ? `OSS/FR/${vatNum}/Q${vat.quarter}.${vat.year}` : null;
             assistEl.innerHTML = `
                 <div style="font-weight:700;margin-bottom:4px">🧾 Déclaration OSS T${vat.quarter} ${vat.year} — pas à pas</div>
                 ${fxFixed ? '' : `<div class="ssub" style="color:#fbbf24;margin-bottom:8px">⚠ Taux BCE non figé — montants INDICATIFS. Figez le taux (bouton 🔒) avant le dépôt réel.</div>`}
@@ -1730,13 +1782,32 @@ class AdminPage {
                 ${steps || '<div class="ssub">Aucune ligne UE hors France ce trimestre.</div>'}
                 ${corrSteps}
                 <div class="ssub" style="margin-top:6px">3. Vérifiez le total : le portail doit afficher <b style="color:#34d399">${eurFmt(ossVatEur)}</b>.</div>
-                <div class="ssub" style="margin-top:4px">4. Paiement : virement <b>en euros</b> au Pôle national TVA commerce en ligne, motif = la <b>référence unique</b> de la déclaration (format OSS/FR/FRxx…/Q${vat.quarter}.${vat.year}, majuscules sans espace) — date de valeur = crédit du compte, virez en avance. Échéance : <b>${nextDl ? fmtD(nextDl.d) : '—'}</b>, sans report.</div>
-                <div class="ssub" style="margin-top:4px">5. Archivez le certificat de dépôt (PDF) — registres à conserver 10 ans.</div>`;
+                <div class="ssub" style="margin-top:4px">4. Paiement : virement <b>en euros</b> au Pôle national TVA commerce en ligne. Motif = la référence unique de la déclaration${payRef ? ' :' : ` (format OSS/FR/&lt;votre n° TVA&gt;/Q${vat.quarter}.${vat.year} — <b>renseignez votre n° de TVA intracom dans le profil</b> pour l'obtenir ici).`}</div>
+                ${payRef ? `<div class="ssub" style="margin-top:2px">Montant : ${cp(frVal(ossVatEur))} €  ·  Motif : ${cp(payRef)}</div>` : ''}
+                <div class="ssub" style="margin-top:4px">Date de valeur = crédit du compte, virez en avance. Échéance : <b>${nextDl ? fmtD(nextDl.d) : '—'}</b>, sans report.</div>
+                <div class="ssub" style="margin-top:4px">5. Archivez le certificat de dépôt (PDF) — registres à conserver 10 ans — et enregistrez le dépôt au journal :</div>
+                <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input id="vat-file-ref" placeholder="Référence / n° de certificat" value="${payRef ? esc(payRef) : ''}" style="${inp};width:210px"/>
+                    <button id="vat-file-save" class="mini-btn" style="font-weight:700">📓 Enregistrer ce dépôt au journal</button>
+                </div>`;
             assistEl.style.display = '';
             assistEl.querySelectorAll('.vat-copy').forEach(b => b.addEventListener('click', async () => {
                 try { await navigator.clipboard.writeText(b.dataset.copy); this._toast('✓ Copié : ' + b.dataset.copy, 'ok'); }
                 catch (_) { this._toast('Copie impossible — sélectionnez manuellement.', 'err'); }
             }));
+            const fileSave = document.getElementById('vat-file-save');
+            if (fileSave) fileSave.addEventListener('click', async () => {
+                fileSave.disabled = true;
+                try {
+                    await this._rpc('admin_vat_filing_record', {
+                        p_year: vat.year, p_quarter: vat.quarter, p_vat_eur_cents: ossVatEur,
+                        p_reference: (document.getElementById('vat-file-ref') || {}).value || payRef || null, p_note: null,
+                    });
+                    this._toast('✓ Dépôt enregistré au journal (registre)', 'ok');
+                    vatCk.declared = true; saveCk();
+                    loadFilings();
+                } catch (e) { fileSave.disabled = false; this._toast('Erreur : ' + e.message, 'err'); }
+            });
         });
 
         // ── Figer le taux BCE du trimestre clos (suggestion ECB via frankfurter, l'humain valide) ──

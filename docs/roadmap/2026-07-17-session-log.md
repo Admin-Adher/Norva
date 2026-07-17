@@ -15,7 +15,8 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 | 7 | Cockpit TVA niveau 2 : calcul TVA due par pays + total à reverser + couche de confiance | `0119971` | `AdminPage.js` (`?v=61`), `app.js` |
 | 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `4f92319` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
 | 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | `eaa3ef6` | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |
-| 10 | Lot A « mode guidé » : profil d'entreprise, parcours, action requise, démarches guidées par statut | *(ce commit)* | `AdminPage.js` (`?v=64`), `app.js` |
+| 10 | Lot A « mode guidé » : profil d'entreprise, parcours, action requise, démarches guidées par statut | `a5fd576` | `AdminPage.js` (`?v=64`), `app.js` |
+| 11 | Lot B : profil serveur (durable/multi-appareils) + journal des dépôts (registre) + référence de virement réelle | *(ce commit)* | `20260717180000_vat_business_profile.sql` (⚠ NOTIFY pgrst — 4 fonctions neuves), `AdminPage.js` (`?v=65`), `app.js` |
 
 ## Cockpit TVA — Lot A « mode guidé » (commit 10, front pur, localStorage)
 
@@ -25,7 +26,12 @@ Refonte de l'onglet en **assistant de conformité** (ton professionnel — « qu
 - **Parcours de conformité** : fil d'Ariane 6 étapes dérivé des données (localisation ✓ → mise en conformité → 1ʳᵉˢ ventes UE → seuil 10 k€ → OSS → déclarations), étape courante = 1ʳᵉ non acquise ;
 - **Démarches guidées** (`<details>` par démarche, état `norva-vat-checklist`) : intracom (courrier pré-rédigé selon le statut + boutons copier + liens profonds impots/douane/HMRC), DES (verrouillée tant que l'intracom n'est pas fait), Royaume-Uni, OSS (verrouillée sous le seuil), et guide de changement de statut ;
 - **Données détaillées repliées** en `<details>` mode expert (ouvert seulement si une déclaration est due) : les jauges de seuils, la table de déclaration, l'assistant de dépôt et le registre restent intacts, mais ne dominent plus l'écran.
-- **Reste (Lot B)** : table serveur `admin_business_profile` (durable, multi-appareils, pré-remplissage de la vraie référence de virement), notifications Telegram (« trimestre clos → figez le taux », « seuil à 80 % »), upload du certificat de dépôt (registre).
+## Cockpit TVA — Lot B (commit 11 ; tables/fonctions NEUVES, aucune ré-émission)
+
+- **Profil serveur durable** (`admin_business_profile`, ligne unique id=1 ; RPC `admin_business_profile_get` / `_set(p_patch jsonb)`, patch partiel whitelisté) : la forme juridique, la raison sociale, le SIREN, le **n° de TVA intracom** et l'état des démarches survivent au changement d'appareil. Le front : localStorage = cache instantané, serveur = source de vérité (fetch 1× → si le serveur a un profil il fait foi ; sinon il est amorcé depuis le cache) + write-through à chaque modification.
+- **Référence de virement RÉELLE** : dès que le n° de TVA est au profil, l'assistant compose `OSS/FR/<n° TVA>/Qn.YYYY` (bouton copier) au lieu d'un exemple — plus le montant EUR à copier.
+- **Journal des dépôts = le registre** (`vat_filings` + RPC `admin_vat_filing_record` / `admin_vat_filings`) : l'assistant propose « 📓 Enregistrer ce dépôt au journal » (période, montant reversé, référence, horodatage) ; le journal s'affiche dans l'onglet (conservation 10 ans, art. 63c).
+- **Reste (Lot B-notify, passe dédiée)** : notifications Telegram (« trimestre clos → figez le taux BCE », « seuil 10 k€ à 80 % ») — touche `refresh_admin_dashboard` (clés VAT dans overview) + `runOpsAlertSweep` de norva-admin, à traiter à part. Upload binaire du certificat PDF (bucket Storage) : futur (le champ note/référence tient le registre en attendant).
 
 ## Cockpit TVA — échelle d'accompagnement (brainstorm UX)
 
