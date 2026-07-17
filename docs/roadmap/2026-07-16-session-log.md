@@ -277,3 +277,50 @@ message « Turned off » + toast info) ; (b) synchro inverse — éteindre manue
 passage : la restauration des selects déclenchait syncFromControls en réentrance qui oubliait
 tcPrev avant la fin de la boucle → dé-surligner AVANT de restaurer. Testé : 8 assertions
 headless sur le vrai SettingsPage.prototype (apply/undo/sync/restore + persistance change).
+
+---
+
+## §15 — Sous-titres IA sur TOUS les VOD (workflow 11 agents + panel adversarial)
+
+**Demande** : les ST IA n'étaient pas disponibles sur l'ensemble des catalogues VOD — audit
+profond (workflow : 7 lecteurs, 1 architecte, 3 vérificateurs adversariaux, ~969k tokens) puis
+implémentation « partout mais logiquement ».
+
+**Causes racines confirmées** : (1) gate front FILMS-ONLY (`_aiSubtitleParams`, WatchPage) alors
+que le backend gérait DÉJÀ les ids d'épisode (resolveVariantUrl, chemin « player-triggered ») ;
+(2) option cachée dès qu'UNE piste texte existe, même dans une langue inutile au viewer (contredit
+PHASE3 §1) ; (3) pregen minuscule par design (2 jobs/nuit/provider, whitelist restreinte) → la
+couverture DOIT venir de l'on-demand, donc de la visibilité de l'option ; (4) budget nocturne
+gaspillé : les séries de la whitelist faisaient transcrire le 1ᵉʳ épisode sous l'id SÉRIE, clé
+jamais relue par le player ; (5) aucun cap anti-abus sur la route POST ; (6) cloud-only et pont
+TMDB inter-panels : hors périmètre (architecture / Phase B.2).
+
+**Implémenté (fixes du panel inclus)** :
+- CLIENT (WatchPage v121) : épisodes éligibles depuis SeriesPage (`type:'series'`) ET Home
+  (`type:'episode'`), itemType toujours 'series' envoyé (le clamp edge transformerait 'episode'
+  en 'movie'), garde anti-id-série (jamais transcrire S1E1 pour S3E7), titleId non envoyé pour
+  les épisodes ; option visible même avec pistes texte (section secondaire « more languages ») ;
+  `_aiUserRequested` révoqué à la sélection d'une autre piste (les livraisons partielles ne
+  volent plus la piste choisie) ; Off garde le polling d'un job en cours ; 429 du cap → état
+  verrouillé honnête « Daily limit reached » (plus de « provider refused »/retry-mensonge) ;
+  label email per-épisode.
+- EDGE (norva-playback) : budget viewer par ÉVÉNEMENTS (table generated_subtitle_requests,
+  1 row = 1 enqueue accepté par la gateway) — 10/24h/user + 15/24h/identité, transcript + OCR ;
+  `force` neutralisé sur la route user (contournait cap + fast-path ready) ; refus low_footprint
+  (Ninja) pour origin viewer (PROVIDER-ANTIBAN : whisper-sur-Ninja gaté par fenêtre
+  d'observation) ; refus du chemin « fiche série → 1er épisode » pour origin viewer (défense en
+  profondeur).
+- GATEWAY (Railway, auto-déployée au push) : cooldown per-provider 12 min entre extractions
+  full-file (transcribe + OCR, pattern lastStoryboardAt — un binge de 10 épisodes devient des
+  lectures espacées, pas 3-4 h de download continu = le fingerprint du ban Ninja) ; pas de mark
+  sur préemption viewer.
+- MIGRATION 20260717120000 : table events + prune 7 j (cron guard sur pg_proc) + whitelist
+  nocturne MOVIE-ONLY.
+
+**Vérifié** : deno check (0 nouvelle erreur), node --check gateway, migration sur PG16 jetable
+(série jouée exclue de la whitelist, events comptés), 14 assertions headless Chromium sur le vrai
+WatchPage.prototype (params films/épisodes/gardes, mapping erreurs, menu contextuel, cap locked,
+label épisode, révocation auto-attach, keepAiPolling).
+
+**Hors périmètre assumé** : pont TMDB inter-panels (Phase B.2, vrai multiplicateur de couverture,
+changement de modèle de données) ; pregen per-épisode ; mode local ; gating par abonnement.

@@ -1417,6 +1417,22 @@ function storyboardCoolingDown(job) {
     return Boolean(last && (Date.now() - last) < STORYBOARD_PROVIDER_COOLDOWN_MS);
 }
 
+// Per-provider TRANSCRIBE/OCR cooldown (AI-subs-everywhere rollout). A transcription or an OCR
+// extraction is the same full-file provider read as a storyboard — the burst that got super8k
+// to refuse this gateway's IP on 2026-07-11 applies identically. With the AI option now on every
+// VOD (movies, episodes, titles that already carry tracks), a binge of "generate" clicks would
+// chain many back-to-back full reads (~3-4 h continuous on a 10-episode run) on one account —
+// the exact fingerprint of the July 3 Ninja ban. Space them instead: same-provider jobs wait out
+// the cooldown (they defer with the honest 'deferred' heartbeat; other providers proceed).
+const TRANSCRIBE_PROVIDER_COOLDOWN_MS = clampInt(process.env.TRANSCRIBE_PROVIDER_COOLDOWN_MS, 12 * 60_000, 0, 6 * 60 * 60_000);
+const lastTranscribeAt = new Map(); // providerKey → epoch ms of the last full-file extraction
+function markTranscribeRun(url) { if (TRANSCRIBE_PROVIDER_COOLDOWN_MS > 0) lastTranscribeAt.set(proxyKeyFromUrl(url), Date.now()); }
+function transcribeCoolingDown(job) {
+    if (job?.kind === 'storyboard' || TRANSCRIBE_PROVIDER_COOLDOWN_MS <= 0) return false;
+    const last = lastTranscribeAt.get(proxyKeyFromUrl(job.url));
+    return Boolean(last && (Date.now() - last) < TRANSCRIBE_PROVIDER_COOLDOWN_MS);
+}
+
 // Non-terminal job heartbeat: stamps the row's stage (queued/deferred/extracting/transcribing)
 // AND bumps updated_at — so a job legitimately deferred for hours (viewer watching on a
 // single-slot account) is no longer reaped at 2h or re-claimed at 90min mid-flight, and the
@@ -1457,7 +1473,7 @@ async function nextRunnableJob(queue, kind) {
         // holds the job's provider account — no round-trip, and it sees what the edge gate
         // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
         // relay-side signals (live sessions on other lanes, enrichment ticks).
-        if (!accountSlotBusyLocally(job.url) && !storyboardCoolingDown(job) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
+        if (!accountSlotBusyLocally(job.url) && !storyboardCoolingDown(job) && !transcribeCoolingDown(job) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
@@ -1539,6 +1555,10 @@ async function runTranscribeJob(job) {
     } catch (e) {
         payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
+    // Start the per-provider cooldown on any TERMINAL whole-film outcome (the provider was read,
+    // success or not). A viewer preemption re-queues WITHOUT marking — the read barely started,
+    // and cooling it down would add 12 min to that viewer's own wait after their playback ends.
+    if (dur === 0 && !(payload && payload.requeue)) markTranscribeRun(url);
     if (payload && payload.requeue) {
         // Viewer preemption is a DEFERRAL, not a failure: keep the row alive/honest and put the
         // job back in line — the queue's local slot check holds it until the viewing ends.
@@ -2016,6 +2036,9 @@ async function runOcrJob(job) {
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
             if (attempt < OCR_EXTRACT_RETRIES) await sleep(OCR_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
         }
+        // OCR demuxes the whole input too (`-c:s copy` walks the file) — same per-provider
+        // cooldown as a transcription once the attempts are done.
+        markTranscribeRun(url);
         if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {

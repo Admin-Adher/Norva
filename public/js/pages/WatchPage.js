@@ -7108,20 +7108,31 @@ class WatchPage {
     // The file coordinates the edge needs to find/produce a transcript. The player always holds
     // these for a cloud VOD (it just used them to resolve the stream), so AI subs no longer depend
     // on a cloud_titles UUID being present. titleId is sent too when available (a cheap fast-path).
-    // Returns null for anything that isn't an on-demand movie (live/series excluded — series would
-    // need an episode-level external id, a later refinement).
+    // Movies AND series episodes are eligible (the edge resolves an unknown series external id as
+    // an EPISODE id — the path built for player-triggered transcriptions); live is excluded.
     _aiSubtitleParams() {
         const c = this.content || {};
         const type = String(this.contentType || c.type || '').toLowerCase();
-        if (type !== 'movie') return null;
+        // SeriesPage plays with type 'series', Home/continue-watching with type 'episode' —
+        // same content, both must behave identically.
+        const isEpisode = type === 'series' || type === 'episode';
+        if (type !== 'movie' && !isEpisode) return null;
         // Raw source id as the player holds it (cloud UUID OR a local/provider alias like "900016").
         // requestAiSubtitles() resolves it to the cloud UUID before calling the edge; here we just
         // need a stable, present id so the menu entry shows and the in-session key is consistent.
         const sourceId = String((this.getTelemetrySourceId ? this.getTelemetrySourceId() : '') || c.sourceId || c.source_id || c.cloudSourceId || '');
-        const externalId = String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
+        // For episodes: c.id MUST be the EPISODE id (playEpisodeFromList sets it). Never fall back
+        // to getTelemetryItemId(), which prefers the SERIES id — transcribing a series id resolves
+        // the FIRST episode and would serve S1E1 subtitles on any episode, silently wrong.
+        const externalId = isEpisode
+            ? String(c.id || c.streamId || c.stream_id || '')
+            : String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
         if (!sourceId || !externalId) return null;
-        const titleId = String(c.titleId || c.title_id || c.data?.titleId || '');
-        return { sourceId, externalId, itemType: 'movie', titleId };
+        if (isEpisode && externalId === String(c.seriesId || c.series_id || '')) return null;
+        const titleId = isEpisode ? '' : String(c.titleId || c.title_id || c.data?.titleId || '');
+        // itemType is ALWAYS 'movie'|'series' — the edge clamps anything else to 'movie', which
+        // would resolve the wrong URL and pollute the movie cache keyspace with episode ids.
+        return { sourceId, externalId, itemType: isEpisode ? 'series' : 'movie', titleId };
     }
 
     // Stable in-session key for a title's AI-subtitle state (cache reuse + stale-response guards).
@@ -7302,7 +7313,7 @@ class WatchPage {
 
     // Menu entry reflecting the AI-subtitle state machine. Rendered as a normal .captions-option
     // so the existing click wiring routes it to selectCaptionTrack('ai', …).
-    _aiSubtitleMenuHtml() {
+    _aiSubtitleMenuHtml(hasTextTracks = false) {
         const showing = this.aiSubtitleTrackShowing();
         if (this.aiSubtitleState === 'processing') {
             const head = `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml(this._aiProcessingTooltip())}">${this._aiProcessingLabelHtml()}</button>`;
@@ -7313,6 +7324,11 @@ class WatchPage {
             return head + notify;
         }
         if (this.aiSubtitleState === 'failed') {
+            // Daily cap is not a failure to retry: a retry re-POSTs and re-429s until tomorrow —
+            // "retry" would be a promise of guaranteed failure. Locked, honest, terminal for today.
+            if (this._aiIsDailyLimit()) {
+                return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml('You reached today\'s AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow.')}">⏳ ${this.escapeHtml('Daily AI subtitle limit reached — try again tomorrow')}</button>`;
+            }
             const reason = this._aiFailureShort();
             const title = this._aiLastError ? ` title="${this.escapeHtml(this._aiLastError)}"` : '';
             return `<button class="captions-option" data-source="ai" data-index="-1"${title}>⚠️ ${this.escapeHtml(reason ? `AI subtitles failed (${reason}) — retry` : 'AI subtitles failed — retry')}</button>`;
@@ -7344,7 +7360,10 @@ class WatchPage {
             `<button class="captions-option" data-action="ai-generate" data-lang="src">🎙 ${this.escapeHtml('Original (spoken language)')}</button>`,
             ...targets.map((lang) => `<button class="captions-option" data-action="ai-generate" data-lang="${this.escapeHtml(lang)}" title="${this.escapeHtml('Transcribes the audio, then auto-translates — works even if you close the tab.')}">🌐 ${this.escapeHtml(this._langDisplayName(lang))}</button>`),
         ].join('');
-        return `<div class="captions-subhead">✨ ${this.escapeHtml('Generate AI subtitles')}</div>${rows}`;
+        // With real text tracks above, the AI section is the secondary option for a language
+        // the file doesn't carry — not the headline act.
+        const subhead = hasTextTracks ? 'AI subtitles — more languages' : 'Generate AI subtitles';
+        return `<div class="captions-subhead">✨ ${this.escapeHtml(subhead)}</div>${rows}`;
     }
 
     // Honest processing label: stage-aware when the server reports one (V1.2 heartbeats),
@@ -7376,10 +7395,18 @@ class WatchPage {
         return 'Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified.';
     }
 
+    // The edge's daily-cap 429 must never read as "provider refused the connection".
+    _aiIsDailyLimit() {
+        const e = String(this._aiLastError || '').toLowerCase();
+        return e.includes('daily limit') || e.includes('limite quotidienne');
+    }
+
     // Short human reason from the server's error detail (full text kept in the tooltip).
     _aiFailureShort() {
         const e = String(this._aiLastError || '').toLowerCase();
         if (!e) return '';
+        if (this._aiIsDailyLimit()) return 'daily limit reached';
+        if (e.includes('unavailable on this provider')) return 'not available on this provider';
         if (e.includes('timeout') || e.includes('killed')) return 'transcription took too long';
         if (e.includes('401') || e.includes('403') || e.includes('429') || e.includes('unauthorized') || e.includes('forbidden')) return 'provider refused the connection';
         if (e.includes('extraction')) return 'audio extraction failed';
@@ -7418,10 +7445,15 @@ class WatchPage {
     }
 
     // Human title for the email body (and the in-menu copy). Best-effort across the shapes content
-    // takes (cloud catalog vs tmdb-enriched vs raw provider item).
+    // takes (cloud catalog vs tmdb-enriched vs raw provider item). Episodes append their label —
+    // notifications are keyed per-episode, so "your subtitles for Breaking Bad are ready" without
+    // saying WHICH episode would be a half-truth.
     _aiTitleLabel() {
         const c = this.content || {};
-        return String(c.name || c.title || c.tmdb?.title || c.tmdb?.name || c.data?.title || c.data?.name || '').trim().slice(0, 200);
+        const base = String(c.name || c.title || c.tmdb?.title || c.tmdb?.name || c.data?.title || c.data?.name || '').trim();
+        const type = String(this.contentType || c.type || '').toLowerCase();
+        const ep = (type === 'series' || type === 'episode') ? String(c.subtitle || c.episodeLabel || '').trim() : '';
+        return (ep && !base.includes(ep) ? `${base} — ${ep}` : base).slice(0, 200);
     }
 
     // Set the completion target ONCE, anchored to when the server actually started transcribing
@@ -7742,6 +7774,9 @@ class WatchPage {
         } catch (err) {
             console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, '| sent:', JSON.stringify(params), err?.details || '');
             this.aiSubtitleState = 'failed';
+            // Keep the server's reason: the daily-cap 429 must surface as its honest, terminal
+            // menu state — not the generic "failed — retry" that re-POSTs into the same 429.
+            this._aiLastError = String(err?.message || err?.details || err?.status || '');
             this.updateCaptionsTracks();
             return;
         }
@@ -8045,9 +8080,11 @@ class WatchPage {
             });
         }
 
-        // AI subtitles: offered only when there is no real text subtitle track to pick. The
-        // row reflects the transcription state machine and, once ready, shows like any track.
-        const aiAvailable = !options.length && this._canRequestAiSubtitles();
+        // AI subtitles: offered on every eligible cloud VOD — even when real text tracks exist
+        // (they may all be in languages useless to this viewer; the AI section then reads as the
+        // secondary "more languages" option). The row reflects the transcription state machine
+        // and, once ready, shows like any track.
+        const aiAvailable = this._canRequestAiSubtitles();
         const aiShowing = aiAvailable && this.aiSubtitleTrackShowing();
         anyActive = anyActive || aiShowing;
         // Lazily fetch the gateway's translation targets (one-shot) so the language rows can
@@ -8073,7 +8110,7 @@ class WatchPage {
         const headerHtml = burned
             ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : 'Burned-in subtitles')}</button>`
             : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`;
-        const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml() : '';
+        const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml(options.length > 0) : '';
         // Phase 4: PGS image tracks get an "OCR → text" row each (offered alongside any text/AI rows).
         const ocrTracks = this.getOcrableSubtitleTracks();
         const ocrHtml = ocrTracks.length ? this._ocrSubtitleMenuHtml(ocrTracks) : '';
@@ -8231,6 +8268,12 @@ class WatchPage {
             this.hls.subtitleTrack = -1;
         }
 
+        // Picking any non-AI row (Off, a probe/native/HLS track, an OCR run) revokes the standing
+        // AI auto-attach consent: with real tracks now coexisting with the AI section, the partial
+        // deliveries and the finished transcript must never steal the viewer's chosen track. The
+        // finished transcript then surfaces as a "show original" row instead of self-attaching.
+        if (source !== 'ai') this._aiUserRequested = false;
+
         // AI subtitles run their own state machine (read cache → trigger → poll → attach), so
         // they short-circuit the standard track-selection tail. The menu stays open while a
         // transcription is in flight so the viewer sees the "generating…" / "retry" feedback.
@@ -8261,7 +8304,9 @@ class WatchPage {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
             this.selectedSubtitleTrackUserChoice = true;
-            this.clearExternalSubtitleTracks();
+            // Turning subtitles off must not silently kill an in-flight transcription's polling —
+            // the job keeps running server-side; keep tracking it so the menu can flip to ready.
+            this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
         } else if (source === 'probe' && Number.isInteger(streamIndex)) {
             this.selectedSubtitleStreamIndex = streamIndex;
             this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);

@@ -2494,7 +2494,7 @@ async function resolveVariantUrl(
   sourceId: string,
   externalId: string,
   itemType: string,
-  opts: { container?: string } = {},
+  opts: { container?: string; forbidSeriesFiche?: boolean } = {},
 ): Promise<string | null> {
   const hint = opts.container ? { container: opts.container } : {};
   if (itemType !== "series") {
@@ -2514,8 +2514,49 @@ async function resolveVariantUrl(
       .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", "series").eq("external_id", externalId).maybeSingle();
     isSeriesId = Boolean(data);
   }
-  if (isSeriesId) return await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+  if (isSeriesId) {
+    // Defense in depth for viewer-origin transcriptions: the fiche path silently transcribes the
+    // FIRST episode and caches it under the SERIES id — a viewer watching S3E7 would get S1E1
+    // subtitles presented as legitimate. Only the crons may take this path knowingly.
+    if (opts.forbidSeriesFiche) {
+      throw new HttpError(422, "a series id was given — AI subtitles need the specific episode id");
+    }
+    return await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+  }
   return ((await resolvePlaybackTarget(sourceId, "series", externalId, userId, db, hint).catch(() => null))?.targetUrl ?? null);
+}
+
+// ── Viewer transcription budget (anti-abuse) ─────────────────────────────────
+// Every transcription/OCR is a FULL provider read (up to ~30 min of stream pull per attempt) plus
+// a whisper/tesseract run on the single-lane gateway. Opening the option to every VOD (movies,
+// episodes, titles that already have tracks) multiplies the clickable surface, so viewer-origin
+// enqueues are budgeted: counted as EVENTS in generated_subtitle_requests at enqueue time (rows in
+// the cross-user cache can be re-claimed/taken over without a new row — counting those would let
+// retry loops and force replays bypass any cap). Cache hits never reach these counters.
+const VIEWER_TRANSCRIBE_DAILY_USER_CAP = 10;      // per user, transcript+ocr combined
+const VIEWER_TRANSCRIBE_DAILY_IDENTITY_CAP = 15;  // per provider identity, all users combined
+
+async function assertViewerTranscribeBudget(db: SupabaseClient, userId: string, providerKey: string): Promise<void> {
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { count: byUser } = await db.from("generated_subtitle_requests")
+    .select("id", { count: "exact", head: true }).eq("user_id", userId).gte("created_at", since);
+  if ((byUser ?? 0) >= VIEWER_TRANSCRIBE_DAILY_USER_CAP) {
+    throw new HttpError(429, "AI subtitle daily limit reached — try again tomorrow");
+  }
+  if (providerKey) {
+    const { count: byIdentity } = await db.from("generated_subtitle_requests")
+      .select("id", { count: "exact", head: true }).eq("provider_key", providerKey).gte("created_at", since);
+    if ((byIdentity ?? 0) >= VIEWER_TRANSCRIBE_DAILY_IDENTITY_CAP) {
+      throw new HttpError(429, "AI subtitle daily limit reached for this provider — try again tomorrow");
+    }
+  }
+}
+
+// Best-effort event record (one row per REAL enqueue accepted by the gateway).
+async function recordViewerTranscribeRequest(db: SupabaseClient, userId: string, providerKey: string, kind: string): Promise<void> {
+  try {
+    await db.from("generated_subtitle_requests").insert({ user_id: userId, provider_key: providerKey, kind });
+  } catch (_) { /* accounting must never fail the enqueue */ }
 }
 
 // Phase 3 (3a) ASYNC enqueue: kick off a background full-film transcription on the gateway and
@@ -2530,7 +2571,17 @@ async function transcribeEnqueue(
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
-  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
+  // origin drives the gateway's priority classes AND the viewer-only guards below.
+  const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
+  // Low-footprint identities (e.g. the re-provisioned Ninja account, capped 60 probes/h after the
+  // July 3 ban) must not take full-file viewer reads: a transcription is a far heavier provider
+  // fingerprint than a probe, and PROVIDER-ANTIBAN-NINJA.md gates whisper on an observation window
+  // that hasn't passed. Refuse cleanly; the player shows an honest "not available on this provider".
+  if (origin === "viewer") {
+    const fp = await getFootprint(db, sourceId, userId);
+    if (fp?.lowFootprint) throw new HttpError(429, "AI subtitles temporarily unavailable on this provider");
+  }
+  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType, { forbidSeriesFiche: origin === "viewer" });
   if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
   // Require a real provider key (no hostFromUrl fallback): the READ paths (getGeneratedSubtitle,
   // translateEnqueue) key on .key only, so a host-keyed write would be a zombie the player can never
@@ -2553,6 +2604,9 @@ async function transcribeEnqueue(
       && Date.parse(stringOr(exrec.updated_at, "")) > Date.now() - FAILED_COOLDOWN_MS) {
     return { status: "failed", cached: true, cooldown: true, jobId: exrec.job_id, providerKey: pkey };
   }
+  // Viewer budget AFTER the cache fast-paths (a capped user keeps full access to everything
+  // already generated) and BEFORE the claim (an over-cap request must not steal the claim).
+  if (origin === "viewer") await assertViewerTranscribeBudget(db, userId, pkey);
   // Atomically claim the job. The RPC's ON CONFLICT ... WHERE makes "take over the row" a single
   // race-free decision, so two concurrent triggers can't both enqueue a duplicate transcription
   // onto the single-slot gateway: exactly one wins and proceeds, the loser reuses the live job.
@@ -2576,9 +2630,8 @@ async function transcribeEnqueue(
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
   const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
   const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
-  // origin drives the gateway's priority classes: a viewer waiting in front of the player jumps
-  // ahead of the nightly pregen batch (viewer > service > pregen).
-  const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
+  // origin (hoisted above, it also drives the viewer guards) sets the gateway's priority class:
+  // a viewer waiting in front of the player jumps ahead of the nightly pregen batch.
   const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}&origin=${origin}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
@@ -2589,6 +2642,9 @@ async function transcribeEnqueue(
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
     return { status: "error", jobId, providerKey: pkey, gatewayStatus: gwStatus, gateway: gwBody };
   }
+  // One budget event per REAL accepted enqueue (a full provider read will follow) — never for
+  // cache hits, lost claims, or gateway refusals above.
+  if (origin === "viewer") await recordViewerTranscribeRequest(db, userId, pkey, "transcript");
   return { status: "processing", jobId, providerKey: pkey, gateway: gwBody };
 }
 
@@ -2606,13 +2662,19 @@ async function ocrEnqueue(
   db: SupabaseClient,
   userId: string,
   runtimeConfig: RuntimeConfig,
-  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; lang?: string; fmt?: string; force?: boolean },
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; lang?: string; fmt?: string; force?: boolean; origin?: string },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const idx = Number(opts.index);
   if (!Number.isInteger(idx) || idx < 0) throw new HttpError(400, "a valid subtitle stream index is required for OCR");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
-  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
+  const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
+  // Same viewer guards as transcribeEnqueue: OCR is a full provider sub-stream read too.
+  if (origin === "viewer") {
+    const fp = await getFootprint(db, sourceId, userId);
+    if (fp?.lowFootprint) throw new HttpError(429, "AI subtitles temporarily unavailable on this provider");
+  }
+  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType, { forbidSeriesFiche: origin === "viewer" });
   if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
   // Require a real provider key (no hostFromUrl fallback): the READ paths (getGeneratedSubtitle,
   // translateEnqueue) key on .key only, so a host-keyed write would be a zombie the player can never
@@ -2630,6 +2692,7 @@ async function ocrEnqueue(
     .eq("kind", "ocr").eq("lang", cacheLang).maybeSingle();
   const exrec = existing as JsonRecord | null;
   if (exrec?.status === "ready" && !opts.force) return { status: "ready", cached: true, jobId: exrec.job_id, providerKey: pkey, kind: "ocr", lang };
+  if (origin === "viewer") await assertViewerTranscribeBudget(db, userId, pkey);
   const PROCESSING_TTL_MS = 90 * 60 * 1000;
   const jobId = crypto.randomUUID();
   const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
@@ -2657,6 +2720,7 @@ async function ocrEnqueue(
     await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
     return { status: "error", jobId, providerKey: pkey, kind: "ocr", lang, gatewayStatus: gwStatus, gateway: gwBody };
   }
+  if (origin === "viewer") await recordViewerTranscribeRequest(db, userId, pkey, "ocr");
   return { status: "processing", jobId, providerKey: pkey, kind: "ocr", lang, gateway: gwBody };
 }
 
@@ -2960,12 +3024,15 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
   const runtimeConfig = await getRuntimeConfig(db);
   const body = recordOrEmpty(await req.json().catch(() => ({})));
   // Phase 4: an OCR request (kind='ocr') routes to the tesseract path for an image-sub track.
+  // force is NOT honored on the user route (below too): p_force bypasses both the ready fast-path
+  // and the processing TTL, i.e. it re-burns a full provider read + gateway lane on a title that
+  // is already done — with it, any daily cap is a fiction. It stays a service/admin affordance.
   if (stringOr(body.kind, "transcript") === "ocr") {
     return await ocrEnqueue(db, userId, runtimeConfig, {
       titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
       itemType: stringOr(body.itemType, ""),
       index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
-      lang: stringOr(body.lang, ""), fmt: stringOr(body.fmt, ""), force: body.force === true,
+      lang: stringOr(body.lang, ""), fmt: stringOr(body.fmt, ""), force: false, origin: "viewer",
     });
   }
   // Phase 3b: a translation request (kind='translation' or a target lang) routes to the Argos path.
@@ -3010,7 +3077,7 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
     externalId: stringOr(body.externalId, ""),
     itemType: stringOr(body.itemType, ""),
     index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
-    force: body.force === true,
+    force: false, // never honored on the user route — see the OCR branch note above
     origin: "viewer", // a human is waiting in front of the player — outranks the pregen batch
     // dur 0 = whole film; user triggers never clip (clipping is a pipeline-test affordance only).
   });
