@@ -1315,22 +1315,26 @@ class AdminPage {
         this._renderVatPanel(vat);
     }
 
-    // ── Panneau TVA / OSS (page Finance) ──
+    // ── Panneau TVA / OSS (page Finance) — cockpit de conformité ──
     // Périmètre : ventes web DIRECTES (rail Revolut) uniquement — sur les stores,
-    // Google/Apple sont « fournisseurs présumés » (art. 9 bis, règl. UE 282/2011) et
-    // collectent/reversent eux-mêmes la TVA UE. Le ledger est en USD : la jauge de
-    // seuil affiche une conversion EUR INDICATIVE ; la déclaration OSS, elle, se fait
-    // en EUR au taux BCE du dernier jour du trimestre (au moment de déclarer).
+    // Google/Apple sont « fournisseurs présumés » (art. 9 bis, règl. UE 282/2011).
+    // Niveau 3 : hero de statut, échéancier, assistant de dépôt champ-par-champ,
+    // taux BCE FIGÉ par trimestre côté serveur (oss_fx_rates via admin_vat_fx_set) ;
+    // tant qu'il n'est pas figé, les conversions EUR sont INDICATIVES et signalées.
     _renderVatPanel(vat) {
         const el = document.getElementById('fin-vat-body');
         if (!el) return;
         if (!vat) { el.innerHTML = '<div class="ssub">Rapport TVA indisponible — la fonction admin_vat_report n\'est pas encore déployée.</div>'; return; }
         const n = AdminPage.n, esc = AdminPage.esc, money = AdminPage.money;
-        const EUR_PER_USD = 0.92; // taux INDICATIF (jauge uniquement) — à rafraîchir de temps en temps
-        const eur = (usdCents) => (Math.round((Number(usdCents) || 0) * EUR_PER_USD) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+        const EUR_PER_USD = 0.92; // fallback INDICATIF quand le taux BCE du trimestre n'est pas figé
+        // fx serveur : figé à la clôture du trimestre (art. 369h) → chiffres DÉFINITIFS.
+        const fx = vat.fx || null;
+        const fxFixed = !!(fx && Number(fx.usd_eur_rate) > 0);
+        const FX = fxFixed ? Number(fx.usd_eur_rate) : EUR_PER_USD;
+        const eur = (usdCents) => (Math.round((Number(usdCents) || 0) * FX) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
         const ys = vat.year_summary || {};
         const THRESH_EUR_CENTS = 1000000; // 10 000 € — seuil UE des ventes B2C transfrontalières (année en cours ET précédente)
-        const crossEurCents = Math.round((Number(ys.eu_cross_cents) || 0) * EUR_PER_USD);
+        const crossEurCents = Math.round((Number(ys.eu_cross_cents) || 0) * FX);
         const pctT = Math.min(100, Math.round(100 * crossEurCents / THRESH_EUR_CENTS));
         const nearThresh = pctT >= 80;
         // Franchise en base FR 2026 : 37 500 € (majoré 41 250 €). Base = opérations
@@ -1338,7 +1342,7 @@ class AdminPage {
         // tant que le seuil 10 k€ n'est pas franchi. Google Play EXCLU (B2B Irlande).
         // Détail complet : docs/TVA-OSS.md.
         const FR_THRESH_EUR_CENTS = 3750000, FR_THRESH_MAJ_EUR_CENTS = 4125000;
-        const frBaseEurCents = Math.round(((Number(ys.fr_cents) || 0) + (Number(ys.eu_cross_cents) || 0)) * EUR_PER_USD);
+        const frBaseEurCents = Math.round(((Number(ys.fr_cents) || 0) + (Number(ys.eu_cross_cents) || 0)) * FX);
         const pctF = Math.min(100, Math.round(100 * frBaseEurCents / FR_THRESH_EUR_CENTS));
         const nearFr = frBaseEurCents >= 3500000; // alerte préparatoire ~35 000 €
         const overFrMaj = frBaseEurCents >= FR_THRESH_MAJ_EUR_CENTS;
@@ -1359,16 +1363,19 @@ class AdminPage {
         // = 'GR' côté carte/ledger (le portail OSS l'affiche 'EL'). Phase 3 : déplacer cette
         // table + le taux BCE réel côté serveur (admin_vat_report).
         const EU_VAT_RATES = { AT:20, BE:21, BG:20, HR:25, CY:19, CZ:21, DK:25, EE:24, FI:25.5, FR:20, DE:19, GR:24, HU:27, IE:23, IT:22, LV:21, LT:21, LU:17, MT:18, NL:21, PL:23, PT:23, RO:21, SK:23, SI:22, ES:21, SE:25 };
-        const eurCents = (usdCents) => Math.round((Number(usdCents) || 0) * EUR_PER_USD);
+        const COUNTRY_FR = { AT:'Autriche', BE:'Belgique', BG:'Bulgarie', HR:'Croatie', CY:'Chypre', CZ:'Tchéquie', DK:'Danemark', EE:'Estonie', FI:'Finlande', DE:'Allemagne', GR:'Grèce (EL sur le portail)', HU:'Hongrie', IE:'Irlande', IT:'Italie', LV:'Lettonie', LT:'Lituanie', LU:'Luxembourg', MT:'Malte', NL:'Pays-Bas', PL:'Pologne', PT:'Portugal', RO:'Roumanie', SK:'Slovaquie', SI:'Slovénie', ES:'Espagne', SE:'Suède' };
+        const eurCents = (usdCents) => Math.round((Number(usdCents) || 0) * FX);
         const eurFmt = (c) => (Number(c) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
-        // Chaîne de calcul (niveau 2) : net USD → base EUR (taux indicatif) → TVA due (taux du
-        // pays). La TVA n'est due que pour les pays UE HORS France (FR = franchise, hors UE = hors OSS).
+        // Chaîne de calcul : net USD → base EUR → TVA due (taux du pays), UE hors France
+        // uniquement. Les champs SERVEUR (rate_pct/base_eur_cents/vat_due_eur_cents,
+        // présents quand le fx est figé) priment sur le calcul local.
         let ossBaseEur = 0, ossVatEur = 0;
         const rowsCalc = rows.map(r => {
             const cc = r.country_code, isEu = !!r.is_eu, isFr = cc === 'FR', unknown = cc === '??';
-            const baseEur = eurCents(r.net_cents);
-            const rate = (isEu && !isFr) ? (EU_VAT_RATES[cc] ?? null) : null;
-            const vatDue = (rate != null) ? Math.round(baseEur * rate / 100) : 0;
+            const baseEur = (fxFixed && r.base_eur_cents != null) ? Number(r.base_eur_cents) : eurCents(r.net_cents);
+            const rate = (r.rate_pct != null) ? Number(r.rate_pct) : ((isEu && !isFr) ? (EU_VAT_RATES[cc] ?? null) : null);
+            const vatDue = (fxFixed && r.vat_due_eur_cents != null) ? Number(r.vat_due_eur_cents)
+                : ((rate != null && isEu && !isFr) ? Math.round(baseEur * rate / 100) : 0);
             if (isEu && !isFr) { ossBaseEur += baseEur; ossVatEur += vatDue; }
             return { r, cc, isEu, isFr, unknown, baseEur, rate, vatDue };
         });
@@ -1382,15 +1389,58 @@ class AdminPage {
         </tr>`).join('');
         const vatFoot = `<tfoot><tr><td colspan="3">Total OSS — UE hors France</td><td class="num">${eurFmt(ossBaseEur)}</td><td class="num"></td><td class="num" style="color:#34d399"><b>${eurFmt(ossVatEur)}</b></td></tr></tfoot>`;
 
+        // ── Statut + échéancier ────────────────────────────────────────────────
+        const unknownN = Number(tot.unknown_n) || 0;
+        const ossApplies = crossEurCents >= THRESH_EUR_CENTS
+            || Math.round((Number(ys.eu_cross_prev_cents) || 0) * FX) >= THRESH_EUR_CENTS;
+        // Prochaine échéance OSS : la déclaration du trimestre échu est due le dernier
+        // jour du mois suivant (30/04, 31/07, 31/10, 31/01) — sans report week-end/férié.
+        const tNow = new Date();
+        const dlCands = [
+            { d: new Date(Date.UTC(tNow.getUTCFullYear(), 0, 31)), q: 4, y: tNow.getUTCFullYear() - 1 },
+            { d: new Date(Date.UTC(tNow.getUTCFullYear(), 3, 30)), q: 1, y: tNow.getUTCFullYear() },
+            { d: new Date(Date.UTC(tNow.getUTCFullYear(), 6, 31)), q: 2, y: tNow.getUTCFullYear() },
+            { d: new Date(Date.UTC(tNow.getUTCFullYear(), 9, 31)), q: 3, y: tNow.getUTCFullYear() },
+            { d: new Date(Date.UTC(tNow.getUTCFullYear() + 1, 0, 31)), q: 4, y: tNow.getUTCFullYear() },
+        ];
+        const nextDl = dlCands.find(c => c.d > tNow);
+        const dlDays = nextDl ? Math.ceil((nextDl.d - tNow) / 86400000) : null;
+        const fmtD = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+        // Hero de statut : LA réponse à « suis-je en règle ? » — priorité aux blocages.
+        const heroBox = (color, ic, t, s) => `<div style="display:flex;gap:12px;align-items:center;background:${color}14;border:1px solid ${color}55;border-radius:10px;padding:12px 14px;margin:10px 0 14px">
+            <span style="font-size:22px;line-height:1">${ic}</span><div><div style="font-weight:700">${t}</div><div class="ssub" style="margin-top:2px">${s}</div></div></div>`;
+        let heroHtml;
+        if (unknownN > 0) {
+            heroHtml = heroBox('#f87171', '🚫', 'Pays inconnus à résoudre avant tout dépôt',
+                `${n(unknownN)} transaction(s) du trimestre sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation du client.`);
+        } else if (ossApplies) {
+            heroHtml = heroBox('#fbbf24', '📅', `Déclaration OSS à préparer — échéance ${nextDl ? fmtD(nextDl.d) : '—'}${dlDays != null ? ` (dans ${dlDays} j)` : ''}`,
+                `Seuil 10 000 € franchi — TVA due dans le pays de chaque client UE. Total estimé du trimestre affiché : <b>${eurFmt(ossVatEur)}</b>${fxFixed ? '' : ' (indicatif — figez le taux BCE)'}.`);
+        } else if (nearThresh) {
+            heroHtml = heroBox('#fbbf24', '📈', `Seuil UE en approche — ${pctT} % des 10 000 €`,
+                'Anticipez : inscription au guichet OSS (rétroactivité possible si demandée avant le 10 du mois suivant la 1ʳᵉ vente concernée) ou régime PME UE (n° EX).');
+        } else {
+            heroHtml = heroBox('#34d399', '✅', 'Rien à déclarer — vous êtes sous tous les seuils',
+                'Franchise en base FR active · OSS non applicable · le cockpit surveille les seuils et les échéances pour vous.');
+        }
+        const dlCard = (v, l, cls, tip) => `<div class="kpi ${cls || ''}"${tip ? ` title="${esc(tip)}"` : ''}><div class="kpi-hd"><div class="v" style="font-size:15px">${v}</div></div><div class="l">${l}</div></div>`;
+        const deadlinesHtml = `<div class="kpi-gtitle" style="margin:0 0 8px">⏱ Prochaines échéances</div><div class="admin-cards fin-mini" style="margin-bottom:14px">
+            ${dlCard(ossApplies && nextDl ? `${fmtD(nextDl.d)}` : 'Sans objet', ossApplies && nextDl ? `Déclaration OSS T${nextDl.q} ${nextDl.y} — dans ${dlDays} j` : 'OSS — sous le seuil 10 k€', ossApplies && dlDays != null && dlDays <= 14 ? 'alert' : '', 'Trimestrielle : 30/04, 31/07, 31/10, 31/01 — sans report, déclaration néant obligatoire une fois inscrit')}
+            ${dlCard('Mensuelle', 'DES (versements Google) — 10ᵉ jour ouvrable du mois suivant', '', 'Sans objet tant qu\'aucun versement Play ; ensuite obligatoire chaque mois de versement (douane.gouv.fr, 750 €/DES manquante)')}
+            ${dlCard(eurFmt(Math.max(0, FR_THRESH_EUR_CENTS - frBaseEurCents)), 'Marge avant TVA française (franchise 37 500 €)', '', 'Base : ventes web localisées en France — dépassement en cours d\'année au-delà de 41 250 € = TVA dès le jour même')}
+        </div>`;
+
         el.innerHTML = `
             <div class="ssub">Périmètre : ventes web directes (Revolut). Les ventes Play/App Store sont déclarées par le store (fournisseur présumé) — hors OSS.</div>
+            ${heroHtml}
+            ${deadlinesHtml}
             <div class="kpi-gtitle" style="margin:12px 0 6px">Seuil UE 10 000 € — B2C transfrontalier UE, ${esc(String(ys.year || vat.year))}</div>
             <div class="hbar" title="Ventes B2C vers d'autres pays UE (hors France) sur l'année civile">
                 <div class="hbar-l">≈ ${eur(ys.eu_cross_cents)}</div>
                 <div class="hbar-track"><div class="hbar-fill ${nearThresh ? 'warn' : ''}" style="width:${Math.max(2, pctT)}%"></div></div>
                 <div class="hbar-v">${pctT} % du seuil</div>
             </div>
-            <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (conversion indicative 1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) · année précédente : ${money(ys.eu_cross_prev_cents)}.
+            <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (1 $ ≈ ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} €${fxFixed ? ', taux BCE figé' : ', indicatif'}) · année précédente : ${money(ys.eu_cross_prev_cents)}.
             Au-delà du seuil (année en cours OU précédente) : TVA du pays du client via l'OSS — ou régime PME UE (n° EX) pour rester exonéré. Voir docs/TVA-OSS.md.</div>
             <div class="kpi-gtitle" style="margin:12px 0 6px">Franchise en base FR — 37 500 € (majoré 41 250 €)</div>
             <div class="hbar" title="Base : ventes web localisées en France (clients FR + autres-UE tant que le seuil 10 k€ n'est pas franchi). Google Play exclu (B2B Irlande).">
@@ -1402,7 +1452,14 @@ class AdminPage {
             <div style="display:flex;gap:10px;align-items:center;margin:14px 0 8px;flex-wrap:wrap">
                 <span class="kpi-gtitle" style="margin:0">Base par pays de consommation</span>
                 <select id="vat-quarter" title="Trimestre (cadence de déclaration OSS)">${qSel}</select>
+                ${fxFixed
+                    ? `<span class="badge green" title="Taux BCE USD→EUR du dernier jour du trimestre, figé le ${esc(fx.fixed_at ? new Date(fx.fixed_at).toLocaleDateString('fr-FR') : '—')}">🔒 BCE ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })}</span>`
+                    : (new Date(Date.UTC(vat.year, (vat.quarter - 1) * 3 + 3, 1)) <= new Date()
+                        ? `<button id="vat-fx-btn" class="mini-btn" title="Trimestre clos : figer le taux BCE du dernier jour (les montants EUR deviennent définitifs)">🔒 Figer le taux BCE</button>`
+                        : `<span class="badge gray" title="Le taux BCE définitif se fige à la clôture du trimestre">fx indicatif ${EUR_PER_USD.toLocaleString('fr-FR')}</span>`)}
                 <button id="vat-csv" class="mini-btn" title="Exporter la base du trimestre par pays (CSV)">⬇ CSV</button>
+                ${(ossVatEur > 0 || corrections.length) ? `<button id="vat-assist-btn" class="mini-btn" ${unknownN > 0 ? 'disabled title="Résolvez d\'abord les pays inconnus — la TVA exige la localisation"' : 'title="Guide champ par champ, dans l\'ordre du portail OSS"'}>🧾 Préparer la déclaration T${vat.quarter}</button>` : ''}
+                ${ossApplies ? `<button id="vat-ics" class="mini-btn" title="Télécharger les 4 prochaines échéances OSS au format calendrier (.ics)">📅 .ics</button>` : ''}
             </div>
             ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Net (USD)</th><th class="num">Base (EUR)</th><th class="num">Taux</th><th class="num">TVA due</th></tr></thead><tbody>${rowsHtml}</tbody>${vatFoot}</table></div>
             <div class="ssub" style="margin-top:6px">TVA due = base convertie × taux du pays. <b>Total à reverser via l'OSS</b> pour ${esc('T' + vat.quarter + ' ' + vat.year)} : <b style="color:#34d399">${eurFmt(ossVatEur)}</b>${Number(tot.unknown_n) > 0 ? ' — <span style="color:#fbbf24">⚠ incomplet (voir ci-dessous)</span>' : ''}.</div>`
@@ -1414,7 +1471,13 @@ class AdminPage {
             <div class="ssub" style="margin-top:4px">À reporter dans la <b>rubrique corrections</b> de la déclaration OSS, sur la période d'origine (pas en négatif du trimestre courant — délai 3 ans).</div>` : ''}
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer (ces transactions n'entrent pas dans le total tant que leur pays est inconnu).</div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
-            <div class="ssub" style="margin-top:8px">Conversion EUR <b>indicative</b> (1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) : le taux BCE <b>définitif</b> se fige au dernier jour du trimestre (art. 369h dir. 2006/112) — figé côté serveur en phase suivante. Taux de TVA standard de chaque pays : base TEDB (aucun changement 2026). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
+            <div id="vat-assist" style="display:none;margin-top:14px;border:1px solid #2a2a38;border-radius:10px;padding:14px;background:rgba(124,147,255,.05)"></div>
+            <div class="kpi-gtitle" style="margin:16px 0 6px">📋 Checklist de conformité</div>
+            <div id="vat-checklist" class="ssub" style="display:grid;gap:6px"></div>
+            <div class="ssub" style="margin-top:10px">${fxFixed
+                ? `Montants EUR <b>définitifs</b> — taux BCE ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} figé au dernier jour du trimestre (art. 369h dir. 2006/112).`
+                : `Conversion EUR <b>indicative</b> (1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) : figez le taux BCE à la clôture du trimestre pour des montants définitifs (art. 369h dir. 2006/112).`}
+            Taux de TVA standard : table serveur <code>eu_vat_standard_rates</code> (source TEDB — à rafraîchir avant chaque dépôt si un taux change). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
 
         const sel = document.getElementById('vat-quarter');
         if (sel) sel.addEventListener('change', async () => {
@@ -1442,6 +1505,111 @@ class AdminPage {
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = `norva-tva-${vat.year}-T${vat.quarter}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        });
+
+        // ── Checklist de conformité (persistée en localStorage — outil mono-admin) ──
+        const ckEl = document.getElementById('vat-checklist');
+        if (ckEl) {
+            const CK = [
+                ['intracom', 'Numéro de TVA intracommunautaire demandé au SIE (gratuit, ne fait pas perdre la franchise)'],
+                ['des', 'DES mensuelle en place sur douane.gouv.fr — dès le 1ᵉʳ versement Google'],
+                ['uk', 'Décision Royaume-Uni prise (bloquer au checkout, ou immatriculation HMRC — seuil nul)'],
+                ['oss', 'Inscription au guichet OSS sur impots.gouv.fr — requise une fois le seuil 10 k€ franchi'],
+            ];
+            let ck = {};
+            try { ck = JSON.parse(localStorage.getItem('norva-vat-checklist') || '{}'); } catch (_) { /* reset */ }
+            ckEl.innerHTML = CK.map(([k, l]) =>
+                `<label style="display:flex;gap:8px;align-items:baseline;cursor:pointer"><input type="checkbox" class="vat-ck" data-k="${k}" ${ck[k] ? 'checked' : ''}/> <span${ck[k] ? ' style="opacity:.55;text-decoration:line-through"' : ''}>${l}</span></label>`).join('');
+            ckEl.querySelectorAll('.vat-ck').forEach(cb => cb.addEventListener('change', () => {
+                ck[cb.dataset.k] = cb.checked;
+                try { localStorage.setItem('norva-vat-checklist', JSON.stringify(ck)); } catch (_) { /* plein */ }
+                const sp = cb.nextElementSibling;
+                if (sp) { sp.style.opacity = cb.checked ? '.55' : ''; sp.style.textDecoration = cb.checked ? 'line-through' : ''; }
+            }));
+        }
+
+        // ── Assistant de dépôt : champ par champ, dans l'ordre du portail OSS ──
+        const assistBtn = document.getElementById('vat-assist-btn');
+        const assistEl = document.getElementById('vat-assist');
+        if (assistBtn && assistEl) assistBtn.addEventListener('click', () => {
+            if (assistEl.style.display !== 'none') { assistEl.style.display = 'none'; return; }
+            const cp = (txt) => `<button class="mini-btn vat-copy" data-copy="${esc(txt)}" title="Copier la valeur">📋 ${esc(txt)}</button>`;
+            const frVal = (c) => (Number(c) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+            const ossRows = rowsCalc.filter(x => x.isEu && !x.isFr && x.baseEur > 0);
+            const steps = ossRows.map((x, i) => `<div style="margin:10px 0;padding:10px;border:1px solid #2a2a38;border-radius:8px">
+                <b>Ligne ${i + 1} — ${AdminPage.flag(x.cc)} ${esc(COUNTRY_FR[x.cc] || x.cc)}</b><br/>
+                <span class="ssub">Type d'opération :</span> Prestations de services ·
+                <span class="ssub">Pays de consommation :</span> ${esc(COUNTRY_FR[x.cc] || x.cc)} ·
+                <span class="ssub">Taux :</span> ${x.rate != null ? x.rate.toLocaleString('fr-FR') + ' %' : '—'}<br/>
+                <span class="ssub">Base imposable (EUR) :</span> ${cp(frVal(x.baseEur))}
+                <span class="ssub" style="margin-left:10px">TVA attendue (auto-calculée par le portail) :</span> <b>${eurFmt(x.vatDue)}</b>
+            </div>`).join('');
+            const corrSteps = corrections.length ? `<div style="margin:10px 0;padding:10px;border:1px solid #2a2a38;border-radius:8px">
+                <b>Rubrique « Corrections de périodes précédentes »</b><br/>
+                ${corrections.map(c => `<div class="ssub" style="margin-top:4px">Période T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))} · ${c.country_code === '??' ? 'Inconnu' : AdminPage.flag(c.country_code)} · montant à corriger : ${cp('-' + frVal(Math.round(Number(c.refund_cents) * (Number(c.orig_usd_eur_rate) || FX))))}${c.orig_usd_eur_rate ? '' : ' <span style="color:#fbbf24">(fx d\'origine non figé — indicatif)</span>'}</div>`).join('')}
+            </div>` : '';
+            assistEl.innerHTML = `
+                <div style="font-weight:700;margin-bottom:4px">🧾 Déclaration OSS T${vat.quarter} ${vat.year} — pas à pas</div>
+                ${fxFixed ? '' : `<div class="ssub" style="color:#fbbf24;margin-bottom:8px">⚠ Taux BCE non figé — montants INDICATIFS. Figez le taux (bouton 🔒) avant le dépôt réel.</div>`}
+                <div class="ssub">1. Connectez-vous : <b>impots.gouv.fr</b> → Mes services → Démarches → <b>Guichet de TVA UE</b> → Déclarer (régime UE).</div>
+                <div class="ssub" style="margin-top:4px">2. Saisissez une ligne par pays (les ventes France ne vont <b>jamais</b> dans l'OSS) :</div>
+                ${steps || '<div class="ssub">Aucune ligne UE hors France ce trimestre.</div>'}
+                ${corrSteps}
+                <div class="ssub" style="margin-top:6px">3. Vérifiez le total : le portail doit afficher <b style="color:#34d399">${eurFmt(ossVatEur)}</b>.</div>
+                <div class="ssub" style="margin-top:4px">4. Paiement : virement <b>en euros</b> au Pôle national TVA commerce en ligne, motif = la <b>référence unique</b> de la déclaration (format OSS/FR/FRxx…/Q${vat.quarter}.${vat.year}, majuscules sans espace) — date de valeur = crédit du compte, virez en avance. Échéance : <b>${nextDl ? fmtD(nextDl.d) : '—'}</b>, sans report.</div>
+                <div class="ssub" style="margin-top:4px">5. Archivez le certificat de dépôt (PDF) — registres à conserver 10 ans.</div>`;
+            assistEl.style.display = '';
+            assistEl.querySelectorAll('.vat-copy').forEach(b => b.addEventListener('click', async () => {
+                try { await navigator.clipboard.writeText(b.dataset.copy); this._toast('✓ Copié : ' + b.dataset.copy, 'ok'); }
+                catch (_) { this._toast('Copie impossible — sélectionnez manuellement.', 'err'); }
+            }));
+        });
+
+        // ── Figer le taux BCE du trimestre clos (suggestion ECB via frankfurter, l'humain valide) ──
+        const fxBtn = document.getElementById('vat-fx-btn');
+        if (fxBtn) fxBtn.addEventListener('click', async () => {
+            fxBtn.disabled = true;
+            const last = new Date(Date.UTC(vat.year, vat.quarter * 3, 0)); // dernier jour du trimestre
+            const iso = last.toISOString().slice(0, 10);
+            let sugg = '';
+            try {
+                // Taux de référence BCE (API frankfurter, données BCE). Simple suggestion : l'admin valide.
+                const r = await fetch(`https://api.frankfurter.dev/v1/${iso}?base=USD&symbols=EUR`, { signal: AbortSignal.timeout(6000) });
+                const d = await r.json();
+                if (d && d.rates && d.rates.EUR) sugg = String(d.rates.EUR);
+            } catch (_) { /* saisie manuelle */ }
+            const raw = window.prompt(`Taux BCE USD→EUR publié le ${fmtD(last)} (dernier jour de T${vat.quarter} ${vat.year} — à défaut de publication ce jour-là, le jour de publication suivant).${sugg ? `\nSuggestion (BCE via frankfurter) : ${sugg}` : '\nSource : https://www.ecb.europa.eu (taux de référence USD)'}`, sugg);
+            if (raw == null) { fxBtn.disabled = false; return; }
+            const val = parseFloat(String(raw).replace(',', '.'));
+            if (!Number.isFinite(val) || val <= 0.2 || val >= 5) { fxBtn.disabled = false; this._toast('Taux invalide.', 'err'); return; }
+            try {
+                await this._rpc('admin_vat_fx_set', { p_year: vat.year, p_quarter: vat.quarter, p_rate: val });
+                const res = await this._rpc('admin_vat_report', { p_year: vat.year, p_quarter: vat.quarter });
+                this._toast(`✓ Taux BCE T${vat.quarter} ${vat.year} figé : ${val}`, 'ok');
+                if (this._route === 'finance') this._renderVatPanel(res);
+            } catch (e) { fxBtn.disabled = false; this._toast('Erreur : ' + e.message, 'err'); }
+        });
+
+        // ── Export .ics des 4 prochaines échéances OSS ──
+        const icsBtn = document.getElementById('vat-ics');
+        if (icsBtn) icsBtn.addEventListener('click', () => {
+            const evts = dlCands.filter(c => c.d > tNow).slice(0, 4);
+            const pad = (x) => String(x).padStart(2, '0');
+            const dstr = (d) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
+            const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Norva//TVA//FR']
+                .concat(evts.flatMap(c => ['BEGIN:VEVENT',
+                    `UID:norva-oss-${c.y}-q${c.q}@norva.tv`,
+                    `DTSTART;VALUE=DATE:${dstr(c.d)}`,
+                    `SUMMARY:Déclaration OSS T${c.q} ${c.y} — échéance (sans report)`,
+                    'DESCRIPTION:Guichet TVA UE sur impots.gouv.fr — déclaration + virement EUR (motif = référence unique). Panneau TVA Norva : montants pré-calculés.',
+                    'BEGIN:VALARM', 'TRIGGER:-P7D', 'ACTION:DISPLAY', `DESCRIPTION:OSS T${c.q} ${c.y} dans 7 jours`, 'END:VALARM',
+                    'END:VEVENT']))
+                .concat(['END:VCALENDAR']).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+            a.download = 'norva-echeances-oss.ics';
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         });
