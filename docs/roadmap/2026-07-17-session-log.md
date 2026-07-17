@@ -16,7 +16,13 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 | 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `4f92319` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
 | 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | `eaa3ef6` | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |
 | 10 | Lot A « mode guidé » : profil d'entreprise, parcours, action requise, démarches guidées par statut | `a5fd576` | `AdminPage.js` (`?v=64`), `app.js` |
-| 11 | Lot B : profil serveur (durable/multi-appareils) + journal des dépôts (registre) + référence de virement réelle | *(ce commit)* | `20260717180000_vat_business_profile.sql` (⚠ NOTIFY pgrst — 4 fonctions neuves), `AdminPage.js` (`?v=65`), `app.js` |
+| 11 | Lot B : profil serveur (durable/multi-appareils) + journal des dépôts (registre) + référence de virement réelle | `0fe8ab2` | `20260717180000_vat_business_profile.sql` (⚠ NOTIFY pgrst — 4 fonctions neuves), `AdminPage.js` (`?v=65`), `app.js` |
+| 12 | Lot B-notify : alertes Telegram TVA (seuil OSS 80 %, taux BCE à figer) + ligne digest hebdo | `5d32a92` | `20260717190000_vat_alert_signals.sql`, `norva-admin/index.ts` |
+| 13 | Certificats de dépôt : bucket Storage privé `vat-certificates` + upload assistant + 📄 sur le journal | *(ce commit)* | `20260717200000_vat_certificates_storage.sql` (⚠ NOTIFY pgrst — signature `admin_vat_filing_record` étendue), `AdminPage.js` (`?v=66`), `app.js` |
+
+## Certificats de dépôt (commit 13) — dernier morceau du registre
+
+Bucket `vat-certificates` **privé** (PDF uniquement, 10 Mo) sur le storage-api de la stack (`norva-storage`), policies RLS `is_admin()` sur les 4 verbes de `storage.objects`. `vat_filings.document_path` relie chaque dépôt à son PDF. Front : input fichier dans l'étape 5 de l'assistant (upload **avant** l'enregistrement — un échec d'upload bloque la ligne, pas de registre mensonger), colonne « Certificat » du journal avec téléchargement authentifié (fetch + blob — pas d'URL publique). ⚠ Signature de `admin_vat_filing_record` étendue ⇒ DROP + NOTIFY pgrst dans la migration/déploiement.
 
 ## Cockpit TVA — Lot A « mode guidé » (commit 10, front pur, localStorage)
 

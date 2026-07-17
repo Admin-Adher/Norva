@@ -1739,12 +1739,30 @@ class AdminPage {
                 const arr = Array.isArray(list) ? list : [];
                 if (!arr.length) { fEl.innerHTML = '<div class="ssub">Aucun dépôt enregistré. Après chaque déclaration, l\'assistant propose de l\'ajouter ici.</div>'; return; }
                 const dt = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-                fEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Période</th><th>Déposé le</th><th class="num">TVA reversée</th><th>Référence</th></tr></thead><tbody>${arr.map(f => `<tr>
+                fEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Période</th><th>Déposé le</th><th class="num">TVA reversée</th><th>Référence</th><th>Certificat</th></tr></thead><tbody>${arr.map(f => `<tr>
                     <td>T${esc(String(f.quarter))} ${esc(String(f.year))}</td>
                     <td>${esc(dt(f.filed_at))}</td>
                     <td class="num">${f.vat_eur_cents != null ? eurFmt(f.vat_eur_cents) : '—'}</td>
                     <td class="ssub">${esc(f.reference || f.note || '—')}</td>
+                    <td>${f.document_path ? `<button class="mini-btn vat-cert-dl" data-path="${esc(f.document_path)}" title="Télécharger le certificat de dépôt (bucket privé)">📄 PDF</button>` : '<span class="ssub">—</span>'}</td>
                 </tr>`).join('')}</tbody></table></div>`;
+                // Bucket privé : téléchargement authentifié (fetch + blob) — pas d'URL publique.
+                fEl.querySelectorAll('.vat-cert-dl').forEach(b => b.addEventListener('click', async () => {
+                    b.disabled = true;
+                    try {
+                        const r = await fetch(`${this._sbUrl()}/storage/v1/object/vat-certificates/${b.dataset.path}`, {
+                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}` },
+                        });
+                        if (!r.ok) throw new Error(String(r.status));
+                        const blob = await r.blob();
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `norva-certificat-${String(b.dataset.path).split('/').pop()}`;
+                        document.body.appendChild(a); a.click(); a.remove();
+                        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                    } catch (e) { this._toast('Téléchargement impossible : ' + e.message, 'err'); }
+                    b.disabled = false;
+                }));
             } catch (e) {
                 fEl.innerHTML = `<div class="ssub">Journal indisponible${/PGRST202/.test(String(e.message)) ? ' — déployez la migration 20260717180000 + NOTIFY pgrst.' : ' : ' + esc(e.message)}</div>`;
             }
@@ -1785,9 +1803,10 @@ class AdminPage {
                 <div class="ssub" style="margin-top:4px">4. Paiement : virement <b>en euros</b> au Pôle national TVA commerce en ligne. Motif = la référence unique de la déclaration${payRef ? ' :' : ` (format OSS/FR/&lt;votre n° TVA&gt;/Q${vat.quarter}.${vat.year} — <b>renseignez votre n° de TVA intracom dans le profil</b> pour l'obtenir ici).`}</div>
                 ${payRef ? `<div class="ssub" style="margin-top:2px">Montant : ${cp(frVal(ossVatEur))} €  ·  Motif : ${cp(payRef)}</div>` : ''}
                 <div class="ssub" style="margin-top:4px">Date de valeur = crédit du compte, virez en avance. Échéance : <b>${nextDl ? fmtD(nextDl.d) : '—'}</b>, sans report.</div>
-                <div class="ssub" style="margin-top:4px">5. Archivez le certificat de dépôt (PDF) — registres à conserver 10 ans — et enregistrez le dépôt au journal :</div>
+                <div class="ssub" style="margin-top:4px">5. Archivez le certificat de dépôt (PDF téléchargé sur le portail) et enregistrez le dépôt au journal — l'ensemble constitue le registre (conservation 10 ans) :</div>
                 <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                     <input id="vat-file-ref" placeholder="Référence / n° de certificat" value="${payRef ? esc(payRef) : ''}" style="${inp};width:210px"/>
+                    <input id="vat-file-pdf" type="file" accept="application/pdf" title="Certificat de dépôt (PDF) — archivé dans le bucket privé vat-certificates" style="${inp};max-width:230px"/>
                     <button id="vat-file-save" class="mini-btn" style="font-weight:700">📓 Enregistrer ce dépôt au journal</button>
                 </div>`;
             assistEl.style.display = '';
@@ -1799,11 +1818,31 @@ class AdminPage {
             if (fileSave) fileSave.addEventListener('click', async () => {
                 fileSave.disabled = true;
                 try {
+                    // Certificat PDF (optionnel) : upload d'abord dans le bucket privé,
+                    // puis la ligne de journal référence son chemin. Un échec d'upload
+                    // bloque l'enregistrement (pas de ligne « avec certificat » mensongère).
+                    let docPath = null;
+                    const fInp = document.getElementById('vat-file-pdf');
+                    const file = fInp && fInp.files && fInp.files[0];
+                    if (file) {
+                        if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) throw new Error('Le certificat doit être un PDF.');
+                        docPath = `${vat.year}/T${vat.quarter}-${Date.now()}.pdf`;
+                        const up = await fetch(`${this._sbUrl()}/storage/v1/object/vat-certificates/${docPath}`, {
+                            method: 'POST',
+                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
+                            body: file,
+                        });
+                        if (!up.ok) {
+                            const d = await up.json().catch(() => ({}));
+                            throw new Error('Upload du certificat impossible : ' + (d.message || d.error || up.status));
+                        }
+                    }
                     await this._rpc('admin_vat_filing_record', {
                         p_year: vat.year, p_quarter: vat.quarter, p_vat_eur_cents: ossVatEur,
                         p_reference: (document.getElementById('vat-file-ref') || {}).value || payRef || null, p_note: null,
+                        p_document_path: docPath,
                     });
-                    this._toast('✓ Dépôt enregistré au journal (registre)', 'ok');
+                    this._toast(docPath ? '✓ Dépôt + certificat archivés au journal' : '✓ Dépôt enregistré au journal (registre)', 'ok');
                     vatCk.declared = true; saveCk();
                     loadFilings();
                 } catch (e) { fileSave.disabled = false; this._toast('Erreur : ' + e.message, 'err'); }
