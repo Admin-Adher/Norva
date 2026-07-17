@@ -1209,7 +1209,21 @@ class AdminPage {
         // Total amount shown as a label note (a bare "4 199,60 $" would read as one number in fr-FR).
         const amtNote = (c) => ` <span class="pacct">· ${money(c)}</span>`;
 
+        // Onglet TVA : indicateur ⚠ quand quelque chose requiert l'attention (pays
+        // inconnus, ou seuil OSS franchi ≈). Le détail précis vit dans le hero du panneau.
+        const vatTot = (vat && vat.totals) || {};
+        const vatYs = (vat && vat.year_summary) || {};
+        const vatAttention = Number(vatTot.unknown_n) > 0
+            || Math.round((Number(vatYs.eu_cross_cents) || 0) * 0.92) >= 1000000
+            || Math.round((Number(vatYs.eu_cross_prev_cents) || 0) * 0.92) >= 1000000;
+        const finTab = this._financeTab === 'vat' ? 'vat' : 'overview';
+
         el.innerHTML = `
+            <div class="qv-row" id="fin-tabs" role="tablist" aria-label="Sections Finance">
+                <button class="qv-chip ${finTab === 'overview' ? 'active' : ''}" data-ftab="overview" role="tab">💶 Vue d'ensemble</button>
+                <button class="qv-chip ${finTab === 'vat' ? 'active' : ''}" data-ftab="vat" role="tab">🇪🇺 TVA &amp; conformité${vatAttention ? ' <span style="color:#fbbf24">⚠</span>' : ''}</button>
+            </div>
+            <div id="fin-tab-overview"${finTab === 'vat' ? ' style="display:none"' : ''}>
             <!-- 1 ── Résumé financier : les 5 métriques dominantes, en tête ── -->
             <div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">💶 Résumé financier</div><div class="admin-cards">
                 ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲')}
@@ -1222,14 +1236,11 @@ class AdminPage {
             <div class="kpi-group"><div class="kpi-gtitle">💳 Revenu par rail — 🌐 web (Revolut) vs 📱 stores mobiles</div>
                 ${railCards ? `<div class="rail-cards">${railCards}</div>` : '<div class="ssub">Aucun abonnement ni essai — les cartes Revolut / Google Play / App Store apparaîtront ici avec les premiers clients.</div>'}
             </div>
-            <!-- 2bis ── Géographie du revenu + préparation TVA/OSS ── -->
-            <div class="fin-cols">
-                <div class="admin-block"><h2>🌍 Répartition par pays</h2>
-                    <div class="ssub" style="margin-bottom:10px">Pays du storefront (Play) ou d'émission de la carte (Revolut, proxy ~95 %).</div>
-                    ${countryBars}
-                    ${countryRailRows ? `<div class="kpi-gtitle" style="margin:14px 0 8px">Par pays &amp; rail</div><div class="scroll"><table><thead><tr><th>Pays</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${countryRailRows}</tbody></table></div>` : ''}
-                </div>
-                <div class="admin-block" id="fin-vat"><h2>🇪🇺 TVA — préparation OSS</h2><div id="fin-vat-body"><div class="ssub">Chargement…</div></div></div>
+            <!-- 2bis ── Géographie du revenu (la conformité TVA vit dans son onglet) ── -->
+            <div class="admin-block"><h2>🌍 Répartition par pays</h2>
+                <div class="ssub" style="margin-bottom:10px">Pays du storefront (Play) ou d'émission de la carte (Revolut, proxy ~95 %).</div>
+                ${countryBars}
+                ${countryRailRows ? `<div class="kpi-gtitle" style="margin:14px 0 8px">Par pays &amp; rail</div><div class="scroll"><table><thead><tr><th>Pays</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${countryRailRows}</tbody></table></div>` : ''}
             </div>
             <!-- 3 ── Risque revenu : tout ce qui menace le revenu, regroupé ── -->
             <div class="kpi-group kpi-group--risk ${anyRisk ? 'has-risk' : ''}"><div class="kpi-gtitle">⚠️ Risque revenu — cliquer un statut pour ouvrir la liste</div><div class="admin-cards">
@@ -1267,7 +1278,23 @@ class AdminPage {
             <!-- 5 ── Ops : log opérationnel + export ── -->
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
                 ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Pays</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
-            </div></div>`;
+            </div></div>
+            </div>
+            <!-- ── Onglet TVA & conformité : le cockpit a sa propre page ── -->
+            <div id="fin-tab-vat"${finTab === 'vat' ? '' : ' style="display:none"'}>
+                <div class="admin-block" id="fin-vat"><h2>🇪🇺 TVA — préparation OSS</h2><div id="fin-vat-body"><div class="ssub">Chargement…</div></div></div>
+            </div>`;
+
+        // Bascule d'onglet : les deux conteneurs sont rendus, on ne fait que montrer/cacher
+        // (l'état du panneau TVA — trimestre choisi, assistant ouvert — survit à la bascule).
+        el.querySelectorAll('#fin-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            const tab = chip.dataset.ftab || 'overview';
+            this._financeTab = tab;
+            el.querySelectorAll('#fin-tabs .qv-chip').forEach(c => c.classList.toggle('active', c === chip));
+            const ov = document.getElementById('fin-tab-overview'), vt = document.getElementById('fin-tab-vat');
+            if (ov) ov.style.display = tab === 'overview' ? '' : 'none';
+            if (vt) vt.style.display = tab === 'vat' ? '' : 'none';
+        }));
 
         // Header status line: MRR · échecs · conversions + a "live" freshness badge.
         const tx = document.querySelector('#page-admin .crm-head-tx');
@@ -1379,7 +1406,7 @@ class AdminPage {
             if (isEu && !isFr) { ossBaseEur += baseEur; ossVatEur += vatDue; }
             return { r, cc, isEu, isFr, unknown, baseEur, rate, vatDue };
         });
-        const rowsHtml = rowsCalc.map(x => `<tr>
+        const rowsHtml = rowsCalc.map(x => `<tr class="vat-cc-row" data-cc="${esc(x.cc)}" style="cursor:pointer" title="Voir les transactions de ce pays (registre)">
             <td>${x.unknown ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(x.cc)}</td>
             <td>${x.isEu ? (x.isFr ? '<span class="ssub">France · franchise</span>' : '<span class="badge blue">UE · OSS</span>') : (x.unknown ? '<span class="ssub">—</span>' : '<span class="badge gray">hors UE</span>')}</td>
             <td class="num" title="${n(x.r.n_tx)} tx · brut ${money(x.r.gross_cents)}${Number(x.r.refunded_cents) > 0 ? ' · remb. −' + money(x.r.refunded_cents) : ''}">${money(x.r.net_cents)}</td>
@@ -1469,7 +1496,8 @@ class AdminPage {
             ${corrections.map(c => `<tr><td>T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))}</td><td>${c.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(c.country_code)}</td><td class="num">−${money(c.refund_cents)}</td></tr>`).join('')}
             </tbody></table></div>
             <div class="ssub" style="margin-top:4px">À reporter dans la <b>rubrique corrections</b> de la déclaration OSS, sur la période d'origine (pas en négatif du trimestre courant — délai 3 ans).</div>` : ''}
-            ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer (ces transactions n'entrent pas dans le total tant que leur pays est inconnu).</div>` : ''}
+            <div id="vat-tx" style="display:none;margin-top:10px;border:1px solid #2a2a38;border-radius:8px;padding:10px"></div>
+            ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer. <button class="mini-btn" id="vat-tx-unknown">Voir les transactions sans pays</button></div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
             <div id="vat-assist" style="display:none;margin-top:14px;border:1px solid #2a2a38;border-radius:10px;padding:14px;background:rgba(124,147,255,.05)"></div>
             <div class="kpi-gtitle" style="margin:16px 0 6px">📋 Checklist de conformité</div>
@@ -1508,6 +1536,41 @@ class AdminPage {
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         });
+
+        // ── Drill-down registre : les transactions derrière chaque ligne pays ──────
+        // Couche de confiance : chaque ligne de la déclaration est vérifiable à la
+        // transaction près (esprit du registre art. 63c), avec sa preuve de
+        // localisation ; '??' liste les inconnues à résoudre (clic → fiche client).
+        const txEl = document.getElementById('vat-tx');
+        const loadTx = async (cc) => {
+            if (!txEl) return;
+            if (txEl.dataset.cc === cc && txEl.style.display !== 'none') { txEl.style.display = 'none'; return; }
+            txEl.dataset.cc = cc;
+            txEl.style.display = '';
+            txEl.innerHTML = '<div class="ssub">Chargement…</div>';
+            try {
+                const res = await this._rpc('admin_vat_transactions', { p_year: vat.year, p_quarter: vat.quarter, p_country: cc });
+                const list = (res && Array.isArray(res.rows)) ? res.rows : [];
+                const dt2 = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+                const KINDS = { first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', refund: 'remboursement' };
+                const trs = list.map(x => `<tr class="user-row" data-user-id="${esc(x.user_id)}" tabindex="0" style="cursor:pointer" title="Ouvrir la fiche client">
+                    <td>${esc(dt2(x.at))}</td><td>${esc(x.email || x.user_id)}</td>
+                    <td>${KINDS[x.kind] || esc(x.kind)}</td>
+                    <td class="num">${x.kind === 'refund' ? '−' : ''}${money(x.amount)}</td>
+                    <td>${AdminPage.flag(x.country_code)}</td>
+                    <td>${x.evidence === 'card_bin' ? '<span class="badge blue" title="Pays d\'émission de la carte — élément de preuve fourni par Revolut (art. 24f, item c)">BIN carte</span>' : '<span class="badge amber" title="Aucune preuve de localisation capturée">aucune</span>'}</td>
+                </tr>`).join('');
+                txEl.innerHTML = `<div class="kpi-gtitle" style="margin:0 0 8px">Registre — ${cc === '??' ? 'transactions sans pays' : 'transactions ' + AdminPage.flag(cc)} · T${vat.quarter} ${vat.year} (${AdminPage.n(res.total)})</div>
+                    ${trs ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Client</th><th>Type</th><th class="num">Montant</th><th>Pays</th><th>Preuve</th></tr></thead><tbody>${trs}</tbody></table></div>` : '<div class="ssub">Aucune transaction.</div>'}
+                    ${Number(res.total) > list.length ? `<div class="ssub" style="margin-top:4px">Affichage limité aux 500 plus récentes (${AdminPage.n(res.total)} au total).</div>` : ''}
+                    ${cc === '??' ? '<div class="ssub" style="margin-top:6px">Pour résoudre : ouvrir la fiche du client (clic sur la ligne) — son prochain paiement re-capturera le pays automatiquement ; sinon, retrouver le pays de la carte sur l\'ordre dans le dashboard Revolut et le corriger en base.</div>' : ''}`;
+            } catch (e) {
+                txEl.innerHTML = `<div class="ssub">Registre indisponible : ${esc(e.message)}${/PGRST202/.test(String(e.message)) ? ' — déployez la migration 20260717170000 + NOTIFY pgrst.' : ''}</div>`;
+            }
+        };
+        el.querySelectorAll('.vat-cc-row').forEach(tr => tr.addEventListener('click', () => loadTx(tr.dataset.cc)));
+        const unkBtn = document.getElementById('vat-tx-unknown');
+        if (unkBtn) unkBtn.addEventListener('click', () => loadTx('??'));
 
         // ── Checklist de conformité (persistée en localStorage — outil mono-admin) ──
         const ckEl = document.getElementById('vat-checklist');
