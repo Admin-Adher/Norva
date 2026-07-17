@@ -13,9 +13,13 @@
 >    + **base backup physique hebdo** (dimanche 04:10 UTC). RPO ≈ 5 min,
 >    restauration à n'importe quel instant. → `RESTORE.md`.
 >
-> Le workflow GitHub `backup-db-to-r2.yml` continue de sauvegarder le **managé
+> ~~Le workflow GitHub `backup-db-to-r2.yml` continue de sauvegarder le **managé
 > dormant** (préfixe `db/`) pendant la fenêtre de rollback — le désactiver quand
-> le managé sera résilié.
+> le managé sera résilié.~~ **Fait** : managé supprimé + workflow retiré (`c0b9b55`).
+> Le préfixe `db/` sur R2 est donc figé (dumps d'avant le cutover du 11/07) — garder
+> le plus récent en archive historique, le reste est supprimable :
+> `rclone lsf r2:$R2_BUCKET/db/ | sort | head -n -1 | rclone delete r2:$R2_BUCKET/db/ --files-from - --dry-run`
+> (retirer `--dry-run` après vérification de la liste).
 
 ## Layout R2 (bucket unique)
 

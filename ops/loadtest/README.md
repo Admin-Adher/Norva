@@ -1,0 +1,82 @@
+# Test de charge — « la box tient-elle 1000 users simultanés ? »
+
+Valide sous burst réel le seul composant que l'audit du 2026-07-17 n'a pas pu
+chiffrer au repos : **edge-runtime** (les isolates Deno de norva-cloud), derrière
+la chaîne complète Caddy → Kong → PostgREST → Postgres. Tout le reste est déjà
+dimensionné (box à ~2 % de charge, pool PostgREST 40, cache hit 99,94 %).
+
+## 1. Règles d'or
+
+- **Jamais depuis la box** (ça mesurerait le loopback et volerait le CPU mesuré).
+  Depuis ton PC (fibre) ou un VPS jetable. `dig api.norva.tv` doit répondre l'IP
+  de la box (pas de proxy Cloudflare devant — Caddy fait le TLS lui-même).
+- **Heure creuse** (nuit UTC), et préviens-toi toi-même : netdata va légitimement
+  râler sur Telegram pendant le palier.
+- Toujours **SMOKE d'abord** (50 VUs, 3 min), full ensuite. `Ctrl+C` arrête net.
+- Le scénario d'écriture (`WRITE=1`) exige le **compte de test** — jamais ton
+  compte perso (il écrit des entrées d'historique `k6-*`).
+
+## 2. Préparation (5 min)
+
+```bash
+# installer k6 (Linux/macOS — https://k6.io/docs/get-started/installation/)
+sudo gpg -k && sudo apt-get install -y k6   # ou : brew install k6
+
+# APIKEY = la clé publishable (anon) — celle du front (Studio → Settings → API)
+export APIKEY='eyJ...'
+
+# TOKEN = access_token d'un COMPTE DE TEST connecté sur https://norva.tv/app.html :
+# DevTools → Application → Local Storage → norva-cloud-session → access_token
+# (expire ~1 h : à re-copier juste avant le run)
+export TOKEN='eyJ...'
+```
+
+## 3. Les trois runs, dans l'ordre
+
+```bash
+cd ops/loadtest
+
+# 1) SMOKE — 50 VUs lecture, 3 min : vérifie que tout est câblé
+k6 run -e SMOKE=1 -e APIKEY="$APIKEY" -e TOKEN="$TOKEN" k6-capacity.js
+
+# 2) FULL lecture — 1000 VUs qui browsent (boot + history + favorites), ~16 min
+k6 run -e APIKEY="$APIKEY" -e TOKEN="$TOKEN" k6-capacity.js
+
+# 3) FULL + écritures — ajoute 100 heartbeats/s (le vrai profil « 1000 viewers »)
+k6 run -e APIKEY="$APIKEY" -e TOKEN="$TOKEN" -e WRITE=1 k6-capacity.js
+```
+
+Variables : `USERS=500` pour viser moins, `BASE_URL=` pour un autre environnement.
+
+## 4. Pendant le run — sur la box, dans un autre terminal
+
+```bash
+watch -n 5 'docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | head -6; uptime'
+```
+
+Les trois jauges qui comptent : CPU de `norva-edge-functions` (le sujet du test),
+CPU de `norva-db`, et la charge machine (16 threads → inquiétant au-delà de ~12).
+
+## 5. Lire le verdict
+
+k6 imprime ses seuils à la fin :
+
+- ✅ `http_req_failed rate<0.01` et `p(95)<500ms` verts au palier 1000 VUs
+  → **la box tient 1000 users simultanés, dossier clos.**
+- ❌ p95 lecture qui s'envole mais DB CPU bas → edge-runtime sature : le levier
+  est `docker compose up -d --scale functions=2` derrière Kong (ou tuning
+  per-worker), à ce moment-là seulement.
+- ❌ erreurs 5xx avec `norva-db` CPU haut → revenir me voir avec la sortie k6 +
+  le `docker stats` : on regardera les requêtes lentes (`pg_stat_statements`).
+
+## 6. Nettoyage après un run WRITE=1
+
+```bash
+docker exec -i norva-db psql -U postgres -d postgres -c \
+  "delete from public.cloud_watch_history where item_id like 'k6-%';"
+```
+
+(Les lignes sont cantonnées au compte de test, source_id NULL — rien d'autre à
+purger. Les seuils du script sont volontairement plus stricts que l'expérience
+réelle perçue : un p95 à 600 ms « échouerait » le test mais resterait invisible
+pour un humain — c'est une marge, pas une falaise.)
