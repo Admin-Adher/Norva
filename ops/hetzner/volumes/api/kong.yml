@@ -342,8 +342,12 @@ services:
 
   ## Edge Functions routes
   - name: functions-v1
-    _comment: 'Edge Functions: /functions/v1/* -> http://functions:9000/*'
-    url: http://functions:9000/
+    _comment: 'Edge Functions: /functions/v1/* -> upstream edge-functions-pool (round-robin)'
+    # Audit capacité 2026-07-17 : le routeur `main` d'edge-runtime est un isolate V8
+    # monothread — UN conteneur plafonne toute l'API à ~95-100 req/s sur un seul cœur
+    # (mesuré k6, edge à 95,9 % = 1 cœur pendant que 15 dorment). Le service pointe
+    # désormais sur l'upstream ci-dessous : chaque conteneur ajoute ~95 req/s.
+    url: http://edge-functions-pool/
     read_timeout: 150000
     routes:
       - name: functions-v1-all
@@ -465,3 +469,26 @@ services:
       - name: basic-auth
         config:
           hide_credentials: true
+
+###
+### Upstreams (audit capacité 2026-07-17)
+###
+# Pool des conteneurs edge-runtime : round-robin + healthcheck TCP actif — une
+# cible morte est éjectée en ~10 s et le trafic bascule sur l'autre (au lieu de
+# 50 % d'erreurs). Ajouter un conteneur = ajouter une target ici + un service
+# functionsN dans le compose.
+upstreams:
+  - name: edge-functions-pool
+    targets:
+      - target: functions:9000
+      - target: functions2:9000
+    healthchecks:
+      active:
+        type: tcp
+        healthy:
+          interval: 5
+          successes: 1
+        unhealthy:
+          interval: 5
+          tcp_failures: 2
+          timeouts: 2

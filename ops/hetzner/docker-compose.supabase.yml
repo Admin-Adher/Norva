@@ -339,7 +339,9 @@ services:
       # dispatches /functions/v1/<name> -> /home/deno/functions/<name>.
       - ../../supabase/functions:/home/deno/functions:ro
       - deno-cache:/root/.cache/deno
-    environment:
+    # Ancre YAML : functions2 (scale-out, audit capacité 2026-07-17) réutilise ce
+    # bloc env à l'identique — une seule source de vérité pour les secrets.
+    environment: &functions-env
       JWT_SECRET: ${JWT_SECRET}
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
@@ -398,6 +400,35 @@ services:
       # released at /confirm). Lower = smaller transient hold; keep it high enough that
       # issuers reliably authorise it. Tunable without a code deploy.
       NORVA_REVOLUT_VALIDATION_CENTS: ${NORVA_REVOLUT_VALIDATION_CENTS:-50}
+    command:
+      - start
+      - --main-service
+      - /home/deno/functions/main
+
+  # --- Edge runtime, 2e conteneur (audit capacité 2026-07-17) -----------------
+  # Le routeur `main` d'edge-runtime est un isolate V8 MONOTHREAD : un conteneur
+  # plafonne toute l'API à ~95-100 req/s sur un cœur (mesuré k6 — edge à 95,9 %
+  # = 1 cœur pendant que 15 dorment). Kong round-robine sur l'upstream
+  # edge-functions-pool (volumes/api/kong.yml) : chaque conteneur ajoute
+  # ~95 req/s. Pour un 3e : dupliquer ce bloc (functions3, deno-cache-3) + une
+  # target dans kong.yml.
+  functions2:
+    container_name: norva-edge-functions-2
+    image: supabase/edge-runtime:v1.74.0
+    restart: unless-stopped
+    depends_on:
+      kong:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/9000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ../../supabase/functions:/home/deno/functions:ro
+      # Cache deno séparé : deux runtimes qui écrivent le même cache se corrompent.
+      - deno-cache-2:/root/.cache/deno
+    environment: *functions-env
     command:
       - start
       - --main-service
@@ -505,6 +536,7 @@ services:
 volumes:
   db-config:
   deno-cache:
+  deno-cache-2:
 
 # Notes:
 # - pg_cron + pg_net run INSIDE the db container; the cron jobs are recreated by
