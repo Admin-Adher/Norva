@@ -13,6 +13,7 @@ import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, isAdminUser, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor } from "../_shared/xtream-sync.ts";
+import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -617,6 +618,12 @@ async function requireUser(req: Request, db: SupabaseClient): Promise<CloudUser>
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) throw new HttpError(401, "Missing bearer token");
+
+  // Vérif locale d'abord (voir _shared/local-auth.ts) — GoTrue n'est consulté
+  // que si le verdict est indécidable localement (alg asymétrique, secret absent).
+  const local = await verifyUserJwtLocally(token);
+  if (local === "invalid") throw new HttpError(401, "Invalid bearer token");
+  if (local !== "fallback") return local;
 
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "Invalid bearer token", error?.message);

@@ -439,3 +439,74 @@ Fix `8af7e5e` + **validation d'appariement ajoutée** (chaque `-c` doit être su
 name=value — à rejouer à chaque édition de ce fichier) :
 `python3 -c "import yaml; c=yaml.safe_load(open('ops/hetzner/docker-compose.supabase.yml'))['services']['db']['command']; [print('BAD',i) for i,a in enumerate(c) if a=='-c' and (i+1>=len(c) or c[i+1]=='-c' or '=' not in c[i+1])]"`
 Recovery : git pull → up -d db (healthy 5 s) → up -d rest → `show wal_compression` = zstd. ✅
+
+### §19 — Campagne k6 « 1000 users réels » : 3 goulots tombés, verdict VALIDÉ (2026-07-17 soir)
+
+**Protocole** : k6 depuis le PC d'Adrien (jamais la box), profil RÉALISTE + WRITE=1 —
+1000 VUs qui bootent 1×/session puis lisent history/favorites avec temps humain, + 100
+heartbeats/s (`ops/loadtest/k6-capacity.js`, README §3). Trois runs, trois diagnostics :
+
+| Run | Config | Échecs | p95 lecture | Load box (15 min) |
+|---|---|---|---|---|
+| 1 | 1 conteneur edge | 62 % | ~1 s | ~16 |
+| 2 | 2 conteneurs edge | 72 % | 814 ms | 7,4 |
+| 3 | + vérif JWT locale | **0,00 %** | **134 ms** | **1,33** |
+
+**Goulot n°1 — le routeur `main` d'edge-runtime est un isolate V8 MONOTHREAD** : un conteneur
+plafonne TOUTE l'API à ~95-100 req/s sur un cœur (edge à 95,9 % = 1 cœur, 15 qui dorment).
+Deux étages de fix : (a) pool v2 par ALIAS de chemin (`e06ead8`) — la v1 gardait des handles
+de workers, un handle mort ne se rafraîchit pas dans ce runtime → ~660 recréations/slot en
+tempête ; la v2 crée des modules « lane » d'une ligne (norva-cloud--p2..p6, catalog/playback
+--p2..p4) et le routeur fait un simple round-robin d'alias, zéro état ; (b) scale-out
+horizontal (`14c119f`) — service `functions2` (env ancré `*functions-env`, cache deno séparé)
++ upstream Kong `edge-functions-pool` (2 targets, healthcheck TCP actif). Équilibrage vérifié
+chirurgical (32 027 vs 32 065 erreurs de part et d'autre au run 2). Un 3ᵉ conteneur =
+dupliquer le bloc + 1 target (commenté dans le compose).
+
+**Goulot n°2 — GoTrue (le vrai mur, révélé par le scale-out)** : chaque requête de fonction
+faisait un GET interne `/auth/v1/user` (Kong→GoTrue). Au run 2, dès la minute 3 (démarrage
+des heartbeats, ~130 req/s offerts) : **67 433 × HTTP 500 sur /auth/v1/user**, latence /user
+30→126 ms, pool DB GoTrue (défaut minuscule) épuisé — chaque 500 ressortait en « 401 Invalid
+bearer token » côté client pendant que la box s'ennuyait (load 7,4). L'aller-retour était de
+la redondance pure : PostgREST re-vérifie le même JWT sur chaque requête DB (RLS). Fix
+`b040c60` : **`_shared/local-auth.ts`** — vérif HS256 locale (JWT_SECRET de l'env), verdicts
+user/invalid/fallback (GoTrue consulté uniquement si indécidable : alg asymétrique futur,
+secret absent → le déploiement managé garde son comportement) ; anon/service_role rejetées
+par le contrôle aud+role+sub ; branché dans les 4 fonctions chaudes (norva-cloud, catalog,
+playback, series-info), replis device-token intacts, chemins sensibles (admin, account-delete,
+billing, support) gardent getUser. + `GOTRUE_DB_MAX_POOL_SIZE=20` (borné, protège les 200
+conn de PG) .
+
+**Goulot n°3 — EMFILE** : boots de workers en échec « Too many open files (os error 24) »
+sous charge (nofile hérité 1024). Fix : `ulimits nofile 262144` sur les deux conteneurs edge
+(compose, `b040c60`) — nécessite une RECRÉATION (`up -d`), pas un restart.
+
+**Verdict final (run 3)** : 89 212 requêtes à 94,9 req/s soutenus, **0,00 % d'échec**, p95
+lecture 134 ms / écriture 54 ms, p99 182 ms, max 420 ms, load 15-min 1,33. **La box tient
+1000 users simultanés avec une marge énorme — dossier clos.** Le plafond réel post-fix n'a
+pas été sondé (aucune saturation) ; si besoin un jour : `STRESS=1` le re-mesurera.
+
+**Capacité concrète & plan de scaling (à jour du 17/07 soir)** :
+- 1000 users réels ≈ ~130 req/s au pic (navigation + 100 heartbeats/s). Seul plafond dur
+  connu : le routeur edge-runtime, ~95-100 req/s PAR conteneur (monothread) → 2 conteneurs
+  ≈ 190-200 req/s. **Sans rien toucher : ~1500 (confortable) à ~2000 simultanés.**
+- Au-delà : **+1 conteneur edge = +~95-100 req/s ≈ +700-1000 simultanés, opération de
+  ~5 min** (dupliquer le bloc `functions2` → `functions3` + volume `deno-cache-3` + une
+  target dans l'upstream `edge-functions-pool` de kong.yml, `up -d functions3` puis restart
+  kong). Prochains candidats-goulots vers ~3-4000 : GoTrue sur les PICS DE LOGIN (le régime
+  établi ne le touche plus) et le pool PostgREST (40) — réglables sans changer de machine ;
+  la DB est très loin (cache 99,94 %, 8 tx/s au repos).
+- Traduction business : 1000 simultanés au pic ≈ ~5-10k abonnés actifs (concurrence de
+  pointe ≈ 10-20 % des utilisateurs quotidiens). Et les FLUX VIDÉO ne transitent pas par la
+  box (providers direct / gateway Railway / relay CF) — l'axe streaming se dimensionne côté
+  sources/gateway, indépendamment de cette capacité API.
+
+**Leçons de terrain (consignées au README loadtest)** : token à re-copier FRAIS avant chaque
+run (5 dernières min du run 2 = 100 % 403, expiration pile à 15:55:29Z) ; tout passer par
+`Read-Host` en PowerShell (un collage multiligne dans `$env:APIKEY` → `invalid header field
+value`, les requêtes ne partent même pas du PC) ; APIKEY = la clé ANON (`ANON_KEY` du .env
+box), pas l'access_token ; `docker stats` à photographier vers la minute 8-10 du palier (post-
+run tout retombe en secondes) ; après un run WRITE, purge
+`delete from public.cloud_watch_history where item_id like 'k6-%';`. Piste future (non
+nécessaire aujourd'hui) : vérif JWT aussi dans le routeur main (VERIFY_JWT), et GoTrue reste
+le composant le moins scalé si un jour les logins massifs deviennent un profil réel.

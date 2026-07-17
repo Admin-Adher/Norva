@@ -7,6 +7,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
+import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -575,8 +576,14 @@ async function requireUserId(req: Request) {
     return requireDeviceUserId(token);
   }
 
-  const { data, error } = await db.auth.getUser(token);
-  if (!error && data.user?.id) return data.user.id;
+  // Vérif locale d'abord (voir _shared/local-auth.ts) — GoTrue n'est consulté
+  // que si le verdict est indécidable localement (alg asymétrique, secret absent).
+  const local = await verifyUserJwtLocally(token);
+  if (local !== "invalid" && local !== "fallback") return local.id;
+  if (local === "fallback") {
+    const { data, error } = await db.auth.getUser(token);
+    if (!error && data.user?.id) return data.user.id;
+  }
 
   return requireDeviceUserId(token);
 }
