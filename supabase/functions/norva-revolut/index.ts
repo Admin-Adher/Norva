@@ -94,14 +94,15 @@ function orderCustomerId(order: JsonRecord): string | null {
 
 // Card ISSUING country from the order's payment details (ISO alpha-2) — the customer-
 // country proxy for the web rail (~95 % for consumer cards; decided 2026-07-17).
-// The field's location differs across Merchant API generations, so try every known
-// path; null when the order carries no payment details (e.g. still pending).
+// CONFIRMED on live sandbox events (étape 0, 2026-07-17): the field is
+// payments[].payment_method.card.card_country. Older candidates kept as fallback
+// for other API generations; null when the order carries no payment details yet.
 function cardCountryFromOrder(order: JsonRecord): string | null {
   const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
   for (const p of payments) {
     const pm = (p.payment_method && typeof p.payment_method === "object") ? p.payment_method as JsonRecord : {};
     const card = (pm.card && typeof pm.card === "object") ? pm.card as JsonRecord : {};
-    const raw = pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
+    const raw = card.card_country ?? pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
     if (typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim())) return raw.trim().toUpperCase();
   }
   return null;
@@ -131,7 +132,7 @@ async function savedCard(customerId: string): Promise<{ id?: string; last4?: str
   const ey = md.expiry_year ?? md.exp_year;
   // Issuing country if the payment-method shape carries it (field name varies / may be
   // absent — the order's payment details are the primary source, this is a fallback).
-  const ccRaw = md.card_country_code ?? md.country_code ?? md.country ?? md.issuer_country;
+  const ccRaw = md.card_country ?? md.card_country_code ?? md.country_code ?? md.country ?? md.issuer_country;
   const country = (typeof ccRaw === "string" && /^[A-Za-z]{2}$/.test(ccRaw.trim())) ? ccRaw.trim().toUpperCase() : undefined;
   return {
     id: card.id ? String(card.id) : undefined,

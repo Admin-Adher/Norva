@@ -184,14 +184,15 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   return patch;
 }
 
-// Card issuing country (ISO alpha-2) from the order's payment details. The field's
-// location differs across Merchant API generations — try every known path.
+// Card issuing country (ISO alpha-2) from the order's payment details. CONFIRMED on
+// live events (étape 0, 2026-07-17): payments[].payment_method.card.card_country.
+// Older candidates kept as fallback for other API generations.
 function cardCountryFromOrder(order: JsonRecord): string | null {
   const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
   for (const p of payments) {
     const pm = recordOrEmpty(p.payment_method);
     const card = recordOrEmpty(pm.card);
-    const raw = pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
+    const raw = card.card_country ?? pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
     if (typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim())) return raw.trim().toUpperCase();
   }
   return null;

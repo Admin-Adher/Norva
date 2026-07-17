@@ -31,7 +31,7 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 
 ## ⚠️ À NE PAS OUBLIER (avant/pendant le déploiement)
 
-1. **Étape 0 non faite** (impossible depuis la session — pas d'accès à la box) : vérifier sur données live que `payload->'order'->'payments'` porte bien `card_country_code` (requêtes prêtes dans `CLIENT-COUNTRY.md`). Si absent : backfill web = 0 ligne (silencieux, sans erreur) et il faut ajuster les chemins jsonb (migration + 3 edge Revolut).
+1. ~~Étape 0 non faite~~ → **FAITE le 2026-07-17 sur données live** : champ réel = `payments[].payment_method.card.card_country` (pas `card_country_code` → backfills Revolut de 20260717120000 en `UPDATE 0`). Rattrapage : migration `20260717140000_revolut_card_country_backfill_fix.sql` (en `supabase_admin`) + redéploiement `norva-revolut`/`norva-revolut-webhook`. Rail RC validé du premier coup. Autres découvertes du déploiement : `postgres` n'est **pas owner** de `cloud_revolut_customers` (dump Hetzner) → **toujours migrer en `supabase_admin`** ; et un changement de **signature** RPC exige `NOTIFY pgrst, 'reload schema'` (sinon 404 PGRST202 même après migration).
 2. **Ordre strict** : migration SQL **avant** le déploiement des 4 edge functions (elles écrivent les nouvelles colonnes).
 3. La migration **DROP + recrée** `admin_users_page` et `admin_users_export` avec un argument de plus — le front déployé (ancien comme nouveau) reste compatible (appels par arguments nommés + défaut null), mais tout script perso appelant l'ancienne signature positionnelle casserait.
 4. Le `?v=58` d'`AdminPage.js` est dans `app.js` (commit 3) — sans lui, les navigateurs servent l'ancien admin en cache.

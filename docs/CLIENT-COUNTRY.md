@@ -36,10 +36,12 @@ l'art. 24f du règl. 282/2011 (voir `TVA-OSS.md` §5).
 | `norva-revolut-webhook` | même extraction sur l'order re-fetché → `projectionPatch` (filet pour les conversions sans `/confirm`) |
 | `norva-revolut-billing` | chaque charge journalisée porte `country_code = card_country` du mapping |
 
-`cardCountryFromOrder` essaie plusieurs chemins (API legacy `/api/1.0` vs 2024-09) :
-`payments[].payment_method.card_country_code`, `payments[].payment_method.card.card_country_code`,
-`payments[].payment_method.card.country_code`, `payments[].card_country_code`.
-Un événement sans payment details ne **null-ifie jamais** un pays déjà connu.
+`cardCountryFromOrder` : chemin **confirmé sur données live** (étape 0, 2026-07-17) =
+`payments[].payment_method.card.card_country` — testé en premier ; les anciens
+candidats (`card_country_code` sous ses variantes) restent en fallback pour une
+autre génération d'API. Un événement sans payment details ne **null-ifie jamais**
+un pays déjà connu. NB : `billing_address.country_code` apparaît parfois (parcours
+hosted) — non utilisé, décision produit « pays carte seul ».
 
 ## Backfill (dans la migration, idempotent — `where … is null` partout)
 
@@ -50,10 +52,18 @@ Un événement sans payment details ne **null-ifie jamais** un pays déjà connu
 4. Ledger Revolut : match `order_id` depuis `payload->'order'->>'id'`, puis fallback
    par client via `card_country`.
 
-### ⚠️ Étape 0 — vérification à faire sur la box (jamais confirmée sur données live)
+### ✅ Étape 0 — FAITE le 2026-07-17 sur données live
 
-Aucun payload d'exemple n'existe dans le repo ; les chemins Revolut sont défensifs
-mais **non confirmés**. Après (ou avant) la migration :
+Verdict : le champ réel est `payments[].payment_method.card.card_country` (les
+chemins `card_country_code` de la migration 20260717120000 ne matchaient pas →
+ses backfills Revolut ont rendu `UPDATE 0`). Corrigé par la migration de
+rattrapage `20260717140000_revolut_card_country_backfill_fix.sql` (à exécuter en
+`supabase_admin` — `postgres` n'est pas owner de `cloud_revolut_customers` ; pas
+de reload PostgREST nécessaire, aucune signature ne change) + les fonctions
+`norva-revolut` / `norva-revolut-webhook` à redéployer. Rail RC confirmé du
+premier coup (`payload->>'country_code'`).
+
+Requêtes de contrôle (réutilisables après tout changement d'API Revolut) :
 
 ```sql
 -- Le pays carte est-il bien dans l'order stocké par le webhook ?
@@ -71,9 +81,10 @@ select country_source, count(*) from cloud_entitlement_projection
 where country_code is not null group by 1;
 ```
 
-Si `card_country_code` n'apparaît pas dans `payments`, le backfill web rend 0 ligne
-(sans erreur) et seule la capture live via `/confirm` couvrira le rail — ajuster
-les chemins dans la migration ET dans les 3 fonctions edge Revolut.
+Si un futur changement d'API déplace le champ, le backfill rend 0 ligne (sans
+erreur) et seule la capture live via `/confirm` couvre le rail — ajuster les
+chemins dans une migration de rattrapage ET dans les fonctions edge Revolut
+(pattern : 20260717140000).
 
 ### Couverture attendue (structurel, pas un bug)
 
