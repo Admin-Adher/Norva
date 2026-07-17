@@ -215,3 +215,37 @@ les rails riches (porteurs de `variants[]`) gardent le chemin direct inchangé ;
 échoue/lève, fallback sur l'ancien comportement (fiche mono-version, jamais pire qu'avant).
 HomePage v46. Testé : 7 assertions headless Chromium sur le vrai prototype (mapping series/movie,
 fallback false + throw, rail riche intact).
+
+---
+
+## §13 — Audit mobile : contenu rogné en bas de page (VOD + Settings) — corrigé
+
+**Symptôme** : sur le webview mobile, le bas de page est quasi systématiquement rogné (~60 à
+140 px) — grilles VOD, settings, guide TV.
+
+**3 causes racines trouvées** :
+1. **`#app` : fallbacks de hauteur dans le MAUVAIS ordre** — `-webkit-fill-available` déclaré
+   APRÈS `100dvh`, donc il gagnait partout (le dernier valide l'emporte) : l'app entière se
+   dimensionnait sur le grand viewport Android → tout le bas passait derrière l'UI navigateur.
+   Les commentaires du code croyaient l'inverse. → réordonné : `100vh` → `-webkit-fill-available`
+   → **`100dvh` gagnant**.
+2. **6 conteneurs dimensionnés en `calc(100vh - …)` sans paire `dvh`** : `.settings-container`
+   (base + mobile), `.movies-grid`, `.series-grid` (base + mobile), `.epg-grid` (base + mobile),
+   `.content-browser` → rognés par la barre d'URL dynamique.
+3. **Aucun d'eux ne soustrayait la bottom-nav mobile (56 px + safe-area)** : la compensation
+   n'existait que sur `.main-content` (padding), que ces conteneurs viewport-sized ignorent.
+
+**Fix** : variable unique `--bottom-nav-h` (0 par défaut ; `calc(56px + env(safe-area-inset-bottom))`
+dans le breakpoint ≤640px qui affiche la barre), soustraite partout + paires `100vh`/`100dvh`
+sur les 6 conteneurs ; le padding de `.main-content` consomme la même variable (une seule
+source de vérité). `support.html` : paire dvh sur `body{min-height}` (cosmétique). Fiches
+Movies/Series : vérifiées SAINES (in-flow dans la chaîne de hauteur → héritent du padding).
+
+**Vérifié** : harnais headless Chromium avec la vraie main.css — 390×844 (barre active) : les
+5 conteneurs finissent ≤ ligne de barre, padding 56 px, `#app` = viewport exact ; 800×900
+(sans barre) : var à 0, aucun sur-rognage. PASS complet.
+
+**Versions Android pour build AAB** : TV `versionCode 17→18`, `versionName 3.8.4→3.8.5-hybrid`.
+Phone DÉJÀ à `versionCode 14 / 1.3.1` (bump antérieur 8f0ddf8, non publié) — inchangé. Les deux
+clients étant des webviews distants, les fixes CSS arrivent via le déploiement web sans rebuild ;
+l'AAB ne sert que le versioning store.

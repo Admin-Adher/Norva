@@ -7,6 +7,11 @@
   /* iOS Safari toolbar compensation (set dynamically by JS) */
   --ios-ui-bottom: 0px;
 
+  /* Height of the fixed mobile bottom nav (0 outside the ≤640px breakpoint).
+     Every viewport-sized container (calc(100vh/100dvh - …)) must subtract it,
+     otherwise its last rows hide behind the bar. */
+  --bottom-nav-h: 0px;
+
 
   /* Colors */
   --color-bg-primary: #080B12;
@@ -150,12 +155,16 @@ body {
 #app {
   display: flex;
   flex-direction: column;
+  /* Order matters — LAST supported value wins. dvh must be the winner: with
+     -webkit-fill-available last, every dvh-capable browser (all modern mobile
+     webviews) used fill-available instead, which tracks the LARGE viewport on
+     Android — the whole app ran taller than the visible area and the bottom
+     was clipped behind the browser UI. */
   height: 100vh;
-  /* fallback */
-  height: 100dvh;
-  /* dynamic viewport height for modern browsers */
+  /* old-WebKit fallback (pre-dvh iOS) */
   height: -webkit-fill-available;
-  /* iOS Safari fallback */
+  /* dynamic viewport height — the modern truth */
+  height: 100dvh;
 }
 
 /* Typography */
@@ -1915,7 +1924,8 @@ video::cue {
 }
 
 .epg-grid {
-  height: calc(100vh - var(--navbar-height) - 60px);
+  height: calc(100vh - var(--navbar-height) - 60px - var(--bottom-nav-h));
+  height: calc(100dvh - var(--navbar-height) - 60px - var(--bottom-nav-h));
   overflow: hidden;
   overflow-y: auto;
   padding: var(--space-md);
@@ -2062,7 +2072,8 @@ video::cue {
   max-width: 900px;
   margin: 0 auto;
   padding: var(--space-lg);
-  height: calc(100vh - var(--navbar-height));
+  height: calc(100vh - var(--navbar-height) - var(--bottom-nav-h));
+  height: calc(100dvh - var(--navbar-height) - var(--bottom-nav-h));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -4330,7 +4341,8 @@ kbd {
 .content-browser {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--navbar-height) - 200px);
+  height: calc(100vh - var(--navbar-height) - 200px - var(--bottom-nav-h));
+  height: calc(100dvh - var(--navbar-height) - 200px - var(--bottom-nav-h));
 }
 
 .content-browser-header {
@@ -5272,7 +5284,8 @@ kbd {
   }
 
   .epg-grid {
-    height: calc(100vh - var(--navbar-height) - 120px);
+    height: calc(100vh - var(--navbar-height) - 120px - var(--bottom-nav-h));
+    height: calc(100dvh - var(--navbar-height) - 120px - var(--bottom-nav-h));
   }
 
   .epg-channel-info {
@@ -5306,7 +5319,8 @@ kbd {
   .series-grid {
     padding: var(--space-md);
     gap: var(--space-md);
-    height: calc(100vh - var(--navbar-height) - 140px);
+    height: calc(100vh - var(--navbar-height) - 140px - var(--bottom-nav-h));
+    height: calc(100dvh - var(--navbar-height) - 140px - var(--bottom-nav-h));
   }
 
   .movie-card,
@@ -5720,7 +5734,8 @@ kbd {
   /* Settings Page - Mobile optimized */
   .settings-container {
     padding: var(--space-sm);
-    height: calc(100vh - var(--navbar-height));
+    height: calc(100vh - var(--navbar-height) - var(--bottom-nav-h));
+    height: calc(100dvh - var(--navbar-height) - var(--bottom-nav-h));
   }
 
   .settings-container h2 {
@@ -6399,7 +6414,8 @@ kbd {
   gap: var(--space-md);
   padding: var(--space-lg);
   overflow-y: auto;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 120px - var(--bottom-nav-h));
+  height: calc(100dvh - 120px - var(--bottom-nav-h));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   justify-content: center;
@@ -7076,7 +7092,8 @@ kbd {
   gap: var(--space-md);
   padding: var(--space-lg);
   overflow-y: auto;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 120px - var(--bottom-nav-h));
+  height: calc(100dvh - 120px - var(--bottom-nav-h));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   justify-content: center;
@@ -13296,6 +13313,10 @@ html.tv-mode #page-live .search-clear {
 .bottom-nav { display: none; }
 
 @media (max-width: 640px) {
+  /* The fixed bottom bar exists at this breakpoint — publish its height so every
+     viewport-sized container (grids, settings, EPG) subtracts it. */
+  :root { --bottom-nav-h: calc(56px + env(safe-area-inset-bottom, 0px)); }
+
   /* Retire the top hamburger + dropdown — page nav now lives at the bottom.
      The top bar shrinks to logo (left) + profile avatar (right). */
   .mobile-menu-toggle { display: none !important; }
@@ -13354,7 +13375,7 @@ html.tv-mode #page-live .search-clear {
   .bottom-nav .nav-link[hidden] { display: none; }
 
   /* Keep page content clear of the fixed bar. */
-  .main-content { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+  .main-content { padding-bottom: var(--bottom-nav-h); }
 
   /* Hide the bar while watching so the video + its controls aren't covered. */
   body.is-watching .bottom-nav { display: none; }
