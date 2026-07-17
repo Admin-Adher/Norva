@@ -265,3 +265,15 @@ constante 120 ; (b) `--bottom-nav-h` 56→57 px ; (c) `.settings-container` pass
 #app→main-content→page). Vérifié avec safe-top simulé 33 px (edge-to-edge) ET 0 (navigateur)
 ET desktop : les 5 conteneurs finissent ≤ ligne de barre ; Delete account (vrai app.html)
 atteignable à 751/787.
+
+### §14 — Assistant de dépannage : re-tap = annuler + synchro inverse (Settings v41)
+
+Retour utilisateur : les options de l'assistant (« Black screen », « Provider blocks it »)
+se cochent mais ne se décochent pas → doute sur leur fonctionnement. C'étaient des boutons
+d'action one-shot (elles n'ALLUMAIENT que). Ajouts : (a) re-taper l'option active ANNULE le
+remède (toggle éteint / selects restaurés à leur valeur pré-assistant via dataset.tcPrev,
+message « Turned off » + toast info) ; (b) synchro inverse — éteindre manuellement le toggle
+(ou bouger les selects) retire le surlignage et le message de l'assistant. Piège corrigé au
+passage : la restauration des selects déclenchait syncFromControls en réentrance qui oubliait
+tcPrev avant la fin de la boucle → dé-surligner AVANT de restaurer. Testé : 8 assertions
+headless sur le vrai SettingsPage.prototype (apply/undo/sync/restore + persistance change).

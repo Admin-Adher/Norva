@@ -1074,39 +1074,84 @@ class SettingsPage {
         const resultEl = document.getElementById('tc-wizard-result');
 
         const FIXES = {
-            sound:   { toggle: 'setting-force-transcode-tc', msg: 'Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again.' },
-            black:   { toggle: 'setting-force-proxy-tc', msg: "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again." },
-            blocked: { toggle: 'setting-force-proxy-tc', msg: "Now streaming through Norva's servers to bypass provider blocks. Try again." },
-            buffer:  { selects: [['setting-quality', 'low'], ['setting-max-resolution', '720p']], msg: 'Lowered quality to reduce buffering. Raise it again once it plays smoothly.' }
+            sound:   { toggle: 'setting-force-transcode-tc', msg: 'Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again.', off: 'Audio fix turned off.' },
+            black:   { toggle: 'setting-force-proxy-tc', msg: "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again.", off: "Turned off — streams play directly from your provider again." },
+            blocked: { toggle: 'setting-force-proxy-tc', msg: "Now streaming through Norva's servers to bypass provider blocks. Try again.", off: "Turned off — streams play directly from your provider again." },
+            buffer:  { selects: [['setting-quality', 'low'], ['setting-max-resolution', '720p']], msg: 'Lowered quality to reduce buffering. Raise it again once it plays smoothly.', off: 'Quality settings restored.' }
         };
 
         const flash = (el) => el?.closest('.setting-item')?.classList.add('tc-flash');
-        const setToggle = (id) => {
+        const setToggle = (id, on) => {
             const el = document.getElementById(id);
-            if (el && !el.checked) { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }
-            flash(el);
+            if (el && el.checked !== on) { el.checked = on; el.dispatchEvent(new Event('change', { bubbles: true })); }
+            if (on) flash(el);
         };
         const setSelect = (id, val) => {
             const el = document.getElementById(id);
             if (el && el.value !== val) { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }
             flash(el);
         };
+        const showResult = (txt) => { if (resultEl) { resultEl.textContent = txt; resultEl.classList.remove('hidden'); } };
+        const forgetPrev = (fix) => (fix.selects || []).forEach(([id]) => { const el = document.getElementById(id); if (el) delete el.dataset.tcPrev; });
 
         wiz.addEventListener('click', (e) => {
             const btn = e.target.closest('.tc-wizard-opt');
             if (!btn) return;
             const fix = FIXES[btn.dataset.fix];
             if (!fix) return;
-            if (fix.toggle) setToggle(fix.toggle);
-            (fix.selects || []).forEach(([id, val]) => setSelect(id, val));
+            // Re-tapping the applied symptom = UNDO. The options read as selectable
+            // choices, so a second tap must deselect (turn the fix back off) — without
+            // this, users think the choice is stuck (it only ever switched things ON).
+            if (btn.classList.contains('is-active')) {
+                // Deselect FIRST: the restore below fires change events, and
+                // syncFromControls must not re-enter and forget tcPrev mid-restore.
+                btn.classList.remove('is-active');
+                if (fix.toggle) setToggle(fix.toggle, false);
+                (fix.selects || []).forEach(([id]) => {
+                    const el = document.getElementById(id);
+                    const prev = el?.dataset.tcPrev;
+                    if (el && prev != null && el.value !== prev) { el.value = prev; el.dispatchEvent(new Event('change', { bubbles: true })); }
+                });
+                forgetPrev(fix);
+                showResult('✓ ' + fix.off);
+                window.NorvaModal?.toast('Fix turned off.', 'info');
+                return;
+            }
+            if (fix.toggle) setToggle(fix.toggle, true);
+            (fix.selects || []).forEach(([id, val]) => {
+                const el = document.getElementById(id);
+                // Remember the pre-wizard value once, so undo can restore it.
+                if (el && el.dataset.tcPrev == null) el.dataset.tcPrev = el.value;
+                setSelect(id, val);
+            });
             wiz.querySelectorAll('.tc-wizard-opt').forEach(o => o.classList.toggle('is-active', o === btn));
-            if (resultEl) { resultEl.textContent = '✓ ' + fix.msg; resultEl.classList.remove('hidden'); }
+            showResult('✓ ' + fix.msg);
             window.NorvaModal?.toast('Applied a fix — try the channel again.', 'success');
             setTimeout(() => {
                 document.getElementById('tab-transcode')?.querySelectorAll('.tc-flash')
                     .forEach(el => el.classList.remove('tc-flash'));
             }, 2400);
         });
+
+        // Mirror manual changes back into the wizard: turning the driven toggle off
+        // (or moving the selects away) clears the symptom highlight — otherwise the
+        // wizard keeps claiming a fix is applied when it no longer is.
+        const stillApplied = (fix) => {
+            if (fix.toggle) return !!document.getElementById(fix.toggle)?.checked;
+            return (fix.selects || []).every(([id, val]) => document.getElementById(id)?.value === val);
+        };
+        const syncFromControls = () => {
+            const active = wiz.querySelector('.tc-wizard-opt.is-active');
+            if (!active) return;
+            const fix = FIXES[active.dataset.fix];
+            if (fix && !stillApplied(fix)) {
+                active.classList.remove('is-active');
+                forgetPrev(fix);
+                resultEl?.classList.add('hidden');
+            }
+        };
+        ['setting-force-transcode-tc', 'setting-force-proxy-tc', 'setting-quality', 'setting-max-resolution']
+            .forEach((id) => document.getElementById(id)?.addEventListener('change', syncFromControls));
 
         // On plain web (no local transcoder) the audio-fix (force-transcode) and the
         // buffering-fix (quality/max-resolution) are inert — the controls they drive are
