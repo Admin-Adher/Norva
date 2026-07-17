@@ -249,3 +249,19 @@ Movies/Series : vérifiées SAINES (in-flow dans la chaîne de hauteur → héri
 Phone DÉJÀ à `versionCode 14 / 1.3.1` (bump antérieur 8f0ddf8, non publié) — inchangé. Les deux
 clients étant des webviews distants, les fixes CSS arrivent via le déploiement web sans rebuild ;
 l'AAB ne sert que le versioning store.
+
+### §13-bis — le rognage persistait dans l'APP : cause = edge-to-edge Android 15
+
+Après réinstallation, le rognage persistait dans l'app (pas dans un navigateur mobile). Cause
+manquée par le premier harnais (safe-areas à 0) : `targetSdk 35` → Android 15 force
+l'**edge-to-edge** → le webview dessine sous la status-bar, la navbar se grandit de
+`--safe-area-inset-top` (~33 px)… que les calc viewport ne soustrayaient PAS → tout débordait
+d'exactement ~safe-top sous la barre. En plus : la barre fait 57 px (56 + border-top), pas 56.
+
+Fix v2 : (a) `--topbar-h = navbar-height + safe-area-inset-top` soustrait par epg-grid,
+grilles mobile, content-browser ; grilles base : `- var(--safe-area-inset-top)` ajouté à la
+constante 120 ; (b) `--bottom-nav-h` 56→57 px ; (c) `.settings-container` passe carrément en
+`height: 100%` (chaîné → immunisé par construction : navbar/safe-top/barre gérés par
+#app→main-content→page). Vérifié avec safe-top simulé 33 px (edge-to-edge) ET 0 (navigateur)
+ET desktop : les 5 conteneurs finissent ≤ ligne de barre ; Delete account (vrai app.html)
+atteignable à 751/787.

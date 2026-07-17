@@ -82,6 +82,13 @@
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
+
+  /* REAL height of the top bar box. In the edge-to-edge webviews (Android 15 /
+     targetSdk 35 forces it; iOS standalone) the navbar pads itself down by the
+     status-bar inset, so its box is navbar-height + safe-top. Every container
+     sized against the viewport must subtract THIS, not --navbar-height alone —
+     that miss left exactly ~safe-top of content hidden behind the bottom nav. */
+  --topbar-h: calc(var(--navbar-height) + var(--safe-area-inset-top));
 }
 
 /* Reset & Base */
@@ -1924,8 +1931,8 @@ video::cue {
 }
 
 .epg-grid {
-  height: calc(100vh - var(--navbar-height) - 60px - var(--bottom-nav-h));
-  height: calc(100dvh - var(--navbar-height) - 60px - var(--bottom-nav-h));
+  height: calc(100vh - var(--topbar-h) - 60px - var(--bottom-nav-h));
+  height: calc(100dvh - var(--topbar-h) - 60px - var(--bottom-nav-h));
   overflow: hidden;
   overflow-y: auto;
   padding: var(--space-md);
@@ -2072,8 +2079,10 @@ video::cue {
   max-width: 900px;
   margin: 0 auto;
   padding: var(--space-lg);
-  height: calc(100vh - var(--navbar-height) - var(--bottom-nav-h));
-  height: calc(100dvh - var(--navbar-height) - var(--bottom-nav-h));
+  /* Chain-based, NOT viewport-based: #app(dvh) → .main-content(flex:1, bottom
+     padding = bottom-nav) → .page(100%) already subtract navbar + safe-top +
+     bottom bar. A viewport calc here would have to repeat all three terms. */
+  height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -4341,8 +4350,8 @@ kbd {
 .content-browser {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--navbar-height) - 200px - var(--bottom-nav-h));
-  height: calc(100dvh - var(--navbar-height) - 200px - var(--bottom-nav-h));
+  height: calc(100vh - var(--topbar-h) - 200px - var(--bottom-nav-h));
+  height: calc(100dvh - var(--topbar-h) - 200px - var(--bottom-nav-h));
 }
 
 .content-browser-header {
@@ -5284,8 +5293,8 @@ kbd {
   }
 
   .epg-grid {
-    height: calc(100vh - var(--navbar-height) - 120px - var(--bottom-nav-h));
-    height: calc(100dvh - var(--navbar-height) - 120px - var(--bottom-nav-h));
+    height: calc(100vh - var(--topbar-h) - 120px - var(--bottom-nav-h));
+    height: calc(100dvh - var(--topbar-h) - 120px - var(--bottom-nav-h));
   }
 
   .epg-channel-info {
@@ -5319,8 +5328,8 @@ kbd {
   .series-grid {
     padding: var(--space-md);
     gap: var(--space-md);
-    height: calc(100vh - var(--navbar-height) - 140px - var(--bottom-nav-h));
-    height: calc(100dvh - var(--navbar-height) - 140px - var(--bottom-nav-h));
+    height: calc(100vh - var(--topbar-h) - 140px - var(--bottom-nav-h));
+    height: calc(100dvh - var(--topbar-h) - 140px - var(--bottom-nav-h));
   }
 
   .movie-card,
@@ -5734,8 +5743,7 @@ kbd {
   /* Settings Page - Mobile optimized */
   .settings-container {
     padding: var(--space-sm);
-    height: calc(100vh - var(--navbar-height) - var(--bottom-nav-h));
-    height: calc(100dvh - var(--navbar-height) - var(--bottom-nav-h));
+    height: 100%;
   }
 
   .settings-container h2 {
@@ -6414,8 +6422,8 @@ kbd {
   gap: var(--space-md);
   padding: var(--space-lg);
   overflow-y: auto;
-  height: calc(100vh - 120px - var(--bottom-nav-h));
-  height: calc(100dvh - 120px - var(--bottom-nav-h));
+  height: calc(100vh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
+  height: calc(100dvh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   justify-content: center;
@@ -7092,8 +7100,8 @@ kbd {
   gap: var(--space-md);
   padding: var(--space-lg);
   overflow-y: auto;
-  height: calc(100vh - 120px - var(--bottom-nav-h));
-  height: calc(100dvh - 120px - var(--bottom-nav-h));
+  height: calc(100vh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
+  height: calc(100dvh - 120px - var(--safe-area-inset-top) - var(--bottom-nav-h));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   justify-content: center;
@@ -13314,8 +13322,10 @@ html.tv-mode #page-live .search-clear {
 
 @media (max-width: 640px) {
   /* The fixed bottom bar exists at this breakpoint — publish its height so every
-     viewport-sized container (grids, settings, EPG) subtracts it. */
-  :root { --bottom-nav-h: calc(56px + env(safe-area-inset-bottom, 0px)); }
+     viewport-sized container (grids, settings, EPG) subtracts it.
+     57px = 56px nav-link + 1px border-top; plus the gesture-bar inset the bar
+     pads itself with in edge-to-edge webviews. */
+  :root { --bottom-nav-h: calc(57px + env(safe-area-inset-bottom, 0px)); }
 
   /* Retire the top hamburger + dropdown — page nav now lives at the bottom.
      The top bar shrinks to logo (left) + profile avatar (right). */
