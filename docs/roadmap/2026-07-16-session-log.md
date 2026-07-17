@@ -337,6 +337,9 @@ migration ST-IA (20260717120000) est appliquée et l'edge redéployé par Adrien
 
 ### §17 — Deux lots de fixes issus des audits ST-IA + synchro multi-appareils (2026-07-17)
 
+> **Trace de référence complète (ancres `fichier:fonction`, migrations, FAQ)** :
+> `docs/audits/AI-SUBTITLES-SYNC-FIXES-2026-07-17.md`.
+
 Suite aux deux audits workflow du 17/07 (tunnel « Generate AI subtitles » chronométré, 8 agents ;
 synchro web/mobile/TV, 9 agents), TOUTES les recommandations ont été appliquées d'un bloc.
 
