@@ -17,7 +17,7 @@ class AdminPage {
         this._isAdmin = null; // cached tri-state (null = unknown)
         this._route = 'cockpit';
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
-        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '', total: 0 };
+        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '', country: '', total: 0 };
         this._allTags = [];
         this._usersDebounce = null;
         this._lastTs = null; // snapshot refreshed_at for the topbar
@@ -1041,18 +1041,19 @@ class AdminPage {
             <div id="fin-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
-            const [f, sparks] = await Promise.all([
+            const [f, sparks, vat] = await Promise.all([
                 this._rpc('admin_finance'),
-                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines are non-critical
+                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null), // sparklines are non-critical
+                this._rpc('admin_vat_report').catch(() => null) // panneau TVA non-critique (absent avant migration)
             ]);
-            this._renderFinance(f || {}, sparks && sparks.series);
+            this._renderFinance(f || {}, sparks && sparks.series, vat);
         } catch (e) {
             const el = document.getElementById('fin-body');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    _renderFinance(f, sparks) {
+    _renderFinance(f, sparks, vat) {
         const el = document.getElementById('fin-body');
         if (!el) return;
         const n = AdminPage.n, money = AdminPage.money, esc = AdminPage.esc;
@@ -1171,9 +1172,33 @@ class AdminPage {
         };
         const railCards = railList.map(railCard).join('');
 
+        // ── Répartition par pays (payants + essais) — barres façon funnel, MRR en valeur.
+        // Le bucket « Inconnu » ('??') reste TOUJOURS visible : c'est la jauge de
+        // couverture de la capture pays (backfill partiel côté web par construction).
+        const byCountry = Array.isArray(f.by_country) ? f.by_country : [];
+        const totalCountryMrr = byCountry.reduce((s, r) => s + (Number(r.mrr_cents) || 0), 0);
+        const countryBars = byCountry.length ? `<div class="hbars">${byCountry.map(r => {
+            const unknown = r.country_code === '??';
+            const v = Number(r.mrr_cents) || 0;
+            const max = Math.max(1, ...byCountry.map(x => Number(x.mrr_cents) || 0));
+            const pct = Math.max(2, Math.round(100 * v / max));
+            const share = totalCountryMrr > 0 && v > 0 ? ` · ${Math.round(100 * v / totalCountryMrr)} %` : '';
+            const extra = `${n(r.n)} payant(s)${Number(r.trialing_n) > 0 ? ` +${n(r.trialing_n)} essai(s)` : ''}`;
+            return `<div class="hbar"><div class="hbar-l" title="${esc(unknown ? 'Pays non capturé pour ces clients' : extra)}">${unknown ? 'Inconnu' : AdminPage.flag(r.country_code)}</div>` +
+                `<div class="hbar-track"><div class="hbar-fill ${unknown ? 'warn' : ''}" style="width:${pct}%"></div></div>` +
+                `<div class="hbar-v" title="${esc(extra)}">${money(v)}<span class="pacct">${share}</span></div></div>`;
+        }).join('')}</div>` : '<div class="ssub">La répartition apparaîtra avec les premiers abonnements (pays capturé au paiement).</div>';
+        const byCR = Array.isArray(f.by_country_rail) ? f.by_country_rail : [];
+        const countryRailRows = byCR.map(r => `<tr>
+            <td>${r.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(r.country_code)}</td>
+            <td>${railBadge(r.provider)}</td>
+            <td class="num">${n(r.n)}</td><td class="num">${money(r.mrr_cents)}</td>
+        </tr>`).join('');
+
         const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(p.email || p.user_id)}" title="Voir la fiche">
             <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
             <td>${railBadge(p.provider)}</td>
+            <td>${AdminPage.flag(p.country_code)}</td>
             <td>${KIND_LABELS[p.kind] || esc(p.kind)}</td><td>${payBadge(p.status)}</td>
             <td class="num">${money(p.amount)}${p.currency && String(p.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(p.currency).toUpperCase())}</span>` : ''}</td>
         </tr>`).join('');
@@ -1196,6 +1221,15 @@ class AdminPage {
             <!-- 2 ── Vue par rail : d'où vient (et viendra) le revenu — web Revolut vs stores ── -->
             <div class="kpi-group"><div class="kpi-gtitle">💳 Revenu par rail — 🌐 web (Revolut) vs 📱 stores mobiles</div>
                 ${railCards ? `<div class="rail-cards">${railCards}</div>` : '<div class="ssub">Aucun abonnement ni essai — les cartes Revolut / Google Play / App Store apparaîtront ici avec les premiers clients.</div>'}
+            </div>
+            <!-- 2bis ── Géographie du revenu + préparation TVA/OSS ── -->
+            <div class="fin-cols">
+                <div class="admin-block"><h2>🌍 Répartition par pays</h2>
+                    <div class="ssub" style="margin-bottom:10px">Pays du storefront (Play) ou d'émission de la carte (Revolut, proxy ~95 %).</div>
+                    ${countryBars}
+                    ${countryRailRows ? `<div class="kpi-gtitle" style="margin:14px 0 8px">Par pays &amp; rail</div><div class="scroll"><table><thead><tr><th>Pays</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${countryRailRows}</tbody></table></div>` : ''}
+                </div>
+                <div class="admin-block" id="fin-vat"><h2>🇪🇺 TVA — préparation OSS</h2><div id="fin-vat-body"><div class="ssub">Chargement…</div></div></div>
             </div>
             <!-- 3 ── Risque revenu : tout ce qui menace le revenu, regroupé ── -->
             <div class="kpi-group kpi-group--risk ${anyRisk ? 'has-risk' : ''}"><div class="kpi-gtitle">⚠️ Risque revenu — cliquer un statut pour ouvrir la liste</div><div class="admin-cards">
@@ -1232,7 +1266,7 @@ class AdminPage {
             </div>
             <!-- 5 ── Ops : log opérationnel + export ── -->
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
-                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
+                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Pays</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
             </div></div>`;
 
         // Header status line: MRR · échecs · conversions + a "live" freshness badge.
@@ -1249,11 +1283,12 @@ class AdminPage {
 
         // Status cards → Clients pre-filtered; CSV of the recent payments table.
         el.querySelectorAll('.fin-status').forEach(c => c.addEventListener('click', () => {
-            // Opening a status view is a fresh filter: clear any leftover search/tag so the count
-            // shown on the card matches the list the user lands on.
+            // Opening a status view is a fresh filter: clear any leftover search/tag/country so
+            // the count shown on the card matches the list the user lands on.
             this._users.billing = c.dataset.billing || '';
             this._users.search = '';
             this._users.tagId = '';
+            this._users.country = '';
             this._users.page = 0;
             this._navigate('clients');
         }));
@@ -1267,12 +1302,119 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const lines = [['date', 'email', 'rail', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
-                .concat(rows.map(p => [p.at, p.email, p.provider, p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
+            const lines = [['date', 'email', 'rail', 'pays', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
+                .concat(rows.map(p => [p.at, p.email, p.provider, p.country_code || '', p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = 'norva-paiements.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        });
+
+        this._renderVatPanel(vat);
+    }
+
+    // ── Panneau TVA / OSS (page Finance) ──
+    // Périmètre : ventes web DIRECTES (rail Revolut) uniquement — sur les stores,
+    // Google/Apple sont « fournisseurs présumés » (art. 9 bis, règl. UE 282/2011) et
+    // collectent/reversent eux-mêmes la TVA UE. Le ledger est en USD : la jauge de
+    // seuil affiche une conversion EUR INDICATIVE ; la déclaration OSS, elle, se fait
+    // en EUR au taux BCE du dernier jour du trimestre (au moment de déclarer).
+    _renderVatPanel(vat) {
+        const el = document.getElementById('fin-vat-body');
+        if (!el) return;
+        if (!vat) { el.innerHTML = '<div class="ssub">Rapport TVA indisponible — la fonction admin_vat_report n\'est pas encore déployée.</div>'; return; }
+        const n = AdminPage.n, esc = AdminPage.esc, money = AdminPage.money;
+        const EUR_PER_USD = 0.92; // taux INDICATIF (jauge uniquement) — à rafraîchir de temps en temps
+        const eur = (usdCents) => (Math.round((Number(usdCents) || 0) * EUR_PER_USD) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+        const ys = vat.year_summary || {};
+        const THRESH_EUR_CENTS = 1000000; // 10 000 € — seuil UE des ventes B2C transfrontalières (année en cours ET précédente)
+        const crossEurCents = Math.round((Number(ys.eu_cross_cents) || 0) * EUR_PER_USD);
+        const pctT = Math.min(100, Math.round(100 * crossEurCents / THRESH_EUR_CENTS));
+        const nearThresh = pctT >= 80;
+        // Franchise en base FR 2026 : 37 500 € (majoré 41 250 €). Base = opérations
+        // localisées en France (art. 293 D CGI) : ventes web FR + ventes web autres-UE
+        // tant que le seuil 10 k€ n'est pas franchi. Google Play EXCLU (B2B Irlande).
+        // Détail complet : docs/TVA-OSS.md.
+        const FR_THRESH_EUR_CENTS = 3750000, FR_THRESH_MAJ_EUR_CENTS = 4125000;
+        const frBaseEurCents = Math.round(((Number(ys.fr_cents) || 0) + (Number(ys.eu_cross_cents) || 0)) * EUR_PER_USD);
+        const pctF = Math.min(100, Math.round(100 * frBaseEurCents / FR_THRESH_EUR_CENTS));
+        const nearFr = frBaseEurCents >= 3500000; // alerte préparatoire ~35 000 €
+        const overFrMaj = frBaseEurCents >= FR_THRESH_MAJ_EUR_CENTS;
+
+        // Sélecteur de trimestre : 8 derniers trimestres, plus récent en premier.
+        const nowD = new Date();
+        let qy = nowD.getUTCFullYear(), qq = Math.floor(nowD.getUTCMonth() / 3) + 1;
+        const qOpts = [];
+        for (let i = 0; i < 8; i++) { qOpts.push([qy, qq]); qq -= 1; if (qq === 0) { qq = 4; qy -= 1; } }
+        const qSel = qOpts.map(([y2, q2]) =>
+            `<option value="${y2}-${q2}"${y2 === vat.year && q2 === vat.quarter ? ' selected' : ''}>T${q2} ${y2}</option>`).join('');
+
+        const rows = Array.isArray(vat.rows) ? vat.rows : [];
+        const tot = vat.totals || {};
+        const rowsHtml = rows.map(r => `<tr>
+            <td>${r.country_code === '??' ? '<span class="ssub">Inconnu</span>' : AdminPage.flag(r.country_code)}</td>
+            <td>${r.is_eu ? '<span class="badge blue">UE</span>' : (r.country_code === '??' ? '<span class="ssub">—</span>' : '<span class="badge gray">hors UE</span>')}</td>
+            <td class="num">${n(r.n_tx)}</td>
+            <td class="num">${money(r.gross_cents)}</td>
+            <td class="num">${Number(r.refunded_cents) > 0 ? '−' + money(r.refunded_cents) : '—'}</td>
+            <td class="num"><b>${money(r.net_cents)}</b></td>
+        </tr>`).join('');
+
+        el.innerHTML = `
+            <div class="ssub">Périmètre : ventes web directes (Revolut). Les ventes Play/App Store sont déclarées par le store (fournisseur présumé) — hors OSS.</div>
+            <div class="kpi-gtitle" style="margin:12px 0 6px">Seuil UE 10 000 € — B2C transfrontalier UE, ${esc(String(ys.year || vat.year))}</div>
+            <div class="hbar" title="Ventes B2C vers d'autres pays UE (hors France) sur l'année civile">
+                <div class="hbar-l">≈ ${eur(ys.eu_cross_cents)}</div>
+                <div class="hbar-track"><div class="hbar-fill ${nearThresh ? 'warn' : ''}" style="width:${Math.max(2, pctT)}%"></div></div>
+                <div class="hbar-v">${pctT} % du seuil</div>
+            </div>
+            <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (conversion indicative 1 $ ≈ ${EUR_PER_USD.toLocaleString('fr-FR')} €) · année précédente : ${money(ys.eu_cross_prev_cents)}.
+            Au-delà du seuil (année en cours OU précédente) : TVA du pays du client via l'OSS — ou régime PME UE (n° EX) pour rester exonéré. Voir docs/TVA-OSS.md.</div>
+            <div class="kpi-gtitle" style="margin:12px 0 6px">Franchise en base FR — 37 500 € (majoré 41 250 €)</div>
+            <div class="hbar" title="Base : ventes web localisées en France (clients FR + autres-UE tant que le seuil 10 k€ n'est pas franchi). Google Play exclu (B2B Irlande).">
+                <div class="hbar-l">≈ ${(frBaseEurCents / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div class="hbar-track"><div class="hbar-fill ${overFrMaj || nearFr ? 'warn' : ''}" style="width:${Math.max(2, pctF)}%"></div></div>
+                <div class="hbar-v">${pctF} % du seuil${overFrMaj ? ' ⚠ majoré dépassé' : nearFr ? ' ⚠ ~35 k€' : ''}</div>
+            </div>
+            <div class="ssub" style="margin-top:4px">Année ${esc(String(ys.year || vat.year))} — 🇫🇷 France : <b>${money(ys.fr_cents)}</b> · 🌍 hors UE : ${money(ys.non_eu_cents)}${Number(ys.unknown_cents) > 0 ? ` · <span title="Transactions sans pays capturé — à résorber, la TVA exige la localisation">pays inconnu : <b>${money(ys.unknown_cents)}</b> ⚠</span>` : ''}</div>
+            <div style="display:flex;gap:10px;align-items:center;margin:14px 0 8px;flex-wrap:wrap">
+                <span class="kpi-gtitle" style="margin:0">Base par pays de consommation</span>
+                <select id="vat-quarter" title="Trimestre (cadence de déclaration OSS)">${qSel}</select>
+                <button id="vat-csv" class="mini-btn" title="Exporter la base du trimestre par pays (CSV)">⬇ CSV</button>
+            </div>
+            ${rowsHtml ? `<div class="scroll"><table><thead><tr><th>Pays</th><th>Zone</th><th class="num">Tx</th><th class="num">Brut</th><th class="num">Remb.</th><th class="num">Net</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+                : '<div class="ssub">Aucune vente web sur ce trimestre.</div>'}
+            ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — pays à récupérer avant déclaration.</div>` : ''}
+            ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
+            <div class="ssub" style="margin-top:8px">Montants en USD (cents ledger). Déclaration OSS : convertir en EUR au taux BCE du <b>dernier jour du trimestre</b> (art. 369h dir. 2006/112) et appliquer le taux standard de chaque pays (source officielle : base TEDB de la Commission). Rappel : les versements Google Play sont hors OSS (Google = fournisseur présumé) mais déclenchent une <b>DES mensuelle</b> + n° de TVA intracom. Détail : docs/TVA-OSS.md.</div>`;
+
+        const sel = document.getElementById('vat-quarter');
+        if (sel) sel.addEventListener('change', async () => {
+            const [y2, q2] = sel.value.split('-').map(Number);
+            sel.disabled = true;
+            try {
+                const res = await this._rpc('admin_vat_report', { p_year: y2, p_quarter: q2 });
+                if (this._route === 'finance') this._renderVatPanel(res);
+            } catch (e) {
+                sel.disabled = false;
+                this._toast('Erreur rapport TVA : ' + e.message, 'err');
+            }
+        });
+        const csvBtn = document.getElementById('vat-csv');
+        if (csvBtn) csvBtn.addEventListener('click', () => {
+            const q = (x) => {
+                let s = String(x == null ? '' : x);
+                if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+                return `"${s.replace(/"/g, '""')}"`;
+            };
+            const lines = [['pays', 'zone', 'devise', 'nb_transactions', 'brut_cents', 'rembourse_cents', 'net_cents'].map(q).join(',')]
+                .concat(rows.map(r => [r.country_code, r.is_eu ? 'UE' : (r.country_code === '??' ? '' : 'hors_UE'), r.currency, r.n_tx, r.gross_cents, r.refunded_cents, r.net_cents].map(q).join(',')));
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `norva-tva-${vat.year}-T${vat.quarter}.csv`;
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         });
@@ -1616,6 +1758,7 @@ class AdminPage {
             let html = row('Abonnement', `<span class="badge ${sm[1]}">${AdminPage.esc(sm[0])}</span>`);
             if (b.is_internal) html += row('Compte', '<span class="badge amber">interne</span>');
             if (m && m.plan) html += row('Plan', `${AdminPage.esc(m.plan)} · ${AdminPage.esc(m.period || '—')}`);
+            if (p && p.country_code) html += row('Pays', AdminPage.flag(p.country_code));
             if (m && m.card_last4) html += row('Carte', `•••• ${AdminPage.esc(m.card_last4)}`);
             if (p && Number(p.dunning_stage) > 0) html += row('Dunning', `<span class="badge red">relance ${AdminPage.esc(String(p.dunning_stage))}/3</span>`);
             el.innerHTML = html;
@@ -1667,6 +1810,7 @@ class AdminPage {
                   <option value="expired">Expirés</option>
                   <option value="free">Sans abonnement</option>
                 </select>
+                <select id="admin-users-country" title="Pays du client (storefront Play ou pays d'émission de la carte)"><option value="">Tous les pays</option><option value="??">Pays inconnu</option></select>
                 <select id="admin-users-tag"><option value="">Tous les segments</option></select>
                 <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ Exporter CSV</button>
               </div>
@@ -1705,6 +1849,11 @@ class AdminPage {
             this._loadUsers(); this._syncQuickViews();
         }));
         this._syncQuickViews();
+        const ctrySel = document.getElementById('admin-users-country');
+        if (ctrySel) {
+            this._fillCountryOptions(ctrySel);
+            ctrySel.addEventListener('change', () => { this._users.country = ctrySel.value; this._users.page = 0; this._loadUsers(); });
+        }
         const tagSel = document.getElementById('admin-users-tag');
         if (tagSel) {
             this._fillTagOptions(tagSel);
@@ -1807,12 +1956,14 @@ class AdminPage {
         try {
             const res = await this._rpc('admin_users_page', {
                 p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
-                p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
+                p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null,
+                p_country: s.country || null
             });
             if (seq !== this._usersSeq) return; // superseded by a newer load
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
+            if (res && Array.isArray(res.countries)) { this._countries = res.countries; this._fillCountryOptions(document.getElementById('admin-users-country')); }
             this._renderUsers(rows);
             this._renderBulkBar();
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
@@ -1837,6 +1988,24 @@ class AdminPage {
         sel.value = cur;
     }
 
+    // Country filter options: known countries (facet from admin_users_page) + the two
+    // fixed entries. Emoji flags render fine in <option> on every modern browser.
+    _fillCountryOptions(sel) {
+        if (!sel) return;
+        const cur = this._users.country || '';
+        const list = Array.isArray(this._countries) ? this._countries : [];
+        const flagTxt = (cc) => {
+            const s = String(cc || '').toUpperCase();
+            return /^[A-Z]{2}$/.test(s) ? String.fromCodePoint(...[...s].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' + s : s;
+        };
+        sel.innerHTML = '<option value="">Tous les pays</option>' +
+            list.map(c => `<option value="${AdminPage.esc(c.country_code)}">${AdminPage.esc(flagTxt(c.country_code))} (${AdminPage.n(c.n)})</option>`).join('') +
+            '<option value="??">Pays inconnu</option>';
+        sel.value = cur;
+        // A stale saved filter (country no longer present) must not silently stick.
+        if (sel.value !== cur) { sel.value = ''; this._users.country = ''; }
+    }
+
     // Highlight the quick-view chip matching the active billing filter.
     _syncQuickViews() {
         const cur = this._users.billing || '';
@@ -1848,7 +2017,7 @@ class AdminPage {
         const el = document.getElementById('admin-users');
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
-        const head = `<tr><th>Email</th><th>Abonnement</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
+        const head = `<tr><th>Email</th><th>Abonnement</th><th>Pays</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
         const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
@@ -1861,9 +2030,11 @@ class AdminPage {
             const last = r.last_sign_in_at
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
+            const ccTip = r.country_source === 'card' ? 'Pays d’émission de la carte (Revolut)' : r.country_source === 'store' ? 'Pays du storefront (Play/App Store)' : '';
             return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" tabindex="0" aria-label="Voir la fiche de ${AdminPage.esc(r.email || r.user_id)}" title="Voir la fiche">
                 <td>${AdminPage.esc(r.email || '—')}${driver}${internal}${banned}</td>
                 <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
+                <td${ccTip ? ` title="${AdminPage.esc(ccTip)}"` : ''}>${AdminPage.flag(r.country_code)}</td>
                 <td>${role}</td>
                 <td>${tags}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -1928,7 +2099,8 @@ class AdminPage {
             const rows = await this._rpc('admin_users_export', {
                 p_search: this._users.search || null,
                 p_tag_id: this._users.tagId || null,
-                p_billing_status: this._users.billing || null
+                p_billing_status: this._users.billing || null,
+                p_country: this._users.country || null
             });
             const list = Array.isArray(rows) ? rows : [];
             // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
@@ -1939,9 +2111,10 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
+            const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'pays', 'source_pays', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
             const lines = [header.map(q).join(',')].concat(list.map(r => [
                 r.email, r.billing_status || 'free', r.plan_code || '', r.billing_period || '', r.amount_cents == null ? '' : r.amount_cents,
+                r.country_code || '', r.country_source || '',
                 r.role, r.banned ? 'oui' : 'non', r.email_confirmed ? 'oui' : 'non',
                 r.created_at || '', r.last_sign_in_at || '', r.sources_count, r.tags || '', r.user_id
             ].map(q).join(',')));
@@ -2044,6 +2217,12 @@ class AdminPage {
         let details = internalRow;
         if (p) {
             details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` ${AdminPage.railBadge(p.provider)}` : ''));
+            // La provenance porte le niveau de confiance : storefront (fiable) vs pays
+            // d'émission de la carte (proxy ~95 % — expats/néobanques possibles).
+            if (p.country_code) {
+                const src = p.country_source === 'card' ? 'pays d\'émission carte' : p.country_source === 'store' ? 'storefront Play/App Store' : '';
+                details += row('Pays', `${AdminPage.flag(p.country_code)}${src ? ` <span class="pacct">· ${src}</span>` : ''}`);
+            }
             if (m && m.plan) details += row('Plan facturé', `${esc(m.plan)} · ${esc(m.period || '—')} · ${money(m.amount_cents)}`);
             // Mobile rails (Play/Apple) have no web-rail mapping — the recurring price/cadence lives
             // on the projection (stamped by the RevenueCat webhook).
@@ -3245,7 +3424,13 @@ class AdminPage {
                 card(n(o.users_active_7d), 'Connectés 7 j', '', 'users_active_7d', '🗓️'),
                 card(n(o.users_watching_7d), 'Regardent 7 j', Number(o.users_watching_7d) > 0 ? 'ok' : '', 'users_watching_7d', '👁️'),
                 card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : '', 'users_new_7d', '➕'),
-                card(n(o.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅')
+                card(n(o.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅'),
+                // Top pays (clients facturés — payants + essais), depuis le cache (billing_countries).
+                (Array.isArray(o.billing_countries) && o.billing_countries.length
+                    ? card(AdminPage.flag(o.billing_countries[0].country_code),
+                        `Top pays · ${n(o.billing_countries_n)} pays${Number(o.billing_country_unknown_n) > 0 ? ` · ${n(o.billing_country_unknown_n)} inconnu(s)` : ''}`,
+                        '', null, '🌍')
+                    : card('—', 'Top pays — en attente de clients', 'muted', null, '🌍'))
             ]),
             group('📡 Providers & catalogue', [
                 card(n(o.sources_total), 'Sources', '', 'sources_total', '🗂️'),
@@ -3497,6 +3682,14 @@ class AdminPage {
     static railBadge(p) {
         const cls = p === 'revolut' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
         return `<span class="badge ${cls}">${AdminPage.railLabel(p)}</span>`;
+    }
+    // Country (ISO alpha-2) → emoji flag + code. Sources: RevenueCat country_code (store,
+    // haute confiance) ou pays d'émission de la carte Revolut (proxy ~95 %). '—' si inconnu.
+    static flag(cc) {
+        const s = String(cc || '').toUpperCase();
+        if (!/^[A-Z]{2}$/.test(s)) return '<span class="ssub">—</span>';
+        const emoji = String.fromCodePoint(...[...s].map(c => 0x1F1A5 + c.charCodeAt(0)));
+        return `${emoji} ${s}`;
     }
     // Deterministic decorative provider icon (varies by name, like the mockup).
     static provIcon(name) {
