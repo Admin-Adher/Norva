@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -95,8 +96,14 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   const token = authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) throw new HttpError(401, "Missing bearer token");
 
-  const { data, error } = await db.auth.getUser(token);
-  if (!error && data.user) return { userId: data.user.id };
+  // Vérif locale d'abord (voir _shared/local-auth.ts) — GoTrue n'est consulté
+  // que si le verdict est indécidable localement (alg asymétrique, secret absent).
+  const local = await verifyUserJwtLocally(token);
+  if (local !== "invalid" && local !== "fallback") return { userId: local.id };
+  if (local === "fallback") {
+    const { data, error } = await db.auth.getUser(token);
+    if (!error && data.user) return { userId: data.user.id };
+  }
 
   const tokenHash = await sha256Hex(token);
   const { data: device, error: deviceError } = await db
@@ -106,7 +113,7 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
     .eq("revoked", false)
     .maybeSingle();
   if (deviceError) throwDb(deviceError, "Unable to verify device token");
-  if (!device) throw new HttpError(401, "Invalid bearer token", error?.message);
+  if (!device) throw new HttpError(401, "Invalid bearer token");
   return { userId: device.user_id, deviceId: device.id };
 }
 

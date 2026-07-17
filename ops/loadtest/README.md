@@ -68,10 +68,21 @@ k6 imprime ses seuils à la fin :
 - ✅ `http_req_failed rate<0.01` et `p(95)<500ms` verts au palier 1000 VUs
   → **la box tient 1000 users simultanés, dossier clos.**
 - ❌ p95 lecture qui s'envole mais DB CPU bas → edge-runtime sature : le levier
-  est `docker compose up -d --scale functions=2` derrière Kong (ou tuning
-  per-worker), à ce moment-là seulement.
+  est un conteneur `functionsN` de plus + une target dans l'upstream
+  `edge-functions-pool` de `volumes/api/kong.yml` (~+95 req/s par conteneur —
+  voir le commentaire du service `functions2` dans le compose).
+- ❌ 401 massifs alors que le token est frais, avec des 500 sur
+  `GET /auth/v1/user` dans les logs Kong → GoTrue sature. Résolu le 17/07
+  (vérif JWT locale `_shared/local-auth.ts` + `GOTRUE_DB_MAX_POOL_SIZE`) ;
+  si ça revient, vérifier que `JWT_SECRET` est bien dans l'env des fonctions
+  (sinon elles retombent en silence sur l'aller-retour GoTrue).
 - ❌ erreurs 5xx avec `norva-db` CPU haut → revenir me voir avec la sortie k6 +
   le `docker stats` : on regardera les requêtes lentes (`pg_stat_statements`).
+
+Piège vécu : un `docker stats` pris APRÈS la fin du run ne montre rien (tout
+retombe en secondes) — photographier le palier vers la minute 8-10, et re-copier
+un token frais juste avant chaque run (expiration 1 h ; les 5 dernières minutes
+du run du 17/07 étaient 100 % 403 à cause d'un token réutilisé).
 
 ## 6. Nettoyage après un run WRITE=1
 

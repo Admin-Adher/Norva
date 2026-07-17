@@ -132,6 +132,12 @@ services:
       API_EXTERNAL_URL: ${API_EXTERNAL_URL:-${SUPABASE_PUBLIC_URL}}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      # k6 2026-07-17 : le pool DB par défaut de GoTrue est minuscule — à ~130 req/s
+      # de GET /user il s'épuisait et /user répondait 500 en rafale (43k sur un run).
+      # Le gros du trafic /user a depuis été supprimé (vérif JWT locale dans les
+      # fonctions, _shared/local-auth.ts) ; ce pool borné protège ce qui reste
+      # (login, refresh) sans risquer de manger les 200 connexions de Postgres.
+      GOTRUE_DB_MAX_POOL_SIZE: ${GOTRUE_DB_MAX_POOL_SIZE:-20}
       GOTRUE_SITE_URL: ${SITE_URL}
       GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
       GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
@@ -334,6 +340,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+    # k6 2026-07-17 : sous 1000 VUs, boots de workers en échec « Too many open
+    # files (os error 24) » — la limite nofile héritée du démon est trop basse
+    # pour sockets keepalive + lecture des modules à chaque boot de worker.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     volumes:
       # Whole functions dir (read-only) — includes the `main` router that
       # dispatches /functions/v1/<name> -> /home/deno/functions/<name>.
@@ -424,6 +437,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+    # Même levée de nofile que `functions` (EMFILE observé sous k6).
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     volumes:
       - ../../supabase/functions:/home/deno/functions:ro
       # Cache deno séparé : deux runtimes qui écrivent le même cache se corrompent.
