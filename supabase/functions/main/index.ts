@@ -14,6 +14,23 @@ const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const SUPABASE_JWKS = parseJwks(Deno.env.get('SUPABASE_JWKS'))
 const VERIFY_JWT = Deno.env.get('VERIFY_JWT') === 'true'
 
+// --- Worker pool (audit capacité 2026-07-17, voir le bloc dans le handler) ---
+// Taille de pool par fonction USER-FACING chaude. Tout ce qui n'est pas listé =
+// 1 worker (comportement historique) — notamment norva-source-sync, dont la
+// chaîne discover/finalize par self-invoke suppose un isolate stable.
+// 6+4+4 isolates × ~1 cœur pèsent au pire ~14 des 16 threads de l'AX42 — les
+// crons/le reste gardent de la place, et la RAM (256 MB × 14 max) est négligeable
+// sur 61 GB.
+const HOT_POOL_SIZES: Record<string, number> = {
+  'norva-cloud': 6,
+  'norva-catalog': 4,
+  'norva-playback': 4,
+}
+const workerPools = new Map<string, { slots: ({ worker: { fetch(r: Request): Promise<Response> } } | null)[]; next: number }>()
+// Hoisted une fois : l'env ne change pas pendant la vie du conteneur (l'ancien
+// code refaisait Deno.env.toObject() + map à CHAQUE requête).
+const ENV_VARS = Object.entries(Deno.env.toObject())
+
 // NOTE:(kallebysantos) We don't check for valid keys but just the bare array parsing,
 // let this for 'jose' lib verification
 export function parseJwks(raw: string | undefined): jose.JSONWebKeySet | null {
@@ -151,9 +168,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const servicePath = `/home/deno/functions/${service_name}`
-  console.error(`serving the request with ${servicePath}`)
 
-  const memoryLimitMb = 150
   // Must comfortably exceed the sync engine's per-isolate work budget
   // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 90s finalize
   // loop deadline in norva-source-sync). Those loops run ~90s of work and THEN
@@ -165,20 +180,56 @@ Deno.serve(async (req: Request) => {
   const workerTimeoutMs = 3 * 60 * 1000
   const noModuleCache = false
   const importMapPath = null
-  const envVarsObj = Deno.env.toObject()
-  const envVars = Object.keys(envVarsObj).map((k) => [k, envVarsObj[k]])
 
-  try {
-    const worker = await EdgeRuntime.userWorkers.create({
+  // Worker POOL (audit capacité 2026-07-17) : un isolate V8 est monothread — avec
+  // UN worker par fonction, norva-cloud plafonnait à ~32 req/s authentifiées sur
+  // UN cœur pendant que les 15 autres dormaient (k6 1000 VUs : 82 % de rejets en
+  // 500/401, débit de succès constant à 31,5/s sur deux runs). Les fonctions
+  // user-facing chaudes reçoivent N isolates round-robin (N cœurs utilisables,
+  // mémoire par worker relevée — elles brassent du gros JSON) ; tout le reste
+  // (crons, sync self-invoke, webhooks) garde exactement l'ancien comportement
+  // mono-worker. Un worker recyclé (timeout 180 s) est respawné en transparence.
+  const poolSize = HOT_POOL_SIZES[service_name] ?? 1
+  const memoryLimitMb = poolSize > 1 ? 256 : 150
+
+  const createWorker = () =>
+    EdgeRuntime.userWorkers.create({
       servicePath,
       memoryLimitMb,
       workerTimeoutMs,
       noModuleCache,
       importMapPath,
-      envVars,
+      envVars: ENV_VARS,
+      // Several LIVE isolates for one servicePath need forceCreate; the default
+      // (reuse-by-path) is kept for pool size 1 — the exact pre-pool semantics.
+      forceCreate: poolSize > 1,
     })
-    return await worker.fetch(req)
+
+  let pool = workerPools.get(servicePath)
+  if (!pool) {
+    pool = { slots: new Array(poolSize).fill(null), next: 0 }
+    workerPools.set(servicePath, pool)
+  }
+  const slot = pool.next
+  pool.next = (pool.next + 1) % pool.slots.length
+
+  try {
+    if (!pool.slots[slot]) {
+      console.error(`creating worker ${slot + 1}/${pool.slots.length} for ${servicePath}`)
+      pool.slots[slot] = { worker: await createWorker() }
+    }
+    try {
+      return await pool.slots[slot]!.worker.fetch(req)
+    } catch (workerErr) {
+      // Dead/recycled worker → one transparent respawn+retry, but never replay a
+      // request whose body was already consumed (a POST half-read by the dying
+      // worker must fail loudly, not double-apply).
+      if (req.bodyUsed) throw workerErr
+      pool.slots[slot] = { worker: await createWorker() }
+      return await pool.slots[slot]!.worker.fetch(req)
+    }
   } catch (e) {
+    pool.slots[slot] = null // next hit on this slot respawns from scratch
     const error = { msg: e.toString() }
     return new Response(JSON.stringify(error), {
       status: 500,
