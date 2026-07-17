@@ -31,7 +31,12 @@ Refonte de l'onglet en **assistant de conformité** (ton professionnel — « qu
 - **Profil serveur durable** (`admin_business_profile`, ligne unique id=1 ; RPC `admin_business_profile_get` / `_set(p_patch jsonb)`, patch partiel whitelisté) : la forme juridique, la raison sociale, le SIREN, le **n° de TVA intracom** et l'état des démarches survivent au changement d'appareil. Le front : localStorage = cache instantané, serveur = source de vérité (fetch 1× → si le serveur a un profil il fait foi ; sinon il est amorcé depuis le cache) + write-through à chaque modification.
 - **Référence de virement RÉELLE** : dès que le n° de TVA est au profil, l'assistant compose `OSS/FR/<n° TVA>/Qn.YYYY` (bouton copier) au lieu d'un exemple — plus le montant EUR à copier.
 - **Journal des dépôts = le registre** (`vat_filings` + RPC `admin_vat_filing_record` / `admin_vat_filings`) : l'assistant propose « 📓 Enregistrer ce dépôt au journal » (période, montant reversé, référence, horodatage) ; le journal s'affiche dans l'onglet (conservation 10 ans, art. 63c).
-- **Reste (Lot B-notify, passe dédiée)** : notifications Telegram (« trimestre clos → figez le taux BCE », « seuil 10 k€ à 80 % ») — touche `refresh_admin_dashboard` (clés VAT dans overview) + `runOpsAlertSweep` de norva-admin, à traiter à part. Upload binaire du certificat PDF (bucket Storage) : futur (le champ note/référence tient le registre en attendant).
+## Cockpit TVA — Lot B-notify (commit 12) : notifications Telegram
+
+- `refresh_admin_dashboard` **ré-émis** (base 20260717120000, **diff vérifié = additions seules**) : 3 clés dans overview — `vat_ytd_eu_cross_cents` / `vat_prevy_eu_cross_cents` (ventes web B2C UE transfrontalières hors FR, année en cours / précédente ; cents USD) et `vat_fx_pending` (libellé 'Tn AAAA' du dernier trimestre clos avec ventes UE mais taux BCE non figé, sinon NULL). Migration `20260717190000` (⚠ ré-émission → **exécuter en supabase_admin**, pas de reload PostgREST — signature inchangée).
+- `runOpsAlertSweep` (norva-admin) : 2 nudges — **seuil OSS ≥ 80 %** (max année N/N-1 × 0,92 ≥ 8 000 €, **supprimé si OSS déjà inscrit** au profil → se résout au lieu de spammer) et **trimestre clos → figez le taux BCE** (se résout dès que `oss_fx_rates` a la ligne). Cooldown 6 h + heal via la machinerie existante. Ajoutés à `checked`.
+- Ligne **🇪🇺 TVA / OSS** dans le digest hebdo Telegram (si signal présent). Déploiement : migration + redéploiement edge `norva-admin`.
+- **Reste** : upload binaire du certificat PDF (bucket Storage) — futur ; le champ référence/note du journal tient le registre en attendant.
 
 ## Cockpit TVA — échelle d'accompagnement (brainstorm UX)
 

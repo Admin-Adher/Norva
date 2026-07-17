@@ -169,6 +169,26 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
 
+  // VAT / OSS proactive nudges (from the cache overview). The 10 000 € threshold is
+  // assessed on the current AND previous calendar year (whichever is higher). Amounts
+  // are USD cents → convert with the same indicative rate the TVA tab uses. The
+  // threshold nudge is suppressed once the founder has registered for OSS (business
+  // profile), so it heals instead of re-firing every 6h for the rest of the year.
+  const VAT_EUR = 0.92;
+  const vatMaxEur = Math.max(Number(ov.vat_ytd_eu_cross_cents ?? 0), Number(ov.vat_prevy_eu_cross_cents ?? 0)) * VAT_EUR;
+  let ossRegistered = false;
+  if (vatMaxEur >= 800_000) {
+    const { data: prof } = await admin.from("admin_business_profile").select("demarches").eq("id", 1).maybeSingle()
+      .then((r) => r, () => ({ data: null }));
+    ossRegistered = ((prof as JsonRecord | null)?.demarches as JsonRecord | undefined)?.oss === true;
+  }
+  if (vatMaxEur >= 800_000 && !ossRegistered) {
+    problems.push({ key: "vat_threshold", detail: `TVA — seuil OSS proche : ~${Math.round(vatMaxEur / 100)} € de ventes UE transfrontalières (≥ 80 % des 10 000 €). Préparez l'inscription au guichet OSS (onglet TVA & conformité).` });
+  }
+  if (ov.vat_fx_pending) {
+    problems.push({ key: "vat_fx_pending", detail: `TVA — trimestre ${ov.vat_fx_pending} clos avec des ventes UE : figez le taux BCE dans l'onglet TVA pour finaliser la déclaration OSS (2 min).` });
+  }
+
   // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
   // `details` is read too so the recovery notice can say WHAT was resolved.
   const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at, details");
@@ -257,7 +277,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
 
   return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale"],
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "vat_threshold", "vat_fx_pending"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
     snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
   };
@@ -289,6 +309,14 @@ async function sendWeeklyDigest(): Promise<JsonRecord> {
   if (n(ov.billing_past_due)) parts.push(`• ⚠️ Échecs de paiement : ${n(ov.billing_past_due)}`);
   parts.push("", "🎫 <b>Support</b>", `• Ouverts : ${n(ov.support_open)} · à répondre : ${n(ov.support_needs_reply)}`);
   if (n(ov.sources_error)) parts.push(`• 🔧 Sources en erreur : ${n(ov.sources_error)}`);
+
+  // TVA/OSS : uniquement si un signal existe (ventes UE transfrontalières ou taux à figer).
+  const vatEurLine = Math.round(Math.max(n(ov.vat_ytd_eu_cross_cents), n(ov.vat_prevy_eu_cross_cents)) * 0.92 / 100);
+  if (vatEurLine > 0 || ov.vat_fx_pending) {
+    parts.push("", "🇪🇺 <b>TVA / OSS</b>");
+    if (vatEurLine > 0) parts.push(`• Ventes UE transfrontalières : ~${vatEurLine} € / 10 000 € (seuil OSS)`);
+    if (ov.vat_fx_pending) parts.push(`• ⏳ Trimestre ${ov.vat_fx_pending} clos : figez le taux BCE pour déclarer`);
+  }
 
   const sent = await sendTelegram(parts.join("\n"));
   return { ok: true, sent, mrr_cents: mrr };
