@@ -1,0 +1,121 @@
+# Pays client — capture, backfill, surfaces admin
+
+> Livré le 2026-07-17 (branche `claude/client-location-revolut-playstore-p9nf74`,
+> migration `20260717120000_customer_country_vat.sql`). Compagnon TVA : [`TVA-OSS.md`](./TVA-OSS.md).
+
+## Sources de vérité (décision produit 2026-07-17)
+
+| Rail | Source | Confiance | Champ amont |
+|---|---|---|---|
+| Play / App Store (RevenueCat) | Pays du **storefront** | Haute | `event.country_code` (racine de l'événement webhook RC) |
+| Web (Revolut Merchant) | Pays d'**émission de la carte** (BIN) | ~95 % (expats, néobanques) | `card_country_code` dans les payment details de l'order |
+| IP-géoloc | — | — | **Hors périmètre** (add-on futur possible pour les comptes gratuits) |
+
+Côté TVA, le pays BIN fourni par Revolut est l'élément de preuve « item c » de
+l'art. 24f du règl. 282/2011 (voir `TVA-OSS.md` §5).
+
+## Modèle de données
+
+- `cloud_entitlement_projection.country_code` + `country_source` (`store`|`card`) —
+  le pays **courant** du client, dernier événement gagne (une MAJ de carte peut le
+  déplacer — voulu). CHECK `^[A-Z]{2}$`.
+- `cloud_revolut_customers.card_country` — pays de la carte sauvegardée ; copié par
+  le cron de renouvellement sur chaque ligne de ledger.
+- `cloud_billing_ledger.country_code` — le pays **au moment de la transaction**
+  (immuable, base des déclarations TVA/OSS — ne jamais le « corriger » vers le pays
+  courant). ⚠️ La vue de compat `cloud_stancer_payments` (`select *` figé) ne porte
+  **pas** cette colonne — lire la table.
+
+## Écriture (capture live)
+
+| Où | Quoi |
+|---|---|
+| `norva-billing-webhook` | `projectionPatch` → `country_code/source='store'` ; `journalRcPayment` → ledger `country_code` |
+| `norva-revolut` `/confirm` | extraction sur l'order fetché (`cardCountryFromOrder`) → `cloud_revolut_customers.card_country` + projection (`source='card'`) ; upsert trial_setup porte le pays |
+| `norva-revolut` `/profile` | capture paresseuse : si `method_details` de la carte porte un pays, persiste + stamp projection |
+| `norva-revolut-webhook` | même extraction sur l'order re-fetché → `projectionPatch` (filet pour les conversions sans `/confirm`) |
+| `norva-revolut-billing` | chaque charge journalisée porte `country_code = card_country` du mapping |
+
+`cardCountryFromOrder` essaie plusieurs chemins (API legacy `/api/1.0` vs 2024-09) :
+`payments[].payment_method.card_country_code`, `payments[].payment_method.card.card_country_code`,
+`payments[].payment_method.card.country_code`, `payments[].card_country_code`.
+Un événement sans payment details ne **null-ifie jamais** un pays déjà connu.
+
+## Backfill (dans la migration, idempotent — `where … is null` partout)
+
+1. RC → projection : dernier `payload->>'country_code'` par user (`provider='revenuecat'`).
+2. Revolut → projection + `card_country` : mêmes chemins jsonb que l'edge, via
+   `jsonb_path_query_first` sur `payload->'order'`.
+3. Ledger RC : match transaction-précis `pi_id = 'rc_' || transaction_id`.
+4. Ledger Revolut : match `order_id` depuis `payload->'order'->>'id'`, puis fallback
+   par client via `card_country`.
+
+### ⚠️ Étape 0 — vérification à faire sur la box (jamais confirmée sur données live)
+
+Aucun payload d'exemple n'existe dans le repo ; les chemins Revolut sont défensifs
+mais **non confirmés**. Après (ou avant) la migration :
+
+```sql
+-- Le pays carte est-il bien dans l'order stocké par le webhook ?
+select created_at, payload->'order'->'payments' as payments
+from cloud_entitlement_events where provider = 'revolut'
+order by created_at desc limit 3;
+
+-- Champ RC (attendu : code alpha-2 en racine)
+select created_at, payload->>'country_code' as cc
+from cloud_entitlement_events where provider = 'revenuecat'
+order by created_at desc limit 3;
+
+-- Taux de couverture après backfill
+select country_source, count(*) from cloud_entitlement_projection
+where country_code is not null group by 1;
+```
+
+Si `card_country_code` n'apparaît pas dans `payments`, le backfill web rend 0 ligne
+(sans erreur) et seule la capture live via `/confirm` couvrira le rail — ajuster
+les chemins dans la migration ET dans les 3 fonctions edge Revolut.
+
+### Couverture attendue (structurel, pas un bug)
+
+- Conversions Revolut passées **uniquement** par `/confirm` : aucune ligne
+  d'événement → pas de backfill possible (capture live désormais).
+- Comptes gratuits : pas de rail de paiement → pays inconnu (« — » dans l'UI).
+- Le bucket **« Inconnu »** (Finance, filtre Clients `'??'`) est la jauge de
+  couverture — jamais masqué.
+
+## Lecture (surfaces admin)
+
+| Surface | Quoi | RPC |
+|---|---|---|
+| Clients | colonne Pays, **filtre pays** (facette serveur + « Inconnu » `'??'`), CSV (`pays`, `source_pays`) | `admin_users_page(+p_country)` / `admin_users_export(+p_country)` — **signatures étendues, anciennes DROPpées** |
+| Fiche + sidebar ticket | ligne Pays avec provenance (« storefront » vs « pays d'émission carte ») | `admin_user_billing` |
+| Finance | bloc 🌍 (barres MRR par pays), table pays×rail, colonne Pays des 50 derniers paiements + CSV | `admin_finance` (`by_country`, `by_country_rail`, `recent_payments.country_code`) |
+| Finance | panneau 🇪🇺 TVA : base trimestrielle par pays, jauges 10 000 € UE et 37 500/41 250 € FR, alerte UK, export CSV | `admin_vat_report(p_year, p_quarter)` — périmètre **rail web uniquement** (Play = fournisseur présumé) |
+| Cockpit | carte Top pays (cache, cron 10 min) | `refresh_admin_dashboard` → `overview.billing_countries/-_n/-_unknown_n` |
+
+Front : helper `AdminPage.flag(cc)` (drapeau emoji + code). Conversion EUR du
+panneau TVA = taux **indicatif** codé en dur (`EUR_PER_USD` dans `_renderVatPanel`)
+— la déclaration réelle utilise le taux BCE du dernier jour du trimestre.
+
+Tous les agrégats appliquent le prédicat canonique d'exclusion
+`admin_internal_accounts`.
+
+## Déploiement
+
+1. **Migration d'abord** (la colonne doit exister avant les fonctions) :
+   `docker exec -i norva-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/20260717120000_customer_country_vat.sql`
+2. **Edge** : `git pull && ops/hetzner/scripts/04-deploy-edge-functions.sh`
+   (norva-revolut, norva-revolut-webhook, norva-billing-webhook, norva-revolut-billing).
+3. **Web** : merge sur `main` → GitHub Actions → Cloudflare Pages
+   (`AdminPage.js` bumpé `?v=58` dans `app.js`).
+4. Recette : un client RC et un client Revolut fraîchement confirmés affichent leur
+   pays partout ; `by_country` n'inclut aucun compte interne ; le bucket Inconnu
+   reflète le count de l'étape 0.
+
+## Hors périmètre (pistes actées, non construites)
+
+Drill-down Finance→Clients par pays (modèle `data-billing`), conversion essai→payant
+par pays, ligne pays du digest Telegram, badge « pays divergent » multi-rail,
+ops-alert afflux pays (anti card-testing), historique/sparklines par pays,
+IP-géoloc pour les comptes gratuits, emails lifecycle localisés (décision produit
+« English-only » à inverser d'abord).
