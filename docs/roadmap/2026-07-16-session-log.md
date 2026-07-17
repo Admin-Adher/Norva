@@ -324,3 +324,13 @@ label épisode, révocation auto-attach, keepAiPolling).
 
 **Hors périmètre assumé** : pont TMDB inter-panels (Phase B.2, vrai multiplicateur de couverture,
 changement de modèle de données) ; pregen per-épisode ; mode local ; gating par abonnement.
+
+### §16 — Trou noir « sondés sans langue » : verdict + re-probe Ferran (2026-07-17 matin)
+
+Échantillonnage box (script 10) : **Strng 8K 0/12 récupérables** (vrais flux morts — perte
+structurelle assumée, aucun re-probe de masse) ; **Ferran 5/12 récupérables, tous par
+header-probe, 0 par vod** → mode vod aveugle sur ce panel. Opérations live : reset de
+**15 518** marqueurs du bucket Ferran (script 11), cron per-source `norva-audio-ferran-probe`
+(probe, jour 6-23), job 12 vod **scopé sur AtlasPro**. Détail dans ENRICHMENT_CRON_SETUP.md
+§2026-07-17. Attendu : +6-7k titres résolus sur Ferran d'ici le week-end. Au passage : la
+migration ST-IA (20260717120000) est appliquée et l'edge redéployé par Adrien à 06:15.

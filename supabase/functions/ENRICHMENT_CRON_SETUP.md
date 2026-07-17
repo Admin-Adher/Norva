@@ -624,3 +624,24 @@ select cron.schedule('vac-tmp', '* * * * *', 'vacuum (full, analyze) public.clou
 -- wait ~1–2 min, confirm cron.job_run_details shows 'succeeded', then:
 select cron.unschedule('vac-tmp');
 ```
+
+## 🔎 2026-07-17 — Ferran : vod aveugle → cron per-source en PROBE + re-probe du bucket
+
+> Échantillonnage (`ops/hetzner/scripts/10-sample-reprobe-empty.sh`) : sur le panel **IPTV
+> Ferran** (compte jeremy `0b971271…`, source `b56d79e9-…`), 5/12 « sondés sans langue »
+> étaient récupérables par HEADER-PROBE et 0 par vod → le mode vod est aveugle sur ce panel
+> (~42 % du bucket récupérable). Strng 8K : 0/12 → vrais flux morts, rien à re-sonder.
+>
+> Correctif live (script `11-ferran-reprobe.sql` + scoping manuel) :
+> - **reset** de 15 518 `audio_probed_at` du bucket Ferran (sondé/0 langue/0 piste) ;
+> - nouveau cron **`norva-audio-ferran-probe`** `2-59/4 6-23 * * *` — body
+>   `{userId: 0b971271…, sourceId: b56d79e9…, type: movie, mode: probe, limit: 25,
+>   concurrency: 1, fallthrough: true}` (même traitement que les panels AÎRO) ;
+> - **job 12 `norva-audio-langs-jeremy` scopé sur AtlasPro** (`sourceId: 68312e1a-…`),
+>   params inchangés (vod, limit 50, conc 2, fallthrough) — il ne re-marquera plus Ferran
+>   en aveugle. Les crons de nuit du compte (13/14/15, probe/target) restent account-wide.
+>
+> Suivi : Ferran ~16,1k candidats à ~6-7k offerts/jour → 1er passage en ~2,5-3 j, attendu
+> +6-7k résolus (~53 % → ~65-70 %). Si AtlasPro montre le même syndrome (2 073 « sans
+> langue », 17 %), re-lancer le script 10 une fois Ferran drainé — il ciblera les 2 panels
+> suivants automatiquement.
