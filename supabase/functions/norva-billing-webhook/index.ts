@@ -128,7 +128,11 @@ Deno.serve(async (req) => {
 
 // --- event -> projection mapping -------------------------------------------
 
-function projectionPatch(userId: string, type: string, event: JsonRecord): JsonRecord | null {
+function projectionPatch(userId: string, type: string, rawEvent: JsonRecord): JsonRecord | null {
+  // PRODUCT_CHANGE carries the OLD product in `product_id` and the NEW one in
+  // `new_product_id` — the projection must describe what the subscriber switched
+  // TO, so plan/cadence derive from the new product from here on.
+  const event = effectiveEvent(type, rawEvent);
   const periodType = String(event.period_type ?? "").toUpperCase();
   const isTrial = periodType === "TRIAL" || periodType === "INTRO";
   const status = statusForEvent(type, isTrial);
@@ -179,10 +183,20 @@ function projectionPatch(userId: string, type: string, event: JsonRecord): JsonR
   // own price/cadence separately; this gives the mobile rails
   // (Play/Apple) the equivalent so admin_finance can compute their MRR. Only stamp
   // when a price is present, so price-less events (cancel/expire) never null it.
+  // Exception — a price-less PRODUCT_CHANGE would otherwise leave the OLD price and
+  // cadence in place until the next RENEWAL (up to a year for a monthly→annual
+  // switch): fall back to the catalog price of the NEW product instead.
   const baseCents = basePriceCents(event);
   if (baseCents != null) {
     patch.mrr_cents = baseCents;
     patch.bill_period = billPeriodForEvent(event);
+  } else if (type === "PRODUCT_CHANGE") {
+    const period = billPeriodForEvent(event);
+    const catalogCents = PRICES[planCode]?.[period];
+    if (catalogCents) {
+      patch.mrr_cents = catalogCents;
+      patch.bill_period = period;
+    }
   }
 
   // TODO(transfer): handle the TRANSFER event by moving the entitlement from
@@ -286,6 +300,24 @@ function countryOf(event: JsonRecord): string | null {
   return c && /^[A-Za-z]{2}$/.test(c) ? c.toUpperCase() : null;
 }
 
+// Catalog price table (cents, USD) — the mobile products mirror the web plans.
+// Used ONLY as an MRR fallback for a price-less PRODUCT_CHANGE; never journaled
+// as cash (the ledger only records amounts the event itself carries).
+const PRICES: Record<string, Record<string, number>> = {
+  plus:   { monthly: 499, annual: 4199 },
+  family: { monthly: 899, annual: 7599 },
+};
+
+// A PRODUCT_CHANGE event's `product_id` is the product being LEFT; the product the
+// subscriber switched to arrives in `new_product_id`. Return a view of the event
+// where product_id describes the NEW product, so every derivation downstream
+// (plan code, billing cadence) follows the switch. All other event types pass through.
+function effectiveEvent(type: string, event: JsonRecord): JsonRecord {
+  if (type !== "PRODUCT_CHANGE") return event;
+  const next = stringOrNull(event.new_product_id);
+  return next ? { ...event, product_id: next } : event;
+}
+
 // monthly | annual, from the product id, else the purchased→expiration span.
 function billPeriodForEvent(event: JsonRecord): string {
   const pid = (stringOrNull(event.product_id) ?? "").toLowerCase();
@@ -302,14 +334,21 @@ function billPeriodForEvent(event: JsonRecord): string {
 // Insert a rail-tagged payment row for a real (non-trial) mobile charge, mirroring
 // the web-rail journal. Idempotent on pi_id (`rc_<transaction_id>`), so RC retries
 // and the whole-event idempotency guard both no-op safely.
+// PRODUCT_CHANGE is journaled as kind='plan_change': the event's price is the NEW
+// product's full catalog price, NOT what Google actually charged (Google prorates
+// the switch itself and never tells RC the prorated cash amount) — so the row is
+// audit context, deliberately EXCLUDED from every revenue/conversion aggregate
+// (they all filter kind in ('first_charge','renewal')). The real annual cash shows
+// up as a normal 'renewal' row at the next RENEWAL event.
 async function journalRcPayment(
   db: SupabaseClient,
   userId: string,
   type: string,
-  event: JsonRecord,
+  rawEvent: JsonRecord,
 ): Promise<void> {
   const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE", "PRODUCT_CHANGE"]);
   if (!MONEY.has(type)) return;
+  const event = effectiveEvent(type, rawEvent); // PRODUCT_CHANGE → describe the NEW product
   const periodType = String(event.period_type ?? "").toUpperCase();
   if (periodType === "TRIAL" || periodType === "INTRO") return; // no cash during a trial/intro
   const cents = paidCents(event);
@@ -320,7 +359,7 @@ async function journalRcPayment(
   const { error } = await db.from("cloud_billing_ledger").upsert({
     pi_id: `rc_${txId}`,
     user_id: userId,
-    kind: type === "RENEWAL" ? "renewal" : "first_charge",
+    kind: type === "RENEWAL" ? "renewal" : (type === "PRODUCT_CHANGE" ? "plan_change" : "first_charge"),
     amount: cents,
     currency: currencyOf(event),
     status: "captured",
