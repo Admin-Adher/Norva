@@ -433,6 +433,38 @@ alignée pixel sur sa maquette (landing.css v38, landing.js v19) :
 - Simulations jsdom re-déroulées (28 assertions vertes, rendu + bascule +
   expiration).
 
+**v3 — polish premium 12 points** (revue design détaillée d'Adrien, valeurs
+chiffrées reprises telles quelles ; landing.css v39, landing.js v20) :
+
+- **Profondeur des cards** : dégradé vertical `#1e223d → #191d34`, bordure
+  `rgba(255,255,255,.08)`, ombres empilées `0 25px 60px rgba(0,0,0,.45)` +
+  glow bleu `0 0 40px rgba(90,110,255,.12)` — les cards « flottent ».
+- **Family = star** : fond plus clair (`#262c50 → #1e2442`), contour
+  `rgba(100,120,255,.45)`, glow large `0 0 60px rgba(96,123,255,.25)`.
+- **Prix énormes** : 72 px / weight 800 / letter-spacing −3 px (62 px ≤ 820,
+  52 px ≤ 520) ; glow du prix en `filter: drop-shadow` (PAS text-shadow, qui
+  transparaîtrait à travers les glyphes en background-clip:text) — bleu sur la
+  Family, encre de l'événement sur la card promo.
+- **CTA relief** : dégradé `#4d7bff → #6b3eff` + double glow
+  (`0 8px 30px rgba(82,105,255,.35)` + `0 0 30px rgba(90,110,255,.3)`), hover
+  `translateY(-2px) scale(1.01)` ; CTA promo outline avec glow à l'encre.
+- **Badges** : padding élargi, ombre portée + glow thémé (inline JS).
+- **Respiration** : padding cards 40/34, +2-4 px entre chaque bloc, ul gap 14.
+- **Coches** : disque teinté doux (`rgba(98,111,255,.15)` + glow ; encre
+  événement via `color-mix` sur la card promo ; disque dégradé plein sur la
+  Family) + coche blanche en mask — deux pseudo-éléments (::before disque,
+  ::after coche).
+- **Fond** : halo radial `rgba(75,95,255,.12)` derrière la grille
+  (`.pricing-section::before`, z-index −1).
+- **Toggle** : capsule coulissante animée (`.toggle-thumb` posé par JS,
+  `positionThumb()` sur apply/resize/load ; si la géométrie n'est pas
+  mesurable, `has-thumb` saute et le bouton actif reprend le dégradé — repli
+  vérifié en jsdom) ; conteneur plus épais, SAVE 30% vert avec glow.
+- **Hiérarchie typo 3 niveaux** : blanc (décision) / `#c7cbe3` (description,
+  features) / `#8c91b4` (mentions, période, note) .
+- **Séparateurs réassurance** : `rgba(255,255,255,.08)`, padding 34 px.
+- Simulations : 24 assertions vertes (+ thumb, repli has-thumb, glow badge).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

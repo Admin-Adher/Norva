@@ -470,6 +470,26 @@
     }
 
     let currentPeriod = 'monthly';
+    // Capsule coulissante du toggle : anime le passage Monthly ↔ Annual. Si la
+    // géométrie n'est pas mesurable (layout caché, vieux moteur), has-thumb
+    // saute et le bouton actif porte lui-même le dégradé (repli CSS).
+    let thumb = null;
+    if (toggleGroup) {
+      thumb = document.createElement('span');
+      thumb.className = 'toggle-thumb';
+      thumb.setAttribute('aria-hidden', 'true');
+      toggleGroup.prepend(thumb);
+      window.addEventListener('resize', () => positionThumb());
+      window.addEventListener('load', () => positionThumb());
+    }
+    function positionThumb() {
+      if (!thumb || !toggleGroup) return;
+      const act = opts.find(o => o.classList.contains('is-active'));
+      if (!act || !act.offsetWidth) { toggleGroup.classList.remove('has-thumb'); return; }
+      toggleGroup.classList.add('has-thumb');
+      thumb.style.width = `${act.offsetWidth}px`;
+      thumb.style.transform = `translateX(${act.offsetLeft}px)`;
+    }
     // Promos actives (catalogue live billing_prices) : { plan: { period: { base_cents, event, label } } }.
     let livePromos = null;
     // Badge labels (copy anglaise du site) + couleurs par événement — alignés sur
@@ -601,6 +621,7 @@
           const label = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
           flag.textContent = `${PROMO_ICONS[promo.event] || PROMO_ICONS.other} ${label} − ${pct}%`;
           flag.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+          flag.style.boxShadow = `0 6px 16px -6px rgba(0,0,0,.5), 0 0 20px ${edge.glow}`;
           if (!save) {
             save = document.createElement('small');
             save.className = 'promo-save';
@@ -623,7 +644,7 @@
           wasLine.querySelector('span').textContent = isAnnual ? '/yr' : '/mo';
           article.classList.add('has-promo');
           article.style.borderColor = edge.border;
-          article.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.08), 0 0 60px -18px ${edge.glow}, 0 30px 70px -28px rgba(0,0,0,.9)`;
+          article.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.08), 0 25px 60px rgba(0,0,0,.45), 0 0 40px ${edge.glow}`;
           article.style.setProperty('--promo-ink', edge.ink);
         } else {
           if (flag) flag.remove();
@@ -641,6 +662,7 @@
       if (announce && status) {
         status.textContent = `${isAnnual ? 'Annual' : 'Monthly'} billing selected. Prices and checkout links updated.`;
       }
+      positionThumb();
     }
 
     opts.forEach(opt => opt.addEventListener('click', () => {

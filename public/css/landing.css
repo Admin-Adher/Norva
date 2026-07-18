@@ -1681,27 +1681,48 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
    ===================================================================== */
 
 .billing-toggle {
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   gap: 4px;
   margin: 30px auto 0;
-  padding: 5px;
-  border: 1px solid var(--glass-line);
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.045);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 30px -18px rgba(0, 0, 0, 0.8);
+}
+
+/* Sliding capsule behind the active option (positioned from JS; if layout is
+   not measurable the has-thumb class is dropped and the active button falls
+   back to carrying the gradient itself). */
+.billing-toggle .toggle-thumb {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  z-index: 0;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #4d7bff, #6b3eff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 24px -8px rgba(82, 105, 255, 0.55);
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), width 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .billing-opt {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
-  padding: 10px 20px;
+  min-height: 46px;
+  padding: 11px 22px;
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: var(--muted);
+  color: #8c91b4;
   font-family: Inter, sans-serif;
   font-size: 14px;
   font-weight: 700;
@@ -1711,12 +1732,17 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
 
 .billing-opt.is-active {
   color: #fff;
-  background: var(--grad-accent);
+  background: linear-gradient(135deg, #4d7bff, #6b3eff);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 10px 26px -10px var(--glow-blue);
 }
 
+.billing-toggle.has-thumb .billing-opt.is-active {
+  background: transparent;
+  box-shadow: none;
+}
+
 .billing-opt .save-badge {
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
   background: rgba(52, 211, 153, 0.16);
   border: 1px solid rgba(52, 211, 153, 0.35);
@@ -1724,6 +1750,7 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
+  box-shadow: 0 0 14px rgba(52, 211, 153, 0.28);
 }
 
 .pricing-grid {
@@ -1738,16 +1765,17 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
   padding: 34px 30px;
 }
 
+/* The featured card is the star: lighter layered background, brighter rim,
+   wide blue glow — the eye lands there first. */
 .pricing-grid .featured {
-  border-color: rgba(120, 156, 255, 0.6);
+  border-color: rgba(100, 120, 255, 0.45);
   background:
-    radial-gradient(120% 90% at 80% 0%, rgba(59, 130, 255, 0.2), transparent 60%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015)),
-    var(--glass-strong);
+    radial-gradient(120% 90% at 80% 0%, rgba(96, 123, 255, 0.16), transparent 60%),
+    linear-gradient(180deg, #262c50 0%, #1e2442 100%);
   box-shadow:
-    inset 0 1px 0 0 var(--hi),
-    0 30px 70px -28px rgba(0, 0, 0, 0.9),
-    0 0 60px -18px var(--glow-blue);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 25px 60px rgba(0, 0, 0, 0.5),
+    0 0 60px rgba(96, 123, 255, 0.25);
 }
 
 /* In-flow chip at the top of the featured card (mirrors the promo badge slot
@@ -1815,33 +1843,44 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
 
 .pricing-grid li {
   position: relative;
-  padding-left: 30px;
+  padding-left: 32px;
 }
 
-/* Circled checkmarks. The outline variant is drawn as a mask so its color can
-   follow the live promo's event theme (--promo-ink, set from JS); the featured
-   card uses a filled blue circle with a white check instead. */
+/* Glowing circled checkmarks: a softly tinted disc (::before) under a white
+   check (::after, drawn as a mask). The disc follows the live promo's event
+   theme via --promo-ink; the featured card gets a filled gradient disc. */
 .pricing-grid li::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 1px;
-  width: 20px;
-  height: 20px;
-  background-color: #4fe0a8;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='16 9.5 10.8 15 8 12.2'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='16 9.5 10.8 15 8 12.2'/%3E%3C/svg%3E") center / contain no-repeat;
+  top: 0;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: rgba(98, 111, 255, 0.15);
+  box-shadow: 0 0 12px rgba(98, 111, 255, 0.18);
+}
+
+.pricing-grid li::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 11px;
+  height: 11px;
+  background-color: #fff;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .pricing-grid .has-promo:not(.featured) li::before {
-  background-color: var(--promo-ink, #4fe0a8);
+  background: color-mix(in srgb, var(--promo-ink, #626fff) 20%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--promo-ink, #626fff) 25%, transparent);
 }
 
 .pricing-grid .featured li::before {
-  -webkit-mask: none;
-  mask: none;
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%234b6ef5'/%3E%3Cpolyline points='16.5 9 10.8 15.2 7.5 12' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  background: linear-gradient(135deg, #4d7bff, #6b3eff);
+  box-shadow: 0 0 14px rgba(90, 110, 255, 0.35);
 }
 
 .pricing-grid a {
@@ -1851,10 +1890,11 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
+  min-height: 52px;
   border: 1px solid var(--glass-line);
-  border-radius: 12px;
+  border-radius: 13px;
   background: rgba(255, 255, 255, 0.06);
+  font-size: 15px;
   font-weight: 800;
   transform: translateZ(0);
   transition:
@@ -1880,20 +1920,27 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
 .pricing-grid .featured a {
   border: 0;
   color: #fff;
-  background: var(--grad-accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 14px 34px -12px var(--glow-blue);
+  background: linear-gradient(135deg, #4d7bff, #6b3eff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 8px 30px rgba(82, 105, 255, 0.35),
+    0 0 30px rgba(90, 110, 255, 0.3);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .pricing-grid a:hover {
-    transform: translateY(-2px);
+    transform: translateY(-2px) scale(1.01);
     border-color: rgba(170, 190, 255, 0.42);
     background: rgba(255, 255, 255, 0.1);
     box-shadow: 0 16px 34px rgba(4, 8, 18, 0.3);
   }
 
   .pricing-grid .featured a:hover {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 20px 46px -12px var(--glow-blue);
+    background: linear-gradient(135deg, #4d7bff, #6b3eff);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 14px 40px rgba(82, 105, 255, 0.42),
+      0 0 36px rgba(90, 110, 255, 0.34);
   }
 
   .pricing-grid a:hover::after {
@@ -3667,34 +3714,88 @@ body.has-bottom-consent {
   }
 }
 
+/* Soft halo behind the pricing grid so the cards detach from the page
+   background (the premium "float"). */
+.pricing-section {
+  position: relative;
+}
+
+.pricing-section::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  z-index: -1;
+  transform: translate(-50%, -50%);
+  width: min(1150px, 100%);
+  height: 760px;
+  background: radial-gradient(circle, rgba(75, 95, 255, 0.12), transparent 65%);
+  pointer-events: none;
+}
+
 /* Pricing cards surface the decision and its exact terms before the feature
    inventory. Flex column with the flexible space absorbed ABOVE the price
    block: both cards keep their CTA/terms/features pinned to the bottom and
    the price floats in the remaining room, however much content sits on top
-   (promo badge + savings line on one card only, etc.). */
+   (promo badge + savings line on one card only, etc.).
+   Depth: layered vertical gradient + faint blue glow + soft drop shadow so
+   the cards float instead of sitting flat on the page. */
 .pricing-grid article {
   display: flex;
   flex-direction: column;
-  padding: 34px 32px;
+  padding: 40px 34px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, #1e223d 0%, #191d34 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 25px 60px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(90, 110, 255, 0.12);
 }
 
+/* Typography hierarchy inside the cards: white for the decision, soft
+   lavender for supporting copy, muted slate for the fine print. */
 .pricing-grid article h3 {
-  font-size: 24px;
-  margin: 0 0 8px;
+  font-size: 25px;
+  margin: 0 0 10px;
+  color: #fff;
 }
 
 .pricing-grid article > p {
   font-size: 14.5px;
+  line-height: 1.55;
+  color: #c7cbe3;
 }
 
 .pricing-grid article > .price {
-  margin: auto 0 20px;
-  font-size: 56px;
+  margin: auto 0 24px;
+  font-size: 72px;
+  font-weight: 800;
   white-space: nowrap;
 }
 
+.pricing-grid .price .price-amount {
+  letter-spacing: -3px;
+}
+
+.pricing-grid .price .price-cur {
+  font-size: 26px;
+}
+
+.pricing-grid .price .price-period {
+  color: #8c91b4;
+}
+
+.pricing-grid .price-note {
+  color: #8c91b4;
+}
+
+.pricing-grid ul {
+  gap: 14px;
+  color: #c7cbe3;
+}
+
 .pricing-grid article > .promo-was {
-  margin: auto 0 2px;
+  margin: auto 0 4px;
 }
 
 .pricing-grid article > .promo-was + .price {
@@ -3702,16 +3803,18 @@ body.has-bottom-consent {
 }
 
 .pricing-grid article > :is(a, .pricing-cta) {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
 }
 
-/* The featured price gets the accent gradient (overridden by the event ink
-   when that card itself runs a promo). */
+/* The featured price gets the accent gradient + a soft glow (drop-shadow —
+   not text-shadow, which would bleed through background-clipped glyphs).
+   Overridden by the event ink when that card itself runs a promo. */
 .pricing-grid .featured .price-amount {
   background: linear-gradient(135deg, #7aa5ff, #8b5cf6);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  filter: drop-shadow(0 0 18px rgba(96, 123, 255, 0.35));
 }
 
 /* Event promo dress-up — elements injected and themed by landing.js when a
@@ -3719,8 +3822,8 @@ body.has-bottom-consent {
    card border/glow set inline). */
 .pricing-grid .promo-flag {
   width: max-content;
-  margin: 0 0 16px;
-  padding: 6px 12px;
+  margin: 0 0 18px;
+  padding: 7px 14px;
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 800;
@@ -3730,10 +3833,14 @@ body.has-bottom-consent {
 }
 
 .pricing-grid .promo-save {
-  margin: -6px 0 12px;
+  margin: -6px 0 14px;
   color: #dfe7fb;
   font-size: 14px;
   font-weight: 600;
+}
+
+.pricing-grid .has-promo .price-amount {
+  filter: drop-shadow(0 0 15px color-mix(in srgb, var(--promo-ink, #fff) 30%, transparent));
 }
 
 .pricing-grid .promo-was {
@@ -3769,6 +3876,7 @@ body.has-bottom-consent {
   border-color: var(--promo-ink, var(--glass-line));
   color: var(--promo-ink, #fff);
   background: rgba(255, 255, 255, 0.02);
+  box-shadow: 0 8px 26px -12px color-mix(in srgb, var(--promo-ink, #626fff) 45%, transparent);
 }
 
 /* Real countdown to the promo's server-side end time (landing.js removes it
@@ -3828,11 +3936,11 @@ body.has-bottom-consent {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 2px 28px;
+  padding: 4px 34px;
 }
 
 .pricing-trust > div + div {
-  border-left: 1px solid var(--glass-line);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .pricing-trust svg {
@@ -3863,10 +3971,10 @@ body.has-bottom-consent {
 
 .pricing-terms {
   display: block;
-  margin: 0 2px 20px;
-  color: #aeb9d2;
+  margin: 0 2px 22px;
+  color: #8c91b4;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .pricing-status {
@@ -4109,11 +4217,11 @@ body.has-bottom-consent {
   }
 
   .pricing-grid article {
-    padding: 28px 24px;
+    padding: 30px 26px;
   }
 
-  .price {
-    margin-top: 26px;
+  .pricing-grid article > .price {
+    font-size: 62px;
   }
 }
 
@@ -4271,13 +4379,12 @@ body.has-bottom-consent {
     padding: 26px 20px;
   }
 
-  .pricing-grid em {
-    top: 16px;
-    right: 16px;
+  .pricing-grid article > .price {
+    font-size: 52px;
   }
 
-  .price {
-    font-size: 46px;
+  .pricing-grid .price .price-amount {
+    letter-spacing: -2px;
   }
 
   .faq-list {
