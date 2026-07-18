@@ -1778,29 +1778,42 @@ html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
     0 0 60px rgba(96, 123, 255, 0.25);
 }
 
-/* In-flow chip at the top of the featured card (mirrors the promo badge slot
-   on the other card). */
+/* Plan title row: the "Most popular" pill sits beside the heading (compact
+   header — one row instead of two), and if a promo ever runs on this card its
+   event badge stays above, so the two badges never stack. */
+.pricing-grid .plan-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+
+.pricing-grid .plan-head h3 {
+  margin: 0;
+}
+
+/* Compact chip beside the plan title. */
 .pricing-grid em {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: max-content;
-  margin: 0 0 16px;
-  padding: 6px 12px;
+  padding: 5px 11px;
   border-radius: 999px;
   background: var(--grad-accent);
   color: #fff;
-  font-size: 10.5px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  box-shadow: 0 8px 20px -8px var(--glow-blue);
+  box-shadow: 0 8px 20px -8px var(--glow-blue), 0 0 18px rgba(90, 110, 255, 0.28);
 }
 
 .pricing-grid em::before {
   content: "★";
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
 }
 
