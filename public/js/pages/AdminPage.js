@@ -1161,7 +1161,7 @@ class AdminPage {
                 <span class="ssub" id="fin-prices-msg"></span>
             </div>
             <div class="kpi-gtitle" style="margin:16px 0 6px">🎨 Visuel de campagne (optionnel)</div>
-            <div class="ssub" style="margin-bottom:8px">Image de <b>fond plein écran</b> de la page de vente pendant une promo (les cartes gardent leur halo aux couleurs de l'événement). Idéal : <b>1920 × 1080 px</b> ou plus (paysage), JPG/WebP, <b>&lt; 2 Mo</b> — un dégradé sombre vertical est appliqué par-dessus : le haut de l'image reste visible, le bas s'assombrit derrière les cartes pour la lisibilité.</div>
+            <div class="ssub" style="margin-bottom:8px">Image de <b>fond plein écran</b> de la page de vente pendant une promo (les cartes gardent leur halo aux couleurs de l'événement). Uploade en <b>pleine qualité</b> (JPG/PNG/WebP, paysage 1920 × 1080 px ou plus, jusqu'à ~25 Mo) — l'image est <b>optimisée automatiquement</b> avant l'envoi (max 2560 px, WebP haute qualité) pour que la page reste instantanée. Un dégradé sombre vertical est appliqué par-dessus : le haut reste visible, le bas s'assombrit derrière les cartes.</div>
             <div id="fin-campaign" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="ssub">Chargement…</span></div>`;
         // Dépliant d'événement maison (le <select> natif rendait clair-sur-clair) :
         // clic → panneau sombre avec icônes ; « Autre… » révèle le champ du libellé
@@ -1269,25 +1269,65 @@ class AdminPage {
                     <input type="file" id="fin-campaign-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px;color:var(--adm-tx2)">
                     ${url ? '<button class="mini-btn" id="fin-campaign-clear">✕ Retirer</button>' : ''}
                     <span class="ssub" id="fin-campaign-msg"></span>`;
+                // Optimisation navigateur : l'admin peut uploader un artwork en pleine
+                // qualité (PNG IA de 10 Mo…) — on le recadre à 2560 px max et on le
+                // ré-encode en WebP haute qualité AVANT l'envoi. Qualité visuelle
+                // intacte pour un fond de page, poids divisé par 10-20 : la page de
+                // vente doit rester instantanée, c'est elle qui convertit.
+                const optimizeImage = (file) => new Promise((resolve, reject) => {
+                    const url = URL.createObjectURL(file);
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            URL.revokeObjectURL(url);
+                            const MAXDIM = 2560;
+                            const scale = Math.min(1, MAXDIM / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+                            const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+                            const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+                            const cv = document.createElement('canvas');
+                            cv.width = w; cv.height = h;
+                            cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                            cv.toBlob(b => {
+                                // On ne garde l'optimisée que si elle apporte quelque chose
+                                // (plus légère, ou redimensionnée) — sinon l'original suffit.
+                                if (b && b.size > 0 && (b.size < file.size || scale < 1)) resolve(b);
+                                else resolve(null);
+                            }, 'image/webp', 0.85);
+                        } catch (e) { reject(e); }
+                    };
+                    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image illisible')); };
+                    img.src = url;
+                });
+                const fmtSize = (n) => n >= 1024 * 1024 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko';
                 document.getElementById('fin-campaign-file')?.addEventListener('change', async (ev) => {
                     const f = ev.target.files && ev.target.files[0];
                     if (!f) return;
                     const cMsg = document.getElementById('fin-campaign-msg');
-                    if (f.size > 2 * 1024 * 1024) { if (cMsg) cMsg.textContent = '❌ Image trop lourde (max 2 Mo).'; return; }
-                    if (cMsg) cMsg.textContent = 'Envoi…';
+                    if (f.size > 25 * 1024 * 1024) { if (cMsg) cMsg.textContent = '❌ Fichier > 25 Mo — exporte une version plus raisonnable.'; return; }
+                    if (cMsg) cMsg.textContent = '⏳ Optimisation…';
                     try {
-                        // Type MIME : celui du navigateur s'il est dans la liste du
-                        // bucket, sinon déduit de l'extension (un f.type vide ou
-                        // exotique ferait rejeter l'upload par allowed_mime_types).
+                        // Type MIME de repli (upload de l'original si l'optimisation
+                        // n'apporte rien) : celui du navigateur s'il est accepté par le
+                        // bucket, sinon déduit de l'extension.
                         const byExt = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
                         const nameExt = String(f.name || '').split('.').pop().toLowerCase();
-                        const mime = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) ? f.type : (byExt[nameExt] || 'image/jpeg');
+                        let body = f;
+                        let mime = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) ? f.type : (byExt[nameExt] || 'image/jpeg');
+                        try {
+                            const opt = await optimizeImage(f);
+                            if (opt) { body = opt; mime = 'image/webp'; }
+                        } catch (_) { /* image exotique → tentative avec l'original */ }
+                        if (body.size > 10 * 1024 * 1024) {
+                            if (cMsg) cMsg.textContent = '❌ Impossible de passer sous 10 Mo — réduis la résolution de l\'export.';
+                            return;
+                        }
+                        if (cMsg) cMsg.textContent = `⬆ Envoi… (${fmtSize(f.size)}${body !== f ? ' → ' + fmtSize(body.size) : ''})`;
                         const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
                         const objPath = `campaign/bg-${Date.now()}.${ext}`;
                         const res = await fetch(`${this._sbUrl()}/storage/v1/object/promo-assets/${objPath}`, {
                             method: 'POST',
                             headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': mime, 'x-upsert': 'true' },
-                            body: f,
+                            body,
                         });
                         if (!res.ok) {
                             // La vraie raison du storage (RLS, MIME, taille) — sans
@@ -1296,7 +1336,8 @@ class AdminPage {
                             throw new Error('upload ' + res.status + (t ? ' — ' + t.slice(0, 180) : ''));
                         }
                         await this._rpc('admin_promo_campaign_set', { p_bg_path: objPath });
-                        this._loadWebPrices();
+                        if (cMsg) cMsg.textContent = `✅ En ligne (${fmtSize(body.size)}${body !== f ? ', optimisée depuis ' + fmtSize(f.size) : ''}).`;
+                        setTimeout(() => this._loadWebPrices(), 1200);
                     } catch (e) {
                         if (cMsg) cMsg.textContent = '❌ ' + (e && e.message ? e.message : 'échec');
                     }

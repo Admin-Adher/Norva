@@ -312,6 +312,17 @@ docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 're
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```
 
+### Visuel de campagne : upload pleine qualité + optimisation navigateur
+
+Recette : un PNG IA de > 2 Mo était rejeté (« Image trop lourde »). Réponse
+premium : **on ne bride plus l'admin, on optimise pour le visiteur** (`?v=77`).
+L'admin accepte jusqu'à ~25 Mo ; l'image est recadrée à **2560 px max** et
+ré-encodée **WebP qualité 0.85 dans le navigateur** avant l'envoi (typiquement
+÷10-20 en poids, qualité visuelle intacte pour un fond sous dégradé) ; l'UI
+affiche « 8,4 Mo → 320 Ko ». Repli : si l'optimisation n'apporte rien ou échoue
+(image exotique), l'original part tel quel sous un plafond bucket porté à
+**10 Mo** (migration `20260719001000`, pas de NOTIFY — config bucket).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
