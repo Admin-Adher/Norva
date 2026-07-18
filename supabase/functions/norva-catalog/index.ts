@@ -1350,13 +1350,18 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
   const audioIso = audioFacetIso(audioFacet);
   const subIso = audioFacetIso(normalizeFacet(url.searchParams.get("subs")));
-  const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
+  const sort = (url.searchParams.get("sort") || "default").trim() || "default";
+  const langSort = sort === "lang-match";
   const prefAudioIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
   const prefSubIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefSubs"))) : null;
   // Decade / minimum-rating filters so the whole filter bar works inside a genre
   // ("See all") or language grid — before, Year/Rating were silently ignored there.
   const yearRange = decadeRange(url.searchParams.get("year"));
   const minRating = paramNumber(url.searchParams.get("minRating"));
+  const addedDays = boundedInt(url.searchParams.get("addedDays"), 0, 0, 3650);
+  const addedAfterDate = addedDays > 0
+    ? new Date(Date.now() - addedDays * 86_400_000).toISOString()
+    : null;
   // Optional text search so it composes with the language grid (the "all" bucket).
   const search = (url.searchParams.get("q") || "").trim();
 
@@ -1378,6 +1383,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
+    if (addedAfterDate !== null) out = out.gte("created_at", addedAfterDate);
     // Audio + subtitles: both strict on the user's OWN ffprobe-detected streams, so the count
     // shown next to a language equals the number of results with zero false positives. Audio =
     // audio_tracks (NOT audio_languages, which is inherited from the global catalog cache by TMDB
@@ -1418,12 +1424,19 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     }
 
     const { data, count, error } = await applyFilters(db.from("cloud_titles").select("*", { count: "exact" }))
-      // Titles WITH artwork first (poster_url non-null), newest within each group —
-      // so the grid opens on rich cards while un-enriched titles (TMDB match still
-      // pending) sit in the tail rather than fronting a wall of placeholders. Nothing
-      // is hidden; the count stays the full browsable total.
-      .order("poster_url", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false })
+      .order(sort === "year-asc" ? "release_year" :
+        sort === "rating" ? "rating_num" :
+        sort === "added" ? "created_at" :
+        sort === "name" ? "title" :
+        sort === "year" ? "release_year" :
+        "poster_url", {
+        ascending: sort === "year-asc" || sort === "name",
+        nullsFirst: false,
+      })
+      // Only the default grid prioritises artwork before recency. Explicit user
+      // sorts (Newest, Recently Added, A→Z, Top Rated) must keep their requested
+      // order even inside language-filter buckets.
+      .order(sort === "default" ? "created_at" : "id", { ascending: sort !== "default" })
       .order("id", { ascending: true })
       .range(offset, offset + limit - 1);
     if (error) {

@@ -127,6 +127,19 @@ test('provider-busy classifier does NOT swallow real demux/media errors', () => 
 test('connection-limit classifier matches BLOCK_HTTP_458 (the original \\b458\\b bug)', () => {
   assert.ok(isConnLimit.test('BLOCK_HTTP_458'));
   assert.ok(isConnLimit.test('PROBE_HTTP_458'));
+  assert.ok(isConnLimit.test('BLOCK_HTTP_429'));
+});
+
+test('engine provider connection blocks do not fall through to transcode', () => {
+  const guard = "if (this.isConnectionLimitError(msg))";
+  const guardIndex = watchSrc.indexOf(guard);
+  const fallbackIndex = watchSrc.indexOf('fallbackEngineToTranscode(playbackAttemptId)');
+  assert.notEqual(guardIndex, -1, 'connection-limit guard missing from engine failure path');
+  assert.notEqual(fallbackIndex, -1, 'transcode fallback call missing from engine failure path');
+  assert.ok(guardIndex < fallbackIndex, 'connection-limit guard must run before transcode fallback');
+  const guardBody = watchSrc.slice(guardIndex, fallbackIndex);
+  assert.match(guardBody, /showPlaybackError\(msg, \{ immediate: true \}\)/);
+  assert.match(guardBody, /return;/);
 });
 
 // ── 3) hub upstream-error classification of ffmpeg's 458 disguise ──────────────

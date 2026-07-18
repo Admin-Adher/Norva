@@ -3079,6 +3079,18 @@ class WatchPage {
                     this.handleEngineUnplayable(e);
                     return;
                 }
+                // Provider auth/rate-limit blocks (401/403/429) are not container failures.
+                // The browser engine already reached the provider and was refused; forcing a
+                // gateway transcode would open a second upstream connection from the datacenter
+                // and usually converts the same account/slot refusal into a noisy FFmpeg 401.
+                // Surface the real provider state immediately instead of cascading through
+                // transcode + version failover against the same provider account.
+                if (this.isConnectionLimitError(msg)) {
+                    this.reportEngineFailure({ stage: 'load', message: msg });
+                    this.destroyEngine();
+                    this.showPlaybackError(msg, { immediate: true });
+                    return;
+                }
                 // Read the source-head verdict before tearing the engine down: a real-media demux
                 // failure is worth a gateway-transcode retry; a provider error page is not.
                 let sourceHead = null;
