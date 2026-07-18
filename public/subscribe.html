@@ -69,17 +69,14 @@
     .price-was { color: var(--quiet); font-size: 14px; font-weight: 600;
       text-decoration: line-through; margin-left: 8px; font-family: Inter, sans-serif; }
     /* Full-page campaign visual (set from JS when a promo is live and an image was
-       uploaded) : the artwork fills the viewport behind everything ; the vertical
-       gradient keeps it visible up top and lands near-opaque behind the content,
-       so the solid cards stay perfectly readable. */
-    #campaign-bg { position: fixed; inset: 0; z-index: -1;
-      background-size: cover; background-position: center top; }
-    /* Voile volontairement léger en haut (l'artwork doit se voir — les artworks
-       d'événement sont souvent sombres, un voile prudent les écrase) ; il ne se
-       densifie que vers le bas, derrière les cartes, qui sont des panneaux
-       opaques de toute façon. */
-    #campaign-bg::after { content: ""; position: absolute; inset: 0;
-      background: linear-gradient(180deg, rgba(9,11,16,.16) 0%, rgba(9,11,16,.5) 48%, rgba(9,11,16,.9) 100%); }
+       uploaded). Painted on the ROOT element — the document canvas — which is by
+       definition the lowest paint layer: no stacking-order subtleties possible.
+       The legibility veil is the first background layer (over the image, light up
+       top so the artwork shows, denser at the bottom behind the opaque cards),
+       and the body goes transparent to let the canvas show through. */
+    html.has-campaign { background-color: var(--bg); background-size: cover;
+      background-position: center top; background-attachment: fixed; background-repeat: no-repeat; }
+    html.has-campaign body { background: transparent; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -737,20 +734,25 @@
           const save = document.querySelector('.toggle .save');
           if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
           // Full-page campaign visual: shown when at least one promo is live AND
-          // an image was uploaded — the event dresses the whole page.
+          // an image was uploaded — painted on the document canvas (<html>), the
+          // lowest possible layer, with the legibility veil as first bg layer.
           const anyPromo = !!(livePromos && Object.keys(livePromos).some(function (k) {
             return livePromos[k] && Object.keys(livePromos[k]).length;
           }));
-          let bgEl = document.getElementById('campaign-bg');
+          const legacyBg = document.getElementById('campaign-bg');
+          if (legacyBg) legacyBg.remove(); // ancienne implémentation (calque z-index)
+          const rootEl = document.documentElement;
           if (liveCampaignBg && anyPromo) {
-            if (!bgEl) {
-              bgEl = document.createElement('div');
-              bgEl.id = 'campaign-bg';
-              document.body.prepend(bgEl);
-            }
-            bgEl.style.backgroundImage = 'url("' + liveCampaignBg + '")';
-          } else if (bgEl) {
-            bgEl.remove();
+            rootEl.classList.add('has-campaign');
+            rootEl.style.backgroundImage =
+              'linear-gradient(180deg, rgba(9,11,16,.16) 0%, rgba(9,11,16,.5) 48%, rgba(9,11,16,.9) 100%), url("' + liveCampaignBg + '")';
+            // Un échec de chargement doit se VOIR — jamais un fond noir muet.
+            const probe = new Image();
+            probe.onerror = function () { console.warn('[norva] visuel de campagne inaccessible :', liveCampaignBg); };
+            probe.src = liveCampaignBg;
+          } else {
+            rootEl.classList.remove('has-campaign');
+            rootEl.style.backgroundImage = '';
           }
           applyPeriod(period); // re-render amounts, notes, promo badges and CTAs
         } catch (_) { /* keep static prices */ }
