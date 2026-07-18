@@ -1,7 +1,7 @@
--- 14-provider-presence-gate-audit-v2.sql — audit du garde « presence → compte provider occupé ».
+-- 15-provider-presence-gate-audit-v3.sql — audit du garde « presence → compte provider occupé ».
 --
 -- NE PAS coller ce fichier dans bash : exécute-le via le wrapper après merge/checkout de la PR :
---   ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
+--   ./ops/hetzner/scripts/15-provider-presence-gate-audit-v3.sh <uuid utilisateur pilote>
 --
 -- Si la box répond "No such file or directory" après git pull, tu es encore sur main sans
 -- cette PR : utilise temporairement la commande docker directe donnée dans la conversation.
@@ -10,7 +10,7 @@
 -- `git fetch origin <branche>` afin de ne pas relire une ancienne copie de la branche distante.
 --
 -- Depuis ~/norva/ops/hetzner :
---   ./scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
+--   ./scripts/15-provider-presence-gate-audit-v3.sh <uuid utilisateur pilote>
 --
 -- But : vérifier sur la box self-hosted que l'ouverture de l'app / du compte utilisateur
 -- marque bien les comptes provider comme occupés, et que les crons/sondes qui consomment un
