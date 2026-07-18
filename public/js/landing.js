@@ -757,7 +757,12 @@
       // afficher les deux revendiquerait deux fois la même économie.
       const refAnchorLive = Boolean(livePromos && Object.keys(livePromos).some(
         pl => livePromos[pl] && livePromos[pl].annual && livePromos[pl].annual.ref_cents));
-      if (best > 0.01 && !refAnchorLive) {
+      if (refAnchorLive) {
+        // La card porte les chiffres (−X% vs monthly billing) ; le toggle garde
+        // un nudge non chiffré — aucun double claim possible.
+        saveBadge.textContent = 'Best value';
+        saveBadge.hidden = false;
+      } else if (best > 0.01) {
         saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
         saveBadge.hidden = false;
       } else {

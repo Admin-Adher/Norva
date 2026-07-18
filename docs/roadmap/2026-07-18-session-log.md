@@ -548,6 +548,27 @@ base — jamais sur l'ancre.
   comparaison ; afficher les deux laisserait croire qu'elles se cumulent.
   Le badge revient de lui-même à l'expiration de la promo.
 
+### Pression marketing vers l'annuel (demande produit)
+
+« Le toggle doit inciter à sélectionner annuel. » Trois leviers standards :
+
+- **Annuel présélectionné par défaut** — vente ET landing (levier de
+  conversion n° 1 du playbook SaaS). Le choix explicite est toujours respecté :
+  `?period=monthly` ouvre en mensuel ; les CTA génériques (nav, héro, final,
+  footer) ne forcent plus `period=monthly` — ils laissent le défaut annuel
+  s'appliquer ; les CTA de la grille continuent de porter la période du toggle.
+  HTML statique des cards landing passé en valeurs annuelles (zéro flash
+  pré-JS, no-JS cohérent).
+- **Chip « Best value »** sur l'option Annual quand le badge chiffré est masqué
+  (promo ancrée 12× active) — non chiffré donc pas de double claim avec le
+  −42 % de la card ; « Save X% » chiffré sinon ; rien si aucun avantage réel.
+- **Nudge cliquable** (page de vente) sous le toggle quand la vue Mensuel est
+  active : « 💡 Save up to $X your first year with annual billing → » — promo
+  annuelle en cours = économie première année vs 12× mensuel base, sinon
+  économie structurelle ; masqué si < 1 $ ; un clic bascule sur Annual.
+- Sims à jour : défaut Annual vérifié, badge « Best value » vérifié (ancre
+  12×), parcours mensuel inchangé après bascule manuelle.
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

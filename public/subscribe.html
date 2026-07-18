@@ -65,6 +65,12 @@
     .save-hint { width: 100%; margin-top: 10px; border: 0; background: none; color: var(--pink);
       font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; text-align: center; }
     .save-hint:hover { text-decoration: underline; }
+    /* Clickable nudge under the toggle while the Monthly view is active: what
+       staying on monthly leaves on the table. One click flips to Annual. */
+    #annual-nudge { display: block; margin: 10px 0 0; padding: 0; border: 0; background: none;
+      color: var(--pink); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; text-align: left; }
+    #annual-nudge:hover { text-decoration: underline; }
+    #annual-nudge[hidden] { display: none; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
     /* Event promo: badge above the price + struck-through base price beside it.
        Badge and background colors are themed per event from JS (PROMO_THEMES);
@@ -226,8 +232,8 @@
     <div class="status" id="already-sub"></div>
 
     <div class="toggle" role="group" aria-label="Billing period">
-      <button type="button" class="period active" data-period="monthly" aria-pressed="true">Monthly</button>
-      <button type="button" class="period" data-period="annual" aria-pressed="false">Annual <span class="save">Save 30%</span></button>
+      <button type="button" class="period" data-period="monthly" aria-pressed="false">Monthly</button>
+      <button type="button" class="period active" data-period="annual" aria-pressed="true">Annual <span class="save">Save 30%</span></button>
     </div>
 
     <div class="grid">
@@ -493,6 +499,38 @@
         flash: '⚡', other: '✨'
       };
 
+      // Nudge cliquable sous le toggle quand la vue Mensuel est active : ce
+      // que le visiteur laisse sur la table en restant au mensuel (« up to »
+      // car calculé sur le meilleur des deux plans — promo annuelle en cours
+      // = économie première année vs 12 × mensuel, sinon économie structurelle
+      // sur les prix de base). Un clic bascule sur Annual.
+      function refreshAnnualNudge() {
+        let n = document.getElementById('annual-nudge');
+        if (period !== 'monthly') { if (n) n.hidden = true; return; }
+        let bestAmt = 0, firstYear = false;
+        document.querySelectorAll('.card').forEach(function (card) {
+          const pr = livePromos && livePromos[card.dataset.plan];
+          const baseM = (pr && pr.monthly && pr.monthly.base_cents) ? pr.monthly.base_cents / 100 : parseFloat(card.dataset.monthly);
+          const effA = parseFloat(card.dataset.annual);
+          const baseA = (pr && pr.annual && pr.annual.base_cents) ? pr.annual.base_cents / 100 : effA;
+          if (!isFinite(baseM) || !isFinite(effA)) return;
+          const structural = baseM * 12 - baseA;
+          const promoFirst = (pr && pr.annual) ? baseM * 12 - effA : 0;
+          if (promoFirst > bestAmt) { bestAmt = promoFirst; firstYear = true; }
+          if (structural > bestAmt) { bestAmt = structural; firstYear = false; }
+        });
+        if (bestAmt < 1) { if (n) n.hidden = true; return; }
+        if (!n) {
+          n = document.createElement('button');
+          n.type = 'button';
+          n.id = 'annual-nudge';
+          n.addEventListener('click', function () { applyPeriod('annual'); });
+          document.querySelector('.toggle')?.insertAdjacentElement('afterend', n);
+        }
+        n.textContent = '💡 Save up to $' + bestAmt.toFixed(2) + (firstYear ? ' your first year' : ' a year') + ' with annual billing →';
+        n.hidden = false;
+      }
+
       function applyPeriod(next) {
         period = next;
         document.querySelectorAll('.period').forEach(function (b) {
@@ -500,6 +538,7 @@
           b.classList.toggle('active', on);
           b.setAttribute('aria-pressed', String(on));
         });
+        refreshAnnualNudge();
         document.querySelectorAll('.card').forEach(function (card) {
           const amount = card.querySelector('.amount');
           const per = card.querySelector('.per');
@@ -783,8 +822,10 @@
       }
 
       // Landing deep-link: honor the plan/period the visitor picked on the
-      // pricing section (?plan=family&period=annual) — intent is never lost.
-      const wantedPeriod = params.get('period') === 'annual' ? 'annual' : 'monthly';
+      // pricing section (?plan=family&period=monthly) — intent is never lost.
+      // No explicit choice → ANNUAL preselected (higher LTV default; the
+      // visitor is one click away from monthly, nothing is hidden).
+      const wantedPeriod = params.get('period') === 'monthly' ? 'monthly' : 'annual';
       const wantedPlan = params.get('plan');
       applyPeriod(wantedPeriod);
       if (wantedPlan === 'plus' || wantedPlan === 'family') {
@@ -850,7 +891,12 @@
           }));
           const save = document.querySelector('.toggle .save');
           if (save) {
-            if (best > 0.01 && !refAnchorLive) {
+            if (refAnchorLive) {
+              // The card carries the numbers (−42% vs monthly billing); the
+              // toggle keeps a non-numeric nudge — no double claim possible.
+              save.textContent = 'Best value';
+              save.hidden = false;
+            } else if (best > 0.01) {
               save.textContent = 'Save ' + Math.round(best * 100) + '%';
               save.hidden = false;
             } else {
