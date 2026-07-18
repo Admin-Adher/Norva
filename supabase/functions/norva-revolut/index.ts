@@ -229,13 +229,22 @@ Deno.serve(async (req) => {
     const name = String(user.user_metadata?.display_name ?? user.user_metadata?.name ?? "").trim();
     const custId = await ensureRevolutCustomer(db, user.id, user.email, name);
 
-    // Record the customer id + recurring plan on the mapping row — the renewal engine
-    // reads amount/period from here (projection.plan_code can't carry the period).
-    // card_update must NOT touch plan/period (would corrupt a family/annual mapping).
+    // Record the customer id on the mapping row. The recurring plan (plan/period/
+    // amount_cents) is what the renewal engine charges, so WHEN it lands here depends
+    // on the account's state:
+    //   • trial_setup / resubscribe — no live entitlement is armed for renewal, so
+    //     staging the plan now is harmless AND required: the hosted-page flow can
+    //     convert via the webhook alone (no /confirm), and the cron needs the row.
+    //   • plan_change — a live entitlement IS armed for renewal. Writing the new
+    //     plan before payment would let an abandoned checkout (this endpoint fires
+    //     on page load) reprice the next renewal to an amount the customer never
+    //     approved. Staged in the order metadata below instead; committed by
+    //     /confirm (or the webhook) once the order is actually paid.
+    //   • card_update — must never touch plan/period (would corrupt the mapping).
     const nowIso = new Date().toISOString();
     const custRow: JsonRecord = { user_id: user.id, updated_at: nowIso };
     if (custId) custRow.revolut_customer_id = custId;
-    if (kind !== "card_update") { custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount; }
+    if (kind === "trial_setup" || kind === "resubscribe") { custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount; }
     await db.from("cloud_revolut_customers").upsert(custRow);
 
     const DESCRIPTIONS: Record<string, string> = {
@@ -342,6 +351,10 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
     const kind = String(meta.kind ?? "trial_setup");
+    // The order metadata is the contract of what THIS paid order was opened for —
+    // amounts stay server-decided (PRICES), the metadata only picks the row.
+    const period = String(meta.period ?? "") === "annual" ? "annual" : "monthly";
+    const amount = PRICES[plan]?.[period] ?? 0;
     // Prefer the order's customer_id; fall back to the one /checkout stored (the
     // legacy order object doesn't always echo customer_id back).
     let customerId = orderCustomerId(order);
@@ -360,12 +373,19 @@ Deno.serve(async (req) => {
     // Country = card issuing country, read on the order we already fetched. Stamped on
     // the mapping (renewal cron copies it onto ledger rows) AND on the projection.
     const cardCountry = cardCountryFromOrder(order);
-    await db.from("cloud_revolut_customers").upsert({
+    const custPatch: JsonRecord = {
       user_id: user.id, revolut_customer_id: customerId ?? undefined, payment_method_id: pmId ?? undefined,
       card_last4: last4 ?? undefined, card_brand: brand ?? undefined, card_exp: cardExp ?? undefined,
       card_country: cardCountry ?? undefined,
       updated_at: nowIso,
-    });
+    };
+    // Paid state confirmed above → commit the recurring plan this order was opened
+    // for. For plan_change this is the ONLY committer (/checkout only stages it in
+    // the order metadata, so an abandoned checkout can never reprice a renewal);
+    // for trial_setup/resubscribe it re-asserts what /checkout staged, healing any
+    // divergence when several checkouts were opened before one was paid.
+    if (kind !== "card_update" && amount) { custPatch.plan = plan; custPatch.period = period; custPatch.amount_cents = amount; }
+    await db.from("cloud_revolut_customers").upsert(custPatch);
     if (cardCountry) {
       // Best-effort: no-op for a first trial_setup (row created below, which carries
       // the country itself); updates the existing row for every other kind — including
@@ -403,6 +423,10 @@ Deno.serve(async (req) => {
       const patch: JsonRecord = {
         provider: "revolut", provider_customer_id: customerId, plan_code: plan, last_event_at: nowIso,
       };
+      // Price of record going forward (the MRR read-side divides an 'annual'
+      // bill_period by 12). Nothing is captured here — the actual charge happens
+      // at the current period end, via the renewal cron.
+      if (amount) { patch.mrr_cents = amount; patch.bill_period = period; }
       if (curStatus === "cancelled_at_period_end") {
         patch.status = (cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
       }

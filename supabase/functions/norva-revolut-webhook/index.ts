@@ -96,6 +96,13 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`projection upsert failed: ${error.message}`);
     }
 
+    // Belt & braces for checkouts finalized WITHOUT /confirm (hosted page, customer
+    // never returns): a COMPLETED checkout order commits the recurring plan it was
+    // opened for onto the billing mapping — the renewal engine charges from that row.
+    // /checkout deliberately does NOT pre-write it for plan_change (an abandoned
+    // checkout must never reprice a renewal), so a paid order is the only committer.
+    await commitOrderPlan(admin, userId, eventType, meta);
+
     await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order });
     return json({ ok: true, type: eventType, plan: patch?.plan_code ?? null });
   } catch (error) {
@@ -225,6 +232,33 @@ function planForMeta(meta: JsonRecord): string {
   if (plan === "norva") return "plus";
   if (plan.includes("family")) return "family";
   return "plus";
+}
+
+// Server-side price table (cents, USD) — must stay in lockstep with norva-revolut's.
+const PRICES: Record<string, Record<string, number>> = {
+  plus:   { monthly: 499, annual: 4199 },
+  family: { monthly: 899, annual: 7599 },
+};
+
+// Commit the recurring plan of a PAID checkout order onto cloud_revolut_customers.
+// Only checkout-created orders carry a kind in metadata (the renewal cron's orders
+// have no metadata and never reach this — resolveUserId already skipped them).
+// Best-effort: the projection reconciliation above must never fail on this.
+async function commitOrderPlan(db: SupabaseClient, userId: string, eventType: string, meta: JsonRecord): Promise<void> {
+  if (eventType !== "ORDER_COMPLETED") return;
+  const kind = String(meta.kind ?? "").toLowerCase();
+  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") return;
+  const plan = planForMeta(meta);
+  const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
+  const amount = PRICES[plan]?.[period];
+  if (!amount) return; // only plus/family carry a web price — anything else is not committable
+  try {
+    await db.from("cloud_revolut_customers").upsert({
+      user_id: userId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn("[norva-revolut-webhook] plan commit failed", String((e as Error)?.message ?? e));
+  }
 }
 
 // --- signature verification -------------------------------------------------
