@@ -219,7 +219,11 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
       status: "active", provider: "revolut", current_period_end: nextEnd,
       ...(mappedPlan ? { plan_code: mappedPlan } : {}),
       fail_open_until: null, dunning_stage: 0, dunning_last_at: null,
-      last_event_at: nowIso, last_verified_at: nowIso, mrr_cents: chargeAmount,
+      last_event_at: nowIso, last_verified_at: nowIso,
+      // Price of record + cadence, ALWAYS together: the MRR read-side divides an
+      // 'annual' bill_period by 12, so stamping the annual amount while leaving a
+      // stale 'monthly' cadence would read as 12× the real MRR.
+      mrr_cents: chargeAmount, bill_period: period,
     }).eq("user_id", row.user_id);
     if (discountPct) {
       try { await db.from("cloud_revolut_customers").update({ discount_next_pct: null, updated_at: nowIso }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
