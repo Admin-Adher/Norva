@@ -421,18 +421,36 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── route: /marketing-push — envoi d'une notification marketing à TOUS les
-    // appareils enregistrés (cloud_push_tokens), avec purge des tokens morts et
-    // journalisation dans marketing_push_log (onglet Notifications de la page
-    // Marketing admin). Best-effort par token : un échec n'arrête pas la boucle. ──
+    // ── route: /marketing-push — envoi d'une notification marketing à un SEGMENT
+    // d'appareils (cloud_push_tokens × cloud_entitlement_projection via la fonction
+    // marketing_push_targets), avec purge des tokens morts et journalisation dans
+    // marketing_push_log (onglet Notifications de la page Marketing admin).
+    // Best-effort par token : un échec n'arrête pas la boucle. ──
     if (segments[segments.length - 1] === "marketing-push") {
       const mp = await req.json().catch(() => ({})) as JsonRecord;
       const title = String(mp.title ?? "").trim();
       const text = String(mp.body ?? "").trim();
+      const AUDIENCES = ["all", "trialing", "paying", "monthly", "free"];
+      const audience = AUDIENCES.includes(String(mp.audience ?? "")) ? String(mp.audience) : "all";
       if (title.length < 2 || title.length > 60) return json(req, { error: "title must be 2..60 characters" }, 400);
       if (text.length < 2 || text.length > 240) return json(req, { error: "body must be 2..240 characters" }, 400);
       if (!fcmConfigured()) return json(req, { error: "FCM not configured (FCM_SERVICE_ACCOUNT secret missing)" }, 500);
-      const { data: toks, error: tokErr } = await admin.from("cloud_push_tokens").select("token");
+      let tokQuery = admin.from("cloud_push_tokens").select("token");
+      if (audience !== "all") {
+        const { data: uids, error: segErr } = await admin.rpc("marketing_push_targets", { p_audience: audience });
+        if (segErr) return json(req, { error: `segment resolution failed: ${segErr.message} — migration 20260719110000 appliquée + NOTIFY pgrst ?` }, 500);
+        const userIds = (uids ?? []).map((u: unknown) => String(u)).filter(Boolean);
+        if (!userIds.length) {
+          try {
+            await admin.from("marketing_push_log").insert({
+              title, body: text, audience, sent_count: 0, fail_count: 0, dead_count: 0, actor: actorEmail,
+            });
+          } catch (_) { /* best-effort */ }
+          return json(req, { ok: true, devices: 0, sent: 0, fail: 0, dead: 0, audience });
+        }
+        tokQuery = tokQuery.in("user_id", userIds);
+      }
+      const { data: toks, error: tokErr } = await tokQuery;
       if (tokErr) return json(req, { error: `token read failed: ${tokErr.message}` }, 500);
       const tokens = [...new Set((toks ?? []).map((t) => String((t as { token?: string }).token)).filter(Boolean))];
       let sent = 0, fail = 0, dead = 0;
@@ -444,14 +462,14 @@ Deno.serve(async (req) => {
       }
       try {
         await admin.from("marketing_push_log").insert({
-          title, body: text, audience: "all",
+          title, body: text, audience,
           sent_count: sent, fail_count: fail, dead_count: dead, actor: actorEmail,
         });
       } catch (_) { /* le log ne doit pas faire échouer un envoi réussi */ }
       try {
-        await sendTelegram(`📣 <b>Push marketing envoyé</b>\n${tgEscape(title)}\n${sent} envoyé(s) · ${fail} échec(s) · ${dead} token(s) mort(s) purgé(s)`);
+        await sendTelegram(`📣 <b>Push marketing envoyé</b> (${audience})\n${tgEscape(title)}\n${sent} envoyé(s) · ${fail} échec(s) · ${dead} token(s) mort(s) purgé(s)`);
       } catch (_) { /* best-effort */ }
-      return json(req, { ok: true, devices: tokens.length, sent, fail, dead });
+      return json(req, { ok: true, devices: tokens.length, sent, fail, dead, audience });
     }
 
     // ── route: /user/:id/:action ──

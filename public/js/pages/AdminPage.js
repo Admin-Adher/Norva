@@ -544,6 +544,11 @@ class AdminPage {
 #page-admin .mkt-pv-t{color:#fff;font-size:13px;font-weight:700;word-break:break-word;}
 #page-admin .mkt-pv-b{color:var(--adm-tx2);font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
 #page-admin .mkt-log-clip{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adm-tx2);font-size:12px;}
+#page-admin .mkt-td-wrap{white-space:normal;overflow:visible;text-overflow:clip;vertical-align:top;}
+#page-admin .mkt-log-title{max-width:220px;min-width:120px;white-space:normal;word-break:break-word;line-height:1.4;font-size:12.5px;}
+#page-admin .mkt-log-msg{max-width:460px;min-width:220px;white-space:normal;word-break:break-word;line-height:1.45;color:var(--adm-tx2);font-size:12px;}
+#page-admin .mkt-log-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+#page-admin #mkt-log-q{background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:8px 11px;font:inherit;font-size:12.5px;min-width:260px;}
 #page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
 #page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
 #page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
@@ -1166,7 +1171,12 @@ class AdminPage {
                             <div class="ssub" id="mkt-nt-c" style="text-align:right;margin-top:3px">0/60</div>
                             <textarea id="mkt-nb" maxlength="240" rows="3" placeholder="Message — ex. Annual plans are 40% off until Sunday. Open Norva to grab yours."></textarea>
                             <div class="ssub" id="mkt-nb-c" style="text-align:right;margin-top:3px">0/240</div>
-                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                            <div class="ssub" style="margin:8px 0 4px">Audience</div>
+                            <div class="pev" id="mkt-aud" data-val="all" style="max-width:360px">
+                                <button type="button" class="pev-btn"><span class="pev-cur">📢 Tous les appareils</span><span class="pev-car">▾</span></button>
+                                <div class="pev-menu" hidden></div>
+                            </div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
                                 <button class="mini-btn" id="mkt-send">📤 Envoyer maintenant</button>
                                 <span class="ssub" id="mkt-send-msg"></span>
                             </div>
@@ -1182,7 +1192,13 @@ class AdminPage {
                         </div>
                     </div>
                 </div>
-                <div class="admin-block"><h2>🗂 Historique des envois</h2><div id="mkt-log"><div class="ssub">Chargement…</div></div></div>
+                <div class="admin-block"><h2>🗂 Historique des envois</h2>
+                    <div class="mkt-log-bar">
+                        <input type="search" id="mkt-log-q" placeholder="🔎 Rechercher (titre, message, auteur)…" autocomplete="off">
+                        <div class="qv-row" id="mkt-log-auds" role="group" aria-label="Filtrer par audience"></div>
+                    </div>
+                    <div id="mkt-log"><div class="ssub">Chargement…</div></div>
+                </div>
             </div>
         </div>`;
 
@@ -1203,6 +1219,7 @@ class AdminPage {
         this._loadMarketingOverview();
         this._loadPushLog();
         this._wirePushComposer();
+        this._wirePushLogControls();
     }
 
     // Vue d'ensemble Marketing : promos actives (billing_prices), appareils push,
@@ -1255,27 +1272,71 @@ class AdminPage {
         }));
     }
 
-    // Historique des notifications push marketing (RPC admin_marketing_push_log).
+    // Audiences push : clé serveur → picto + libellés (composeur + historique).
+    static AUDIENCES() {
+        return [
+            ['all', '📢', 'Tous les appareils'],
+            ['trialing', '⏳', 'En essai'],
+            ['paying', '💳', 'Abonnés payants'],
+            ['monthly', '📅', 'Mensuels payants — upsell annuel'],
+            ['free', '💤', 'Sans abonnement actif — win-back']
+        ];
+    }
+    static audShort(a) {
+        const x = AdminPage.AUDIENCES().find(v => v[0] === a);
+        return x ? `${x[1]} ${x[0] === 'all' ? 'Tous' : x[0] === 'trialing' ? 'Essai' : x[0] === 'paying' ? 'Payants' : x[0] === 'monthly' ? 'Mensuels' : 'Sans abo'}` : (a || '—');
+    }
+
+    // Historique des notifications push marketing — vraie liste : recherche
+    // (titre/message/auteur, débouncée), filtre par audience, message à la ligne.
     async _loadPushLog() {
         const el = document.getElementById('mkt-log');
         if (!el) return;
         try {
-            const rows = await this._rpc('admin_marketing_push_log');
+            const rows = await this._rpc('admin_marketing_push_log', {
+                p_query: (this._pushLogQuery || '').trim() || null,
+                p_audience: this._pushLogAud || null,
+                p_limit: 100
+            });
             if (this._route !== 'marketing') return;
             const esc = AdminPage.esc, n = AdminPage.n;
             const list = Array.isArray(rows) ? rows : [];
             el.innerHTML = list.length
-                ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
-                    <td style="white-space:nowrap">${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td><div class="mkt-log-clip" style="max-width:180px" title="${esc(r.title)}">${esc(r.title)}</div></td>
-                    <td><div class="mkt-log-clip" title="${esc(r.body)}">${esc(r.body)}</div></td>
-                    <td class="num">${n(r.sent_count)}</td>
-                    <td class="num">${Number(r.fail_count) ? `<span class="badge red">${n(r.fail_count)}</span>` : '0'}${Number(r.dead_count) ? ` <span class="pacct" title="Tokens morts purgés pendant l'envoi">· ${n(r.dead_count)} purgé(s)</span>` : ''}</td>
-                    <td><div class="mkt-log-clip" style="max-width:180px" title="${esc(r.actor || '')}">${esc(r.actor || '—')}</div></td>
+                ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Audience</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
+                    <td style="white-space:nowrap;vertical-align:top">${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td style="vertical-align:top"><span class="badge blue">${esc(AdminPage.audShort(r.audience))}</span></td>
+                    <td class="mkt-td-wrap"><div class="mkt-log-title">${esc(r.title)}</div></td>
+                    <td class="mkt-td-wrap"><div class="mkt-log-msg">${esc(r.body)}</div></td>
+                    <td class="num" style="vertical-align:top">${n(r.sent_count)}</td>
+                    <td class="num" style="vertical-align:top">${Number(r.fail_count) ? `<span class="badge red">${n(r.fail_count)}</span>` : '0'}${Number(r.dead_count) ? ` <span class="pacct" title="Tokens morts purgés pendant l'envoi">· ${n(r.dead_count)} purgé(s)</span>` : ''}</td>
+                    <td style="vertical-align:top"><div class="mkt-log-clip" style="max-width:180px" title="${esc(r.actor || '')}">${esc(r.actor || '—')}</div></td>
                 </tr>`).join('')}</tbody></table></div>`
-                : '<div class="ssub">Aucune notification marketing envoyée pour l\'instant — la première apparaîtra ici avec ses compteurs.</div>';
+                : `<div class="ssub">${(this._pushLogQuery || this._pushLogAud) ? 'Aucun envoi ne correspond à cette recherche.' : 'Aucune notification marketing envoyée pour l\'instant — la première apparaîtra ici avec ses compteurs.'}</div>`;
         } catch (e) {
-            el.innerHTML = `<div class="ssub">Historique indisponible — appliquer la migration 20260719090000 puis <code>NOTIFY pgrst, 'reload schema'</code>. (${AdminPage.esc(e && e.message ? e.message : 'erreur')})</div>`;
+            el.innerHTML = `<div class="ssub">Historique indisponible — appliquer les migrations 20260719090000 + 20260719110000 puis <code>NOTIFY pgrst, 'reload schema'</code>. (${AdminPage.esc(e && e.message ? e.message : 'erreur')})</div>`;
+        }
+    }
+
+    // Barre de l'historique : recherche débouncée + chips d'audience.
+    _wirePushLogControls() {
+        const q = document.getElementById('mkt-log-q');
+        const auds = document.getElementById('mkt-log-auds');
+        if (q) {
+            q.value = this._pushLogQuery || '';
+            q.addEventListener('input', () => {
+                this._pushLogQuery = q.value;
+                clearTimeout(this._pushLogQT);
+                this._pushLogQT = setTimeout(() => this._loadPushLog(), 300);
+            });
+        }
+        if (auds) {
+            const mk = (val, label) => `<button class="qv-chip${(this._pushLogAud || '') === val ? ' active' : ''}" data-aud="${val}">${label}</button>`;
+            auds.innerHTML = mk('', 'Toutes') + AdminPage.AUDIENCES().map(([v]) => mk(v, AdminPage.audShort(v))).join('');
+            auds.querySelectorAll('.qv-chip').forEach(chip => chip.addEventListener('click', () => {
+                this._pushLogAud = chip.dataset.aud || '';
+                auds.querySelectorAll('.qv-chip').forEach(c => c.classList.toggle('active', c === chip));
+                this._loadPushLog();
+            }));
         }
     }
 
@@ -1296,30 +1357,76 @@ class AdminPage {
         nt.addEventListener('input', syncPv);
         nb.addEventListener('input', syncPv);
         syncPv();
-        (async () => {
-            try {
-                const ov = await this._rpc('admin_marketing_overview');
-                const d = document.getElementById('mkt-devices');
-                if (d && ov) d.textContent = `📱 ${AdminPage.n(ov.push_devices)} appareil(s) enregistré(s) · ${AdminPage.n(ov.push_users)} compte(s)`;
-            } catch (_) { /* migration absente — le hint reste générique */ }
-        })();
+        // Sélecteur d'audience : dépliant maison + compteur d'appareils PAR
+        // segment (admin_marketing_audience_counts). Le hint sous l'aperçu suit
+        // la sélection — on sait toujours combien d'appareils seront touchés.
+        const aud = document.getElementById('mkt-aud');
+        let audCounts = null;
+        const audLabel = (v) => {
+            const x = AdminPage.AUDIENCES().find(a => a[0] === v) || AdminPage.AUDIENCES()[0];
+            return `${x[1]} ${x[2]}`;
+        };
+        const syncHint = () => {
+            const d = document.getElementById('mkt-devices');
+            if (!d) return;
+            const v = aud?.dataset.val || 'all';
+            if (audCounts && typeof audCounts[v] === 'number') {
+                d.textContent = `📱 ${AdminPage.n(audCounts[v])} appareil(s) ciblé(s) — ${audLabel(v)}`;
+            } else {
+                d.textContent = `📱 Audience : ${audLabel(v)}`;
+            }
+        };
+        if (aud) {
+            const btn = aud.querySelector('.pev-btn');
+            const menu = aud.querySelector('.pev-menu');
+            const renderMenu = () => {
+                menu.innerHTML = AdminPage.AUDIENCES().map(([v, ic, l]) =>
+                    `<button type="button" class="pev-opt${(aud.dataset.val || 'all') === v ? ' on' : ''}" data-val="${v}">${ic} ${l}${audCounts && typeof audCounts[v] === 'number' ? ` <span class="pacct">· ${AdminPage.n(audCounts[v])} appareil(s)</span>` : ''}</button>`).join('');
+                menu.querySelectorAll('.pev-opt').forEach(opt => opt.addEventListener('click', () => {
+                    aud.dataset.val = opt.dataset.val || 'all';
+                    const cur = aud.querySelector('.pev-cur');
+                    if (cur) cur.textContent = audLabel(aud.dataset.val);
+                    menu.hidden = true;
+                    renderMenu();
+                    syncHint();
+                }));
+            };
+            renderMenu();
+            btn?.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+            if (!this._mktPevCloseWired) {
+                this._mktPevCloseWired = true;
+                document.addEventListener('click', () => {
+                    document.querySelectorAll('#mkt-tab-notifs .pev-menu').forEach(m => { m.hidden = true; });
+                });
+            }
+            (async () => {
+                try {
+                    audCounts = await this._rpc('admin_marketing_audience_counts');
+                    renderMenu();
+                } catch (_) { /* migration 20260719110000 absente — sélecteur sans compteurs */ }
+                syncHint();
+            })();
+        }
+        syncHint();
         const sendBtn = document.getElementById('mkt-send');
         sendBtn?.addEventListener('click', async () => {
             const title = nt.value.trim(), body = nb.value.trim();
+            const audience = aud?.dataset.val || 'all';
             const msg = document.getElementById('mkt-send-msg');
             if (title.length < 2 || body.length < 2) { if (msg) msg.textContent = '❌ Titre et message obligatoires (2 caractères min).'; return; }
-            if (!window.confirm(`Envoyer cette notification à TOUS les appareils enregistrés ?\n\n« ${title} »\n${body}\n\nEnvoi immédiat — un push ne se rappelle pas.`)) return;
+            const nDev = audCounts && typeof audCounts[audience] === 'number' ? `≈ ${AdminPage.n(audCounts[audience])} appareil(s)` : 'les appareils du segment';
+            if (!window.confirm(`Envoyer cette notification à « ${audLabel(audience)} » (${nDev}) ?\n\n« ${title} »\n${body}\n\nEnvoi immédiat — un push ne se rappelle pas.`)) return;
             sendBtn.disabled = true;
             if (msg) msg.textContent = 'Envoi…';
             try {
                 const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/marketing-push`, {
                     method: 'POST',
                     headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title, body })
+                    body: JSON.stringify({ title, body, audience })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || String(res.status));
-                if (msg) msg.textContent = `✅ ${AdminPage.n(data.sent)} envoyé(s) sur ${AdminPage.n(data.devices)} appareil(s)`
+                if (msg) msg.textContent = `✅ ${AdminPage.n(data.sent)} envoyé(s) sur ${AdminPage.n(data.devices)} appareil(s) — ${audLabel(data.audience || audience)}`
                     + (data.fail ? ` · ${AdminPage.n(data.fail)} échec(s)` : '')
                     + (data.dead ? ` · ${AdminPage.n(data.dead)} token(s) mort(s) purgé(s)` : '');
                 nt.value = ''; nb.value = ''; syncPv();

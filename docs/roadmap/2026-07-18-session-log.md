@@ -654,7 +654,36 @@ versionCode 14 en dur aurait de toute façon bloqué la mise à jour Play
   **✅ Vérifié en prod par Adrien (2026-07-18)** : appareil enregistré, push
   marketing reçu sur le téléphone, historique correct — la clé FCM de la box
   est donc valide aussi (l'envoi a réellement abouti). La chaîne push
-  marketing est opérationnelle de bout en bout.
+  marketing est opérationnelle de bout en bout. (Le « pas reçu » intermédiaire
+  était la permission notifications remise à zéro par la réinstallation de
+  l'APK.)
+
+### Segmentation push + historique filtrable — migration `20260719110000`
+
+**Cinq audiences** (source de vérité : `cloud_entitlement_projection`,
+multi-rail) : 📢 tous · ⏳ en essai · 💳 abonnés payants (même prédicat que le
+MRR : active/grace/past_due/cancelled_at_period_end, provider ≠ system) ·
+📅 mensuels payants (upsell annuel — période = coalesce(mapping Revolut,
+bill_period)) · 💤 sans abonnement actif (win-back = complément des deux
+premiers parmi les porteurs de token). Les comptes internes ne sont PAS
+exclus (s'auto-notifier sert à recetter).
+
+- `marketing_push_targets(p_audience)` — résolution segment → user_ids,
+  **service_role only** (appelée par l'edge).
+- `admin_marketing_audience_counts()` — appareils par segment (compteurs live
+  dans le dépliant d'audience du composeur + dialog de confirmation).
+- `admin_marketing_push_log(p_query, p_audience, p_limit)` — recherche ilike
+  titre/message/auteur + filtre audience + limite (max 200). **Signature
+  étendue ⇒ DROP de la 0-arg ⇒ ⚠ NOTIFY pgrst.**
+- Edge `/marketing-push` : `audience` whitelistée, cibles via la fonction SQL,
+  segment vide → log 0/0 proprement ; audience journalisée + dans le Telegram.
+- UI : dépliant d'audience (pev) avec compteurs, hint « N appareil(s)
+  ciblé(s) », confirmation avec audience + volume ; historique = vraie liste
+  (recherche débouncée 300 ms, chips d'audience, colonne Audience, **titre et
+  message en retour à la ligne** — plus de rognage — auteur en ellipsis).
+- Limite connue : la résolution passe par `.in(user_id, […])` — très large
+  segment (> quelques milliers d'ids) = URL PostgREST longue ; à migrer vers
+  un join côté SQL si la base utilisateurs explose.
 
 ### Périmètre des visuels par surface (question de recette)
 
