@@ -177,9 +177,13 @@ async function chargeSavedCard(
   };
 }
 
-interface Row { user_id: string; plan_code: string | null; trial_ends_at: string | null; current_period_end: string | null }
+interface Row { user_id: string; plan_code: string | null; trial_ends_at: string | null; current_period_end: string | null; billing_retry_count?: number | null }
 
-async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null, errors: unknown[]): Promise<string> {
+// opts.retryAttempt (1|2) = relance automatique d'un past_due (J+3/J+5) : la
+// référence d'ordre est suffixée (-tN, jamais de collision avec l'échec initial)
+// et un échec ne RE-ÉTEND PAS la fenêtre de grâce de 72 h — l'accès ne doit pas
+// se rouvrir à chaque tentative.
+async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null, errors: unknown[], opts: { retryAttempt?: number } = {}): Promise<string> {
   const { data: cust } = await db.from("cloud_revolut_customers")
     .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct,card_country").eq("user_id", row.user_id).maybeSingle();
   const c = cust as {
@@ -197,15 +201,18 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
   if (!customerId || !pmId || !amount) {
     // No saved card yet (e.g. /profile never captured it) or no amount → can't charge.
     // Fail to past_due so dunning (norva-lifecycle) prompts a card update.
-    await db.from("cloud_entitlement_projection").update({ status: "past_due", last_event_at: nowIso, fail_open_until: addHours(nowIso, 72) }).eq("user_id", row.user_id);
+    await db.from("cloud_entitlement_projection").update({
+      status: "past_due", last_event_at: nowIso,
+      ...(opts.retryAttempt ? {} : { fail_open_until: addHours(nowIso, 72) }),
+    }).eq("user_id", row.user_id);
     return pmId ? "no_plan" : "no_card";
   }
 
   // Cycle-keyed reference so a retry in the same cycle reuses it (Revolut caps ext_ref length).
   const cycleDay = Math.floor((Date.parse(String(cycleAnchor ?? "")) || Date.now()) / 86400000).toString(36);
-  const extRef = `${row.user_id.replace(/-/g, "").slice(0, 24)}-r${cycleDay}`.slice(0, 40);
+  const extRef = `${row.user_id.replace(/-/g, "").slice(0, 24)}-r${cycleDay}${opts.retryAttempt ? `-t${opts.retryAttempt}` : ""}`.slice(0, 40);
   const chargeAmount = discountPct ? Math.max(50, Math.round(amount * (100 - discountPct) / 100)) : amount;
-  const desc = `${planLabel} ${period} — ${kind}${discountPct ? ` (${discountPct}% off)` : ""}`;
+  const desc = `${planLabel} ${period} — ${kind}${opts.retryAttempt ? ` (auto-retry ${opts.retryAttempt})` : ""}${discountPct ? ` (${discountPct}% off)` : ""}`;
 
   const { outcome, orderId, paymentId, detail } = await chargeSavedCard(customerId, pmId, chargeAmount, extRef, desc);
   if (outcome === "failed" && detail && errors.length < 5) {
@@ -219,12 +226,23 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
       status: "active", provider: "revolut", current_period_end: nextEnd,
       ...(mappedPlan ? { plan_code: mappedPlan } : {}),
       fail_open_until: null, dunning_stage: 0, dunning_last_at: null,
+      billing_retry_count: 0,
       last_event_at: nowIso, last_verified_at: nowIso,
       // Price of record + cadence, ALWAYS together: the MRR read-side divides an
       // 'annual' bill_period by 12, so stamping the annual amount while leaving a
       // stale 'monthly' cadence would read as 12× the real MRR.
       mrr_cents: chargeAmount, bill_period: period,
     }).eq("user_id", row.user_id);
+    // 💚 Une relance automatique vient de récupérer un abonnement en échec —
+    // signal fondateur (best-effort, comptes internes exclus).
+    if (opts.retryAttempt) {
+      try {
+        if (!(await isInternal(db, row.user_id))) {
+          const email = await userEmail(db, row.user_id);
+          await sendTelegram(`💚 <b>Paiement récupéré</b> (relance auto n°${opts.retryAttempt})\n${tgEscape(email)}\n${tgEscape(planLabel)} · ${period} · $${(chargeAmount / 100).toFixed(2)}`);
+        }
+      } catch (_) { /* best-effort */ }
+    }
     if (discountPct) {
       try { await db.from("cloud_revolut_customers").update({ discount_next_pct: null, updated_at: nowIso }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
     }
@@ -265,9 +283,13 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
     return "charged";
   }
 
-  // Failed → past_due (dunning handled by norva-lifecycle), keep a grace window open.
-  await db.from("cloud_entitlement_projection").update({ status: "past_due", last_event_at: nowIso, fail_open_until: addHours(nowIso, 72) }).eq("user_id", row.user_id);
-  await pingChargeFailed(db, row.user_id, planLabel, kind);
+  // Failed → past_due (dunning handled by norva-lifecycle), keep a grace window
+  // open — sauf sur une RELANCE : la grâce initiale de 72 h ne se ré-étend pas.
+  await db.from("cloud_entitlement_projection").update({
+    status: "past_due", last_event_at: nowIso,
+    ...(opts.retryAttempt ? {} : { fail_open_until: addHours(nowIso, 72) }),
+  }).eq("user_id", row.user_id);
+  if (!opts.retryAttempt) await pingChargeFailed(db, row.user_id, planLabel, kind);
   return "failed";
 }
 
@@ -277,7 +299,7 @@ function addHours(fromIso: string, hours: number): string {
 
 async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
   const nowIso = new Date().toISOString();
-  const out = { trial_charged: 0, renew_charged: 0, failed: 0, no_card: 0, ended: 0 };
+  const out = { trial_charged: 0, renew_charged: 0, retry_recovered: 0, retry_failed: 0, failed: 0, no_card: 0, ended: 0 };
   const errors: unknown[] = [];
 
   // 1) Trials whose free days are up → first charge.
@@ -296,6 +318,31 @@ async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
   for (const row of (renewals ?? []) as Row[]) {
     const r = await chargeUser(db, row, "renewal", row.current_period_end, errors);
     if (r === "charged") out.renew_charged++; else if (r === "no_card") out.no_card++; else if (r === "failed") out.failed++;
+  }
+
+  // 2bis) Relances automatiques des past_due (anti-churn involontaire) : ~2/3 des
+  // échecs de carte sont transitoires — on re-tente J+3 puis J+5 après l'échéance,
+  // avant que le dunning n'expire l'abonnement (~J+10). Succès → réactivation
+  // (période ancrée sur l'échéance d'origine, jamais de temps facturé deux fois) ;
+  // échec → past_due inchangé, la grâce de 72 h ne se ré-étend pas.
+  const d3 = new Date(Date.now() - 3 * 86400_000).toISOString();
+  const d5 = new Date(Date.now() - 5 * 86400_000).toISOString();
+  const { data: retries } = await db.from("cloud_entitlement_projection")
+    .select("user_id,plan_code,trial_ends_at,current_period_end,billing_retry_count")
+    .eq("provider", "revolut").eq("status", "past_due")
+    .or(`and(billing_retry_count.eq.0,current_period_end.lte.${d3}),and(billing_retry_count.eq.1,current_period_end.lte.${d5})`)
+    .limit(BATCH);
+  for (const row of (retries ?? []) as Row[]) {
+    const attempt = (row.billing_retry_count ?? 0) + 1;
+    // L'essai est consommé AVANT le débit : un crash du cron ne rejoue jamais
+    // une tentative (le garde status=past_due évite d'écraser un retour actif).
+    const { data: claimed } = await db.from("cloud_entitlement_projection")
+      .update({ billing_retry_count: attempt })
+      .eq("user_id", row.user_id).eq("status", "past_due").eq("billing_retry_count", attempt - 1)
+      .select("user_id");
+    if (!Array.isArray(claimed) || !claimed.length) continue; // course perdue → un autre run s'en charge
+    const r = await chargeUser(db, row, "renewal", row.current_period_end, errors, { retryAttempt: attempt });
+    if (r === "charged") out.retry_recovered++; else out.retry_failed++;
   }
 
   // 3) Cancelled plans whose paid/trial period is over → expired (never charged).

@@ -1095,6 +1095,10 @@ class App {
                 this.redirectToPaywall(decision);
                 return false;
             }
+            // Paiement en échec mais accès encore ouvert (fenêtre de grâce) :
+            // alerte visible NON bloquante — le mur souple n'arrive qu'à la fin
+            // de la grâce, ici on prévient pendant qu'il est simple d'agir.
+            this._maybeShowBillingAlert(decision);
         } catch (err) {
             if (err?.status === 401) {
                 // A 401 here can be a momentarily-stale token, not a dead session.
@@ -1130,6 +1134,65 @@ class App {
             window.NorvaEntitlement = this.entitlement;
         }
         return true;
+    }
+
+    // Bandeau « paiement en échec » en tête de l'app : visible mais non bloquant,
+    // affiché pendant la fenêtre de grâce (past_due/grace, accès maintenu). CTA
+    // selon le rail : web → gestion d'abonnement Norva ; Play → Google Play
+    // (politique Play : jamais de lien de paiement web dans l'app) ; TV → texte
+    // seul (le paiement se règle sur téléphone/web). Fermable pour la session —
+    // il revient à la prochaine ouverture tant que le paiement n'est pas réglé.
+    _maybeShowBillingAlert(decision) {
+        try {
+            const status = String(decision?.status || decision?.projection?.status || '').toLowerCase();
+            const inGrace = decision?.reason === 'billing_grace' || status === 'past_due' || status === 'grace';
+            const existing = document.getElementById('norva-billing-alert');
+            if (!inGrace) { if (existing) existing.remove(); return; }
+            if (existing || sessionStorage.getItem('norva-billing-alert-dismissed') === '1') return;
+            if (!document.getElementById('norva-billing-alert-css')) {
+                const st = document.createElement('style');
+                st.id = 'norva-billing-alert-css';
+                st.textContent = '#norva-billing-alert{position:relative;z-index:120;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;padding:9px 44px 9px 16px;background:linear-gradient(90deg,rgba(251,191,36,.14),rgba(251,146,60,.12));border-bottom:1px solid rgba(251,191,36,.35);color:#fde8b0;font-size:13.5px;line-height:1.45;}'
+                    + '#norva-billing-alert a{color:#fff;font-weight:700;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.45);}'
+                    + '#norva-billing-alert .nba-x{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:0;color:#fde8b0;font-size:14px;cursor:pointer;padding:4px 6px;}';
+                document.head.appendChild(st);
+            }
+            const bar = document.createElement('div');
+            bar.id = 'norva-billing-alert';
+            bar.setAttribute('role', 'status');
+            const msg = document.createElement('span');
+            msg.textContent = "⚠️ Your last payment didn't go through — your access stays on for a few days while it's sorted out.";
+            bar.appendChild(msg);
+            const provider = String(decision?.projection?.provider || '').toLowerCase();
+            const isTv = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+            if (isTv) {
+                const hint = document.createElement('span');
+                hint.textContent = 'Update your payment on norva.tv or in the Norva phone app.';
+                bar.appendChild(hint);
+            } else {
+                const a = document.createElement('a');
+                if (provider === 'google_play' || provider === 'apple_app_store') {
+                    a.href = 'https://play.google.com/store/account/subscriptions';
+                    a.target = '_blank'; a.rel = 'noopener';
+                    a.textContent = 'Fix it on Google Play →';
+                } else {
+                    a.href = '/subscription.html?returnTo=' + encodeURIComponent('/app#home');
+                    a.textContent = 'Update payment →';
+                }
+                bar.appendChild(a);
+            }
+            const x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'nba-x';
+            x.setAttribute('aria-label', 'Dismiss');
+            x.textContent = '✕';
+            x.addEventListener('click', () => {
+                try { sessionStorage.setItem('norva-billing-alert-dismissed', '1'); } catch (_) { /* privé */ }
+                bar.remove();
+            });
+            bar.appendChild(x);
+            document.body.prepend(bar);
+        } catch (_) { /* l'alerte ne doit jamais casser le boot */ }
     }
 
     redirectToPaywall(decision) {

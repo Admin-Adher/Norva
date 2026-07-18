@@ -277,6 +277,41 @@ Routage : `validRoute` étendu + dispatch générique `finance/<sub>` ; l'état
 interne des onglets (trimestre TVA, saisies promo) survit aux bascules
 (conteneurs montrés/cachés, jamais re-rendus).
 
+### Anti-churn involontaire : relances auto J+3/J+5 + bandeau in-app
+
+Question d'Adrien (« que se passe-t-il quand un renouvellement échoue ? ») →
+constat : le rail web ne re-tentait JAMAIS la même carte (récupération 100 %
+dépendante du client), alors que ~2/3 des échecs sont transitoires. Construit :
+
+- **Relances automatiques** (migration `20260718235900` : colonne
+  `billing_retry_count` sur la projection — ⚠ NOTIFY pgrst, colonne lue via
+  REST) : le cron re-tente **J+3 puis J+5** après l'échéance, avant l'expiration
+  du dunning (~J+10). Essai consommé AVANT le débit (claim CAS
+  `status=past_due AND retry_count=n-1` — un crash ou deux runs concurrents ne
+  rejouent jamais un débit) ; référence d'ordre suffixée `-t1/-t2` (pas de
+  collision avec l'échec initial) ; succès → réactivation ancrée sur l'échéance
+  d'origine + Telegram « 💚 Paiement récupéré » ; échec → past_due inchangé,
+  la **grâce de 72 h ne se ré-étend pas** et pas de re-ping (le J0 a déjà pingé).
+- **Bandeau in-app non bloquant** (`app.js ?v=46`, `_maybeShowBillingAlert`) :
+  à l'ouverture de Norva pendant la grâce (`billing_grace`/past_due/grace),
+  bandeau ambre en tête d'app — « Your last payment didn't go through… » — CTA
+  par rail (web → gestion d'abonnement ; Play → Google Play, politique Play
+  oblige ; TV → texte seul, le paiement se règle sur téléphone/web). Fermable
+  par session, revient à la prochaine ouverture tant que non réglé. Le mur
+  souple existant reste le second étage après la grâce.
+
+Chronologie complète d'un échec (rail web) : J0 échec + Telegram + grâce 72 h +
+emails J0/J+1/J+2 → **relance auto J+3** → coupure d'accès J+3 (mur souple) →
+**relance auto J+5** → expiration ~J+10 (21 j max) → win-back.
+
+```bash
+cd ~/norva && git pull origin main
+docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260718235900_billing_auto_retry.sql
+docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
+ops/hetzner/scripts/04-deploy-edge-functions.sh
+```
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
