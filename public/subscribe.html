@@ -74,8 +74,12 @@
        so the solid cards stay perfectly readable. */
     #campaign-bg { position: fixed; inset: 0; z-index: -1;
       background-size: cover; background-position: center top; }
+    /* Voile volontairement léger en haut (l'artwork doit se voir — les artworks
+       d'événement sont souvent sombres, un voile prudent les écrase) ; il ne se
+       densifie que vers le bas, derrière les cartes, qui sont des panneaux
+       opaques de toute façon. */
     #campaign-bg::after { content: ""; position: absolute; inset: 0;
-      background: linear-gradient(180deg, rgba(9,11,16,.42) 0%, rgba(9,11,16,.75) 45%, rgba(9,11,16,.96) 100%); }
+      background: linear-gradient(180deg, rgba(9,11,16,.16) 0%, rgba(9,11,16,.5) 48%, rgba(9,11,16,.9) 100%); }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
