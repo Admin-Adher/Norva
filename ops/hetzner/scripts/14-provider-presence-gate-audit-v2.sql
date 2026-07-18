@@ -184,3 +184,16 @@ where r.created >= now() - interval '2 hours'
   )
 order by r.created desc
 limit 50;
+
+\echo '================ [I] Réponses HTTP pg_net attribuées au pilote (après déploiement edge) ================'
+select r.created,
+       r.status_code,
+       r.timed_out,
+       left(coalesce(r.error_msg, ''), 200) as error_msg,
+       left(coalesce(r.content, ''), 1000) as content
+from net._http_response r
+where r.created >= now() - interval '24 hours'
+  and coalesce(r.content, '') ilike '%"userId":"' || :'USER_ID' || '"%'
+order by r.created desc
+limit 50;
+
