@@ -334,6 +334,13 @@
             d.appendChild(struck);
             const pctVal = Math.max(1, Math.round(100 - (cents / promo.base_cents) * 100));
             d.appendChild(document.createTextNode(' · −' + pctVal + '% (save $' + ((promo.base_cents - cents) / 100).toFixed(2) + ')'));
+            if (promo.cycles) {
+              const firstTxt = period === 'annual'
+                ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')
+                : (promo.cycles === 1 ? 'your first month' : 'your first ' + promo.cycles + ' months');
+              d.appendChild(document.createTextNode(' · promo price for ' + firstTxt + ', then $'
+                + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo')));
+            }
             row.insertAdjacentElement('afterend', d);
           }
         }).catch(function () { /* static fallback stays */ });

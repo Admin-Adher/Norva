@@ -209,8 +209,15 @@ Deno.serve(async (req) => {
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
-    const amount = (await getPrices(db))[plan]?.[period];
+    const catalog = await getCatalog(db);
+    const amount = catalog.prices[plan]?.[period];
     if (!amount) return json({ error: "Unknown plan" }, 400);
+    // Promo « N premières périodes » : le prix de base et le décompte voyagent
+    // avec l'engagement (mapping + metadata) — le cron rebascule au prix de base
+    // une fois les cycles promo épuisés. cycles null = réduction à vie.
+    const promoInfo = catalog.promos[plan]?.[period] ?? null;
+    const promoCycles = promoInfo?.cycles ?? null;
+    const promoBase = promoCycles ? promoInfo!.base_cents : null;
 
     // ── Checkout KIND, decided SERVER-SIDE from the account's real state ───────
     // (kind decided server-side): trial_setup grants trial days ONCE;
@@ -260,7 +267,12 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const custRow: JsonRecord = { user_id: user.id, updated_at: nowIso };
     if (custId) custRow.revolut_customer_id = custId;
-    if (kind === "trial_setup" || kind === "resubscribe") { custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount; }
+    if (kind === "trial_setup" || kind === "resubscribe") {
+      custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount;
+      // Les nulls explicites effacent un éventuel état promo d'un checkout précédent.
+      custRow.base_amount_cents = promoBase;
+      custRow.promo_cycles_left = promoCycles;
+    }
     await db.from("cloud_revolut_customers").upsert(custRow);
 
     const DESCRIPTIONS: Record<string, string> = {
@@ -294,7 +306,8 @@ Deno.serve(async (req) => {
       description: DESCRIPTIONS[kind],
       // amount_cents = the catalog price at checkout OPEN — /confirm commits THIS
       // amount, so a promo ending mid-checkout still honors what the page showed.
-      metadata: { user_id: user.id, plan, period, kind, amount_cents: amount },
+      // base_amount_cents/promo_cycles carry the « N first periods » promo terms.
+      metadata: { user_id: user.id, plan, period, kind, amount_cents: amount, base_amount_cents: promoBase, promo_cycles: promoCycles },
     };
     // customer_id links the order → customer so the saved card attaches; fall back to
     // customer_email if the customer couldn't be created.
@@ -378,6 +391,12 @@ Deno.serve(async (req) => {
     const amount = (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
       ? Math.round(metaAmount)
       : ((await getPrices(db))[plan]?.[period] ?? 0);
+    // Conditions promo « N périodes » stampées à l'ouverture du checkout (server-
+    // written). Absentes (vieil ordre) = réduction à vie, comportement historique.
+    const metaBase = Number(meta.base_amount_cents);
+    const metaCycles = Number(meta.promo_cycles);
+    const promoCycles = (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24) ? Math.round(metaCycles) : null;
+    const promoBase = (promoCycles && Number.isFinite(metaBase) && metaBase >= 100 && metaBase <= 99999) ? Math.round(metaBase) : null;
     // Prefer the order's customer_id; fall back to the one /checkout stored (the
     // legacy order object doesn't always echo customer_id back).
     let customerId = orderCustomerId(order);
@@ -407,7 +426,13 @@ Deno.serve(async (req) => {
     // the order metadata, so an abandoned checkout can never reprice a renewal);
     // for trial_setup/resubscribe it re-asserts what /checkout staged, healing any
     // divergence when several checkouts were opened before one was paid.
-    if (kind !== "card_update" && amount) { custPatch.plan = plan; custPatch.period = period; custPatch.amount_cents = amount; }
+    if (kind !== "card_update" && amount) {
+      custPatch.plan = plan; custPatch.period = period; custPatch.amount_cents = amount;
+      // Nulls explicites : un engagement SANS promo limitée efface l'état promo
+      // d'un engagement précédent (le prix courant devient définitif).
+      custPatch.base_amount_cents = promoBase && promoBase > amount ? promoBase : null;
+      custPatch.promo_cycles_left = promoBase && promoBase > amount ? promoCycles : null;
+    }
     await db.from("cloud_revolut_customers").upsert(custPatch);
     if (cardCountry) {
       // Best-effort: no-op for a first trial_setup (row created below, which carries

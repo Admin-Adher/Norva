@@ -253,9 +253,17 @@ async function commitOrderPlan(db: SupabaseClient, userId: string, eventType: st
     ? Math.round(metaAmount)
     : (await getPrices(db))[plan]?.[period];
   if (!amount) return; // only plus/family carry a web price — anything else is not committable
+  // Conditions promo « N périodes » stampées à l'ouverture du checkout —
+  // absentes (vieil ordre) = réduction à vie, comportement historique.
+  const metaBase = Number(meta.base_amount_cents);
+  const metaCycles = Number(meta.promo_cycles);
+  const promoCycles = (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24) ? Math.round(metaCycles) : null;
+  const promoBase = (promoCycles && Number.isFinite(metaBase) && metaBase > amount && metaBase <= 99999) ? Math.round(metaBase) : null;
   try {
     await db.from("cloud_revolut_customers").upsert({
-      user_id: userId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
+      user_id: userId, plan, period, amount_cents: amount,
+      base_amount_cents: promoBase, promo_cycles_left: promoBase ? promoCycles : null,
+      updated_at: new Date().toISOString(),
     });
   } catch (e) {
     console.warn("[norva-revolut-webhook] plan commit failed", String((e as Error)?.message ?? e));

@@ -608,11 +608,27 @@
             price.dataset.monthly = (pl.monthly / 100).toFixed(2);
             price.dataset.annual = (pl.annual / 100).toFixed(2);
             // Les mentions légales sous la carte portent le prix réellement
-            // facturé — on remplace le montant embarqué dans les gabarits.
+            // facturé — et pour une promo « N premières périodes », l'après-promo
+            // en toutes lettres (« for your first 3 months, then US$4.99/month »).
             const terms = price.parentElement?.querySelector('.pricing-terms');
             if (terms) {
-              if (terms.dataset.monthlyTerms) terms.dataset.monthlyTerms = terms.dataset.monthlyTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, `US$${(pl.monthly / 100).toFixed(2)}`);
-              if (terms.dataset.annualTerms) terms.dataset.annualTerms = terms.dataset.annualTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, `US$${(pl.annual / 100).toFixed(2)}`);
+              const promoOf = per => (d.promos && d.promos[planOfPrice(price)] && d.promos[planOfPrice(price)][per]) || null;
+              const pm = promoOf('monthly');
+              const pa = promoOf('annual');
+              if (terms.dataset.monthlyTerms) {
+                const eff = `US$${(pl.monthly / 100).toFixed(2)}`;
+                terms.dataset.monthlyTerms = (pm && pm.cycles)
+                  ? terms.dataset.monthlyTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?\/month until canceled/,
+                      `${eff}/month for your first ${pm.cycles === 1 ? 'month' : pm.cycles + ' months'}, then US$${(pm.base_cents / 100).toFixed(2)}/month until canceled`)
+                  : terms.dataset.monthlyTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, eff);
+              }
+              if (terms.dataset.annualTerms) {
+                const eff = `US$${(pl.annual / 100).toFixed(2)}`;
+                terms.dataset.annualTerms = (pa && pa.cycles)
+                  ? terms.dataset.annualTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?\/year until canceled/,
+                      `${eff}/year for your first ${pa.cycles === 1 ? 'year' : pa.cycles + ' years'}, then US$${(pa.base_cents / 100).toFixed(2)}/year until canceled`)
+                  : terms.dataset.annualTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, eff);
+              }
             }
           });
           livePromos = d.promos || null;

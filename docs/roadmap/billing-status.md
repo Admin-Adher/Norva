@@ -43,6 +43,13 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
   (équité si la promo finit en cours de saisie). Visuel de campagne plein écran
   uploadable (bucket public `promo-assets`). Rail Play hors périmètre (promos
   dans la Play Console).
+- **Durée des promos = « N premières périodes »** (décision produit) : champ 🔁
+  sur chaque promo (conseillé 3 en mensuel, 1 en annuel ; vide = à vie, réservé
+  early-bird). Le mapping client mémorise `base_amount_cents` +
+  `promo_cycles_left` ; le cron décompte à chaque encaissement et rebascule au
+  prix de base à épuisement. Disclosure légale « then $X » sur vente, checkout
+  et landing. Les abonnés promo engagés avant restent à vie (pas de changement
+  de termes rétroactif).
 - **Upsell mensuel→annuel durci** (audit 26 agents, 21 constats confirmés) :
   plan_change commité uniquement à l'ordre PAYÉ, MRR annuel /12 partout,
   `PRODUCT_CHANGE` → ledger `plan_change` (exclu conversions/TVA), remplacement

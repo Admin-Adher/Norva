@@ -86,6 +86,13 @@ ne marquait jamais le plan courant (gap général, pas seulement VIP).
 | `8329765` | Voile de lisibilité allégé (16/50/90 %) |
 | `b73f4a3` | Fond peint sur le canvas du document (`html.has-campaign`) + témoin console |
 | `0cda48d` | Tolérance billing.js périmé + éviction du cache immutable (hash) |
+| `c9a1691` | Sélecteur d'événement v2 — dépliant maison + événement nommé (« Autre… ») |
+| `1330d86` | Finance ré-architecturée en onglets (Vue d'ensemble + 4 onglets d'action) |
+| `ede908d` | Relances de prélèvement auto J+3/J+5 + bandeau in-app non bloquant |
+| `35f9799` | Upload visuel pleine qualité (optimisation navigateur, plafond 10 Mo) |
+| `3df0546` | % + économie affichés partout (Omnibus), landing page alignée sur les promos |
+| `75938bd` | Compte à rebours réel jusqu'à la fin de promo (page de vente) |
+| *(ce commit)* | Promos « N premières périodes » — `promo_cycles` bout en bout (voir section dédiée) |
 
 ## Nuances actées, non corrigées (volontaire)
 
@@ -361,6 +368,51 @@ Chiffres tabulaires (pas de tremblement), compact sur écran court.
 | App Android téléphone (webview + Play Billing natif) | ❌ volontaire | Google est marchand — les prix affichés restent alignés Play Console ; promos mobiles dans la Play Console |
 | App Android TV (webview, `hasNativeBilling()=false`) | ✅ | La TV vend via le rail web (QR → checkout Revolut sur téléphone) — les promos web s'y appliquent réellement |
 | Future app App Store | ❌ (même gating) | Apple marchand — même logique que Play |
+
+### Promos « N premières périodes » (décision produit) — migration `20260719020000`
+
+Question posée : les réductions d'événement sont-elles à vie ? Réponse historique :
+oui (grandfathering intégral — le prix promo restait le prix de renouvellement pour
+toujours). Décision d'Adrien : **modèle SaaS standard « N premières périodes »** —
+typiquement 3 mois en mensuel, la 1ʳᵉ année en annuel — coût de promo borné et
+calculable, LTV protégée, promos réutilisables à chaque événement. Le « à vie »
+reste possible (champ durée vide = ∞) mais réservé aux gestes stratégiques
+(early-bird, membres fondateurs).
+
+**Mécanique bout en bout :**
+
+- `billing_prices.promo_cycles` (1..24, NULL = à vie) — saisi dans la carte admin
+  (champ 🔁 à côté de l'échéance, pré-rempli 3 en mensuel / 1 en annuel quand on
+  crée une promo, placeholder ∞ ; récap de sauvegarde « N période(s) puis prix de
+  base » ou « à vie »).
+- À l'engagement (checkout `/confirm` payé OU webhook `ORDER_COMPLETED`, selon qui
+  arrive premier — les deux idempotents), le mapping client reçoit
+  `amount_cents = prix promo`, `base_amount_cents = prix de base mémorisé`,
+  `promo_cycles_left = N`. Les valeurs voyagent **stampées dans les metadata de
+  l'ordre** (`base_amount_cents`, `promo_cycles`) — même garantie d'équité que le
+  prix : c'est l'offre affichée au moment du clic qui fait foi, pas l'état de la
+  table au moment du paiement.
+- Le cron (`norva-revolut-billing`) décrémente `promo_cycles_left` **après chaque
+  encaissement réussi** ; à épuisement, `amount_cents` rebascule sur
+  `base_amount_cents` (nettoyé à NULL) — le cycle suivant est facturé plein tarif.
+  L'essai gratuit ne décompte rien (pas d'encaissement) : les N périodes sont bien
+  N périodes **payées**.
+- Transparence légale (« then $X ») partout : page de vente « You save $1.99/mo
+  for your first 3 months, then $4.99/mo », checkout « promo price for your first
+  3 months, then $4.99/mo », landing (Terms) « US$3.00/month for your first
+  3 months, then US$4.99/month until canceled ».
+
+**Points d'attention :**
+
+- `admin_billing_promo_set` gagne `p_cycles` → **signature étendue** ⇒ DROP de
+  l'ancienne 6-args ⇒ **⚠ NOTIFY pgrst obligatoire** (+ nouvelles colonnes
+  `base_amount_cents`/`promo_cycles_left` lues via REST par le cron).
+- Les abonnés promo **existants** (engagés avant cette migration) restent « à
+  vie » : leur mapping n'a pas de `promo_cycles_left`, aucun contrat en cours
+  n'est modifié — c'est voulu (on ne change pas les termes après coup).
+- Le décompte est côté Revolut uniquement ; sur le rail Play, les offres
+  limitées dans le temps se configurent dans la Play Console (mêmes règles que
+  le reste des promos — voir tableau des surfaces ci-dessus).
 
 ## Déploiement box — lots 1-5 (FAIT le 2026-07-18 ~12h06)
 

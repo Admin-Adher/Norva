@@ -185,9 +185,10 @@ interface Row { user_id: string; plan_code: string | null; trial_ends_at: string
 // se rouvrir à chaque tentative.
 async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null, errors: unknown[], opts: { retryAttempt?: number } = {}): Promise<string> {
   const { data: cust } = await db.from("cloud_revolut_customers")
-    .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct,card_country").eq("user_id", row.user_id).maybeSingle();
+    .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct,card_country,base_amount_cents,promo_cycles_left").eq("user_id", row.user_id).maybeSingle();
   const c = cust as {
     revolut_customer_id?: string; payment_method_id?: string; plan?: string; period?: string; amount_cents?: number; discount_next_pct?: number; card_country?: string;
+    base_amount_cents?: number | null; promo_cycles_left?: number | null;
   } | null;
   const customerId = c?.revolut_customer_id ?? null;
   const pmId = c?.payment_method_id ?? null;
@@ -245,6 +246,21 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
     }
     if (discountPct) {
       try { await db.from("cloud_revolut_customers").update({ discount_next_pct: null, updated_at: nowIso }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
+    }
+    // Promo « N premières périodes » : décompte après chaque encaissement ; à
+    // épuisement, le prix de base redevient le montant récurrent — le cycle qui
+    // vient d'être encaissé était le dernier au tarif promo.
+    if (typeof c?.promo_cycles_left === "number" && c.promo_cycles_left > 0) {
+      const left = c.promo_cycles_left - 1;
+      const revert = left <= 0;
+      const baseOk = typeof c?.base_amount_cents === "number" && c.base_amount_cents >= 100 && c.base_amount_cents <= 99999;
+      try {
+        await db.from("cloud_revolut_customers").update({
+          promo_cycles_left: revert ? null : left,
+          ...(revert ? { base_amount_cents: null, ...(baseOk ? { amount_cents: c!.base_amount_cents } : {}) } : {}),
+          updated_at: nowIso,
+        }).eq("user_id", row.user_id);
+      } catch (_) { /* le prochain run du cron retentera le décompte */ }
     }
     if (orderId) {
       try {

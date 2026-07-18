@@ -520,7 +520,18 @@
               const noteEl = card.querySelector('.price-note');
               if (noteEl) noteEl.insertAdjacentElement('beforebegin', save);
             }
-            save.textContent = 'You save $' + ((promo.base_cents - effCents) / 100).toFixed(2) + (annual ? '/yr' : '/mo');
+            // « N premières périodes » : l'après-promo est annoncé noir sur blanc
+            // (« then $4.99/mo ») — transparence exigée pour les prix d'appel.
+            const unit = annual ? '/yr' : '/mo';
+            const saveAmt = 'You save $' + ((promo.base_cents - effCents) / 100).toFixed(2) + unit;
+            if (promo.cycles) {
+              const firstTxt = annual
+                ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')
+                : (promo.cycles === 1 ? 'your first month' : 'your first ' + promo.cycles + ' months');
+              save.textContent = saveAmt + ' for ' + firstTxt + ', then $' + (promo.base_cents / 100).toFixed(2) + unit;
+            } else {
+              save.textContent = saveAmt;
+            }
             // Event identity: themed badge + tinted card halo. The uploaded
             // campaign image is a FULL-PAGE background (applyLivePrices), never
             // squeezed inside the card.
