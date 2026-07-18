@@ -86,10 +86,10 @@ Câblage repo de `NORVA_EDGE_CALLBACK_BASE` (lu par `services/media-gateway/src/
 - `ops/hetzner/media/docker-compose.media.yml` : `NORVA_EDGE_CALLBACK_BASE: ${NORVA_EDGE_CALLBACK_BASE:-}`
 - `.env.example` : documenté.
 
-⚠️ **Action ops restante** : poser la **valeur** (URL de la fonction `norva-playback`,
-ex. `https://api.norva.tv/functions/v1/norva-playback`) dans l'env du gateway (Railway
-dashboard ou `.env.media`) + redéployer. Sans elle, le rapporteur reste inerte
-(`account-activity reporter IDLE …`). Cf. `docs/LIVE-TV-458-SLOT-CONTENTION.md`.
+✅ **Fait** (constaté le 2026-07-18) : la valeur
+`https://api.norva.tv/functions/v1/norva-playback` est posée dans les variables
+Railway du gateway et le rapporteur est **actif** (touches `kind='gateway'`
+visibles dans `provider_account_activity`). Cf. `docs/LIVE-TV-458-SLOT-CONTENTION.md`.
 
 ## 6. Comportement après correctif
 

@@ -257,13 +257,64 @@ IDLE — set NORVA_EDGE_CALLBACK_BASE…`.
       titres/j (couverture audio en recul). Retour au design `6-23` (Ninja
       24/7 capé 60/h) — sûr car le verrou + crawl-yield font skipper toute
       sonde qui croise un viewer. Le « prêt » de fenêtre est donc soldé.
-- [ ] **Poser la valeur de `NORVA_EDGE_CALLBACK_BASE`** dans `.env.media`
-      de la machine gateway + `docker compose --env-file .env.media -f
-      docker-compose.media.yml up -d`. Valeur self-host :
-      `https://api.norva.tv/functions/v1/norva-playback`. (Câblage compose
-      déjà en place ; sans elle le verrou reste fail-open sur le cas
-      « viewer web > 5 min » — à poser AVANT ou juste après le ré-élargissement.)
+- [x] ~~**Poser la valeur de `NORVA_EDGE_CALLBACK_BASE`**~~ — **fait** (posée dans
+      les variables Railway du service gateway, constaté le 2026-07-18 ; rapporteur
+      vérifié **actif** en prod via les touches `kind='gateway'` dans
+      `provider_account_activity`). Valeur : `https://api.norva.tv/functions/v1/norva-playback`.
 - [ ] Différable : keepalive session lecture native ; signalement des
       téléchargements (slot tenu des heures, zéro télémétrie).
 - [x] ~~Fin du prêt : réactiver crons 79/80~~ — réactivés le 2026-07-05
       (jobids **35/36** après la restauration Hetzner), 24/7 depuis 2026-07-16.
+
+## 9. Incident VOD mobile 2026-07-18 — collision au LANCEMENT + cul-de-sac client (corrigé)
+
+**Symptôme.** VOD du propriétaire ~20 h (heure FR) : sur le web, `[NorvaEngine] slot
+busy (458)` avec retries (lecture après 1-3 min — beaucoup trop) ; sur l'app
+téléphone, erreur **terminale** `ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED /
+UnrecognizedInputFormatException`, `Host: norva-production.up.railway.app`,
+persistante à travers les Retry.
+
+**Diagnostic (vérifié en base pendant l'incident).**
+- Le job **3** (`norva-audio-langs-untagged`, compte super8k du propriétaire —
+  l'ex-job 10, renuméroté à la restauration Hetzner) sondait **toutes les 3 min**
+  en fenêtre `6-23` (ré-élargie le 16/07, §8). Le verrou est **sain pendant un
+  visionnage** (touches `event`/`history` fraîches constatées live) mais
+  l'**instant du lancement** n'a par construction aucun signal frais → une sonde
+  déjà en vol tient le slot unique au moment du play. Chaque lancement rejoue la
+  roulette toutes les 3 min.
+- Chaîne mobile du cul-de-sac : URL directe refusée (erreur IO) → bascule sur le
+  fallback gateway `/raw` → le panel répond son **corps d'erreur « busy » en
+  HTTP 200** → relayé tel quel → ExoPlayer le sniffe comme un conteneur → erreur
+  de **parsing**, catégorie exclue de l'échelle de récupération (réservée IO) →
+  écran d'erreur définitif. Le web, lui, retente les 458 et finit par passer.
+
+**Correctifs (branche `claude/vod-launch-resilience-h4ij2m`).**
+1. **Gateway `/raw` — garde anti corps non-média** : sur un 2xx à content-type
+   textuel, les premiers octets sont sniffés ; un corps « text-shaped » (page
+   busy/ban HTML/JSON, corps vide) est **retenté comme un 458** (même backoff,
+   même fenêtre de libération) puis refusé en **502 JSON** — plus jamais pipé
+   vers un player. Un vrai média mal étiqueté (magic mp4/mkv/ts/…) est pipé
+   normalement. **Profite aux APK déjà installés dès le déploiement Railway** :
+   une vraie erreur HTTP arme leur fallback/retry existant.
+2. **Players téléphone + TV** : les erreurs `PARSING_CONTAINER_*`/`MANIFEST_*`
+   rejoignent l'échelle de récupération (fallback gateway → re-prépa différée →
+   erreur). Sur mono-slot, un « conteneur illisible » est presque toujours de la
+   contention déguisée. Nécessite un **build APK** pour prendre effet.
+3. **Presence gate** (la vraie fermeture du trou « lancement ») : RPC
+   `provider_account_touch_by_user` (migration `20260718200000`) + touche
+   throttlée 60 s dans `norva-cloud` (chokepoints `requireUser` et
+   `requireDevice`, **hors heartbeat TV**) → dès qu'un utilisateur ouvre
+   l'app/le site, les comptes provider de SES sources sont marqués `presence`
+   et les sondes s'écartent **avant** son premier play. Limites assumées : un
+   client qui polle en continu prolonge la présence (le heartbeat TV est exclu
+   pour préserver les fenêtres de nuit) ; ne protège pas un appareil non-Norva.
+
+**Ops — soulagement immédiat pendant ce genre d'incident** (réversible) :
+```sql
+select cron.alter_job(job_id := 3, active := false);  -- pause la sonde du compte regardé
+-- reprise : select cron.alter_job(job_id := 3, active := true);
+```
+
+**Rappel périmètre** : les sondes ne visent que les comptes pilotes câblés — un
+nouvel utilisateur n'est jamais sondé (héritage cache cross-user). Le risque
+« nouveaux utilisateurs » était le cul-de-sac client (1/2 ci-dessus), pas les crons.

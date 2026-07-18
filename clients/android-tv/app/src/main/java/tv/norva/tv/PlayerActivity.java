@@ -385,17 +385,21 @@ public class PlayerActivity extends Activity {
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
                 // Transient network/HTTP errors (incl. a 504 or a briefly held
-                // single-connection slot): retry once before giving up.
-                boolean transientIo = code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
-                        && code < PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED;
+                // single-connection slot) AND container/manifest parsing errors: a
+                // single-slot panel answering "busy" with a non-media body on HTTP 200
+                // surfaces as PARSING_CONTAINER_* — contention, not a broken file
+                // (2026-07-18 VOD incident). Retry both before giving up; decode/DRM
+                // errors stay terminal (retrying can't fix those).
+                boolean recoverable = code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                        && code <= PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED;
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
                 // accepted. Switch to the gateway fallback once before retrying/erroring.
-                if (transientIo && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
+                if (recoverable && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
                     switchToFallback();
                     return;
                 }
-                if (transientIo && playRetries < 1 && player != null) {
+                if (recoverable && playRetries < 1 && player != null) {
                     playRetries++;
                     spinner.setVisibility(View.VISIBLE);
                     errorView.setVisibility(View.GONE);

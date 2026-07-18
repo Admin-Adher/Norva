@@ -395,10 +395,28 @@ public class PlayerActivity extends Activity {
                 errHandler.removeCallbacks(bufferWatchdog);
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
-                // accepted. Switch to the gateway fallback once before surfacing the error.
-                if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && isIoError(error)) {
-                    switchToFallback();
-                    return;
+                // accepted. A single-slot panel can also answer "busy" with a non-media
+                // body on HTTP 200, which surfaces here as a PARSING_CONTAINER_* error —
+                // slot contention, not a broken file (2026-07-18 VOD incident). Both are
+                // recoverable: drive the same ladder as the watchdog — gateway fallback
+                // once, then one delayed re-prepare (the provider frees its lone slot
+                // ~8s after the prior drop), and only then surface the error.
+                if (isRecoverableError(error)) {
+                    if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried) {
+                        switchToFallback();
+                        return;
+                    }
+                    if (!watchdogRetried && player != null) {
+                        watchdogRetried = true;
+                        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+                        errHandler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (player != null) { player.prepare(); player.setPlayWhenReady(true); }
+                            }
+                        }, 1500);
+                        return;
+                    }
                 }
                 // Surface the real failure on screen (error code, HTTP status, cause,
                 // host) instead of a silent hang — so it can be read/screenshotted.
@@ -549,10 +567,17 @@ public class PlayerActivity extends Activity {
         player.setPlayWhenReady(true);
     }
 
-    private static boolean isIoError(PlaybackException e) {
+    /**
+     * IO errors (network/HTTP refusals) AND container/manifest parsing errors are
+     * worth the recovery ladder. On single-slot IPTV accounts a "busy"/ban refusal
+     * often arrives as a non-media body on HTTP 200, which ExoPlayer reports as an
+     * unparseable container — contention wearing a parsing error's clothes. Decode,
+     * DRM and codec errors stay non-recoverable (retrying can't fix those).
+     */
+    private static boolean isRecoverableError(PlaybackException e) {
         int code = e.errorCode;
         return code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
-                && code < PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED;
+                && code <= PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED;
     }
 
     /** Compact, shareable diagnostic from a playback failure (code, HTTP status, cause, host). */
