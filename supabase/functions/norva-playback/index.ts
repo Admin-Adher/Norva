@@ -3667,18 +3667,13 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
   if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
   const body = recordOrEmpty(await req.json().catch(() => ({})));
-  const auditMeta = {
-    userId: stringOr(body.userId, "") || null,
-    sourceId: stringOr(body.sourceId, "") || null,
-  };
-  const withAuditMeta = (payload: JsonRecord): JsonRecord => ({ ...payload, audit: auditMeta });
 
   // Global kill switch (admin feature flag): when enrichment_paused is ON, skip all backfill work so
   // NO provider connection is opened this tick — an ops pause (incident, provider protection). One
   // cheap flag read; FAIL-OPEN (a transient read error keeps enriching rather than silently halting).
   try {
     const { data: paused } = await db.rpc("feature_flag", { p_key: "enrichment_paused" });
-    if (paused === true) return withAuditMeta({ paused: true, skipped: "enrichment_paused" });
+    if (paused === true) return { paused: true, skipped: "enrichment_paused" };
   } catch (_) { /* fail-open: keep enriching if the flag can't be read */ }
 
   // One dimension per call by default. With fallthrough:true (set on the DAYTIME audio-films
@@ -3692,14 +3687,14 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   if (body.fallthrough !== true) {
     // Single-dim path (night crons): same short-circuit as the chain below.
     const soloKey = sweepDimKey(body);
-    if (!soloKey) return withAuditMeta((await runOneDimension(db, body)) as JsonRecord);
+    if (!soloKey) return await runOneDimension(db, body);
     const soloEx = await exhaustedMap(db, [soloKey]);
     if ((soloEx.get(soloKey) ?? 0) > Date.now()) {
-      return withAuditMeta({ skipped: "exhausted", key: soloKey, until: new Date(soloEx.get(soloKey)!).toISOString() });
+      return { skipped: "exhausted", key: soloKey, until: new Date(soloEx.get(soloKey)!).toISOString() };
     }
     const soloRes = (await runOneDimension(db, body)) as JsonRecord;
     await recordExhaustion(db, soloKey, Number(soloRes?.processed ?? 0), soloRes?.skipped);
-    return withAuditMeta(soloRes);
+    return soloRes;
   }
   const fuId = stringOr(body.userId, "");
   // Carry the primary cron's panel scope (sourceId) into EVERY drained dimension. Without this the
@@ -3731,10 +3726,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     const processed = Number(r?.processed ?? 0);
     if (key) await recordExhaustion(db, key, processed, r?.skipped);
     tried.push({ type: stringOr(dim.type, "?"), kind, processed, skipped: stringOrNull(r?.skipped) });
-    if (r?.skipped) return withAuditMeta({ mode: "fallthrough", stoppedAt: r.skipped, tried });   // live viewer / in-flight pregen → stop the whole chain
-    if (processed > 0) return withAuditMeta({ mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r });
+    if (r?.skipped) return { mode: "fallthrough", stoppedAt: r.skipped, tried };   // live viewer / in-flight pregen → stop the whole chain
+    if (processed > 0) return { mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r };
   }
-  return withAuditMeta({ mode: "fallthrough", exhausted: true, tried });
+  return { mode: "fallthrough", exhausted: true, tried };
 }
 
 async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
