@@ -491,6 +491,25 @@
       birthday: 'linear-gradient(135deg,#f472b6,#8b5cf6)', flash: 'linear-gradient(135deg,#fde047,#f59e0b)',
       other: 'linear-gradient(135deg,#ff8067,#b579ff)'
     };
+    // Bordure + halo du chip de compte à rebours, aux couleurs de l'événement
+    // (mêmes teintes que PROMO_THEMES sur la page de vente).
+    const PROMO_EDGE = {
+      black_friday: { border: 'rgba(255,184,0,.5)', glow: 'rgba(255,184,0,.28)' },
+      cyber_monday: { border: 'rgba(99,102,241,.55)', glow: 'rgba(34,211,238,.26)' },
+      winter_sale: { border: 'rgba(125,211,252,.5)', glow: 'rgba(125,211,252,.26)' },
+      summer_sale: { border: 'rgba(251,146,60,.5)', glow: 'rgba(251,191,36,.26)' },
+      christmas: { border: 'rgba(239,68,68,.5)', glow: 'rgba(239,68,68,.26)' },
+      new_year: { border: 'rgba(250,204,21,.5)', glow: 'rgba(250,204,21,.26)' },
+      lunar_new_year: { border: 'rgba(245,158,11,.55)', glow: 'rgba(239,68,68,.28)' },
+      eid: { border: 'rgba(16,185,129,.5)', glow: 'rgba(16,185,129,.26)' },
+      easter: { border: 'rgba(165,180,252,.5)', glow: 'rgba(249,168,212,.24)' },
+      halloween: { border: 'rgba(249,115,22,.55)', glow: 'rgba(249,115,22,.28)' },
+      valentines: { border: 'rgba(225,29,72,.5)', glow: 'rgba(251,113,133,.26)' },
+      back_to_school: { border: 'rgba(56,189,248,.5)', glow: 'rgba(56,189,248,.24)' },
+      birthday: { border: 'rgba(139,92,246,.5)', glow: 'rgba(244,114,182,.26)' },
+      flash: { border: 'rgba(253,224,71,.55)', glow: 'rgba(253,224,71,.28)' },
+      other: { border: 'rgba(181,121,255,.5)', glow: 'rgba(181,121,255,.26)' }
+    };
     function planOfPrice(price) {
       return price.closest('article')?.querySelector('a[data-plan]')?.dataset.plan || '';
     }
@@ -552,31 +571,55 @@
           const amountText = (isAnnual ? price.dataset.annual : price.dataset.monthly) || amount.textContent;
           price.setAttribute('aria-label', `${currency}${amountText} ${isAnnual ? 'per year' : 'per month'}`.trim());
         }
-        // Promo active sur ce plan+période : badge événement + % de réduction +
-        // prix de référence barré (obligation Omnibus : l'ancien prix visible).
+        // Promo active sur ce plan+période : rangée badge événement + pastille
+        // −X%, prix de référence barré (obligation Omnibus : l'ancien prix
+        // visible) et ligne d'économie verte — mêmes codes que la page de vente.
+        // Les rangées promo ont des slots subgrid dédiés (landing.css) : les
+        // deux cartes restent alignées même quand une seule est en promo.
         const promo = livePromos && livePromos[planOfPrice(price)] && livePromos[planOfPrice(price)][currentPeriod];
-        let flag = price.parentElement?.querySelector('.promo-flag');
+        const article = price.closest('article');
+        let row = article?.querySelector('.promo-row');
         let was = price.querySelector('.price-was');
-        if (promo && promo.base_cents) {
+        let save = article?.querySelector('.promo-save');
+        if (promo && promo.base_cents && article) {
           const effRaw = Number.parseFloat(String(isAnnual ? price.dataset.annual : price.dataset.monthly).replace(',', '.'));
           const effCents = Number.isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
           const pct = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
-          if (!flag) {
-            flag = document.createElement('span');
-            flag.className = 'promo-flag';
-            price.insertAdjacentElement('beforebegin', flag);
+          const bg = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+          if (!row) {
+            row = document.createElement('div');
+            row.className = 'promo-row';
+            row.appendChild(Object.assign(document.createElement('span'), { className: 'promo-flag' }));
+            row.appendChild(Object.assign(document.createElement('span'), { className: 'promo-pct' }));
+            price.insertAdjacentElement('beforebegin', row);
           }
-          flag.textContent = `${(promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other} · −${pct}%`;
-          flag.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+          const flag = row.querySelector('.promo-flag');
+          flag.textContent = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
+          flag.style.background = bg;
+          const pctEl = row.querySelector('.promo-pct');
+          pctEl.textContent = `−${pct}%`;
+          pctEl.style.background = bg;
           if (!was) {
             was = document.createElement('span');
             was.className = 'price-was';
             price.appendChild(was);
           }
           was.textContent = `${currency}${(promo.base_cents / 100).toFixed(2)}`;
+          if (!save) {
+            save = document.createElement('small');
+            save.className = 'promo-save';
+            price.insertAdjacentElement('afterend', save);
+          }
+          let saveTxt = `You save ${currency}${((promo.base_cents - effCents) / 100).toFixed(2)}${isAnnual ? '/yr' : '/mo'}`;
+          if (promo.cycles) {
+            const unit = isAnnual ? 'year' : 'month';
+            saveTxt += promo.cycles === 1 ? ` for your first ${unit}` : ` for your first ${promo.cycles} ${unit}s`;
+          }
+          save.textContent = saveTxt;
         } else {
-          if (flag) flag.remove();
+          if (row) row.remove();
           if (was) was.remove();
+          if (save) save.remove();
         }
       });
 
@@ -612,6 +655,11 @@
             // en toutes lettres (« for your first 3 months, then US$4.99/month »).
             const terms = price.parentElement?.querySelector('.pricing-terms');
             if (terms) {
+              // Version d'origine mémorisée : si la promo expire pendant la
+              // visite, expirePromosNow() re-dérive les mentions du prix de
+              // base à partir du texte statique, pas du texte déjà réécrit.
+              if (!terms.dataset.monthlyTermsOrig && terms.dataset.monthlyTerms) terms.dataset.monthlyTermsOrig = terms.dataset.monthlyTerms;
+              if (!terms.dataset.annualTermsOrig && terms.dataset.annualTerms) terms.dataset.annualTermsOrig = terms.dataset.annualTerms;
               const promoOf = per => (d.promos && d.promos[planOfPrice(price)] && d.promos[planOfPrice(price)][per]) || null;
               const pm = promoOf('monthly');
               const pa = promoOf('annual');
@@ -632,25 +680,107 @@
             }
           });
           livePromos = d.promos || null;
-          // Badge « Save X% » du toggle annuel : le vrai chiffre.
-          let best = 0;
-          Object.keys(d.prices).forEach(k => {
-            const p2 = d.prices[k];
-            if (p2 && p2.monthly && p2.annual) best = Math.max(best, 1 - p2.annual / (12 * p2.monthly));
-          });
-          const saveBadge = document.querySelector('.billing-toggle .save-badge');
-          if (saveBadge && best > 0.01) saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
-          if (!document.getElementById('norva-promo-css')) {
-            const st = document.createElement('style');
-            st.id = 'norva-promo-css';
-            st.textContent = '.pricing-grid .promo-flag{display:inline-block;margin:0 0 10px;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#0b1220;}'
-              + '.pricing-grid .price-was{margin-left:8px;color:rgba(255,255,255,.45);font-size:.5em;font-weight:600;text-decoration:line-through;vertical-align:middle;}';
-            document.head.appendChild(st);
-          }
+          refreshToggleSaveBadge();
           apply(currentPeriod, false);
+          startPromoCountdown();
         })
         .catch(() => { /* prix statiques conservés */ });
     })();
+
+    // Badge « Save X% » du toggle annuel : recalculé depuis les prix affichés
+    // (datasets), donc juste aussi bien en promo qu'après son expiration.
+    function refreshToggleSaveBadge() {
+      const saveBadge = document.querySelector('.billing-toggle .save-badge');
+      if (!saveBadge) return;
+      let best = 0;
+      prices.forEach(price => {
+        const m = Number.parseFloat(String(price.dataset.monthly || '').replace(',', '.'));
+        const a = Number.parseFloat(String(price.dataset.annual || '').replace(',', '.'));
+        if (m > 0 && a > 0) best = Math.max(best, 1 - a / (12 * m));
+      });
+      if (best > 0.01) saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
+    }
+
+    // Compte à rebours RÉEL jusqu'à la fin de la promo la plus proche —
+    // l'instant exact où le serveur l'auto-désactive (promo_ends_at). Jamais un
+    // faux timer qui se réinitialise (dark pattern sanctionné). Chip verre
+    // fumé sous le toggle, aux couleurs de l'événement ; coral + pulsation
+    // sous une heure ; à zéro la vitrine revient d'elle-même aux prix de base.
+    let countdownTimer = 0;
+    function startPromoCountdown() {
+      clearInterval(countdownTimer);
+      const old = document.getElementById('promo-countdown');
+      if (old) old.remove();
+      if (!livePromos || !toggleGroup) return;
+      let soonest = null, soonestPromo = null;
+      Object.keys(livePromos).forEach(pl => {
+        Object.keys(livePromos[pl] || {}).forEach(per => {
+          const p = livePromos[pl][per];
+          if (!p || !p.ends_at) return;
+          const t = new Date(p.ends_at).getTime();
+          if (Number.isFinite(t) && t > Date.now() && (soonest === null || t < soonest)) { soonest = t; soonestPromo = p; }
+        });
+      });
+      if (!soonest) return; // promo sans échéance → pas de compte à rebours
+      const box = document.createElement('div');
+      box.id = 'promo-countdown';
+      const edge = PROMO_EDGE[soonestPromo.event] || PROMO_EDGE.other;
+      box.style.borderColor = edge.border;
+      box.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.07), 0 14px 38px -14px ${edge.glow}`;
+      const ev = document.createElement('span');
+      ev.className = 'cd-ev';
+      ev.textContent = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
+      ev.style.background = PROMO_BADGE_BG[soonestPromo.event] || PROMO_BADGE_BG.other;
+      const txt = document.createElement('span');
+      txt.textContent = 'ends in';
+      const clock = document.createElement('b');
+      box.appendChild(ev);
+      box.appendChild(txt);
+      box.appendChild(clock);
+      toggleGroup.insertAdjacentElement('afterend', box);
+      const pad = x => String(x).padStart(2, '0');
+      const tick = () => {
+        const left = soonest - Date.now();
+        if (left <= 0) {
+          clearInterval(countdownTimer);
+          box.remove();
+          expirePromosNow();
+          return;
+        }
+        const d2 = Math.floor(left / 86400000);
+        const h = Math.floor(left / 3600000) % 24;
+        const m = Math.floor(left / 60000) % 60;
+        const s = Math.floor(left / 1000) % 60;
+        clock.textContent = (d2 > 0 ? d2 + 'd ' : '') + pad(h) + ':' + pad(m) + ':' + pad(s);
+        box.classList.toggle('urgent', left < 3600000);
+      };
+      tick();
+      countdownTimer = setInterval(tick, 1000);
+    }
+
+    // À zéro : retour honnête aux prix de base sans rechargement — le serveur
+    // a déjà basculé de son côté (auto-désactivation à promo_ends_at).
+    function expirePromosNow() {
+      if (!livePromos) return;
+      prices.forEach(price => {
+        const pl = planOfPrice(price);
+        const terms = price.parentElement?.querySelector('.pricing-terms');
+        ['monthly', 'annual'].forEach(per => {
+          const p = livePromos && livePromos[pl] && livePromos[pl][per];
+          if (!p || !p.base_cents) return;
+          const base = (p.base_cents / 100).toFixed(2);
+          if (per === 'annual') price.dataset.annual = base; else price.dataset.monthly = base;
+          if (terms) {
+            const key = per === 'monthly' ? 'monthlyTerms' : 'annualTerms';
+            const orig = terms.dataset[key + 'Orig'];
+            if (orig) terms.dataset[key] = orig.replace(/US\$[0-9]+(?:\.[0-9]+)?/, `US$${base}`);
+          }
+        });
+      });
+      livePromos = null;
+      refreshToggleSaveBadge();
+      apply(currentPeriod, false);
+    }
 
     planCtas.forEach(link => {
       link.addEventListener('click', () => {

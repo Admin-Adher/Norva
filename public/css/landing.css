@@ -2613,6 +2613,12 @@ html.norva-lite .simpler-promo .promo-card.is-visible .bm-hero::before {
     grid-template-columns: 1fr;
   }
 
+  /* Stacked pricing cards: the grid's row-gap is 0 (subgrid rows inside the
+     cards must not inherit it), so restore the spacing between the cards. */
+  .pricing-grid article + article {
+    margin-top: 16px;
+  }
+
   .poster-row {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -3627,23 +3633,126 @@ body.has-bottom-consent {
 }
 
 /* Pricing cards surface the decision and its exact terms before the feature
-   inventory, avoiding a CTA below the fold on common laptop viewports. */
+   inventory, avoiding a CTA below the fold on common laptop viewports.
+   Each child sits in an explicit row slot shared across the two cards via
+   subgrid, so prices, CTAs and features stay pixel-aligned even when only one
+   card carries promo elements (badge row + savings line). Rows 3 and 5 belong
+   to the promo and collapse to zero height when no promo is live. Browsers
+   without subgrid keep the same per-card layout, only cross-card alignment
+   degrades. */
+.pricing-grid {
+  row-gap: 0;
+  column-gap: 16px;
+}
+
 .pricing-grid article {
   display: grid;
-  grid-template-rows: auto auto auto auto auto auto 1fr;
+  grid-row: span 9;
+  grid-template-rows: subgrid;
   align-content: start;
 }
 
-.pricing-grid article > :is(strong, h3) { order: 1; }
-.pricing-grid article > p { order: 2; }
-.pricing-grid article > .price { order: 3; }
-.pricing-grid article > .price-note { order: 4; }
-.pricing-grid article > :is(a, .pricing-cta) { order: 5; }
-.pricing-grid article > .pricing-terms { order: 6; }
-.pricing-grid article > ul { order: 7; }
+.pricing-grid article > :is(strong, h3) { grid-row: 1; }
+.pricing-grid article > p { grid-row: 2; margin-bottom: 30px; }
+.pricing-grid article > .promo-row { grid-row: 3; }
+.pricing-grid article > .price { grid-row: 4; margin: 0 0 20px; }
+.pricing-grid article > .promo-save { grid-row: 5; }
+.pricing-grid article > .price-note { grid-row: 6; }
+.pricing-grid article > :is(a, .pricing-cta) { grid-row: 7; margin: 0 0 10px; }
+.pricing-grid article > .pricing-terms { grid-row: 8; }
+.pricing-grid article > ul { grid-row: 9; }
 
-.pricing-grid article > :is(a, .pricing-cta) {
-  margin: 0 0 10px;
+/* Event promo on the pricing cards — elements injected by landing.js when a
+   promo is live in billing_prices; colors are themed per event from JS. */
+.pricing-grid .promo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.pricing-grid .promo-flag,
+.pricing-grid .promo-pct {
+  width: max-content;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #0b1220;
+}
+
+.pricing-grid .price {
+  white-space: nowrap;
+}
+
+.pricing-grid .price-was {
+  margin-left: 10px;
+  color: rgba(230, 236, 252, 0.45);
+  font-family: Inter, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: line-through;
+  vertical-align: 6px;
+}
+
+.pricing-grid .promo-save {
+  display: block;
+  margin: -12px 0 16px;
+  color: #4fe0a8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Real countdown to the promo's server-side end time (landing.js removes it
+   and reverts prices at zero — never a fake resetting timer). Glass chip so
+   it stays legible over any background; border/glow themed per event. */
+#promo-countdown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: 100%;
+  margin: 18px auto 0;
+  padding: 8px 18px 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 11, 20, 0.74);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(12px) saturate(130%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 14px 38px -16px rgba(0, 0, 0, 0.85);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#promo-countdown .cd-ev {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0b1220;
+}
+
+#promo-countdown b {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  font-size: 16.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+#promo-countdown.urgent b { color: #fb7185; }
+
+#promo-countdown.urgent {
+  border-color: rgba(251, 113, 133, 0.55);
+  animation: cd-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes cd-pulse {
+  50% { opacity: 0.72; }
 }
 
 .pricing-terms {

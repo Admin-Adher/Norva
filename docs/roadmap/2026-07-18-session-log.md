@@ -360,6 +360,49 @@ réinitialise est un dark pattern sanctionné (DGCCRF/Omnibus), le nôtre ne peu
 pas mentir par construction. Promo sans échéance = pas de compte à rebours.
 Chiffres tabulaires (pas de tremblement), compact sur écran court.
 
+### Landing : cards pricing refondues + compte à rebours ; chrono de vente en chip (recette)
+
+Trois constats d'Adrien sur captures : le compte à rebours n'existait pas sur la
+landing, les cards pricing de la landing n'étaient « vraiment pas optimales »
+(badge promo étiré sur toute la largeur AU-DESSUS du titre, prix barré géant sur
+sa propre ligne, gros trou, CTA désalignés entre les deux cards), et le chrono de
+la page de vente se noyait dans le visuel de campagne.
+
+**Cause racine du badge cassé** : `.pricing-grid article` est une grid à `order`
+explicites par type d'enfant — les éléments injectés par landing.js
+(`.promo-flag`) n'avaient pas de slot → `order: 0` (avant le titre) +
+étirement grid par défaut. Le prix barré (`.5em` de 52 px = 26 px) débordait et
+passait à la ligne.
+
+**Refonte (landing.css v37, landing.js v18, index.html)** :
+
+- **Alignement subgrid** : les deux cards partagent désormais les mêmes rangées
+  (`grid-template-rows: subgrid`, 9 slots explicites par type d'enfant, rangées
+  3 et 5 réservées à la promo). Prix, CTA, mentions et features restent alignés
+  au pixel entre les deux cards MÊME quand une seule est en promo — la card
+  sans promo laisse le slot vide à la même hauteur. Repli : navigateurs sans
+  subgrid = même layout par card, seul l'alignement croisé se dégrade.
+  Piège documenté : le `row-gap` parent est hérité par les subgrids → passé à
+  0 sur `.pricing-grid` (l'espacement inter-cards en 1 colonne est rendu par
+  une marge dans la media query 820 px).
+- **Rangée promo façon page de vente** : pastille événement nommée + pastille
+  « −40 % » séparée (mêmes dégradés thématiques), prix barré INLINE à côté du
+  prix (15 px, Inter), ligne verte « You save US$1.99/mo for your first
+  3 months ». `Most popular` ajouté sur la card Family (l'em existait en CSS,
+  jamais posé dans le HTML).
+- **Compte à rebours sur la landing** : même logique que la page de vente
+  (échéance la plus proche parmi les promos actives, urgence corail < 1 h, à
+  zéro la vitrine revient d'elle-même aux prix de base : datasets, mentions
+  légales — restaurées depuis une copie d'origine `data-*-terms-orig` —, badge
+  « Save X% » du toggle recalculé). Jamais de faux timer.
+- **Chip chrono (les deux pages)** : le chrono est maintenant un chip en verre
+  fumé (fond `rgba(8,11,20,.74)` + backdrop-blur) → lisible sur N'IMPORTE quel
+  visuel de campagne ; pastille événement colorée + gros chrono tabulaire
+  16,5 px ; bordure et halo aux couleurs de l'événement.
+- Recette simulée (jsdom, 24 assertions vertes) : rendu promo mensuel, bascule
+  annuel sans fuite de promo, expiration en direct (chip retiré, prix et
+  mentions restaurés).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

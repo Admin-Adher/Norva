@@ -72,11 +72,20 @@
       font-size: 10.5px; font-weight: 900; color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
     .promo-save { color: var(--green); font-size: 12.5px; font-weight: 700; margin: 2px 0 0; }
     /* Real countdown to the promo's server-side auto-disable time (never a fake
-       resetting timer). Turns coral + pulses under one hour. */
-    #promo-countdown { margin: 14px 0 0; text-align: center; color: var(--muted); font-size: 13.5px; }
-    #promo-countdown b { color: #fff; font-variant-numeric: tabular-nums; font-weight: 800; margin-left: 2px; }
+       resetting timer). Smoked-glass chip so it stays legible over any campaign
+       artwork; border/glow themed per event from JS. Coral + pulse under 1 h. */
+    #promo-countdown { display: flex; align-items: center; gap: 10px; width: max-content; max-width: 100%;
+      margin: 16px auto 0; padding: 8px 18px 8px 10px; border: 1px solid rgba(255,255,255,.16);
+      border-radius: 999px; background: rgba(8,11,20,.74);
+      -webkit-backdrop-filter: blur(12px) saturate(130%); backdrop-filter: blur(12px) saturate(130%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 14px 38px -16px rgba(0,0,0,.85);
+      color: var(--muted); font-size: 13px; }
+    #promo-countdown .cd-ev { padding: 4px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 900;
+      letter-spacing: .04em; text-transform: uppercase; color: #0b1220; white-space: nowrap; }
+    #promo-countdown b { color: #fff; font-variant-numeric: tabular-nums; font-size: 16.5px;
+      font-weight: 800; letter-spacing: .02em; }
     #promo-countdown.urgent b { color: var(--coral); }
-    #promo-countdown.urgent { animation: cd-pulse 1.1s ease-in-out infinite; }
+    #promo-countdown.urgent { border-color: rgba(251,113,133,.55); animation: cd-pulse 1.1s ease-in-out infinite; }
     @keyframes cd-pulse { 50% { opacity: .72; } }
     /* Full-page campaign visual (set from JS when a promo is live and an image was
        uploaded). Painted on the ROOT element — the document canvas — which is by
@@ -187,7 +196,8 @@
       html:not(.tv) .row .btn { min-height: 38px; font-size: 13px; }
       html:not(.tv) .status.show, html:not(.tv) #already-sub.show { margin-top: 8px; padding: 8px 12px; font-size: 12.5px; }
       html:not(.tv) .save-hint { margin-top: 6px; font-size: 12px; }
-      html:not(.tv) #promo-countdown { margin-top: 8px; font-size: 12px; }
+      html:not(.tv) #promo-countdown { margin-top: 8px; padding: 5px 14px 5px 7px; font-size: 12px; }
+      html:not(.tv) #promo-countdown b { font-size: 14px; }
     }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
@@ -844,10 +854,20 @@
         if (!grid) return;
         const box = document.createElement('div');
         box.id = 'promo-countdown';
+        // Chip verre fumé aux couleurs de l'événement : pastille nommée + gros
+        // chrono — lisible même sur un visuel de campagne chargé.
+        const theme = PROMO_THEMES[soonestPromo.event] || PROMO_THEMES.other;
+        box.style.borderColor = theme.border;
+        box.style.boxShadow = 'inset 0 1px 0 rgba(255,255,255,.07), 0 14px 38px -14px ' + theme.glow.replace(/[\d.]+\)$/, '.4)');
         const label = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
+        const ev = document.createElement('span');
+        ev.className = 'cd-ev';
+        ev.textContent = label;
+        ev.style.background = theme.badge;
         const txt = document.createElement('span');
-        txt.textContent = '⏳ ' + label + ' ends in ';
+        txt.textContent = 'ends in';
         const clock = document.createElement('b');
+        box.appendChild(ev);
         box.appendChild(txt);
         box.appendChild(clock);
         grid.insertAdjacentElement('beforebegin', box);
