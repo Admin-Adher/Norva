@@ -26,6 +26,7 @@
 --      dans pg_cron, mais leurs runners doivent skipper au runtime quand
 --      provider_account_busy(...) = true. [E] montre seulement l'enqueue pg_net ("1 row"),
 --      [G] lit les réponses HTTP pg_net qui contiennent le vrai JSON du runner.
+--      Si ta sortie s’arrête à [F], tu exécutes une ancienne version du fichier : refetch la branche.
 --
 -- Note : on ne désactive pas cron.job.active ici. Le design Norva est une pause runtime par
 -- compte provider, pas un arrêt global des jobs : les autres providers/utilisateurs continuent.
