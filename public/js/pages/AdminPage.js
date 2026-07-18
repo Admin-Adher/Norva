@@ -1213,14 +1213,25 @@ class AdminPage {
                     if (f.size > 2 * 1024 * 1024) { if (cMsg) cMsg.textContent = '❌ Image trop lourde (max 2 Mo).'; return; }
                     if (cMsg) cMsg.textContent = 'Envoi…';
                     try {
-                        const ext = f.type === 'image/png' ? 'png' : (f.type === 'image/webp' ? 'webp' : 'jpg');
+                        // Type MIME : celui du navigateur s'il est dans la liste du
+                        // bucket, sinon déduit de l'extension (un f.type vide ou
+                        // exotique ferait rejeter l'upload par allowed_mime_types).
+                        const byExt = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+                        const nameExt = String(f.name || '').split('.').pop().toLowerCase();
+                        const mime = ['image/jpeg', 'image/png', 'image/webp'].includes(f.type) ? f.type : (byExt[nameExt] || 'image/jpeg');
+                        const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
                         const objPath = `campaign/bg-${Date.now()}.${ext}`;
                         const res = await fetch(`${this._sbUrl()}/storage/v1/object/promo-assets/${objPath}`, {
                             method: 'POST',
-                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': f.type, 'x-upsert': 'true' },
+                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': mime, 'x-upsert': 'true' },
                             body: f,
                         });
-                        if (!res.ok) throw new Error('upload ' + res.status);
+                        if (!res.ok) {
+                            // La vraie raison du storage (RLS, MIME, taille) — sans
+                            // elle, un « 400 » sec est indiagnosticable.
+                            const t = await res.text().catch(() => '');
+                            throw new Error('upload ' + res.status + (t ? ' — ' + t.slice(0, 180) : ''));
+                        }
                         await this._rpc('admin_promo_campaign_set', { p_bg_path: objPath });
                         this._loadWebPrices();
                     } catch (e) {

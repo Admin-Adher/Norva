@@ -150,6 +150,31 @@ halo doré sur la carte ; uploader une image de campagne → elle devient le fon
 de la carte ; à 100 % de zoom les avantages des plans restent visibles, sans
 scroll. (Lots 7+8 : migrations + NOTIFY + edge déjà appliqués, sortie propre.)
 
+### Fix upload campagne (recette) — migration `20260718210000`
+
+L'upload rendait `400` : le flux **x-upsert** de storage-api LIT l'objet avec le
+rôle du JWT (test d'existence + retour de ligne), or le bucket n'avait que des
+policies INSERT/UPDATE/DELETE → **policy SELECT admin ajoutée** (la lecture
+publique `/object/public/…` n'est pas concernée, servie hors RLS). Côté front
+(`?v=73`) : le message d'erreur affiche désormais la réponse du storage (un
+« 400 » sec est indiagnosticable), et le type MIME est déduit de l'extension si
+le navigateur n'en fournit pas un accepté par `allowed_mime_types`.
+
+```bash
+docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260718210000_promo_assets_select_policy.sql
+```
+(Pas de NOTIFY ni de redéploiement edge — policy storage seule.)
+
+### Périmètre des visuels par surface (question de recette)
+
+| Surface | Prix live + badge + fond de campagne ? | Pourquoi |
+|---|---|---|
+| Navigateur web (desktop + mobile) | ✅ | Rail Revolut |
+| App Android téléphone (webview + Play Billing natif) | ❌ volontaire | Google est marchand — les prix affichés restent alignés Play Console ; promos mobiles dans la Play Console |
+| App Android TV (webview, `hasNativeBilling()=false`) | ✅ | La TV vend via le rail web (QR → checkout Revolut sur téléphone) — les promos web s'y appliquent réellement |
+| Future app App Store | ❌ (même gating) | Apple marchand — même logique que Play |
+
 ## Déploiement box — lots 1-5 (FAIT le 2026-07-18 ~12h06)
 
 ```bash
