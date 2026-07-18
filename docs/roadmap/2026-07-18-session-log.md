@@ -651,6 +651,10 @@ versionCode 14 en dur aurait de toute façon bloqué la mise à jour Play
   silencieux sur cette chaîne. Recette téléphone : ouvrir l'app connectée,
   ~10 s, `localStorage.getItem('norva-push-reg')` doit dire `registered` et
   Marketing afficher 1 appareil — SANS rebuild de l'APK (le fix est web).
+  **✅ Vérifié en prod par Adrien (2026-07-18)** : appareil enregistré, push
+  marketing reçu sur le téléphone, historique correct — la clé FCM de la box
+  est donc valide aussi (l'envoi a réellement abouti). La chaîne push
+  marketing est opérationnelle de bout en bout.
 
 ### Périmètre des visuels par surface (question de recette)
 
