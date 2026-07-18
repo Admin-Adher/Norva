@@ -56,11 +56,16 @@ SQL finance — puis 21 vérifications adversariales sur pièces). 45 constats b
 ## Déploiement box (à faire)
 
 ```bash
-cd /opt/norva && git pull origin main
+cd ~/norva && git pull origin main
 docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
   < supabase/migrations/20260718100000_annual_upgrade_mrr_correctness.sql
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```
+
+> ⚠️ La checkout de la box est `~/norva` (PAS `/opt/norva` — première version de
+> cette checklist erronée : le `cd` avait échoué, donc pull et migration sautés et
+> edge redéployées depuis l'ancien code — toujours vérifier que le `git pull` a
+> réellement affiché les nouveaux commits avant d'enchaîner).
 
 - Migration en **`supabase_admin`** (règle maison) ; **pas de NOTIFY pgrst**
   (aucune signature ne change — `create or replace` seulement).
