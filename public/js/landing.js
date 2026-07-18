@@ -470,6 +470,30 @@
     }
 
     let currentPeriod = 'monthly';
+    // Promos actives (catalogue live billing_prices) : { plan: { period: { base_cents, event, label } } }.
+    let livePromos = null;
+    // Badge labels (copy anglaise du site) + couleurs par événement — alignés sur
+    // la page de vente (subscribe.html PROMO_LABELS / PROMO_THEMES).
+    const PROMO_LABELS = {
+      black_friday: 'Black Friday', cyber_monday: 'Cyber Monday', winter_sale: 'Winter Sale',
+      summer_sale: 'Summer Sale', christmas: 'Christmas Sale', new_year: 'New Year Sale',
+      lunar_new_year: 'Lunar New Year', eid: 'Eid Sale', easter: 'Easter Sale',
+      halloween: 'Halloween Sale', valentines: "Valentine's Sale", back_to_school: 'Back to School',
+      birthday: 'Birthday Sale', flash: 'Flash Sale', other: 'Limited Offer'
+    };
+    const PROMO_BADGE_BG = {
+      black_friday: 'linear-gradient(135deg,#ffb800,#ff6a00)', cyber_monday: 'linear-gradient(135deg,#22d3ee,#6366f1)',
+      winter_sale: 'linear-gradient(135deg,#7dd3fc,#38bdf8)', summer_sale: 'linear-gradient(135deg,#fbbf24,#fb7185)',
+      christmas: 'linear-gradient(135deg,#ef4444,#16a34a)', new_year: 'linear-gradient(135deg,#facc15,#f472b6)',
+      lunar_new_year: 'linear-gradient(135deg,#ef4444,#f59e0b)', eid: 'linear-gradient(135deg,#10b981,#facc15)',
+      easter: 'linear-gradient(135deg,#f9a8d4,#a5b4fc)', halloween: 'linear-gradient(135deg,#f97316,#7c3aed)',
+      valentines: 'linear-gradient(135deg,#fb7185,#e11d48)', back_to_school: 'linear-gradient(135deg,#38bdf8,#fbbf24)',
+      birthday: 'linear-gradient(135deg,#f472b6,#8b5cf6)', flash: 'linear-gradient(135deg,#fde047,#f59e0b)',
+      other: 'linear-gradient(135deg,#ff8067,#b579ff)'
+    };
+    function planOfPrice(price) {
+      return price.closest('article')?.querySelector('a[data-plan]')?.dataset.plan || '';
+    }
 
     function buildPlanHref(plan, period) {
       const base = sameOriginBase();
@@ -528,6 +552,32 @@
           const amountText = (isAnnual ? price.dataset.annual : price.dataset.monthly) || amount.textContent;
           price.setAttribute('aria-label', `${currency}${amountText} ${isAnnual ? 'per year' : 'per month'}`.trim());
         }
+        // Promo active sur ce plan+période : badge événement + % de réduction +
+        // prix de référence barré (obligation Omnibus : l'ancien prix visible).
+        const promo = livePromos && livePromos[planOfPrice(price)] && livePromos[planOfPrice(price)][currentPeriod];
+        let flag = price.parentElement?.querySelector('.promo-flag');
+        let was = price.querySelector('.price-was');
+        if (promo && promo.base_cents) {
+          const effRaw = Number.parseFloat(String(isAnnual ? price.dataset.annual : price.dataset.monthly).replace(',', '.'));
+          const effCents = Number.isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
+          const pct = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
+          if (!flag) {
+            flag = document.createElement('span');
+            flag.className = 'promo-flag';
+            price.insertAdjacentElement('beforebegin', flag);
+          }
+          flag.textContent = `${(promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other} · −${pct}%`;
+          flag.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+          if (!was) {
+            was = document.createElement('span');
+            was.className = 'price-was';
+            price.appendChild(was);
+          }
+          was.textContent = `${currency}${(promo.base_cents / 100).toFixed(2)}`;
+        } else {
+          if (flag) flag.remove();
+          if (was) was.remove();
+        }
       });
 
       if (announce && status) {
@@ -541,6 +591,50 @@
       apply(period, true);
       emitLandingEvent('billing_period_change', { period });
     }));
+
+    // Catalogue live (source unique billing_prices, servie par norva-revolut
+    // /prices) : la landing affiche les MÊMES prix effectifs et promos que la
+    // page de vente — une promo en cours ne doit jamais être invisible sur la
+    // vitrine. Les valeurs statiques du HTML restent le repli hors-ligne.
+    (function loadLivePrices() {
+      const api = (window.NORVA_API_BASE || 'https://api.norva.tv').replace(/\/+$/, '');
+      fetch(`${api}/functions/v1/norva-revolut/prices`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (!d || !d.ok || !d.prices) return;
+          prices.forEach(price => {
+            const pl = d.prices[planOfPrice(price)];
+            if (!pl || !pl.monthly || !pl.annual) return;
+            price.dataset.monthly = (pl.monthly / 100).toFixed(2);
+            price.dataset.annual = (pl.annual / 100).toFixed(2);
+            // Les mentions légales sous la carte portent le prix réellement
+            // facturé — on remplace le montant embarqué dans les gabarits.
+            const terms = price.parentElement?.querySelector('.pricing-terms');
+            if (terms) {
+              if (terms.dataset.monthlyTerms) terms.dataset.monthlyTerms = terms.dataset.monthlyTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, `US$${(pl.monthly / 100).toFixed(2)}`);
+              if (terms.dataset.annualTerms) terms.dataset.annualTerms = terms.dataset.annualTerms.replace(/US\$[0-9]+(?:\.[0-9]+)?/, `US$${(pl.annual / 100).toFixed(2)}`);
+            }
+          });
+          livePromos = d.promos || null;
+          // Badge « Save X% » du toggle annuel : le vrai chiffre.
+          let best = 0;
+          Object.keys(d.prices).forEach(k => {
+            const p2 = d.prices[k];
+            if (p2 && p2.monthly && p2.annual) best = Math.max(best, 1 - p2.annual / (12 * p2.monthly));
+          });
+          const saveBadge = document.querySelector('.billing-toggle .save-badge');
+          if (saveBadge && best > 0.01) saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
+          if (!document.getElementById('norva-promo-css')) {
+            const st = document.createElement('style');
+            st.id = 'norva-promo-css';
+            st.textContent = '.pricing-grid .promo-flag{display:inline-block;margin:0 0 10px;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#0b1220;}'
+              + '.pricing-grid .price-was{margin-left:8px;color:rgba(255,255,255,.45);font-size:.5em;font-weight:600;text-decoration:line-through;vertical-align:middle;}';
+            document.head.appendChild(st);
+          }
+          apply(currentPeriod, false);
+        })
+        .catch(() => { /* prix statiques conservés */ });
+    })();
 
     planCtas.forEach(link => {
       link.addEventListener('click', () => {

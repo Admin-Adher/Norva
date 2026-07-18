@@ -68,6 +68,9 @@
       color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
     .price-was { color: var(--quiet); font-size: 14px; font-weight: 600;
       text-decoration: line-through; margin-left: 8px; font-family: Inter, sans-serif; }
+    .promo-pct { display: inline-block; margin: 0 0 8px 8px; padding: 4px 9px; border-radius: 999px;
+      font-size: 10.5px; font-weight: 900; color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
+    .promo-save { color: var(--green); font-size: 12.5px; font-weight: 700; margin: 2px 0 0; }
     /* Full-page campaign visual (set from JS when a promo is live and an image was
        uploaded). Painted on the ROOT element — the document canvas — which is by
        definition the lowest paint layer: no stacking-order subtleties possible.
@@ -489,17 +492,43 @@
               if (priceEl) priceEl.appendChild(was);
             }
             was.textContent = '$' + (promo.base_cents / 100).toFixed(2);
+            // Discount made explicit — the % pill next to the badge and the
+            // saved amount under the price (the struck reference price above is
+            // the EU Omnibus requirement; these two are the selling points).
+            const effRaw = parseFloat(annual ? card.dataset.annual : card.dataset.monthly);
+            const effCents = isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
+            const pctVal = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
+            let pct = card.querySelector('.promo-pct');
+            if (!pct) {
+              pct = document.createElement('span');
+              pct.className = 'promo-pct';
+              badge.insertAdjacentElement('afterend', pct);
+            }
+            pct.textContent = '−' + pctVal + '%';
+            let save = card.querySelector('.promo-save');
+            if (!save) {
+              save = document.createElement('div');
+              save.className = 'promo-save';
+              const noteEl = card.querySelector('.price-note');
+              if (noteEl) noteEl.insertAdjacentElement('beforebegin', save);
+            }
+            save.textContent = 'You save $' + ((promo.base_cents - effCents) / 100).toFixed(2) + (annual ? '/yr' : '/mo');
             // Event identity: themed badge + tinted card halo. The uploaded
             // campaign image is a FULL-PAGE background (applyLivePrices), never
             // squeezed inside the card.
             const theme = PROMO_THEMES[promo.event] || PROMO_THEMES.other;
             badge.style.background = theme.badge;
+            pct.style.background = theme.badge;
             card.classList.add('promo-live');
             card.style.borderColor = theme.border;
             card.style.backgroundImage = 'radial-gradient(130% 110% at 50% 0%, ' + theme.glow + ', rgba(9,11,16,0) 62%)';
           } else {
             if (badge) badge.remove();
             if (was) was.remove();
+            const pctEl = card.querySelector('.promo-pct');
+            if (pctEl) pctEl.remove();
+            const saveEl = card.querySelector('.promo-save');
+            if (saveEl) saveEl.remove();
             card.classList.remove('promo-live');
             card.style.borderColor = '';
             card.style.backgroundImage = '';

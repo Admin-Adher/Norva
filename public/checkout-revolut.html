@@ -332,6 +332,8 @@
             d.appendChild(chip);
             d.appendChild(document.createTextNode(' was '));
             d.appendChild(struck);
+            const pctVal = Math.max(1, Math.round(100 - (cents / promo.base_cents) * 100));
+            d.appendChild(document.createTextNode(' · −' + pctVal + '% (save $' + ((promo.base_cents - cents) / 100).toFixed(2) + ')'));
             row.insertAdjacentElement('afterend', d);
           }
         }).catch(function () { /* static fallback stays */ });

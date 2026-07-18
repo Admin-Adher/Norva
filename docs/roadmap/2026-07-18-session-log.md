@@ -323,6 +323,25 @@ affiche « 8,4 Mo → 320 Ko ». Repli : si l'optimisation n'apporte rien ou éc
 (image exotique), l'original part tel quel sous un plafond bucket porté à
 **10 Mo** (migration `20260719001000`, pas de NOTIFY — config bucket).
 
+### Promos : % + économie affichés & landing page alignée (recette)
+
+Deux manques relevés par Adrien :
+
+- **Réduction chiffrée** (plus vendeur + conformité) : la page de vente affiche
+  désormais, en plus du prix de référence barré (l'exigence **Omnibus**
+  art. L112-1-1 C. conso — l'ancien prix visible), une **pastille « −40 % »**
+  aux couleurs de l'événement et une ligne verte **« You save $1.99/mo »** ;
+  le récap checkout porte « was $4.99/mo · −40 % (save $1.99) ». Le pourcentage
+  est calculé, jamais saisi (aucun risque d'écart prix/annonce).
+- **Landing page** (`landing.js ?v=16`) : les cartes tarifs de norva.tv
+  n'affichaient QUE les prix statiques — une promo en cours était invisible sur
+  la vitrine. La landing consomme désormais le même catalogue live `/prices` :
+  prix effectifs, badge événement + « −X % », prix barré, badge « Save X% » du
+  toggle recalculé, et **les mentions légales sous les cartes portent le prix
+  réellement facturé** (« 7 days free, then US$3.00/month… »). Repli statique si
+  l'API est injoignable. NB : le JSON-LD SEO garde les prix de base (les promos
+  sont temporaires — choix assumé).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
