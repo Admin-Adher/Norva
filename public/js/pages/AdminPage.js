@@ -88,7 +88,7 @@ class AdminPage {
     // name, entity pages only as client:<uuid> / ticket:<uuid>.
     static validRoute(r) {
         r = String(r || '');
-        if (['cockpit', 'finance', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+        if (['cockpit', 'finance', 'finance/vat', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
         return m ? (m[1] + ':' + m[2]) : null;
     }
@@ -717,7 +717,7 @@ class AdminPage {
         if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 10 min') : '';
     }
     _setActiveNav(route) {
-        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support' : route);
+        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support' : (route.startsWith('finance') ? 'finance' : route));
         document.querySelectorAll('#page-admin .crm-nav-item').forEach(el => {
             const on = el.dataset.route === mapped;
             el.classList.toggle('active', on);
@@ -877,7 +877,7 @@ class AdminPage {
         const main = document.querySelector('#page-admin .crm-main');
         if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); } // reset scroll + move focus into content (a11y)
         if (route === 'cockpit') this._pageCockpit();
-        else if (route === 'finance') this._pageFinance();
+        else if (route === 'finance' || route === 'finance/vat') { this._financeTab = route === 'finance/vat' ? 'vat' : 'overview'; this._route = 'finance'; this._pageFinance(); }
         else if (route === 'clients') this._pageClients();
         else if (route === 'support') this._pageSupport();
         else if (route.startsWith('ticket:')) this._pageTicket(route.slice(7));
@@ -1287,6 +1287,8 @@ class AdminPage {
 
         // Bascule d'onglet : les deux conteneurs sont rendus, on ne fait que montrer/cacher
         // (l'état du panneau TVA — trimestre choisi, assistant ouvert — survit à la bascule).
+        // La sélection est reflétée dans l'URL (#admin/finance[/vat]) → F5 / favori / lien
+        // partagé restaurent l'onglet exact (this._route reste 'finance' pour les gardes).
         el.querySelectorAll('#fin-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
             const tab = chip.dataset.ftab || 'overview';
             this._financeTab = tab;
@@ -1294,6 +1296,7 @@ class AdminPage {
             const ov = document.getElementById('fin-tab-overview'), vt = document.getElementById('fin-tab-vat');
             if (ov) ov.style.display = tab === 'overview' ? '' : 'none';
             if (vt) vt.style.display = tab === 'vat' ? '' : 'none';
+            try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/finance' + (tab === 'vat' ? '/vat' : '')); } catch (_) { /* non-navigable */ }
         }));
 
         // Header status line: MRR · échecs · conversions + a "live" freshness badge.
