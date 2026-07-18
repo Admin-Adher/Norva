@@ -17,7 +17,9 @@ Exemple depuis la racine du repo:
   ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh 00000000-0000-0000-0000-000000000000
 
 Avant de lancer:
-  1) Mets le repo à jour sur la box (git pull).
+  1) Vérifie que cette PR est mergée ou que tu as checkout la branche de PR.
+     Si git pull dit seulement "Already up to date" sur main mais que ce fichier manque,
+     la PR n'est pas encore déployée sur ta box.
   2) Ouvre l'app/le site avec ce compte pilote.
   3) Lance ce script dans les 60 secondes.
 

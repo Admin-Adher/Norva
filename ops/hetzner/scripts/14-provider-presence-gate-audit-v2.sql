@@ -1,7 +1,10 @@
 -- 14-provider-presence-gate-audit-v2.sql — audit du garde « presence → compte provider occupé ».
 --
--- NE PAS coller ce fichier dans bash : exécute-le via le wrapper :
+-- NE PAS coller ce fichier dans bash : exécute-le via le wrapper après merge/checkout de la PR :
 --   ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
+--
+-- Si la box répond "No such file or directory" après git pull, tu es encore sur main sans
+-- cette PR : utilise temporairement la commande docker directe donnée dans la conversation.
 --
 -- Depuis ~/norva/ops/hetzner :
 --   ./scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
