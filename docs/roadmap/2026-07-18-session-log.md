@@ -482,6 +482,34 @@ Deux points sur capture (page de vente sur fond de campagne Flash Sale) :
   la réduction structurelle annuelle réelle (~30 %), stable pendant les promos.
   Prouvé (cas piège promo sur les 2 plans : ancien 10 % faux → corrigé 30 %).
 
+### « SAVE 30% » vs « −40% » — analyse de l'incohérence (recette)
+
+Capture d'Adrien : toggle « SAVE 30% » ET cards « −40 % » côte à côte. Analyse :
+
+- Ce sont **deux réductions différentes** qui peuvent légitimement coexister :
+  le badge du toggle = réduction **structurelle** de la facturation annuelle vs
+  mensuelle (prix de base) ; le −40 % des cards = réduction **événementielle**
+  (Flash Sale) sur le prix de base de la période affichée.
+- MAIS la config de recette (annuel base = 60 $ = 12 × 5 $ mensuel, pareil
+  Family avec 108 = 12 × 9) n'a **aucune** réduction structurelle annuelle →
+  le « Save 30% » affiché n'était PAS un calcul : c'était le **texte statique
+  par défaut du HTML**, jamais écrasé car le code ne mettait à jour le badge
+  que si `best > 1 %` — sans jamais le masquer sinon. Allégation fausse.
+- **Correctifs** (vente + landing) : badge **masqué** quand la réduction
+  structurelle réelle est ≤ 1 % ; réaffiché avec le vrai chiffre sinon.
+  Table de vérité vérifiée : config capture → masqué ; config prod
+  (4.99/41.99, 8.99/75.99) → « Save 30% », avec ou sans promo.
+- **save-hint** (upsell annuel sur la card du souscripteur mensuel) : même
+  faille — calculait `12×mensuel − annuel` sur les prix **effectifs** (donc
+  faussé en promo, voire négatif) → recalculé sur les prix de **base** et
+  supprimé si l'économie est ≤ 0,50 $.
+- Bonus cosmétique : « That's about 3.00/mo » sans symbole → « $3.00/mo »
+  (JS + valeurs statiques par défaut).
+- À savoir pour la recette : si Adrien veut une vraie réduction annuelle, la
+  base annuelle doit être < 12 × base mensuelle (ex. 41.99 vs 59.88 ≈ 30 %) ;
+  avec annuel = 12 × mensuel, le badge du toggle disparaît (comportement
+  voulu et honnête).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

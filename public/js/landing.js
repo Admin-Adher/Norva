@@ -743,7 +743,14 @@
           : Number.parseFloat(String(price.dataset.annual || '').replace(',', '.'));
         if (m > 0 && a > 0) best = Math.max(best, 1 - a / (12 * m));
       });
-      if (best > 0.01) saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
+      // Pas de vraie réduction annuelle structurelle → le badge disparaît
+      // (laisser le « Save 30% » statique serait une allégation fausse).
+      if (best > 0.01) {
+        saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
+        saveBadge.hidden = false;
+      } else {
+        saveBadge.hidden = true;
+      }
     }
 
     // Compte à rebours RÉEL jusqu'à la fin de la promo la plus proche —

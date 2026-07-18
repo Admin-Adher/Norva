@@ -235,7 +235,7 @@
         data-plan="plus"
         data-product="norva_plus"
         data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
-        data-monthly="4.99" data-annual="41.99" data-annual-note="That's about 3.49/mo, billed yearly.">
+        data-monthly="4.99" data-annual="41.99" data-annual-note="That's about $3.49/mo, billed yearly.">
         <h2>Norva</h2>
         <p class="tag">Everything Norva does — for you and a plus-one.</p>
         <div class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></div>
@@ -253,7 +253,7 @@
         data-plan="family"
         data-product="norva_family"
         data-package-monthly="family_monthly" data-package-annual="family_annual"
-        data-monthly="8.99" data-annual="75.99" data-annual-note="That's about 6.29/mo, billed yearly.">
+        data-monthly="8.99" data-annual="75.99" data-annual-note="That's about $6.29/mo, billed yearly.">
         <span class="badge">Most popular</span>
         <h2>Norva Family</h2>
         <p class="tag">The full Norva experience for the whole home.</p>
@@ -373,13 +373,21 @@
           let hint = card.querySelector('.save-hint');
           const wantHint = isCurrent && currentPeriod === 'monthly' && period === 'monthly';
           if (wantHint && !hint) {
-            const save = (parseFloat(card.dataset.monthly) * 12 - parseFloat(card.dataset.annual)).toFixed(2);
-            hint = document.createElement('button');
-            hint.type = 'button';
-            hint.className = 'save-hint';
-            hint.textContent = 'Your plan, billed annually — save $' + save + ' a year →';
-            hint.addEventListener('click', function () { applyPeriod('annual'); });
-            b.insertAdjacentElement('afterend', hint);
+            // Structural saving on BASE prices — a temporary promo must not
+            // distort the pitch, and if the configured annual carries no real
+            // discount (annual ≥ 12×monthly) there is nothing to claim.
+            const pr = livePromos && livePromos[card.dataset.plan];
+            const baseM = (pr && pr.monthly && pr.monthly.base_cents) ? pr.monthly.base_cents / 100 : parseFloat(card.dataset.monthly);
+            const baseA = (pr && pr.annual && pr.annual.base_cents) ? pr.annual.base_cents / 100 : parseFloat(card.dataset.annual);
+            const saveAmt = baseM * 12 - baseA;
+            if (saveAmt > 0.5) {
+              hint = document.createElement('button');
+              hint.type = 'button';
+              hint.className = 'save-hint';
+              hint.textContent = 'Your plan, billed annually — save $' + saveAmt.toFixed(2) + ' a year →';
+              hint.addEventListener('click', function () { applyPeriod('annual'); });
+              b.insertAdjacentElement('afterend', hint);
+            }
           }
           if (hint) hint.hidden = !wantHint;
           if (isCurrent) { b.textContent = 'Current plan'; return; }
@@ -804,7 +812,7 @@
             if (!pl || !pl.monthly || !pl.annual) return;
             card.dataset.monthly = (pl.monthly / 100).toFixed(2);
             card.dataset.annual = (pl.annual / 100).toFixed(2);
-            card.dataset.annualNote = "That's about " + (Math.floor(pl.annual / 12) / 100).toFixed(2) + '/mo, billed yearly.';
+            card.dataset.annualNote = "That's about $" + (Math.floor(pl.annual / 12) / 100).toFixed(2) + '/mo, billed yearly.';
             const hint = card.querySelector('.save-hint');
             if (hint) hint.remove(); // rebuilt with the fresh numbers by refreshCtas
           });
@@ -820,8 +828,19 @@
             const baseA = (pr && pr.annual && pr.annual.base_cents) || (pl && pl.annual);
             if (baseM && baseA) best = Math.max(best, 1 - baseA / (12 * baseM));
           });
+          // If the configured base prices carry no real annual discount
+          // (annual ≈ 12×monthly), the badge must DISAPPEAR — leaving the
+          // static « Save 30% » default would be a false claim right next to
+          // the promo's own −X% (the « SAVE 30% vs −40% » recette confusion).
           const save = document.querySelector('.toggle .save');
-          if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
+          if (save) {
+            if (best > 0.01) {
+              save.textContent = 'Save ' + Math.round(best * 100) + '%';
+              save.hidden = false;
+            } else {
+              save.hidden = true;
+            }
+          }
           startPromoCountdown();
           // Full-page campaign visual: shown when at least one promo is live AND
           // an image was uploaded — painted on the document canvas (<html>), the
