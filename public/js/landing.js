@@ -752,7 +752,12 @@
       });
       // Pas de vraie réduction annuelle structurelle → le badge disparaît
       // (laisser le « Save 30% » statique serait une allégation fausse).
-      if (best > 0.01) {
+      // Idem quand une promo annuelle ancrée « 12× mensuel » est active : son
+      // −X% « vs monthly billing » sur la card est la MÊME comparaison —
+      // afficher les deux revendiquerait deux fois la même économie.
+      const refAnchorLive = Boolean(livePromos && Object.keys(livePromos).some(
+        pl => livePromos[pl] && livePromos[pl].annual && livePromos[pl].annual.ref_cents));
+      if (best > 0.01 && !refAnchorLive) {
         saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
         saveBadge.hidden = false;
       } else {

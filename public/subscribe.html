@@ -842,9 +842,15 @@
           // (annual ≈ 12×monthly), the badge must DISAPPEAR — leaving the
           // static « Save 30% » default would be a false claim right next to
           // the promo's own −X% (the « SAVE 30% vs −40% » recette confusion).
+          // Same when a « 12× monthly » anchored promo is live: its −X% « vs
+          // monthly billing » on the card is the SAME comparison — showing
+          // both would double-claim the saving (30% and 42% look stackable).
+          const refAnchorLive = Boolean(livePromos && Object.keys(livePromos).some(function (k) {
+            return livePromos[k] && livePromos[k].annual && livePromos[k].annual.ref_cents;
+          }));
           const save = document.querySelector('.toggle .save');
           if (save) {
-            if (best > 0.01) {
+            if (best > 0.01 && !refAnchorLive) {
               save.textContent = 'Save ' + Math.round(best * 100) + '%';
               save.hidden = false;
             } else {

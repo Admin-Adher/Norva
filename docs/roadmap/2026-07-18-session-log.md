@@ -540,8 +540,13 @@ base — jamais sur l'ancre.
   barré, du −% et de l'économie ; barré suffixé « billed monthly », économie
   suffixée « vs monthly billing » ; checkout dit « vs ~~$59.88/yr~~ billed
   monthly » (jamais « was »).
-- Sim jsdom dédiée (6 assertions) : badge −42 %, barré qualifié, save qualifié,
+- Sim jsdom dédiée (7 assertions) : badge −42 %, barré qualifié, save qualifié,
   « then » sur la base, pas de fuite sur la vue mensuelle.
+- **Pas de double revendication** (remarque d'Adrien) : quand une promo ancrée
+  12× est active, le badge « Save 30% » du toggle est **masqué** (vente +
+  landing) — le −42 % « vs monthly billing » de la card est la MÊME
+  comparaison ; afficher les deux laisserait croire qu'elles se cumulent.
+  Le badge revient de lui-même à l'expiration de la promo.
 
 ### Périmètre des visuels par surface (question de recette)
 
