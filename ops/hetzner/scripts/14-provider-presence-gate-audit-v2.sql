@@ -19,8 +19,9 @@
 --   3) Les lignes [C] doivent afficher busy=true, age_seconds faible (< 300), verdict=OK_BUSY_FRESH.
 --      Si [C] est vide, le compte n'a pas de source Xtream exploitable (serverHost+username)
 --      ou le touch presence n'est pas arrivé.
---   4) [D] liste les crons qui touchent des slots provider : ils restent actifs dans pg_cron,
---      mais leurs runners doivent skipper au runtime quand provider_account_busy(...) = true.
+--   4) [D] liste les crons du pilote qui touchent des slots provider : ils restent actifs
+--      dans pg_cron, mais leurs runners doivent skipper au runtime quand
+--      provider_account_busy(...) = true. [E] permet de voir leurs derniers runs.
 --
 -- Note : on ne désactive pas cron.job.active ici. Le design Norva est une pause runtime par
 -- compte provider, pas un arrêt global des jobs : les autres providers/utilisateurs continuent.
@@ -79,7 +80,7 @@ from provider_keys k
 left join public.provider_account_activity a on a.account_key = k.account_key
 order by busy desc, a.last_seen_at desc nulls last, k.account_key;
 
-\echo '================ [D] Crons/sondes provider-slot à surveiller ================'
+\echo '================ [D] Crons/sondes provider-slot du pilote à surveiller ================'
 with pilot_sources as (
   select s.id::text as source_id
   from public.cloud_sources s
@@ -104,9 +105,31 @@ select jobid,
        pilot_source_match,
        regexp_replace(command, E'[\\n\\r\\t ]+', ' ', 'g') as command
 from provider_slot_jobs
-order by (pilot_user_match or pilot_source_match) desc, jobname nulls last, jobid;
+where pilot_user_match or pilot_source_match
+order by jobname nulls last, jobid;
 
-\echo '================ [E] Derniers runs account-busy / skipped / live-session (24 h) ================'
+\echo '================ [E] Derniers runs des crons du pilote (24 h) ================'
+with pilot_sources as (
+  select s.id::text as source_id
+  from public.cloud_sources s
+  where s.user_id = :'USER_ID'::uuid
+), pilot_jobs as (
+  select j.jobid, j.jobname
+  from cron.job j
+  where coalesce(j.command, '') ilike '%' || :'USER_ID' || '%'
+     or exists (select 1 from pilot_sources ps where coalesce(j.command, '') ilike '%' || ps.source_id || '%')
+)
+select d.start_time,
+       d.status,
+       pj.jobname,
+       left(coalesce(d.return_message, ''), 500) as return_message
+from cron.job_run_details d
+join pilot_jobs pj on pj.jobid = d.jobid
+where d.start_time >= now() - interval '24 hours'
+order by d.start_time desc
+limit 50;
+
+\echo '================ [F] Derniers skips account-busy / live-session tous crons (24 h) ================'
 select d.start_time,
        d.status,
        j.jobname,
