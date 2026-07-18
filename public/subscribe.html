@@ -71,6 +71,13 @@
     .promo-pct { display: inline-block; margin: 0 0 8px 8px; padding: 4px 9px; border-radius: 999px;
       font-size: 10.5px; font-weight: 900; color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
     .promo-save { color: var(--green); font-size: 12.5px; font-weight: 700; margin: 2px 0 0; }
+    /* Real countdown to the promo's server-side auto-disable time (never a fake
+       resetting timer). Turns coral + pulses under one hour. */
+    #promo-countdown { margin: 14px 0 0; text-align: center; color: var(--muted); font-size: 13.5px; }
+    #promo-countdown b { color: #fff; font-variant-numeric: tabular-nums; font-weight: 800; margin-left: 2px; }
+    #promo-countdown.urgent b { color: var(--coral); }
+    #promo-countdown.urgent { animation: cd-pulse 1.1s ease-in-out infinite; }
+    @keyframes cd-pulse { 50% { opacity: .72; } }
     /* Full-page campaign visual (set from JS when a promo is live and an image was
        uploaded). Painted on the ROOT element — the document canvas — which is by
        definition the lowest paint layer: no stacking-order subtleties possible.
@@ -180,6 +187,7 @@
       html:not(.tv) .row .btn { min-height: 38px; font-size: 13px; }
       html:not(.tv) .status.show, html:not(.tv) #already-sub.show { margin-top: 8px; padding: 8px 12px; font-size: 12.5px; }
       html:not(.tv) .save-hint { margin-top: 6px; font-size: 12px; }
+      html:not(.tv) #promo-countdown { margin-top: 8px; font-size: 12px; }
     }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
@@ -775,6 +783,7 @@
           });
           const save = document.querySelector('.toggle .save');
           if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
+          startPromoCountdown();
           // Full-page campaign visual: shown when at least one promo is live AND
           // an image was uploaded — painted on the document canvas (<html>), the
           // lowest possible layer, with the legibility veil as first bg layer.
@@ -798,6 +807,77 @@
           }
           applyPeriod(period); // re-render amounts, notes, promo badges and CTAs
         } catch (_) { /* keep static prices */ }
+      }
+
+      // Real urgency: countdown to the soonest promo_ends_at among active promos —
+      // the exact moment the server auto-disables the promo. At zero, the page
+      // honestly reverts to base prices in front of the visitor (never a fake,
+      // self-resetting timer — that's a sanctioned dark pattern).
+      let countdownTimer = 0;
+      function startPromoCountdown() {
+        clearInterval(countdownTimer);
+        const old = document.getElementById('promo-countdown');
+        if (old) old.remove();
+        if (!livePromos) return;
+        let soonest = null, soonestPromo = null;
+        Object.keys(livePromos).forEach(function (pl) {
+          Object.keys(livePromos[pl] || {}).forEach(function (per) {
+            const p = livePromos[pl][per];
+            if (!p || !p.ends_at) return;
+            const t = new Date(p.ends_at).getTime();
+            if (isFinite(t) && t > Date.now() && (soonest === null || t < soonest)) { soonest = t; soonestPromo = p; }
+          });
+        });
+        if (!soonest) return; // promo sans échéance → pas de compte à rebours
+        const grid = document.querySelector('.grid');
+        if (!grid) return;
+        const box = document.createElement('div');
+        box.id = 'promo-countdown';
+        const label = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
+        const txt = document.createElement('span');
+        txt.textContent = '⏳ ' + label + ' ends in ';
+        const clock = document.createElement('b');
+        box.appendChild(txt);
+        box.appendChild(clock);
+        grid.insertAdjacentElement('beforebegin', box);
+        const pad = function (x) { return String(x).padStart(2, '0'); };
+        const tick = function () {
+          const left = soonest - Date.now();
+          if (left <= 0) {
+            clearInterval(countdownTimer);
+            box.remove();
+            expirePromosNow();
+            return;
+          }
+          const d = Math.floor(left / 86400000);
+          const h = Math.floor(left / 3600000) % 24;
+          const m = Math.floor(left / 60000) % 60;
+          const s = Math.floor(left / 1000) % 60;
+          clock.textContent = (d > 0 ? d + 'd ' : '') + pad(h) + ':' + pad(m) + ':' + pad(s);
+          box.classList.toggle('urgent', left < 3600000);
+        };
+        tick();
+        countdownTimer = setInterval(tick, 1000);
+      }
+      // À zéro : retour honnête aux prix de base sans rechargement — le serveur a
+      // déjà basculé de son côté (auto-désactivation à promo_ends_at, cache 60 s).
+      function expirePromosNow() {
+        try {
+          if (livePromos) {
+            Object.keys(livePromos).forEach(function (pl) {
+              Object.keys(livePromos[pl] || {}).forEach(function (per) {
+                const p = livePromos[pl][per];
+                const cardEl = document.querySelector('.card[data-plan="' + pl + '"]');
+                if (cardEl && p && p.base_cents) {
+                  if (per === 'annual') cardEl.dataset.annual = (p.base_cents / 100).toFixed(2);
+                  else cardEl.dataset.monthly = (p.base_cents / 100).toFixed(2);
+                }
+              });
+            });
+          }
+          livePromos = null;
+          applyPeriod(period); // retire badges, prix barrés, économies — prix de base réaffichés
+        } catch (_) { /* jamais bloquant */ }
       }
 
       window.NorvaBilling.login(appUserId());

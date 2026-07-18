@@ -342,6 +342,17 @@ Deux manques relevés par Adrien :
   l'API est injoignable. NB : le JSON-LD SEO garde les prix de base (les promos
   sont temporaires — choix assumé).
 
+### Compte à rebours de promo (page de vente)
+
+Urgence RÉELLE, jamais simulée : « ⏳ Winter Sale ends in 2d 04:12:37 » entre le
+toggle et les cartes, branché sur la `promo_ends_at` la plus proche parmi les
+promos actives — l'instant exact où le serveur auto-désactive la promo. Coral +
+pulsation sous 1 h ; à zéro, la page **revient d'elle-même aux prix de base**
+devant le visiteur (badges/barrés/économies retirés) — le timer qui se
+réinitialise est un dark pattern sanctionné (DGCCRF/Omnibus), le nôtre ne peut
+pas mentir par construction. Promo sans échéance = pas de compte à rebours.
+Chiffres tabulaires (pas de tremblement), compact sur écran court.
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
