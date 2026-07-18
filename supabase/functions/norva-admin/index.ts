@@ -12,6 +12,7 @@
 //   /user/:id/refund     { pi_id }   → merchant-initiated Revolut refund of a captured charge
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
+import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -418,6 +419,39 @@ Deno.serve(async (req) => {
         relay: { configured: Boolean(relay), ...rl },
         billing,
       });
+    }
+
+    // ── route: /marketing-push — envoi d'une notification marketing à TOUS les
+    // appareils enregistrés (cloud_push_tokens), avec purge des tokens morts et
+    // journalisation dans marketing_push_log (onglet Notifications de la page
+    // Marketing admin). Best-effort par token : un échec n'arrête pas la boucle. ──
+    if (segments[segments.length - 1] === "marketing-push") {
+      const mp = await req.json().catch(() => ({})) as JsonRecord;
+      const title = String(mp.title ?? "").trim();
+      const text = String(mp.body ?? "").trim();
+      if (title.length < 2 || title.length > 60) return json(req, { error: "title must be 2..60 characters" }, 400);
+      if (text.length < 2 || text.length > 240) return json(req, { error: "body must be 2..240 characters" }, 400);
+      if (!fcmConfigured()) return json(req, { error: "FCM not configured (FCM_SERVICE_ACCOUNT secret missing)" }, 500);
+      const { data: toks, error: tokErr } = await admin.from("cloud_push_tokens").select("token");
+      if (tokErr) return json(req, { error: `token read failed: ${tokErr.message}` }, 500);
+      const tokens = [...new Set((toks ?? []).map((t) => String((t as { token?: string }).token)).filter(Boolean))];
+      let sent = 0, fail = 0, dead = 0;
+      for (const tk of tokens) {
+        const r = await sendFcmPush(tk, { title, body: text, data: { kind: "marketing" } });
+        if (r.ok) sent++;
+        else if (r.unregistered) { dead++; try { await admin.from("cloud_push_tokens").delete().eq("token", tk); } catch (_) { /* noop */ } }
+        else fail++;
+      }
+      try {
+        await admin.from("marketing_push_log").insert({
+          title, body: text, audience: "all",
+          sent_count: sent, fail_count: fail, dead_count: dead, actor: actorEmail,
+        });
+      } catch (_) { /* le log ne doit pas faire échouer un envoi réussi */ }
+      try {
+        await sendTelegram(`📣 <b>Push marketing envoyé</b>\n${tgEscape(title)}\n${sent} envoyé(s) · ${fail} échec(s) · ${dead} token(s) mort(s) purgé(s)`);
+      } catch (_) { /* best-effort */ }
+      return json(req, { ok: true, devices: tokens.length, sent, fail, dead });
     }
 
     // ── route: /user/:id/:action ──

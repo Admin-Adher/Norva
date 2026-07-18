@@ -569,6 +569,40 @@ base — jamais sur l'ancre.
 - Sims à jour : défaut Annual vérifié, badge « Best value » vérifié (ancre
   12×), parcours mensuel inchangé après bascule manuelle.
 
+### Page Marketing admin — migration `20260719090000` (demande produit)
+
+Nouvelle page **📣 Marketing** dans la sidebar (groupe Business), trois onglets
+deep-linkables `#admin/marketing[/promos|/notifs]` :
+
+- **Vue d'ensemble** : promos actives (détail −%, cycles, réf. 12×, échéance),
+  appareils push enregistrés (+ comptes), notifications 30 j, visuel de
+  campagne, raccourcis vers les onglets. Chaque KPI dégrade proprement si sa
+  migration n'est pas passée.
+- **Promotions** : la carte « 💵 Tarifs web & promotions » + visuel de campagne
+  DÉMÉNAGE ici depuis Finance (conteneur `#fin-prices` conservé →
+  `_loadWebPrices()` inchangé). Finance garde Vue d'ensemble / Paiements /
+  Analyse / TVA ; les vieux liens `#admin/finance/promos` redirigent.
+- **Notifications** : composeur push mobile (titre 60, message 240, compteurs,
+  **aperçu Android en direct**), envoi à TOUS les appareils enregistrés avec
+  confirmation (« un push ne se rappelle pas »), historique des envois (date,
+  titre, message, envoyés/échecs/tokens purgés, acteur).
+
+**Infra réutilisée** (rien de neuf côté mobile) : FCM v1 déjà en place —
+`_shared/fcm.ts` (service account `FCM_SERVICE_ACCOUNT`), tokens
+`cloud_push_tokens` enregistrés par l'app Android (bridge WebView
+`getPushToken`), purge des tokens morts (pattern de norva-import-notify).
+
+**Nouveau backend** :
+- Migration `20260719090000_marketing_push.sql` : table `marketing_push_log`
+  (RLS sans policy — service role only) + RPC `admin_marketing_push_log()` et
+  `admin_marketing_overview()` — **⚠ NOTIFY pgrst**.
+- Route `norva-admin /marketing-push` (POST, admin-JWT) : valide titre/corps,
+  lit tous les tokens, envoie via FCM un par un (best-effort), purge les
+  tokens `UNREGISTERED`, journalise, ping Telegram récapitulatif.
+
+Périmètre : les pushs n'atteignent que les appareils **Android app** ayant
+accepté les notifications (pas le web, pas la TV — pas de FCM là-bas).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

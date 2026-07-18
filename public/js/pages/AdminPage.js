@@ -88,7 +88,9 @@ class AdminPage {
     // name, entity pages only as client:<uuid> / ticket:<uuid>.
     static validRoute(r) {
         r = String(r || '');
-        if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+        if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse',
+            'marketing', 'marketing/promos', 'marketing/notifs',
+            'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
         return m ? (m[1] + ':' + m[2]) : null;
     }
@@ -99,6 +101,7 @@ class AdminPage {
         return [
             { key: 'cockpit', label: 'Cockpit', icon: '🎯', section: 'Business' },
             { key: 'finance', label: 'Finance', icon: '💶', section: 'Business' },
+            { key: 'marketing', label: 'Marketing', icon: '📣', section: 'Business' },
             { key: 'clients', label: 'Clients', icon: '👥', section: 'Business' },
             { key: 'support', label: 'Support', icon: '🎫', section: 'Business' },
             { key: 'providers', label: 'Providers', icon: '📡', section: 'Catalogue' },
@@ -531,6 +534,15 @@ class AdminPage {
 #page-admin .refm:hover:not(:disabled){border-color:#5b7cfa;color:var(--adm-tx);}
 #page-admin .refm.on{background:linear-gradient(135deg,rgba(91,124,250,.3),rgba(168,85,247,.25));border-color:#5b7cfa;color:#fff;}
 #page-admin .refm:disabled{opacity:.35;cursor:default;}
+#page-admin .mkt-notif-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;}
+@media (max-width:900px){#page-admin .mkt-notif-grid{grid-template-columns:1fr;}}
+#page-admin .mkt-notif-grid input[type=text],#page-admin .mkt-notif-grid textarea{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:9px 11px;font:inherit;font-size:13px;}
+#page-admin .mkt-notif-grid textarea{resize:vertical;margin-top:6px;}
+#page-admin .mkt-preview{border:1px solid var(--adm-line);border-radius:14px;background:#12161f;padding:12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.4);}
+#page-admin .mkt-pv-hd{display:flex;align-items:center;gap:6px;color:var(--adm-tx2);font-size:11px;margin-bottom:6px;}
+#page-admin .mkt-pv-ic{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,#5b7cfa,#a855f7);color:#fff;font-size:10px;font-weight:900;}
+#page-admin .mkt-pv-t{color:#fff;font-size:13px;font-weight:700;word-break:break-word;}
+#page-admin .mkt-pv-b{color:var(--adm-tx2);font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
 #page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
 #page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
 #page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
@@ -761,7 +773,8 @@ class AdminPage {
         if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 10 min') : '';
     }
     _setActiveNav(route) {
-        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support' : (route.startsWith('finance') ? 'finance' : route));
+        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support'
+            : (route.startsWith('finance') ? 'finance' : (route.startsWith('marketing') ? 'marketing' : route)));
         document.querySelectorAll('#page-admin .crm-nav-item').forEach(el => {
             const on = el.dataset.route === mapped;
             el.classList.toggle('active', on);
@@ -923,8 +936,23 @@ class AdminPage {
         if (route === 'cockpit') this._pageCockpit();
         else if (route === 'finance' || route.startsWith('finance/')) {
             const finSub = route.split('/')[1] || '';
-            this._financeTab = ['vat', 'promos', 'paiements', 'analyse'].includes(finSub) ? finSub : 'overview';
-            this._route = 'finance'; this._pageFinance();
+            if (finSub === 'promos') {
+                // Les promotions ont déménagé dans la page Marketing — les vieux
+                // liens/favoris #admin/finance/promos y atterrissent directement.
+                this._marketingTab = 'promos';
+                this._route = 'marketing';
+                try { history.replaceState(history.state, '', '#admin/marketing/promos'); } catch (_) { /* non-navigable */ }
+                this._setActiveNav('marketing');
+                this._pageMarketing();
+            } else {
+                this._financeTab = ['vat', 'paiements', 'analyse'].includes(finSub) ? finSub : 'overview';
+                this._route = 'finance'; this._pageFinance();
+            }
+        }
+        else if (route === 'marketing' || route.startsWith('marketing/')) {
+            const mktSub = route.split('/')[1] || '';
+            this._marketingTab = ['promos', 'notifs'].includes(mktSub) ? mktSub : 'overview';
+            this._route = 'marketing'; this._pageMarketing();
         }
         else if (route === 'clients') this._pageClients();
         else if (route === 'support') this._pageSupport();
@@ -1101,6 +1129,204 @@ class AdminPage {
             const el = document.getElementById('fin-body');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    // ── Page: Marketing — promotions (déplacées de Finance), visuel de campagne
+    // et notifications push mobiles (FCM, tokens cloud_push_tokens enregistrés
+    // par l'app Android via le bridge WebView). Trois onglets deep-linkables :
+    // #admin/marketing[/promos|/notifs]. ──
+    async _pageMarketing() {
+        this._setCrumb('Marketing');
+        const v = this._view();
+        const MKT_TABS = { overview: 'mkt-tab-overview', promos: 'mkt-tab-promos', notifs: 'mkt-tab-notifs' };
+        const tab = MKT_TABS[this._marketingTab] ? this._marketingTab : 'overview';
+        const show = t => (tab === t ? '' : ' style="display:none"');
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">📣 Marketing</h1>
+            <p class="crm-sub">Promotions, campagnes visuelles et notifications push — tout ce qui pousse Norva vers ses utilisateurs.</p>
+            <div class="qv-row" id="mkt-tabs" role="tablist" aria-label="Sections Marketing">
+                <button class="qv-chip ${tab === 'overview' ? 'active' : ''}" data-mtab="overview" role="tab">📣 Vue d'ensemble</button>
+                <button class="qv-chip ${tab === 'promos' ? 'active' : ''}" data-mtab="promos" role="tab">🏷️ Promotions</button>
+                <button class="qv-chip ${tab === 'notifs' ? 'active' : ''}" data-mtab="notifs" role="tab">📲 Notifications</button>
+            </div>
+            <div id="mkt-tab-overview"${show('overview')}><div id="mkt-overview"><div class="ssub">Chargement…</div></div></div>
+            <div id="mkt-tab-promos"${show('promos')}>
+                <div class="admin-block"><h2>💵 Tarifs web &amp; promotions (Revolut)</h2>
+                    <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs et promos gérés dans la Play Console.</div>
+                    <div id="fin-prices"><div class="ssub">Chargement…</div></div>
+                </div>
+            </div>
+            <div id="mkt-tab-notifs"${show('notifs')}>
+                <div class="admin-block"><h2>📲 Notification push (mobile)</h2>
+                    <div class="ssub" style="margin-bottom:10px">Envoyée immédiatement à <b>tous les appareils enregistrés</b> (app Android installée + push accepté). Rédige en <b>anglais</b> — le produit est anglophone — et reste parcimonieux : une notification de trop = désinstallation.</div>
+                    <div class="mkt-notif-grid">
+                        <div>
+                            <input type="text" id="mkt-nt" maxlength="60" placeholder="Titre — ex. Flash Sale: 40% off tonight ⚡" autocomplete="off">
+                            <div class="ssub" id="mkt-nt-c" style="text-align:right;margin-top:3px">0/60</div>
+                            <textarea id="mkt-nb" maxlength="240" rows="3" placeholder="Message — ex. Annual plans are 40% off until Sunday. Open Norva to grab yours."></textarea>
+                            <div class="ssub" id="mkt-nb-c" style="text-align:right;margin-top:3px">0/240</div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                                <button class="mini-btn" id="mkt-send">📤 Envoyer maintenant</button>
+                                <span class="ssub" id="mkt-send-msg"></span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="ssub" style="margin-bottom:6px">Aperçu (Android)</div>
+                            <div class="mkt-preview">
+                                <div class="mkt-pv-hd"><span class="mkt-pv-ic">N</span> Norva · maintenant</div>
+                                <div class="mkt-pv-t" id="mkt-pv-t">Titre</div>
+                                <div class="mkt-pv-b" id="mkt-pv-b">Message</div>
+                            </div>
+                            <div class="ssub" id="mkt-devices" style="margin-top:8px">📱 Appareils : chargement…</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="admin-block"><h2>🗂 Historique des envois</h2><div id="mkt-log"><div class="ssub">Chargement…</div></div></div>
+            </div>
+        </div>`;
+
+        // Bascule d'onglet : montrer/cacher en préservant l'état (dépliant promo
+        // ouvert, brouillon de notification…), URL reflétée pour F5 / favoris.
+        v.querySelectorAll('#mkt-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            const t = MKT_TABS[chip.dataset.mtab] ? chip.dataset.mtab : 'overview';
+            this._marketingTab = t;
+            v.querySelectorAll('#mkt-tabs .qv-chip').forEach(c => c.classList.toggle('active', c === chip));
+            Object.entries(MKT_TABS).forEach(([k2, id]) => {
+                const node = document.getElementById(id);
+                if (node) node.style.display = k2 === t ? '' : 'none';
+            });
+            try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/marketing' + (t === 'overview' ? '' : '/' + t)); } catch (_) { /* non-navigable */ }
+        }));
+
+        this._loadWebPrices();
+        this._loadMarketingOverview();
+        this._loadPushLog();
+        this._wirePushComposer();
+    }
+
+    // Vue d'ensemble Marketing : promos actives (billing_prices), appareils push,
+    // notifications 30 j, visuel de campagne — chaque KPI dégrade proprement si
+    // sa migration n'est pas encore passée.
+    async _loadMarketingOverview() {
+        const el = document.getElementById('mkt-overview');
+        if (!el) return;
+        const esc = AdminPage.esc, n = AdminPage.n;
+        let ov = null, prices = null, camp = null;
+        try { ov = await this._rpc('admin_marketing_overview'); } catch (_) { /* migration 20260719090000 absente */ }
+        try { prices = await this._rpc('admin_billing_prices'); } catch (_) { /* dégradé */ }
+        try { camp = await this._rpc('admin_promo_campaign'); } catch (_) { /* dégradé */ }
+        if (this._route !== 'marketing') return;
+        const rows = Array.isArray(prices) ? prices : [];
+        const actives = rows.filter(r => r.promo_active);
+        const LBL = { plus: 'Norva', family: 'Norva Family' }, PER = { monthly: 'mensuel', annual: 'annuel' };
+        const day = d => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
+        const promoRows = actives.map(r => {
+            const pct = Math.max(1, Math.round(100 - (r.promo_amount_cents / r.amount_cents) * 100));
+            const bits = [`−${pct}%`, `$${(r.promo_amount_cents / 100).toFixed(2)} (base $${(r.amount_cents / 100).toFixed(2)})`];
+            if (r.promo_cycles) bits.push(`${r.promo_cycles} période${r.promo_cycles > 1 ? 's' : ''} puis base`);
+            if (r.promo_ref_monthly) bits.push('réf. 12× mensuel');
+            const end = day(r.promo_ends_at);
+            return `<tr><td>${esc(LBL[r.plan] || r.plan)} · ${esc(PER[r.period] || r.period)}</td><td>${esc(bits.join(' · '))}</td><td>${end ? esc(end) : '<span class="pacct">sans échéance</span>'}</td></tr>`;
+        }).join('');
+        const card = (v2, l, icon, cls) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v2}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+        el.innerHTML = `
+            <div class="kpi-group"><div class="kpi-gtitle">📣 L'essentiel</div><div class="admin-cards">
+                ${card(n(actives.length), 'Promo(s) active(s)', '🏷️', actives.length ? 'ok' : '')}
+                ${card(ov ? n(ov.push_devices) : '—', 'Appareils push' + (ov && Number(ov.push_users) ? ` (${n(ov.push_users)} compte${Number(ov.push_users) > 1 ? 's' : ''})` : ''), '📱', ov && Number(ov.push_devices) > 0 ? 'ok' : '')}
+                ${card(ov ? n(ov.notifs_30d) : '—', 'Notifications envoyées (30 j)', '📤', '')}
+                ${card(camp && camp.bg_path ? 'Oui' : 'Non', 'Visuel de campagne', '🎨', camp && camp.bg_path ? 'ok' : '')}
+            </div></div>
+            <div class="admin-block"><h2>🏷️ Promotions en cours</h2>
+                ${promoRows
+                    ? `<div class="scroll"><table><thead><tr><th>Tarif</th><th>Promo</th><th>Fin</th></tr></thead><tbody>${promoRows}</tbody></table></div>`
+                    : '<div class="ssub">Aucune promotion active — lance-en une dans l\'onglet Promotions.</div>'}
+            </div>
+            <div class="admin-block"><h2>⚡ Raccourcis</h2>
+                <div style="display:flex;gap:10px;flex-wrap:wrap">
+                    <button class="mini-btn" data-goto="promos">🏷️ Gérer les promotions</button>
+                    <button class="mini-btn" data-goto="notifs">📲 Envoyer une notification</button>
+                </div>
+                ${ov && ov.last_notif_at ? `<div class="ssub" style="margin-top:8px">Dernière notification envoyée ${AdminPage.timeAgo(ov.last_notif_at)}.</div>` : ''}
+                ${ov ? '' : '<div class="ssub" style="margin-top:8px">⚠ KPIs push indisponibles — appliquer la migration 20260719090000 puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>'}
+            </div>`;
+        el.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => {
+            document.querySelector(`#mkt-tabs .qv-chip[data-mtab="${b.dataset.goto}"]`)?.click();
+        }));
+    }
+
+    // Historique des notifications push marketing (RPC admin_marketing_push_log).
+    async _loadPushLog() {
+        const el = document.getElementById('mkt-log');
+        if (!el) return;
+        try {
+            const rows = await this._rpc('admin_marketing_push_log');
+            if (this._route !== 'marketing') return;
+            const esc = AdminPage.esc, n = AdminPage.n;
+            const list = Array.isArray(rows) ? rows : [];
+            el.innerHTML = list.length
+                ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
+                    <td>${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td>${esc(r.title)}</td>
+                    <td class="ssub" style="max-width:340px">${esc(r.body)}</td>
+                    <td class="num">${n(r.sent_count)}</td>
+                    <td class="num">${Number(r.fail_count) ? `<span class="badge red">${n(r.fail_count)}</span>` : '0'}${Number(r.dead_count) ? ` <span class="pacct" title="Tokens morts purgés pendant l'envoi">· ${n(r.dead_count)} purgé(s)</span>` : ''}</td>
+                    <td class="ssub">${esc(r.actor || '—')}</td>
+                </tr>`).join('')}</tbody></table></div>`
+                : '<div class="ssub">Aucune notification marketing envoyée pour l\'instant — la première apparaîtra ici avec ses compteurs.</div>';
+        } catch (e) {
+            el.innerHTML = `<div class="ssub">Historique indisponible — appliquer la migration 20260719090000 puis <code>NOTIFY pgrst, 'reload schema'</code>. (${AdminPage.esc(e && e.message ? e.message : 'erreur')})</div>`;
+        }
+    }
+
+    // Composeur : aperçu Android en direct + envoi via norva-admin /marketing-push
+    // (admin-JWT ; l'edge lit les tokens, envoie via FCM, purge les tokens morts
+    // et journalise). Confirmation obligatoire — un push, ça ne se rappelle pas.
+    _wirePushComposer() {
+        const nt = document.getElementById('mkt-nt'), nb = document.getElementById('mkt-nb');
+        const pvT = document.getElementById('mkt-pv-t'), pvB = document.getElementById('mkt-pv-b');
+        const cT = document.getElementById('mkt-nt-c'), cB = document.getElementById('mkt-nb-c');
+        if (!nt || !nb) return;
+        const syncPv = () => {
+            if (pvT) pvT.textContent = nt.value.trim() || 'Titre';
+            if (pvB) pvB.textContent = nb.value.trim() || 'Message';
+            if (cT) cT.textContent = `${nt.value.length}/60`;
+            if (cB) cB.textContent = `${nb.value.length}/240`;
+        };
+        nt.addEventListener('input', syncPv);
+        nb.addEventListener('input', syncPv);
+        syncPv();
+        (async () => {
+            try {
+                const ov = await this._rpc('admin_marketing_overview');
+                const d = document.getElementById('mkt-devices');
+                if (d && ov) d.textContent = `📱 ${AdminPage.n(ov.push_devices)} appareil(s) enregistré(s) · ${AdminPage.n(ov.push_users)} compte(s)`;
+            } catch (_) { /* migration absente — le hint reste générique */ }
+        })();
+        const sendBtn = document.getElementById('mkt-send');
+        sendBtn?.addEventListener('click', async () => {
+            const title = nt.value.trim(), body = nb.value.trim();
+            const msg = document.getElementById('mkt-send-msg');
+            if (title.length < 2 || body.length < 2) { if (msg) msg.textContent = '❌ Titre et message obligatoires (2 caractères min).'; return; }
+            if (!window.confirm(`Envoyer cette notification à TOUS les appareils enregistrés ?\n\n« ${title} »\n${body}\n\nEnvoi immédiat — un push ne se rappelle pas.`)) return;
+            sendBtn.disabled = true;
+            if (msg) msg.textContent = 'Envoi…';
+            try {
+                const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/marketing-push`, {
+                    method: 'POST',
+                    headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, body })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || String(res.status));
+                if (msg) msg.textContent = `✅ ${AdminPage.n(data.sent)} envoyé(s) sur ${AdminPage.n(data.devices)} appareil(s)`
+                    + (data.fail ? ` · ${AdminPage.n(data.fail)} échec(s)` : '')
+                    + (data.dead ? ` · ${AdminPage.n(data.dead)} token(s) mort(s) purgé(s)` : '');
+                nt.value = ''; nb.value = ''; syncPv();
+                this._loadPushLog();
+            } catch (e) {
+                if (msg) msg.textContent = '❌ ' + (e && e.message ? e.message : 'échec');
+            } finally { sendBtn.disabled = false; }
+        });
     }
 
     // Carte « 💵 Tarifs web » : édition de billing_prices (source unique lue par les
@@ -1547,15 +1773,15 @@ class AdminPage {
             || Math.round((Number(vatYs.eu_cross_prev_cents) || 0) * 0.92) >= 1000000;
         // Onglets Finance : la Vue d'ensemble MONTRE (lecture pure), les actions
         // vivent chacune dans leur onglet (même modèle que TVA). Chaque onglet est
-        // deep-linkable : #admin/finance[/promos|/paiements|/analyse|/vat].
-        const FIN_TABS = { overview: 'fin-tab-overview', promos: 'fin-tab-promos', paiements: 'fin-tab-pay', analyse: 'fin-tab-analyse', vat: 'fin-tab-vat' };
+        // deep-linkable : #admin/finance[/paiements|/analyse|/vat]. Les promotions
+        // vivent désormais dans la page Marketing (#admin/marketing/promos).
+        const FIN_TABS = { overview: 'fin-tab-overview', paiements: 'fin-tab-pay', analyse: 'fin-tab-analyse', vat: 'fin-tab-vat' };
         const finTab = FIN_TABS[this._financeTab] ? this._financeTab : 'overview';
         const finShow = t => (finTab === t ? '' : ' style="display:none"');
 
         el.innerHTML = `
             <div class="qv-row" id="fin-tabs" role="tablist" aria-label="Sections Finance">
                 <button class="qv-chip ${finTab === 'overview' ? 'active' : ''}" data-ftab="overview" role="tab">💶 Vue d'ensemble</button>
-                <button class="qv-chip ${finTab === 'promos' ? 'active' : ''}" data-ftab="promos" role="tab">🏷️ Promotions</button>
                 <button class="qv-chip ${finTab === 'paiements' ? 'active' : ''}" data-ftab="paiements" role="tab">🧾 Paiements</button>
                 <button class="qv-chip ${finTab === 'analyse' ? 'active' : ''}" data-ftab="analyse" role="tab">📊 Analyse</button>
                 <button class="qv-chip ${finTab === 'vat' ? 'active' : ''}" data-ftab="vat" role="tab">🇪🇺 TVA &amp; conformité${vatAttention ? ' <span style="color:#fbbf24">⚠</span>' : ''}</button>
@@ -1600,13 +1826,6 @@ class AdminPage {
                 </div></div>
             </div>
             </div>
-            <!-- 🏷️ Onglet Promotions : tarification + promos + visuel de campagne -->
-            <div id="fin-tab-promos"${finShow('promos')}>
-                <div class="admin-block"><h2>💵 Tarifs web &amp; promotions (Revolut)</h2>
-                    <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs et promos gérés dans la Play Console.</div>
-                    <div id="fin-prices"><div class="ssub">Chargement…</div></div>
-                </div>
-            </div>
             <!-- 🧾 Onglet Paiements : log opérationnel + export -->
             <div id="fin-tab-pay"${finShow('paiements')}>
                 <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
@@ -1649,8 +1868,6 @@ class AdminPage {
             });
             try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/finance' + (tab === 'overview' ? '' : '/' + tab)); } catch (_) { /* non-navigable */ }
         }));
-
-        this._loadWebPrices();
 
         // Header status line: MRR · échecs · conversions + a "live" freshness badge.
         const tx = document.querySelector('#page-admin .crm-head-tx');
