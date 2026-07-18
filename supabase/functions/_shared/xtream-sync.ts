@@ -577,6 +577,10 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
         movies: { status: "running" },
         series: { status: "running" },
         categories: { status: "running" },
+        // L'upsert en base se fait PENDANT la discovery (appendSourceItems inline) —
+        // la milestone "Import catalog" doit vivre dès maintenant, pas rester
+        // "Waiting" pendant toute la plus longue phase pour claquer à "Done" à 74.
+        import: { status: "running" },
       },
     };
     if (cursor.runVersion) {
@@ -619,6 +623,12 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       for (let i = 0; i < typeIdx; i++) done += targetsFor(DISCOVER_TYPES[i].type).length;
       return done;
     };
+    // Cadence de persistance adaptative (UX barre, audit 18/07) : l'ancien « tous
+    // les 4 lots » = 56 catégories par écriture — un provider à 150 catégories
+    // voyait ~3 sauts de ~15 % au lieu d'une progression continue. Viser ~3-4 %
+    // par écriture, borné à [1..4] lots (le surcoût WAL reste négligeable, et les
+    // petits providers qui écrivent chaque lot finissent en secondes de toute façon).
+    const persistEvery = Math.max(1, Math.min(4, Math.round(totalTargets / 160)));
 
     let sincePersist = 0;
     while (Date.now() < deadline && typeIdx < DISCOVER_TYPES.length) {
@@ -654,13 +664,17 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       cursor.counts = { live: liveCount, movies: movieCount, series: seriesCount };
       cursor.sig = sig;
       sincePersist++;
-      if (sincePersist >= 4 || Date.now() >= deadline) {
+      if (sincePersist >= persistEvery || Date.now() >= deadline) {
         sincePersist = 0;
-        const percent = Math.max(18, Math.min(57, 18 + Math.round((39 * completedTargets()) / Math.max(1, totalTargets))));
+        // Bande 18→66 (l'ancien plafond 57 laissait une falaise muette 57→74
+        // pendant recomptage + prune — comblée aussi par les jalons 68/71 plus bas).
+        const percent = Math.max(18, Math.min(66, 18 + Math.round((48 * completedTargets()) / Math.max(1, totalTargets))));
+        const importedTotal = liveCount + movieCount + seriesCount;
         await persist({
           stage: "discovering",
           percent,
-          counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount },
+          counts: { live: liveCount, movies: movieCount, series: seriesCount, total: importedTotal },
+          steps: { import: { status: "running", count: importedTotal } },
         });
       }
       if (superseded) return;
@@ -678,6 +692,12 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       await selfInvokeSyncStep(sourceId);
       return;
     }
+
+    // Jalon UX (audit 18/07) : la fin de discovery enchaîne recomptage authoritaire
+    // + prune Layer 3, potentiellement longs sur un gros catalogue — sans écriture,
+    // la barre gelait au plafond discovery puis téléportait à 74.
+    await persist({ stage: "importing", percent: 68, steps: { import: { status: "running" } } });
+    if (superseded) return;
 
     // Layer 3: recompute authoritative per-type totals from the table (DO UPDATE inflates the
     // running counts via cross-category re-touches), then decide whether it's safe to prune.
@@ -718,6 +738,9 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     }
 
     if (cursor.runVersion) {
+      // Second jalon avant le prune (le DELETE des titres disparus peut être long).
+      await persist({ stage: "importing", percent: 71 });
+      if (superseded) return;
       const totalHeld = await countSourceItemsTotal(sourceId, userId, db);
       const wouldRemove = Math.max(0, totalHeld - total);
       const fetchErrors = Number(cursor.fetchErrors) || 0;

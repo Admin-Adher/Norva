@@ -679,9 +679,47 @@ class HomePage {
 
         this.maybeRecoverSetupCatalogFinalization(sourceView, type);
 
-        this.setupRefreshTimer = setTimeout(() => {
-            this.lastLoadedAt = 0;
-            if (this.app?.currentPage === 'home') this.loadDashboardData();
+        const gateSourceId = sourceView.cloudId || sourceView.cloud_id || sourceView.id || sourceView.source_id || null;
+        this.scheduleSetupSyncRefresh(container, gateSourceId, type, 0);
+    }
+
+    // Pendant l'import, rafraîchir SEULEMENT le panneau de progression (un GET de la
+    // source + patch en place) au lieu d'un loadDashboardData complet toutes les 4 s :
+    // moins de travail, zéro flicker, et l'élément barre survit aux ticks — condition
+    // pour que sa transition CSS anime les paliers. Garde-fous : refresh complet dès
+    // que la phase change (le gate doit basculer ready/error) et périodiquement
+    // (toutes les ~32 s) au cas où l'état global aurait bougé autrement.
+    scheduleSetupSyncRefresh(container, sourceId, type, tick = 0) {
+        if (this.setupRefreshTimer) clearTimeout(this.setupRefreshTimer);
+        this.setupRefreshTimer = setTimeout(async () => {
+            if (this.app?.currentPage !== 'home') return;
+            const fullRefresh = () => {
+                this.lastLoadedAt = 0;
+                this.loadDashboardData();
+            };
+            const manager = this.app?.sourceManager || window.app?.sourceManager;
+            const api = window.API || (typeof API !== 'undefined' ? API : null);
+            const panel = container.querySelector('.norva-setup-sync-panel');
+            if (!panel || !panel.isConnected || !sourceId || tick >= 7 ||
+                !manager?.patchCatalogPreparation || !api?.sources?.getById) {
+                fullRefresh();
+                return;
+            }
+            try {
+                const latest = await api.sources.getById(sourceId);
+                const view = manager.sourceWithStatus ? manager.sourceWithStatus(latest || {}) : (latest || {});
+                const { phase } = manager.sourceSyncState(view);
+                if (phase === 'ready' || phase === 'error') {
+                    fullRefresh();
+                    return;
+                }
+                if (!manager.patchCatalogPreparation(panel, view, type)) {
+                    panel.innerHTML = manager.renderCatalogPreparation(view, type);
+                }
+                this.scheduleSetupSyncRefresh(container, sourceId, type, tick + 1);
+            } catch (_) {
+                fullRefresh();
+            }
         }, 4000);
     }
 
@@ -711,7 +749,10 @@ class HomePage {
                 : (latestSource || sourceView);
             const panel = document.querySelector('.norva-setup-sync-panel');
             if (panel && manager.renderCatalogPreparation) {
-                panel.innerHTML = manager.renderCatalogPreparation(latestView, type);
+                // Patch-first : garder l'élément barre vivant pour que sa transition anime.
+                if (!(manager.patchCatalogPreparation && manager.patchCatalogPreparation(panel, latestView, type))) {
+                    panel.innerHTML = manager.renderCatalogPreparation(latestView, type);
+                }
             }
         };
 

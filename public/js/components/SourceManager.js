@@ -811,13 +811,26 @@ class SourceManager {
         `;
     }
 
+    // Copy du héros, partagée entre le rendu complet et le patch en place. À 99 %
+    // la phase "finalizing" (heal des variantes + bascule ready) peut durer — sans
+    // copy dédiée, le chiffre figé à 99 se lit comme un plantage.
+    catalogSyncingCopy(progress = {}, percent = 0, phase = 'syncing', source = {}) {
+        if (phase === 'ready') return 'Your catalog is ready.';
+        if (phase === 'error') return source.sync_error || source.syncError || 'Norva could not finish importing this service.';
+        const stage = String(progress.stage || '').toLowerCase();
+        if (stage === 'finalizing' || percent >= 99) {
+            return 'Finishing touches — Norva is unlocking your catalog now.';
+        }
+        return 'Norva is connecting, counting your catalog and preparing it for Home, Live TV, Movies and Series.';
+    }
+
     renderCatalogPreparation(source = {}, type = 'xtream') {
         const { phase, counts, progress } = this.sourceSyncState(source);
         const sourceName = source.name || 'TV service';
         const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
         const determinate = percent > 0 || phase === 'ready';
         const statusText = {
-            syncing: 'Norva is connecting, counting your catalog and preparing it for Home, Live TV, Movies and Series.',
+            syncing: this.catalogSyncingCopy(progress, percent, 'syncing', source),
             ready: 'Your catalog is ready.',
             error: source.sync_error || source.syncError || 'Norva could not finish importing this service.'
         };
@@ -825,7 +838,7 @@ class SourceManager {
         const milestones = this.catalogMilestones(progress, counts).map(step => this.renderCatalogMilestone(step)).join('');
 
         return `
-      <div class="source-sync-step source-sync-${this.escapeHtml(phase)}">
+      <div class="source-sync-step source-sync-${this.escapeHtml(phase)}" data-phase="${this.escapeHtml(phase)}">
         <div class="source-sync-hero">
           <span class="source-sync-pill">${this.escapeHtml(phaseLabel)}</span>
           <h3>${this.escapeHtml(sourceName)}</h3>
@@ -876,6 +889,86 @@ class SourceManager {
         ` : ''}
       </div>
     `;
+    }
+
+    // Fluidité (audit 18/07) : sur un tick de poll de MÊME phase, patcher le DOM en
+    // place au lieu de reconstruire innerHTML. C'est ce qui permet à la transition
+    // CSS de la barre de jouer — un élément recréé naît directement à sa nouvelle
+    // largeur, sans animation, et chaque palier serveur devenait une téléportation.
+    // Retourne false quand un rebuild complet est requis (premier rendu, changement
+    // de phase syncing→ready/error).
+    patchCatalogPreparation(root, source = {}, type = 'xtream') {
+        const step = root && root.querySelector ? root.querySelector('.source-sync-step') : null;
+        if (!step) return false;
+        const { phase, counts, progress } = this.sourceSyncState(source);
+        if ((step.dataset.phase || '') !== phase) return false;
+
+        const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
+        this.animateCatalogBar(step, percent, phase === 'ready');
+
+        // Compteurs — ordre fixe du markup : Live, Movies, Series, Categories.
+        const cards = step.querySelectorAll('.source-sync-card strong');
+        const values = [counts.live, counts.movies, counts.series, counts.categories];
+        cards.forEach((el, i) => {
+            const next = this.formatCatalogCount(values[i]);
+            if (el.textContent !== next) el.textContent = next;
+        });
+
+        // Timeline des milestones (non animée — remplacement direct suffisant).
+        const timeline = step.querySelector('.source-sync-timeline');
+        if (timeline) {
+            timeline.innerHTML = this.catalogMilestones(progress, counts).map(s => this.renderCatalogMilestone(s)).join('');
+        }
+
+        // Copy du héros (bascule « Finishing touches » quand finalizing/99 %).
+        const hero = step.querySelector('.source-sync-hero p');
+        if (hero) {
+            const copy = this.catalogSyncingCopy(progress, percent, phase, source);
+            if (hero.textContent !== copy) hero.textContent = copy;
+        }
+        return true;
+    }
+
+    // Largeur : la transition CSS anime le remplissage vers la cible. Label % :
+    // compté en douceur vers la cible sur la même durée — le chiffre avance
+    // pourcent par pourcent au lieu de sauter de palier en palier.
+    animateCatalogBar(step, targetPercent, ready = false) {
+        const bar = step.querySelector('.source-sync-progress');
+        const wrap = step.querySelector('.source-sync-progress-wrap');
+        if (!bar) return;
+        const target = Math.max(0, Math.min(100, Number(targetPercent) || 0));
+        const determinate = target > 0 || ready;
+        bar.classList.toggle('is-determinate', determinate);
+        bar.style.setProperty('--source-sync-percent', `${target}%`);
+        if (determinate) bar.setAttribute('aria-valuenow', String(Math.round(target)));
+        else bar.removeAttribute('aria-valuenow');
+
+        let label = wrap ? wrap.querySelector('small') : null;
+        if (determinate && !label && wrap) {
+            label = document.createElement('small');
+            wrap.appendChild(label);
+        }
+        if (!label) return;
+
+        if (this._catalogBarTimer) { clearInterval(this._catalogBarTimer); this._catalogBarTimer = null; }
+        const shown = Number(String(label.textContent || '').replace('%', ''));
+        const start = Number.isFinite(shown) ? Math.max(0, Math.min(100, shown)) : target;
+        const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduced || Math.abs(target - start) < 1) {
+            label.textContent = `${Math.round(target)}%`;
+            return;
+        }
+        const durationMs = 2400; // même durée que la transition CSS de la largeur
+        const startedAt = Date.now();
+        this._catalogBarTimer = setInterval(() => {
+            const t = Math.min(1, (Date.now() - startedAt) / durationMs);
+            const eased = 1 - Math.pow(1 - t, 3);
+            label.textContent = `${Math.round(start + (target - start) * eased)}%`;
+            if (t >= 1 || !label.isConnected) {
+                clearInterval(this._catalogBarTimer);
+                this._catalogBarTimer = null;
+            }
+        }, 120);
     }
 
     async recoverCatalogFinalization(sourceId, token, render) {
@@ -985,7 +1078,11 @@ class SourceManager {
         const render = (source) => {
             const { phase } = this.sourceSyncState(source);
             title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? 'TV service needs attention' : 'Preparing your catalog';
-            body.innerHTML = this.renderCatalogPreparation(source, type);
+            // Patch en place sur un tick de même phase (la barre garde son élément →
+            // la transition CSS anime) ; rebuild complet uniquement sur transition.
+            if (!this.patchCatalogPreparation(body, source, type)) {
+                body.innerHTML = this.renderCatalogPreparation(source, type);
+            }
 
             // Only rebuild the footer (and its focusable buttons) when the actionable
             // state actually changes. During a long import the phase stays "preparing"

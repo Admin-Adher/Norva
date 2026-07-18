@@ -1819,10 +1819,23 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // limit so batchLimit >= 1000 never reads a capped page as "short" and stops early.
       const pageCap = Math.min(batchLimit, 1000);
       const done = rows.length === 0 || rows.length < pageCap;
+      // Aligné sur norva-source-sync (audit 18/07) : la barre user remplit 86→99 vers
+      // le seuil USABLE (premier bloc de titres — minutes) puis épingle 100 + usable,
+      // pas vers le catalogue VOD entier (heures). Sans ça, quand CE moteur (co-pilot
+      // client, driver en stall) prenait la main, la même progression physique
+      // affichait un autre pourcentage et la barre rampait sur des heures.
+      const usableThreshold = (() => {
+        const t = boundedInt(Deno.env.get("NORVA_USABLE_TITLE_THRESHOLD"), 2000, 0, 200000);
+        return t > 0 ? Math.min(totalVod, t) : totalVod;
+      })();
+      const usable = nextOffset >= usableThreshold;
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: done ? 99 : titleFinalizePercent(nextOffset, totalVod),
-        steps: { finalize: { status: "running" } },
+        percent: usable ? 100 : (done ? 99 : titleFinalizePercent(nextOffset, usableThreshold)),
+        // usable=false n'est jamais écrit : si le driver source-sync a déjà posé
+        // usable=true, un batch co-pilot en retard ne doit pas dé-readier le client.
+        ...(usable ? { usable: true } : {}),
+        steps: { finalize: { status: usable ? "done" : "running" } },
       });
       return {
         sourceId,
@@ -1834,6 +1847,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         limit: batchLimit,
         totalVod,
         done,
+        usable,
         ...result,
         titleProjection,
       };

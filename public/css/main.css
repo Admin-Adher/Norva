@@ -3641,6 +3641,17 @@ video::cue {
   width: var(--source-sync-percent, 0%);
   transform: none;
   animation: none;
+  /* Les pourcents serveur arrivent par paliers (bandes 18→66, 68, 71, 74, 76-99) :
+     la transition transforme chaque palier en glissade au lieu d'une téléportation.
+     Ne joue que si l'élément est PATCHÉ en place (SourceManager.patchCatalogPreparation)
+     — un innerHTML rebuild recrée l'élément et repart sans animation. */
+  transition: width 2.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-sync-progress.is-determinate span {
+    transition: none;
+  }
 }
 
 .source-sync-timeline {
