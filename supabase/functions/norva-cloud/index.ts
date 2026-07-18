@@ -105,6 +105,35 @@ const EPG_MAX_XML_BYTES = 80_000_000;
 const EPG_MAX_PROGRAMMES = 80_000;
 const epgCache = new Map<string, { expiresAt: number; data: unknown }>();
 
+// ── Presence gate (incident VOD mobile 2026-07-18) ──────────────────────────────
+// A viewer's FIRST play attempt has no busy-lock signal yet: the lock's writers
+// (session/event/history/gateway reporter) only fire once a stream exists, so a
+// background probe that starts while they browse takes the provider's single
+// slot and the launch collides (458 → minutes of client retries, or a terminal
+// mobile error). Fix: any authenticated app/site activity marks the user's
+// provider accounts busy ("presence"), so probes stand down BEFORE the first
+// play. Throttled per user per isolate; best-effort (never fails the request);
+// deliberately NOT wired to the TV device heartbeat — an idle keepalive is not
+// presence, and counting it would starve the night enrichment windows.
+const PRESENCE_TOUCH_INTERVAL_MS = 60_000;
+const presenceTouchedAt = new Map<string, number>();
+function touchUserPresence(db: SupabaseClient, userId: string) {
+  try {
+    const now = Date.now();
+    if (now - (presenceTouchedAt.get(userId) ?? 0) < PRESENCE_TOUCH_INTERVAL_MS) return;
+    presenceTouchedAt.set(userId, now);
+    if (presenceTouchedAt.size > 1000) {
+      for (const [key, at] of presenceTouchedAt) {
+        if (now - at >= PRESENCE_TOUCH_INTERVAL_MS) presenceTouchedAt.delete(key);
+      }
+    }
+    waitUntil(Promise.resolve(db.rpc("provider_account_touch_by_user", { p_user: userId, p_kind: "presence" }))
+      .then(({ error }) => {
+        if (error) console.warn("[norva-cloud] presence touch failed", error.message);
+      }));
+  } catch (_) { /* best-effort */ }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
@@ -209,6 +238,9 @@ async function route(
 
   if (scope === "device") {
     const device = await requireDevice(req, db);
+    // Presence gate: any real device activity (not the idle heartbeat keepalive)
+    // stands the user's probes down before their first play of the session.
+    if (id !== "heartbeat") touchUserPresence(db, device.user_id);
     if (req.method === "GET" && id === "me") return { body: { device } };
     // Self-unpair: the paired screen (e.g. a TV) revokes ITS OWN device token on
     // logout, so the account drops this screen and the token can't silently
@@ -342,6 +374,10 @@ async function route(
   }
 
   const user = await requireUser(req, db);
+
+  // Presence gate: the user is actively using the app/site — stand their probes
+  // down now, before the first play attempt of the session (see helper above).
+  touchUserPresence(db, user.id);
 
   // Cold-start aggregation: a fresh app load otherwise fans out into ~7 separate
   // norva-cloud calls (profile, profiles, entitlements, sources, trial, …), each

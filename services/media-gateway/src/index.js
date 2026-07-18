@@ -566,6 +566,80 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
 // from an IP the provider accepts (no FFmpeg, no transcode). Auth is a per-
 // session HMAC token signed by the playback function with the shared gateway
 // token, carried in the path; the engine fetches it cross-origin with Range.
+// ── /raw junk-body guard (2026-07-18 mobile VOD incident) ────────────────────────
+// Textual content-types that legit stream bytes never carry. Everything else
+// (video/*, audio/*, application/octet-stream, absent header) pipes untouched.
+const NON_MEDIA_CONTENT_TYPE_RE = /^\s*(?:text\/|application\/(?:json|problem\+json|xml|xhtml\+xml))/i;
+
+// One read of the response body — the leading chunk decides. A busy/ban page
+// arrives whole in the first chunk; real media leads with its container magic.
+async function sniffLeadingBytes(webBody, signal) {
+    const reader = webBody.getReader();
+    try {
+        const { value, done } = await reader.read();
+        return { chunk: done || !value ? Buffer.alloc(0) : Buffer.from(value), reader };
+    } catch (err) {
+        if (!(signal && signal.aborted)) {
+            console.warn('[media-gateway] /raw body sniff failed:', redactCreds(String((err && err.message) || err)));
+        }
+        return { chunk: Buffer.alloc(0), reader };
+    }
+}
+
+// Container magics of everything the /raw lane pipes (mp4/mov, mkv/webm, MPEG-TS,
+// flv, avi/wav, ogg, mp3/ADTS, HLS playlist). Unknown BINARY leaders still pipe
+// (fail-open: the player's own sniffer decides); only a text-shaped body under a
+// textual content-type is refused — that shape is a busy/ban page, not a stream.
+function looksLikeMediaStart(buf) {
+    if (!buf || buf.length === 0) return false; // empty 2xx body = dead link, not a stream
+    const head = buf.toString('latin1', 0, Math.min(buf.length, 16));
+    if (buf.length >= 8 && head.slice(4, 8) === 'ftyp') return true; // mp4 / mov
+    if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return true; // mkv/webm (EBML)
+    if (head.startsWith('FLV')) return true;
+    if (buf[0] === 0x47 && (buf.length < 189 || buf[188] === 0x47)) return true; // MPEG-TS sync byte(s)
+    if (head.startsWith('RIFF')) return true; // avi / wav
+    if (head.startsWith('OggS')) return true;
+    if (head.startsWith('ID3') || (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return true; // mp3 / ADTS
+    if (head.startsWith('#EXTM3U')) return true; // HLS playlist relayed as-is
+    return !looksLikeTextStart(buf);
+}
+
+// "Text-shaped": printable ASCII + whitespace across the whole sample (optional
+// UTF-8 BOM). An HTML/JSON/XML busy page matches; any real container hits a
+// control byte within the first few bytes.
+function looksLikeTextStart(buf) {
+    let i = 0;
+    if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) i = 3;
+    const n = Math.min(buf.length, 256);
+    for (; i < n; i += 1) {
+        const b = buf[i];
+        const printable = (b >= 0x20 && b !== 0x7f) || b === 0x09 || b === 0x0a || b === 0x0d;
+        if (!printable) return false;
+    }
+    return true;
+}
+
+// Rebuild a Node stream from a sniffed body: replay the leading chunk, then pump
+// the remaining web-stream reads. destroy() cancels the reader so the provider
+// connection (the account's single slot) drops with the client, like fromWeb does.
+function readableFromSniffedBody(sniffed) {
+    const { Readable } = require('stream');
+    let leading = sniffed.chunk && sniffed.chunk.length ? sniffed.chunk : null;
+    const reader = sniffed.reader;
+    return new Readable({
+        read() {
+            if (leading) { const c = leading; leading = null; this.push(c); return; }
+            reader.read().then(({ value, done }) => {
+                if (done) this.push(null);
+                else this.push(Buffer.from(value));
+            }).catch((err) => this.destroy(err));
+        },
+        destroy(err, cb) {
+            Promise.resolve().then(() => reader.cancel()).catch(() => {}).then(() => cb(err));
+        },
+    });
+}
+
 app.get('/raw/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
@@ -600,6 +674,7 @@ app.get('/raw/:token', async (req, res) => {
     // Anything else (206/200/404/...) passes straight through.
     const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT;
     let upstream = null;
+    let sniffedBody = null; // { chunk, reader } when a suspect 2xx body was sniffed and proved to be real media
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
             upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal, dispatcher: pickProxyAgent(claims.uid || proxyKeyFromUrl(claims.url)) || undefined });
@@ -619,6 +694,33 @@ app.get('/raw/:token', async (req, res) => {
             await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
             continue;
         }
+        // A single-slot panel refusing a connection often answers with an HTML/JSON
+        // "busy"/ban page on HTTP 200 (2026-07-18 mobile VOD incident). Piped through,
+        // those bytes reach the native player as an unparseable "container"
+        // (ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) — a dead-end its recovery ladder
+        // used to ignore, whereas a real HTTP error arms fallback/retry. Only textual
+        // content-types are suspected (panels routinely mislabel real media as
+        // octet-stream, and players ignore the header anyway), and the leading bytes
+        // are sniffed so a panel that mislabels REAL media as text keeps playing.
+        // Junk retries like a 458: same slot-release window, same backoff.
+        if (method === 'GET' && upstream.ok && upstream.body
+            && NON_MEDIA_CONTENT_TYPE_RE.test(String(upstream.headers.get('content-type') || ''))) {
+            const probe = await sniffLeadingBytes(upstream.body, ac.signal);
+            if (ac.signal.aborted) { try { await probe.reader.cancel(); } catch (_) {} try { res.end(); } catch (_) {} return; }
+            if (looksLikeMediaStart(probe.chunk)) { sniffedBody = probe; break; }
+            try { await probe.reader.cancel(); } catch (_) {} // free the slot before retrying
+            if (attempt < maxAttempts) {
+                console.warn(`[media-gateway] /raw provider sent a non-media body (status ${upstream.status}, attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1]}ms`);
+                await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+                continue;
+            }
+            console.warn(`[media-gateway] /raw provider kept sending a non-media body (status ${upstream.status}); refusing to pipe it as a stream`);
+            return res.status(502).json({
+                error: 'Provider returned a non-media body (busy/ban page) instead of stream bytes',
+                upstreamStatus: upstream.status,
+                contentType: String(upstream.headers.get('content-type') || '') || null,
+            });
+        }
         break;
     }
     if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
@@ -631,7 +733,9 @@ app.get('/raw/:token', async (req, res) => {
     if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=30');
     if (method === 'HEAD' || !upstream.body) { res.end(); return; }
-    const nodeStream = require('stream').Readable.fromWeb(upstream.body);
+    const nodeStream = sniffedBody
+        ? readableFromSniffedBody(sniffedBody)
+        : require('stream').Readable.fromWeb(upstream.body);
     // In-band header capture: if this response carries the file's LEADING bytes, tee them
     // (best-effort) so a later codec probe reads the header locally instead of opening a
     // second provider connection. Attached BEFORE pipe() so no leading chunk is missed;
