@@ -16,7 +16,7 @@
 -- Interprétation rapide :
 --   1) Ouvrir l'app/le site avec le compte pilote.
 --   2) Relancer ce script dans les 60 secondes.
---   3) Les lignes [C] doivent afficher busy=true et age_seconds faible (< 300).
+--   3) Les lignes [C] doivent afficher busy=true, age_seconds faible (< 300), verdict=OK_BUSY_FRESH.
 --      Si [C] est vide, le compte n'a pas de source Xtream exploitable (serverHost+username)
 --      ou le touch presence n'est pas arrivé.
 --   4) [D] liste les crons qui touchent des slots provider : ils restent actifs dans pg_cron,
@@ -68,21 +68,43 @@ select k.account_key,
        a.kind,
        a.last_seen_at,
        case when a.last_seen_at is null then null else round(extract(epoch from now() - a.last_seen_at))::int end as age_seconds,
-       public.provider_account_busy(k.account_key) as busy
+       public.provider_account_busy(k.account_key) as busy,
+       case
+         when a.last_seen_at is null then 'NO_ACTIVITY_ROW'
+         when public.provider_account_busy(k.account_key) then 'OK_BUSY_FRESH'
+         when a.last_seen_at <= now() - interval '5 minutes' then 'STALE_NOT_BUSY_REOPEN_APP'
+         else 'NOT_BUSY_UNEXPECTED'
+       end as verdict
 from provider_keys k
 left join public.provider_account_activity a on a.account_key = k.account_key
-order by k.account_key;
+order by busy desc, a.last_seen_at desc nulls last, k.account_key;
 
 \echo '================ [D] Crons/sondes provider-slot à surveiller ================'
-select j.jobid,
-       j.jobname,
-       j.schedule,
-       j.active,
-       regexp_replace(j.command, E'[\\n\\r\\t ]+', ' ', 'g') as command
-from cron.job j
-where coalesce(j.jobname, '') ilike any (array['%audio%', '%probe%', '%backfill%', '%enrich%'])
-   or coalesce(j.command, '') ilike any (array['%audio%', '%probe%', '%backfill%', '%enrich%', '%provider_account_busy%'])
-order by j.jobname nulls last, j.jobid;
+with pilot_sources as (
+  select s.id::text as source_id
+  from public.cloud_sources s
+  where s.user_id = :'USER_ID'::uuid
+), provider_slot_jobs as (
+  select j.jobid,
+         j.jobname,
+         j.schedule,
+         j.active,
+         coalesce(j.command, '') as command,
+         coalesce(j.command, '') ilike '%' || :'USER_ID' || '%' as pilot_user_match,
+         exists (select 1 from pilot_sources ps where coalesce(j.command, '') ilike '%' || ps.source_id || '%') as pilot_source_match
+  from cron.job j
+  where coalesce(j.jobname, '') ilike any (array['%audio%', '%probe%', '%backfill%', '%enrich%', '%subtitle%', '%whisper%'])
+     or coalesce(j.command, '') ilike any (array['%audio%', '%probe%', '%backfill%', '%enrich%', '%subtitle%', '%whisper%', '%provider_account_busy%'])
+)
+select jobid,
+       jobname,
+       schedule,
+       active,
+       pilot_user_match,
+       pilot_source_match,
+       regexp_replace(command, E'[\\n\\r\\t ]+', ' ', 'g') as command
+from provider_slot_jobs
+order by (pilot_user_match or pilot_source_match) desc, jobname nulls last, jobid;
 
 \echo '================ [E] Derniers runs account-busy / skipped / live-session (24 h) ================'
 select d.start_time,
