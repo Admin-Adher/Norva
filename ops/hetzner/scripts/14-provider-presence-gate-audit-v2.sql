@@ -6,6 +6,9 @@
 -- Si la box répond "No such file or directory" après git pull, tu es encore sur main sans
 -- cette PR : utilise temporairement la commande docker directe donnée dans la conversation.
 --
+-- Pour tester la version de PR sans merge via `git show origin/<branche>:...`, lance d'abord
+-- `git fetch origin <branche>` afin de ne pas relire une ancienne copie de la branche distante.
+--
 -- Depuis ~/norva/ops/hetzner :
 --   ./scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
 --
