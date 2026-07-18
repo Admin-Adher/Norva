@@ -603,6 +603,27 @@ deep-linkables `#admin/marketing[/promos|/notifs]` :
 Périmètre : les pushs n'atteignent que les appareils **Android app** ayant
 accepté les notifications (pas le web, pas la TV — pas de FCM là-bas).
 
+**Recette « 0 appareil enregistré » — diagnostic (référence ops).** La chaîne :
+FCM token (app) → prefs → bridge WebView `getPushToken` → app.js
+`registerPushToken()` (6 essais × 1,5 s au boot) → POST norva-cloud
+`/push-token` → `cloud_push_tokens`. Constat :
+
+- Côté box, l'envoi est PRÊT : le test d'Adrien a renvoyé `ok` (la route
+  vérifie `fcmConfigured()` AVANT de lire les tokens → le secret
+  `FCM_SERVICE_ACCOUNT` est bien posé).
+- Le maillon mort est à la SOURCE : **`app/google-services.json` est gitignoré
+  (volontaire — c'est une config par projet Firebase) et le build.gradle
+  n'applique le plugin Firebase QUE si le fichier est présent**. Sans lui,
+  `FirebaseMessaging.getToken()` échoue silencieusement (« push disabled, app
+  continues normally ») → aucun token n'existe sur le téléphone → rien à
+  enregistrer. « Notifications acceptées » dans les réglages Android = la
+  permission OS seulement, pas FCM.
+- Fix opérationnel (pas de code) : Firebase Console → projet (LE MÊME que le
+  service account du secret box) → app Android `tv.norva.phone` → télécharger
+  `google-services.json` → le poser dans `clients/android-phone/app/` sur la
+  machine de build → rebuild + réinstaller/republier. Au premier lancement
+  connecté, le token remonte et l'appareil apparaît dans Marketing.
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
