@@ -155,7 +155,15 @@ class AdminPage {
 #page-admin .crm-nav-item.active{background:linear-gradient(90deg,rgba(91,124,250,.22),rgba(168,85,247,.09));color:#c6d0ff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(120,150,255,.16);}
 #page-admin .crm-nav-item.active .ic{opacity:1;}
 #page-admin .crm-nav-item.active::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,#5b7cfa,#a855f7);}
-#page-admin .crm-side-foot{margin-top:auto;padding:11px 12px;font-size:11px;color:var(--adm-tx3);line-height:1.5;background:rgba(255,255,255,.03);border:1px solid var(--adm-line2);border-radius:11px;}
+#page-admin .crm-side-foot{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px 11px;background:linear-gradient(135deg,rgba(91,124,250,.10),rgba(168,85,247,.05));border:1px solid var(--adm-line2);border-radius:12px;box-shadow:inset 0 0 0 1px rgba(120,150,255,.08);cursor:default;transition:box-shadow .15s;}
+#page-admin .crm-side-foot:hover{box-shadow:inset 0 0 0 1px rgba(120,150,255,.22);}
+#page-admin .sf-ava{flex:none;width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;letter-spacing:.02em;box-shadow:0 2px 8px rgba(91,124,250,.35);}
+#page-admin .sf-tx{flex:1;min-width:0;line-height:1.35;}
+#page-admin .sf-name{font-size:11.5px;font-weight:700;color:var(--adm-tx);display:flex;align-items:center;gap:6px;}
+#page-admin .sf-name .sf-shield{font-size:10px;opacity:.9;}
+#page-admin .sf-mail{display:block;font-size:10.5px;color:var(--adm-tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .sf-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.15);animation:sfPulse 2.4s ease-in-out infinite;}
+@keyframes sfPulse{0%,100%{box-shadow:0 0 0 3px rgba(52,211,153,.15);}50%{box-shadow:0 0 0 5px rgba(52,211,153,.05);}}
 #page-admin .crm-main{flex:1;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;background:radial-gradient(1100px 520px at 78% -8%,rgba(91,124,250,.10),transparent 60%),radial-gradient(760px 420px at 8% 0%,rgba(168,85,247,.06),transparent 55%),var(--adm-bg);}
 #page-admin .crm-topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;padding:13px 26px;background:rgba(10,13,22,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--adm-line);}
 #page-admin .crm-crumb{font-size:15px;font-weight:700;color:var(--adm-tx);}
@@ -639,7 +647,18 @@ class AdminPage {
   <aside class="crm-sidebar">
     <div class="crm-brand"><svg class="crm-logo" viewBox="0 0 48 48" width="30" height="30" fill="none" aria-hidden="true"><defs><linearGradient id="ncg" x1="7" y1="5" x2="41" y2="43" gradientUnits="userSpaceOnUse"><stop stop-color="#5b8cff"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs><rect x="1.6" y="1.6" width="44.8" height="44.8" rx="13" fill="#0b1022" stroke="url(#ncg)" stroke-width="1.7"/><circle cx="24" cy="25.5" r="11.5" fill="none" stroke="url(#ncg)" stroke-width="2.2" opacity=".8"/><circle cx="24" cy="21" r="4.4" fill="url(#ncg)"/><path d="M16 33.4c0-4.4 3.6-7.2 8-7.2s8 2.8 8 7.2z" fill="url(#ncg)"/><circle cx="24" cy="14" r="3.2" fill="#8fb0ff"/><circle cx="14" cy="31" r="3.2" fill="#6f8dff"/><circle cx="34" cy="31" r="3.2" fill="#c084fc"/></svg><span>Norva CRM</span></div>
     <nav id="crm-nav">${nav}</nav>
-    <div class="crm-side-foot">Admin · accès restreint<br>rôle app_metadata.role</div>
+    ${(() => {
+        // Carte de session : humain devant (initiale, rôle, email), technique en tooltip.
+        // L'accès réel est gardé SERVEUR (is_admin() sur chaque RPC) — ceci n'est que de l'UX.
+        const em = String(this.app?.currentUser?.email || '');
+        const ini = (em.trim()[0] || 'A').toUpperCase();
+        return `<div class="crm-side-foot" title="Accès restreint — contrôlé côté serveur (app_metadata.role = 'admin', is_admin() sur chaque RPC)">
+      <span class="sf-ava">${AdminPage.esc(ini)}</span>
+      <span class="sf-tx"><span class="sf-name">Administrateur <span class="sf-shield">🛡️</span></span>
+      <span class="sf-mail">${AdminPage.esc(em || 'Session sécurisée')}</span></span>
+      <span class="sf-dot" aria-label="Session active"></span>
+    </div>`;
+    })()}
   </aside>
   <main class="crm-main" tabindex="-1">
     <div class="crm-topbar">
