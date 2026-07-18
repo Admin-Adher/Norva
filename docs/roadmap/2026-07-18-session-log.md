@@ -189,6 +189,26 @@ publique** — `/prices` renvoie `campaign.bg_path` (chemin bucket) et c'est
 tous ses appels API). La carte admin n'était pas touchée (elle construit déjà
 depuis `_sbUrl()`). Redéploiement edge requis (norva-revolut + _shared).
 
+### Épilogue fond de campagne — la traque du cache (référence incident)
+
+Le fond restait noir chez Adrien alors que TOUTE la chaîne serveur était prouvée
+saine (simulation jsdom des fichiers servis + vraie API : calque créé ✓). Sa
+console a fini par montrer `campaign={bg_path}` brut = **ancien billing.js en
+exécution**, alors que le CDN servait le bon contenu sous la bonne URL hashée.
+Cause : copie périmée **figée dans le cache HTTP navigateur** — les assets
+hashés sont servis `immutable/max-age=1 an`, et le fetch interne du service
+worker n'obéit PAS au « Disable cache » de DevTools : une copie logée pendant
+la fenêtre d'un déploiement n'est plus jamais re-demandée. Leçons codées :
+
+1. **Toute modification de `billing.js` évince tous les caches** (le hash de
+   contenu change l'URL) — c'est le mécanisme d'éviction universel.
+2. **La page tolère un billing.js périmé** : subscribe.html sait construire
+   l'URL du visuel depuis le `bg_path` brut.
+3. Réimplémentation du fond sur le **canvas du document** (`html.has-campaign`,
+   body transparent) — zéro dépendance à l'ordre de peinture, contrairement au
+   calque `z-index:-1` initial.
+4. Témoin : `console.warn` si l'image ne charge pas — plus d'échec muet.
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
