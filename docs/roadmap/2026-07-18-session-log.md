@@ -1,6 +1,13 @@
-# Session 2026-07-18 — audit upsell mensuel→annuel + 5 lots de correctifs
+# Session 2026-07-18 — audit upsell mensuel→annuel, tarifs dynamiques & promos
 
-**Statut : 5 commits + 1 doc sur la branche `claude/client-location-revolut-playstore-p9nf74`, poussés sur `main`. Reste à déployer sur la box : 1 migration (`supabase_admin`, PAS de NOTIFY pgrst) + 4 edge functions (checklist en bas).**
+**Statut final : TOUT est livré ET déployé (box + Cloudflare Pages), vérifié en
+recette. Trois chantiers dans la journée : (1) audit upsell mensuel→annuel →
+5 lots de correctifs ; (2) plan courant + protection des grants manuels +
+upsell annuel ; (3) tarifs web à source unique `billing_prices` + promos
+événementielles (badge, thèmes, visuel de campagne plein écran) + page de
+vente sans scroll. Migrations appliquées en `supabase_admin` : 20260718100000,
+-150000, -170000, -190000, -210000 (cette dernière : si l'upload de visuel
+marche, elle est passée — sinon l'appliquer, idempotente).**
 
 Question d'origine : *« quelle est la logique quand un client paie en mensuel
 3 mois puis passe en annuel ? »* — audit par workflow (26 agents : 5 lecteurs par
@@ -62,6 +69,23 @@ ne marquait jamais le plan courant (gap général, pas seulement VIP).
   and save » sur la page abonnement (statut `active` seulement), qui mène droit
   au checkout plan_change. Économies calculées depuis les prix réels
   (`data-monthly/annual`, `billing-config.js`) — jamais codées en dur.
+
+## Suite de la journée — commits (lots 6-9 + fixes de recette)
+
+| Commit | Sujet |
+|---|---|
+| `e7ab042` | Checklist box : chemin réel `~/norva` (pas `/opt/norva`) + garde-fou |
+| `d8d3a94` | Lot 6 — plan courant marqué + grants manuels inécrasables (kind jamais trial_setup si abonnement vivant, verrou /confirm) |
+| `97847ed` | Upsell annuel honnête (hint carte + ligne « Switch and save » abonnement) |
+| `e924c92` | Lot 7 — `billing_prices` source unique + `/prices` + carte « 💵 Tarifs web » |
+| `a06514c` | Lot 8 — promos événementielles (base/promo/événement/échéance) + no-scroll v1 |
+| `d55a576` | Lot 9 — avantages toujours visibles + thèmes visuels par événement |
+| `209e4a4` | Fix upload visuel : policy SELECT `promo-assets` (migration 20260718210000) |
+| `a7ad94f` | Visuel de campagne → fond plein écran de la page (plus dans la carte) |
+| `43c322c` | Fix `kong:8000` : l'edge renvoie un chemin, le front construit l'URL |
+| `8329765` | Voile de lisibilité allégé (16/50/90 %) |
+| `b73f4a3` | Fond peint sur le canvas du document (`html.has-campaign`) + témoin console |
+| `0cda48d` | Tolérance billing.js périmé + éviction du cache immutable (hash) |
 
 ## Nuances actées, non corrigées (volontaire)
 
@@ -134,12 +158,16 @@ Recette d'Adrien sur le Lot 8, deux corrections :
   dégradé sombre par-dessus pour la lisibilité. `?v=72`, `billing.js` expose
   `campaign.bg_url` dans le catalogue.
 
-## Déploiement box — Lots 7+8 (FAIT le 2026-07-18) · Lot 9 (à faire)
+## Déploiement box — Lots 7+8+9 : FAIT le 2026-07-18 (sorties propres)
+
+Séquence de référence si rejeu nécessaire (idempotent) :
 
 ```bash
 cd ~/norva && git pull origin main
-docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-  < supabase/migrations/20260718190000_promo_campaign_visual.sql
+for m in 20260718150000_billing_prices 20260718170000_billing_promos \
+         20260718190000_promo_campaign_visual 20260718210000_promo_assets_select_policy; do
+  docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+    < supabase/migrations/${m}.sql; done
 docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```

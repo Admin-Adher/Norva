@@ -7,7 +7,8 @@
 > - **Où on en est** = ce fichier.
 > - **Comment finir** (procédures détaillées) = [`docs/roadmap/billing-setup.md`](./billing-setup.md).
 >
-> _Dernière mise à jour : 2026-06-22._
+> _Dernière mise à jour : 2026-07-18 (tarification dynamique & promos — voir la
+> mise à jour datée ci-dessous)._
 
 ---
 
@@ -26,6 +27,32 @@ Branche de dev : **`claude/eager-carson-2zlqwy`**.
 Projet Supabase : **`oupsceccxsonaalhueff`**.
 
 ---
+
+## 💵 MISE À JOUR 2026-07-18 — tarification dynamique, promos & durcissement upsell (LIVE)
+
+> Détail complet : [`2026-07-18-session-log.md`](./2026-07-18-session-log.md).
+> Tout est **déployé et vérifié** (box + Pages). À savoir pour ne pas re-découvrir :
+
+- **Les prix web ne sont PLUS codés en dur** : source unique `billing_prices`
+  (base + promo optionnelle avec événement → badge et échéance auto-désactivante),
+  lue par les edge via `_shared/prices.ts` (cache 60 s, repli `DEFAULT_PRICES`)
+  et par le front via `GET norva-revolut/prices` (public). Modifier un tarif ou
+  lancer une promo = carte **« 💵 Tarifs web » de Finance** (2 clics). Les abonnés
+  existants gardent leur prix souscrit (le cron débite le mapping, jamais le
+  catalogue) ; `/checkout` stampe le montant dans les metadata de l'ordre
+  (équité si la promo finit en cours de saisie). Visuel de campagne plein écran
+  uploadable (bucket public `promo-assets`). Rail Play hors périmètre (promos
+  dans la Play Console).
+- **Upsell mensuel→annuel durci** (audit 26 agents, 21 constats confirmés) :
+  plan_change commité uniquement à l'ordre PAYÉ, MRR annuel /12 partout,
+  `PRODUCT_CHANGE` → ledger `plan_change` (exclu conversions/TVA), remplacement
+  Play natif (`WITH_TIME_PRORATION`), textes UI honnêtes, grants manuels (VIP
+  2099) inécrasables, plan courant marqué sur la page tarifs, upsell annuel avec
+  économie réelle affichée.
+- **Piège d'exploitation documenté** : un asset front « impossible à mettre à
+  jour » chez un client = copie immutable-cachée sous une URL hashée (le fetch du
+  service worker ignore Disable cache) → **modifier le fichier suffit** (nouveau
+  hash = éviction universelle). Cf. épilogue du journal 2026-07-18.
 
 ## ⚠️ MISE À JOUR 2026-07-01 — réalité high-risk & pivot Gumroad (hybride)
 
