@@ -724,15 +724,23 @@
         .catch(() => { /* prix statiques conservés */ });
     })();
 
-    // Badge « Save X% » du toggle annuel : recalculé depuis les prix affichés
-    // (datasets), donc juste aussi bien en promo qu'après son expiration.
+    // Badge « Save X% » du toggle annuel : réduction STRUCTURELLE annuelle,
+    // calculée sur les PRIX DE BASE — une promo mensuelle temporaire (ex.
+    // 3 $/mois pendant 3 mois) ne doit pas fausser la comparaison annuel/mensuel
+    // (sinon on afficherait un « Save 3% » absurde). Hors promo, les datasets
+    // portent déjà le prix de base : même résultat.
     function refreshToggleSaveBadge() {
       const saveBadge = document.querySelector('.billing-toggle .save-badge');
       if (!saveBadge) return;
       let best = 0;
       prices.forEach(price => {
-        const m = Number.parseFloat(String(price.dataset.monthly || '').replace(',', '.'));
-        const a = Number.parseFloat(String(price.dataset.annual || '').replace(',', '.'));
+        const pl = planOfPrice(price);
+        const promoM = livePromos && livePromos[pl] && livePromos[pl].monthly;
+        const promoA = livePromos && livePromos[pl] && livePromos[pl].annual;
+        const m = (promoM && promoM.base_cents) ? promoM.base_cents / 100
+          : Number.parseFloat(String(price.dataset.monthly || '').replace(',', '.'));
+        const a = (promoA && promoA.base_cents) ? promoA.base_cents / 100
+          : Number.parseFloat(String(price.dataset.annual || '').replace(',', '.'));
         if (m > 0 && a > 0) best = Math.max(best, 1 - a / (12 * m));
       });
       if (best > 0.01) saveBadge.textContent = `Save ${Math.round(best * 100)}%`;

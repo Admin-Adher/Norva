@@ -24,14 +24,20 @@
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.05; margin-bottom: 10px; }
     .lead { color: var(--muted); font-size: 16px; line-height: 1.55; max-width: 620px; }
-    .toggle { display: inline-flex; gap: 4px; margin: 22px 0 6px; padding: 5px;
-      border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,0.04); }
-    .toggle button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px;
-      border: 0; border-radius: 999px; background: transparent; color: var(--muted);
-      font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
-    .toggle button.active { background: rgba(255,255,255,0.1); color: #fff; }
-    .save { padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 900;
-      text-transform: uppercase; color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
+    /* Dark glass so the toggle stays readable over any campaign artwork; the
+       active option carries a bright accent gradient — impossible to miss. */
+    .toggle { display: inline-flex; gap: 4px; margin: 22px 0 6px; padding: 6px;
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; background: rgba(10,13,20,0.72);
+      -webkit-backdrop-filter: blur(12px) saturate(130%); backdrop-filter: blur(12px) saturate(130%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 30px -16px rgba(0,0,0,0.85); }
+    .toggle button { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
+      border: 0; border-radius: 999px; background: transparent; color: #8c91b4;
+      font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: color 180ms ease; }
+    .toggle button.active { color: #fff; background: linear-gradient(135deg, #4d7bff, #6b3eff);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 22px -8px rgba(82,105,255,0.6); }
+    .save { padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 900;
+      text-transform: uppercase; color: #4fe0a8; background: rgba(52,211,153,0.16);
+      border: 1px solid rgba(52,211,153,0.35); box-shadow: 0 0 14px rgba(52,211,153,0.28); }
     .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 16px; }
     @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
     .card { position: relative; border: 1px solid var(--line); border-radius: 14px;
@@ -802,11 +808,17 @@
             const hint = card.querySelector('.save-hint');
             if (hint) hint.remove(); // rebuilt with the fresh numbers by refreshCtas
           });
-          // « Save X% » badge on the toggle: the real best saving across plans.
+          // « Save X% » badge on the toggle: the STRUCTURAL annual discount,
+          // computed from BASE prices — a temporary monthly promo (e.g. $3/mo
+          // for 3 months) must not distort the annual-vs-monthly comparison
+          // (it was reading the promo price and printing a nonsense « Save 3% »).
           let best = 0;
           Object.keys(prices).forEach(function (k) {
             const pl = prices[k];
-            if (pl && pl.monthly && pl.annual) best = Math.max(best, 1 - pl.annual / (12 * pl.monthly));
+            const pr = livePromos && livePromos[k];
+            const baseM = (pr && pr.monthly && pr.monthly.base_cents) || (pl && pl.monthly);
+            const baseA = (pr && pr.annual && pr.annual.base_cents) || (pl && pl.annual);
+            if (baseM && baseA) best = Math.max(best, 1 - baseA / (12 * baseM));
           });
           const save = document.querySelector('.toggle .save');
           if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';

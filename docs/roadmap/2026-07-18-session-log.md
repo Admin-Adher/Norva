@@ -465,6 +465,23 @@ chiffrées reprises telles quelles ; landing.css v39, landing.js v20) :
 - **Séparateurs réassurance** : `rgba(255,255,255,.08)`, padding 34 px.
 - Simulations : 24 assertions vertes (+ thumb, repli has-thumb, glow badge).
 
+### Toggle page de vente lisible + fix « Save X% » sur prix de base (recette)
+
+Deux points sur capture (page de vente sur fond de campagne Flash Sale) :
+
+- **Toggle invisible** : l'état actif était `rgba(255,255,255,.1)` sur conteneur
+  `rgba(255,255,255,.04)` — noyé dans le visuel de campagne. Passé en **verre
+  sombre** (`rgba(10,13,20,.72)` + backdrop-blur, toujours lisible quelle que
+  soit l'image) avec **état actif en dégradé accent** `#4d7bff→#6b3eff` + glow.
+  Badge « Save » harmonisé (vert translucide, comme la landing).
+- **« Save 3% » absurde** : le badge d'économie annuelle se calculait sur les
+  prix **effectifs** (donc le prix promo mensuel — ex. 3 $/mois pendant 3 mois).
+  Une promo mensuelle temporaire faussait complètement la comparaison
+  annuel/mensuel. Corrigé sur **page de vente ET landing** : calcul sur les
+  **prix de base** (`promos[plan][period].base_cents` sinon prix effectif) →
+  la réduction structurelle annuelle réelle (~30 %), stable pendant les promos.
+  Prouvé (cas piège promo sur les 2 plans : ancien 10 % faux → corrigé 30 %).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |
