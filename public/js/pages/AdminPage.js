@@ -543,6 +543,7 @@ class AdminPage {
 #page-admin .mkt-pv-ic{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,#5b7cfa,#a855f7);color:#fff;font-size:10px;font-weight:900;}
 #page-admin .mkt-pv-t{color:#fff;font-size:13px;font-weight:700;word-break:break-word;}
 #page-admin .mkt-pv-b{color:var(--adm-tx2);font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+#page-admin .mkt-log-clip{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--adm-tx2);font-size:12px;}
 #page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
 #page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
 #page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
@@ -1265,12 +1266,12 @@ class AdminPage {
             const list = Array.isArray(rows) ? rows : [];
             el.innerHTML = list.length
                 ? `<div class="scroll"><table><thead><tr><th>Date</th><th>Titre</th><th>Message</th><th class="num">Envoyés</th><th class="num">Échecs</th><th>Par</th></tr></thead><tbody>${list.map(r => `<tr>
-                    <td>${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td>${esc(r.title)}</td>
-                    <td class="ssub" style="max-width:340px">${esc(r.body)}</td>
+                    <td style="white-space:nowrap">${new Date(r.created_at).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td><div class="mkt-log-clip" style="max-width:180px" title="${esc(r.title)}">${esc(r.title)}</div></td>
+                    <td><div class="mkt-log-clip" title="${esc(r.body)}">${esc(r.body)}</div></td>
                     <td class="num">${n(r.sent_count)}</td>
                     <td class="num">${Number(r.fail_count) ? `<span class="badge red">${n(r.fail_count)}</span>` : '0'}${Number(r.dead_count) ? ` <span class="pacct" title="Tokens morts purgés pendant l'envoi">· ${n(r.dead_count)} purgé(s)</span>` : ''}</td>
-                    <td class="ssub">${esc(r.actor || '—')}</td>
+                    <td><div class="mkt-log-clip" style="max-width:180px" title="${esc(r.actor || '')}">${esc(r.actor || '—')}</div></td>
                 </tr>`).join('')}</tbody></table></div>`
                 : '<div class="ssub">Aucune notification marketing envoyée pour l\'instant — la première apparaîtra ici avec ses compteurs.</div>';
         } catch (e) {
