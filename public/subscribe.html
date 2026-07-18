@@ -266,8 +266,8 @@
         const msg = document.getElementById('confirm-msg');
         const cont = document.getElementById('confirm-continue');
         if (rs === 'plan_changed') {
-          title.textContent = 'Plan updated';
-          msg.textContent = 'Your new plan is active right away. The new price applies from your next billing cycle — nothing extra is charged today.';
+          title.textContent = 'Plan change confirmed';
+          msg.textContent = 'Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing extra is charged today.';
         } else if (rs === 'plan_scheduled') {
           title.textContent = 'Plan change scheduled';
           msg.textContent = 'Your new plan starts at your next billing cycle — you keep everything you already paid for until then.';
@@ -368,13 +368,25 @@
       });
 
       // Adjust CTA copy based on whether this account can still start a trial.
+      // The card-check reassurance box depends on this answer, so it is revealed
+      // from here (after the eligibility is known), not at page load.
       async function loadTrialEligibility() {
         try {
-          if (!window.NorvaCloud || !window.NorvaCloud.billing) return;
-          const res = await window.NorvaCloud.billing.trialEligibility();
-          trialEligible = res && res.eligible !== false;
+          if (window.NorvaCloud && window.NorvaCloud.billing) {
+            const res = await window.NorvaCloud.billing.trialEligibility();
+            trialEligible = res && res.eligible !== false;
+          }
         } catch (_) { /* keep default */ }
         document.querySelectorAll('.buy').forEach(function (b) { b.textContent = ctaLabel(); });
+        if (!trialEligible) {
+          // Existing/returning subscriber — every "free trial" promise on the page
+          // would be false for this account. Reword the static copy accordingly.
+          const lead = document.querySelector('.lead');
+          if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
+          const note = document.querySelector('.note');
+          if (note) note.textContent = 'Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.';
+        }
+        maybeShowAssurance();
       }
 
       // Tailor the contextual message to WHY the user hit the wall instead of a
@@ -426,12 +438,24 @@
 
       // The card-check hold only applies to the web checkout (Revolut). Reveal the
       // reassurance only there — native Play Billing (TV/mobile) takes no such hold, so it'd be wrong.
+      // Called from loadTrialEligibility(): the trial-flavored wording must never be
+      // shown to an account that can't start a trial (plan change / resubscribe) —
+      // for a resubscriber the first payment follows the card check, so this variant
+      // promises nothing about "no charge".
       function maybeShowAssurance() {
         try {
           const b = window.NorvaBilling;
           const webCheckout = b && (b.isRevolutEnabled && b.isRevolutEnabled());
           if (webCheckout && !b.hasNativeBilling()) {
             const el = document.getElementById('trial-assurance');
+            if (el && !trialEligible) {
+              const body = el.querySelector('div');
+              if (body) {
+                body.innerHTML = '<strong>Secure card check first.</strong> ' +
+                  'We verify your card with a tiny temporary authorization that is released right away and never debited. ' +
+                  'The exact billing for your plan is shown on the next screen before you confirm, and every payment comes with an email receipt.';
+              }
+            }
             if (el) el.classList.add('show');
             const pm = document.getElementById('pay-marks');
             if (pm) pm.classList.add('show');
@@ -466,9 +490,8 @@
         }
       }
       window.NorvaBilling.login(appUserId());
-      loadTrialEligibility();
+      loadTrialEligibility(); // reveals the card-check reassurance once eligibility is known
       checkExisting();
-      maybeShowAssurance();
       maybeGateRestore();
     })();
   </script>

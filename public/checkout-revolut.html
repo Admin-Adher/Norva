@@ -321,6 +321,10 @@
         const breakdown = document.getElementById('bill-breakdown');
         if (breakdown) breakdown.classList.toggle('hidden', special);
         if (after) after.hidden = !special;
+        // No new trial on these paths — the "after your 7-day free trial" price
+        // qualifier only belongs to a first trial_setup.
+        const sumPer = document.getElementById('sum-per');
+        if (sumPer && special) sumPer.textContent = (period === 'annual' ? '/yr' : '/mo');
         if (checkoutKind === 'card_update') {
           h1.textContent = 'Update your payment method';
           sub.textContent = 'Enter your new card — it becomes the card used for your Norva plan.';
@@ -328,7 +332,7 @@
           payBtn.textContent = 'Save card';
         } else if (checkoutKind === 'plan_change') {
           h1.textContent = 'Change your plan';
-          sub.textContent = 'Your new plan applies right away — no extra charge today, the new price starts next cycle.';
+          sub.textContent = 'No charge today — your current period is already paid and runs to its end. The new plan price applies at your next renewal.';
           after.textContent = 'Today: $0.00 — card check only, your current period is already paid.';
           payBtn.textContent = 'Confirm plan change';
         } else if (checkoutKind === 'resubscribe') {
@@ -377,8 +381,8 @@
       const SUCCESS_COPY = {
         trial_setup: ['Your free trial has started',
           "You have full access to Norva on every screen. You won't be charged until your 7-day trial ends — cancel anytime before then."],
-        plan_change: ['Plan updated',
-          'Your new plan is active right away. The new price applies from your next billing cycle.'],
+        plan_change: ['Plan change confirmed',
+          'Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing is charged today.'],
         resubscribe: ['Welcome back — your plan is active',
           'Your first payment is being processed and your receipt is on its way by email.'],
         card_update: ['Payment method updated',

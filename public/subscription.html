@@ -241,6 +241,14 @@
             if (!p) return;
             const msg = card.querySelector('.msg');
             function slot(node) { if (msg) card.insertBefore(node, msg); else card.appendChild(node); }
+            // Billing terms of record (what the next renewal will charge) — the one
+            // place a plan change becomes visible before the renewal happens.
+            if (p.amount_cents && p.period) {
+              const d0 = el('div', 'detail');
+              d0.appendChild(el('span', null, 'Billing'));
+              d0.appendChild(el('b', null, '$' + (p.amount_cents / 100).toFixed(2) + (p.period === 'annual' ? ' / year' : ' / month')));
+              slot(d0);
+            }
             if (p.card_last4) {
               const d = el('div', 'detail');
               d.appendChild(el('span', null, 'Payment method'));
