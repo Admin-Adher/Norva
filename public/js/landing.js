@@ -491,24 +491,31 @@
       birthday: 'linear-gradient(135deg,#f472b6,#8b5cf6)', flash: 'linear-gradient(135deg,#fde047,#f59e0b)',
       other: 'linear-gradient(135deg,#ff8067,#b579ff)'
     };
-    // Bordure + halo du chip de compte à rebours, aux couleurs de l'événement
-    // (mêmes teintes que PROMO_THEMES sur la page de vente).
+    // Habillage par événement : bordure/halo de la card en promo, teinte
+    // d'accent (ink : gros prix, CTA, coches) — mêmes teintes que PROMO_THEMES
+    // sur la page de vente — et picto du badge/chrono.
     const PROMO_EDGE = {
-      black_friday: { border: 'rgba(255,184,0,.5)', glow: 'rgba(255,184,0,.28)' },
-      cyber_monday: { border: 'rgba(99,102,241,.55)', glow: 'rgba(34,211,238,.26)' },
-      winter_sale: { border: 'rgba(125,211,252,.5)', glow: 'rgba(125,211,252,.26)' },
-      summer_sale: { border: 'rgba(251,146,60,.5)', glow: 'rgba(251,191,36,.26)' },
-      christmas: { border: 'rgba(239,68,68,.5)', glow: 'rgba(239,68,68,.26)' },
-      new_year: { border: 'rgba(250,204,21,.5)', glow: 'rgba(250,204,21,.26)' },
-      lunar_new_year: { border: 'rgba(245,158,11,.55)', glow: 'rgba(239,68,68,.28)' },
-      eid: { border: 'rgba(16,185,129,.5)', glow: 'rgba(16,185,129,.26)' },
-      easter: { border: 'rgba(165,180,252,.5)', glow: 'rgba(249,168,212,.24)' },
-      halloween: { border: 'rgba(249,115,22,.55)', glow: 'rgba(249,115,22,.28)' },
-      valentines: { border: 'rgba(225,29,72,.5)', glow: 'rgba(251,113,133,.26)' },
-      back_to_school: { border: 'rgba(56,189,248,.5)', glow: 'rgba(56,189,248,.24)' },
-      birthday: { border: 'rgba(139,92,246,.5)', glow: 'rgba(244,114,182,.26)' },
-      flash: { border: 'rgba(253,224,71,.55)', glow: 'rgba(253,224,71,.28)' },
-      other: { border: 'rgba(181,121,255,.5)', glow: 'rgba(181,121,255,.26)' }
+      black_friday: { border: 'rgba(255,184,0,.5)', glow: 'rgba(255,184,0,.28)', ink: '#ffb800' },
+      cyber_monday: { border: 'rgba(99,102,241,.55)', glow: 'rgba(34,211,238,.26)', ink: '#22d3ee' },
+      winter_sale: { border: 'rgba(125,211,252,.5)', glow: 'rgba(125,211,252,.26)', ink: '#7dd3fc' },
+      summer_sale: { border: 'rgba(251,146,60,.5)', glow: 'rgba(251,191,36,.26)', ink: '#fbbf24' },
+      christmas: { border: 'rgba(239,68,68,.5)', glow: 'rgba(239,68,68,.26)', ink: '#f87171' },
+      new_year: { border: 'rgba(250,204,21,.5)', glow: 'rgba(250,204,21,.26)', ink: '#facc15' },
+      lunar_new_year: { border: 'rgba(245,158,11,.55)', glow: 'rgba(239,68,68,.28)', ink: '#f59e0b' },
+      eid: { border: 'rgba(16,185,129,.5)', glow: 'rgba(16,185,129,.26)', ink: '#34d399' },
+      easter: { border: 'rgba(165,180,252,.5)', glow: 'rgba(249,168,212,.24)', ink: '#f9a8d4' },
+      halloween: { border: 'rgba(249,115,22,.55)', glow: 'rgba(249,115,22,.28)', ink: '#fb923c' },
+      valentines: { border: 'rgba(225,29,72,.5)', glow: 'rgba(251,113,133,.26)', ink: '#fb7185' },
+      back_to_school: { border: 'rgba(56,189,248,.5)', glow: 'rgba(56,189,248,.24)', ink: '#38bdf8' },
+      birthday: { border: 'rgba(139,92,246,.5)', glow: 'rgba(244,114,182,.26)', ink: '#f472b6' },
+      flash: { border: 'rgba(253,224,71,.55)', glow: 'rgba(253,224,71,.28)', ink: '#fbbf24' },
+      other: { border: 'rgba(181,121,255,.5)', glow: 'rgba(181,121,255,.26)', ink: '#b579ff' }
+    };
+    const PROMO_ICONS = {
+      black_friday: '🛍️', cyber_monday: '💻', winter_sale: '❄️', summer_sale: '☀️',
+      christmas: '🎄', new_year: '🎆', lunar_new_year: '🧧', eid: '🌙', easter: '🐣',
+      halloween: '🎃', valentines: '💘', back_to_school: '🎒', birthday: '🎂',
+      flash: '⚡', other: '✨'
     };
     function planOfPrice(price) {
       return price.closest('article')?.querySelector('a[data-plan]')?.dataset.plan || '';
@@ -571,44 +578,33 @@
           const amountText = (isAnnual ? price.dataset.annual : price.dataset.monthly) || amount.textContent;
           price.setAttribute('aria-label', `${currency}${amountText} ${isAnnual ? 'per year' : 'per month'}`.trim());
         }
-        // Promo active sur ce plan+période : rangée badge événement + pastille
-        // −X%, prix de référence barré (obligation Omnibus : l'ancien prix
-        // visible) et ligne d'économie verte — mêmes codes que la page de vente.
-        // Les rangées promo ont des slots subgrid dédiés (landing.css) : les
-        // deux cartes restent alignées même quand une seule est en promo.
+        // Promo active sur ce plan+période : la card s'habille aux couleurs de
+        // l'événement (maquette) — badge « ⚡ ÉVÉNEMENT − X% » en tête, ligne
+        // « You save … » au-dessus du titre, prix de référence barré au-dessus
+        // du gros prix teinté (obligation Omnibus : l'ancien prix visible),
+        // bordure/halo, CTA et coches assortis via --promo-ink (landing.css).
         const promo = livePromos && livePromos[planOfPrice(price)] && livePromos[planOfPrice(price)][currentPeriod];
         const article = price.closest('article');
-        let row = article?.querySelector('.promo-row');
-        let was = price.querySelector('.price-was');
+        let flag = article?.querySelector('.promo-flag');
         let save = article?.querySelector('.promo-save');
+        let wasLine = article?.querySelector('.promo-was');
         if (promo && promo.base_cents && article) {
           const effRaw = Number.parseFloat(String(isAnnual ? price.dataset.annual : price.dataset.monthly).replace(',', '.'));
           const effCents = Number.isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
           const pct = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
-          const bg = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
-          if (!row) {
-            row = document.createElement('div');
-            row.className = 'promo-row';
-            row.appendChild(Object.assign(document.createElement('span'), { className: 'promo-flag' }));
-            row.appendChild(Object.assign(document.createElement('span'), { className: 'promo-pct' }));
-            price.insertAdjacentElement('beforebegin', row);
+          const edge = PROMO_EDGE[promo.event] || PROMO_EDGE.other;
+          if (!flag) {
+            flag = document.createElement('span');
+            flag.className = 'promo-flag';
+            article.prepend(flag);
           }
-          const flag = row.querySelector('.promo-flag');
-          flag.textContent = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
-          flag.style.background = bg;
-          const pctEl = row.querySelector('.promo-pct');
-          pctEl.textContent = `−${pct}%`;
-          pctEl.style.background = bg;
-          if (!was) {
-            was = document.createElement('span');
-            was.className = 'price-was';
-            price.appendChild(was);
-          }
-          was.textContent = `${currency}${(promo.base_cents / 100).toFixed(2)}`;
+          const label = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
+          flag.textContent = `${PROMO_ICONS[promo.event] || PROMO_ICONS.other} ${label} − ${pct}%`;
+          flag.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
           if (!save) {
             save = document.createElement('small');
             save.className = 'promo-save';
-            price.insertAdjacentElement('afterend', save);
+            flag.insertAdjacentElement('afterend', save);
           }
           let saveTxt = `You save ${currency}${((promo.base_cents - effCents) / 100).toFixed(2)}${isAnnual ? '/yr' : '/mo'}`;
           if (promo.cycles) {
@@ -616,10 +612,29 @@
             saveTxt += promo.cycles === 1 ? ` for your first ${unit}` : ` for your first ${promo.cycles} ${unit}s`;
           }
           save.textContent = saveTxt;
+          if (!wasLine) {
+            wasLine = document.createElement('div');
+            wasLine.className = 'promo-was';
+            wasLine.appendChild(document.createElement('s'));
+            wasLine.appendChild(document.createElement('span'));
+            price.insertAdjacentElement('beforebegin', wasLine);
+          }
+          wasLine.querySelector('s').textContent = `${currency}${(promo.base_cents / 100).toFixed(2)}`;
+          wasLine.querySelector('span').textContent = isAnnual ? '/yr' : '/mo';
+          article.classList.add('has-promo');
+          article.style.borderColor = edge.border;
+          article.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.08), 0 0 60px -18px ${edge.glow}, 0 30px 70px -28px rgba(0,0,0,.9)`;
+          article.style.setProperty('--promo-ink', edge.ink);
         } else {
-          if (row) row.remove();
-          if (was) was.remove();
+          if (flag) flag.remove();
           if (save) save.remove();
+          if (wasLine) wasLine.remove();
+          if (article) {
+            article.classList.remove('has-promo');
+            article.style.borderColor = '';
+            article.style.boxShadow = '';
+            article.style.removeProperty('--promo-ink');
+          }
         }
       });
 
@@ -724,12 +739,10 @@
       if (!soonest) return; // promo sans échéance → pas de compte à rebours
       const box = document.createElement('div');
       box.id = 'promo-countdown';
-      const edge = PROMO_EDGE[soonestPromo.event] || PROMO_EDGE.other;
-      box.style.borderColor = edge.border;
-      box.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.07), 0 14px 38px -14px ${edge.glow}`;
       const ev = document.createElement('span');
       ev.className = 'cd-ev';
-      ev.textContent = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
+      const cdLabel = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
+      ev.textContent = `${PROMO_ICONS[soonestPromo.event] || PROMO_ICONS.other} ${cdLabel}`;
       ev.style.background = PROMO_BADGE_BG[soonestPromo.event] || PROMO_BADGE_BG.other;
       const txt = document.createElement('span');
       txt.textContent = 'ends in';

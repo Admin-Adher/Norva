@@ -403,6 +403,36 @@ passait à la ligne.
   annuel sans fuite de promo, expiration en direct (chip retiré, prix et
   mentions restaurés).
 
+**v2 sur maquette d'Adrien** (« pour la landing page je veux ça ») — refonte
+alignée pixel sur sa maquette (landing.css v38, landing.js v19) :
+
+- Card promo habillée aux couleurs de l'événement : badge unique
+  « ⚡ FLASH SALE − 40 % » en tête, ligne « You save US$1.99/mo… » au-dessus
+  du titre, prix de référence barré sur sa propre ligne AU-DESSUS du gros prix,
+  gros prix teinté à l'encre de l'événement, bordure + halo de card thémés,
+  CTA outline thémé, coches encerclées assorties. Thémage via `--promo-ink`
+  posé par JS + `article.has-promo` (15 encres, une par événement, + pictos
+  emoji par événement sur badge et chrono).
+- Card Family : « ★ MOST POPULAR » en flux en tête de card (l'em absolu
+  d'angle est passé statique), gros prix en dégradé bleu (background-clip),
+  coches cercles pleins bleus à coche blanche.
+- Layout : flex column, l'espace flexible est absorbé AU-DESSUS du bloc prix
+  (`margin-top: auto` sur `.promo-was`/`.price`) → CTA/mentions/features
+  ancrés en bas des deux cards, le prix flotte dans l'espace restant, comme
+  sur la maquette (le subgrid strict de la v1 imposait des rangées partagées
+  que la maquette ne suit pas). Grille élargie à 880 px, cards 34/32.
+- Toggle : état actif en dégradé accent (plus lisible), badge « SAVE 30% »
+  vert sur fond vert sombre. Chrono landing épuré SANS boîte (fond propre de
+  la landing) : pastille événement + gros chrono ; la page de vente garde le
+  chip verre fumé (nécessaire sur visuel de campagne).
+- Bandeau de réassurance sous les cards (3 items + séparateurs) + « Taxes may
+  apply based on your location. ». ⚠ Le « Trusted by millions » de la maquette
+  est une allégation chiffrée invérifiable (pratique commerciale trompeuse,
+  L121-2) → remplacé par « 7-day free trial / Try before you pay » (vrai, même
+  poids marketing) — à re-challenger avec Adrien s'il y tient.
+- Simulations jsdom re-déroulées (28 assertions vertes, rendu + bascule +
+  expiration).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

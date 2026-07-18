@@ -472,6 +472,12 @@
         flash:          { badge: 'linear-gradient(135deg,#fde047,#f59e0b)', glow: 'rgba(253,224,71,.16)', border: 'rgba(253,224,71,.55)' },
         other:          { badge: 'linear-gradient(135deg,#ff8067,#b579ff)', glow: 'rgba(181,121,255,.14)', border: 'rgba(181,121,255,.5)' }
       };
+      const PROMO_ICONS = {
+        black_friday: '🛍️', cyber_monday: '💻', winter_sale: '❄️', summer_sale: '☀️',
+        christmas: '🎄', new_year: '🎆', lunar_new_year: '🧧', eid: '🌙', easter: '🐣',
+        halloween: '🎃', valentines: '💘', back_to_school: '🎒', birthday: '🎂',
+        flash: '⚡', other: '✨'
+      };
 
       function applyPeriod(next) {
         period = next;
@@ -862,7 +868,7 @@
         const label = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
         const ev = document.createElement('span');
         ev.className = 'cd-ev';
-        ev.textContent = label;
+        ev.textContent = (PROMO_ICONS[soonestPromo.event] || PROMO_ICONS.other) + ' ' + label;
         ev.style.background = theme.badge;
         const txt = document.createElement('span');
         txt.textContent = 'ends in';
