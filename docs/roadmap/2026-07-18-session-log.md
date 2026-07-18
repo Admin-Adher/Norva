@@ -259,6 +259,24 @@ docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 're
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```
 
+### Finance ré-architecturée en onglets (demande UX)
+
+Principe acté : **la Vue d'ensemble MONTRE, les onglets AGISSENT** (`?v=76`).
+5 onglets, tous deep-linkables sur le modèle de la TVA
+(`#admin/finance[/promos|/paiements|/analyse|/vat]`, restaurés au F5) :
+
+| Onglet | Contenu |
+|---|---|
+| 💶 Vue d'ensemble | Résumé financier, revenu par rail, répartition par pays, risque revenu, état des abonnés + MRR par plan — lecture pure |
+| 🏷️ Promotions | Tarifs web + promos + visuel de campagne (la carte « 💵 ») |
+| 🧾 Paiements | 50 derniers paiements + export CSV |
+| 📊 Analyse | Funnel de conversion + annulations & rétention |
+| 🇪🇺 TVA & conformité | Inchangé (cockpit TVA complet) |
+
+Routage : `validRoute` étendu + dispatch générique `finance/<sub>` ; l'état
+interne des onglets (trimestre TVA, saisies promo) survit aux bascules
+(conteneurs montrés/cachés, jamais re-rendus).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

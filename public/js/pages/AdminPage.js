@@ -88,7 +88,7 @@ class AdminPage {
     // name, entity pages only as client:<uuid> / ticket:<uuid>.
     static validRoute(r) {
         r = String(r || '');
-        if (['cockpit', 'finance', 'finance/vat', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+        if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse', 'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
         return m ? (m[1] + ':' + m[2]) : null;
     }
@@ -915,7 +915,11 @@ class AdminPage {
         const main = document.querySelector('#page-admin .crm-main');
         if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); } // reset scroll + move focus into content (a11y)
         if (route === 'cockpit') this._pageCockpit();
-        else if (route === 'finance' || route === 'finance/vat') { this._financeTab = route === 'finance/vat' ? 'vat' : 'overview'; this._route = 'finance'; this._pageFinance(); }
+        else if (route === 'finance' || route.startsWith('finance/')) {
+            const finSub = route.split('/')[1] || '';
+            this._financeTab = ['vat', 'promos', 'paiements', 'analyse'].includes(finSub) ? finSub : 'overview';
+            this._route = 'finance'; this._pageFinance();
+        }
         else if (route === 'clients') this._pageClients();
         else if (route === 'support') this._pageSupport();
         else if (route.startsWith('ticket:')) this._pageTicket(route.slice(7));
@@ -1470,14 +1474,22 @@ class AdminPage {
         const vatAttention = Number(vatTot.unknown_n) > 0
             || Math.round((Number(vatYs.eu_cross_cents) || 0) * 0.92) >= 1000000
             || Math.round((Number(vatYs.eu_cross_prev_cents) || 0) * 0.92) >= 1000000;
-        const finTab = this._financeTab === 'vat' ? 'vat' : 'overview';
+        // Onglets Finance : la Vue d'ensemble MONTRE (lecture pure), les actions
+        // vivent chacune dans leur onglet (même modèle que TVA). Chaque onglet est
+        // deep-linkable : #admin/finance[/promos|/paiements|/analyse|/vat].
+        const FIN_TABS = { overview: 'fin-tab-overview', promos: 'fin-tab-promos', paiements: 'fin-tab-pay', analyse: 'fin-tab-analyse', vat: 'fin-tab-vat' };
+        const finTab = FIN_TABS[this._financeTab] ? this._financeTab : 'overview';
+        const finShow = t => (finTab === t ? '' : ' style="display:none"');
 
         el.innerHTML = `
             <div class="qv-row" id="fin-tabs" role="tablist" aria-label="Sections Finance">
                 <button class="qv-chip ${finTab === 'overview' ? 'active' : ''}" data-ftab="overview" role="tab">💶 Vue d'ensemble</button>
+                <button class="qv-chip ${finTab === 'promos' ? 'active' : ''}" data-ftab="promos" role="tab">🏷️ Promotions</button>
+                <button class="qv-chip ${finTab === 'paiements' ? 'active' : ''}" data-ftab="paiements" role="tab">🧾 Paiements</button>
+                <button class="qv-chip ${finTab === 'analyse' ? 'active' : ''}" data-ftab="analyse" role="tab">📊 Analyse</button>
                 <button class="qv-chip ${finTab === 'vat' ? 'active' : ''}" data-ftab="vat" role="tab">🇪🇺 TVA &amp; conformité${vatAttention ? ' <span style="color:#fbbf24">⚠</span>' : ''}</button>
             </div>
-            <div id="fin-tab-overview"${finTab === 'vat' ? ' style="display:none"' : ''}>
+            <div id="fin-tab-overview"${finShow('overview')}>
             <!-- 1 ── Résumé financier : les 5 métriques dominantes, en tête ── -->
             <div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">💶 Résumé financier</div><div class="admin-cards">
                 ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲')}
@@ -1505,7 +1517,7 @@ class AdminPage {
                 ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j' + amtNote(up.renewals_7d_cents), '', null, '🔁')}
                 ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
             </div></div>
-            <!-- 4 ── Analyse ── -->
+            <!-- 4 ── État des abonnés (le funnel/rétention vit dans l'onglet Analyse) ── -->
             <div class="fin-cols">
                 <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés — cliquer pour ouvrir la liste</div><div class="admin-cards fin-mini">
                     ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
@@ -1516,46 +1528,55 @@ class AdminPage {
                     ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
                 </div></div>
             </div>
-            <div class="fin-cols">
-                <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2>
-                    ${funnelData.length ? hbars(funnelData, '') : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
+            </div>
+            <!-- 🏷️ Onglet Promotions : tarification + promos + visuel de campagne -->
+            <div id="fin-tab-promos"${finShow('promos')}>
+                <div class="admin-block"><h2>💵 Tarifs web &amp; promotions (Revolut)</h2>
+                    <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs et promos gérés dans la Play Console.</div>
+                    <div id="fin-prices"><div class="ssub">Chargement…</div></div>
                 </div>
-                <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
-                    <div class="admin-cards fin-mini" style="margin-bottom:16px">
-                        ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
-                        ${card(n(savesTotal), 'Clients sauvés', savesTotal > 0 ? 'ok' : '', null, '💚', 'Clients ayant renoncé à annuler après une contre-offre.')}
-                        ${saveRate != null ? card(saveRate + ' %', 'Taux de sauvetage', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+            </div>
+            <!-- 🧾 Onglet Paiements : log opérationnel + export -->
+            <div id="fin-tab-pay"${finShow('paiements')}>
+                <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
+                    ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Pays</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
+                </div></div>
+            </div>
+            <!-- 📊 Onglet Analyse : funnel + rétention -->
+            <div id="fin-tab-analyse"${finShow('analyse')}>
+                <div class="fin-cols">
+                    <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2>
+                        ${funnelData.length ? hbars(funnelData, '') : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
                     </div>
-                    ${reasonData.length ? `<div class="kpi-gtitle" style="margin:0 0 8px">Raisons d'annulation</div>${hbars(reasonData, 'warn')}` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
+                    <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
+                        <div class="admin-cards fin-mini" style="margin-bottom:16px">
+                            ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
+                            ${card(n(savesTotal), 'Clients sauvés', savesTotal > 0 ? 'ok' : '', null, '💚', 'Clients ayant renoncé à annuler après une contre-offre.')}
+                            ${saveRate != null ? card(saveRate + ' %', 'Taux de sauvetage', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+                        </div>
+                        ${reasonData.length ? `<div class="kpi-gtitle" style="margin:0 0 8px">Raisons d'annulation</div>${hbars(reasonData, 'warn')}` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
+                    </div>
                 </div>
             </div>
-            <!-- 5 ── Ops : log opérationnel + export ── -->
-            <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
-                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Pays</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
-            </div></div>
-            <!-- 6 ── Tarification web : source unique billing_prices (promos sans code) ── -->
-            <div class="admin-block"><h2>💵 Tarifs web (Revolut)</h2>
-                <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs gérés dans la Play Console.</div>
-                <div id="fin-prices"><div class="ssub">Chargement…</div></div>
-            </div>
-            </div>
-            <!-- ── Onglet TVA & conformité : le cockpit a sa propre page ── -->
-            <div id="fin-tab-vat"${finTab === 'vat' ? '' : ' style="display:none"'}>
+            <!-- 🇪🇺 Onglet TVA & conformité : le cockpit a sa propre page -->
+            <div id="fin-tab-vat"${finShow('vat')}>
                 <div class="admin-block" id="fin-vat"><h2>🇪🇺 TVA — préparation OSS</h2><div id="fin-vat-body"><div class="ssub">Chargement…</div></div></div>
             </div>`;
 
-        // Bascule d'onglet : les deux conteneurs sont rendus, on ne fait que montrer/cacher
-        // (l'état du panneau TVA — trimestre choisi, assistant ouvert — survit à la bascule).
-        // La sélection est reflétée dans l'URL (#admin/finance[/vat]) → F5 / favori / lien
+        // Bascule d'onglet : tous les conteneurs sont rendus, on ne fait que montrer/
+        // cacher (l'état interne — trimestre TVA choisi, dépliant promo ouvert —
+        // survit à la bascule). La sélection est reflétée dans l'URL
+        // (#admin/finance[/promos|/paiements|/analyse|/vat]) → F5 / favori / lien
         // partagé restaurent l'onglet exact (this._route reste 'finance' pour les gardes).
         el.querySelectorAll('#fin-tabs .qv-chip').forEach(chip => chip.addEventListener('click', () => {
-            const tab = chip.dataset.ftab || 'overview';
+            const tab = FIN_TABS[chip.dataset.ftab] ? chip.dataset.ftab : 'overview';
             this._financeTab = tab;
             el.querySelectorAll('#fin-tabs .qv-chip').forEach(c => c.classList.toggle('active', c === chip));
-            const ov = document.getElementById('fin-tab-overview'), vt = document.getElementById('fin-tab-vat');
-            if (ov) ov.style.display = tab === 'overview' ? '' : 'none';
-            if (vt) vt.style.display = tab === 'vat' ? '' : 'none';
-            try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/finance' + (tab === 'vat' ? '/vat' : '')); } catch (_) { /* non-navigable */ }
+            Object.entries(FIN_TABS).forEach(([t, id]) => {
+                const node = document.getElementById(id);
+                if (node) node.style.display = t === tab ? '' : 'none';
+            });
+            try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/finance' + (tab === 'overview' ? '' : '/' + tab)); } catch (_) { /* non-navigable */ }
         }));
 
         this._loadWebPrices();
