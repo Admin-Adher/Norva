@@ -306,11 +306,25 @@
           const promo = catalog.promos && catalog.promos[plan] && catalog.promos[plan][period];
           const row = document.querySelector('.price-row');
           if (promo && promo.base_cents && row && !document.getElementById('promo-note')) {
+            // Badge colors follow the event identity (kept in sync with the
+            // sales page's PROMO_THEMES).
+            const PROMO_BADGE_BG = {
+              black_friday: 'linear-gradient(135deg,#ffb800,#ff6a00)', cyber_monday: 'linear-gradient(135deg,#22d3ee,#6366f1)',
+              winter_sale: 'linear-gradient(135deg,#7dd3fc,#38bdf8)', summer_sale: 'linear-gradient(135deg,#fbbf24,#fb7185)',
+              christmas: 'linear-gradient(135deg,#ef4444,#16a34a)', new_year: 'linear-gradient(135deg,#facc15,#f472b6)',
+              lunar_new_year: 'linear-gradient(135deg,#ef4444,#f59e0b)', eid: 'linear-gradient(135deg,#10b981,#facc15)',
+              easter: 'linear-gradient(135deg,#f9a8d4,#a5b4fc)', halloween: 'linear-gradient(135deg,#f97316,#7c3aed)',
+              valentines: 'linear-gradient(135deg,#fb7185,#e11d48)', back_to_school: 'linear-gradient(135deg,#38bdf8,#fbbf24)',
+              birthday: 'linear-gradient(135deg,#f472b6,#8b5cf6)', flash: 'linear-gradient(135deg,#fde047,#f59e0b)',
+              other: 'linear-gradient(135deg,#ff8067,#b579ff)'
+            };
             const d = document.createElement('div');
             d.id = 'promo-note';
             d.className = 'promo-note';
             d.innerHTML = '<span class="promo-chip">' + (PROMO_LABELS[promo.event] || PROMO_LABELS.other) + '</span>'
               + ' was <s>$' + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo') + '</s>';
+            const chip = d.querySelector('.promo-chip');
+            if (chip) chip.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
             row.insertAdjacentElement('afterend', d);
           }
         }).catch(function () { /* static fallback stays */ });

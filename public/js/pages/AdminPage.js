@@ -1137,7 +1137,10 @@ class AdminPage {
                 <button class="mini-btn" id="fin-prices-save">💾 Enregistrer</button>
                 <span class="ssub">Promo vide = tarif de base seul. L'échéance est optionnelle (auto-désactivation).</span>
                 <span class="ssub" id="fin-prices-msg"></span>
-            </div>`;
+            </div>
+            <div class="kpi-gtitle" style="margin:16px 0 6px">🎨 Visuel de campagne (optionnel)</div>
+            <div class="ssub" style="margin-bottom:8px">Image de fond de la carte en promo sur la page de vente — remplace le thème aux couleurs de l'événement. Idéal : <b>1200 × 1400 px</b> (proche du ratio de la carte), JPG/PNG/WebP, <b>&lt; 2 Mo</b> — un dégradé sombre est appliqué par-dessus pour la lisibilité des textes.</div>
+            <div id="fin-campaign" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="ssub">Chargement…</span></div>`;
         const msgEl = () => document.getElementById('fin-prices-msg');
         document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
             const baseEdits = [], promoEdits = [];
@@ -1187,6 +1190,51 @@ class AdminPage {
                 if (msgEl()) msgEl().textContent = '❌ ' + (e && e.message ? e.message : 'échec');
             }
         });
+
+        // Visuel de campagne : image publique (bucket promo-assets, écriture admin)
+        // appliquée en fond de la carte en promo. Best-effort — la carte tarifs
+        // reste utilisable si la migration campagne n'est pas encore passée.
+        try {
+            const camp = await this._rpc('admin_promo_campaign');
+            const cHost = document.getElementById('fin-campaign');
+            if (cHost) {
+                const path = camp && camp.bg_path ? String(camp.bg_path) : '';
+                const url = path ? `${this._sbUrl()}/storage/v1/object/public/promo-assets/${path}` : '';
+                cHost.innerHTML = `${url
+                    ? `<img src="${url}" alt="Visuel de campagne" style="width:120px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--adm-line)">`
+                    : '<span class="ssub">Aucune image — les promos utilisent le thème par défaut de leur événement.</span>'}
+                    <input type="file" id="fin-campaign-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px;color:var(--adm-tx2)">
+                    ${url ? '<button class="mini-btn" id="fin-campaign-clear">✕ Retirer</button>' : ''}
+                    <span class="ssub" id="fin-campaign-msg"></span>`;
+                document.getElementById('fin-campaign-file')?.addEventListener('change', async (ev) => {
+                    const f = ev.target.files && ev.target.files[0];
+                    if (!f) return;
+                    const cMsg = document.getElementById('fin-campaign-msg');
+                    if (f.size > 2 * 1024 * 1024) { if (cMsg) cMsg.textContent = '❌ Image trop lourde (max 2 Mo).'; return; }
+                    if (cMsg) cMsg.textContent = 'Envoi…';
+                    try {
+                        const ext = f.type === 'image/png' ? 'png' : (f.type === 'image/webp' ? 'webp' : 'jpg');
+                        const objPath = `campaign/bg-${Date.now()}.${ext}`;
+                        const res = await fetch(`${this._sbUrl()}/storage/v1/object/promo-assets/${objPath}`, {
+                            method: 'POST',
+                            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': f.type, 'x-upsert': 'true' },
+                            body: f,
+                        });
+                        if (!res.ok) throw new Error('upload ' + res.status);
+                        await this._rpc('admin_promo_campaign_set', { p_bg_path: objPath });
+                        this._loadWebPrices();
+                    } catch (e) {
+                        if (cMsg) cMsg.textContent = '❌ ' + (e && e.message ? e.message : 'échec');
+                    }
+                });
+                document.getElementById('fin-campaign-clear')?.addEventListener('click', async () => {
+                    try { await this._rpc('admin_promo_campaign_set', { p_bg_path: null }); this._loadWebPrices(); } catch (_) { /* noop */ }
+                });
+            }
+        } catch (_) {
+            const cHost = document.getElementById('fin-campaign');
+            if (cHost) cHost.innerHTML = '<span class="ssub">Visuel de campagne indisponible — appliquer la migration 20260718190000 (+ NOTIFY pgrst).</span>';
+        }
     }
 
     _renderFinance(f, sparks, vat) {

@@ -150,7 +150,7 @@
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     pricesPromise = fetch(base + '/functions/v1/norva-revolut/prices', { headers: { 'apikey': apikey } })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { return (d && d.ok && d.prices) ? { prices: d.prices, promos: d.promos || {} } : null; })
+      .then(function (d) { return (d && d.ok && d.prices) ? { prices: d.prices, promos: d.promos || {}, campaign: d.campaign || null } : null; })
       .catch(function () { return null; });
     return pricesPromise;
   }

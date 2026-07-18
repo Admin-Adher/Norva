@@ -110,22 +110,45 @@ Suite produit du Lot 7 (« base + promo, badge d'événement, choix mondiaux »)
   `max-height: 799px` masque lead + listes de features, déjà résumées par le
   bloc compare). Mobile garde son scroll naturel ; TV intacte.
 
-## Déploiement box — Lots 7+8 (à faire)
+## Lot 9 — avantages toujours visibles + identité visuelle des promos
+
+Recette d'Adrien sur le Lot 8, deux corrections :
+
+- **CRITIQUE — listes d'avantages** : le palier « écran court » (`max-height:
+  799px`) masquait les `ul` des cartes — à 100 % de zoom sur son écran, les
+  avantages disparaissaient. **Règle produit actée : les listes d'avantages ne
+  se masquent JAMAIS** — ce qui s'efface sur écran court, c'est ce qui les
+  répète (lead, bloc compare, note légale) + compression renforcée de tout le
+  reste. La page tient toujours sans scroll desktop.
+- **Identité visuelle des promos** (le badge dégradé de marque « pas assez
+  marketing ») : chaque événement du catalogue a désormais son **thème** —
+  badge à ses couleurs (Black Friday noir/or, Noël rouge/vert, Aïd
+  émeraude/or, Nouvel An chinois rouge/or…) + fond de carte teinté (halo
+  radial). `PROMO_THEMES` dans subscribe.html, badge assorti au checkout.
+- **Visuel de campagne uploadable** (migration `20260718190000`) : bucket
+  **public** `promo-assets` (lecture libre — la page de vente charge l'image
+  sans auth ; écriture admin-only par RLS), table `billing_promo_campaign`
+  (ligne unique) + RPCs `admin_promo_campaign(_set)`. ⚠ NOTIFY pgrst. Uploadé
+  depuis la carte « 💵 Tarifs web » (guidage : ≈1200×1400 px, JPG/PNG/WebP,
+  < 2 Mo) → remplace le thème par défaut en fond de la carte en promo, avec
+  dégradé sombre par-dessus pour la lisibilité. `?v=72`, `billing.js` expose
+  `campaign.bg_url` dans le catalogue.
+
+## Déploiement box — Lots 7+8 (FAIT le 2026-07-18) · Lot 9 (à faire)
 
 ```bash
 cd ~/norva && git pull origin main
-for m in 20260718150000_billing_prices 20260718170000_billing_promos; do
-  docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-    < supabase/migrations/${m}.sql; done
+docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260718190000_promo_campaign_visual.sql
 docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```
 
 Recette : `curl -s $FUNCTIONS_BASE_URL/norva-revolut/prices` rend
-`{prices, promos}` ; la carte « 💵 Tarifs web » liste 4 tarifs avec étage promo ;
-poser une promo (ex. flash $2.99 sur plus mensuel) → badge + prix barré sur la
-page tarifs sous ~1 min ; la retirer → retour au tarif de base. Page tarifs
-desktop : aucun scroll à 1080p ni sur laptop 768px.
+`{prices, promos, campaign}` ; poser une promo Black Friday → badge noir/or +
+halo doré sur la carte ; uploader une image de campagne → elle devient le fond
+de la carte ; à 100 % de zoom les avantages des plans restent visibles, sans
+scroll. (Lots 7+8 : migrations + NOTIFY + edge déjà appliqués, sortie propre.)
 
 ## Déploiement box — lots 1-5 (FAIT le 2026-07-18 ~12h06)
 

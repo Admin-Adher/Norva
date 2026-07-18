@@ -194,7 +194,7 @@ Deno.serve(async (req) => {
   // their static values as fallback when this is down.
   if (req.method === "GET" && path === "/prices") {
     const catalog = await getCatalog(db);
-    return json({ ok: true, currency: "usd", prices: catalog.prices, promos: catalog.promos });
+    return json({ ok: true, currency: "usd", prices: catalog.prices, promos: catalog.promos, campaign: catalog.campaign });
   }
 
   // ── /checkout — user-authed: open a trial-setup order ──────────────────────

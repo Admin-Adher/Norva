@@ -19,7 +19,9 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 export type PriceTable = Record<string, Record<string, number>>;
 export interface PromoInfo { base_cents: number; event: string; ends_at: string | null }
 export type PromoTable = Record<string, Record<string, PromoInfo>>;
-export interface Catalog { prices: PriceTable; promos: PromoTable }
+// campaign.bg_url : image de campagne uploadée (bucket public promo-assets),
+// null = le front applique le thème par défaut de l'événement.
+export interface Catalog { prices: PriceTable; promos: PromoTable; campaign: { bg_url: string | null } }
 
 // Repli historique (cents, USD) — utilisé si la table est vide ou inaccessible
 // (migration pas encore appliquée, DB en incident). Ne PAS s'en servir comme
@@ -31,6 +33,13 @@ export const DEFAULT_PRICES: PriceTable = {
 
 let cache: { at: number; catalog: Catalog } | null = null;
 const TTL_MS = 60_000;
+
+// URL publique de l'image de campagne (bucket public → pas d'auth côté page).
+function campaignUrl(bgPath: string | null): string | null {
+  if (!bgPath) return null;
+  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  return base ? `${base}/storage/v1/object/public/promo-assets/${bgPath}` : null;
+}
 
 export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.catalog;
@@ -58,13 +67,20 @@ export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
           };
         }
       }
+      // Visuel de campagne (best-effort : table absente avant la migration
+      // 20260718190000 → simplement pas de campagne).
+      let bgUrl: string | null = null;
+      try {
+        const { data: camp } = await db.from("billing_promo_campaign").select("bg_path").eq("id", 1).maybeSingle();
+        bgUrl = campaignUrl((camp as { bg_path?: string | null } | null)?.bg_path ?? null);
+      } catch (_) { /* pas de campagne */ }
       // NB : le TTL de 60 s borne aussi la fenêtre autour de promo_ends_at — une
       // promo expire au pire une minute « en retard » côté edge, jamais plus.
-      cache = { at: Date.now(), catalog: { prices, promos } };
+      cache = { at: Date.now(), catalog: { prices, promos, campaign: { bg_url: bgUrl } } };
       return cache.catalog;
     }
   } catch (_) { /* repli ci-dessous */ }
-  return cache?.catalog ?? { prices: DEFAULT_PRICES, promos: {} };
+  return cache?.catalog ?? { prices: DEFAULT_PRICES, promos: {}, campaign: { bg_url: null } };
 }
 
 // Table des prix EFFECTIFS (promo active sinon base) — l'API qu'utilisent tous

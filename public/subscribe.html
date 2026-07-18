@@ -60,12 +60,15 @@
       font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; text-align: center; }
     .save-hint:hover { text-decoration: underline; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
-    /* Event promo: badge above the price + struck-through base price beside it. */
+    /* Event promo: badge above the price + struck-through base price beside it.
+       Badge and background colors are themed per event from JS (PROMO_THEMES);
+       an uploaded campaign image replaces the tinted background. */
     .promo-badge { display: inline-block; margin-bottom: 8px; padding: 4px 10px; border-radius: 999px;
       font-size: 10.5px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em;
       color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
     .price-was { color: var(--quiet); font-size: 14px; font-weight: 600;
       text-decoration: line-through; margin-left: 8px; font-family: Inter, sans-serif; }
+    .card.promo-live { background-size: cover; background-position: center; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -142,12 +145,30 @@
       html:not(.tv) .promo-badge { margin-bottom: 6px; }
     }
     @media (min-width: 640px) and (max-height: 799px) {
+      /* Les LISTES D'AVANTAGES restent toujours visibles (règle produit) — ce qui
+         s'efface sur écran court, c'est ce qui les répète : le lead, le bloc
+         compare (« both plans include every feature ») et la note légale. */
       html:not(.tv) .lead { display: none; }
-      html:not(.tv) .card ul { display: none; }
-      html:not(.tv) .card .tag { margin-bottom: 8px; }
-      html:not(.tv) .price { font-size: 30px; }
-      html:not(.tv) .card { padding: 16px 20px; }
+      html:not(.tv) .compare { display: none; }
       html:not(.tv) .note { display: none; }
+      html:not(.tv) .brand { margin-bottom: 6px; }
+      html:not(.tv) h1 { font-size: 20px; margin-bottom: 4px; }
+      html:not(.tv) .toggle { margin: 8px 0 0; }
+      html:not(.tv) .toggle button { padding: 7px 14px; font-size: 13px; }
+      html:not(.tv) .grid { margin-top: 10px; gap: 12px; }
+      html:not(.tv) .card { padding: 14px 18px; }
+      html:not(.tv) .card h2 { font-size: 17px; }
+      html:not(.tv) .card .tag { margin-bottom: 8px; font-size: 12px; }
+      html:not(.tv) .price { font-size: 28px; }
+      html:not(.tv) .price-note { min-height: 12px; margin: 2px 0 6px; font-size: 11px; }
+      html:not(.tv) .card ul { gap: 4px; margin: 2px 0 10px; font-size: 12.5px; }
+      html:not(.tv) .btn { min-height: 40px; }
+      html:not(.tv) .assurance { margin-top: 8px; padding: 7px 12px; font-size: 11px; }
+      html:not(.tv) .pay-marks { margin-top: 6px; }
+      html:not(.tv) .row { margin-top: 8px; }
+      html:not(.tv) .row .btn { min-height: 38px; font-size: 13px; }
+      html:not(.tv) .status.show, html:not(.tv) #already-sub.show { margin-top: 8px; padding: 8px 12px; font-size: 12.5px; }
+      html:not(.tv) .save-hint { margin-top: 6px; font-size: 12px; }
     }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
@@ -400,6 +421,28 @@
         flash: 'Flash Sale', other: 'Limited Offer'
       };
       let livePromos = null; // { plan: { period: { base_cents, event } } } when a promo is live
+      let liveCampaignBg = null; // uploaded campaign background URL (overrides the event theme)
+
+      // Visual identity per event: badge colors + a tinted card background, so a
+      // Black Friday reads black-and-gold, Christmas red-and-green, etc. The
+      // uploaded campaign image (admin Finance card) replaces the tint when set.
+      const PROMO_THEMES = {
+        black_friday:   { badge: 'linear-gradient(135deg,#ffb800,#ff6a00)', glow: 'rgba(255,184,0,.16)',  border: 'rgba(255,184,0,.5)' },
+        cyber_monday:   { badge: 'linear-gradient(135deg,#22d3ee,#6366f1)', glow: 'rgba(34,211,238,.14)', border: 'rgba(99,102,241,.55)' },
+        winter_sale:    { badge: 'linear-gradient(135deg,#7dd3fc,#38bdf8)', glow: 'rgba(125,211,252,.13)', border: 'rgba(125,211,252,.5)' },
+        summer_sale:    { badge: 'linear-gradient(135deg,#fbbf24,#fb7185)', glow: 'rgba(251,191,36,.14)', border: 'rgba(251,146,60,.5)' },
+        christmas:      { badge: 'linear-gradient(135deg,#ef4444,#16a34a)', glow: 'rgba(239,68,68,.14)',  border: 'rgba(239,68,68,.5)' },
+        new_year:       { badge: 'linear-gradient(135deg,#facc15,#f472b6)', glow: 'rgba(250,204,21,.14)', border: 'rgba(250,204,21,.5)' },
+        lunar_new_year: { badge: 'linear-gradient(135deg,#ef4444,#f59e0b)', glow: 'rgba(239,68,68,.16)',  border: 'rgba(245,158,11,.55)' },
+        eid:            { badge: 'linear-gradient(135deg,#10b981,#facc15)', glow: 'rgba(16,185,129,.15)', border: 'rgba(16,185,129,.5)' },
+        easter:         { badge: 'linear-gradient(135deg,#f9a8d4,#a5b4fc)', glow: 'rgba(249,168,212,.13)', border: 'rgba(165,180,252,.5)' },
+        halloween:      { badge: 'linear-gradient(135deg,#f97316,#7c3aed)', glow: 'rgba(249,115,22,.16)', border: 'rgba(249,115,22,.55)' },
+        valentines:     { badge: 'linear-gradient(135deg,#fb7185,#e11d48)', glow: 'rgba(251,113,133,.15)', border: 'rgba(225,29,72,.5)' },
+        back_to_school: { badge: 'linear-gradient(135deg,#38bdf8,#fbbf24)', glow: 'rgba(56,189,248,.13)', border: 'rgba(56,189,248,.5)' },
+        birthday:       { badge: 'linear-gradient(135deg,#f472b6,#8b5cf6)', glow: 'rgba(244,114,182,.15)', border: 'rgba(139,92,246,.5)' },
+        flash:          { badge: 'linear-gradient(135deg,#fde047,#f59e0b)', glow: 'rgba(253,224,71,.16)', border: 'rgba(253,224,71,.55)' },
+        other:          { badge: 'linear-gradient(135deg,#ff8067,#b579ff)', glow: 'rgba(181,121,255,.14)', border: 'rgba(181,121,255,.5)' }
+      };
 
       function applyPeriod(next) {
         period = next;
@@ -436,9 +479,21 @@
               if (priceEl) priceEl.appendChild(was);
             }
             was.textContent = '$' + (promo.base_cents / 100).toFixed(2);
+            // Event identity: themed badge + themed card background — replaced by
+            // the uploaded campaign image (dark overlay keeps the text readable).
+            const theme = PROMO_THEMES[promo.event] || PROMO_THEMES.other;
+            badge.style.background = theme.badge;
+            card.classList.add('promo-live');
+            card.style.borderColor = theme.border;
+            card.style.backgroundImage = liveCampaignBg
+              ? 'linear-gradient(180deg, rgba(9,11,16,.82), rgba(9,11,16,.94)), url("' + liveCampaignBg + '")'
+              : 'radial-gradient(130% 110% at 50% 0%, ' + theme.glow + ', rgba(9,11,16,0) 62%)';
           } else {
             if (badge) badge.remove();
             if (was) was.remove();
+            card.classList.remove('promo-live');
+            card.style.borderColor = '';
+            card.style.backgroundImage = '';
           }
         });
         refreshCtas(); // the current plan/period combo depends on the toggle
@@ -653,6 +708,7 @@
           if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling())) return;
           const prices = catalog.prices; // EFFECTIVE cents — an active promo is already applied
           livePromos = catalog.promos || null;
+          liveCampaignBg = (catalog.campaign && catalog.campaign.bg_url) || null;
           document.querySelectorAll('.card').forEach(function (card) {
             const pl = prices[card.dataset.plan];
             if (!pl || !pl.monthly || !pl.annual) return;
