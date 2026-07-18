@@ -240,7 +240,7 @@
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/vendor/qrcode.js?v=1"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=11"></script>
+  <script src="/js/billing.js?v=12"></script>
   <script type="module">
     (async function () {
       const params = new URLSearchParams(location.search);
@@ -271,10 +271,24 @@
         statusEl.classList.add('show');
       }
 
-      // ── Order summary from config (display only — amounts are server-side) ──
+      // ── Order summary (display only — amounts are server-side) ──────────────
+      // Static config first for instant paint, then the live catalog (single
+      // source billing_prices) overwrites it — so a promo shows its real price.
       const cfg = (window.NORVA_BILLING_CONFIG && NORVA_BILLING_CONFIG.revolut) || {};
       const prices = (cfg.plans || {})[plan] || {};
-      const displayPrice = period === 'annual' ? (prices.annual || '') : (prices.monthly || '');
+      let displayPrice = period === 'annual' ? (prices.annual || '') : (prices.monthly || '');
+      if (window.NorvaBilling && window.NorvaBilling.revolutPrices) {
+        window.NorvaBilling.revolutPrices().then(function (live) {
+          const pl = live && live[plan];
+          const cents = pl && (period === 'annual' ? pl.annual : pl.monthly);
+          if (!cents) return;
+          displayPrice = (cents / 100).toFixed(2);
+          const amtEl = document.getElementById('sum-amount');
+          if (amtEl) amtEl.textContent = displayPrice;
+          const bdThen = document.getElementById('bd-then');
+          if (bdThen) bdThen.textContent = '$' + displayPrice + (period === 'annual' ? '/yr' : '/mo');
+        }).catch(function () { /* static fallback stays */ });
+      }
       if (plan === 'family') {
         document.getElementById('sum-plan').textContent = 'Norva Family';
         document.getElementById('sum-tag').textContent = 'The full Norva experience for the whole home.';

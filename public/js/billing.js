@@ -137,6 +137,22 @@
   function revolutCancel(reason) { return revolutAction('cancel', reason ? { reason: reason } : null); }
   function revolutResume() { return revolutAction('resume'); }
 
+  // Current web catalog (cents, USD) from the single price source (billing_prices,
+  // served by norva-revolut GET /prices — public, no auth). Cached for the page's
+  // lifetime; resolves null on failure so callers keep their static fallbacks.
+  let pricesPromise = null;
+  function revolutPrices() {
+    if (!isRevolutEnabled()) return Promise.resolve(null);
+    if (pricesPromise) return pricesPromise;
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    pricesPromise = fetch(base + '/functions/v1/norva-revolut/prices', { headers: { 'apikey': apikey } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { return (d && d.ok && d.prices) ? d.prices : null; })
+      .catch(function () { return null; });
+    return pricesPromise;
+  }
+
   // Read-only billing profile for display (plan/period + card last4/brand/exp).
   async function revolutProfile() {
     if (!isRevolutEnabled()) return null;
@@ -290,6 +306,7 @@
     revolutCreateOrder: revolutCreateOrder,
     confirmRevolut: confirmRevolut,
     revolutProfile: revolutProfile,
+    revolutPrices: revolutPrices,
     revolutCancel: revolutCancel,
     revolutResume: revolutResume,
     purchase: purchase,

@@ -81,7 +81,21 @@ ne marquait jamais le plan courant (gap général, pas seulement VIP).
   stampe le montant réellement chargé) : sous-évaluation d'un seul cycle, hors
   périmètre de l'audit.
 
-## Déploiement box (à faire)
+## Déploiement box — Lot 7 (à faire)
+
+```bash
+cd ~/norva && git pull origin main
+docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260718150000_billing_prices.sql
+docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
+ops/hetzner/scripts/04-deploy-edge-functions.sh
+```
+
+Recette : `curl -s $FUNCTIONS_BASE_URL/norva-revolut/prices` rend le catalogue ;
+la carte « 💵 Tarifs web » de Finance liste 4 tarifs ; changer un prix → la page
+tarifs l'affiche sous ~1 min ; le remettre → idem.
+
+## Déploiement box — lots 1-5 (FAIT le 2026-07-18 ~12h06)
 
 ```bash
 cd ~/norva && git pull origin main
@@ -115,6 +129,36 @@ ops/hetzner/scripts/04-deploy-edge-functions.sh
 - `effectiveEvent()` (webhook RC) réécrit `product_id` ← `new_product_id` pour
   `PRODUCT_CHANGE` **avant** toute dérivation — si un jour on lit d'autres champs
   produit sur cet événement, passer par ce helper.
-- Le prix catalogue mobile est dupliqué dans `norva-billing-webhook` ET
-  `norva-revolut`/`norva-revolut-webhook`/`norva-revolut-billing` (`PRICES`) — un
-  changement de prix se répercute aux **quatre** endroits.
+- ~~Le prix catalogue est dupliqué dans 4 edge functions~~ → **résolu par le
+  Lot 7** : source unique `billing_prices` (voir section dédiée). Les seuls
+  prix « en dur » restants sont des **replis** : `DEFAULT_PRICES` dans
+  `_shared/prices.ts` (si la table est inaccessible) et les valeurs statiques
+  des pages/`billing-config.js` (si l'endpoint public est down) — ils n'ont
+  pas besoin de suivre les promos, seulement les changements durables.
+
+## Lot 7 — tarifs web dynamiques (source unique `billing_prices`)
+
+Demande produit : promos (Black Friday, Noël, soldes) en changeant les prix à UN
+endroit. Construit :
+
+- **Migration `20260718150000_billing_prices.sql`** : table `billing_prices`
+  (plan × period → cents, bornes 100..99999, RLS + lecture service_role only),
+  seed des tarifs actuels, RPCs admin `admin_billing_prices` /
+  `admin_billing_price_set` (gate `is_admin()`). ⚠ **NOTIFY pgrst requis**.
+- **`_shared/prices.ts`** : `getPrices(db)` — cache 60 s par isolate + repli
+  `DEFAULT_PRICES`. Branché dans `norva-revolut` (checkout/confirm),
+  `norva-revolut-webhook` (commit hosted-page), `norva-billing-webhook`
+  (repli MRR `PRODUCT_CHANGE`). `norva-revolut-billing` n'en a **pas** — voulu :
+  le cron débite le prix **verrouillé** du mapping, jamais le catalogue.
+- **Équité promo** : `/checkout` stampe `amount_cents` dans les metadata de
+  l'ordre → `/confirm` (et le webhook) committent **le prix affiché au moment de
+  l'ouverture**, même si la promo se termine pendant la saisie carte.
+- **GET `norva-revolut/prices`** (public) + `NorvaBilling.revolutPrices()`
+  (`billing.js ?v=12`, cache page) : `subscribe.html` (cartes, note « about
+  X/mo », badge « Save X% » recalculé, hint d'économie), `checkout-revolut.html`
+  (récap), `subscription.html` (upsell) — statiques en repli. **Gaté web-only** :
+  sur natif, les prix affichés restent ceux de la Play Console (une promo web ne
+  doit jamais annoncer un prix que Google ne facturera pas).
+- **Carte « 💵 Tarifs web » (Finance, `AdminPage ?v=70`)** : 4 champs + confirm
+  récapitulatif → `admin_billing_price_set`. Une promo = 2 clics ; retour au
+  tarif normal = 2 clics. Effet nouveaux checkouts uniquement, ~1 min (cache).

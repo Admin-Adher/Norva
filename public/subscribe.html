@@ -223,7 +223,7 @@
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=11"></script>
+  <script src="/js/billing.js?v=12"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -564,10 +564,41 @@
           try { chosen.scrollIntoView({ block: 'nearest' }); } catch (_) {}
         }
       }
+      // Live price table (single source billing_prices, via GET norva-revolut/prices).
+      // Web checkout only: on native the prices shown must stay the Play Console
+      // ones — a web promo must never advertise a price Google won't charge.
+      // The static data-* values remain the fallback when the endpoint is down.
+      function applyLivePrices(prices) {
+        try {
+          if (!prices) return;
+          const b = window.NorvaBilling;
+          if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling())) return;
+          document.querySelectorAll('.card').forEach(function (card) {
+            const pl = prices[card.dataset.plan];
+            if (!pl || !pl.monthly || !pl.annual) return;
+            card.dataset.monthly = (pl.monthly / 100).toFixed(2);
+            card.dataset.annual = (pl.annual / 100).toFixed(2);
+            card.dataset.annualNote = "That's about " + (Math.floor(pl.annual / 12) / 100).toFixed(2) + '/mo, billed yearly.';
+            const hint = card.querySelector('.save-hint');
+            if (hint) hint.remove(); // rebuilt with the fresh numbers by refreshCtas
+          });
+          // « Save X% » badge on the toggle: the real best saving across plans.
+          let best = 0;
+          Object.keys(prices).forEach(function (k) {
+            const pl = prices[k];
+            if (pl && pl.monthly && pl.annual) best = Math.max(best, 1 - pl.annual / (12 * pl.monthly));
+          });
+          const save = document.querySelector('.toggle .save');
+          if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
+          applyPeriod(period); // re-render amounts, notes and CTAs from the new data
+        } catch (_) { /* keep static prices */ }
+      }
+
       window.NorvaBilling.login(appUserId());
       loadTrialEligibility(); // reveals the card-check reassurance once eligibility is known
       checkExisting();
       maybeGateRestore();
+      if (window.NorvaBilling.revolutPrices) window.NorvaBilling.revolutPrices().then(applyLivePrices);
     })();
   </script>
 </body>

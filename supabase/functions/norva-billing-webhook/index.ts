@@ -35,6 +35,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { getPrices } from "../_shared/prices.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -103,7 +104,9 @@ Deno.serve(async (req) => {
     // Reconcile the projection first (idempotent upsert keyed by user_id), then
     // record the event as processed. Recording last means a transient failure
     // leaves no event row, so RevenueCat's retry safely reprocesses.
-    const patch = projectionPatch(userId, eventType, event);
+    // The catalog table is only needed for the price-less PRODUCT_CHANGE fallback.
+    const priceTable = eventType === "PRODUCT_CHANGE" ? await getPrices(admin) : null;
+    const patch = projectionPatch(userId, eventType, event, priceTable);
     if (patch) {
       const { error } = await admin
         .from("cloud_entitlement_projection")
@@ -128,7 +131,7 @@ Deno.serve(async (req) => {
 
 // --- event -> projection mapping -------------------------------------------
 
-function projectionPatch(userId: string, type: string, rawEvent: JsonRecord): JsonRecord | null {
+function projectionPatch(userId: string, type: string, rawEvent: JsonRecord, priceTable: Record<string, Record<string, number>> | null = null): JsonRecord | null {
   // PRODUCT_CHANGE carries the OLD product in `product_id` and the NEW one in
   // `new_product_id` — the projection must describe what the subscriber switched
   // TO, so plan/cadence derive from the new product from here on.
@@ -192,7 +195,7 @@ function projectionPatch(userId: string, type: string, rawEvent: JsonRecord): Js
     patch.bill_period = billPeriodForEvent(event);
   } else if (type === "PRODUCT_CHANGE") {
     const period = billPeriodForEvent(event);
-    const catalogCents = PRICES[planCode]?.[period];
+    const catalogCents = priceTable?.[planCode]?.[period];
     if (catalogCents) {
       patch.mrr_cents = catalogCents;
       patch.bill_period = period;
@@ -300,13 +303,10 @@ function countryOf(event: JsonRecord): string | null {
   return c && /^[A-Za-z]{2}$/.test(c) ? c.toUpperCase() : null;
 }
 
-// Catalog price table (cents, USD) — the mobile products mirror the web plans.
-// Used ONLY as an MRR fallback for a price-less PRODUCT_CHANGE; never journaled
-// as cash (the ledger only records amounts the event itself carries).
-const PRICES: Record<string, Record<string, number>> = {
-  plus:   { monthly: 499, annual: 4199 },
-  family: { monthly: 899, annual: 7599 },
-};
+// NB: the catalog price used as MRR fallback for a price-less PRODUCT_CHANGE comes
+// from billing_prices (single source, _shared/prices.ts) — the mobile products
+// mirror the web plans. Never journaled as cash (the ledger only records amounts
+// the event itself carries).
 
 // A PRODUCT_CHANGE event's `product_id` is the product being LEFT; the product the
 // subscriber switched to arrives in `new_product_id`. Return a view of the event

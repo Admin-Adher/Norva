@@ -108,7 +108,7 @@
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=11"></script>
+  <script src="/js/billing.js?v=12"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -252,22 +252,34 @@
             // Honest annual upsell for a monthly subscriber in good standing: the
             // real yearly saving, straight into the plan-change checkout (which
             // charges nothing today — the annual price starts at the next renewal).
+            // Savings come from the live catalog (single source billing_prices),
+            // with the static config as fallback — a promo shows its real numbers.
             if (String(decision.status || '') === 'active' && p.period === 'monthly'
                 && (p.plan === 'plus' || p.plan === 'family')) {
-              const cfgPlans = (((window.NORVA_BILLING_CONFIG || {}).revolut) || {}).plans || {};
-              const pl = cfgPlans[p.plan] || {};
-              const m = parseFloat(pl.monthly), y = parseFloat(pl.annual);
-              if (isFinite(m) && isFinite(y) && m * 12 > y) {
+              const renderSave = function (mCents, yCents) {
+                if (!(isFinite(mCents) && isFinite(yCents) && mCents * 12 > yCents)) return;
                 const d3 = el('div', 'detail');
                 d3.appendChild(el('span', null, 'Annual billing'));
                 const bWrap = el('b');
-                const a = el('a', null, 'Switch and save $' + (m * 12 - y).toFixed(2) + ' a year →');
+                const a = el('a', null, 'Switch and save $' + ((mCents * 12 - yCents) / 100).toFixed(2) + ' a year →');
                 a.setAttribute('href', '/checkout-revolut.html?plan=' + p.plan + '&period=annual&returnTo=' + encodeURIComponent('/subscription.html'));
                 a.style.cssText = 'color:var(--pink);text-decoration:none';
                 bWrap.appendChild(a);
                 d3.appendChild(bWrap);
                 slot(d3);
-              }
+              };
+              const cfgFallback = function () {
+                const pl = ((((window.NORVA_BILLING_CONFIG || {}).revolut) || {}).plans || {})[p.plan] || {};
+                const m = parseFloat(pl.monthly), y = parseFloat(pl.annual);
+                if (isFinite(m) && isFinite(y)) renderSave(Math.round(m * 100), Math.round(y * 100));
+              };
+              if (window.NorvaBilling.revolutPrices) {
+                window.NorvaBilling.revolutPrices().then(function (live) {
+                  const pl = live && live[p.plan];
+                  if (pl && pl.monthly && pl.annual) renderSave(pl.monthly, pl.annual);
+                  else cfgFallback();
+                }).catch(cfgFallback);
+              } else cfgFallback();
             }
             if (p.card_last4) {
               const d = el('div', 'detail');

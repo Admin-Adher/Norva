@@ -510,6 +510,11 @@ class AdminPage {
 #page-admin .qv-chip{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx2);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .14s,color .14s,background .14s;}
 #page-admin .qv-chip:hover{border-color:#5b7cfa;color:var(--adm-tx);}
 #page-admin .qv-chip.active{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));border-color:rgba(120,150,255,.4);color:#fff;}
+#page-admin .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
+#page-admin .price-cell{display:flex;flex-direction:column;gap:6px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--adm-tx2);}
+#page-admin .price-cell .price-in{display:flex;align-items:center;gap:6px;color:var(--adm-tx);font-weight:700;}
+#page-admin .price-cell input{width:96px;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;}
+#page-admin .price-cell input:focus-visible{outline:none;border-color:#5b7cfa;}
 #page-admin .filter-bar{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;margin-bottom:14px;}
 #page-admin .filter-bar .fb-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 #page-admin .filter-bar .users-controls{margin-bottom:0;}
@@ -1074,6 +1079,56 @@ class AdminPage {
         }
     }
 
+    // Carte « 💵 Tarifs web » : édition de billing_prices (source unique lue par les
+    // edge et le front). Effet : nouveaux checkouts + changements de plan uniquement
+    // — les abonnés existants gardent leur prix souscrit (mapping). Cache edge 60 s.
+    async _loadWebPrices() {
+        const host = document.getElementById('fin-prices');
+        if (!host) return;
+        let rows = null;
+        try { rows = await this._rpc('admin_billing_prices'); } catch (_) { /* rendu dégradé ci-dessous */ }
+        if (!Array.isArray(rows) || !rows.length) {
+            host.innerHTML = '<div class="ssub">Table des tarifs indisponible — appliquer la migration 20260718150000 (supabase_admin) puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>';
+            return;
+        }
+        const LBL = { plus: 'Norva', family: 'Norva Family' };
+        const PER = { monthly: 'mensuel', annual: 'annuel' };
+        const by = {};
+        rows.forEach(r => { by[r.plan + ':' + r.period] = r; });
+        const order = ['plus:monthly', 'plus:annual', 'family:monthly', 'family:annual'].filter(k => by[k]);
+        host.innerHTML = `<div class="price-grid">${order.map(k => {
+            const [plan, period] = k.split(':');
+            return `<label class="price-cell"><span>${LBL[plan]} · ${PER[period]}</span>
+                <span class="price-in">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(by[k].amount_cents / 100).toFixed(2)}"></span></label>`;
+        }).join('')}</div>
+            <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <button class="mini-btn" id="fin-prices-save">💾 Enregistrer</button>
+                <span class="ssub" id="fin-prices-msg"></span>
+            </div>`;
+        const msgEl = () => document.getElementById('fin-prices-msg');
+        document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
+            const edits = [];
+            host.querySelectorAll('input[data-price]').forEach(inp => {
+                const [plan, period] = String(inp.dataset.price).split(':');
+                const cents = Math.round(parseFloat(inp.value) * 100);
+                const cur = by[plan + ':' + period];
+                if (Number.isFinite(cents) && cur && cents !== Number(cur.amount_cents)) edits.push({ plan, period, cents });
+            });
+            if (!edits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
+            const rec = edits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`).join(' · ');
+            if (!window.confirm(`Appliquer ${edits.length} tarif(s) ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
+            try {
+                for (const e of edits) {
+                    await this._rpc('admin_billing_price_set', { p_plan: e.plan, p_period: e.period, p_amount_cents: e.cents });
+                }
+                if (msgEl()) msgEl().textContent = `✅ ${edits.length} tarif(s) mis à jour — visibles sur le site sous ~1 min (cache edge 60 s).`;
+                this._loadWebPrices();
+            } catch (e) {
+                if (msgEl()) msgEl().textContent = '❌ ' + (e && e.message ? e.message : 'échec');
+            }
+        });
+    }
+
     _renderFinance(f, sparks, vat) {
         const el = document.getElementById('fin-body');
         if (!el) return;
@@ -1300,6 +1355,11 @@ class AdminPage {
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
                 ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Pays</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
             </div></div>
+            <!-- 6 ── Tarification web : source unique billing_prices (promos sans code) ── -->
+            <div class="admin-block"><h2>💵 Tarifs web (Revolut)</h2>
+                <div class="ssub" style="margin-bottom:10px">Source unique <code>billing_prices</code> — appliquée aux <b>nouveaux</b> checkouts et changements de plan ; les abonnés existants gardent leur prix souscrit. Rail Play : tarifs gérés dans la Play Console.</div>
+                <div id="fin-prices"><div class="ssub">Chargement…</div></div>
+            </div>
             </div>
             <!-- ── Onglet TVA & conformité : le cockpit a sa propre page ── -->
             <div id="fin-tab-vat"${finTab === 'vat' ? '' : ' style="display:none"'}>
@@ -1319,6 +1379,8 @@ class AdminPage {
             if (vt) vt.style.display = tab === 'vat' ? '' : 'none';
             try { if (String(location.hash || '').startsWith('#admin')) history.replaceState(history.state, '', '#admin/finance' + (tab === 'vat' ? '/vat' : '')); } catch (_) { /* non-navigable */ }
         }));
+
+        this._loadWebPrices();
 
         // Header status line: MRR · échecs · conversions + a "live" freshness badge.
         const tx = document.querySelector('#page-admin .crm-head-tx');

@@ -27,6 +27,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { getPrices } from "../_shared/prices.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
@@ -41,13 +42,11 @@ const VALIDATION_CENTS = boundedInt(Deno.env.get("NORVA_REVOLUT_VALIDATION_CENTS
 const SAVE_OFFER_PCT = 50;
 const CANCEL_REASONS = new Set(["too_expensive", "not_using", "technical", "other", "skipped"]);
 
-// Server-side price table (cents, USD). The client only sends {plan, period}.
-const PRICES: Record<string, Record<string, number>> = {
-  plus:   { monthly: 499, annual: 4199 },
-  family: { monthly: 899, annual: 7599 },
-};
+// Prices are SERVER-decided (the client only sends {plan, period}) and live in the
+// billing_prices table — single source, read via _shared/prices.ts (60 s cache +
+// hard-coded fallback). Promos are a table update, never a code change.
 
-const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
+const CORS ={ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
@@ -188,6 +187,13 @@ Deno.serve(async (req) => {
   if (!REVOLUT_SECRET_KEY || !SUPABASE_URL || !SERVICE_KEY) return json({ ok: false, inert: true, reason: "not_configured" });
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
+  // ── /prices — PUBLIC: current catalog (cents, USD) for the web pages ───────
+  // Display only — every order amount is still decided server-side from the same
+  // source. The pages keep their static values as fallback when this is down.
+  if (req.method === "GET" && path === "/prices") {
+    return json({ ok: true, currency: "usd", prices: await getPrices(db) });
+  }
+
   // ── /checkout — user-authed: open a trial-setup order ──────────────────────
   if (req.method === "POST" && path === "/checkout") {
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
@@ -200,7 +206,7 @@ Deno.serve(async (req) => {
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
-    const amount = PRICES[plan]?.[period];
+    const amount = (await getPrices(db))[plan]?.[period];
     if (!amount) return json({ error: "Unknown plan" }, 400);
 
     // ── Checkout KIND, decided SERVER-SIDE from the account's real state ───────
@@ -283,7 +289,9 @@ Deno.serve(async (req) => {
       redirect_url: redirectUrl,
       merchant_order_ext_ref: extRef(user.id),
       description: DESCRIPTIONS[kind],
-      metadata: { user_id: user.id, plan, period, kind },
+      // amount_cents = the catalog price at checkout OPEN — /confirm commits THIS
+      // amount, so a promo ending mid-checkout still honors what the page showed.
+      metadata: { user_id: user.id, plan, period, kind, amount_cents: amount },
     };
     // customer_id links the order → customer so the saved card attaches; fall back to
     // customer_email if the customer couldn't be created.
@@ -358,10 +366,15 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
     const kind = String(meta.kind ?? "trial_setup");
-    // The order metadata is the contract of what THIS paid order was opened for —
-    // amounts stay server-decided (PRICES), the metadata only picks the row.
+    // The order metadata is the contract of what THIS paid order was opened for.
+    // The amount was stamped by /checkout at OPEN time (both are server-written —
+    // the client never touches metadata), so a promo ending mid-checkout still
+    // honors what the customer saw. Catalog fallback for pre-stamp orders.
     const period = String(meta.period ?? "") === "annual" ? "annual" : "monthly";
-    const amount = PRICES[plan]?.[period] ?? 0;
+    const metaAmount = Number(meta.amount_cents);
+    const amount = (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
+      ? Math.round(metaAmount)
+      : ((await getPrices(db))[plan]?.[period] ?? 0);
     // Prefer the order's customer_id; fall back to the one /checkout stored (the
     // legacy order object doesn't always echo customer_id back).
     let customerId = orderCustomerId(order);

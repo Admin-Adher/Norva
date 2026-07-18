@@ -42,10 +42,10 @@ const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
 // small so a run stays well within the edge wall-clock limit. The cron runs hourly.
 const BATCH = 25;
 
-const PRICES: Record<string, Record<string, number>> = {
-  plus:   { monthly: 499, annual: 4199 },
-  family: { monthly: 899, annual: 7599 },
-};
+// NB: pas de table de prix ici, et c'est voulu — ce cron débite EXCLUSIVEMENT
+// cloud_revolut_customers.amount_cents, le prix verrouillé à la souscription.
+// Le catalogue courant (promos incluses) vit dans billing_prices et ne concerne
+// que les nouveaux checkouts (norva-revolut) — jamais les renouvellements.
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });

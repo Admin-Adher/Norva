@@ -28,6 +28,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { getPrices } from "../_shared/prices.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -234,23 +235,23 @@ function planForMeta(meta: JsonRecord): string {
   return "plus";
 }
 
-// Server-side price table (cents, USD) — must stay in lockstep with norva-revolut's.
-const PRICES: Record<string, Record<string, number>> = {
-  plus:   { monthly: 499, annual: 4199 },
-  family: { monthly: 899, annual: 7599 },
-};
-
 // Commit the recurring plan of a PAID checkout order onto cloud_revolut_customers.
 // Only checkout-created orders carry a kind in metadata (the renewal cron's orders
 // have no metadata and never reach this — resolveUserId already skipped them).
 // Best-effort: the projection reconciliation above must never fail on this.
+// Amount: the metadata's amount_cents (stamped server-side at checkout OPEN, so a
+// promo ending mid-checkout still honors what the customer saw), else the current
+// catalog from billing_prices (single source, _shared/prices.ts).
 async function commitOrderPlan(db: SupabaseClient, userId: string, eventType: string, meta: JsonRecord): Promise<void> {
   if (eventType !== "ORDER_COMPLETED") return;
   const kind = String(meta.kind ?? "").toLowerCase();
   if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") return;
   const plan = planForMeta(meta);
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
-  const amount = PRICES[plan]?.[period];
+  const metaAmount = Number(meta.amount_cents);
+  const amount = (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
+    ? Math.round(metaAmount)
+    : (await getPrices(db))[plan]?.[period];
   if (!amount) return; // only plus/family carry a web price — anything else is not committable
   try {
     await db.from("cloud_revolut_customers").upsert({
