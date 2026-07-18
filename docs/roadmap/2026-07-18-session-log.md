@@ -178,6 +178,17 @@ cartes gardent halo + badge aux couleurs de l'événement. Guidage d'upload
 actualisé : **paysage 1920 × 1080 px+**, JPG/WebP, < 2 Mo. Le checkout reste
 volontairement sobre (page de paiement sans distraction).
 
+### Fix URL du visuel (recette) — `kong:8000`
+
+L'image ne s'affichait pas sur la page de vente : l'edge construisait l'URL
+publique depuis `SUPABASE_URL`… qui, vu par l'edge runtime de la box, est
+l'hôte Docker INTERNE `http://kong:8000` — irrésolvable par un navigateur (et
+mixed content en prime). **Règle actée : l'edge ne construit jamais d'URL
+publique** — `/prices` renvoie `campaign.bg_path` (chemin bucket) et c'est
+`billing.js` (`?v=14`) qui assemble l'URL depuis SA base publique (celle de
+tous ses appels API). La carte admin n'était pas touchée (elle construit déjà
+depuis `_sbUrl()`). Redéploiement edge requis (norva-revolut + _shared).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

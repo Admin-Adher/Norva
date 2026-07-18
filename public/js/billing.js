@@ -150,7 +150,21 @@
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     pricesPromise = fetch(base + '/functions/v1/norva-revolut/prices', { headers: { 'apikey': apikey } })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { return (d && d.ok && d.prices) ? { prices: d.prices, promos: d.promos || {}, campaign: d.campaign || null } : null; })
+      .then(function (d) {
+        if (!(d && d.ok && d.prices)) return null;
+        // Campaign visual: the server sends a bucket PATH (never a URL — on the
+        // self-hosted box its SUPABASE_URL is the internal Docker host, useless
+        // to a browser). The public URL is assembled here, from the same base
+        // the page already uses for every API call.
+        var camp = d.campaign || null;
+        var bgUrl = null;
+        if (camp && camp.bg_path) {
+          bgUrl = base + '/storage/v1/object/public/promo-assets/' + String(camp.bg_path).replace(/^\/+/, '');
+        } else if (camp && camp.bg_url && /^https:\/\//.test(camp.bg_url)) {
+          bgUrl = camp.bg_url; // older edge build — only if publicly resolvable
+        }
+        return { prices: d.prices, promos: d.promos || {}, campaign: bgUrl ? { bg_url: bgUrl } : null };
+      })
       .catch(function () { return null; });
     return pricesPromise;
   }
