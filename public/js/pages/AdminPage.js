@@ -214,7 +214,7 @@ class AdminPage {
 #page-admin .admin-block{margin-bottom:18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:17px 20px 18px;}
 #page-admin .admin-block h2{font-size:14px;font-weight:650;margin:0 0 13px;color:var(--adm-tx);letter-spacing:-.1px;}
 #page-admin table{width:100%;border-collapse:collapse;font-size:13px;}
-#page-admin th,#page-admin td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--adm-line2);white-space:nowrap;}
+#page-admin th,#page-admin td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--adm-line2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #page-admin thead th{border-bottom:1px solid var(--adm-line);}
 #page-admin tbody tr:last-child td{border-bottom:0;}
 #page-admin th{color:var(--adm-tx3);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;}
