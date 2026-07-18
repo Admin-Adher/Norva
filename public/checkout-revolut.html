@@ -321,10 +321,17 @@
             const d = document.createElement('div');
             d.id = 'promo-note';
             d.className = 'promo-note';
-            d.innerHTML = '<span class="promo-chip">' + (PROMO_LABELS[promo.event] || PROMO_LABELS.other) + '</span>'
-              + ' was <s>$' + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo') + '</s>';
-            const chip = d.querySelector('.promo-chip');
-            if (chip) chip.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+            const chip = document.createElement('span');
+            chip.className = 'promo-chip';
+            // Custom label (admin "Autre…" event) wins over the standard label;
+            // built via textContent — never markup.
+            chip.textContent = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
+            chip.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+            const struck = document.createElement('s');
+            struck.textContent = '$' + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo');
+            d.appendChild(chip);
+            d.appendChild(document.createTextNode(' was '));
+            d.appendChild(struck);
             row.insertAdjacentElement('afterend', d);
           }
         }).catch(function () { /* static fallback stays */ });

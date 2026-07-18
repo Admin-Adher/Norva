@@ -479,7 +479,9 @@
               const priceEl = card.querySelector('.price');
               if (priceEl) priceEl.insertAdjacentElement('beforebegin', badge);
             }
-            badge.textContent = PROMO_LABELS[promo.event] || PROMO_LABELS.other;
+            // Custom label (admin "Autre…" event, e.g. « Norva Days ») wins over
+            // the standard event label.
+            badge.textContent = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
             if (!was) {
               was = document.createElement('span');
               was.className = 'price-was';

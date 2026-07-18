@@ -237,6 +237,28 @@ la fenêtre d'un déploiement n'est plus jamais re-demandée. Leçons codées :
    calque `z-index:-1` initial.
 4. Témoin : `console.warn` si l'image ne charge pas — plus d'échec muet.
 
+### Sélecteur d'événement v2 — dépliant maison + événement nommé (recette)
+
+Le `<select>` natif rendait clair-sur-clair (« trop brut ») et « Autre » était
+muet. Remplacé (`AdminPage ?v=75`) par un **dépliant maison** aux couleurs du
+dashboard (panneau sombre, icônes par événement, état sélectionné en dégradé),
+et « Autre… » révèle un champ **nom d'événement** (2-24 caractères) qui devient
+le badge affiché tel quel sur la page de vente et le checkout (ex. « Norva
+Days ») — construit en `textContent`, jamais en markup. Migration
+`20260718230000_promo_custom_label.sql` : colonne `promo_label`,
+`admin_billing_promo_set` **signature étendue** (`p_label`) ⇒ DROP ancienne ⇒
+**⚠ NOTIFY pgrst requis** ; `admin_billing_prices` ré-émise avec le champ ;
+`_shared/prices.ts` expose `label` dans les promos (thème visuel = celui de
+l'événement « Autre »).
+
+```bash
+cd ~/norva && git pull origin main
+docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260718230000_promo_custom_label.sql
+docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
+ops/hetzner/scripts/04-deploy-edge-functions.sh
+```
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

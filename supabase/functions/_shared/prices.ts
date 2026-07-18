@@ -17,7 +17,9 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 export type PriceTable = Record<string, Record<string, number>>;
-export interface PromoInfo { base_cents: number; event: string; ends_at: string | null }
+// label : libellé de badge personnalisé (prioritaire sur le libellé standard de
+// l'événement côté front — pensé pour event='other', un événement propre à Norva).
+export interface PromoInfo { base_cents: number; event: string; label: string | null; ends_at: string | null }
 export type PromoTable = Record<string, Record<string, PromoInfo>>;
 // campaign.bg_path : CHEMIN de l'image de campagne dans le bucket public
 // promo-assets (null = thème par défaut de l'événement côté front). On renvoie
@@ -41,10 +43,11 @@ export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.catalog;
   try {
     const { data } = await db.from("billing_prices")
-      .select("plan,period,amount_cents,promo_amount_cents,promo_event,promo_ends_at");
+      .select("plan,period,amount_cents,promo_amount_cents,promo_event,promo_label,promo_ends_at");
     const rows = (data ?? []) as {
       plan: string; period: string; amount_cents: number;
-      promo_amount_cents: number | null; promo_event: string | null; promo_ends_at: string | null;
+      promo_amount_cents: number | null; promo_event: string | null;
+      promo_label: string | null; promo_ends_at: string | null;
     }[];
     if (rows.length) {
       // Les valeurs par défaut restent le socle : une ligne manquante en base
@@ -59,7 +62,9 @@ export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
         prices[r.plan][r.period] = promoLive ? Math.round(r.promo_amount_cents as number) : base;
         if (promoLive) {
           (promos[r.plan] ??= {})[r.period] = {
-            base_cents: base, event: r.promo_event ?? "other", ends_at: r.promo_ends_at ?? null,
+            base_cents: base, event: r.promo_event ?? "other",
+            label: (typeof r.promo_label === "string" && r.promo_label.trim()) ? r.promo_label.trim() : null,
+            ends_at: r.promo_ends_at ?? null,
           };
         }
       }

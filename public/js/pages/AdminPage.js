@@ -515,6 +515,16 @@ class AdminPage {
 #page-admin .price-cell .price-in{display:flex;align-items:center;gap:6px;color:var(--adm-tx);font-weight:700;}
 #page-admin .price-cell input{width:96px;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;}
 #page-admin .price-cell input:focus-visible{outline:none;border-color:#5b7cfa;}
+#page-admin .pev{position:relative;}
+#page-admin .pev-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:7px 10px;font:inherit;font-size:12.5px;cursor:pointer;transition:border-color .14s;}
+#page-admin .pev-btn:hover{border-color:#5b7cfa;}
+#page-admin .pev-car{color:var(--adm-tx2);font-size:10px;}
+#page-admin .pev-menu{position:absolute;z-index:40;top:calc(100% + 6px);left:0;right:0;max-height:264px;overflow:auto;background:#12161f;border:1px solid var(--adm-line);border-radius:10px;padding:6px;box-shadow:0 14px 36px rgba(0,0,0,.55);display:grid;gap:2px;}
+#page-admin .pev-menu[hidden]{display:none;}
+#page-admin .pev-opt{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:7px;color:var(--adm-tx2);padding:7px 9px;font:inherit;font-size:12.5px;cursor:pointer;}
+#page-admin .pev-opt:hover{background:rgba(91,124,250,.14);color:var(--adm-tx);}
+#page-admin .pev-opt.on{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));color:#fff;}
+#page-admin .price-cell input.pev-label{width:100%;font-size:12px;}
 #page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
 #page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
 #page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
@@ -1100,16 +1110,19 @@ class AdminPage {
         }
         const LBL = { plus: 'Norva', family: 'Norva Family' };
         const PER = { monthly: 'mensuel', annual: 'annuel' };
-        // Catalogue d'événements (clé serveur → libellé FR admin) ; le badge côté
-        // page de vente est le libellé anglais correspondant.
+        // Catalogue d'événements (clé serveur → libellé FR admin + icône) ; le badge
+        // côté page de vente est le libellé anglais correspondant — sauf libellé
+        // personnalisé (événement « Autre »), qui prime.
         const EVENTS = [
-            ['black_friday', 'Black Friday'], ['cyber_monday', 'Cyber Monday'],
-            ['winter_sale', 'Soldes d\'hiver'], ['summer_sale', 'Soldes d\'été'],
-            ['christmas', 'Noël'], ['new_year', 'Nouvel An'], ['lunar_new_year', 'Nouvel An chinois'],
-            ['eid', 'Aïd'], ['easter', 'Pâques'], ['halloween', 'Halloween'],
-            ['valentines', 'Saint-Valentin'], ['back_to_school', 'Rentrée'],
-            ['birthday', 'Anniversaire Norva'], ['flash', 'Vente flash'], ['other', 'Autre']
+            ['black_friday', 'Black Friday', '🖤'], ['cyber_monday', 'Cyber Monday', '💻'],
+            ['winter_sale', 'Soldes d\'hiver', '❄️'], ['summer_sale', 'Soldes d\'été', '☀️'],
+            ['christmas', 'Noël', '🎄'], ['new_year', 'Nouvel An', '🎆'], ['lunar_new_year', 'Nouvel An chinois', '🏮'],
+            ['eid', 'Aïd', '🌙'], ['easter', 'Pâques', '🐣'], ['halloween', 'Halloween', '🎃'],
+            ['valentines', 'Saint-Valentin', '💘'], ['back_to_school', 'Rentrée', '🎒'],
+            ['birthday', 'Anniversaire Norva', '🎂'], ['flash', 'Vente flash', '⚡'], ['other', 'Autre…', '🏷️']
         ];
+        const evOf = v => EVENTS.find(x => x[0] === v) || EVENTS[0];
+        const escA = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         const toLocalInput = iso => {
             if (!iso) return '';
             const d = new Date(iso);
@@ -1128,7 +1141,12 @@ class AdminPage {
                 <span class="price-in" title="Prix de base">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(r.amount_cents / 100).toFixed(2)}"></span>
                 <div class="promo-sub" title="Promo : prime sur le prix de base tant qu'elle est remplie (et non échue)">
                     <span class="price-in">🏷 $ <input type="number" step="0.01" min="1" max="999.99" data-promo="${k}" placeholder="—" value="${r.promo_amount_cents ? (r.promo_amount_cents / 100).toFixed(2) : ''}"></span>
-                    <select data-pevent="${k}">${EVENTS.map(([v, l]) => `<option value="${v}"${r.promo_event === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+                    <div class="pev" data-pev-host="${k}" data-val="${escA(r.promo_event || 'black_friday')}">
+                        <button type="button" class="pev-btn"><span class="pev-cur">${evOf(r.promo_event || 'black_friday')[2]} ${evOf(r.promo_event || 'black_friday')[1]}</span><span class="pev-car">▾</span></button>
+                        <div class="pev-menu" hidden>${EVENTS.map(([v, l, ic]) =>
+                            `<button type="button" class="pev-opt${(r.promo_event || 'black_friday') === v ? ' on' : ''}" data-val="${v}">${ic} ${l}</button>`).join('')}</div>
+                    </div>
+                    <input type="text" class="pev-label" data-plabel="${k}" maxlength="24" placeholder="Nom de l'événement (badge affiché)" value="${escA(r.promo_label || '')}"${(r.promo_event || '') === 'other' ? '' : ' style="display:none"'} title="Libellé du badge sur la page de vente (2-24 caractères) — pour un événement propre à Norva">
                     <input type="datetime-local" data-pends="${k}" value="${toLocalInput(r.promo_ends_at)}" title="Fin de promo (optionnel) — passée cette date, la promo s'auto-désactive">
                 </div>
             </div>`;
@@ -1141,6 +1159,39 @@ class AdminPage {
             <div class="kpi-gtitle" style="margin:16px 0 6px">🎨 Visuel de campagne (optionnel)</div>
             <div class="ssub" style="margin-bottom:8px">Image de <b>fond plein écran</b> de la page de vente pendant une promo (les cartes gardent leur halo aux couleurs de l'événement). Idéal : <b>1920 × 1080 px</b> ou plus (paysage), JPG/WebP, <b>&lt; 2 Mo</b> — un dégradé sombre vertical est appliqué par-dessus : le haut de l'image reste visible, le bas s'assombrit derrière les cartes pour la lisibilité.</div>
             <div id="fin-campaign" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="ssub">Chargement…</span></div>`;
+        // Dépliant d'événement maison (le <select> natif rendait clair-sur-clair) :
+        // clic → panneau sombre avec icônes ; « Autre… » révèle le champ du libellé
+        // personnalisé (badge affiché tel quel sur la page de vente).
+        host.querySelectorAll('[data-pev-host]').forEach(pev => {
+            const key = pev.dataset.pevHost;
+            const btn = pev.querySelector('.pev-btn');
+            const menu = pev.querySelector('.pev-menu');
+            btn?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const wasHidden = menu.hidden;
+                host.querySelectorAll('.pev-menu').forEach(m => { m.hidden = true; });
+                menu.hidden = !wasHidden;
+            });
+            menu?.querySelectorAll('.pev-opt').forEach(opt => opt.addEventListener('click', () => {
+                pev.dataset.val = opt.dataset.val || 'other';
+                const curSpan = pev.querySelector('.pev-cur');
+                if (curSpan) curSpan.textContent = opt.textContent;
+                menu.querySelectorAll('.pev-opt').forEach(o => o.classList.toggle('on', o === opt));
+                menu.hidden = true;
+                const lblIn = host.querySelector(`input[data-plabel="${key}"]`);
+                if (lblIn) {
+                    lblIn.style.display = pev.dataset.val === 'other' ? '' : 'none';
+                    if (pev.dataset.val === 'other') lblIn.focus();
+                }
+            }));
+        });
+        if (!this._pevCloseWired) {
+            this._pevCloseWired = true;
+            document.addEventListener('click', () => {
+                document.querySelectorAll('#fin-prices .pev-menu').forEach(m => { m.hidden = true; });
+            });
+        }
+
         const msgEl = () => document.getElementById('fin-prices-msg');
         document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
             const baseEdits = [], promoEdits = [];
@@ -1152,26 +1203,33 @@ class AdminPage {
                 if (Number.isFinite(cents) && cents !== Number(cur.amount_cents)) baseEdits.push({ plan, period, cents });
                 const pv = String(host.querySelector(`input[data-promo="${k}"]`)?.value ?? '').trim();
                 const pCents = pv === '' ? null : Math.round(parseFloat(pv) * 100);
-                const pEvent = String(host.querySelector(`select[data-pevent="${k}"]`)?.value || 'other');
+                const pEvent = String(host.querySelector(`[data-pev-host="${k}"]`)?.dataset.val || 'other');
+                const pLabelRaw = String(host.querySelector(`input[data-plabel="${k}"]`)?.value || '').trim();
+                const pLabel = (pEvent === 'other' && pLabelRaw) ? pLabelRaw.slice(0, 24) : null;
                 const pEndsRaw = String(host.querySelector(`input[data-pends="${k}"]`)?.value || '');
                 const pEnds = pEndsRaw ? new Date(pEndsRaw).toISOString() : null;
                 const curEnds = cur.promo_ends_at ? new Date(cur.promo_ends_at).toISOString() : null;
                 const changed = (pCents ?? null) !== (cur.promo_amount_cents ?? null)
-                    || (pCents != null && (pEvent !== (cur.promo_event || 'other') || pEnds !== curEnds));
+                    || (pCents != null && (pEvent !== (cur.promo_event || 'other') || pEnds !== curEnds
+                        || (pLabel || null) !== (cur.promo_label || null)));
                 if (!changed) continue;
                 if (pCents != null && !Number.isFinite(pCents)) continue;
+                if (pCents != null && pEvent === 'other' && pLabelRaw && pLabelRaw.length < 2) {
+                    if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le nom de l'événement fait 2 à 24 caractères.`;
+                    return;
+                }
                 const baseAfter = Number.isFinite(cents) ? cents : Number(cur.amount_cents);
                 if (pCents != null && pCents >= baseAfter) {
                     if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le promo doit être inférieur au prix de base.`;
                     return;
                 }
-                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds });
+                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds, label: pLabel });
             }
             if (!baseEdits.length && !promoEdits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
             const rec = baseEdits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`)
                 .concat(promoEdits.map(e => e.cents == null
                     ? `${LBL[e.plan]} ${PER[e.period]} : fin de promo`
-                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${(EVENTS.find(x => x[0] === e.event) || ['', e.event])[1]})`))
+                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${e.label || evOf(e.event)[1]})`))
                 .join('\n');
             if (!window.confirm(`Appliquer ces changements ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
             try {
@@ -1181,7 +1239,8 @@ class AdminPage {
                 for (const e of promoEdits) {
                     await this._rpc('admin_billing_promo_set', {
                         p_plan: e.plan, p_period: e.period,
-                        p_amount_cents: e.cents, p_event: e.cents == null ? null : e.event, p_ends_at: e.cents == null ? null : e.ends,
+                        p_amount_cents: e.cents, p_event: e.cents == null ? null : e.event,
+                        p_ends_at: e.cents == null ? null : e.ends, p_label: e.cents == null ? null : e.label,
                     });
                 }
                 if (msgEl()) msgEl().textContent = `✅ Enregistré — visible sur le site sous ~1 min (cache edge 60 s).`;
