@@ -293,7 +293,7 @@
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=14"></script>
+  <script src="/js/billing.js?v=15"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -715,7 +715,18 @@
           if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling())) return;
           const prices = catalog.prices; // EFFECTIVE cents — an active promo is already applied
           livePromos = catalog.promos || null;
-          liveCampaignBg = (catalog.campaign && catalog.campaign.bg_url) || null;
+          // Campaign visual URL. billing.js normally resolves it (bg_url), but the
+          // page also knows how to build it from the raw bucket path — so a stale
+          // cached billing.js (immutable-cached under an old hash) can never cost
+          // us the campaign background again.
+          liveCampaignBg = null;
+          const camp = catalog.campaign || null;
+          if (camp && camp.bg_url) {
+            liveCampaignBg = camp.bg_url;
+          } else if (camp && camp.bg_path) {
+            const apiBase = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
+            liveCampaignBg = apiBase + '/storage/v1/object/public/promo-assets/' + String(camp.bg_path).replace(/^\/+/, '');
+          }
           document.querySelectorAll('.card').forEach(function (card) {
             const pl = prices[card.dataset.plan];
             if (!pl || !pl.monthly || !pl.annual) return;

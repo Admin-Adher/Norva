@@ -138,7 +138,9 @@
   function revolutResume() { return revolutAction('resume'); }
 
   // Current web catalog from the single price source (billing_prices, served by
-  // norva-revolut GET /prices — public, no auth). Resolves { prices, promos }:
+  // norva-revolut GET /prices — public, no auth). NB: any edit here changes the
+  // deployed content hash (?v=<sha256>), which is exactly how a stale immutable
+  // cached copy gets evicted on every client. Resolves { prices, promos }:
   // `prices` are EFFECTIVE cents (an active promo already applied), `promos`
   // carries the struck-through base + event badge for display. Cached for the
   // page's lifetime; resolves null on failure so callers keep static fallbacks.
