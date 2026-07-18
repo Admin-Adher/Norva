@@ -278,7 +278,7 @@ class MoviesPage {
     // Catalogue-wide "All" grid carrying the active language params — reuses the
     // genre "See all" infinite-scroll grid with the synthetic 'all' bucket.
     openLanguageBucket() {
-        const langKey = JSON.stringify(this.currentLanguageParams());
+        const langKey = this.currentBucketViewKey();
         if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
         this.openBucket({ id: 'genre-all', title: 'All movies', curation: { bucket: 'all' } });
     }
@@ -293,7 +293,10 @@ class MoviesPage {
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
         if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (this.sortSelect?.value === 'lang-match') {
+        if (this.addedSelect?.value) params.addedDays = this.addedSelect.value;
+        const sort = this.sortSelect?.value || '';
+        if (sort && sort !== 'default') params.sort = sort;
+        if (sort === 'lang-match') {
             params.sort = 'lang-match';
             const prefs = this.getPreferences();
             if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
@@ -304,6 +307,18 @@ class MoviesPage {
         const search = (this.searchInput?.value || '').trim();
         if (search) params.q = search;
         return params;
+    }
+
+    // A bucket grid's identity is the full set of server-side params plus the
+    // client-only grouping/favorite/watch controls. If any of these changes, the
+    // current language/genre bucket must be rebuilt instead of keeping stale order.
+    currentBucketViewKey() {
+        return JSON.stringify({
+            ...this.currentLanguageParams(),
+            watched: this.watchedSelect?.value || '',
+            favoritesOnly: Boolean(this.showFavoritesOnly),
+            group: Boolean(this.groupDuplicates)
+        });
     }
 
     // Dynamic filter menus: only show audio/subtitle languages actually present in
@@ -348,7 +363,7 @@ class MoviesPage {
         if (!bucket) return;
         // Re-open (re-render) when the same genre is active but the language params
         // changed, so toggling an audio/subtitle filter refreshes the grid.
-        const langKey = JSON.stringify(this.currentLanguageParams());
+        const langKey = this.currentBucketViewKey();
         if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
         const label = (T && T.label) ? T.label(bucket) : bucket;
