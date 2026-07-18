@@ -1,10 +1,10 @@
--- 13-provider-presence-gate-audit.sql — audit du garde « presence → compte provider occupé ».
+-- 14-provider-presence-gate-audit-v2.sql — audit du garde « presence → compte provider occupé ».
 --
 -- NE PAS coller ce fichier dans bash : exécute-le via le wrapper :
---   ./ops/hetzner/scripts/13-provider-presence-gate-audit.sh <uuid utilisateur pilote>
+--   ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
 --
 -- Depuis ~/norva/ops/hetzner :
---   ./scripts/13-provider-presence-gate-audit.sh <uuid utilisateur pilote>
+--   ./scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
 --
 -- But : vérifier sur la box self-hosted que l'ouverture de l'app / du compte utilisateur
 -- marque bien les comptes provider comme occupés, et que les crons/sondes qui consomment un

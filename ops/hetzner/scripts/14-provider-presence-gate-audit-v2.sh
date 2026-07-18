@@ -8,13 +8,13 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage depuis la racine du repo ~/norva:
-  ./ops/hetzner/scripts/13-provider-presence-gate-audit.sh <uuid utilisateur pilote>
+  ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
 
 Usage si tu es déjà dans ~/norva/ops/hetzner:
-  ./scripts/13-provider-presence-gate-audit.sh <uuid utilisateur pilote>
+  ./scripts/14-provider-presence-gate-audit-v2.sh <uuid utilisateur pilote>
 
 Exemple depuis la racine du repo:
-  ./ops/hetzner/scripts/13-provider-presence-gate-audit.sh 00000000-0000-0000-0000-000000000000
+  ./ops/hetzner/scripts/14-provider-presence-gate-audit-v2.sh 00000000-0000-0000-0000-000000000000
 
 Avant de lancer:
   1) Mets le repo à jour sur la box (git pull).
@@ -39,7 +39,7 @@ if [[ ! "$USER_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SQL_FILE="$SCRIPT_DIR/13-provider-presence-gate-audit.sql"
+SQL_FILE="$SCRIPT_DIR/14-provider-presence-gate-audit-v2.sql"
 
 if [[ ! -f "$SQL_FILE" ]]; then
   echo "Erreur: fichier SQL introuvable: $SQL_FILE" >&2
