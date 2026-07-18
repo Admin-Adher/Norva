@@ -77,7 +77,7 @@ class MoviesPage {
             searchId: 'movies-category-search',
             listId: 'movies-category-list',
             allLabel: 'All Categories',
-            onChange: () => this.onFiltersChanged()
+            onChange: () => this.onFiltersChanged('movies-category-multiselect')
         });
 
         // Source change reloads everything
@@ -102,7 +102,7 @@ class MoviesPage {
             const runSearch = () => {
                 if (isTv && generation !== this._tvSearchGeneration) return;
                 this._searchIdleCallback = null;
-                this.onFiltersChanged();
+                this.onFiltersChanged('movies-search');
             };
             this._searchTimeout = setTimeout(() => {
                 if (isTv && typeof window.requestIdleCallback === 'function') {
@@ -117,14 +117,14 @@ class MoviesPage {
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
          this.watchedSelect, this.addedSelect, this.durationSelect,
          this.audioSelect, this.subtitleSelect].forEach(sel => {
-            sel?.addEventListener('change', () => this.onFiltersChanged());
+            sel?.addEventListener('change', () => this.onFiltersChanged(sel?.id || 'filter-select'));
         });
 
         // Group duplicates toggle
         this.groupToggleBtn?.addEventListener('click', () => {
             this.groupDuplicates = !this.groupDuplicates;
             this.groupToggleBtn.classList.toggle('active', this.groupDuplicates);
-            this.onFiltersChanged();
+            this.onFiltersChanged('movies-group-toggle');
         });
 
 
@@ -182,7 +182,7 @@ class MoviesPage {
         favBtn?.addEventListener('click', () => {
             this.showFavoritesOnly = !this.showFavoritesOnly;
             favBtn.classList.toggle('active', this.showFavoritesOnly);
-            this.onFiltersChanged();
+            this.onFiltersChanged('movies-favorites-btn');
         });
 
         // Build the mockup-oriented Movies chrome only in the Android TV client.
@@ -234,7 +234,48 @@ class MoviesPage {
         });
     }
 
-    onFiltersChanged() {
+    filterDebugSnapshot(trigger = 'unknown') {
+        const selectedCategories = [...(this.categoryMulti?.getSelected?.() || [])];
+        return {
+            trigger,
+            cloud: this.isCloudPagedMode(),
+            tv: this._isTvMode(),
+            activeBucket: this.activeBucket || null,
+            bucketViewKey: this.currentBucketViewKey?.() || null,
+            languageActive: this.isLanguageFilterActive(),
+            controls: {
+                sort: this.sortSelect?.value || 'default',
+                source: this.sourceSelect?.value || '',
+                categories: selectedCategories,
+                year: this.yearSelect?.value || '',
+                rating: this.ratingSelect?.value || '',
+                watched: this.watchedSelect?.value || '',
+                added: this.addedSelect?.value || '',
+                duration: this.durationSelect?.value || '',
+                audio: this.audioSelect?.value || '',
+                subtitle: this.subtitleSelect?.value || '',
+                search: (this.searchInput?.value || '').trim(),
+                favoritesOnly: Boolean(this.showFavoritesOnly),
+                groupDuplicates: Boolean(this.groupDuplicates)
+            },
+            languageParams: this.currentLanguageParams?.() || null,
+            cloudPageParams: this.isCloudPagedMode() ? this.cloudPageParams?.(0) : null,
+            loadedMovies: this.movies?.length || 0,
+            filteredCards: this.filteredCards?.length || 0,
+            cloudOffset: this.cloudOffset,
+            cloudTotal: this.cloudTotal,
+            cloudHasMore: this.cloudHasMore
+        };
+    }
+
+    debugFilterLog(event, payload = {}) {
+        try {
+            console.info(`[Movies][filters] ${event}`, payload);
+        } catch (_) { /* console logging must never affect filtering */ }
+    }
+
+    onFiltersChanged(trigger = 'unknown') {
+        this.debugFilterLog('change', this.filterDebugSnapshot(trigger));
         this.persistFilters();
         this.renderActiveFilterChips();
         // Cloud: picking a genre opens that genre's full grid — the same dense,
@@ -242,11 +283,11 @@ class MoviesPage {
         // Manage Content's genres.
         if (this.isCloudPagedMode() && !this._isTvMode()) {
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
-            if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+            if (buckets.length) { this.debugFilterLog('route:genre-bucket', { bucket: buckets[0], params: this.currentLanguageParams(), key: this.currentBucketViewKey() }); this.openGenreBucket(buckets[0]); return; }
             // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
             // no genre selected → a catalogue-wide grid filtered server-side by each
             // title's available version languages.
-            if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
+            if (this.isLanguageFilterActive()) { this.debugFilterLog('route:language-bucket', { params: this.currentLanguageParams(), key: this.currentBucketViewKey() }); this.openLanguageBucket(); return; }
         }
         // Android TV: the flat-grid endpoint (list_media_items_deduped, version-level)
         // can't filter by audio/subtitles — those live on the title-level, language-aware
@@ -254,6 +295,7 @@ class MoviesPage {
         // filter routes through the SAME bucket grid web/mobile use → identical filtered
         // results across devices. Genre/default views keep the TV split-view flat grid.
         if (this.isCloudPagedMode() && this._isTvMode() && this.isLanguageFilterActive()) {
+            this.debugFilterLog('route:tv-language-bucket', { params: this.currentLanguageParams(), key: this.currentBucketViewKey() });
             this.openLanguageBucket();
             return;
         }
@@ -262,6 +304,7 @@ class MoviesPage {
             return;
         }
         if (this.isCloudPagedMode()) {
+            this.debugFilterLog('route:cloud-page', { params: this.cloudPageParams(0) });
             this.loadMovies();
             return;
         }
@@ -278,8 +321,12 @@ class MoviesPage {
     // Catalogue-wide "All" grid carrying the active language params — reuses the
     // genre "See all" infinite-scroll grid with the synthetic 'all' bucket.
     openLanguageBucket() {
-        const langKey = JSON.stringify(this.currentLanguageParams());
-        if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
+        const langKey = this.currentBucketViewKey();
+        if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) {
+            this.debugFilterLog('language-bucket:skip-same-key', { key: langKey, params: this.currentLanguageParams() });
+            return;
+        }
+        this.debugFilterLog('language-bucket:open', { previousKey: this.activeBucketLangKey, nextKey: langKey, params: this.currentLanguageParams() });
         this.openBucket({ id: 'genre-all', title: 'All movies', curation: { bucket: 'all' } });
     }
 
@@ -293,7 +340,10 @@ class MoviesPage {
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
         if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (this.sortSelect?.value === 'lang-match') {
+        if (this.addedSelect?.value) params.addedDays = this.addedSelect.value;
+        const sort = this.sortSelect?.value || '';
+        if (sort && sort !== 'default') params.sort = sort;
+        if (sort === 'lang-match') {
             params.sort = 'lang-match';
             const prefs = this.getPreferences();
             if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
@@ -304,6 +354,18 @@ class MoviesPage {
         const search = (this.searchInput?.value || '').trim();
         if (search) params.q = search;
         return params;
+    }
+
+    // A bucket grid's identity is the full set of server-side params plus the
+    // client-only grouping/favorite/watch controls. If any of these changes, the
+    // current language/genre bucket must be rebuilt instead of keeping stale order.
+    currentBucketViewKey() {
+        return JSON.stringify({
+            ...this.currentLanguageParams(),
+            watched: this.watchedSelect?.value || '',
+            favoritesOnly: Boolean(this.showFavoritesOnly),
+            group: Boolean(this.groupDuplicates)
+        });
     }
 
     // Dynamic filter menus: only show audio/subtitle languages actually present in
@@ -348,7 +410,7 @@ class MoviesPage {
         if (!bucket) return;
         // Re-open (re-render) when the same genre is active but the language params
         // changed, so toggling an audio/subtitle filter refreshes the grid.
-        const langKey = JSON.stringify(this.currentLanguageParams());
+        const langKey = this.currentBucketViewKey();
         if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
         const label = (T && T.label) ? T.label(bucket) : bucket;
@@ -452,7 +514,22 @@ class MoviesPage {
         // into the new grid (or corrupt its offset).
         const requestId = this.bucketRequestId;
         try {
-            const payload = await API.media.genreItems({ type: 'movie', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset, ...this.currentLanguageParams() });
+            const requestParams = { type: 'movie', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset, ...this.currentLanguageParams() };
+            this.debugFilterLog('bucket:request', { requestId, params: requestParams });
+            const payload = await API.media.genreItems(requestParams);
+            this.debugFilterLog('bucket:response', {
+                requestId,
+                params: requestParams,
+                count: payload?.count,
+                items: payload?.items?.length || 0,
+                hasMore: Boolean(payload?.hasMore),
+                firstTitles: (payload?.items || []).slice(0, 8).map(item => ({
+                    title: item.title || item.name,
+                    year: item.year || item.release_year,
+                    createdAt: item.created_at || item.createdAt,
+                    sourceId: item.sourceId || item.source_id
+                }))
+            });
             if (requestId !== this.bucketRequestId || !this.bucketGridEl?.isConnected) return;
             const items = (payload && payload.items) || [];
             // Offset pagination over a live catalog can re-serve a boundary row —
@@ -1133,7 +1210,23 @@ class MoviesPage {
         try {
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.movie-card').length;
             // On reset always refetch page 1 (offset 0), even after a cache paint.
-            const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
+            const pageParams = this.cloudPageParams(reset ? 0 : this.cloudOffset);
+            this.debugFilterLog(reset ? 'cloud-page:request-reset' : 'cloud-page:request-more', { requestId, params: pageParams });
+            const page = await API.media.page(pageParams);
+            this.debugFilterLog(reset ? 'cloud-page:response-reset' : 'cloud-page:response-more', {
+                requestId,
+                params: pageParams,
+                count: page?.count,
+                films: page?.films,
+                items: page?.items?.length || 0,
+                hasMore: Boolean(page?.hasMore),
+                firstTitles: (page?.items || []).slice(0, 8).map(item => ({
+                    title: item.title || item.name,
+                    year: item.year || item.release_year,
+                    added: item.added || item.added_at,
+                    sourceId: item.sourceId || item.source_id
+                }))
+            });
             if (!reset && this._isTvMode() && this._tvPendingCloudReset) return;
             if (reset && (
                 requestId !== this.cloudRequestId ||
