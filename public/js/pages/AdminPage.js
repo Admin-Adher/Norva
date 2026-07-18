@@ -527,6 +527,10 @@ class AdminPage {
 #page-admin .price-cell input.pev-label{width:100%;font-size:12px;}
 #page-admin .price-cell .pcy-unit{font-style:normal;color:var(--adm-tx2);font-weight:500;font-size:11.5px;}
 #page-admin .price-cell input[data-pcycles]{width:58px;}
+#page-admin .refm{margin-left:6px;padding:4px 8px;border-radius:999px;border:1px solid var(--adm-line);background:rgba(0,0,0,.25);color:var(--adm-tx2);font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:border-color .14s,color .14s;}
+#page-admin .refm:hover:not(:disabled){border-color:#5b7cfa;color:var(--adm-tx);}
+#page-admin .refm.on{background:linear-gradient(135deg,rgba(91,124,250,.3),rgba(168,85,247,.25));border-color:#5b7cfa;color:#fff;}
+#page-admin .refm:disabled{opacity:.35;cursor:default;}
 #page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
 #page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
 #page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
@@ -1144,7 +1148,9 @@ class AdminPage {
             const r = by[k];
             return `<div class="price-cell${r.promo_active ? ' promo-on' : ''}">
                 <span>${LBL[plan]} · ${PER[period]}${r.promo_active ? ' <span class="pchip">PROMO</span>' : ''}</span>
-                <span class="price-in" title="Prix de base">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(r.amount_cents / 100).toFixed(2)}"></span>
+                <span class="price-in" title="Prix de base">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(r.amount_cents / 100).toFixed(2)}">${period === 'annual'
+                    ? `<button type="button" class="refm${r.promo_ref_monthly ? ' on' : ''}" data-refm="${k}" title="Ancre marketing (promo annuelle) : afficher la réduction par rapport à 12 × le prix mensuel de base, au lieu du prix annuel de base — le site le présente comme « vs monthly billing » (comparaison de deux offres actuelles, légal), jamais comme un ancien prix. Actif uniquement quand une promo est remplie.">12×</button>`
+                    : ''}</span>
                 <div class="promo-sub" title="Promo : prime sur le prix de base tant qu'elle est remplie (et non échue)">
                     <span class="price-in">🏷 $ <input type="number" step="0.01" min="1" max="999.99" data-promo="${k}" placeholder="—" value="${r.promo_amount_cents ? (r.promo_amount_cents / 100).toFixed(2) : ''}"></span>
                     <div class="pev" data-pev-host="${k}" data-val="${escA(r.promo_event || 'black_friday')}">
@@ -1198,6 +1204,17 @@ class AdminPage {
                 document.querySelectorAll('#fin-prices .pev-menu').forEach(m => { m.hidden = true; });
             });
         }
+        // Bouton « 12× » (ancre marketing des promos annuelles) : cliquable
+        // uniquement quand le champ promo de la ligne est rempli — suit la
+        // saisie en direct.
+        host.querySelectorAll('[data-refm]').forEach(btn => {
+            const key = btn.dataset.refm;
+            const promoIn = host.querySelector(`input[data-promo="${key}"]`);
+            const sync = () => { btn.disabled = !String(promoIn?.value ?? '').trim(); };
+            sync();
+            promoIn?.addEventListener('input', sync);
+            btn.addEventListener('click', () => btn.classList.toggle('on'));
+        });
 
         const msgEl = () => document.getElementById('fin-prices-msg');
         document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
@@ -1220,10 +1237,13 @@ class AdminPage {
                 let pCycles = pCycRaw === '' ? null : Math.round(parseFloat(pCycRaw));
                 if (pCycles != null && (!Number.isFinite(pCycles) || pCycles < 1)) pCycles = null;
                 if (pCycles != null) pCycles = Math.min(24, pCycles);
+                const pRef = period === 'annual'
+                    && Boolean(host.querySelector(`[data-refm="${k}"]`)?.classList.contains('on'));
                 const changed = (pCents ?? null) !== (cur.promo_amount_cents ?? null)
                     || (pCents != null && (pEvent !== (cur.promo_event || 'other') || pEnds !== curEnds
                         || (pLabel || null) !== (cur.promo_label || null)
-                        || (pCycles ?? null) !== (cur.promo_cycles ?? null)));
+                        || (pCycles ?? null) !== (cur.promo_cycles ?? null)
+                        || pRef !== Boolean(cur.promo_ref_monthly)));
                 if (!changed) continue;
                 if (pCents != null && !Number.isFinite(pCents)) continue;
                 if (pCents != null && pEvent === 'other' && pLabelRaw && pLabelRaw.length < 2) {
@@ -1235,13 +1255,13 @@ class AdminPage {
                     if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le promo doit être inférieur au prix de base.`;
                     return;
                 }
-                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds, label: pLabel, cycles: pCycles });
+                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds, label: pLabel, cycles: pCycles, ref: pRef });
             }
             if (!baseEdits.length && !promoEdits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
             const rec = baseEdits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`)
                 .concat(promoEdits.map(e => e.cents == null
                     ? `${LBL[e.plan]} ${PER[e.period]} : fin de promo`
-                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${e.label || evOf(e.event)[1]}, ${e.cycles ? e.cycles + ' période' + (e.cycles > 1 ? 's' : '') + ' puis prix de base' : 'à vie'})`))
+                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${e.label || evOf(e.event)[1]}, ${e.cycles ? e.cycles + ' période' + (e.cycles > 1 ? 's' : '') + ' puis prix de base' : 'à vie'}${e.ref ? ', réf. 12× mensuel' : ''})`))
                 .join('\n');
             if (!window.confirm(`Appliquer ces changements ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
             try {
@@ -1254,6 +1274,7 @@ class AdminPage {
                         p_amount_cents: e.cents, p_event: e.cents == null ? null : e.event,
                         p_ends_at: e.cents == null ? null : e.ends, p_label: e.cents == null ? null : e.label,
                         p_cycles: e.cents == null ? null : e.cycles,
+                        p_ref_monthly: e.cents == null ? false : Boolean(e.ref),
                     });
                 }
                 if (msgEl()) msgEl().textContent = `✅ Enregistré — visible sur le site sous ~1 min (cache edge 60 s).`;

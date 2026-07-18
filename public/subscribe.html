@@ -529,13 +529,20 @@
               const priceEl = card.querySelector('.price');
               if (priceEl) priceEl.appendChild(was);
             }
-            was.textContent = '$' + (promo.base_cents / 100).toFixed(2);
+            // Marketing anchor: when the admin turned on the « 12× monthly »
+            // reference for an annual promo, the comparison price is what a
+            // year of monthly billing costs — ALWAYS displayed with the
+            // « billed monthly » qualifier (comparing two current offers is
+            // legal; a bare struck price that was never charged is not).
+            const refCents = promo.ref_cents || promo.base_cents;
+            const refMonthly = Boolean(promo.ref_cents);
+            was.textContent = '$' + (refCents / 100).toFixed(2) + (refMonthly ? ' billed monthly' : '');
             // Discount made explicit — the % pill next to the badge and the
             // saved amount under the price (the struck reference price above is
             // the EU Omnibus requirement; these two are the selling points).
             const effRaw = parseFloat(annual ? card.dataset.annual : card.dataset.monthly);
-            const effCents = isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
-            const pctVal = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
+            const effCents = isFinite(effRaw) ? Math.round(effRaw * 100) : refCents;
+            const pctVal = Math.max(1, Math.round(100 - (effCents / refCents) * 100));
             let pct = card.querySelector('.promo-pct');
             if (!pct) {
               pct = document.createElement('span');
@@ -552,8 +559,11 @@
             }
             // « N premières périodes » : l'après-promo est annoncé noir sur blanc
             // (« then $4.99/mo ») — transparence exigée pour les prix d'appel.
+            // Le « then » reste sur la BASE (le vrai prix post-promo), même
+            // quand l'économie affichée est ancrée sur 12× mensuel.
             const unit = annual ? '/yr' : '/mo';
-            const saveAmt = 'You save $' + ((promo.base_cents - effCents) / 100).toFixed(2) + unit;
+            const saveAmt = 'You save $' + ((refCents - effCents) / 100).toFixed(2) + unit
+              + (refMonthly ? ' vs monthly billing' : '');
             if (promo.cycles) {
               const firstTxt = annual
                 ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')

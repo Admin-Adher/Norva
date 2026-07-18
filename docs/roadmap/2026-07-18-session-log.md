@@ -510,6 +510,39 @@ Capture d'Adrien : toggle « SAVE 30% » ET cards « −40 % » côte à côte. 
   avec annuel = 12 × mensuel, le badge du toggle disparaît (comportement
   voulu et honnête).
 
+### Ancre marketing « 12× mensuel » — migration `20260719060000` (demande produit)
+
+Idée d'Adrien : une promo annuelle comparée à la base annuelle paraît faible
+(34,99 vs 41,99 = −17 %) car la base annuelle inclut DÉJÀ la remise structurelle.
+Comparée à un an de facturation mensuelle (12 × 4,99 = 59,88), la même promo
+vaut **−42 %**. → Bouton d'ancrage optionnel, par promo annuelle.
+
+**Cadre légal (décision d'implémentation)** : afficher 59,88 comme *ancien prix*
+barré nu serait un faux prix de référence (L112-1-1). Comparer deux offres
+ACTUELLES est licite (framing du badge « Save 30% ») ⇒ l'ancre est TOUJOURS
+affichée avec le qualificatif **« billed monthly / vs monthly billing »** sur
+les trois surfaces. Le « then $41.99/yr » (prix post-promo réel) reste sur la
+base — jamais sur l'ancre.
+
+**Mécanique :**
+
+- `billing_prices.promo_ref_monthly` (bool, annuel seulement — le RPC rejette
+  sur mensuel). `admin_billing_promo_set` passe à **8 args** (`p_ref_monthly`)
+  ⇒ DROP ancienne 7 args ⇒ **⚠ NOTIFY pgrst**.
+- L'edge calcule `promos.annual.ref_cents = 12 × base mensuelle` (émis
+  seulement s'il DÉPASSE la base annuelle — sinon il n'amplifie rien).
+  **Affichage pur** : montants facturés/stampés (metadata checkout, mapping,
+  cron) inchangés.
+- Admin : bouton **« 12× »** à côté du prix de base annuel, cliquable
+  uniquement quand le champ promo est rempli (suivi en direct de la saisie),
+  état violet quand actif ; récap « réf. 12× mensuel » ; envoyé au RPC.
+- Front (vente, landing, checkout) : `ref_cents || base_cents` comme ancre du
+  barré, du −% et de l'économie ; barré suffixé « billed monthly », économie
+  suffixée « vs monthly billing » ; checkout dit « vs ~~$59.88/yr~~ billed
+  monthly » (jamais « was »).
+- Sim jsdom dédiée (6 assertions) : badge −42 %, barré qualifié, save qualifié,
+  « then » sur la base, pas de fuite sur la vue mensuelle.
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

@@ -20,7 +20,12 @@ export type PriceTable = Record<string, Record<string, number>>;
 // label : libellé de badge personnalisé (prioritaire sur le libellé standard de
 // l'événement côté front — pensé pour event='other', un événement propre à Norva).
 // cycles : durée de la promo en périodes facturées (null = à vie / early-bird).
-export interface PromoInfo { base_cents: number; event: string; label: string | null; ends_at: string | null; cycles: number | null }
+// ref_cents : ancre marketing « 12 × mensuel » (annuel + promo_ref_monthly
+// seulement, émise uniquement si elle DÉPASSE base_cents) — le front doit
+// toujours l'afficher avec le qualificatif « billed monthly / vs monthly
+// billing », jamais en prix barré nu (L112-1-1). Affichage pur : les montants
+// facturés/stampés ne changent pas.
+export interface PromoInfo { base_cents: number; event: string; label: string | null; ends_at: string | null; cycles: number | null; ref_cents: number | null }
 export type PromoTable = Record<string, Record<string, PromoInfo>>;
 // campaign.bg_path : CHEMIN de l'image de campagne dans le bucket public
 // promo-assets (null = thème par défaut de l'événement côté front). On renvoie
@@ -44,20 +49,24 @@ export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.catalog;
   try {
     const { data } = await db.from("billing_prices")
-      .select("plan,period,amount_cents,promo_amount_cents,promo_event,promo_label,promo_ends_at,promo_cycles");
+      .select("plan,period,amount_cents,promo_amount_cents,promo_event,promo_label,promo_ends_at,promo_cycles,promo_ref_monthly");
     const rows = (data ?? []) as {
       plan: string; period: string; amount_cents: number;
       promo_amount_cents: number | null; promo_event: string | null;
       promo_label: string | null; promo_ends_at: string | null; promo_cycles: number | null;
+      promo_ref_monthly: boolean | null;
     }[];
     if (rows.length) {
       // Les valeurs par défaut restent le socle : une ligne manquante en base
       // (jamais le cas en pratique — seed de la migration) garde un prix sain.
       const prices: PriceTable = { plus: { ...DEFAULT_PRICES.plus }, family: { ...DEFAULT_PRICES.family } };
       const promos: PromoTable = {};
+      const baseBy: Record<string, Record<string, number>> = {};
+      const wantsRef: Record<string, boolean> = {};
       for (const r of rows) {
         if (!prices[r.plan] || !Number.isFinite(r.amount_cents) || r.amount_cents <= 0) continue;
         const base = Math.round(r.amount_cents);
+        (baseBy[r.plan] ??= {})[r.period] = base;
         const promoLive = Number.isFinite(r.promo_amount_cents as number) && (r.promo_amount_cents as number) > 0
           && (!r.promo_ends_at || new Date(r.promo_ends_at).getTime() > Date.now());
         prices[r.plan][r.period] = promoLive ? Math.round(r.promo_amount_cents as number) : base;
@@ -67,7 +76,18 @@ export async function getCatalog(db: SupabaseClient): Promise<Catalog> {
             label: (typeof r.promo_label === "string" && r.promo_label.trim()) ? r.promo_label.trim() : null,
             ends_at: r.promo_ends_at ?? null,
             cycles: (Number.isFinite(r.promo_cycles as number) && (r.promo_cycles as number) > 0) ? Math.round(r.promo_cycles as number) : null,
+            ref_cents: null,
           };
+          if (r.period === "annual" && r.promo_ref_monthly === true) wantsRef[r.plan] = true;
+        }
+      }
+      // Ancre « 12 × mensuel » des promos annuelles : calculée ici (source
+      // unique), émise seulement si elle amplifie réellement (> base annuelle).
+      for (const plan of Object.keys(wantsRef)) {
+        const p = promos[plan]?.annual;
+        const baseM = baseBy[plan]?.monthly;
+        if (p && Number.isFinite(baseM) && (baseM as number) * 12 > p.base_cents) {
+          p.ref_cents = Math.round((baseM as number) * 12);
         }
       }
       // Visuel de campagne (best-effort : table absente avant la migration

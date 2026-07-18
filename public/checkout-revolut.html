@@ -327,13 +327,20 @@
             // built via textContent — never markup.
             chip.textContent = (promo.label && String(promo.label).trim()) || PROMO_LABELS[promo.event] || PROMO_LABELS.other;
             chip.style.background = PROMO_BADGE_BG[promo.event] || PROMO_BADGE_BG.other;
+            // Ancre « 12× mensuel » (promo annuelle, opt-in admin) : comparaison
+            // avec un an de facturation mensuelle, toujours qualifiée — jamais
+            // présentée comme un ancien prix.
+            const refCents = promo.ref_cents || promo.base_cents;
+            const refMonthly = Boolean(promo.ref_cents);
             const struck = document.createElement('s');
-            struck.textContent = '$' + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo');
+            struck.textContent = '$' + (refCents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo');
             d.appendChild(chip);
-            d.appendChild(document.createTextNode(' was '));
+            d.appendChild(document.createTextNode(refMonthly ? ' vs ' : ' was '));
             d.appendChild(struck);
-            const pctVal = Math.max(1, Math.round(100 - (cents / promo.base_cents) * 100));
-            d.appendChild(document.createTextNode(' · −' + pctVal + '% (save $' + ((promo.base_cents - cents) / 100).toFixed(2) + ')'));
+            if (refMonthly) d.appendChild(document.createTextNode(' billed monthly'));
+            const pctVal = Math.max(1, Math.round(100 - (cents / refCents) * 100));
+            d.appendChild(document.createTextNode(' · −' + pctVal + '% (save $' + ((refCents - cents) / 100).toFixed(2)
+              + (refMonthly ? ' vs monthly billing' : '') + ')'));
             if (promo.cycles) {
               const firstTxt = period === 'annual'
                 ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')

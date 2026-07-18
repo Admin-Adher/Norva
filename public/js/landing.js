@@ -609,9 +609,15 @@
         let save = article?.querySelector('.promo-save');
         let wasLine = article?.querySelector('.promo-was');
         if (promo && promo.base_cents && article) {
+          // Ancre marketing « 12× mensuel » (promo annuelle, opt-in admin) :
+          // la comparaison porte sur un an de facturation mensuelle — toujours
+          // qualifiée « billed monthly » (deux offres actuelles, jamais un
+          // faux prix barré).
+          const refCents = promo.ref_cents || promo.base_cents;
+          const refMonthly = Boolean(promo.ref_cents);
           const effRaw = Number.parseFloat(String(isAnnual ? price.dataset.annual : price.dataset.monthly).replace(',', '.'));
-          const effCents = Number.isFinite(effRaw) ? Math.round(effRaw * 100) : promo.base_cents;
-          const pct = Math.max(1, Math.round(100 - (effCents / promo.base_cents) * 100));
+          const effCents = Number.isFinite(effRaw) ? Math.round(effRaw * 100) : refCents;
+          const pct = Math.max(1, Math.round(100 - (effCents / refCents) * 100));
           const edge = PROMO_EDGE[promo.event] || PROMO_EDGE.other;
           if (!flag) {
             flag = document.createElement('span');
@@ -627,7 +633,8 @@
             save.className = 'promo-save';
             flag.insertAdjacentElement('afterend', save);
           }
-          let saveTxt = `You save ${currency}${((promo.base_cents - effCents) / 100).toFixed(2)}${isAnnual ? '/yr' : '/mo'}`;
+          let saveTxt = `You save ${currency}${((refCents - effCents) / 100).toFixed(2)}${isAnnual ? '/yr' : '/mo'}`
+            + (refMonthly ? ' vs monthly billing' : '');
           if (promo.cycles) {
             const unit = isAnnual ? 'year' : 'month';
             saveTxt += promo.cycles === 1 ? ` for your first ${unit}` : ` for your first ${promo.cycles} ${unit}s`;
@@ -640,8 +647,8 @@
             wasLine.appendChild(document.createElement('span'));
             price.insertAdjacentElement('beforebegin', wasLine);
           }
-          wasLine.querySelector('s').textContent = `${currency}${(promo.base_cents / 100).toFixed(2)}`;
-          wasLine.querySelector('span').textContent = isAnnual ? '/yr' : '/mo';
+          wasLine.querySelector('s').textContent = `${currency}${(refCents / 100).toFixed(2)}`;
+          wasLine.querySelector('span').textContent = (isAnnual ? '/yr' : '/mo') + (refMonthly ? ' billed monthly' : '');
           article.classList.add('has-promo');
           article.style.borderColor = edge.border;
           article.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.08), 0 25px 60px rgba(0,0,0,.45), 0 0 40px ${edge.glow}`;
