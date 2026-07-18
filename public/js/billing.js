@@ -137,9 +137,11 @@
   function revolutCancel(reason) { return revolutAction('cancel', reason ? { reason: reason } : null); }
   function revolutResume() { return revolutAction('resume'); }
 
-  // Current web catalog (cents, USD) from the single price source (billing_prices,
-  // served by norva-revolut GET /prices — public, no auth). Cached for the page's
-  // lifetime; resolves null on failure so callers keep their static fallbacks.
+  // Current web catalog from the single price source (billing_prices, served by
+  // norva-revolut GET /prices — public, no auth). Resolves { prices, promos }:
+  // `prices` are EFFECTIVE cents (an active promo already applied), `promos`
+  // carries the struck-through base + event badge for display. Cached for the
+  // page's lifetime; resolves null on failure so callers keep static fallbacks.
   let pricesPromise = null;
   function revolutPrices() {
     if (!isRevolutEnabled()) return Promise.resolve(null);
@@ -148,7 +150,7 @@
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     pricesPromise = fetch(base + '/functions/v1/norva-revolut/prices', { headers: { 'apikey': apikey } })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { return (d && d.ok && d.prices) ? d.prices : null; })
+      .then(function (d) { return (d && d.ok && d.prices) ? { prices: d.prices, promos: d.promos || {} } : null; })
       .catch(function () { return null; });
     return pricesPromise;
   }

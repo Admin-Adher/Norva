@@ -60,6 +60,12 @@
       font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; text-align: center; }
     .save-hint:hover { text-decoration: underline; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
+    /* Event promo: badge above the price + struck-through base price beside it. */
+    .promo-badge { display: inline-block; margin-bottom: 8px; padding: 4px 10px; border-radius: 999px;
+      font-size: 10.5px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em;
+      color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
+    .price-was { color: var(--quiet); font-size: 14px; font-weight: 600;
+      text-decoration: line-through; margin-left: 8px; font-family: Inter, sans-serif; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -108,6 +114,41 @@
     html.tv .card { padding: 28px; }
     html.tv h1 { font-size: 34px; }
     html.tv .lead { font-size: 18px; }
+    /* ── Desktop: the whole page fits the viewport (no scroll) ────────────────
+       Same layout and hierarchy, only the vertical rhythm densifies with screen
+       height. Two stages; on short laptops the per-card feature lists give way —
+       the compare box already states both plans include everything. Phones keep
+       their natural scroll (cards stack there). TV keeps its 10-foot sizes. */
+    @media (min-width: 640px) and (max-height: 979px) {
+      html:not(.tv) body { padding: 14px 22px; }
+      html:not(.tv) .brand { margin-bottom: 8px; }
+      html:not(.tv) .brand img { width: 32px; height: 32px; }
+      html:not(.tv) h1 { font-size: clamp(22px, 3.6vh, 32px); margin-bottom: 6px; }
+      html:not(.tv) .lead { font-size: 14px; }
+      html:not(.tv) .toggle { margin: 12px 0 2px; }
+      html:not(.tv) .grid { margin-top: 12px; gap: 14px; }
+      html:not(.tv) .card { padding: 18px 20px; }
+      html:not(.tv) .price { font-size: 34px; }
+      html:not(.tv) .price-note { min-height: 14px; margin: 2px 0 8px; font-size: 11.5px; }
+      html:not(.tv) .card ul { gap: 6px; margin: 4px 0 14px; font-size: 13px; }
+      html:not(.tv) .btn { min-height: 44px; }
+      html:not(.tv) .compare { margin-top: 12px; padding: 9px 14px; font-size: 12.5px; }
+      html:not(.tv) .assurance { margin-top: 10px; padding: 9px 14px; font-size: 12px; }
+      html:not(.tv) .pay-marks { margin-top: 10px; }
+      html:not(.tv) .status { margin-top: 10px; padding: 10px 14px; }
+      html:not(.tv) .row { margin-top: 10px; }
+      html:not(.tv) .note { margin-top: 10px; font-size: 11.5px; }
+      html:not(.tv) .save-hint { margin-top: 8px; font-size: 12.5px; }
+      html:not(.tv) .promo-badge { margin-bottom: 6px; }
+    }
+    @media (min-width: 640px) and (max-height: 799px) {
+      html:not(.tv) .lead { display: none; }
+      html:not(.tv) .card ul { display: none; }
+      html:not(.tv) .card .tag { margin-bottom: 8px; }
+      html:not(.tv) .price { font-size: 30px; }
+      html:not(.tv) .card { padding: 16px 20px; }
+      html:not(.tv) .note { display: none; }
+    }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=1"></script>
@@ -223,7 +264,7 @@
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=12"></script>
+  <script src="/js/billing.js?v=13"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -347,6 +388,19 @@
         if (cont && cont.focus) { try { cont.focus(); } catch (_) {} }
       }
 
+      // Badge labels (site copy is English) for the promo event catalog — the
+      // event key is chosen in the admin Finance card, this maps it to display.
+      const PROMO_LABELS = {
+        black_friday: 'Black Friday', cyber_monday: 'Cyber Monday',
+        winter_sale: 'Winter Sale', summer_sale: 'Summer Sale',
+        christmas: 'Christmas Sale', new_year: 'New Year Sale',
+        lunar_new_year: 'Lunar New Year', eid: 'Eid Sale', easter: 'Easter Sale',
+        halloween: 'Halloween Sale', valentines: "Valentine's Sale",
+        back_to_school: 'Back to School', birthday: 'Birthday Sale',
+        flash: 'Flash Sale', other: 'Limited Offer'
+      };
+      let livePromos = null; // { plan: { period: { base_cents, event } } } when a promo is live
+
       function applyPeriod(next) {
         period = next;
         document.querySelectorAll('.period').forEach(function (b) {
@@ -362,6 +416,30 @@
           amount.textContent = annual ? card.dataset.annual : card.dataset.monthly;
           per.textContent = annual ? '/yr' : '/mo';
           note.textContent = annual ? (card.dataset.annualNote || '') : '';
+          // Active promo on this plan+period → event badge + struck-through base
+          // price next to the (already promo) displayed price.
+          const promo = livePromos && livePromos[card.dataset.plan] && livePromos[card.dataset.plan][period];
+          let badge = card.querySelector('.promo-badge');
+          let was = card.querySelector('.price-was');
+          if (promo && promo.base_cents) {
+            if (!badge) {
+              badge = document.createElement('span');
+              badge.className = 'promo-badge';
+              const priceEl = card.querySelector('.price');
+              if (priceEl) priceEl.insertAdjacentElement('beforebegin', badge);
+            }
+            badge.textContent = PROMO_LABELS[promo.event] || PROMO_LABELS.other;
+            if (!was) {
+              was = document.createElement('span');
+              was.className = 'price-was';
+              const priceEl = card.querySelector('.price');
+              if (priceEl) priceEl.appendChild(was);
+            }
+            was.textContent = '$' + (promo.base_cents / 100).toFixed(2);
+          } else {
+            if (badge) badge.remove();
+            if (was) was.remove();
+          }
         });
         refreshCtas(); // the current plan/period combo depends on the toggle
       }
@@ -568,11 +646,13 @@
       // Web checkout only: on native the prices shown must stay the Play Console
       // ones — a web promo must never advertise a price Google won't charge.
       // The static data-* values remain the fallback when the endpoint is down.
-      function applyLivePrices(prices) {
+      function applyLivePrices(catalog) {
         try {
-          if (!prices) return;
+          if (!catalog || !catalog.prices) return;
           const b = window.NorvaBilling;
           if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling())) return;
+          const prices = catalog.prices; // EFFECTIVE cents — an active promo is already applied
+          livePromos = catalog.promos || null;
           document.querySelectorAll('.card').forEach(function (card) {
             const pl = prices[card.dataset.plan];
             if (!pl || !pl.monthly || !pl.annual) return;
@@ -590,7 +670,7 @@
           });
           const save = document.querySelector('.toggle .save');
           if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
-          applyPeriod(period); // re-render amounts, notes and CTAs from the new data
+          applyPeriod(period); // re-render amounts, notes, promo badges and CTAs
         } catch (_) { /* keep static prices */ }
       }
 

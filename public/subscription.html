@@ -108,7 +108,7 @@
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=12"></script>
+  <script src="/js/billing.js?v=13"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -274,8 +274,8 @@
                 if (isFinite(m) && isFinite(y)) renderSave(Math.round(m * 100), Math.round(y * 100));
               };
               if (window.NorvaBilling.revolutPrices) {
-                window.NorvaBilling.revolutPrices().then(function (live) {
-                  const pl = live && live[p.plan];
+                window.NorvaBilling.revolutPrices().then(function (catalog) {
+                  const pl = catalog && catalog.prices && catalog.prices[p.plan];
                   if (pl && pl.monthly && pl.annual) renderSave(pl.monthly, pl.annual);
                   else cfgFallback();
                 }).catch(cfgFallback);

@@ -27,7 +27,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { getPrices } from "../_shared/prices.ts";
+import { getCatalog, getPrices } from "../_shared/prices.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
@@ -188,10 +188,13 @@ Deno.serve(async (req) => {
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
   // ── /prices — PUBLIC: current catalog (cents, USD) for the web pages ───────
-  // Display only — every order amount is still decided server-side from the same
-  // source. The pages keep their static values as fallback when this is down.
+  // `prices` are EFFECTIVE (an active promo already applied); `promos` carries the
+  // struck-through base + event badge for display. Display only — every order
+  // amount is still decided server-side from the same source. The pages keep
+  // their static values as fallback when this is down.
   if (req.method === "GET" && path === "/prices") {
-    return json({ ok: true, currency: "usd", prices: await getPrices(db) });
+    const catalog = await getCatalog(db);
+    return json({ ok: true, currency: "usd", prices: catalog.prices, promos: catalog.promos });
   }
 
   // ── /checkout — user-authed: open a trial-setup order ──────────────────────

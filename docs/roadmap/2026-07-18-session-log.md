@@ -81,19 +81,51 @@ ne marquait jamais le plan courant (gap général, pas seulement VIP).
   stampe le montant réellement chargé) : sous-évaluation d'un seul cycle, hors
   périmètre de l'audit.
 
-## Déploiement box — Lot 7 (à faire)
+## Lot 8 — promos événementielles + page tarifs sans scroll
+
+Suite produit du Lot 7 (« base + promo, badge d'événement, choix mondiaux ») :
+
+- **Migration `20260718170000_billing_promos.sql`** : colonnes
+  `promo_amount_cents` / `promo_event` / `promo_ends_at` sur `billing_prices` ;
+  `admin_billing_promo_set` (promo NULL = retrait ; sinon événement du catalogue
+  obligatoire, montant **strictement < base**, échéance future optionnelle) ;
+  `admin_billing_prices` ré-émise avec les champs promo (+ `promo_active`
+  calculé). ⚠ NOTIFY pgrst.
+- **Prix effectif** : `_shared/prices.ts#getCatalog()` — promo PRIME quand
+  remplie et non échue (`promo_ends_at` passé = auto-désactivation, TTL 60 s de
+  latence max). `getPrices()` rend les effectifs → checkout/confirm/webhooks
+  héritent des promos sans changement. `/prices` expose `{ prices, promos }`
+  (base barrée + événement).
+- **Catalogue d'événements** (clé → badge EN affiché) : black_friday,
+  cyber_monday, winter_sale, summer_sale, christmas, new_year, lunar_new_year,
+  eid, easter, halloween, valentines, back_to_school, birthday, flash, other.
+- **Page de vente** : badge dégradé au-dessus du prix + base barrée à côté du
+  prix promo (subscribe), note « 🏷 Black Friday — was $41.99/yr » au récap
+  checkout. `billing.js ?v=13` (le helper résout `{prices, promos}`).
+- **Carte admin** (`AdminPage ?v=71`) : chaque tarif = base + étage promo
+  (montant, événement en FR, échéance datetime) ; bordure + chip PROMO quand
+  actif ; garde-fou client et serveur promo < base.
+- **Sans scroll** (demande UX) : sur desktop la page tarifs tient dans le
+  viewport — deux paliers de densité (`max-height: 979px` resserre tout ;
+  `max-height: 799px` masque lead + listes de features, déjà résumées par le
+  bloc compare). Mobile garde son scroll naturel ; TV intacte.
+
+## Déploiement box — Lots 7+8 (à faire)
 
 ```bash
 cd ~/norva && git pull origin main
-docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-  < supabase/migrations/20260718150000_billing_prices.sql
+for m in 20260718150000_billing_prices 20260718170000_billing_promos; do
+  docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+    < supabase/migrations/${m}.sql; done
 docker exec -i norva-db psql -U supabase_admin -d postgres -c "NOTIFY pgrst, 'reload schema';"
 ops/hetzner/scripts/04-deploy-edge-functions.sh
 ```
 
-Recette : `curl -s $FUNCTIONS_BASE_URL/norva-revolut/prices` rend le catalogue ;
-la carte « 💵 Tarifs web » de Finance liste 4 tarifs ; changer un prix → la page
-tarifs l'affiche sous ~1 min ; le remettre → idem.
+Recette : `curl -s $FUNCTIONS_BASE_URL/norva-revolut/prices` rend
+`{prices, promos}` ; la carte « 💵 Tarifs web » liste 4 tarifs avec étage promo ;
+poser une promo (ex. flash $2.99 sur plus mensuel) → badge + prix barré sur la
+page tarifs sous ~1 min ; la retirer → retour au tarif de base. Page tarifs
+desktop : aucun scroll à 1080p ni sur laptop 768px.
 
 ## Déploiement box — lots 1-5 (FAIT le 2026-07-18 ~12h06)
 

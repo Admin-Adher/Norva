@@ -515,6 +515,10 @@ class AdminPage {
 #page-admin .price-cell .price-in{display:flex;align-items:center;gap:6px;color:var(--adm-tx);font-weight:700;}
 #page-admin .price-cell input{width:96px;background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;}
 #page-admin .price-cell input:focus-visible{outline:none;border-color:#5b7cfa;}
+#page-admin .price-cell.promo-on{border-color:rgba(255,128,103,.55);}
+#page-admin .price-cell .pchip{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.04em;color:#0b1220;background:linear-gradient(135deg,#ff8067,#b579ff);}
+#page-admin .price-cell .promo-sub{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:8px;border-top:1px dashed var(--adm-line);}
+#page-admin .price-cell .promo-sub select,#page-admin .price-cell .promo-sub input[type="datetime-local"]{background:rgba(0,0,0,.25);border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx);padding:6px 8px;font:inherit;font-size:12px;width:100%;}
 #page-admin .filter-bar{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;margin-bottom:14px;}
 #page-admin .filter-bar .fb-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 #page-admin .filter-bar .users-controls{margin-bottom:0;}
@@ -1080,48 +1084,104 @@ class AdminPage {
     }
 
     // Carte « 💵 Tarifs web » : édition de billing_prices (source unique lue par les
-    // edge et le front). Effet : nouveaux checkouts + changements de plan uniquement
-    // — les abonnés existants gardent leur prix souscrit (mapping). Cache edge 60 s.
+    // edge et le front). Deux étages par tarif : le prix de BASE, et une PROMO
+    // optionnelle (montant + événement → badge sur la page de vente + échéance
+    // auto-désactivante). Le promo PRIME tant qu'il est rempli et non échu.
+    // Effet : nouveaux checkouts + changements de plan uniquement — les abonnés
+    // existants gardent leur prix souscrit (mapping). Cache edge 60 s.
     async _loadWebPrices() {
         const host = document.getElementById('fin-prices');
         if (!host) return;
         let rows = null;
         try { rows = await this._rpc('admin_billing_prices'); } catch (_) { /* rendu dégradé ci-dessous */ }
         if (!Array.isArray(rows) || !rows.length) {
-            host.innerHTML = '<div class="ssub">Table des tarifs indisponible — appliquer la migration 20260718150000 (supabase_admin) puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>';
+            host.innerHTML = '<div class="ssub">Table des tarifs indisponible — appliquer les migrations 20260718150000 + 20260718170000 (supabase_admin) puis <code>NOTIFY pgrst, \'reload schema\'</code>.</div>';
             return;
         }
         const LBL = { plus: 'Norva', family: 'Norva Family' };
         const PER = { monthly: 'mensuel', annual: 'annuel' };
+        // Catalogue d'événements (clé serveur → libellé FR admin) ; le badge côté
+        // page de vente est le libellé anglais correspondant.
+        const EVENTS = [
+            ['black_friday', 'Black Friday'], ['cyber_monday', 'Cyber Monday'],
+            ['winter_sale', 'Soldes d\'hiver'], ['summer_sale', 'Soldes d\'été'],
+            ['christmas', 'Noël'], ['new_year', 'Nouvel An'], ['lunar_new_year', 'Nouvel An chinois'],
+            ['eid', 'Aïd'], ['easter', 'Pâques'], ['halloween', 'Halloween'],
+            ['valentines', 'Saint-Valentin'], ['back_to_school', 'Rentrée'],
+            ['birthday', 'Anniversaire Norva'], ['flash', 'Vente flash'], ['other', 'Autre']
+        ];
+        const toLocalInput = iso => {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (!isFinite(d.getTime())) return '';
+            const p = x => String(x).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+        };
         const by = {};
         rows.forEach(r => { by[r.plan + ':' + r.period] = r; });
         const order = ['plus:monthly', 'plus:annual', 'family:monthly', 'family:annual'].filter(k => by[k]);
         host.innerHTML = `<div class="price-grid">${order.map(k => {
             const [plan, period] = k.split(':');
-            return `<label class="price-cell"><span>${LBL[plan]} · ${PER[period]}</span>
-                <span class="price-in">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(by[k].amount_cents / 100).toFixed(2)}"></span></label>`;
+            const r = by[k];
+            return `<div class="price-cell${r.promo_active ? ' promo-on' : ''}">
+                <span>${LBL[plan]} · ${PER[period]}${r.promo_active ? ' <span class="pchip">PROMO</span>' : ''}</span>
+                <span class="price-in" title="Prix de base">$ <input type="number" step="0.01" min="1" max="999.99" data-price="${k}" value="${(r.amount_cents / 100).toFixed(2)}"></span>
+                <div class="promo-sub" title="Promo : prime sur le prix de base tant qu'elle est remplie (et non échue)">
+                    <span class="price-in">🏷 $ <input type="number" step="0.01" min="1" max="999.99" data-promo="${k}" placeholder="—" value="${r.promo_amount_cents ? (r.promo_amount_cents / 100).toFixed(2) : ''}"></span>
+                    <select data-pevent="${k}">${EVENTS.map(([v, l]) => `<option value="${v}"${r.promo_event === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+                    <input type="datetime-local" data-pends="${k}" value="${toLocalInput(r.promo_ends_at)}" title="Fin de promo (optionnel) — passée cette date, la promo s'auto-désactive">
+                </div>
+            </div>`;
         }).join('')}</div>
             <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                 <button class="mini-btn" id="fin-prices-save">💾 Enregistrer</button>
+                <span class="ssub">Promo vide = tarif de base seul. L'échéance est optionnelle (auto-désactivation).</span>
                 <span class="ssub" id="fin-prices-msg"></span>
             </div>`;
         const msgEl = () => document.getElementById('fin-prices-msg');
         document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
-            const edits = [];
-            host.querySelectorAll('input[data-price]').forEach(inp => {
-                const [plan, period] = String(inp.dataset.price).split(':');
-                const cents = Math.round(parseFloat(inp.value) * 100);
-                const cur = by[plan + ':' + period];
-                if (Number.isFinite(cents) && cur && cents !== Number(cur.amount_cents)) edits.push({ plan, period, cents });
-            });
-            if (!edits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
-            const rec = edits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`).join(' · ');
-            if (!window.confirm(`Appliquer ${edits.length} tarif(s) ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
+            const baseEdits = [], promoEdits = [];
+            for (const k of order) {
+                const [plan, period] = k.split(':');
+                const cur = by[k];
+                const baseIn = host.querySelector(`input[data-price="${k}"]`);
+                const cents = Math.round(parseFloat(baseIn?.value) * 100);
+                if (Number.isFinite(cents) && cents !== Number(cur.amount_cents)) baseEdits.push({ plan, period, cents });
+                const pv = String(host.querySelector(`input[data-promo="${k}"]`)?.value ?? '').trim();
+                const pCents = pv === '' ? null : Math.round(parseFloat(pv) * 100);
+                const pEvent = String(host.querySelector(`select[data-pevent="${k}"]`)?.value || 'other');
+                const pEndsRaw = String(host.querySelector(`input[data-pends="${k}"]`)?.value || '');
+                const pEnds = pEndsRaw ? new Date(pEndsRaw).toISOString() : null;
+                const curEnds = cur.promo_ends_at ? new Date(cur.promo_ends_at).toISOString() : null;
+                const changed = (pCents ?? null) !== (cur.promo_amount_cents ?? null)
+                    || (pCents != null && (pEvent !== (cur.promo_event || 'other') || pEnds !== curEnds));
+                if (!changed) continue;
+                if (pCents != null && !Number.isFinite(pCents)) continue;
+                const baseAfter = Number.isFinite(cents) ? cents : Number(cur.amount_cents);
+                if (pCents != null && pCents >= baseAfter) {
+                    if (msgEl()) msgEl().textContent = `❌ ${LBL[plan]} ${PER[period]} : le promo doit être inférieur au prix de base.`;
+                    return;
+                }
+                promoEdits.push({ plan, period, cents: pCents, event: pEvent, ends: pEnds });
+            }
+            if (!baseEdits.length && !promoEdits.length) { if (msgEl()) msgEl().textContent = 'Aucun changement.'; return; }
+            const rec = baseEdits.map(e => `${LBL[e.plan]} ${PER[e.period]} → $${(e.cents / 100).toFixed(2)}`)
+                .concat(promoEdits.map(e => e.cents == null
+                    ? `${LBL[e.plan]} ${PER[e.period]} : fin de promo`
+                    : `${LBL[e.plan]} ${PER[e.period]} : PROMO $${(e.cents / 100).toFixed(2)} (${(EVENTS.find(x => x[0] === e.event) || ['', e.event])[1]})`))
+                .join('\n');
+            if (!window.confirm(`Appliquer ces changements ?\n${rec}\n\nEffet immédiat sur les nouveaux checkouts (abonnés existants inchangés).`)) return;
             try {
-                for (const e of edits) {
+                for (const e of baseEdits) {
                     await this._rpc('admin_billing_price_set', { p_plan: e.plan, p_period: e.period, p_amount_cents: e.cents });
                 }
-                if (msgEl()) msgEl().textContent = `✅ ${edits.length} tarif(s) mis à jour — visibles sur le site sous ~1 min (cache edge 60 s).`;
+                for (const e of promoEdits) {
+                    await this._rpc('admin_billing_promo_set', {
+                        p_plan: e.plan, p_period: e.period,
+                        p_amount_cents: e.cents, p_event: e.cents == null ? null : e.event, p_ends_at: e.cents == null ? null : e.ends,
+                    });
+                }
+                if (msgEl()) msgEl().textContent = `✅ Enregistré — visible sur le site sous ~1 min (cache edge 60 s).`;
                 this._loadWebPrices();
             } catch (e) {
                 if (msgEl()) msgEl().textContent = '❌ ' + (e && e.message ? e.message : 'échec');
