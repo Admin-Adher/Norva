@@ -52,6 +52,9 @@
       color: #fff; background: var(--accent); font: inherit; font-weight: 800; cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center; }
     .card.featured .btn { background: linear-gradient(135deg, var(--coral), #b579ff); color: #0b1220; }
+    /* The subscriber's own plan+period: marked, not buyable. */
+    .card.current { border-color: rgba(52,211,153,0.5); }
+    .card.current .btn { background: #242c3d; color: #9fb0cd; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
@@ -226,6 +229,15 @@
       const backBtn = document.getElementById('back');
       let period = 'monthly';
       let trialEligible = true;
+      // Live-plan state (filled by checkExisting): a subscriber must see their own
+      // plan as "Current plan" — not as something to buy — and must never be shown
+      // trial wording, whatever the raw trial-eligibility says (manually granted
+      // accounts have a live plan AND an unconsumed trial).
+      let hasLivePlan = false;
+      let currentPlan = null;     // 'plus' | 'family' | null
+      let currentPeriod = null;   // 'monthly' | 'annual' | null (web rail only)
+
+      function offersTrial() { return trialEligible && !hasLivePlan; }
 
       backBtn.setAttribute('href', returnTo);
 
@@ -242,8 +254,38 @@
         statusEl.classList.add('show');
       }
 
-      function ctaLabel() {
-        return trialEligible ? 'Start 7-day free trial' : 'Subscribe';
+      // One CTA state machine for both cards, re-run whenever the account state or
+      // the period toggle changes: current plan+period reads as such (and can't be
+      // re-bought), any other combination is a switch, the trial only appears for
+      // accounts without a live plan.
+      function refreshCtas() {
+        document.querySelectorAll('.card').forEach(function (card) {
+          const b = card.querySelector('.buy');
+          if (!b) return;
+          const samePlan = hasLivePlan && currentPlan === card.dataset.plan;
+          const isCurrent = samePlan && (currentPeriod === null || currentPeriod === period);
+          b.disabled = isCurrent;
+          card.classList.toggle('current', isCurrent);
+          if (isCurrent) { b.textContent = 'Current plan'; return; }
+          if (samePlan) {
+            b.textContent = period === 'annual' ? 'Switch to annual billing' : 'Switch to monthly billing';
+          } else if (hasLivePlan) {
+            b.textContent = 'Switch to this plan';
+          } else {
+            b.textContent = offersTrial() ? 'Start 7-day free trial' : 'Subscribe';
+          }
+        });
+      }
+
+      // Rewrites the static copy once when the trial stops applying to this account.
+      let noTrialCopyDone = false;
+      function applyNoTrialCopy() {
+        if (noTrialCopyDone) return;
+        noTrialCopyDone = true;
+        const lead = document.querySelector('.lead');
+        if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
+        const note = document.querySelector('.note');
+        if (note) note.textContent = 'Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.';
       }
 
       // Clear "trial started" confirmation so the renewal terms are explicit
@@ -274,7 +316,7 @@
         } else if (rs === 'unchanged') {
           title.textContent = "You're already on this plan";
           msg.textContent = 'No changes were made — your plan stays exactly as it is.';
-        } else if (trialEligible) {
+        } else if (offersTrial()) {
           title.textContent = 'Your free trial has started';
           msg.textContent = "You have full access now and won't be charged until your 7-day trial ends. Cancel anytime before then.";
         } else {
@@ -302,6 +344,7 @@
           per.textContent = annual ? '/yr' : '/mo';
           note.textContent = annual ? (card.dataset.annualNote || '') : '';
         });
+        refreshCtas(); // the current plan/period combo depends on the toggle
       }
 
       document.querySelectorAll('.period').forEach(function (b) {
@@ -377,15 +420,8 @@
             trialEligible = res && res.eligible !== false;
           }
         } catch (_) { /* keep default */ }
-        document.querySelectorAll('.buy').forEach(function (b) { b.textContent = ctaLabel(); });
-        if (!trialEligible) {
-          // Existing/returning subscriber — every "free trial" promise on the page
-          // would be false for this account. Reword the static copy accordingly.
-          const lead = document.querySelector('.lead');
-          if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
-          const note = document.querySelector('.note');
-          if (note) note.textContent = 'Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.';
-        }
+        if (!offersTrial()) applyNoTrialCopy();
+        refreshCtas();
         maybeShowAssurance();
       }
 
@@ -401,7 +437,7 @@
         if (r.indexOf('capacity') !== -1 || r.indexOf('concurrent') !== -1 || r.indexOf('stream') !== -1) {
           return "Too many streams are playing at once. Close one on another device and try again.";
         }
-        return trialEligible ? 'Start your 7-day free trial to keep watching.' : 'Subscribe to keep watching.';
+        return offersTrial() ? 'Start your 7-day free trial to keep watching.' : 'Subscribe to keep watching.';
       }
 
       // If we landed here from a playback/capacity wall (soft wall at first
@@ -424,6 +460,26 @@
           if (!dec || dec.enforced === false || dec.mode === 'observe') return;
           const st = String(dec.status || '');
           if (['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) === -1) return;
+          // Live plan → no trial wording anywhere, and the current plan card must
+          // read as such instead of inviting a re-purchase.
+          hasLivePlan = true;
+          currentPlan = String(dec.planCode || (dec.projection || {}).plan_code || '') || null;
+          applyNoTrialCopy();
+          refreshCtas();
+          maybeShowAssurance();
+          // Billing cadence (web rail only) so the toggle can tell the exact
+          // current combo apart from a monthly↔annual switch of the same plan.
+          try {
+            if (String((dec.projection || {}).provider || '') === 'revolut'
+                && window.NorvaBilling && window.NorvaBilling.revolutProfile) {
+              window.NorvaBilling.revolutProfile().then(function (p) {
+                if (p && (p.period === 'monthly' || p.period === 'annual')) {
+                  currentPeriod = p.period;
+                  refreshCtas();
+                }
+              }).catch(function () { /* cosmetic */ });
+            }
+          } catch (_) { /* cosmetic */ }
           const box = document.getElementById('already-sub');
           if (!box) return;
           box.textContent = 'You already have a Norva ' + (st === 'trialing' ? 'free trial' : 'plan') + '. ';
@@ -438,17 +494,17 @@
 
       // The card-check hold only applies to the web checkout (Revolut). Reveal the
       // reassurance only there — native Play Billing (TV/mobile) takes no such hold, so it'd be wrong.
-      // Called from loadTrialEligibility(): the trial-flavored wording must never be
-      // shown to an account that can't start a trial (plan change / resubscribe) —
-      // for a resubscriber the first payment follows the card check, so this variant
-      // promises nothing about "no charge".
+      // Called from loadTrialEligibility() AND checkExisting() (idempotent): the
+      // trial-flavored wording must never be shown to an account that can't start a
+      // trial (live plan, plan change, resubscribe) — for a resubscriber the first
+      // payment follows the card check, so this variant promises nothing about "no charge".
       function maybeShowAssurance() {
         try {
           const b = window.NorvaBilling;
           const webCheckout = b && (b.isRevolutEnabled && b.isRevolutEnabled());
           if (webCheckout && !b.hasNativeBilling()) {
             const el = document.getElementById('trial-assurance');
-            if (el && !trialEligible) {
+            if (el && !offersTrial()) {
               const body = el.querySelector('div');
               if (body) {
                 body.innerHTML = '<strong>Secure card check first.</strong> ' +

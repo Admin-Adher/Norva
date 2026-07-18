@@ -507,6 +507,12 @@ class SettingsPage {
                 return 'Your free trial is active.';
             }
             case 'active': {
+                // A manually granted plan (VIP/system) never renews and has nothing
+                // to cancel — say what it is instead of implying a billing cycle.
+                const prov = String(p.provider || '').toLowerCase();
+                if (prov === 'manual' || prov === 'system') {
+                    return 'Your access is included with your account — nothing renews, nothing to pay.';
+                }
                 const when = p.current_period_end ? fmt(p.current_period_end) : null;
                 return when ? `Your plan renews on ${when}. Cancel anytime.` : 'Your plan is active.';
             }

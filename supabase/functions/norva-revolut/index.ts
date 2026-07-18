@@ -219,9 +219,16 @@ Deno.serve(async (req) => {
       (projStatus === "trialing" && trialEndMs > nowMs) ||
       (projStatus === "active" && (periodEndMs === 0 || periodEndMs > nowMs)) ||
       (projStatus === "cancelled_at_period_end" && periodEndMs > nowMs);
+    // An account with a LIVE entitlement can never open a trial_setup — whatever
+    // the trial history. This covers manually granted accounts (VIP/admin gifts:
+    // active until 2099, trial never consumed): before this guard they were
+    // classed trial_setup, and paying the card check would have OVERWRITTEN the
+    // grant with a 7-day trial in /confirm. plan_change preserves the existing
+    // status/period fields by design.
     let kind = "trial_setup";
     if (payload.intent === "update_card") kind = "card_update";
-    else if (proj?.trial_consumed_at) kind = liveEntitlement ? "plan_change" : "resubscribe";
+    else if (liveEntitlement) kind = "plan_change";
+    else if (proj?.trial_consumed_at) kind = "resubscribe";
 
     // A Revolut customer is needed for the card to be saved (see helper). Create it
     // up front so the order can carry customer_id. Degrade gracefully: if creation
@@ -405,8 +412,8 @@ Deno.serve(async (req) => {
     }
 
     const { data: curRow } = await db.from("cloud_entitlement_projection")
-      .select("status,trial_ends_at,trial_consumed_at").eq("user_id", user.id).maybeSingle();
-    const cur = curRow as { status?: string; trial_ends_at?: string; trial_consumed_at?: string } | null;
+      .select("status,trial_ends_at,trial_consumed_at,current_period_end").eq("user_id", user.id).maybeSingle();
+    const cur = curRow as { status?: string; trial_ends_at?: string; trial_consumed_at?: string; current_period_end?: string } | null;
     const curStatus = String(cur?.status ?? "");
 
     if (kind === "card_update") {
@@ -446,6 +453,13 @@ Deno.serve(async (req) => {
     // an old setup order after the trial was consumed must not mint fresh days.
     if (cur?.trial_consumed_at) {
       return json({ ok: true, status: curStatus || "trialing", kind, note: "already_confirmed" });
+    }
+    // Belt & braces: a live 'active' entitlement (e.g. a manual grant, or a stale
+    // trial_setup order minted before /checkout learned to refuse them) must never
+    // be downgraded to a 7-day trial. The card was still saved above — harmless.
+    const curEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
+    if (curStatus === "active" && curEndMs > Date.now()) {
+      return json({ ok: true, status: "active", kind, note: "already_active" });
     }
     await db.from("cloud_entitlement_projection").upsert({
       user_id: user.id, status: "trialing", provider: "revolut", provider_customer_id: customerId,

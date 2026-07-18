@@ -434,8 +434,12 @@
         add('Status', status);
         const end = proj.trial_ends_at || proj.current_period_end;
         if (end) {
+          // A manually granted plan (VIP/system) has no billing cycle — nothing
+          // "renews", the access simply runs until its end date.
+          const granted = ['manual', 'system'].indexOf(String(proj.provider || '').toLowerCase()) !== -1;
           const label = decision.status === 'cancelled_at_period_end' ? 'Access until'
-            : decision.status === 'trialing' ? 'Trial ends' : 'Renews';
+            : decision.status === 'trialing' ? 'Trial ends'
+            : granted ? 'Access until' : 'Renews';
           add(label, fmtDate(end));
         }
         return frag;

@@ -35,6 +35,28 @@ SQL finance — puis 21 vérifications adversariales sur pièces). 45 constats b
 | 4 | 🟠 Android : achat brut sans `oldProductId` (risque de double abonnement) → remplacement Play réel, `WITH_TIME_PRORATION` (seul mode valide dans les deux sens ; `CHARGE_PRORATED_PRICE` est refusé pour mensuel→annuel, prix/unité de temps en baisse). Compilé contre stubs RC v8 — à confirmer au 1ᵉʳ vrai build | `4d60c30` | `NorvaBilling.java` |
 | 5 | 🟡 UI : promesse d'essai aux inéligibles (subscribe), « after your 7-day free trial » et « applies right away » en plan change (checkout), upgrade invisible après coup → ligne « Billing $XX / year » (subscription) | `06bbbfe` | `subscribe.html`, `checkout-revolut.html`, `subscription.html` |
 
+## Lot 6 (recette du jour) — plan courant + protection des grants manuels
+
+Trouvé par Adrien en recette : connecté avec un compte **à accès manuel**
+(VIP family jusqu'en 2099, `trial_consumed_at` vide), la page tarifs reproposait
+l'essai 7 jours ET laissait re-cliquer le plan family déjà actif. Deux causes :
+l'éligibilité essai = « jamais consommé » (vrai pour un compte gifté), et la page
+ne marquait jamais le plan courant (gap général, pas seulement VIP).
+
+- **Serveur** (`norva-revolut`) : un compte avec un abonnement **vivant** ne reçoit
+  plus jamais un ordre `trial_setup` (kind → `plan_change`, qui préserve
+  statut/échéance) ; et verrou dans `/confirm` : une projection `active` à échéance
+  future n'est **jamais** rétrogradée en essai 7 jours — protège les grants 2099
+  même contre les vieux ordres `trial_setup` PENDING d'avant le fix.
+- **`subscribe.html`** : machine d'état des CTA — plan+période courants = « Current
+  plan » (désactivé, carte marquée), même plan autre période = « Switch to
+  annual/monthly billing », autre plan = « Switch to this plan » ; plus aucun
+  wording d'essai dès qu'un plan vivant existe (lead, note, réassurance) quelle que
+  soit l'éligibilité brute. Période courante lue du profil Revolut (rail web).
+- **`subscription.html` + `Settings.js` (`?v=42` dans app.html)** : un grant
+  manuel/system affiche « Access until » / « accès inclus » au lieu de « Renews
+  Jan 1, 2099 » (rien ne se renouvelle).
+
 ## Nuances actées, non corrigées (volontaire)
 
 - **Remise save-offer × annuel** : une remise de rétention en attente (50 % « sur
