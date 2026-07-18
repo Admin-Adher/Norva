@@ -166,6 +166,18 @@ docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
 ```
 (Pas de NOTIFY ni de redéploiement edge — policy storage seule.)
 
+### Visuel de campagne v2 — fond PLEIN ÉCRAN (recette)
+
+Deux constats d'Adrien après le fix d'upload : (1) l'image « ne s'affichait
+pas » — elle était en réalité appliquée dans la carte sous un voile à 82-94 %,
+donc écrasée ; (2) décision produit : l'image doit habiller **toute la page**,
+pas une carte. Refonte (`?v=74`) : `#campaign-bg` fixe plein viewport derrière
+tout (visible quand ≥ 1 promo active ET image uploadée), dégradé vertical
+42 % → 96 % (artwork visible en haut, quasi opaque derrière les cartes) ; les
+cartes gardent halo + badge aux couleurs de l'événement. Guidage d'upload
+actualisé : **paysage 1920 × 1080 px+**, JPG/WebP, < 2 Mo. Le checkout reste
+volontairement sobre (page de paiement sans distraction).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

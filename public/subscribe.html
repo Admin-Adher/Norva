@@ -68,7 +68,14 @@
       color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
     .price-was { color: var(--quiet); font-size: 14px; font-weight: 600;
       text-decoration: line-through; margin-left: 8px; font-family: Inter, sans-serif; }
-    .card.promo-live { background-size: cover; background-position: center; }
+    /* Full-page campaign visual (set from JS when a promo is live and an image was
+       uploaded) : the artwork fills the viewport behind everything ; the vertical
+       gradient keeps it visible up top and lands near-opaque behind the content,
+       so the solid cards stay perfectly readable. */
+    #campaign-bg { position: fixed; inset: 0; z-index: -1;
+      background-size: cover; background-position: center top; }
+    #campaign-bg::after { content: ""; position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(9,11,16,.42) 0%, rgba(9,11,16,.75) 45%, rgba(9,11,16,.96) 100%); }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
@@ -479,15 +486,14 @@
               if (priceEl) priceEl.appendChild(was);
             }
             was.textContent = '$' + (promo.base_cents / 100).toFixed(2);
-            // Event identity: themed badge + themed card background — replaced by
-            // the uploaded campaign image (dark overlay keeps the text readable).
+            // Event identity: themed badge + tinted card halo. The uploaded
+            // campaign image is a FULL-PAGE background (applyLivePrices), never
+            // squeezed inside the card.
             const theme = PROMO_THEMES[promo.event] || PROMO_THEMES.other;
             badge.style.background = theme.badge;
             card.classList.add('promo-live');
             card.style.borderColor = theme.border;
-            card.style.backgroundImage = liveCampaignBg
-              ? 'linear-gradient(180deg, rgba(9,11,16,.82), rgba(9,11,16,.94)), url("' + liveCampaignBg + '")'
-              : 'radial-gradient(130% 110% at 50% 0%, ' + theme.glow + ', rgba(9,11,16,0) 62%)';
+            card.style.backgroundImage = 'radial-gradient(130% 110% at 50% 0%, ' + theme.glow + ', rgba(9,11,16,0) 62%)';
           } else {
             if (badge) badge.remove();
             if (was) was.remove();
@@ -726,6 +732,22 @@
           });
           const save = document.querySelector('.toggle .save');
           if (save && best > 0.01) save.textContent = 'Save ' + Math.round(best * 100) + '%';
+          // Full-page campaign visual: shown when at least one promo is live AND
+          // an image was uploaded — the event dresses the whole page.
+          const anyPromo = !!(livePromos && Object.keys(livePromos).some(function (k) {
+            return livePromos[k] && Object.keys(livePromos[k]).length;
+          }));
+          let bgEl = document.getElementById('campaign-bg');
+          if (liveCampaignBg && anyPromo) {
+            if (!bgEl) {
+              bgEl = document.createElement('div');
+              bgEl.id = 'campaign-bg';
+              document.body.prepend(bgEl);
+            }
+            bgEl.style.backgroundImage = 'url("' + liveCampaignBg + '")';
+          } else if (bgEl) {
+            bgEl.remove();
+          }
           applyPeriod(period); // re-render amounts, notes, promo badges and CTAs
         } catch (_) { /* keep static prices */ }
       }

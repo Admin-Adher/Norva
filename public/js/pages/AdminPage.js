@@ -1139,7 +1139,7 @@ class AdminPage {
                 <span class="ssub" id="fin-prices-msg"></span>
             </div>
             <div class="kpi-gtitle" style="margin:16px 0 6px">🎨 Visuel de campagne (optionnel)</div>
-            <div class="ssub" style="margin-bottom:8px">Image de fond de la carte en promo sur la page de vente — remplace le thème aux couleurs de l'événement. Idéal : <b>1200 × 1400 px</b> (proche du ratio de la carte), JPG/PNG/WebP, <b>&lt; 2 Mo</b> — un dégradé sombre est appliqué par-dessus pour la lisibilité des textes.</div>
+            <div class="ssub" style="margin-bottom:8px">Image de <b>fond plein écran</b> de la page de vente pendant une promo (les cartes gardent leur halo aux couleurs de l'événement). Idéal : <b>1920 × 1080 px</b> ou plus (paysage), JPG/WebP, <b>&lt; 2 Mo</b> — un dégradé sombre vertical est appliqué par-dessus : le haut de l'image reste visible, le bas s'assombrit derrière les cartes pour la lisibilité.</div>
             <div id="fin-campaign" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="ssub">Chargement…</span></div>`;
         const msgEl = () => document.getElementById('fin-prices-msg');
         document.getElementById('fin-prices-save')?.addEventListener('click', async () => {
@@ -1201,7 +1201,7 @@ class AdminPage {
                 const path = camp && camp.bg_path ? String(camp.bg_path) : '';
                 const url = path ? `${this._sbUrl()}/storage/v1/object/public/promo-assets/${path}` : '';
                 cHost.innerHTML = `${url
-                    ? `<img src="${url}" alt="Visuel de campagne" style="width:120px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--adm-line)">`
+                    ? `<img src="${url}" alt="Visuel de campagne" style="width:160px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--adm-line)">`
                     : '<span class="ssub">Aucune image — les promos utilisent le thème par défaut de leur événement.</span>'}
                     <input type="file" id="fin-campaign-file" accept="image/jpeg,image/png,image/webp" style="font-size:12px;color:var(--adm-tx2)">
                     ${url ? '<button class="mini-btn" id="fin-campaign-clear">✕ Retirer</button>' : ''}
