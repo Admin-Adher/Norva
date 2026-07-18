@@ -186,7 +186,18 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     problems.push({ key: "vat_threshold", detail: `TVA — seuil OSS proche : ~${Math.round(vatMaxEur / 100)} € de ventes UE transfrontalières (≥ 80 % des 10 000 €). Préparez l'inscription au guichet OSS (onglet TVA & conformité).` });
   }
   if (ov.vat_fx_pending) {
-    problems.push({ key: "vat_fx_pending", detail: `TVA — trimestre ${ov.vat_fx_pending} clos avec des ventes UE : figez le taux BCE dans l'onglet TVA pour finaliser la déclaration OSS (2 min).` });
+    // Taux BCE du dernier jour du trimestre clos, joint à l'alerte (suggestion —
+    // l'humain confirme dans l'onglet). Best-effort : sans réseau, alerte sans taux.
+    let fxSugg = "";
+    try {
+      const nowD = new Date();
+      const lastDay = new Date(Date.UTC(nowD.getUTCFullYear(), Math.floor(nowD.getUTCMonth() / 3) * 3, 0));
+      const r = await fetch(`https://api.frankfurter.dev/v1/${lastDay.toISOString().slice(0, 10)}?base=USD&symbols=EUR`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json() as JsonRecord;
+      const rate = (d?.rates as JsonRecord | undefined)?.EUR;
+      if (rate) fxSugg = ` Taux BCE suggéré : ${rate} (à confirmer dans l'onglet).`;
+    } catch (_) { /* alerte sans suggestion */ }
+    problems.push({ key: "vat_fx_pending", detail: `TVA — trimestre ${ov.vat_fx_pending} clos avec des ventes UE : figez le taux BCE dans l'onglet TVA pour finaliser la déclaration OSS (2 min).${fxSugg}` });
   }
 
   // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.

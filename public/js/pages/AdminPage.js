@@ -1041,11 +1041,13 @@ class AdminPage {
             <div id="fin-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
-            const [f, sparks, vat] = await Promise.all([
+            const [f, sparks, vat, fc] = await Promise.all([
                 this._rpc('admin_finance'),
                 this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null), // sparklines are non-critical
-                this._rpc('admin_vat_report').catch(() => null) // panneau TVA non-critique (absent avant migration)
+                this._rpc('admin_vat_report').catch(() => null), // panneau TVA non-critique (absent avant migration)
+                this._rpc('admin_vat_forecast').catch(() => null) // provision + prévision T+1 + ETA (non-critique)
             ]);
+            this._vatForecast = fc || null; // trimestre-indépendant — survit aux re-renders du panneau
             this._renderFinance(f || {}, sparks && sparks.series, vat);
         } catch (e) {
             const el = document.getElementById('fin-body');
@@ -1545,15 +1547,39 @@ class AdminPage {
                 + `<div style="margin-top:10px">${doneBtn('uk', '✓ Position arrêtée')}</div>`)}
             ${demarche('oss', '🇪🇺', 'Inscription au guichet OSS', ossApplies ? 'action requise' : 'à l\'approche du seuil',
                 ossApplies ? null : 'Se déverrouille à l\'approche des 10 000 € de ventes UE — inutile tant que vous êtes sous le seuil.',
-                gstep(1, `${link('https://cfspro-idp.impots.gouv.fr', 'impots.gouv.fr')} → Mes services → Gérer mon guichet unique de TVA UE → « Je choisis le régime UE ».`)
-                + gstep(2, `Alternative : le <b>régime PME UE</b> (n° EX) maintient l'exonération jusqu'à 100 000 € de CA UE, avec un simple état trimestriel — à arbitrer avec votre expert-comptable.`)
-                + gstep(3, `${doneBtn('oss', '✓ Inscrit à l\'OSS')}`))}
+                (() => {
+                    // Comparatif OSS vs régime PME UE, avec les chiffres RÉELS : les prix Norva
+                    // sont TTC de fait ($4.99 affiché) → sous OSS la TVA sort de la marge
+                    // (part de TVA d'un prix TTC = t/(100+t)). Sous EX : 0 € jusqu'à 100 k€ UE.
+                    const euYearEur = Math.round(Math.max(Number(ys.eu_cross_cents) || 0, Number(ys.eu_cross_prev_cents) || 0) * FX);
+                    const euR = rowsCalc.filter(x => x.isEu && !x.isFr && x.rate != null && x.baseEur > 0);
+                    const wRate = euR.length ? euR.reduce((s2, x) => s2 + x.rate * x.baseEur, 0) / euR.reduce((s2, x) => s2 + x.baseEur, 0) : 21;
+                    const ossCost = Math.round(euYearEur * wRate / (100 + wRate));
+                    const compare = `<div style="border:1px solid rgba(124,147,255,.35);background:rgba(124,147,255,.07);border-radius:9px;padding:11px 13px;margin:10px 0">
+                        <b>⚖️ Comparatif pour votre cas</b> (prix inchangés — TTC de fait) :<br/>
+                        ${euYearEur > 0
+                            ? `• <b>OSS</b> : ≈ −${eurFmt(ossCost)}/an de marge sur ${eurFmt(euYearEur)} de ventes UE (taux moyen de votre mix : ${wRate.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %).<br/>`
+                            : `• <b>OSS</b> : la TVA de chaque pays sortirait de votre marge (~17 à 27 % des ventes UE, prix TTC inchangés).<br/>`}
+                        • <b>Régime PME UE (n° EX)</b> : 0 € de TVA jusqu'à 100 000 € de CA UE — un état trimestriel des CA en contrepartie.<br/>
+                        <span class="ssub">Décision produit associée : absorber la TVA ou augmenter les prix UE. À arbitrer avec l'expert-comptable (TVA-OSS.md §2).</span></div>`;
+                    return compare
+                        + gstep(1, `${link('https://cfspro-idp.impots.gouv.fr', 'impots.gouv.fr')} → Mes services → Gérer mon guichet unique de TVA UE → « Je choisis le régime UE ».`)
+                        + gstep(2, `Alternative : le <b>régime PME UE</b> (n° EX) — demande via le même espace professionnel ; exclusion immédiate au-delà de 100 k€ UE (notification sous 15 jours).`)
+                        + gstep(3, `${doneBtn('oss', '✓ Inscrit à l\'OSS')}`);
+                })())}
             ${demarche('switch', '🔄', 'Changement de forme juridique', 'guide de transition', null,
                 `<div class="ssub">Un changement de statut crée une nouvelle personne morale (nouveau SIREN) : il faut refaire le numéro intracommunautaire, ré-inscrire l'OSS, basculer la DES sur le nouveau SIREN, et mettre à jour Revolut Merchant et Google Play Console. La franchise en base reste accessible en société (mêmes seuils — elle dépend du chiffre d'affaires, pas du statut). Modifiez alors le profil ci-dessus : jauges, courriers et échéances s'adaptent automatiquement.</div>`)}`;
 
+        // Provision + prévision T+1 + ETA (RPC admin_vat_forecast — trimestre-indépendant).
+        const fc = this._vatForecast || null;
+        const provCents = Number(fc && fc.provision_eur_cents) || 0;
+        const fcVat = Number(fc && fc.forecast_vat_eur_cents) || 0;
+        const fcNq = (fc && fc.next_quarter) || null;
         const dlCard = (v, l, cls, tip) => `<div class="kpi ${cls || ''}"${tip ? ` title="${esc(tip)}"` : ''}><div class="kpi-hd"><div class="v" style="font-size:15px">${v}</div></div><div class="l">${l}</div></div>`;
         const deadlinesHtml = `<div class="kpi-gtitle" style="margin:0 0 8px">⏱ Prochaines échéances</div><div class="admin-cards fin-mini" style="margin-bottom:14px">
             ${dlCard(ossApplies && nextDl ? `${fmtD(nextDl.d)}` : 'Sans objet', ossApplies && nextDl ? `Déclaration OSS T${nextDl.q} ${nextDl.y} — dans ${dlDays} j` : 'OSS — sous le seuil 10 k€', ossApplies && dlDays != null && dlDays <= 14 ? 'alert' : '', 'Trimestrielle : 30/04, 31/07, 31/10, 31/01 — sans report, déclaration néant obligatoire une fois inscrit')}
+            ${provCents > 0 ? dlCard(eurFmt(provCents), 'Provision TVA — collectée, non reversée', 'alert', 'TVA due cumulée des trimestres non encore déposés : de l\'argent à réserver, il ne vous appartient pas') : ''}
+            ${ossApplies && fcVat > 0 && fcNq ? dlCard('≈ ' + eurFmt(fcVat), `TVA estimée T${fcNq.quarter} ${fcNq.year} (${AdminPage.n(fc.forecast_subscribers)} abonnés UE)`, '', 'Estimation déterministe : renouvellements des abonnés UE actifs × taux du pays (fx indicatif) — pas d\'extrapolation') : ''}
             ${dlCard('Mensuelle', 'DES (versements Google) — 10ᵉ jour ouvrable du mois suivant', '', 'Sans objet tant qu\'aucun versement Play ; ensuite obligatoire chaque mois de versement (douane.gouv.fr, 750 €/DES manquante)')}
             ${dlCard(eurFmt(Math.max(0, FR_THRESH_EUR_CENTS - frBaseEurCents)), 'Marge avant TVA française (franchise 37 500 €)', '', 'Base : ventes web localisées en France — dépassement en cours d\'année au-delà de 41 250 € = TVA dès le jour même')}
         </div>`;
@@ -1574,7 +1600,7 @@ class AdminPage {
                 <div class="hbar-track"><div class="hbar-fill ${nearThresh ? 'warn' : ''}" style="width:${Math.max(2, pctT)}%"></div></div>
                 <div class="hbar-v">${pctT} % du seuil</div>
             </div>
-            <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (1 $ ≈ ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} €${fxFixed ? ', taux BCE figé' : ', indicatif'}) · année précédente : ${money(ys.eu_cross_prev_cents)}.
+            <div class="ssub" style="margin-top:6px">${money(ys.eu_cross_cents)} bruts (1 $ ≈ ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} €${fxFixed ? ', taux BCE figé' : ', indicatif'}) · année précédente : ${money(ys.eu_cross_prev_cents)}.${fc && fc.eta ? ` <b>Au rythme des 3 derniers mois : seuil atteint dans ~${AdminPage.n(fc.eta.months_min)} à ${AdminPage.n(fc.eta.months_max)} mois.</b>` : ''}
             Au-delà du seuil (année en cours OU précédente) : TVA du pays du client via l'OSS — ou régime PME UE (n° EX) pour rester exonéré. Voir docs/TVA-OSS.md.</div>
             <div class="kpi-gtitle" style="margin:12px 0 6px">Franchise en base FR — 37 500 € (majoré 41 250 €)</div>
             <div class="hbar" title="Base : ventes web localisées en France (clients FR + autres-UE tant que le seuil 10 k€ n'est pas franchi). Google Play exclu (B2B Irlande).">
@@ -1592,6 +1618,7 @@ class AdminPage {
                         ? `<button id="vat-fx-btn" class="mini-btn" title="Trimestre clos : figer le taux BCE du dernier jour (les montants EUR deviennent définitifs)">🔒 Figer le taux BCE</button>`
                         : `<span class="badge gray" title="Le taux BCE définitif se fige à la clôture du trimestre">fx indicatif ${EUR_PER_USD.toLocaleString('fr-FR')}</span>`)}
                 <button id="vat-csv" class="mini-btn" title="Exporter la base du trimestre par pays (CSV)">⬇ CSV</button>
+                ${(rows.length || corrections.length) ? `<button id="vat-dossier" class="mini-btn" title="Dossier trimestriel autonome (HTML imprimable) : déclaration + registre + dépôts — pour l'expert-comptable ou une due diligence">🗂 Dossier T${vat.quarter}</button>` : ''}
                 ${(ossVatEur > 0 || corrections.length) ? `<button id="vat-assist-btn" class="mini-btn" ${unknownN > 0 ? 'disabled title="Résolvez d\'abord les pays inconnus — la TVA exige la localisation"' : 'title="Guide champ par champ, dans l\'ordre du portail OSS"'}>🧾 Préparer la déclaration T${vat.quarter}</button>` : ''}
                 ${ossApplies ? `<button id="vat-ics" class="mini-btn" title="Télécharger les 4 prochaines échéances OSS au format calendrier (.ics)">📅 .ics</button>` : ''}
             </div>
@@ -1606,6 +1633,8 @@ class AdminPage {
             <div id="vat-tx" style="display:none;margin-top:10px;border:1px solid #2a2a38;border-radius:8px;padding:10px"></div>
             ${Number(tot.unknown_n) > 0 ? `<div class="ssub" style="margin-top:6px">⚠ <b>Total incomplet</b> : ${n(tot.unknown_n)} transaction(s) sans pays (${money(tot.unknown_gross_cents)}) — la TVA exige la localisation. À résoudre avant de déclarer. <button class="mini-btn" id="vat-tx-unknown">Voir les transactions sans pays</button></div>` : ''}
             ${rows.some(r => r.country_code === 'GB') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Royaume-Uni</b> : seuil d'immatriculation NUL pour un vendeur non établi — TVA UK (20 %) due dès la 1ʳᵉ vente web B2C (immatriculation HMRC). Décision à prendre : bloquer les clients UK au checkout, ou s'immatriculer.</div>` : ''}
+            ${rows.some(r => r.country_code === 'CH') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Suisse</b> : des ventes CH existent — assujettissement TVA suisse (8,1 %) dès CHF 100 000 de chiffre d'affaires <b>mondial</b>. À surveiller avec l'expert-comptable (détail : docs/TVA-OSS.md).</div>` : ''}
+            ${rows.some(r => r.country_code === 'NO') ? `<div class="ssub" style="margin-top:6px">⚠ <b>Norvège</b> : des ventes NO existent — régime VOEC dès NOK 50 000 de ventes B2C sur 12 mois glissants (déclarations trimestrielles). À surveiller (détail : docs/TVA-OSS.md).</div>` : ''}
             <div id="vat-assist" style="display:none;margin-top:14px;border:1px solid #2a2a38;border-radius:10px;padding:14px;background:rgba(124,147,255,.05)"></div>
             <div class="kpi-gtitle" style="margin:16px 0 6px">📓 Journal des dépôts <span class="ssub" style="font-weight:500">— votre registre (conservation 10 ans)</span></div>
             <div id="vat-filings"><div class="ssub">Chargement…</div></div>
@@ -1698,6 +1727,64 @@ class AdminPage {
             setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         });
 
+        // ── Dossier trimestriel : HTML autonome imprimable (comptable / due diligence) ──
+        // Un seul fichier, zéro dépendance : profil, déclaration par pays, corrections,
+        // registre transaction par transaction, dépôts. Thème clair (imprimable en PDF
+        // par le navigateur). Les métadonnées de calcul (fx, taux) sont incluses.
+        const dossierBtn = document.getElementById('vat-dossier');
+        if (dossierBtn) dossierBtn.addEventListener('click', async () => {
+            dossierBtn.disabled = true;
+            try {
+                const [txRes, filRes] = await Promise.all([
+                    this._rpc('admin_vat_transactions', { p_year: vat.year, p_quarter: vat.quarter }).catch(() => null),
+                    this._rpc('admin_vat_filings', { p_year: vat.year, p_quarter: vat.quarter }).catch(() => null),
+                ]);
+                const txs = (txRes && Array.isArray(txRes.rows)) ? txRes.rows : [];
+                const fils = Array.isArray(filRes) ? filRes : [];
+                const dtL = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                const KINDS2 = { first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', refund: 'remboursement' };
+                const declRows = rowsCalc.map(x => `<tr><td>${x.unknown ? 'Inconnu' : esc(x.cc)}</td><td>${x.isEu ? (x.isFr ? 'France (franchise)' : 'UE — OSS') : (x.unknown ? '—' : 'hors UE')}</td><td class="r">${money(x.r.net_cents)}</td><td class="r">${eurFmt(x.baseEur)}</td><td class="r">${x.rate != null ? x.rate.toLocaleString('fr-FR') + ' %' : '—'}</td><td class="r">${x.rate != null ? eurFmt(x.vatDue) : '—'}</td></tr>`).join('');
+                const corrRows = corrections.map(c => `<tr><td>T${esc(String(c.orig_quarter))} ${esc(String(c.orig_year))}</td><td>${esc(c.country_code)}</td><td class="r">−${money(c.refund_cents)}</td></tr>`).join('');
+                const txRows = txs.map(x => `<tr><td>${esc(dtL(x.at))}</td><td>${esc(x.email || x.user_id)}</td><td>${KINDS2[x.kind] || esc(x.kind)}</td><td class="r">${x.kind === 'refund' ? '−' : ''}${money(x.amount)}</td><td>${esc(x.country_code || '—')}</td><td>${x.evidence === 'card_bin' ? 'BIN carte (art. 24f, c)' : '—'}</td></tr>`).join('');
+                const filRows = fils.map(f2 => `<tr><td>${esc(dtL(f2.filed_at))}</td><td class="r">${f2.vat_eur_cents != null ? eurFmt(f2.vat_eur_cents) : '—'}</td><td>${f2.paid_at ? '✓ ' + esc(dtL(f2.paid_at)) : 'non marqué'}</td><td>${esc(f2.reference || '—')}</td><td>${esc(f2.document_path || '—')}</td></tr>`).join('');
+                const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Norva — Dossier TVA T${vat.quarter} ${vat.year}</title><style>
+                    body{font:13px/1.5 Arial,sans-serif;color:#111;margin:34px;max-width:900px}
+                    h1{font-size:20px;margin:0 0 2px}h2{font-size:14px;margin:22px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px}
+                    .sub{color:#555;font-size:12px;margin:0 0 4px}
+                    table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px}
+                    th{text-align:left;background:#f2f2f2;border:1px solid #ddd;padding:5px 8px}
+                    td{border:1px solid #ddd;padding:5px 8px}td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+                    tfoot td{font-weight:bold;background:#fafafa}
+                    .note{font-size:11px;color:#666;margin-top:6px}
+                    @media print{body{margin:12mm}}
+                </style></head><body>
+                <h1>Dossier TVA — T${vat.quarter} ${vat.year}</h1>
+                <p class="sub">${esc(profile.name || 'Norva')}${profile.siren ? ' · SIREN ' + esc(profile.siren) : ''}${profile.vat_number ? ' · TVA ' + esc(profile.vat_number) : ''} · ${esc(pf.label)} · généré le ${esc(new Date().toLocaleString('fr-FR'))}</p>
+                <p class="sub">Périmètre : ventes web directes (Revolut) — les ventes Play/App Store sont déclarées par le store (fournisseur présumé, art. 9 bis règl. UE 282/2011). Conversion : ${fxFixed ? `taux BCE ${FX.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} figé au dernier jour du trimestre (art. 369h)` : `taux INDICATIF 1 $ ≈ ${FX.toLocaleString('fr-FR')} € — taux BCE non encore figé`}. Taux de TVA : standards (source TEDB).</p>
+                <h2>1. Déclaration par pays de consommation</h2>
+                <table><thead><tr><th>Pays</th><th>Zone</th><th class="r">Net (USD)</th><th class="r">Base (EUR)</th><th class="r">Taux</th><th class="r">TVA due</th></tr></thead>
+                <tbody>${declRows || '<tr><td colspan="6">Aucune vente sur le trimestre.</td></tr>'}</tbody>
+                <tfoot><tr><td colspan="3">Total OSS — UE hors France</td><td class="r">${eurFmt(ossBaseEur)}</td><td></td><td class="r">${eurFmt(ossVatEur)}</td></tr></tfoot></table>
+                ${corrRows ? `<h2>2. Corrections de périodes antérieures</h2><table><thead><tr><th>Période d'origine</th><th>Pays</th><th class="r">Montant (USD)</th></tr></thead><tbody>${corrRows}</tbody></table><p class="note">À reporter dans la rubrique corrections de la déclaration OSS, sur la période d'origine (délai 3 ans).</p>` : ''}
+                <h2>${corrRows ? '3' : '2'}. Registre des transactions (art. 63c — ${AdminPage.n(txRes && txRes.total)} transaction(s))</h2>
+                <table><thead><tr><th>Date</th><th>Client</th><th>Type</th><th class="r">Montant (USD)</th><th>Pays</th><th>Preuve de localisation</th></tr></thead>
+                <tbody>${txRows || '<tr><td colspan="6">Aucune transaction.</td></tr>'}</tbody></table>
+                ${Number(txRes && txRes.total) > txs.length ? `<p class="note">Registre tronqué à ${txs.length} lignes (${AdminPage.n(txRes.total)} au total) — l'intégralité reste requêtable en base (cloud_billing_ledger).</p>` : ''}
+                <h2>${corrRows ? '4' : '3'}. Dépôts enregistrés pour ce trimestre</h2>
+                <table><thead><tr><th>Déposé le</th><th class="r">TVA reversée</th><th>Payé</th><th>Référence</th><th>Certificat (chemin)</th></tr></thead>
+                <tbody>${filRows || '<tr><td colspan="5">Aucun dépôt enregistré.</td></tr>'}</tbody></table>
+                <p class="note">Document généré par le cockpit TVA Norva. Montants sources en USD (cents du ledger) ; bases et TVA en EUR selon la conversion indiquée en tête. Conservation des registres : 10 ans (art. 63c règl. UE 282/2011).</p>
+                </body></html>`;
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+                a.download = `norva-dossier-tva-${vat.year}-T${vat.quarter}.html`;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                this._toast('✓ Dossier généré — imprimable en PDF depuis le navigateur', 'ok');
+            } catch (e) { this._toast('Erreur dossier : ' + e.message, 'err'); }
+            dossierBtn.disabled = false;
+        });
+
         // ── Drill-down registre : les transactions derrière chaque ligne pays ──────
         // Couche de confiance : chaque ligne de la déclaration est vérifiable à la
         // transaction près (esprit du registre art. 63c), avec sa preuve de
@@ -1742,13 +1829,19 @@ class AdminPage {
                 const arr = Array.isArray(list) ? list : [];
                 if (!arr.length) { fEl.innerHTML = '<div class="ssub">Aucun dépôt enregistré. Après chaque déclaration, l\'assistant propose de l\'ajouter ici.</div>'; return; }
                 const dt = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-                fEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Période</th><th>Déposé le</th><th class="num">TVA reversée</th><th>Référence</th><th>Certificat</th></tr></thead><tbody>${arr.map(f => `<tr>
+                fEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Période</th><th>Déposé le</th><th class="num">TVA reversée</th><th>Payé</th><th>Référence</th><th>Certificat</th></tr></thead><tbody>${arr.map(f => `<tr>
                     <td>T${esc(String(f.quarter))} ${esc(String(f.year))}</td>
                     <td>${esc(dt(f.filed_at))}</td>
                     <td class="num">${f.vat_eur_cents != null ? eurFmt(f.vat_eur_cents) : '—'}</td>
+                    <td>${f.paid_at ? `<span class="badge green" title="Virement marqué payé">✓ ${esc(dt(f.paid_at))}</span>` : `<button class="mini-btn vat-paid" data-id="${esc(f.id)}" title="Marquer le virement OSS comme effectué (déclaré → payé → archivé)">💶 Marquer payé</button>`}</td>
                     <td class="ssub">${esc(f.reference || f.note || '—')}</td>
                     <td>${f.document_path ? `<button class="mini-btn vat-cert-dl" data-path="${esc(f.document_path)}" title="Télécharger le certificat de dépôt (bucket privé)">📄 PDF</button>` : '<span class="ssub">—</span>'}</td>
                 </tr>`).join('')}</tbody></table></div>`;
+                fEl.querySelectorAll('.vat-paid').forEach(b => b.addEventListener('click', async () => {
+                    b.disabled = true;
+                    try { await this._rpc('admin_vat_filing_mark_paid', { p_id: b.dataset.id }); this._toast('✓ Virement marqué payé — cycle complet (déclaré → payé → archivé)', 'ok'); loadFilings(); }
+                    catch (e) { b.disabled = false; this._toast('Erreur : ' + e.message, 'err'); }
+                }));
                 // Bucket privé : téléchargement authentifié (fetch + blob) — pas d'URL publique.
                 fEl.querySelectorAll('.vat-cert-dl').forEach(b => b.addEventListener('click', async () => {
                     b.disabled = true;
@@ -3918,7 +4011,13 @@ class AdminPage {
                 card(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : '', 'active_paying', '👤'),
                 card(n(o.billing_past_due), 'Échecs paiement', Number(o.billing_past_due) > 0 ? 'alert' : 'ok', 'past_due', '🛡️'),
                 card(n(o.billing_conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📈'),
-                card(money(o.billing_collected_30d_cents), 'Encaissé 30 j', '', 'collected_30d_cents', '💰')
+                card(money(o.billing_collected_30d_cents), 'Encaissé 30 j', '', 'collected_30d_cents', '💰'),
+                // Provision TVA (EUR) : TVA collectée non encore reversée — visible seulement
+                // quand elle existe (0 sous franchise/seuil : rien à provisionner).
+                ...(Number(o.vat_provision_eur_cents) > 0
+                    ? [card((Number(o.vat_provision_eur_cents) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €',
+                        'Provision TVA — à réserver, pas à vous', 'alert', null, '🏦')]
+                    : [])
             ]),
             group('👥 Clients & croissance', [
                 card(n(o.users_total), 'Utilisateurs', o.users_active_7d ? 'ok' : '', 'users_total', '👥'),

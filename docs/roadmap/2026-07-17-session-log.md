@@ -27,6 +27,17 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 > (`120000`/`150000`/`160000` existent aussi pour sous-titres/watch-history — noms de
 > fichiers distincts, sans impact ; juste ne pas s'étonner de les voir côte à côte).
 
+## Pack premium (commit 14) — brainstorm confronté, puis implémenté
+
+Confrontation des 9 idées « premium » à la réalité (1 fondateur, 4 déclarations/an, 0 vente UE) → tuées : score de conformité (gimmick), intégration Revolut Business (4 virements/an), onboarding wizard (audience de 1), cron BCE (le bouton + l'alerte suffisent). Implémenté (`20260717210000_vat_premium_pack.sql` — ⚠ NOTIFY pgrst, fonctions neuves ; + `AdminPage.js ?v=68` ; + norva-admin) :
+- **Onglet TVA deep-linkable** `#admin/finance/vat` (commit `c44bd5f`, `?v=67`) — survit au F5/favori.
+- **Provision TVA** : helper `vat_provision_eur_cents()` (Σ net×taux×fx par trimestre − Σ dépôts, plancher 0, **gate légal : 0 sous le seuil 10 k€**) → carte Cockpit (`overview.vat_provision_eur_cents`, refresh ré-émis, diff = 1 addition) + carte échéancier de l'onglet.
+- **Cycle payé** : `vat_filings.paid_at` + `admin_vat_filing_mark_paid` + colonne « Payé » au journal (déclaré → payé → archivé, marquage manuel).
+- **Prévision T+1 déterministe + ETA fourchette** : `admin_vat_forecast()` (abonnés UE actifs × renouvellements × taux ; ETA seulement si ≥ 3 mois de ventes UE non nulles, fourchette ±30 %) → cartes/ligne de jauge.
+- **Dossier trimestriel** : bouton 🗂 → HTML autonome imprimable (profil, déclaration, corrections, registre art. 63c, dépôts, métadonnées fx/taux) — zéro dépendance, pour comptable/due diligence.
+- **Comparatif OSS vs régime EX** dans la démarche OSS, avec les vrais chiffres (part de TVA d'un prix TTC = t/(100+t)) + la décision produit (absorber vs augmenter les prix UE).
+- **Alertes CH/NO** (Suisse CHF 100 k mondial, Norvège VOEC NOK 50 k) à côté de l'alerte UK ; **taux BCE suggéré directement dans l'alerte Telegram** `vat_fx_pending` (fetch frankfurter best-effort).
+
 ## Certificats de dépôt (commit 13) — dernier morceau du registre
 
 Bucket `vat-certificates` **privé** (PDF uniquement, 10 Mo) sur le storage-api de la stack (`norva-storage`), policies RLS `is_admin()` sur les 4 verbes de `storage.objects`. `vat_filings.document_path` relie chaque dépôt à son PDF. Front : input fichier dans l'étape 5 de l'assistant (upload **avant** l'enregistrement — un échec d'upload bloque la ligne, pas de registre mensonger), colonne « Certificat » du journal avec téléchargement authentifié (fetch + blob — pas d'URL publique). ⚠ Signature de `admin_vat_filing_record` étendue ⇒ DROP + NOTIFY pgrst dans la migration/déploiement.
