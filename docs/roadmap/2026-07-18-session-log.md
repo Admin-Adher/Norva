@@ -624,6 +624,34 @@ FCM token (app) → prefs → bridge WebView `getPushToken` → app.js
   machine de build → rebuild + réinstaller/republier. Au premier lancement
   connecté, le token remonte et l'appareil apparaît dans Marketing.
 
+**ÉPILOGUE — la VRAIE cause racine (bug dormant depuis le 30/06).** Adrien
+buildait en fait via GitHub Actions avec le secret `GOOGLE_SERVICES_JSON`
+injecté (log « Wrote google-services.json (674 bytes) ») — l'APK avait bien
+Firebase. Après réinstallation : toujours 0 appareil. La traque a fini sur le
+client web : `registerPushToken()` appelait `API.request('POST',
+'/push-token')` → **`CloudAdapter.request` ne route que les endpoints
+catalogue et jette « Cloud API route not mapped » pour tout le reste** — et
+`/push-token` n'y a jamais été mappé. L'erreur était avalée par le try/catch
+best-effort → **l'enregistrement n'a JAMAIS fonctionné**, pour personne,
+depuis le lot push du 30 juin. Triple leçon : (1) un best-effort silencieux
+peut cacher un mort-né pendant un mois ; (2) vérifier une feature de bout en
+bout = un APPAREIL RÉEL dans la table, pas juste le code relu ; (3) le
+versionCode 14 en dur aurait de toute façon bloqué la mise à jour Play
+(bumpé → 15/1.3.2).
+
+**Correctifs (cloudApi v49, api v72, app v47)** :
+- `NorvaCloud.push.register(token, platform)` — chemin DIRECT vers norva-cloud
+  (le transport générique, pas l'adaptateur catalogue).
+- Mapping `POST /push-token` ajouté dans `CloudAdapter.request` (robustesse si
+  un autre code repasse par `API.request`).
+- `registerPushToken()` durci : retry 10 × 2 s (premier lancement lent),
+  re-tentative à chaque retour au premier plan, et résultat OBSERVABLE —
+  `NorvaTrace` + `localStorage['norva-push-reg']`
+  (`{status: registered|no-token|error, detail, at}`) : plus jamais un échec
+  silencieux sur cette chaîne. Recette téléphone : ouvrir l'app connectée,
+  ~10 s, `localStorage.getItem('norva-push-reg')` doit dire `registered` et
+  Marketing afficher 1 appareil — SANS rebuild de l'APK (le fix est web).
+
 ### Périmètre des visuels par surface (question de recette)
 
 | Surface | Prix live + badge + fond de campagne ? | Pourquoi |

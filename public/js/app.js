@@ -763,21 +763,40 @@ class App {
     }
 
     // Phase 2 native push: read the FCM token the Android wrapper exposes via its JS bridge
-    // (window.NorvaTVCloud.getPushToken) and register it with the backend so the digest sender can push
-    // to this device when the app is closed. No-op in a plain browser (no bridge). Best-effort.
+    // (window.NorvaTVCloud.getPushToken) and register it with the backend so marketing pushes and
+    // the import digest can reach this device when the app is closed. No-op in a plain browser
+    // (no bridge). Best-effort, but OBSERVABLE: the outcome lands in NorvaTrace + localStorage
+    // ('norva-push-reg') — the historical bug (route jamais mappée dans CloudAdapter) est resté
+    // invisible un mois précisément parce que tout était avalé en silence. Chemin DIRECT
+    // NorvaCloud.push.register (pas API.request). Re-tenté au retour au premier plan : au premier
+    // lancement, le token FCM peut mettre plus de temps que la fenêtre de retry du boot.
     async registerPushToken() {
+        const note = (status, detail) => {
+            try { localStorage.setItem('norva-push-reg', JSON.stringify({ status, detail: detail || '', at: new Date().toISOString() })); } catch (_) { /* plein/privé */ }
+            window.NorvaTrace?.log?.('push-token', status + (detail ? ' — ' + detail : ''));
+        };
         try {
             const bridge = window.NorvaTVCloud;
-            if (!bridge || typeof bridge.getPushToken !== 'function') return;
-            let token = '';
-            for (let i = 0; i < 6 && !token; i++) {                 // FCM token may not be ready at first launch
-                try { token = String(bridge.getPushToken() || ''); } catch (_) { token = ''; }
-                if (!token) await new Promise((r) => setTimeout(r, 1500));
+            if (!bridge || typeof bridge.getPushToken !== 'function') return; // navigateur / TV sans FCM
+            if (!this._pushFgRetryWired) {
+                this._pushFgRetryWired = true;
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible' && this.currentUser && !this.currentUser.device) this.registerPushToken();
+                });
             }
-            if (!token || this._lastPushToken === token) return;
-            await window.API?.request?.('POST', '/push-token', { token, platform: 'android' });
+            let token = '';
+            for (let i = 0; i < 10 && !token; i++) {                // FCM token may not be ready at first launch
+                try { token = String(bridge.getPushToken() || ''); } catch (_) { token = ''; }
+                if (!token) await new Promise((r) => setTimeout(r, 2000));
+            }
+            if (!token) { note('no-token', 'FCM token absent après ~20 s (Firebase non initialisé dans ce build ?)'); return; }
+            if (this._lastPushToken === token) return;              // déjà enregistré cette session
+            await window.NorvaCloud.push.register(token, 'android');
             this._lastPushToken = token;
-        } catch (_) { /* best-effort */ }
+            note('registered', token.slice(0, 12) + '…');
+        } catch (e) {
+            note('error', e && e.message ? e.message : String(e));
+        }
     }
 
     isCatalogPage(pageName) {

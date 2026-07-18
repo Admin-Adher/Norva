@@ -1177,6 +1177,13 @@ const CloudAdapter = (() => {
         const [path, queryString = ''] = endpoint.split('?');
         const query = new URLSearchParams(queryString);
 
+        // Token push FCM (app Android) — passe-plat vers norva-cloud. Sans ce
+        // mapping, l'appel tombait dans le « Cloud API route not mapped » final,
+        // avalé par le best-effort appelant → aucun appareil enregistré.
+        if (method === 'POST' && path === '/push-token') {
+            return NorvaCloud.push.register(data && data.token, data && data.platform);
+        }
+
         if (method === 'GET' && path === '/sources') return listSources();
         if (method === 'GET' && path.startsWith('/sources/type/')) {
             const type = decodeURIComponent(path.split('/').pop());

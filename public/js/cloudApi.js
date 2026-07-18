@@ -957,6 +957,15 @@
             }
         },
 
+        // Enregistrement du token FCM de l'appareil (app Android) auprès du
+        // backend — norva-cloud upsert dans cloud_push_tokens. Chemin DIRECT :
+        // ne pas passer par API.request/CloudAdapter, qui ne route que les
+        // endpoints catalogue (c'était le bug historique : « Cloud API route
+        // not mapped » avalé en silence → zéro appareil enregistré).
+        push: {
+            register: (token, platform) => request('POST', '/push-token', { token, platform: platform || 'android' })
+        },
+
         entitlements: {
             get: () => cachedGet('entitlements', ENTITLEMENTS_TTL_MS, () => request('GET', '/entitlements')),
             device: () => request('GET', '/device/entitlements', null, { token: getDeviceToken() }),
