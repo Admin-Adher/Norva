@@ -55,6 +55,10 @@
     /* The subscriber's own plan+period: marked, not buyable. */
     .card.current { border-color: rgba(52,211,153,0.5); }
     .card.current .btn { background: #242c3d; color: #9fb0cd; }
+    /* Annual-savings nudge under the current monthly plan's CTA. */
+    .save-hint { width: 100%; margin-top: 10px; border: 0; background: none; color: var(--pink);
+      font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; text-align: center; }
+    .save-hint:hover { text-decoration: underline; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
     .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
@@ -266,6 +270,21 @@
           const isCurrent = samePlan && (currentPeriod === null || currentPeriod === period);
           b.disabled = isCurrent;
           card.classList.toggle('current', isCurrent);
+          // Honest annual upsell on the subscriber's own monthly card: the real
+          // yearly saving (12×monthly − annual), one click flips the toggle where
+          // the switch CTA takes over. Only when the cadence is known (web rail).
+          let hint = card.querySelector('.save-hint');
+          const wantHint = isCurrent && currentPeriod === 'monthly' && period === 'monthly';
+          if (wantHint && !hint) {
+            const save = (parseFloat(card.dataset.monthly) * 12 - parseFloat(card.dataset.annual)).toFixed(2);
+            hint = document.createElement('button');
+            hint.type = 'button';
+            hint.className = 'save-hint';
+            hint.textContent = 'Your plan, billed annually — save $' + save + ' a year →';
+            hint.addEventListener('click', function () { applyPeriod('annual'); });
+            b.insertAdjacentElement('afterend', hint);
+          }
+          if (hint) hint.hidden = !wantHint;
           if (isCurrent) { b.textContent = 'Current plan'; return; }
           if (samePlan) {
             b.textContent = period === 'annual' ? 'Switch to annual billing' : 'Switch to monthly billing';

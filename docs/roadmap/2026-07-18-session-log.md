@@ -56,6 +56,12 @@ ne marquait jamais le plan courant (gap général, pas seulement VIP).
 - **`subscription.html` + `Settings.js` (`?v=42` dans app.html)** : un grant
   manuel/system affiche « Access until » / « accès inclus » au lieu de « Renews
   Jan 1, 2099 » (rien ne se renouvelle).
+- **Upsell annuel honnête** (idée d'Adrien, validée) : sous le CTA « Current
+  plan » d'un abonné mensuel (cadence connue, rail web), lien « save $17.89/31.89
+  a year » qui bascule le toggle sur Annuel ; et ligne « Annual billing — Switch
+  and save » sur la page abonnement (statut `active` seulement), qui mène droit
+  au checkout plan_change. Économies calculées depuis les prix réels
+  (`data-monthly/annual`, `billing-config.js`) — jamais codées en dur.
 
 ## Nuances actées, non corrigées (volontaire)
 
