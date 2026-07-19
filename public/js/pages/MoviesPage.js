@@ -2816,12 +2816,27 @@ class MoviesPage {
         if (Number.isInteger(audioStreamIndex)) {
             playbackHint.audioStreamIndex = audioStreamIndex;
         }
+        const fileAudioTracks = movie.audio_tracks_scope === 'file' || movie.audioTracksScope === 'file'
+            ? (movie.audioTracks || movie.audio_tracks || [])
+            : null;
+        const fileAudioLanguages = fileAudioTracks
+            ? [...new Set(fileAudioTracks
+                .map(track => MediaUtils.normalizeLanguagePreference(track?.lang || track?.language || ''))
+                .filter(code => code && code !== 'und' && code !== 'unknown'))]
+            : null;
         const versionList = (versions || [movie]).map(v => ({
             sourceId: v.sourceId,
+            cloudSourceId: v.cloudSourceId || v.cloud_source_id || null,
             streamId: v.stream_id,
             container: v.container_extension || 'mp4',
             type: 'movie',
-            label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId))
+            label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId)),
+            audioTracks: v.audio_tracks_scope === 'file' || v.audioTracksScope === 'file'
+                ? (v.audioTracks || v.audio_tracks || [])
+                : null,
+            subtitleTracks: v.subtitle_tracks_scope === 'file' || v.subtitleTracksScope === 'file'
+                ? (v.subtitleTracks || v.subtitle_tracks || [])
+                : null
         }));
         const content = {
             type: 'movie',
@@ -2832,6 +2847,8 @@ class MoviesPage {
             year: this.getItemYear(movie),
             rating: movie.rating || movie.tmdb?.vote_average,
             sourceId: movie.sourceId,
+            cloudSourceId: movie.cloudSourceId || movie.cloud_source_id || null,
+            titleId: movie.titleId || movie.title_id || null,
             categoryId: movie.category_id,
             containerExtension: container,
             resumeTime: resumePlan.target,
@@ -2839,13 +2856,20 @@ class MoviesPage {
             durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
             versions: versionList,
             versionIndex: 0,
-            audioLanguages: movie.audioLanguages || movie.audio_languages || null,
+            variantCount: Math.max(1, Number(movie.variantCount || movie.variant_count || versionList.length || 1)),
+            audioLanguages: fileAudioLanguages,
             versionLanguages: movie.versionLanguages || movie.version_languages || null,
             originalLanguage: movie.originalLanguage || movie.original_language || null,
-            // Precomputed ordered per-track language map (served on the grid item by
-            // norva-catalog attachMediaLanguages). Lets the player label every audio
-            // track with zero playback-time probe — see WatchPage.getContentAudioTracks.
-            audioTracks: movie.audioTracks || movie.audio_tracks || null
+            // Exact-file ordered language map served on the selected variant by
+            // norva-catalog. It can label tracks without inheriting a sibling dub.
+            audioTracks: fileAudioTracks,
+            audioTracksScope: fileAudioTracks !== null ? 'file' : null,
+            subtitleTracks: movie.subtitle_tracks_scope === 'file' || movie.subtitleTracksScope === 'file'
+                ? (movie.subtitleTracks || movie.subtitle_tracks || [])
+                : null,
+            subtitleTracksScope: movie.subtitle_tracks_scope === 'file' || movie.subtitleTracksScope === 'file'
+                ? 'file'
+                : null
         };
 
         // Open the player immediately (poster + loading animation), then resolve

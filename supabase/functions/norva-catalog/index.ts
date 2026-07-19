@@ -1319,12 +1319,10 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 
 // Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
-// --- Audio language + burned-in subtitle filtering ----------------------------
-// Audio AND subtitle filters are both strict: the value is a real ISO-639 code captured by
-// ffprobe into cloud_titles.audio_languages (audio) / subtitle_tracks[].lang (soft subtitles).
-// Release-name tags such as vf/multi/vostfr are intentionally NOT used — they're ambiguous and
-// far poorer coverage. (Burned-in subtitles aren't a stream, so they can't be probed — an
-// honest, accepted limit; the soft-subtitle streams that ffprobe sees drive the menu instead.)
+// --- Exact provider-file language filtering ------------------------------------
+// Audio AND soft-subtitle filters are strict: each value comes from the exact
+// ffprobe-backed file union for this user's title. Release-name tags such as
+// vf/multi/vostfr and global TMDB-level hints intentionally never drive filters.
 
 function normalizeFacet(value: string | null): string | null {
   const v = (value || "").toLowerCase().trim();
@@ -1348,9 +1346,9 @@ function paramNumber(value: string | null): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-// Audio/subtitle facet values are real ISO-639 codes from the user's detected tracks
-// (audio_tracks / subtitle_tracks). Keep only syntactically-safe codes; the SQL filter
-// below is strict on the detected track, not on the inherited audio_languages aggregate.
+// Audio/subtitle facet values are ISO-639 codes from exact provider-file unions
+// owned by this user (file_audio_languages / file_subtitle_languages). Keep only
+// syntactically-safe codes; legacy/global title hints never drive strict filters.
 function audioFacetIso(facet: string | null): string | null {
   return facet && /^[a-z]{2,3}$/.test(facet) ? facet : null;
 }
@@ -1359,28 +1357,19 @@ function titleVersionLanguages(title: JsonRecord): string[] {
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
 }
 function titleAudioLanguages(title: JsonRecord): string[] {
-  const raw = (title as { audio_languages?: unknown }).audio_languages;
+  // Exact union of provider files owned by this user. The legacy
+  // audio_languages field can be inherited globally by TMDB id.
+  const raw = (title as { file_audio_languages?: unknown }).file_audio_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
 }
-// Distinct ISO-639 subtitle languages from the real detected soft-sub streams
-// (subtitle_tracks[].lang). Mirrors titleAudioLanguages for the "best for my
-// languages" sort. Empty when subtitles haven't been probed yet.
+// Exact union of soft-subtitle languages across provider files owned by this
+// user. Absolute subtitle stream indices remain file-scoped.
 function titleSubtitleLanguages(title: JsonRecord): string[] {
-  const raw = (title as { subtitle_tracks?: unknown }).subtitle_tracks;
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const track of raw) {
-    const lang = (track as { lang?: unknown } | null)?.lang;
-    if (typeof lang === "string") {
-      const code = lang.toLowerCase();
-      if (/^[a-z]{2,3}$/.test(code) && !out.includes(code)) out.push(code);
-    }
-  }
-  return out;
+  const raw = (title as { file_subtitle_languages?: unknown }).file_subtitle_languages;
+  return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
 }
-// Distinct ISO-639 audio languages from the real detected streams (audio_tracks[].lang) — the
-// user's OWN ffprobe probe, NOT the inherited audio_languages aggregate (which over-claims via the
-// global catalog cache, keyed by TMDB id). Drives the audio menu, the strict grid filter, and sort.
+// Distinct ISO-639 languages from a legacy title-level ordered map. Exact menus,
+// filters, and sorting use file_audio_languages instead.
 function titleAudioTrackLanguages(title: JsonRecord): string[] {
   const raw = (title as { audio_tracks?: unknown }).audio_tracks;
   if (!Array.isArray(raw)) return [];
@@ -1430,7 +1419,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const candidateLimit = boundedInt(url.searchParams.get("candidates"), 6000, 100, 8000);
   if (!bucketParam) throw new HttpError(400, "Missing bucket");
 
-  // Optional audio-language / burned-in-subtitle filters + "best for my languages"
+  // Optional exact audio/soft-subtitle filters + "best for my languages"
   // sort. All additive: absent → the query and result are identical to before.
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
   const audioIso = audioFacetIso(audioFacet);
@@ -1457,8 +1446,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // Build the shared SQL filter. genre_buckets is the denormalised curated-bucket
   // set (migration 20260704160000), GIN-indexed — so a bucket's grid is filtered
   // over the WHOLE catalogue by index, not classified in a recency-capped window.
-  // Every dimension is now a real SQL predicate: strict audio languages, best-effort
-  // subtitle version tags, year (release_year), rating (rating_num),
+  // Every dimension is now a real SQL predicate: exact per-file audio/subtitle unions,
+  // year (release_year), rating (rating_num),
   // hidden genres (drop a title tagged with ANY hidden bucket — the "Kids profile
   // sees no Horror anywhere" rule).
   const applyFilters = (q: any) => {
@@ -1469,15 +1458,10 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
     if (addedAfterDate !== null) out = out.gte("created_at", addedAfterDate);
-    // Audio + subtitles: both strict on the user's OWN ffprobe-detected streams, so the count
-    // shown next to a language equals the number of results with zero false positives. Audio =
-    // audio_tracks (NOT audio_languages, which is inherited from the global catalog cache by TMDB
-    // id and over-claims languages the user's file doesn't have); subs = subtitle_tracks. Both are
-    // jsonb arrays of {lang,…} matched by @> containment. Pass the containment value as a JSON
-    // STRING (not a JS array) — postgrest-js serialises a JS array as a Postgres array literal
-    // ({...}) which is invalid JSON for a jsonb column; the string form yields cs.[{"lang":"xx"}].
-    if (audioIso) out = out.contains("audio_tracks", JSON.stringify([{ lang: audioIso }]));
-    if (subIso) out = out.contains("subtitle_tracks", JSON.stringify([{ lang: subIso }]));
+    // Both filters use exact language unions derived from this user's owned
+    // provider files. They intentionally ignore optimistic/global title hints.
+    if (audioIso) out = out.contains("file_audio_languages", [audioIso]);
+    if (subIso) out = out.contains("file_subtitle_languages", [subIso]);
     return out;
   };
 
@@ -1494,11 +1478,16 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         throwDb(error, "Unable to list genre items");
       }
       const ranked = ((data ?? []) as JsonRecord[])
-        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioTrackLanguages(title), prefAudioIso, prefSubIso) }))
+        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubIso) }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);
-      const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
+      const variantsByTitle = await listVariantsByTitleIds(
+        pageRows.map((row) => String(row.id)),
+        userId,
+        audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
+        audioIso,
+      );
       await applyCatalogOverlay(pageRows, itemType, lang);
       return {
         items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
@@ -1530,7 +1519,12 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     }
     const pageRows = (data ?? []) as JsonRecord[];
     const total = count ?? null;
-    const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
+    const variantsByTitle = await listVariantsByTitleIds(
+      pageRows.map((row) => String(row.id)),
+      userId,
+      audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
+      audioIso,
+    );
     await applyCatalogOverlay(pageRows, itemType, lang);
     return {
       items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
@@ -1544,10 +1538,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   }
 }
 
-// Dynamic menu options: which audio / burned-in-subtitle facets actually exist in
-// this user's catalogue, so the dropdowns only show real choices (no dead options).
-// Audio facets come from real captured audio-track languages; subtitles still use
-// burned-in/release tags because embedded subtitles cannot be reliably probed.
+// Dynamic menu options: which exact audio / soft-subtitle languages exist across
+// this user's provider files, so the dropdowns only show real choices.
 // In-isolate memo for the language-facets endpoint. listLanguageFacets fires ~25
 // count-queries per call, all per-user + per-item_type. Caching the result briefly
 // stops repeated page loads (and many concurrent users at scale) from re-running the
@@ -1558,6 +1550,25 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 const FACET_CACHE = new Map<string, { value: { audio: unknown[]; subtitles: unknown[] }; exp: number }>();
 const FACET_CACHE_TTL_MS = 60_000;
 const FACET_CACHE_MAX = 512;
+const FACET_LANGUAGE_NAMES = new Intl.DisplayNames(["en"], { type: "language" });
+const FACET_NUMBER = new Intl.NumberFormat("en-US");
+
+function exactLanguageFacetItems(raw: unknown): Array<{ value: string; label: string; count: number }> {
+  const counts = recordOrEmpty(raw);
+  return Object.entries(counts)
+    .map(([value, count]) => ({ value: value.toLowerCase(), count: Math.max(0, Number(count) || 0) }))
+    .filter((item) =>
+      /^[a-z]{2,3}$/.test(item.value) &&
+      !["un", "und", "mul", "zxx", "mis", "nar"].includes(item.value) &&
+      item.count > 0
+    )
+    .map((item) => {
+      let name = item.value.toUpperCase();
+      try { name = FACET_LANGUAGE_NAMES.of(item.value) || name; } catch (_) { /* keep ISO */ }
+      return { ...item, label: `${name} · ${FACET_NUMBER.format(item.count)}` };
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
 
 async function listLanguageFacets(url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
@@ -1570,18 +1581,24 @@ async function listLanguageFacets(url: URL, userId: string) {
     return hit.value;
   }
 
-  // The facet set math runs in Postgres (cloud_language_facets → jsonb, ready to render).
-  // The RPC returns every real audio language observed in cloud_titles.audio_languages, sorted
-  // by exact title count, plus best-effort subtitle tags. jsonb deserialises reliably, so the
-  // menus cannot silently empty because of Postgres text[] client parsing.
+  // The facet set math runs in Postgres over file_audio_languages and
+  // file_subtitle_languages. Counts are exact per title and deserialize as jsonb.
   let value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
   try {
-    const { data, error } = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
+    const { data, error } = await db.rpc("cloud_exact_language_counts", { p_user_id: userId, p_item_type: itemType });
     if (!error && data && typeof data === "object") {
       const d = data as { audio?: unknown; subtitles?: unknown };
       value = {
-        audio: Array.isArray(d.audio) ? d.audio : [],
-        subtitles: Array.isArray(d.subtitles) ? d.subtitles : [],
+        audio: exactLanguageFacetItems(d.audio),
+        subtitles: exactLanguageFacetItems(d.subtitles),
+      };
+    } else {
+      // Rolling-deploy compatibility while the database migration lands.
+      const legacy = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
+      const d = legacy.data as { audio?: unknown; subtitles?: unknown } | null;
+      value = {
+        audio: Array.isArray(d?.audio) ? d.audio : [],
+        subtitles: Array.isArray(d?.subtitles) ? d.subtitles : [],
       };
     }
   } catch (_) { /* leave the menus empty (falls back to the static <option>s) on any failure */ }
@@ -1594,78 +1611,229 @@ async function listLanguageFacets(url: URL, userId: string) {
   return value;
 }
 
-// Capture path for real audio-track languages observed at playback (the default
-// track from get_vod_info + the demuxed track list). Best-effort union into the
-// title's audio_languages, scoped to the caller's own title; never blocks
-// playback. This is what de-opaques the "Multi" tag over time.
+// Capture audio/subtitle languages observed by a client for one owned provider
+// file. Client JSON is tenant-local only: it may update this user's title union
+// and a true mono-movie legacy map, but never a global file/title cache or fanout.
+// Legacy title-only callers are accepted solely for a truly single-variant movie.
 async function recordObservedLanguages(req: Request, userId: string) {
   let body: JsonRecord;
   try { body = recordOrEmpty(await req.json()); } catch (_) { throw new HttpError(400, "Invalid JSON body"); }
   const titleId = stringOrNull(body.titleId ?? body.title_id);
   if (!titleId || !/^[0-9a-f-]{36}$/i.test(titleId)) throw new HttpError(400, "Missing or invalid titleId");
+
+  const requestedSourceId = stringOrNull(
+    body.cloudSourceId ?? body.cloud_source_id ?? body.sourceId ?? body.source_id,
+  );
+  const requestedTypeRaw = stringOrNull(body.itemType ?? body.item_type)?.toLowerCase() ?? null;
+  if (requestedTypeRaw && requestedTypeRaw !== "movie" && requestedTypeRaw !== "series") {
+    throw new HttpError(400, "Invalid itemType");
+  }
+  const requestedExternalId = stringOrNull(
+    body.externalId ?? body.external_id ?? body.itemId ?? body.item_id,
+  );
+  const requestedParentExternalId = stringOrNull(
+    body.parentExternalId ?? body.parent_external_id ??
+      body.audioSeriesId ?? body.audio_series_id ?? body.seriesId ?? body.series_id,
+  );
+  const hasFileCoordinates = Boolean(
+    requestedSourceId || requestedTypeRaw || requestedExternalId || requestedParentExternalId,
+  );
+
+  const cleanLanguage = (value: unknown): string | null => {
+    const lang = typeof value === "string" ? value.toLowerCase().trim() : "";
+    return /^[a-z]{2,3}$/.test(lang) &&
+        !["un", "und", "mul", "zxx", "mis", "nar"].includes(lang)
+      ? lang
+      : null;
+  };
   const incoming = Array.isArray(body.audio) ? body.audio : [];
   const codes = [...new Set(incoming
-    .map((code) => String(code).toLowerCase().trim())
-    .filter((code) => /^[a-z]{2,3}$/.test(code) && code !== "und"))];
-  // Ordered per-track map the player observed via a live probe (self-heal: persisting it
-  // means future playbacks of this title need ZERO probe). [{index, lang|null}, ...] in
-  // stream order; null-lang tracks kept so index/position alignment holds.
-  const orderedTracks = Array.isArray(body.audioTracks)
-    ? (body.audioTracks as unknown[])
+    .map(cleanLanguage)
+    .filter((code): code is string => Boolean(code)))];
+  const rawAudioTracks = body.audioTracks ?? body.audio_tracks;
+  const audioTracksScope = stringOrNull(body.audioTracksScope ?? body.audio_tracks_scope)?.toLowerCase() ?? null;
+  // Only an explicitly file-scoped ordered map is authoritative evidence. Null
+  // languages remain in the map so absolute index/position alignment survives.
+  const orderedTracks = Array.isArray(rawAudioTracks)
+    ? (rawAudioTracks as unknown[])
         .map((t) => {
           const r = recordOrEmpty(t);
           const index = Number(r.index);
-          const lang = r.lang == null ? null : String(r.lang).toLowerCase().trim();
-          // Accept 2- AND 3-letter ISO codes — same rule as the `codes` set above. The
-          // client only aliases the common languages to 2-letter; Persian (fas), Kurdish
-          // (kur), Albanian (sqi), Greek (ell)… arrive as 3-letter. A `{2}`-only test
-          // dropped exactly those from the persisted map, so those titles never self-healed.
-          return { index, lang: lang && /^[a-z]{2,3}$/.test(lang) && lang !== "und" ? lang : null };
+          return { index, lang: cleanLanguage(r.lang ?? r.language) };
         })
-        .filter((t) => Number.isInteger(t.index))
+        .filter((t) => Number.isInteger(t.index) && t.index >= 0 && t.index <= 1024)
     : [];
-  if (!codes.length && !orderedTracks.length) return { ok: true, updated: false };
+  const rawSubtitleTracks = body.subtitleTracks ?? body.subtitle_tracks ?? body.subtitles;
+  const subtitleTracksScope = stringOrNull(
+    body.subtitleTracksScope ?? body.subtitle_tracks_scope,
+  )?.toLowerCase() ?? null;
+  const subtitleTracksArrayProvided = Array.isArray(rawSubtitleTracks);
+  const orderedSubtitleTracks = subtitleTracksArrayProvided
+    ? (rawSubtitleTracks as unknown[])
+        .map((entry) => {
+          const track = recordOrEmpty(entry);
+          const index = Number(track.index);
+          return {
+            index,
+            lang: cleanLanguage(track.lang ?? track.language),
+            codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
+            subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
+            extractable: track.extractable === true,
+            forced: track.forced === true,
+          };
+        })
+        .filter((track) => Number.isInteger(track.index) && track.index >= 0 && track.index <= 1024)
+    : [];
 
-  const { data, error } = await db.from("cloud_titles")
-    .select("audio_languages, audio_tracks, provider_tmdb_id, item_type").eq("user_id", userId).eq("id", titleId).maybeSingle();
-  if (error || !data) return { ok: true, updated: false };
-  const row = data as JsonRecord;
+  const observedCodes = [...new Set([
+    ...codes,
+    ...orderedTracks.map((track) => track.lang).filter((code): code is string => Boolean(code)),
+  ])].sort();
+  const hasExactAudioMap = audioTracksScope === "file" && orderedTracks.length > 0;
+  const hasExactSubtitleMap = subtitleTracksScope === "file" && subtitleTracksArrayProvided;
+  const hasLegacyAudioObservation = orderedTracks.length > 0 || observedCodes.length > 0;
+  if (!hasLegacyAudioObservation && !hasExactSubtitleMap) return { ok: true, updated: false };
 
-  // 1) Ordered map: store only when the title has none yet — never clobber the crawl's
-  // authoritative map with a client report.
-  let storedTracks = false;
-  const haveTracks = Array.isArray(row.audio_tracks) && (row.audio_tracks as unknown[]).length > 0;
-  if (!haveTracks && orderedTracks.length) {
-    const { error: tErr } = await db.from("cloud_titles")
-      .update({ audio_tracks: orderedTracks }).eq("user_id", userId).eq("id", titleId);
-    storedTracks = !tErr;
+  const { data: titleData, error: titleError } = await db.from("cloud_titles")
+    .select("id,item_type,variant_count,audio_languages,audio_tracks,audio_probed_at,subtitle_tracks,subtitle_probed_at")
+    .eq("user_id", userId)
+    .eq("id", titleId)
+    .maybeSingle();
+  if (titleError) throwDb(titleError, "Unable to validate observed-language title");
+  if (!titleData) return { ok: true, updated: false, reason: "title_not_owned" };
+  const title = titleData as JsonRecord;
+  const titleType = String(title.item_type ?? "") === "series" ? "series" : "movie";
+  const itemType = requestedTypeRaw ?? titleType;
+  if (itemType !== titleType) return { ok: true, updated: false, reason: "title_type_mismatch" };
+
+  let variant: JsonRecord | null = null;
+  let sourceId: string | null = requestedSourceId;
+  let fileExternalId: string | null = requestedExternalId;
+  let legacyDerived = false;
+
+  if (hasFileCoordinates) {
+    if (!sourceId || !fileExternalId || (itemType === "series" && !requestedParentExternalId)) {
+      return { ok: true, updated: false, reason: "incomplete_file_coordinates" };
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
+      throw new HttpError(400, "Invalid cloudSourceId");
+    }
+    const variantExternalId = itemType === "series" ? requestedParentExternalId : fileExternalId;
+    const { data, error } = await db.from("cloud_title_variants")
+      .select("id,user_id,title_id,source_id,item_type,external_id")
+      .eq("user_id", userId)
+      .eq("title_id", titleId)
+      .eq("source_id", sourceId)
+      .eq("item_type", itemType)
+      .eq("external_id", variantExternalId)
+      .limit(1)
+      .maybeSingle();
+    if (error) throwDb(error, "Unable to validate observed-language variant");
+    variant = (data as JsonRecord | null) ?? null;
+    if (!variant) return { ok: true, updated: false, reason: "variant_not_owned" };
+  } else {
+    // Old clients only sent titleId. Derive a file only when the title has one
+    // movie variant; a grouped movie or series episode is inherently ambiguous.
+    if (itemType !== "movie") {
+      return { ok: true, updated: false, reason: "file_coordinates_required" };
+    }
+    const { data, error } = await db.from("cloud_title_variants")
+      .select("id,user_id,title_id,source_id,item_type,external_id")
+      .eq("user_id", userId)
+      .eq("title_id", titleId)
+      .eq("item_type", "movie")
+      .limit(2);
+    if (error) throwDb(error, "Unable to validate legacy observed-language variant");
+    const variants = (data ?? []) as JsonRecord[];
+    if (variants.length !== 1) {
+      return { ok: true, updated: false, reason: "file_coordinates_required" };
+    }
+    variant = variants[0];
+    sourceId = stringOrNull(variant.source_id);
+    fileExternalId = stringOrNull(variant.external_id);
+    legacyDerived = true;
+  }
+  if (!variant || !sourceId || !fileExternalId) {
+    return { ok: true, updated: false, reason: "file_coordinates_required" };
   }
 
-  // 2) Deduped language set: race-safe union (unchanged behavior).
-  const current = Array.isArray(row.audio_languages)
-    ? (row.audio_languages as unknown[]).map((code) => String(code).toLowerCase())
+  // Check the real sibling count instead of trusting a potentially stale rollup.
+  const { data: siblingRows, error: siblingError } = await db.from("cloud_title_variants")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("title_id", titleId)
+    .eq("item_type", itemType)
+    .limit(2);
+  if (siblingError) throwDb(siblingError, "Unable to validate title variant count");
+  const trueSingleMovie = itemType === "movie" &&
+    (siblingRows ?? []).length === 1 &&
+    String((siblingRows ?? [])[0]?.id ?? "") === String(variant.id ?? "");
+
+  // Replace file evidence only from complete, explicitly file-scoped maps.
+  // Selected-language codes and title/global hints are never authoritative.
+  let unionMerged = false;
+  if (hasExactAudioMap || hasExactSubtitleMap) {
+    try {
+      const { error } = await db.rpc("merge_cloud_title_file_languages", {
+        p_user_id: userId,
+        p_title_id: titleId,
+        p_variant_id: variant.id,
+        p_file_external_id: fileExternalId,
+        p_audio_tracks: orderedTracks,
+        p_subtitle_tracks: orderedSubtitleTracks,
+        p_has_audio: hasExactAudioMap,
+        p_has_subtitle: hasExactSubtitleMap,
+      });
+      unionMerged = !error;
+    } catch (_) { /* rolling deploy: legacy single-movie update below remains safe */ }
+  }
+
+  // Legacy ordered maps remain valid only when title == exact movie file.
+  // Grouped movies and every series keep their absolute indices out of the
+  // title row. Trusted server probes own all global exact-file cache writes.
+  let storedTracks = false;
+  let legacyLanguagesChanged = false;
+  let mergedLegacyLanguages = Array.isArray(title.audio_languages)
+    ? (title.audio_languages as unknown[]).map((code) => String(code).toLowerCase())
     : [];
-  const merged = [...new Set([...current, ...codes])].sort();
-  const langsChanged = codes.length > 0 && merged.length !== current.length;
-  if (langsChanged) {
-    const { error: updateError } = await db.from("cloud_titles")
-      .update({ audio_languages: merged }).eq("user_id", userId).eq("id", titleId);
-    if (!updateError) {
-      // Scale-readiness: mirror into the global catalog cache (race-safe SQL union).
-      // Best-effort — must never block capture. The Supabase builder is a thenable
-      // without .catch(), so this MUST be a try/catch.
-      const tmdbId = stringOrNull(row.provider_tmdb_id);
-      const obsItemType = stringOrNull(row.item_type);
-      if (tmdbId && obsItemType && !/^(tt)?0+$/i.test(tmdbId)) {
-        try {
-          await db.rpc("merge_catalog_title_audio", {
-            p_item_type: obsItemType, p_provider_tmdb_id: tmdbId, p_codes: codes,
-          });
-        } catch (_) { /* best-effort global mirror */ }
+  if (trueSingleMovie) {
+    const update: JsonRecord = {};
+    const haveAudioTracks = Array.isArray(title.audio_tracks) && (title.audio_tracks as unknown[]).length > 0;
+    if (!haveAudioTracks && hasExactAudioMap) {
+      update.audio_tracks = orderedTracks;
+      update.audio_probed_at = new Date().toISOString();
+      storedTracks = true;
+    }
+    const haveSubtitleProbe = Boolean(title.subtitle_probed_at);
+    if (!haveSubtitleProbe && hasExactSubtitleMap) {
+      update.subtitle_tracks = orderedSubtitleTracks;
+      update.subtitle_probed_at = new Date().toISOString();
+    }
+    const currentLegacyCount = mergedLegacyLanguages.length;
+    mergedLegacyLanguages = [...new Set([...mergedLegacyLanguages, ...observedCodes])].sort();
+    legacyLanguagesChanged = mergedLegacyLanguages.length !== currentLegacyCount;
+    if (legacyLanguagesChanged) update.audio_languages = mergedLegacyLanguages;
+    if (Object.keys(update).length) {
+      const { error } = await db.from("cloud_titles")
+        .update(update)
+        .eq("user_id", userId)
+        .eq("id", titleId);
+      if (error) {
+        storedTracks = false;
+        legacyLanguagesChanged = false;
       }
     }
   }
-  return { ok: true, updated: langsChanged || storedTracks, audioLanguages: merged, audioTracksStored: storedTracks };
+
+  FACET_CACHE.delete(`${userId}:${itemType}`);
+  return {
+    ok: true,
+    updated: unionMerged || storedTracks || legacyLanguagesChanged,
+    exact: true,
+    legacyDerived,
+    audioLanguages: observedCodes,
+    audioTracksStored: storedTracks,
+  };
 }
 
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number, lang: string | null) {
@@ -1918,36 +2086,149 @@ async function listVerifiedTitleCandidates(
 // defaultVariant lives on a DISABLED source plays nothing, and one on an errored source
 // (dead credentials — the IPTV reality) should only be picked when no healthy variant
 // exists. Cached briefly: every rail of one /home/rails call shares the lookup.
-const sourceHealthCache = new Map<string, { at: number; disabled: Set<string>; errored: Set<string> }>();
-async function sourceHealthFor(userId: string): Promise<{ disabled: Set<string>; errored: Set<string> }> {
-  const hit = sourceHealthCache.get(userId);
-  if (hit && Date.now() - hit.at < 30_000) return hit;
-  const entry = { at: Date.now(), disabled: new Set<string>(), errored: new Set<string>() };
-  try {
-    const { data } = await db.from("cloud_sources").select("id,sync_status").eq("user_id", userId);
-    for (const s of (data ?? []) as JsonRecord[]) {
-      const st = String(s.sync_status ?? "");
-      if (st === "disabled") entry.disabled.add(String(s.id));
-      else if (st === "error") entry.errored.add(String(s.id));
-    }
-  } catch (_) { /* fail-open: no filtering beats an empty Home */ }
-  sourceHealthCache.set(userId, entry);
-  return entry;
+type SourceCatalogContext = {
+  disabled: Set<string>;
+  errored: Set<string>;
+  exactKeysBySource: Map<string, string[]>;
+};
+const sourceCatalogContextCache = new Map<string, { at: number; promise: Promise<SourceCatalogContext> }>();
+
+async function sourceCatalogContextFor(userId: string): Promise<SourceCatalogContext> {
+  const hit = sourceCatalogContextCache.get(userId);
+  if (hit && Date.now() - hit.at < 30_000) return await hit.promise;
+
+  const promise = (async (): Promise<SourceCatalogContext> => {
+    const context: SourceCatalogContext = {
+      disabled: new Set<string>(),
+      errored: new Set<string>(),
+      exactKeysBySource: new Map<string, string[]>(),
+    };
+    try {
+      const { data } = await db.from("cloud_sources")
+        .select("id,sync_status,config_hint")
+        .eq("user_id", userId);
+      const hints = new Map<string, { providerKey: string; host: string }>();
+      for (const source of (data ?? []) as JsonRecord[]) {
+        const sourceId = String(source.id ?? "");
+        const status = String(source.sync_status ?? "");
+        if (status === "disabled") context.disabled.add(sourceId);
+        else if (status === "error") context.errored.add(sourceId);
+        const hint = recordOrEmpty(source.config_hint);
+        hints.set(sourceId, {
+          providerKey: String(hint.providerKey ?? "").trim(),
+          host: String(hint.serverHost ?? "").trim(),
+        });
+      }
+
+      const providerKeys = [...new Set([...hints.values()].map((hint) => hint.providerKey).filter(Boolean))];
+      const identities = new Map<string, string>();
+      for (let index = 0; index < providerKeys.length; index += 200) {
+        const { data: rows } = await db.from("catalog_provider_identities")
+          .select("provider_key,identity_id")
+          .in("provider_key", providerKeys.slice(index, index + 200));
+        for (const row of (rows ?? []) as JsonRecord[]) {
+          if (row.provider_key && row.identity_id) {
+            identities.set(String(row.provider_key), String(row.identity_id));
+          }
+        }
+      }
+      for (const [sourceId, hint] of hints) {
+        context.exactKeysBySource.set(sourceId, [...new Set([
+          identities.get(hint.providerKey) ?? "",
+          hint.providerKey,
+          hint.host,
+        ].filter(Boolean))]);
+      }
+    } catch (_) { /* fail-open: catalogue remains usable without enrichment */ }
+    return context;
+  })();
+
+  sourceCatalogContextCache.set(userId, { at: Date.now(), promise });
+  return await promise;
 }
 
-async function listVariantsByTitleIds(titleIds: string[], userId?: string) {
+async function sourceHealthFor(userId: string): Promise<{ disabled: Set<string>; errored: Set<string> }> {
+  const context = await sourceCatalogContextFor(userId);
+  return { disabled: context.disabled, errored: context.errored };
+}
+
+// Attach the GLOBAL cache entry for the exact provider file to each exposed
+// variant. cloud_titles.audio_tracks is a grouped-title facet and may come from
+// a different dub/file; absolute stream indices are only valid at
+// (provider identity, item type, external id) granularity.
+async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>, userId: string) {
+  // A series variant is the parent series id, not an episode file id. Legacy
+  // crawler rows keyed (series, seriesId) describe an arbitrary first episode
+  // and must never be exposed as file-scoped tracks.
+  const variants = [...variantsByTitle.values()].flat()
+    .filter((variant) => String(variant.item_type ?? "") === "movie");
+  if (!variants.length) return;
+  try {
+    const sourceIds = [...new Set(variants.map((v) => String(v.source_id ?? "")).filter(Boolean))];
+    const sourceContext = await sourceCatalogContextFor(userId);
+    const keysBySource = new Map<string, string[]>();
+    for (const sourceId of sourceIds) {
+      const keys = sourceContext.exactKeysBySource.get(sourceId);
+      if (keys?.length) keysBySource.set(sourceId, keys);
+    }
+    const cacheKeys = [...new Set([...keysBySource.values()].flat())];
+    const externalIds = [...new Set(variants.map((v) => String(v.external_id ?? "")).filter(Boolean))];
+    if (!cacheKeys.length || !externalIds.length) return;
+
+    const rowsByKey = new Map<string, JsonRecord>();
+    for (let index = 0; index < externalIds.length; index += 150) {
+      const { data } = await db.from("catalog_file_tracks")
+        .select("server_host,item_type,external_id,audio_tracks,subtitle_tracks,audio_probed_at,subtitle_probed_at")
+        .in("server_host", cacheKeys)
+        .in("external_id", externalIds.slice(index, index + 150));
+      for (const row of (data ?? []) as JsonRecord[]) {
+        rowsByKey.set(`${row.server_host}:${row.item_type}:${row.external_id}`, row);
+      }
+    }
+
+    for (const variant of variants) {
+      const sourceKeys = keysBySource.get(String(variant.source_id ?? "")) ?? [];
+      const itemType = String(variant.item_type ?? "");
+      const externalId = String(variant.external_id ?? "");
+      const row = sourceKeys
+        .map((key) => rowsByKey.get(`${key}:${itemType}:${externalId}`))
+        .find(Boolean);
+      if (!row) continue;
+      if (row.audio_probed_at) {
+        variant.__file_audio_tracks = Array.isArray(row.audio_tracks) ? row.audio_tracks : [];
+        variant.__file_audio_probed_at = row.audio_probed_at;
+      }
+      if (row.subtitle_probed_at) {
+        variant.__file_subtitle_tracks = Array.isArray(row.subtitle_tracks) ? row.subtitle_tracks : [];
+        variant.__file_subtitle_probed_at = row.subtitle_probed_at;
+      }
+    }
+  } catch (_) {
+    // Track labels are enrichment only; a cache miss/outage must never hide the
+    // catalogue or make a playable version disappear.
+  }
+}
+
+async function listVariantsByTitleIds(
+  titleIds: string[],
+  userId?: string,
+  exposedLimit = HOME_RAIL_VARIANT_LIMIT,
+  requiredAudioIso: string | null = null,
+) {
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
   const health = userId ? await sourceHealthFor(userId) : { disabled: new Set<string>(), errored: new Set<string>() };
   for (let index = 0; index < titleIds.length; index += 200) {
     const chunk = titleIds.slice(index, index + 200);
-    const { data, error } = await db
+    let query = db
       .from("cloud_title_variants")
-      .select("*")
+      .select("id,user_id,title_id,source_id,media_item_id,item_type,external_id,raw_title,label,language,quality,resolution,container_extension,poster_url,playback_hint,codec_profile,compatibility_tier,playback_cost_score,last_observed_ttff_ms,metadata,created_at")
       .in("title_id", chunk)
       .order("playback_cost_score", { ascending: true })
       .order("last_observed_ttff_ms", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
+    if (userId) query = query.eq("user_id", userId);
+    const { data, error } = await query;
     if (error) {
       if (isMissingMaterialization(error)) return variantsByTitle;
       throwDb(error, "Unable to list title variants");
@@ -1969,7 +2250,19 @@ async function listVariantsByTitleIds(titleIds: string[], userId?: string) {
       sorted.sort((a, b) =>
         Number(health.errored.has(String(a.source_id))) - Number(health.errored.has(String(b.source_id))));
     }
-    variantsByTitle.set(key, sorted.slice(0, HOME_RAIL_VARIANT_LIMIT));
+    variantsByTitle.set(key, requiredAudioIso ? sorted : sorted.slice(0, exposedLimit));
+  }
+  if (userId) await attachExactFileTracks(variantsByTitle, userId);
+  if (requiredAudioIso) {
+    for (const [key, variants] of variantsByTitle) {
+      variants.sort((left, right) => {
+        const matches = (variant: JsonRecord) => Array.isArray(variant.__file_audio_tracks) &&
+          (variant.__file_audio_tracks as JsonRecord[]).some((track) =>
+            String(track?.lang ?? track?.language ?? "").toLowerCase() === requiredAudioIso);
+        return Number(matches(right)) - Number(matches(left));
+      });
+      variantsByTitle.set(key, variants.slice(0, exposedLimit));
+    }
   }
   return variantsByTitle;
 }
@@ -2201,8 +2494,10 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     audioLanguages: titleAudioLanguages(title),
     // Ordered per-track map so the player labels each engine audio stream by absolute
     // index — real language names with NO playback-time probe.
-    audio_tracks: titleAudioTracks(title),
-    audioTracks: titleAudioTracks(title),
+    audio_tracks: numberOr(title.variant_count, variants.length) <= 1 ? titleAudioTracks(title) : [],
+    audioTracks: numberOr(title.variant_count, variants.length) <= 1 ? titleAudioTracks(title) : [],
+    audio_tracks_scope: numberOr(title.variant_count, variants.length) <= 1 ? "file" : "title",
+    audioTracksScope: numberOr(title.variant_count, variants.length) <= 1 ? "file" : "title",
     version_languages: titleVersionLanguages(title),
     versionLanguages: titleVersionLanguages(title),
     metadata,
@@ -2306,6 +2601,12 @@ function numberOrNull(value: unknown) {
 }
 
 function titleVariantItem(variant: JsonRecord) {
+  const audioTracks = Array.isArray(variant.__file_audio_tracks)
+    ? variant.__file_audio_tracks
+    : undefined;
+  const subtitleTracks = Array.isArray(variant.__file_subtitle_tracks)
+    ? variant.__file_subtitle_tracks
+    : undefined;
   return {
     id: variant.id,
     source_id: variant.source_id,
@@ -2331,6 +2632,18 @@ function titleVariantItem(variant: JsonRecord) {
     playbackHint: recordOrEmpty(variant.playback_hint),
     codec_profile: recordOrEmpty(variant.codec_profile),
     codecProfile: recordOrEmpty(variant.codec_profile),
+    audio_tracks: audioTracks,
+    audioTracks,
+    audio_tracks_scope: audioTracks !== undefined ? "file" : undefined,
+    audioTracksScope: audioTracks !== undefined ? "file" : undefined,
+    audio_probed_at: variant.__file_audio_probed_at,
+    audioProbedAt: variant.__file_audio_probed_at,
+    subtitle_tracks: subtitleTracks,
+    subtitleTracks,
+    subtitle_tracks_scope: subtitleTracks !== undefined ? "file" : undefined,
+    subtitleTracksScope: subtitleTracks !== undefined ? "file" : undefined,
+    subtitle_probed_at: variant.__file_subtitle_probed_at,
+    subtitleProbedAt: variant.__file_subtitle_probed_at,
     compatibility_tier: variant.compatibility_tier,
     compatibilityTier: variant.compatibility_tier,
     playback_cost_score: variant.playback_cost_score,

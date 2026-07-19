@@ -148,6 +148,10 @@ class WatchPage {
         this._pendingSubtitlePreferenceApplied = false;
         this._videoEncodeFallbackTried = false;
         this._playbackAttemptId = 0;
+        this._failoverAttemptId = null;
+        this._engineRuntimeRecoveryAttemptId = null;
+        this._engineMidRetries = 0;
+        this._engineRetryFromPos = 0;
         this._playbackStatusOkReported = false;
         this._seekDebounceTimer = null;
         this._pendingSeekTarget = null;
@@ -454,13 +458,28 @@ class WatchPage {
         });
 
         if (Array.isArray(content.versions)) {
-            copy.versions = content.versions.map(version => ({
-                sourceId: version.sourceId,
-                streamId: version.streamId,
-                container: version.container,
-                type: version.type,
-                label: version.label
-            })).filter(version => version.sourceId && version.streamId);
+            copy.versions = content.versions.map(version => {
+                const audioTracks = this.cloneForResumeStorage(version.audioTracks || version.audio_tracks);
+                const subtitleTracks = this.cloneForResumeStorage(version.subtitleTracks || version.subtitle_tracks);
+                const audioLanguages = this.cloneForResumeStorage(version.audioLanguages || version.audio_languages);
+                return {
+                    sourceId: version.sourceId || version.source_id,
+                    cloudSourceId: version.cloudSourceId || version.cloud_source_id || null,
+                    streamId: version.streamId || version.stream_id,
+                    container: version.container || version.containerExtension || version.container_extension,
+                    type: version.type,
+                    label: version.label,
+                    audioTracks: Array.isArray(audioTracks) ? audioTracks : null,
+                    audioTracksScope: Array.isArray(audioTracks)
+                        ? (version.audioTracksScope || version.audio_tracks_scope || 'file')
+                        : null,
+                    audioLanguages: Array.isArray(audioLanguages) ? audioLanguages : null,
+                    subtitleTracks: Array.isArray(subtitleTracks) ? subtitleTracks : null,
+                    subtitleTracksScope: Array.isArray(subtitleTracks)
+                        ? (version.subtitleTracksScope || version.subtitle_tracks_scope || 'file')
+                        : null,
+                };
+            }).filter(version => version.sourceId && version.streamId);
         }
         if (Number.isFinite(Number(content.versionIndex))) {
             copy.versionIndex = Number(content.versionIndex);
@@ -530,6 +549,56 @@ class WatchPage {
         this.content.playbackPreferences = normalized;
         this.setPendingPlaybackPreferences(normalized);
         return normalized;
+    }
+
+    getLanguageSafeFailoverPreferences(preferences = this.getMergedPlaybackPreferences()) {
+        const normalized = this.normalizePlaybackPreferences(preferences) || {};
+        const result = {};
+        const language = this.normalizeTrackLanguage(
+            normalized.audio?.language || normalized.audio?.lang
+        );
+
+        // Audio stream indexes are absolute to one container. Carrying an index to
+        // a sibling version can select a completely different language.
+        if (language && language !== 'und') {
+            result.audio = { source: 'probe', language };
+        }
+        if (normalized.subtitle?.source === 'off' || normalized.subtitle?.mode === 'off') {
+            result.subtitle = { source: 'off', mode: 'off' };
+        } else if (normalized.subtitle) {
+            // Subtitle stream indices are file-local too. Preserve only the
+            // language and user timing offset across sibling versions.
+            const subtitleLanguage = this.normalizeTrackLanguage(
+                normalized.subtitle.language || normalized.subtitle.lang
+            );
+            if (subtitleLanguage && subtitleLanguage !== 'und') {
+                result.subtitle = {
+                    source: 'probe',
+                    language: subtitleLanguage,
+                    offsetSeconds: this.normalizeSubtitleOffset(
+                        normalized.subtitle.offsetSeconds ?? normalized.subtitle.offset_seconds ?? 0
+                    )
+                };
+            }
+        }
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    getLanguageSafeFailoverAudioOptions(tracks, preferences) {
+        const audioPreference = this.normalizePlaybackPreferences(preferences)?.audio;
+        if (!audioPreference || !Array.isArray(tracks) || !tracks.length) return {};
+        const track = this.findTrackByPreference(tracks, audioPreference, null, 'audio');
+        const streamIndex = Number(track?.index);
+        if (!Number.isInteger(streamIndex) || streamIndex < 0) return {};
+
+        // A Gateway session fixes its audio map when FFmpeg starts. Restore-by-language
+        // in loadVideo() is therefore too late: resolve the same language to this
+        // sibling file's absolute stream index before requesting the session.
+        return {
+            audioStreamIndex: streamIndex,
+            ...(track?.codec ? { audioCodec: track.codec } : {}),
+            ...(Number.isFinite(Number(track?.channels)) ? { audioChannels: Number(track.channels) } : {}),
+        };
     }
 
     getCurrentAudioPreference() {
@@ -1380,6 +1449,7 @@ class WatchPage {
         this.versions = Array.isArray(content.versions) && content.versions.length > 1 ? content.versions : null;
         this.versionIndex = content.versionIndex || 0;
         this._failoverInProgress = false;
+        this._failoverAttemptId = null;
         this._playbackStatusOkReported = false;
         this._lastFailureMsg = null;
         this._cloudRelayFallbackTried = false;
@@ -2976,8 +3046,8 @@ class WatchPage {
     // Plays mkv/HEVC/AC-3/DTS/… entirely client-side: reads the raw file by
     // byte-range, remuxes the container and transcodes non-browser audio to AAC,
     // feeding a MediaSource. No transcode server, no Railway. User policy is
-    // "engine only": on failure we surface a clear message + telemetry rather
-    // than falling back to the gateway.
+    // Runtime failures are recovered at the exact playback position; the gateway
+    // remains a bounded last resort for genuinely unsupported media.
     async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null } = {}) {
         this.destroyEngine();
         // An hls instance left over from a prior transcode attempt stays ATTACHED to this same
@@ -3017,10 +3087,27 @@ class WatchPage {
                     if (engineTrace) console.log('[NorvaEngine] seek', timings);
                     // Dedicated seek telemetry (backend accepts the 'seek' event type).
                     try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
-                }
+                },
+                onFatal: (error) => {
+                    // Ignore a late callback from an engine that has already been replaced.
+                    if (this.norvaEngine !== engine) return;
+                    this.handleEngineRuntimeFailure(error, playbackAttemptId, {
+                        stage: 'mux-write-discontinuity',
+                        alreadyReported: true,
+                    }).catch((recoveryError) => {
+                        console.warn('[WatchPage] engine recovery failed:', recoveryError?.message || recoveryError);
+                    });
+                },
             });
             try {
                 await engine.load(url, { startTime, audioStreamIndex });
+                // onFatal can fire while load() is still unwinding. Its recovery may
+                // already have destroyed/replaced this engine; never let the obsolete
+                // load continuation touch the replacement player.
+                if (this.norvaEngine !== engine) {
+                    try { engine.destroy(); } catch (_) {}
+                    return;
+                }
                 if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                 try { this.syncEngineAudioTracks(); } catch (_) {}
                 // In-band subtitles: start capturing text-subtitle packets from the very start
@@ -3035,6 +3122,13 @@ class WatchPage {
                 this.setVolumeFromStorage();
                 return;
             } catch (e) {
+                // A fatal mux callback may have started the shared runtime recovery
+                // before load() rejected. The old catch must not launch a competing
+                // gateway/version fallback or tear down the newly-created engine.
+                if (this.norvaEngine !== engine) {
+                    try { engine.destroy(); } catch (_) {}
+                    return;
+                }
                 if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                 const msg = String(e && (e.message || e));
                 if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES) {
@@ -3042,12 +3136,13 @@ class WatchPage {
                     // Give the relay's upstream socket a moment to actually drop —
                     // the client-side abort alone leaves it lingering briefly.
                     await this.waitForProviderSlotRelease(800);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     const waitMs = 4000 + attempt * 4000; // 4s, 8s, 12s — the slot frees ~8s after the prior drop
                     console.warn(`[NorvaEngine] slot busy (458), retry ${attempt + 1}/${SLOT_BUSY_RETRIES} in ${waitMs}ms`);
                     try { this.showLoading(); } catch (_) {}
                     try { this.updateTranscodeStatus('direct', `Stream busy, reconnecting… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
                     await new Promise((r) => setTimeout(r, waitMs));
-                    if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     continue;
                 }
                 // A SOURCEOPEN_TIMEOUT means the browser deferred opening the MediaSource (a known
@@ -3060,7 +3155,7 @@ class WatchPage {
                     console.warn(`[NorvaEngine] SOURCEOPEN_TIMEOUT, retry ${attempt + 1}/${ENGINE_SETUP_RETRIES}`);
                     try { this.showLoading(); } catch (_) {}
                     await new Promise((r) => setTimeout(r, 400));
-                    if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     continue;
                 }
                 // Slot still busy after every in-line retry: the provider's connection
@@ -3107,7 +3202,7 @@ class WatchPage {
                 // transcode would just refetch the same error.
                 const providerErrorHead = !!(sourceHead && sourceHead.notMedia);
                 const realMediaDemuxFail = !providerErrorHead;
-                if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId)) return;
+                if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId, startTime)) return;
                 // This version can't play — the engine failed AND the transcode fallback
                 // couldn't start (dead/unreachable provider stream, e.g. RANGE_UNSUPPORTED +
                 // FFmpeg I/O error), or the source is a provider error page. Route through
@@ -3124,38 +3219,185 @@ class WatchPage {
     // Engine could not demux this container (e.g. MPEG-TS, which this libav build lacks). Re-resolve
     // the title forcing the gateway transcode path (server-side ffmpeg → browser-safe HLS) and play
     // that. Only ever runs after an engine load already failed, so it can't regress a working title.
-    async fallbackEngineToTranscode(playbackAttemptId) {
+    async fallbackEngineToTranscode(playbackAttemptId, startOffsetOverride = null) {
         const c = this.content || {};
         if (!c.sourceId || !c.id) return false;
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        const contentAtStart = c;
+        const itemIdAtStart = String(c.id);
+        const sourceIdAtStart = String(c.sourceId);
+        const fallbackBecameStale = () => this.isStalePlaybackAttempt(playbackAttemptId)
+            || this.content !== contentAtStart
+            || String(this.content?.id || '') !== itemIdAtStart
+            || String(this.content?.sourceId || '') !== sourceIdAtStart;
         const type = c.type === 'series' ? 'series' : 'movie';
-        const startOffset = Math.max(0, Number(this.resumeTime) || 0);
-        console.warn('[WatchPage] engine cannot demux this container — falling back to gateway transcode');
+        const hasExplicitOffset = startOffsetOverride !== null && startOffsetOverride !== undefined;
+        const explicitOffset = Number(startOffsetOverride);
+        const snapshotOffset = Number(this.getResumeSnapshotPosition?.());
+        const startOffset = Math.max(0, Math.floor(
+            hasExplicitOffset && Number.isFinite(explicitOffset)
+                ? explicitOffset
+                : (Number.isFinite(snapshotOffset) ? snapshotOffset : (Number(this.resumeTime) || 0))
+        ));
+        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+        const audioOptions = this.getSelectedAudioPlaybackOptions();
+        this.resumeTime = startOffset;
+        console.warn(`[WatchPage] engine fallback to gateway transcode from ${startOffset}s`);
         try { this.showLoading(); } catch (_) {}
         try { this.updateTranscodeStatus('transcoding', 'Conversion serveur…'); } catch (_) {}
         let result;
         try {
+            await this.waitForProviderSlotRelease(900);
+            if (fallbackBecameStale()) return true;
+            if (this.currentPlaybackMode !== 'engine') return false;
             // Force a FULL re-encode (not remux): the engine already proved this is non-browser-safe
             // real media (TS, possibly mislabeled mp4), and a TS stream-copy remux into HLS is the
             // exact thing that just failed. gatewayMode:'transcode' skips the doomed remux attempt.
             result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
                 mode: 'transcode', gatewayMode: 'transcode', audioMode: 'transcode',
+                ...audioOptions,
                 seekOffset: startOffset, startOffset, resumeTime: startOffset
             });
         } catch (err) {
             console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);
             return false;
         }
-        if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
-        if (!result?.url) return false;
+        const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+        if (fallbackBecameStale()
+            || this.currentPlaybackMode !== 'engine') {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            return true;
+        }
+        if (!result?.url) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            return false;
+        }
         result.seekOffset = startOffset;
         result.startOffset = startOffset;
+        c.cloudPlaybackSessionId = resultSessionId || null;
         try {
-            await this.play(c, result.url, result);
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                playbackAttemptId,
+                seekOffset: startOffset,
+                startOffset,
+                resumeTarget: startOffset,
+                cloudPlaybackSessionId: resultSessionId || null,
+                playbackPreferences,
+            }));
+            if (fallbackBecameStale()) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            }
             return true;
         } catch (err) {
+            if (fallbackBecameStale()) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return true;
+            }
             console.warn('[WatchPage] transcode fallback play failed:', err?.message || err);
             return false;
+        }
+    }
+
+    async handleEngineRuntimeFailure(error, playbackAttemptId, options = {}) {
+        if (!Number.isFinite(playbackAttemptId)) playbackAttemptId = this._playbackAttemptId;
+        if (this._engineRuntimeRecoveryAttemptId === playbackAttemptId) return true;
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        this._engineRuntimeRecoveryAttemptId = playbackAttemptId;
+
+        try {
+            let snapshot = null;
+            try { snapshot = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
+            const wasTs = Boolean(snapshot?.looksLikeMpegTs);
+            const providerErrorHead = Boolean(snapshot?.sourceHead && snapshot.sourceHead.notMedia);
+            // The monotone resume snapshot intentionally remembers the furthest point
+            // seen, but that is wrong after a user seeks backwards. Prefer the visible
+            // playhead while it is available, and only use the snapshot if media reset
+            // to zero before the fatal callback ran.
+            const rememberedPosition = Number(this._lastKnownPlaybackPosition);
+            const visiblePosition = Number(this.getPlaybackPosition?.());
+            const snapshotPosition = Number(this.getResumeSnapshotPosition?.());
+            const resumeAt = Math.max(0, Math.floor(
+                Number.isFinite(visiblePosition) && visiblePosition > 0
+                    ? visiblePosition
+                    : (Number.isFinite(rememberedPosition) && rememberedPosition > 2
+                        ? rememberedPosition
+                        : (Number.isFinite(snapshotPosition) ? snapshotPosition : 0))
+            ));
+            const engineUrl = this.baseStreamUrl || this.currentUrl;
+            const selectedAudioIndex = Number.isInteger(this.selectedAudioStreamIndex)
+                ? this.selectedAudioStreamIndex
+                : (Number.isInteger(this.directAudioStreamIndex) ? this.directAudioStreamIndex : null);
+            const reason = String(error?.message || error || 'ENGINE_RUNTIME_FAILURE');
+
+            if (!options.alreadyReported) {
+                this.reportEngineFailure({
+                    stage: options.stage || 'runtime',
+                    message: options.mediaErrorCode
+                        ? `code=${options.mediaErrorCode} ${reason}`
+                        : reason,
+                });
+            }
+
+            this.trackPlaybackPosition({ position: resumeAt, force: true });
+            this.resumeTime = resumeAt;
+            try { this.saveResumeSnapshotThrottled(true); } catch (_) {}
+            this.destroyEngine();
+
+            // A provider error page is not a remux/decode failure. Reopening it through
+            // another lane would only consume another provider connection.
+            if (providerErrorHead) {
+                this.handleEngineUnplayable(error);
+                return false;
+            }
+
+            // One clean reopen fixes a broken post-seek mux sequence for MKV/MP4. TS
+            // sources retain one additional retry because timestamp discontinuities are
+            // common there. The budget only re-arms after 120 healthy seconds.
+            const maxEngineRetries = wasTs ? 2 : 1;
+            this._engineMidRetries = this._engineMidRetries || 0;
+            if (engineUrl
+                && this._engineMidRetries < maxEngineRetries
+                && !this.isStalePlaybackAttempt(playbackAttemptId)) {
+                this._engineMidRetries++;
+                this._engineRetryFromPos = resumeAt;
+                console.warn(
+                    `[WatchPage] engine runtime failure — retry ${this._engineMidRetries}/${maxEngineRetries} from ${resumeAt}s`
+                );
+                try { this.showLoading(); } catch (_) {}
+                await this.waitForProviderSlotRelease(800);
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.currentPlaybackMode !== 'engine') {
+                    return false;
+                }
+                await this.playWithEngine(engineUrl, {
+                    startTime: resumeAt,
+                    playbackAttemptId,
+                    audioStreamIndex: selectedAudioIndex,
+                });
+                return true;
+            }
+
+            const hasNextVersion = Boolean(
+                this.versions && this.versionIndex < this.versions.length - 1
+            );
+            // Server-side linear transcoding cannot efficiently materialise a playlist
+            // 30+ minutes into a non-seekable provider file. Prefer another equivalent
+            // version at the exact point before attempting that slow lane.
+            let versionAttempted = false;
+            if (resumeAt >= 300 && hasNextVersion) {
+                versionAttempted = true;
+                if (await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
+            }
+
+            if (await this.fallbackEngineToTranscode(playbackAttemptId, resumeAt)) return true;
+            if (!versionAttempted && hasNextVersion && await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
+            this.handleEngineUnplayable(error);
+            return false;
+        } finally {
+            if (this._engineRuntimeRecoveryAttemptId === playbackAttemptId) {
+                this._engineRuntimeRecoveryAttemptId = null;
+            }
         }
     }
 
@@ -3249,6 +3491,11 @@ class WatchPage {
         const relay = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
             .filter((t) => Number.isInteger(t.index));
         const named = relay.filter((t) => t.lang && t.lang !== 'und');
+        const savedLanguage = this.normalizeTrackLanguage(saved?.language || saved?.lang);
+        if (saved && !this._pendingAudioPreferenceApplied && savedLanguage && savedLanguage !== 'und') {
+            const matchingTrack = named.find((track) => track.lang === savedLanguage);
+            if (Number.isInteger(matchingTrack?.index)) return matchingTrack.index;
+        }
         if (named.length < 2) return null;
         const naturalDefault = relay.slice().sort((a, b) => a.index - b.index)[0];
         if (naturalDefault && naturalDefault.lang && naturalDefault.lang !== 'und') return null;
@@ -3367,6 +3614,8 @@ class WatchPage {
                         pumpExitReason: snap.pumpExitReason, lastReadError: snap.lastReadError,
                         exitFetchMB: snap.exitFetchMB, looksLikeMpegTs: snap.looksLikeMpegTs,
                         seekWrites: snap.seekWrites, firstSeek: snap.firstSeek,
+                        writeDiscontinuities: snap.writeDiscontinuities,
+                        firstWriteDiscontinuity: snap.firstWriteDiscontinuity,
                         video: snap.video, sb: snap.sb, ms: snap.ms, timings: snap.timings,
                     } : null
                 }
@@ -4761,12 +5010,11 @@ class WatchPage {
     updateProgress() {
         if (!this.video) return;
 
-        // Sustained engine playback past the last mid-stream retry point → refresh the retry
-        // budget, so a long film that blips occasionally keeps using the fast engine path
-        // instead of exhausting 2 lifetime retries and dropping to the gateway forever.
+        // Only re-arm after two minutes of healthy playback. A corrupt remux used to fail
+        // every ~50 seconds, so the old 15-second window created an infinite retry loop.
         if (this._engineMidRetries > 0 && this.currentPlaybackMode === 'engine') {
             const pos = Number(this.getPlaybackPosition());
-            if (Number.isFinite(pos) && pos > (this._engineRetryFromPos || 0) + 15) {
+            if (Number.isFinite(pos) && pos > (this._engineRetryFromPos || 0) + 120) {
                 this._engineMidRetries = 0;
             }
         }
@@ -4924,61 +5172,21 @@ class WatchPage {
         const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
         if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
 
-        // Engine mode is "engine only": a MediaError means the in-browser engine
-        // can't play this title. Report it (telemetry) and show the native-app
-        // message — do NOT run the gateway/version retry chain (no Railway).
+        // The browser can surface the same remux failure either through MediaError
+        // or the engine's explicit continuity guard. Both paths share one bounded
+        // recovery ladder, deduplicated by the exact playback-attempt id.
         if (this.currentPlaybackMode === 'engine') {
             const err = this.video?.error;
             // Benign: fired while the previous src is cleared during stop()/setup,
             // before the engine has attached its MediaSource. Not a real failure.
             if (!err || !err.code || /Empty src/i.test(err.message || '')) return;
-            this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
-            // The engine loaded cleanly but the browser can't DECODE/parse the codec (MPEG-2 in TS,
-            // or HEVC / 10-bit / E-AC3 in MKV/MP4 — CHUNK_DEMUXER_ERROR_APPEND_FAILED, code 4). The
-            // gateway transcode is the known-good path for these, so fall back to it instead of a
-            // dead-end banner + retry-in-place loop (worst case = today).
-            let wasTs = false;
-            let providerErrorHead = false;
-            try {
-                const snap = this.norvaEngine?.engineSnapshot?.();
-                wasTs = Boolean(snap?.looksLikeMpegTs);
-                // A non-media head = provider error page (HTML/JSON), NOT a codec failure: transcoding
-                // would just refetch the same error, so don't. Anything else is real media the browser
-                // choked on. Missing head info defaults to false → prefer transcode over a dead loop.
-                providerErrorHead = Boolean(snap?.sourceHead && snap.sourceHead.notMedia);
-            } catch (_) {}
-            // Capture where playback stopped BEFORE teardown, so a retry resumes there.
-            const resumeAt = Math.max(0, Math.floor(Number(this.video?.currentTime) || Number(this.resumeTime) || 0));
-            const engineUrl = this.baseStreamUrl || this.currentUrl;
-            this.destroyEngine();
-            // A mid-stream engine error on a TS is usually a transient source/session hiccup (the
-            // single-slot /raw connection dropping, a timestamp discontinuity) — a fresh engine
-            // attempt resuming from where it stopped clears it, which is why the user's manual
-            // retries succeed. Do it automatically a couple of times (counter resets on the next
-            // first_frame) BEFORE the gateway fallback, so a blip doesn't bounce them to the slow path.
-            this._engineMidRetries = this._engineMidRetries || 0;
-            if (wasTs && engineUrl && this._engineMidRetries < 2 && !this.isStalePlaybackAttempt(videoAttemptId)) {
-                this._engineMidRetries++;
-                this._engineRetryFromPos = resumeAt; // updateProgress() refreshes the budget once playback passes this + 15s
-                console.warn(`[WatchPage] engine mid-stream error (code=${err.code}) — retry ${this._engineMidRetries}/2 from ${resumeAt}s`);
-                try { this.showLoading(); } catch (_) {}
-                this.playWithEngine(engineUrl, { startTime: resumeAt, playbackAttemptId: videoAttemptId })
-                    .catch(() => { /* playWithEngine owns its own fallback chain */ });
-                return;
-            }
-            // Real media the browser can't decode/parse — MPEG-2 in TS, OR HEVC / 10-bit / E-AC3 in
-            // MKV/MP4. Previously only TS fell back here, so a non-TS codec failure looped on
-            // retry-in-place forever; fall back to the gateway transcode for ANY real-media codec
-            // failure. fallbackEngineToTranscode re-resolves in transcode mode (currentPlaybackMode
-            // leaves 'engine'), so a subsequent failure can't re-enter this branch — no loop.
-            // A provider error page (notMedia head) is skipped: refetching would hit the same error.
-            if (!providerErrorHead) {
-                this.fallbackEngineToTranscode(videoAttemptId)
-                    .then((ok) => { if (!ok) this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)); })
-                    .catch(() => this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)));
-                return;
-            }
-            this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code));
+            this.handleEngineRuntimeFailure(
+                new Error(`MEDIA_ERR_${err.code}:${err.message || ''}`),
+                videoAttemptId,
+                { stage: 'mediaerror', mediaErrorCode: err.code }
+            ).catch((recoveryError) => {
+                this.handleEngineUnplayable(recoveryError);
+            });
             return;
         }
 
@@ -5057,6 +5265,7 @@ class WatchPage {
      * otherwise stop the spinner and show a clear error message.
      */
     async handlePlaybackFailure(message) {
+        const playbackAttemptId = this._playbackAttemptId;
         if (this._handlingPlaybackFailure) {
             console.warn('[WatchPage] Ignoring duplicate playback failure while retry is already running:', message);
             return;
@@ -5088,7 +5297,8 @@ class WatchPage {
                 await this.reportPlaybackStatus('broken', message);
             }
             await this.releasePlaybackPipelineForRetry();
-            const attempted = await this.tryNextVersion();
+            const attempted = await this.tryNextVersion(null, playbackAttemptId);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             if (!attempted) {
                 this.showPlaybackError(message);
             }
@@ -5633,46 +5843,123 @@ class WatchPage {
      * Failover: when a stream fails to play and the content was opened from
      * a duplicate group, automatically switch to the next available version.
      */
-    async tryNextVersion() {
+    async tryNextVersion(positionOverride = null, playbackAttemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
         // No version left: report failure even if a (failed) switch just happened
         if (!this.versions || this.versionIndex >= this.versions.length - 1) return false;
         if (this._failoverInProgress) return false;
 
         this._failoverInProgress = true;
-        this.versionIndex++;
-        const next = this.versions[this.versionIndex];
-        console.warn(`[WatchPage] Playback failed, switching to version ${this.versionIndex + 1}/${this.versions.length}: ${next.label}`);
+        this._failoverAttemptId = playbackAttemptId;
+        const contentAtStart = this.content;
+        const nextIndex = this.versionIndex + 1;
+        const next = this.versions[nextIndex];
+        const nextStreamId = next.streamId ?? next.stream_id;
+        const nextSourceId = next.sourceId ?? next.source_id;
+        const nextCloudSourceId = next.cloudSourceId ?? next.cloud_source_id ?? null;
+        const nextContainer = next.container || next.containerExtension || next.container_extension || 'mp4';
+        const nextAudioTracks = Array.isArray(next.audioTracks)
+            ? next.audioTracks
+            : (Array.isArray(next.audio_tracks) ? next.audio_tracks : null);
+        const nextAudioLanguages = Array.isArray(next.audioLanguages)
+            ? next.audioLanguages
+            : (Array.isArray(next.audio_languages) ? next.audio_languages : []);
+        const nextSubtitleTracks = Array.isArray(next.subtitleTracks)
+            ? next.subtitleTracks
+            : (Array.isArray(next.subtitle_tracks) ? next.subtitle_tracks : null);
+        const playbackPreferences = this.getLanguageSafeFailoverPreferences();
+        const nextAudioOptions = this.getLanguageSafeFailoverAudioOptions(
+            nextAudioTracks,
+            playbackPreferences
+        );
+        console.warn(`[WatchPage] Playback failed, switching to version ${nextIndex + 1}/${this.versions.length}: ${next.label}`);
         let handedOff = false;
 
         try {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) return false;
             // Resume close to where the previous version failed
-            const position = Math.max(0, Math.floor(this.getPlaybackPosition()) - 5);
-            const result = await API.proxy.xtream.getStreamUrl(next.sourceId, next.streamId, next.type || 'movie', next.container || 'mp4', {
+            const position = positionOverride !== null
+                ? Math.max(0, Math.floor(Number(positionOverride) || 0))
+                : Math.max(0, Math.floor(this.getPlaybackPosition()) - 5);
+            const result = await API.proxy.xtream.getStreamUrl(nextSourceId, nextStreamId, next.type || 'movie', nextContainer, {
+                ...nextAudioOptions,
                 seekOffset: position,
                 startOffset: position,
                 resumeTime: position
             });
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return true;
+            }
             if (result?.url) {
+                const resultAudioTracks = Array.isArray(result.audioTracks)
+                    ? result.audioTracks
+                    : (Array.isArray(result.audio_tracks) ? result.audio_tracks : null);
+                const resultAudioLanguages = Array.isArray(result.audioLanguages)
+                    ? result.audioLanguages
+                    : (Array.isArray(result.audio_languages) ? result.audio_languages : null);
+                const resultSubtitleTracks = Array.isArray(result.subtitleTracks)
+                    ? result.subtitleTracks
+                    : (Array.isArray(result.subtitle_tracks) ? result.subtitle_tracks : null);
+                const exactAudioTracks = resultAudioTracks !== null ? resultAudioTracks : nextAudioTracks;
+                const exactAudioLanguages = resultAudioLanguages !== null ? resultAudioLanguages : nextAudioLanguages;
+                const exactSubtitleTracks = resultSubtitleTracks !== null ? resultSubtitleTracks : nextSubtitleTracks;
+
+                this.versionIndex = nextIndex;
                 this.updateTranscodeStatus('transcoding', `Switched: ${next.label}`);
                 if (this.subtitleEl) {
                     this.subtitleEl.textContent = next.label || '';
                 }
                 this.resumeTime = position;
-                this.content.id = next.streamId;
-                this.content.sourceId = next.sourceId;
-                this.content.cloudPlaybackSessionId = result.sessionId || null;
-                this.containerExtension = next.container || 'mp4';
-                this._failoverInProgress = false;
+                this.content.id = nextStreamId;
+                this.content.itemId = nextStreamId;
+                this.content.item_id = nextStreamId;
+                this.content.streamId = nextStreamId;
+                this.content.stream_id = nextStreamId;
+                this.content.externalId = nextStreamId;
+                this.content.external_id = nextStreamId;
+                this.content.sourceId = nextSourceId;
+                this.content.source_id = nextSourceId;
+                this.content.cloudSourceId = nextCloudSourceId;
+                this.content.cloud_source_id = nextCloudSourceId;
+                this.content.containerExtension = nextContainer;
+                this.content.container_extension = nextContainer;
+                this.content.versionIndex = nextIndex;
+                this.content.version_index = nextIndex;
+                this.replaceExactContentAudioMetadata(exactAudioTracks, exactAudioLanguages);
+                this.content.subtitleTracks = exactSubtitleTracks;
+                this.content.subtitle_tracks = exactSubtitleTracks;
+                this.content.subtitleTracksScope = exactSubtitleTracks !== null ? 'file' : null;
+                this.content.subtitle_tracks_scope = exactSubtitleTracks !== null ? 'file' : null;
+                this.content.cloudPlaybackSessionId = resultSessionId || null;
+                this.content.playbackPreferences = playbackPreferences;
+                this.content.playback_preferences = playbackPreferences;
+                this.setPendingPlaybackPreferences(playbackPreferences);
+                this.selectedAudioStreamIndex = null;
+                this.directAudioStreamIndex = null;
+                this.selectedAudioTrackUserChoice = false;
+                this.containerExtension = nextContainer;
                 handedOff = true;
-                await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                const failoverMetadata = this.playbackMetadataFromResult(result, {
+                    playbackAttemptId,
                     seekOffset: position,
-                    startOffset: position
-                }));
+                    startOffset: position,
+                    cloudPlaybackSessionId: resultSessionId || null,
+                    playbackPreferences,
+                });
+                this._resumePlaybackMetadata = failoverMetadata;
+                await this.loadVideo(result.url, failoverMetadata);
+            } else {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
             }
         } catch (err) {
             console.error('[WatchPage] Failover failed:', err);
         } finally {
-            this._failoverInProgress = false;
+            if (this._failoverAttemptId === playbackAttemptId) {
+                this._failoverInProgress = false;
+                this._failoverAttemptId = null;
+            }
         }
         return handedOff;
     }
@@ -5778,21 +6065,75 @@ class WatchPage {
     // (audioTracks = [{index, lang|null}, ...] in absolute-stream order). Present → the
     // player labels every track with ZERO playback-time probe.
     getContentAudioTracks() {
+        const scope = String(this.content?.audioTracksScope || this.content?.audio_tracks_scope || '').toLowerCase();
+        const variantCount = Number(
+            this.content?.variantCount ||
+            this.content?.variant_count ||
+            this.content?.versions?.length ||
+            1
+        );
+        // On grouped titles, an unscoped map may belong to a sibling file.
+        // Only a file-scoped map (or a truly single-version title) is safe.
+        if (scope !== 'file' && variantCount > 1) return [];
         const raw = this.content?.audioTracks || this.content?.audio_tracks;
         if (!Array.isArray(raw)) return [];
         return raw
-            .map((t) => ({ index: Number(t?.index), lang: (t?.lang == null ? null : String(t.lang).toLowerCase()) }))
+            .map((t) => ({
+                index: Number(t?.index),
+                lang: this.normalizeTrackLanguage(t?.lang || t?.language) || null
+            }))
             .filter((t) => Number.isInteger(t.index));
+    }
+
+    replaceExactContentAudioMetadata(rawTracks, rawLanguages = []) {
+        if (!this.content) return null;
+        const hasExactTracks = Array.isArray(rawTracks);
+        const tracks = hasExactTracks
+            ? rawTracks.map((track) => {
+                const index = Number(track?.index);
+                const language = this.normalizeTrackLanguage(track?.lang || track?.language);
+                return {
+                    ...(track && typeof track === 'object' ? track : {}),
+                    index,
+                    lang: language && language !== 'und' ? language : null,
+                };
+            }).filter((track) => Number.isInteger(track.index))
+            : null;
+        const languages = hasExactTracks
+            ? Array.from(new Set([
+                ...(Array.isArray(rawLanguages) ? rawLanguages : []),
+                ...tracks.map((track) => track.lang),
+            ].map((language) => this.normalizeTrackLanguage(language))
+                .filter((language) => language && language !== 'und')))
+            : null;
+        const scope = hasExactTracks ? 'file' : null;
+
+        this.content.audioTracks = tracks;
+        this.content.audio_tracks = tracks;
+        this.content.audioTracksScope = scope;
+        this.content.audio_tracks_scope = scope;
+        this.content.audioLanguages = languages;
+        this.content.audio_languages = languages;
+        return tracks;
     }
 
     async enrichCloudPlaybackTracks(playbackUrl) {
         try {
+            const playbackAttemptId = this._playbackAttemptId;
+            const contentAtStart = this.content;
+            const itemIdAtStart = String(contentAtStart?.externalId || contentAtStart?.id || '');
+            const sourceIdAtStart = String(contentAtStart?.cloudSourceId || contentAtStart?.sourceId || '');
+            const isStaleEnrichment = () => this.isStalePlaybackAttempt(playbackAttemptId)
+                || this.content !== contentAtStart
+                || String(this.content?.externalId || this.content?.id || '') !== itemIdAtStart
+                || String(this.content?.cloudSourceId || this.content?.sourceId || '') !== sourceIdAtStart;
             // Robust path: a precomputed ordered map on content means real language names
             // with NO provider hit at playback (no probe to contend with the stream, no
             // latency). Reuse applyCloudMultiAudioTracks so the engine/direct wiring is
             // identical to the live-probe path — only the source of the data differs.
             const pre = this.getContentAudioTracks();
             if (pre.length) {
+                this.replaceExactContentAudioMetadata(pre);
                 this.applyCloudMultiAudioTracks({ audioTracks: pre });
                 this.updateAudioTracks();
                 return;
@@ -5813,6 +6154,7 @@ class WatchPage {
             const probeP = fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null);
             const [data, probe] = await Promise.all([infoP, probeP]);
+            if (isStaleEnrichment()) return;
             if (data) {
                 this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
                 if (data.duration && !this.probeDuration) {
@@ -5820,22 +6162,13 @@ class WatchPage {
                     this.updateDurationState();
                 }
             }
-            this.applyCloudMultiAudioTracks(probe);
-            // Seed the single-label path: applyCloudMultiAudioTracks builds a switchable list
-            // only for >=2 languages and bails for one. So for a mono-/single-language file we
-            // feed the probe's detected language(s) into content.audio_languages, which is the
-            // ground truth contentAudioLanguageLabel() reads — the menu then shows the REAL
-            // language ("Persian") instead of "Default". Untagged streams stay "und" -> dropped.
-            if (probe && Array.isArray(probe.audioLanguages) && probe.audioLanguages.length && this.content) {
-                const langs = probe.audioLanguages
-                    .map((l) => this.normalizeTrackLanguage(l))
-                    .filter((l) => l && l !== 'und');
-                if (langs.length) {
-                    const existing = Array.isArray(this.content.audio_languages) ? this.content.audio_languages : [];
-                    const merged = Array.from(new Set([...existing, ...langs]));
-                    this.content.audio_languages = merged;
-                    this.content.audioLanguages = merged;
-                }
+            const hasExactProbe = Array.isArray(probe?.audioTracks) || Array.isArray(probe?.audioLanguages);
+            if (hasExactProbe) {
+                const exactTracks = this.replaceExactContentAudioMetadata(
+                    Array.isArray(probe?.audioTracks) ? probe.audioTracks : [],
+                    Array.isArray(probe?.audioLanguages) ? probe.audioLanguages : []
+                );
+                this.applyCloudMultiAudioTracks({ ...probe, audioTracks: exactTracks || [] });
             }
             this.updateAudioTracks();
             this.reportObservedAudioLanguages();
@@ -5909,6 +6242,14 @@ class WatchPage {
     // 2-3 -> "Multi: FR/EN/JA", >3 -> "Multi". Returns null when nothing is detected,
     // so callers keep "Default"/"Audio" rather than fabricating a language.
     contentAudioLanguageLabel() {
+        const variantCount = Number(
+            this.content?.variantCount ||
+            this.content?.variant_count ||
+            this.content?.versions?.length ||
+            1
+        );
+        const scope = String(this.content?.audioTracksScope || this.content?.audio_tracks_scope || '').toLowerCase();
+        if (variantCount > 1 && scope !== 'file') return null;
         const audio = this.content?.audioLanguages || this.content?.audio_languages || null;
         const version = this.content?.versionLanguages || this.content?.version_languages || null;
         const hasAudio = Array.isArray(audio) && audio.length;
@@ -5999,38 +6340,52 @@ class WatchPage {
         return [{ source: 'none', index: -1, label: contentLabel || 'Default', active: true }];
     }
 
-    // Best-effort capture of the real audio-track languages observed at playback
-    // (default track from get_vod_info + the demuxed track list) so the catalogue
-    // learns which languages a "Multi" file actually carries. Title-scoped + deduped
-    // by the code set; never disrupts playback.
+    // Persist only a COMPLETE ordered map already returned by the trusted
+    // playback/gateway probe for this exact file. A selected language,
+    // title-level union, or browser hint is never file-level evidence.
     reportObservedAudioLanguages() {
         try {
             if (!window.API?.isCloudMode?.()) return;
             const titleId = this.content?.titleId || this.content?.title_id;
-            if (!titleId) return;
-            const codes = new Set();
-            const add = (lang) => {
-                const code = this.normalizeTrackLanguage(lang);
-                if (code && code !== 'und' && /^[a-z]{2,3}$/.test(code)) codes.add(code);
-            };
-            if (this.cloudAudioInfo) add(this.cloudAudioInfo.language);
-            for (const t of (Array.isArray(this.audioTracks) ? this.audioTracks : [])) add(t.language || t.lang);
-            const native = this.video?.audioTracks;
-            if (native && Number.isFinite(native.length)) {
-                for (let i = 0; i < native.length; i++) add(native[i]?.language);
-            }
-            for (const t of (Array.isArray(this.hls?.audioTracks) ? this.hls.audioTracks : [])) add(t.lang || t.language);
-            // Ordered per-track map from a live container probe — let the server persist the
-            // ORDER so future playbacks of this title need zero probe (self-heal). The server
-            // only stores it when the title has none yet, so re-sending is a harmless no-op.
+            const sourceId = this.content?.sourceId || this.content?.source_id || null;
+            const cloudSourceId = this.content?.cloudSourceId
+                || this.content?.cloud_source_id
+                || this.content?.data?.cloudSourceId
+                || null;
+            const itemType = this.content?.type === 'series' ? 'series' : 'movie';
+            const externalId = this.content?.externalId
+                || this.content?.external_id
+                || this.content?.itemId
+                || this.content?.item_id
+                || this.content?.streamId
+                || this.content?.stream_id
+                || this.content?.id
+                || null;
+            if (!titleId && !(cloudSourceId && externalId)) return;
             const orderedTracks = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
                 .filter((t) => Number.isInteger(t.index))
-                .map((t) => ({ index: t.index, lang: (t.lang && t.lang !== 'und') ? t.lang : null }));
-            if (!codes.size && !orderedTracks.length) return;
-            const key = `${titleId}:${[...codes].sort().join(',')}:${orderedTracks.length}`;
+                .map((t) => ({
+                    index: t.index,
+                    lang: (t.lang && t.lang !== 'und') ? this.normalizeTrackLanguage(t.lang) : null
+                }));
+            if (!orderedTracks.length) return;
+            const mapFingerprint = orderedTracks
+                .map((track) => `${track.index}:${track.lang || ''}`)
+                .join('|');
+            const key = `${titleId || ''}:${cloudSourceId || sourceId || ''}:${itemType}:${externalId || ''}:${mapFingerprint}`;
             if (this._observedLangsSent === key) return;
             this._observedLangsSent = key;
-            window.API?.media?.reportObservedLanguages?.({ titleId, audio: [...codes], audioTracks: orderedTracks }).catch(() => { });
+            window.API?.media?.reportObservedLanguages?.({
+                titleId: titleId || null,
+                sourceId,
+                cloudSourceId,
+                itemType,
+                itemId: externalId,
+                externalId,
+                parentExternalId: this.content?.parentExternalId || this.content?.parent_external_id || this.content?.seriesId || null,
+                audioTracks: orderedTracks,
+                audioTracksScope: 'file',
+            }).catch(() => { });
         } catch (_) { /* best-effort capture; never disrupt playback */ }
     }
 
@@ -6783,12 +7138,15 @@ class WatchPage {
             // untagged-by-our-parser), use the gateway's languages and re-sync the audio
             // menu — e.g. a VOSTFR file's lone Japanese track now shows "Japanese".
             const gwAudio = (Array.isArray(data.audioTracks) ? data.audioTracks : [])
-                .filter((a) => Number.isInteger(Number(a.index)) && a.language)
-                .map((a) => ({ index: Number(a.index), lang: this.normalizeTrackLanguage(a.language) }))
-                .filter((a) => a.lang && a.lang !== 'und');
+                .filter((a) => Number.isInteger(Number(a.index)))
+                .map((a) => ({
+                    index: Number(a.index),
+                    lang: this.normalizeTrackLanguage(a.language || a.lang) || null
+                }));
+            const gatewayHasLang = gwAudio.some((track) => track.lang && track.lang !== 'und');
             const relayHasLang = Array.isArray(this._relayAudioTracks)
                 && this._relayAudioTracks.some((t) => t.lang && t.lang !== 'und');
-            if (gwAudio.length && !relayHasLang) {
+            if (gatewayHasLang && !relayHasLang) {
                 this._relayAudioTracks = gwAudio;
                 try { this.syncEngineAudioTracks(); } catch (_) { /* best-effort */ }
                 // Self-heal: persist the gateway-discovered languages now so the next play

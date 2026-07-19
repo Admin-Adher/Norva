@@ -1,11 +1,7 @@
 'use strict';
 
-// Version-button label builder for the Movie/Series fiches (MediaUtils.versionDescriptor).
-// A title's "versions" are usually the SAME film re-imported across a provider's regional
-// catalogue sections and across providers. The label is two-tier — { headline, meta,
-// badge, tier } — leading with whatever DIFFERS (market by default, provider when the
-// market is constant), the constants demoted to the muted meta line. mediaUtils.js is a
-// browser IIFE; load it with a shim.
+// Version cards describe one provider FILE. Exact per-file probes are authoritative;
+// title-level/grouped maps and provider market labels must never masquerade as audio.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -18,97 +14,134 @@ const win = {};
 new Function('window', src)(win);
 const M = win.MediaUtils;
 
-const names = { s1: 'Strng IPTV 8K', s2: 'AtlasPro', s3: 'KING365' };
+const names = { s1: 'Strng IPTV 8K', s2: 'AtlasPro' };
 const resolve = (id) => names[id] || '';
-const mk = (raw, extra) => Object.assign({ raw_title: raw, container_extension: 'mkv', sourceId: 's1' }, extra || {});
-const desc = (item, siblings) => M.versionDescriptor(item, { siblings: siblings || [item], resolveSourceName: resolve });
-
-test('headline = humanised MARKET; provider·container demoted to meta', () => {
-    const d = desc(mk('GR - One Last Adventure'));
-    assert.strictEqual(d.headline, 'Greek');
-    assert.strictEqual(d.meta, 'Strng IPTV 8K · MKV');
+const mk = (raw, extra) => Object.assign({
+    raw_title: raw,
+    container_extension: 'mkv',
+    sourceId: 's1'
+}, extra || {});
+const desc = (item, siblings) => M.versionDescriptor(item, {
+    siblings: siblings || [item],
+    resolveSourceName: resolve
 });
 
-test('ISO tokens resolve via the language map incl. the "▎" bar separator', () => {
-    assert.strictEqual(desc(mk('ES ▎ X')).headline, 'Spanish');
-    assert.strictEqual(desc(mk('AR ▎ X')).headline, 'Arabic');
-    assert.strictEqual(desc(mk('FR - X')).headline, 'French');
+test('AR-SUBS means Arabic subtitles, never Arabic audio without a file probe', () => {
+    const d = desc(mk('AR-SUBS - Something'));
+    assert.strictEqual(d.headline, 'Audio unknown');
+    assert.match(d.meta, /ST AR · burned-in/);
+    assert.doesNotMatch(d.headline, /Arabic/);
 });
 
-test('non-ISO IPTV tokens get a human label (Nordic / Netflix / Multi / Latino)', () => {
-    assert.strictEqual(desc(mk('SCAN ▎ X')).headline, 'Nordic');
-    assert.strictEqual(desc(mk('NF - X')).headline, 'Netflix');
-    assert.strictEqual(desc(mk('LAT - X')).headline, 'Latino');
-    // No leading token, but the category names the platform.
-    assert.strictEqual(desc(mk('One Last Adventure - 2026', { category_name: 'Multi-Sub★ TOP NEW' })).headline, 'Multi');
-});
-
-test('subtitle-only markets carry a "· ST" nuance', () => {
-    assert.strictEqual(desc(mk('AR-SUBS - Something')).headline, 'Arabic · ST');
-});
-
-test('quality rides as a badge (4K flagged), never duplicated in the headline', () => {
-    const d = desc(mk('EN - One Last Adventure 4K (2026)'));
+test('AR-SUBS with an exact English track leads with English', () => {
+    const d = desc(mk('AR-SUBS - Something', {
+        audio_tracks_scope: 'file',
+        audio_tracks: [{ index: 1, lang: 'eng' }]
+    }));
     assert.strictEqual(d.headline, 'English');
-    assert.strictEqual(d.badge, '4K');
-    assert.ok(!/4K/i.test(d.meta), 'quality should not repeat in meta');
+    assert.match(d.meta, /ST AR · burned-in/);
+    assert.strictEqual(d.audioSource, 'file');
 });
 
-test('garbage / noise prefixes never become the headline', () => {
-    // "PREFIX" and "TOP" are not markets -> fall through to the provider lead, no market shown.
+test('a single exact French soundtrack and soft subtitles stay separate', () => {
+    const d = desc(mk('FR - X', {
+        audio_tracks_scope: 'file',
+        audio_tracks: [{ index: 1, lang: 'fre' }],
+        subtitle_tracks_scope: 'file',
+        subtitle_tracks: [{ index: 2, lang: 'fre' }, { index: 3, lang: 'fre' }]
+    }));
+    assert.strictEqual(d.headline, 'French');
+    assert.match(d.meta, /^ST FR ·/);
+});
+
+test('large multi-audio Netflix file stays compact and Netflix is metadata', () => {
+    const audioTracks = Array.from({ length: 22 }, (_, index) => ({
+        index,
+        lang: index === 0 ? 'eng' : ['fre', 'spa', 'deu', 'ita'][index % 4]
+    }));
+    const subtitleTracks = Array.from({ length: 32 }, (_, index) => ({
+        index: 22 + index,
+        lang: index % 2 ? 'fre' : 'eng'
+    }));
+    const d = desc(mk('NF - X', {
+        audio_tracks_scope: 'file',
+        audio_tracks: audioTracks,
+        subtitle_tracks_scope: 'file',
+        subtitle_tracks: subtitleTracks
+    }));
+    assert.strictEqual(d.headline, 'English +21');
+    assert.match(d.meta, /^32 ST · Netflix ·/);
+});
+
+test('two or three exact soundtracks use compact language codes', () => {
+    const d = desc(mk('X', {
+        audio_tracks_scope: 'file',
+        audio_tracks: [
+            { index: 0, lang: 'eng' },
+            { index: 1, lang: 'fre' },
+            { index: 2, lang: 'ara' }
+        ]
+    }));
+    assert.strictEqual(d.headline, 'EN / FR / AR');
+});
+
+test('an unprobed language prefix is explicitly marked as likely', () => {
+    assert.strictEqual(desc(mk('FR - X')).headline, 'Likely French');
+    assert.strictEqual(desc(mk('EN - X')).headline, 'Likely English');
+});
+
+test('Netflix and Nordic are never presented as observed audio', () => {
+    const nf = desc(mk('NF - X'));
+    assert.strictEqual(nf.headline, 'Audio unknown');
+    assert.match(nf.meta, /Netflix/);
+
+    const nordic = desc(mk('X', { category_name: 'NORDIC FILM NEW RELEASE' }));
+    assert.strictEqual(nordic.headline, 'Audio unknown');
+    assert.match(nordic.meta, /Nordic/);
+});
+
+test('a grouped title track map cannot contaminate a child variant', () => {
+    const item = mk('AR-SUBS - X', {
+        variant_count: 12,
+        audio_tracks_scope: 'title',
+        audio_tracks: [{ index: 1, lang: 'fre' }],
+        audio_languages: ['en', 'fr']
+    });
+    const d = desc(item);
+    assert.strictEqual(d.headline, 'Audio unknown');
+    assert.doesNotMatch(d.headline, /French/);
+    const compatibility = M.analyzeLanguageCompatibility(item, { preferredAudioLanguage: 'fr' });
+    assert.strictEqual(compatibility.audio.state, 'unknown');
+    assert.strictEqual(compatibility.audio.source, 'provider_aggregate');
+});
+
+test('codec-profile tracks are safe because the profile belongs to the exact variant', () => {
+    const d = desc(mk('NF - X', {
+        codec_profile: {
+            audioTracks: [{ index: 0, lang: 'eng' }, { index: 1, lang: 'fre' }]
+        }
+    }));
+    assert.strictEqual(d.headline, 'EN / FR');
+});
+
+test('quality is a badge and noise prefixes never leak into the headline', () => {
+    const quality = desc(mk('EN - One Last Adventure 4K (2026)'));
+    assert.strictEqual(quality.headline, 'Likely English');
+    assert.strictEqual(quality.badge, '4K');
+
     for (const raw of ['PREFIX - Oscar Shaw', 'TOP - Some Title']) {
         const d = desc(mk(raw));
-        assert.strictEqual(d.headline, 'Strng IPTV 8K');
-        assert.ok(!/PREFIX|TOP/i.test(d.headline + d.meta), `noise leaked for "${raw}"`);
+        assert.strictEqual(d.headline, 'Audio unknown');
+        assert.doesNotMatch(d.headline + d.meta, /PREFIX|TOP/);
     }
 });
 
-test('ADAPTIVE: market constant but provider varies -> provider leads', () => {
-    const set = [mk('EN - X', { sourceId: 's1' }), mk('EN - X', { sourceId: 's2' }), mk('EN - X', { sourceId: 's3' })];
-    const d0 = M.versionDescriptor(set[0], { siblings: set, resolveSourceName: resolve });
-    const d1 = M.versionDescriptor(set[1], { siblings: set, resolveSourceName: resolve });
-    assert.strictEqual(d0.headline, 'Strng IPTV 8K');       // provider leads
-    assert.strictEqual(d1.headline, 'AtlasPro');
-    assert.ok(d0.meta.includes('English'), 'the constant market demotes to meta');
-});
-
-test('market varies -> market leads even across multiple providers', () => {
-    const set = [mk('EN - X', { sourceId: 's1' }), mk('FR - X', { sourceId: 's2' })];
-    const d0 = M.versionDescriptor(set[0], { siblings: set, resolveSourceName: resolve });
-    assert.strictEqual(d0.headline, 'English');
-    assert.ok(d0.meta.includes('Strng IPTV 8K'));
-});
-
-test('true duplicates (same market+provider+container+quality) split by raw category', () => {
-    const a = mk('EN - X', { sourceId: 's1', category_name: '|EN| DOCUMENTARY' });
-    const b = mk('EN - X', { sourceId: 's1', category_name: 'EN ▎CINEMA MOVIES' });
-    const da = M.versionDescriptor(a, { siblings: [a, b], resolveSourceName: resolve });
-    const db = M.versionDescriptor(b, { siblings: [a, b], resolveSourceName: resolve });
-    assert.ok(da.meta.includes('EN DOCUMENTARY'), `A needs category: ${da.meta}`);
-    assert.ok(db.meta.includes('EN ▎CINEMA MOVIES'), `B needs category: ${db.meta}`);
-    assert.notStrictEqual(da.meta, db.meta);
-});
-
-test('headline is never repeated in meta (market label == provider name)', () => {
-    // Provider literally named "Netflix"; NF market also resolves to "Netflix".
-    const nf = (id) => ({ x: 'Netflix' }[id] || '');
-    const d = M.versionDescriptor(mk('NF - The Film', { sourceId: 'x' }), { resolveSourceName: nf });
-    assert.strictEqual(d.headline, 'Netflix');
-    assert.ok(!d.meta.split(' · ').includes('Netflix'), `Netflix duplicated in meta: ${d.meta}`);
-    assert.strictEqual(d.meta, 'MKV');
-});
-
-test('SCAND (5-char Nordic prefix) resolves; no literal token leaks', () => {
-    assert.strictEqual(desc(mk('SCAND - The Movie')).headline, 'Nordic');
-    assert.strictEqual(desc(mk('SCAN ▎ X')).headline, 'Nordic');
-});
-
-test('a null hole in siblings does not throw', () => {
-    const a = mk('EN - X');
-    assert.doesNotThrow(() => M.versionDescriptor(a, { siblings: [a, null, undefined], resolveSourceName: resolve }));
-});
-
-test('fluidity tier maps to a dot descriptor (or null when unknown)', () => {
+test('a null sibling does not throw and fluidity tier remains available', () => {
+    const item = mk('EN - X');
+    assert.doesNotThrow(() => M.versionDescriptor(item, {
+        siblings: [item, null, undefined],
+        resolveSourceName: resolve
+    }));
     assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'direct' }).tier.cls, 'tier-direct');
     assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'video_transcode' }).tier.cls, 'tier-transcode');
     assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'unknown' }).tier, null);

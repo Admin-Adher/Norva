@@ -316,6 +316,10 @@ const MediaUtils = (() => {
             }
         }
         if (!sawLangToken) return null;
+        // "AR-SUBS", "FR-ST", ... describe the subtitle language, not the
+        // soundtrack. Only an explicit DUB marker makes that language an audio
+        // signal too.
+        if (hasSub && !hasDub) audioLang = null;
         return { audioLang, subLang, hasSub, hasDub };
     }
 
@@ -655,20 +659,27 @@ const MediaUtils = (() => {
 
     function parseTitleLanguageSignals(name) {
         const raw = stripDiacritics(String(name || '')).toLowerCase();
+        const region = parseLeadingRegionTag(name);
+        // "AR-SUBS - …" contains the token "AR", which the generic free-form
+        // audio regex would otherwise misread as Arabic audio. When the leading
+        // segment is explicitly subtitle-only, scan audio markers in the title
+        // body after that segment; the subtitle parser still sees the full label.
+        const audioRaw = region && region.hasSub && !region.hasDub && !region.audioLang
+            ? raw.replace(/^\s*[0-9a-z+][0-9a-z+\s._\-/]{0,24}?\s*[-–—|:/]\s+/, '')
+            : raw;
         const audio = [];
         const subtitles = [];
         const pushUnique = (list, entry) => {
             if (!list.some(item => item.language === entry.language && item.tag === entry.tag)) list.push(entry);
         };
         TITLE_AUDIO_SIGNALS.forEach(signal => {
-            if (signal.re.test(raw)) pushUnique(audio, { language: signal.language, tag: signal.tag, confidence: 'probable' });
+            if (signal.re.test(audioRaw)) pushUnique(audio, { language: signal.language, tag: signal.tag, confidence: 'probable' });
         });
         TITLE_SUBTITLE_SIGNALS.forEach(signal => {
             if (signal.re.test(raw)) pushUnique(subtitles, { language: signal.language, tag: signal.tag, confidence: 'probable' });
         });
         // Leading "XX - " region/language prefix (the dominant IPTV-VOD convention,
         // and the only signal for languages the body never spells out, e.g. Persian).
-        const region = parseLeadingRegionTag(name);
         if (region) {
             if (region.audioLang) pushUnique(audio, { language: region.audioLang, tag: 'PREFIX', confidence: 'region' });
             if (region.subLang && (region.hasSub || RTL_SUB_RE.test(String(name || '')))) {
@@ -777,6 +788,17 @@ const MediaUtils = (() => {
     // claimed from a real probe, never from the inherited audio_languages aggregate (which
     // over-claims languages the user's own file may not have).
     function probedAudioLanguages(item = {}) {
+        const scope = String(item.audioTracksScope || item.audio_tracks_scope || '').toLowerCase();
+        const variantCount = Number(
+            item.variantCount ||
+            item.variant_count ||
+            item.versions?.length ||
+            1
+        );
+        // Absolute stream indices at title scope may describe a sibling dub.
+        // Treat them only as a soft aggregate; exact confirmation requires a
+        // file-scoped map (legacy unscoped single-file titles remain safe).
+        if ((scope && scope !== 'file') || (!scope && variantCount > 1)) return null;
         const raw = item.audio_tracks || item.audioTracks;
         if (!Array.isArray(raw)) return null;
         const langs = [];
@@ -1480,6 +1502,9 @@ const MediaUtils = (() => {
         const tok = leadingMarketToken(src);
         if (tok && MARKET_LABELS[tok]) return { label: MARKET_LABELS[tok] };
         const tag = parseLeadingRegionTag(src);
+        if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
+            return { label: `${languageDisplayFull(tag.subLang)} subtitles`, kind: 'subtitle' };
+        }
         if (tag && tag.audioLang) {
             let label = languageDisplayFull(tag.audioLang);
             if (tag.hasSub && !tag.hasDub) label += ' · ST';
@@ -1509,6 +1534,75 @@ const MediaUtils = (() => {
         return s.length > 24 ? `${s.slice(0, 23).trim()}…` : s;
     }
 
+    function versionTrackState(item = {}, kind = 'audio') {
+        const isAudio = kind === 'audio';
+        const direct = isAudio
+            ? (item.audioTracks || item.audio_tracks)
+            : (item.subtitleTracks || item.subtitle_tracks || item.subtitles);
+        const scope = String(isAudio
+            ? (item.audioTracksScope || item.audio_tracks_scope || '')
+            : (item.subtitleTracksScope || item.subtitle_tracks_scope || '')).toLowerCase();
+        const probedAt = isAudio
+            ? (item.audioProbedAt || item.audio_probed_at)
+            : (item.subtitleProbedAt || item.subtitle_probed_at);
+
+        // A direct list is authoritative only when the API explicitly scopes it
+        // to this FILE. Unscoped cloud_titles tracks are a grouped-title facet
+        // and must never name a sibling variant's absolute stream indices.
+        if (scope === 'file' && Array.isArray(direct)) {
+            return { tracks: direct, known: Boolean(probedAt) || direct.length > 0, source: 'file' };
+        }
+        const profileTracks = tracksFromCodecProfile(item, kind);
+        if (Array.isArray(profileTracks)) {
+            return { tracks: profileTracks, known: true, source: 'codec' };
+        }
+        return { tracks: [], known: false, source: 'none' };
+    }
+
+    function versionTrackLanguages(tracks) {
+        const langs = [];
+        for (const track of tracks || []) {
+            const code = normalizeLanguagePreference(
+                track && (track.lang || track.language || track.iso_639_1 || track.iso639 || track.code || '')
+            );
+            if (code && code !== 'und' && code !== 'unknown' && !langs.includes(code)) langs.push(code);
+        }
+        return langs;
+    }
+
+    function versionAudioHeadline(state) {
+        if (!state.known) return '';
+        const tracks = state.tracks || [];
+        const langs = versionTrackLanguages(tracks);
+        const count = tracks.length;
+        if (!count) return 'Audio unavailable';
+        if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : 'Audio';
+        if (count <= 3 && langs.length === count) return langs.map(languageDisplay).join(' / ');
+        const first = normalizeLanguagePreference(
+            tracks[0] && (tracks[0].lang || tracks[0].language || tracks[0].iso_639_1 || tracks[0].iso639 || tracks[0].code || '')
+        );
+        if (first && first !== 'und' && first !== 'unknown') {
+            return `${languageDisplayFull(first)} +${count - 1}`;
+        }
+        if (langs.length === 1) return `${languageDisplayFull(langs[0])} +${Math.max(1, count - 1)}`;
+        return `${count} audios`;
+    }
+
+    function versionSubtitleLabel(item, state) {
+        if (state.known && state.tracks.length) {
+            const langs = versionTrackLanguages(state.tracks);
+            if (state.tracks.length > 3) return `${state.tracks.length} ST`;
+            if (langs.length === 1) return `ST ${languageDisplay(langs[0])}`;
+            if (langs.length >= 2 && langs.length <= 3) return `ST ${langs.map(languageDisplay).join('/')}`;
+            return `${state.tracks.length} ST`;
+        }
+        const tag = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
+        if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
+            return `ST ${languageDisplay(tag.subLang)} · burned-in`;
+        }
+        return '';
+    }
+
     // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string }
     // Returns { headline, meta, badge, tier }.
     function versionDescriptor(item = {}, opts = {}) {
@@ -1524,24 +1618,21 @@ const MediaUtils = (() => {
         const provider = resolveVersionProvider(item, resolve);
         const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
         const quality = versionQuality(item);
+        const audioState = versionTrackState(item, 'audio');
+        const subtitleState = versionTrackState(item, 'subtitle');
+        const observedAudio = versionAudioHeadline(audioState);
+        const subtitleLabel = versionSubtitleLabel(item, subtitleState);
+        const prefix = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
+        const likelyAudio = prefix && prefix.audioLang ? languageDisplayFull(prefix.audioLang) : '';
 
-        const distinct = (fn) => new Set(siblings.map(fn).map(v => String(v || '')).filter(Boolean));
-        const marketVaries = distinct(it => { const m = versionMarket(it); return m ? m.label : ''; }).size > 1;
-        const providerVaries = distinct(it => resolveVersionProvider(it, resolve)).size > 1;
-
-        // Lead with whichever axis actually distinguishes the versions.
-        let headline;
-        let metaParts;
-        if (marketLabel && (marketVaries || !providerVaries)) {
-            headline = marketLabel;
-            metaParts = [provider, container];
-        } else if (provider) {
-            headline = provider;
-            metaParts = [marketLabel, container];
-        } else {
-            headline = marketLabel || quality || `Version ${index + 1}`;
-            metaParts = [container];
-        }
+        // A version card represents one provider FILE. Lead with that file's
+        // observed soundtrack. Prefix/category/platform text is only a clearly
+        // marked fallback; "Netflix" and "Arabic subtitles" are not audio.
+        const headline = observedAudio || (likelyAudio ? `Likely ${likelyAudio}` : 'Audio unknown');
+        const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== likelyAudio
+            ? marketLabel
+            : '';
+        const metaParts = [subtitleLabel, inferredMarket, provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Demote constants, but never repeat the headline in the meta line (e.g. an "NF"
         // market whose provider is also literally named "Netflix").
@@ -1551,7 +1642,9 @@ const MediaUtils = (() => {
         // sibling, disambiguate with the raw provider category.
         const sigOf = (it) => {
             const m = versionMarket(it);
+            const a = versionAudioHeadline(versionTrackState(it, 'audio'));
             return [
+                a,
                 m ? m.label : '',
                 resolveVersionProvider(it, resolve),
                 String(it.container_extension || it.containerExtension || '').toUpperCase(),
@@ -1565,7 +1658,7 @@ const MediaUtils = (() => {
             if (cat && cat !== headline) meta = meta ? `${meta} · ${cat}` : cat;
         }
 
-        return { headline, meta, badge, tier };
+        return { headline, meta, badge, tier, audioSource: audioState.source };
     }
 
     return {

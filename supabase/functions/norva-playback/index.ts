@@ -377,37 +377,29 @@ async function createPlaybackSession(
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).
-      //  - Reuse the title's precomputed maps when present (no probe).
-      //  - Otherwise probe + persist onto the title row, so the grid + next play are instant,
-      //    the subtitle-pref restore works (tracks known at load), and the global cache is fed.
+      //  - Reuse the exact provider-file cache when present (no probe).
+      //  - Otherwise probe that exact file and feed the global file cache.
+      // A cloud_titles map is a grouped-title facet and may belong to a sibling
+      // dub; its absolute indices must never label another variant.
       // All best-effort — never blocks or breaks playback.
       let audioTracks: Array<{ index: number; lang: string | null }> = [];
       let subtitleTracks: JsonRecord[] = [];
       const titleRow = await resolveEngineAudioTitleRow(db, userId, sourceId, itemType, itemId, requestedPlaybackHint)
         .catch(() => null);
-      let haveAudio = false; // this user's row already has the audio map
-      let haveSub = false;   // ...or a subtitle probe (possibly empty) so we shouldn't re-probe
-      const precomputedAudio = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
-        .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) }))
-        .filter((t) => Number.isInteger(t.index));
-      if (precomputedAudio.length) { audioTracks = precomputedAudio; haveAudio = true; }
-      const precomputedSub = (titleRow && Array.isArray(titleRow.subtitle_tracks) ? titleRow.subtitle_tracks as JsonRecord[] : [])
-        .filter((t) => Number.isInteger(Number(t?.index)));
-      if (precomputedSub.length) { subtitleTracks = precomputedSub; haveSub = true; }
-      // subtitle_probed_at distinguishes "probed, file has no subs" (skip) from "never probed".
-      if (titleRow && titleRow.subtitle_probed_at) haveSub = true;
+      let haveAudio = false;
+      let haveSub = false;
 
       // Cross-mirror cache key (providerKey when known, else the host) — drives the
       // global file-track read, the share/fan-out, and the whisper-detect cache below.
-      const serverHost = await resolveFileTracksKey(sourceId, userId, db, targetUrl);
-      const fileExternalId = itemType === "series"
-        ? stringOr(requestedPlaybackHint.audioSeriesId ?? requestedPlaybackHint.audio_series_id ?? requestedPlaybackHint.seriesId ?? requestedPlaybackHint.series_id, "")
-        : itemId;
+      const serverHost = await resolveFileTracksKey(stringOr(sourceId, ""), userId, db, targetUrl);
+      // itemId is the PLAYED file (episode id for series), whereas audioSeriesId
+      // only resolves the parent title row. File caches must stay episode-exact.
+      const fileExternalId = itemId;
 
       // Cross-user reuse: another user (or the crawl) may have already probed this exact
       // provider file. Pull from the global per-file cache (no provider hit) and fill this
       // user's row, before ever falling back to a probe.
-      if ((!haveAudio || !haveSub) && titleRow?.id && serverHost && fileExternalId) {
+      if (serverHost && fileExternalId) {
         try {
           const { data: fr } = await db.from("catalog_file_tracks")
             .select("audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at")
@@ -415,25 +407,16 @@ async function createPlaybackSession(
             .maybeSingle();
           const fileRow = fr as JsonRecord | null;
           if (fileRow) {
-            const fill: JsonRecord = {};
-            if (!haveAudio && fileRow.audio_probed_at) {
+            if (fileRow.audio_probed_at) {
               const ga = (Array.isArray(fileRow.audio_tracks) ? fileRow.audio_tracks as JsonRecord[] : [])
                 .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) })).filter((t) => Number.isInteger(t.index));
-              if (ga.length) {
-                audioTracks = ga; haveAudio = true;
-                fill.audio_tracks = ga;
-                fill.audio_languages = [...new Set(ga.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
-                fill.audio_probed_at = new Date().toISOString();
-              }
+              audioTracks = ga;
+              haveAudio = true;
             }
-            if (!haveSub && fileRow.subtitle_probed_at) {
+            if (fileRow.subtitle_probed_at) {
               const gs = Array.isArray(fileRow.subtitle_tracks) ? fileRow.subtitle_tracks as JsonRecord[] : [];
-              subtitleTracks = gs; haveSub = true;
-              fill.subtitle_tracks = gs;
-              fill.subtitle_probed_at = new Date().toISOString();
-            }
-            if (Object.keys(fill).length) {
-              try { await db.from("cloud_titles").update(fill).eq("user_id", userId).eq("id", titleRow.id); } catch (_) { /* best-effort */ }
+              subtitleTracks = gs;
+              haveSub = true;
             }
           }
         } catch (_) { /* best-effort global reuse */ }
@@ -441,15 +424,62 @@ async function createPlaybackSession(
 
       // Still missing → probe the provider ONCE, persist to this user's row, and SHARE to the
       // global file cache + fan out to every other owner so they skip the probe entirely.
+      // A codec profile is stored on the exact cloud_title_variants row, so it
+      // is a safe second source when the global file cache has not caught up.
+      const exactVariantProfile = itemType === "movie"
+        && String(titleRow?.variant_external_id ?? "") === String(itemId);
+      const variantProfile = exactVariantProfile
+        ? recordOrEmpty(titleRow?.variant_codec_profile)
+        : {};
+      const variantAudioRaw = variantProfile.audioTracks ?? variantProfile.audio_tracks;
+      const variantSubtitleRaw = variantProfile.subtitles ?? variantProfile.subtitleTracks ?? variantProfile.subtitle_tracks;
+      if (!haveAudio && Array.isArray(variantAudioRaw) && variantAudioRaw.length) {
+        audioTracks = (variantAudioRaw as JsonRecord[])
+          .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang ?? t?.language) }))
+          .filter((t) => Number.isInteger(t.index));
+        haveAudio = audioTracks.length > 0;
+      }
+      if (!haveSub && Array.isArray(variantSubtitleRaw) && (haveAudio || variantSubtitleRaw.length)) {
+        subtitleTracks = (variantSubtitleRaw as JsonRecord[])
+          .filter((t) => Number.isInteger(Number(t?.index)));
+        haveSub = true;
+      }
+
+      // Backwards compatibility for a genuinely single-version title only.
+      // In that case title == file; grouped-title indices are never safe.
+      const singleMovieTitle = itemType === "movie" && Number(titleRow?.variant_count ?? 0) <= 1;
+      if (singleMovieTitle) {
+        if (!haveAudio) {
+          const singleAudio = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
+            .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) }))
+            .filter((t) => Number.isInteger(t.index));
+          if (singleAudio.length) { audioTracks = singleAudio; haveAudio = true; }
+        }
+        if (!haveSub) {
+          const singleSub = (titleRow && Array.isArray(titleRow.subtitle_tracks) ? titleRow.subtitle_tracks as JsonRecord[] : [])
+            .filter((t) => Number.isInteger(Number(t?.index)));
+          if (singleSub.length || titleRow?.subtitle_probed_at) {
+            subtitleTracks = singleSub;
+            haveSub = true;
+          }
+        }
+      }
+
       if (!haveAudio || !haveSub) {
         let probed = { audioTracks: [] as Array<{ index: number; lang: string | null }>, subtitleTracks: [] as JsonRecord[] };
         try { probed = await probeEngineTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
         const probeOk = probed.audioTracks.length > 0; // every video has audio → audio present == parse ok
         const gotAudio = !haveAudio && probeOk;
         const gotSub = !haveSub && probeOk;
-        if (gotAudio) audioTracks = probed.audioTracks;
-        if (gotSub) subtitleTracks = probed.subtitleTracks;
-        if (titleRow?.id && (gotAudio || gotSub)) {
+        if (gotAudio) {
+          audioTracks = probed.audioTracks;
+          haveAudio = true;
+        }
+        if (gotSub) {
+          subtitleTracks = probed.subtitleTracks;
+          haveSub = true;
+        }
+        if (titleRow?.id && singleMovieTitle && (gotAudio || gotSub)) {
           const update: JsonRecord = {};
           let codes: string[] = [];
           if (gotAudio) {
@@ -480,7 +510,7 @@ async function createPlaybackSession(
         // (lang null) — no provider/demux language. Detect them via Whisper IN THE BACKGROUND
         // and re-persist, so the next play is fully named. Runs once (right after the first
         // probe), best-effort, never blocks the response. Off unless NORVA_WHISPER_DETECT=true.
-        if (gotAudio && titleRow?.id && serverHost && fileExternalId
+        if (gotAudio && titleRow?.id && singleMovieTitle && serverHost && fileExternalId
           && audioTracks.length >= 2 && audioTracks.some((t) => !t.lang)) {
           const rc = await getRuntimeConfig(db);
           if (rc.whisperDetect && rc.mediaGatewayUrl && rc.mediaGatewayToken) {
@@ -491,6 +521,25 @@ async function createPlaybackSession(
             }));
           }
         }
+      }
+      // The grouped-title language facets are a UNION of exact provider files,
+      // never a representative file's absolute stream-index map. Pair the
+      // resolved parent variant with the exact played file id after track
+      // validation. For series, the variant is the parent while itemId remains
+      // the exact episode, so the SQL layer can keep episode evidence distinct.
+      if (titleRow?.id && titleRow.variant_id && (haveAudio || haveSub)) {
+        try {
+          await db.rpc("merge_cloud_title_file_languages", {
+            p_user_id: userId,
+            p_title_id: titleRow.id,
+            p_variant_id: titleRow.variant_id,
+            p_file_external_id: fileExternalId,
+            p_audio_tracks: audioTracks,
+            p_subtitle_tracks: subtitleTracks,
+            p_has_audio: haveAudio,
+            p_has_subtitle: haveSub,
+          });
+        } catch (_) { /* exact-language union is best-effort; playback must continue */ }
       }
       return {
         session,
@@ -2137,13 +2186,13 @@ async function persistOrderedAudioForTitle(
   const externalId = stringOr(variant.external_id, "");
   const variantItemType = stringOr(variant.item_type, fallbackItemType);
   if (!sourceId || !externalId) return false;
+  // A series variant identifies the parent series, while the probe below opens
+  // one representative episode. Persisting that episode's absolute indices on
+  // the parent makes every other episode appear to expose the same tracks.
+  if (variantItemType === "series") return false;
   let targetUrl: string | null;
-  if (variantItemType === "series") {
-    targetUrl = await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
-  } else {
-    const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
-    targetUrl = target?.targetUrl ?? null;
-  }
+  const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
+  targetUrl = target?.targetUrl ?? null;
   if (!targetUrl) return false;
   const payload = JSON.stringify({ v: 1, sid: "audio-order", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
   const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
@@ -2404,11 +2453,10 @@ async function verifyTaggedAudioLanguages(opts: {
   return confirmedTracks && !silent ? "confirmed" : "unclear";
 }
 
-// Map an engine playback (source + item) to its cloud_titles row, so a probed audio
-// map can be reused (skip the relay probe) and persisted (grid + next play instant).
-// Movies map by the variant's external_id (= the played stream id). A series episode's
-// stream id is the EPISODE, not the series, so the client passes the series id in the
-// hint (audioSeriesId). Returns null when it can't resolve a row (then we just probe).
+// Resolve the parent title plus the exact variant codec profile. The parent is
+// used only for single-version backwards compatibility; all multi-version track
+// indices come from the exact file cache/profile. A series episode id is still
+// distinct from its parent series title id.
 async function resolveEngineAudioTitleRow(
   db: SupabaseClient,
   userId: string,
@@ -2424,7 +2472,7 @@ async function resolveEngineAudioTitleRow(
   if (!externalId) return null;
   const { data: variant } = await db
     .from("cloud_title_variants")
-    .select("title_id")
+    .select("id,title_id,external_id,codec_profile")
     .eq("user_id", userId)
     .eq("source_id", sourceId)
     .eq("item_type", itemType)
@@ -2435,15 +2483,26 @@ async function resolveEngineAudioTitleRow(
   if (!titleId) return null;
   const { data: row } = await db
     .from("cloud_titles")
-    .select("id, audio_tracks, subtitle_tracks, subtitle_probed_at, provider_tmdb_id")
+    .select("id, variant_count, audio_tracks, subtitle_tracks, subtitle_probed_at, provider_tmdb_id")
     .eq("user_id", userId)
     .eq("id", titleId)
     .maybeSingle();
-  return row ? (row as EngineTitleRow) : null;
+  return row
+    ? {
+      ...(row as EngineTitleRow),
+      variant_id: String((variant as JsonRecord | null)?.id ?? ""),
+      variant_external_id: String((variant as JsonRecord | null)?.external_id ?? ""),
+      variant_codec_profile: recordOrEmpty((variant as JsonRecord | null)?.codec_profile),
+    }
+    : null;
 }
 
 type EngineTitleRow = {
   id: string;
+  variant_count: number;
+  variant_id: string;
+  variant_external_id: string;
+  variant_codec_profile: JsonRecord;
   audio_tracks: unknown;
   subtitle_tracks: unknown;
   subtitle_probed_at: string | null;
@@ -3765,6 +3824,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // (no provider hit). The scale dedup: a title probed by ANY user is shared to all
   // others for free here, instead of re-probing the same provider file once per user.
   if (stringOr(body.mode, "") === "catalog") {
+    if (itemType === "series") {
+      return { mode: "catalog", filled: 0, processed: 0, seriesSkipped: true };
+    }
     const { data: filled, error: fillErr } = await db.rpc("fill_user_audio_from_catalog", {
       p_user_id: userId,
       p_item_type: itemType,
@@ -3973,6 +4035,13 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // streaming, so the WAV extraction doesn't contend with a live stream. Serialized by default
   // (concurrency 1) since each detection is a provider connection; resumable by id cursor.
   if (stringOr(body.mode, "") === "whisper") {
+    if (itemType === "series") {
+      return {
+        mode: "whisper", processed: 0, verified: 0, corrected: 0,
+        candidates: 0, detected: 0, lastId: afterId, hasMore: false,
+        seriesSkipped: true,
+      };
+    }
     if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
       throw new HttpError(503, "Media gateway is not configured");
     }
@@ -4077,11 +4146,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     if (!wrows || !wrows.length) return { mode: "whisper", processed: verified, verified, corrected, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
     const wLastId = String(wrows[wrows.length - 1].id);
 
-    const candidates = wrows.filter((t) => {
-      const arr = Array.isArray((t as JsonRecord).audio_tracks) ? (t as JsonRecord).audio_tracks as JsonRecord[] : [];
+    const whisperRows = wrows as JsonRecord[];
+    const candidates = whisperRows.filter((t: JsonRecord) => {
+      const arr = Array.isArray(t.audio_tracks) ? t.audio_tracks as JsonRecord[] : [];
       return arr.some((x) => !stringOrNull(x?.lang));
     });
-    const wvIds = candidates.map((t) => stringOrNull((t as JsonRecord).default_variant_id)).filter(Boolean) as string[];
+    const wvIds = candidates.map((t: JsonRecord) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();
     if (wvIds.length) {
       const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", wvIds);
@@ -4125,6 +4195,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       await Promise.all(candidates.slice(i, i + wConcurrency).map(runOne));
     }
     return { mode: "whisper", processed: wrows.length + verified, verified, corrected, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
+  }
+
+  // Generic audio/subtitle crawling resolves a representative episode for a
+  // series and would then write those file-local indices onto the series parent.
+  // Until variants carry exact episode ids, series are playback-only for track
+  // discovery and must not enter the title-level crawler.
+  if (itemType === "series") {
+    return { mode, processed: 0, updated: 0, lastId: afterId, hasMore: false, seriesSkipped: true };
   }
 
   // Autonomous provider probe (audio-langs / subtitle backfill via the relay). Defer while the user

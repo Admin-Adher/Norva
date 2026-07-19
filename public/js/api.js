@@ -799,6 +799,12 @@ const CloudAdapter = (() => {
             context.container;
         const playbackHint = raw.playback_hint || raw.playbackHint || {};
         const codecProfile = raw.codec_profile || raw.codecProfile || {};
+        const audioTracks = raw.audio_tracks_scope === 'file' || raw.audioTracksScope === 'file'
+            ? (raw.audio_tracks || raw.audioTracks || [])
+            : null;
+        const subtitleTracks = raw.subtitle_tracks_scope === 'file' || raw.subtitleTracksScope === 'file'
+            ? (raw.subtitle_tracks || raw.subtitleTracks || [])
+            : null;
         const providerTmdbId = context.providerTmdbId || null;
 
         return {
@@ -835,6 +841,18 @@ const CloudAdapter = (() => {
             playbackHint,
             codec_profile: codecProfile,
             codecProfile,
+            audio_tracks: audioTracks,
+            audioTracks,
+            audio_tracks_scope: audioTracks !== null ? 'file' : null,
+            audioTracksScope: audioTracks !== null ? 'file' : null,
+            audio_probed_at: raw.audio_probed_at || raw.audioProbedAt || null,
+            audioProbedAt: raw.audioProbedAt || raw.audio_probed_at || null,
+            subtitle_tracks: subtitleTracks,
+            subtitleTracks,
+            subtitle_tracks_scope: subtitleTracks !== null ? 'file' : null,
+            subtitleTracksScope: subtitleTracks !== null ? 'file' : null,
+            subtitle_probed_at: raw.subtitle_probed_at || raw.subtitleProbedAt || null,
+            subtitleProbedAt: raw.subtitleProbedAt || raw.subtitle_probed_at || null,
             provider_tmdb_id: providerTmdbId,
             providerTmdbId,
             tmdb_id: providerTmdbId,

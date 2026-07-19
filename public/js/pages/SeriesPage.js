@@ -3622,7 +3622,11 @@ class SeriesPage {
             year: this.currentSeries?.year,
             rating: this.currentSeries?.rating,
             sourceId: sourceId,
+            cloudSourceId: this.currentSeries?.cloudSourceId || this.currentSeries?.cloud_source_id || null,
+            titleId: this.currentSeries?.titleId || this.currentSeries?.title_id || null,
             seriesId: this.currentSeries?.series_id,
+            externalId: episodeId,
+            parentExternalId: this.currentSeries?.series_id,
             // TMDB id keys the cross-user skip-intro markers for this season.
             providerTmdbId: this.currentSeries?.provider_tmdb_id || this.currentSeries?.providerTmdbId
                 || this.currentSeries?.tmdb?.id || null,
@@ -3633,16 +3637,20 @@ class SeriesPage {
             resumeTime: resumePlan.target,
             playbackPreferences,
             durationHint,
-            audioLanguages: this.currentSeries?.audioLanguages || this.currentSeries?.audio_languages || null,
+            // Track indices are episode/file-specific. The playback resolver
+            // returns the exact episode map; a grouped series map is not safe.
+            audioLanguages: null,
             versionLanguages: this.currentSeries?.versionLanguages || this.currentSeries?.version_languages || null,
             // TMDB source language: lets the player resolve a VOSTFR/VO ("original") track to its
             // real language ("Japanese"…) — never assumes one from the VOSTFR tag. Comes from the
             // grid item (norva-catalog) or the series-info response (norva-series-info).
             originalLanguage: this.currentSeries?.originalLanguage || this.currentSeries?.original_language
                 || this.currentSeriesInfo?.original_language || null,
-            // Precomputed ordered per-track language map (when the series was crawled) so
-            // the player labels every audio track with ZERO playback probe — same as movies.
-            audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null,
+            // The resolver/probe may attach an exact map for this episode later.
+            audioTracks: null,
+            audioTracksScope: null,
+            subtitleTracks: null,
+            subtitleTracksScope: null,
             nextEpisodeLabel
         };
 

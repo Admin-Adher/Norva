@@ -257,6 +257,32 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     if (error) throw error;
   }
 
+  // Exact per-file track caches are shared across accounts by provider identity.
+  // Once the movie variants exist, hydrate each grouped title's language UNION
+  // from those exact files. Series variants identify the parent series rather
+  // than an episode, so they must never participate in this join.
+  const movieExternalIds = [...new Set(
+    savedVariants
+      .filter((variant) => variant.item_type === "movie")
+      .map((variant) => stringOr(variant.external_id, ""))
+      .filter(Boolean),
+  )];
+  if (projectionServerHost && movieExternalIds.length) {
+    for (let index = 0; index < movieExternalIds.length; index += 500) {
+      try {
+        await options.db.rpc("hydrate_cloud_title_file_languages", {
+          p_user_id: options.userId,
+          p_source_id: options.sourceId,
+          p_server_key: projectionServerHost,
+          p_item_type: "movie",
+          p_external_ids: movieExternalIds.slice(index, index + 500),
+        });
+      } catch (error) {
+        console.warn("[vod-title-projection] exact file-language hydration skipped:", error instanceof Error ? error.message : error);
+      }
+    }
+  }
+
   // Foundation for the global shared title cache (docs/roadmap/global-title-cache-design.md):
   // dual-write the title-level metadata into catalog_titles, keyed globally by
   // (item_type, provider_tmdb_id), so at scale it is enriched/stored once instead of

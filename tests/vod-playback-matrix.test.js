@@ -19,6 +19,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -133,7 +134,7 @@ test('connection-limit classifier matches BLOCK_HTTP_458 (the original \\b458\\b
 test('engine provider connection blocks do not fall through to transcode', () => {
   const guard = "if (this.isConnectionLimitError(msg))";
   const guardIndex = watchSrc.indexOf(guard);
-  const fallbackIndex = watchSrc.indexOf('fallbackEngineToTranscode(playbackAttemptId)');
+  const fallbackIndex = watchSrc.indexOf('fallbackEngineToTranscode(playbackAttemptId, startTime)');
   assert.notEqual(guardIndex, -1, 'connection-limit guard missing from engine failure path');
   assert.notEqual(fallbackIndex, -1, 'transcode fallback call missing from engine failure path');
   assert.ok(guardIndex < fallbackIndex, 'connection-limit guard must run before transcode fallback');
@@ -231,4 +232,191 @@ test('edge: raw lane registered in the coordinator at resolve time', () => {
   assert.ok(src.includes('const rawCoordination = await prepareEdgeSessionCoordinator'), 'raw prepare missing');
   assert.ok(src.includes('lane: "raw"'), 'raw lane marker missing');
   assert.ok(src.includes('lane: options.lane'), 'commit lane passthrough missing');
+});
+
+// ── 6) post-seek remux continuity + position-preserving recovery ───────────────
+test('browser engine rejects discontinuous mux writes before they reach MediaSource', () => {
+  const src = read('public/js/norvaEngine.js');
+  assert.ok(src.includes('writePos !== expectedWritePos'), 'strict mux write-position guard missing');
+  assert.ok(src.includes('MUX_WRITE_DISCONTINUITY'), 'typed discontinuity error missing');
+  assert.ok(src.includes('this.onFatal(error)'), 'player fatal callback missing');
+  assert.ok(src.includes('if (this._fatalSignaled)'), 'all writes after a fatal discontinuity must be dropped');
+  assert.ok(src.includes('fatalBytesDropped'), 'post-fatal write drops must be observable');
+  const guard = src.slice(src.indexOf('writePos !== expectedWritePos'), src.indexOf('// Trace write position'));
+  assert.ok(guard.includes('return;'), 'bad mux bytes must be dropped');
+  assert.ok(!guard.includes('this.queue.push'), 'bad mux bytes must never reach the append queue');
+});
+
+test('engine runtime recovery resumes MKV/MP4 once and keeps the selected audio index', () => {
+  const start = watchSrc.indexOf('async handleEngineRuntimeFailure(');
+  const end = watchSrc.indexOf('\n    destroyEngine()', start);
+  assert.notStrictEqual(start, -1, 'runtime recovery helper missing');
+  assert.notStrictEqual(end, -1, 'runtime recovery helper end missing');
+  const body = watchSrc.slice(start, end);
+  assert.ok(body.includes('const maxEngineRetries = wasTs ? 2 : 1'),
+    'non-TS media must receive one bounded engine retry');
+  assert.ok(body.includes('startTime: resumeAt'), 'engine retry must resume at the failure position');
+  assert.ok(body.includes('audioStreamIndex: selectedAudioIndex'), 'engine retry must preserve selected audio');
+  assert.ok(body.includes('fallbackEngineToTranscode(playbackAttemptId, resumeAt)'),
+    'gateway fallback must receive the captured position');
+  assert.ok(body.includes('Number.isFinite(visiblePosition) && visiblePosition > 0'),
+    'a backward seek must resume from the visible playhead, not the monotone snapshot');
+  assert.ok(body.includes('this._engineRuntimeRecoveryAttemptId === playbackAttemptId'),
+    'runtime recovery must deduplicate only the same playback attempt');
+  assert.ok(body.indexOf('const rememberedPosition = Number(this._lastKnownPlaybackPosition)')
+      < body.indexOf('const snapshotPosition = Number(this.getResumeSnapshotPosition?.())'),
+    'the remembered playhead must be captured before the snapshot getter can observe a reset video');
+  assert.ok(body.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;'),
+    'an obsolete recovery must not surface its error over a newer title');
+});
+
+test('version failover is scoped to the playback attempt and cannot replace a newer title', () => {
+  const start = watchSrc.indexOf('async tryNextVersion(');
+  const end = watchSrc.indexOf('\n    updateVolumeUI()', start);
+  const body = watchSrc.slice(start, end);
+  assert.ok(body.includes('playbackAttemptId = this._playbackAttemptId'),
+    'failover must capture its playback attempt');
+  assert.ok(body.includes('this.isStalePlaybackAttempt(playbackAttemptId)'),
+    'failover must reject stale resolves');
+  assert.ok(body.includes('this.content !== contentAtStart'),
+    'failover must not mutate a different title');
+  assert.ok(body.includes('playbackAttemptId,'),
+    'loadVideo must retain the guarded playback attempt');
+  assert.ok(body.includes('await this.cleanupStaleCloudPlaybackSession(resultSessionId)'),
+    'a stale alternate-version resolve must release its provider session');
+  assert.ok(body.includes('this.content.cloudSourceId = nextCloudSourceId'),
+    'failover must replace the exact cloud-source identity');
+  assert.ok(body.includes('this.content.containerExtension = nextContainer'),
+    'failover must replace the content-level container alias');
+  assert.ok(body.includes('this.content.versionIndex = nextIndex'),
+    'the resumable content object must retain the selected version index');
+  assert.ok(body.includes('this.replaceExactContentAudioMetadata(exactAudioTracks, exactAudioLanguages)'),
+    'failover must replace, not merge, exact-file audio metadata');
+  assert.ok(body.includes('this.getLanguageSafeFailoverPreferences()'),
+    'failover must retain language semantics without reusing a file-relative stream index');
+  assert.ok(body.includes('this.getLanguageSafeFailoverAudioOptions('),
+    'failover must map the retained language onto the sibling file before resolving it');
+  assert.ok(body.includes('...nextAudioOptions'),
+    'the sibling file audio index must be sent when its Gateway session is created');
+});
+
+test('version failover remaps a language preference instead of reusing the old file index', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  const safePreference = page.getLanguageSafeFailoverPreferences({
+    audio: { source: 'probe', streamIndex: 7, language: 'fra' },
+  });
+  const options = page.getLanguageSafeFailoverAudioOptions([
+    { index: 2, lang: 'eng' },
+    { index: 11, lang: 'fre', codec: 'aac', channels: 2 },
+  ], safePreference);
+
+  assert.strictEqual(safePreference.audio.language, 'fr');
+  assert.strictEqual(Object.hasOwn(safePreference.audio, 'streamIndex'), false);
+  assert.strictEqual(options.audioStreamIndex, 11);
+  assert.notStrictEqual(options.audioStreamIndex, 7);
+});
+
+test('a fatal callback during engine load cannot start a competing fallback', () => {
+  const start = watchSrc.indexOf('async playWithEngine(');
+  const end = watchSrc.indexOf('\n    async fallbackEngineToTranscode(', start);
+  const body = watchSrc.slice(start, end);
+  const identityGuards = body.match(/this\.norvaEngine !== engine/g) || [];
+  assert.ok(identityGuards.length >= 3,
+    'onFatal, load success, and load catch must all reject an obsolete engine');
+  assert.ok(body.includes('try { engine.destroy(); } catch (_) {}'),
+    'an obsolete engine must destroy only itself, never the replacement');
+});
+
+test('engine-to-gateway fallback keeps the exact offset without restarting play()', () => {
+  const start = watchSrc.indexOf('async fallbackEngineToTranscode(');
+  const end = watchSrc.indexOf('\n    async handleEngineRuntimeFailure(', start);
+  assert.notStrictEqual(start, -1, 'engine fallback helper missing');
+  assert.notStrictEqual(end, -1, 'engine fallback helper end missing');
+  const body = watchSrc.slice(start, end);
+  assert.ok(body.includes('startOffsetOverride'), 'explicit resume override missing');
+  assert.ok(body.includes('resumeTarget: startOffset'), 'resume target must be propagated');
+  assert.ok(body.includes('await this.loadVideo('), 'lane swap must use loadVideo');
+  assert.ok(!body.includes('await this.play(c,'), 'play() would reset the retry budget and playback state');
+  assert.ok(body.includes('await this.cleanupStaleCloudPlaybackSession(resultSessionId)'),
+    'a stale gateway fallback resolve must release its provider session');
+});
+
+test('delayed engine setup retries never destroy a replacement engine', () => {
+  const start = watchSrc.indexOf('async playWithEngine(');
+  const end = watchSrc.indexOf('\n    async fallbackEngineToTranscode(', start);
+  const body = watchSrc.slice(start, end);
+  const slotRetry = body.slice(body.indexOf('if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES)'),
+    body.indexOf('// A SOURCEOPEN_TIMEOUT'));
+  const sourceOpenRetry = body.slice(body.indexOf('if (/SOURCEOPEN_TIMEOUT/i.test(msg)'),
+    body.indexOf('// Slot still busy'));
+  assert.ok(slotRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return;'),
+    'slot retry must abandon a stale wait');
+  assert.ok(sourceOpenRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return;'),
+    'SOURCEOPEN retry must abandon a stale wait');
+  assert.ok(!slotRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine()'),
+    'slot retry must not destroy a newer engine');
+  assert.ok(!sourceOpenRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine()'),
+    'SOURCEOPEN retry must not destroy a newer engine');
+});
+
+test('engine retry budget cannot re-arm inside the historical ~50 second crash loop', () => {
+  assert.ok(watchSrc.includes('(this._engineRetryFromPos || 0) + 120'),
+    'runtime retry budget must require two healthy minutes before re-arming');
+});
+
+// ── 7) exact-file track isolation ──────────────────────────────────────────────
+test('playback reads the exact file cache before any single-title fallback', () => {
+  const src = read('supabase/functions/norva-playback/index.ts');
+  const cacheLookup = src.indexOf('.from("catalog_file_tracks")');
+  const singleTitleFallback = src.indexOf('Backwards compatibility for a genuinely single-version title only');
+  assert.notStrictEqual(cacheLookup, -1, 'catalog_file_tracks lookup missing');
+  assert.notStrictEqual(singleTitleFallback, -1, 'single-version title fallback guard missing');
+  assert.ok(cacheLookup < singleTitleFallback, 'exact file cache must win over title-level maps');
+  assert.ok(src.includes('Number(titleRow?.variant_count ?? 0) <= 1'),
+    'grouped title tracks must be rejected');
+  assert.ok(src.includes('const fileExternalId = itemId'),
+    'series caches must use the exact episode id, not the parent series id');
+  assert.ok(src.includes('const singleMovieTitle = itemType === "movie"'),
+    'series episodes must never reuse or overwrite parent-title track indices');
+  assert.ok(src.includes('String(titleRow?.variant_external_id ?? "") === String(itemId)'),
+    'codec-profile tracks must belong to the exact played file');
+});
+
+test('catalog variants expose only exact file-scoped tracks', () => {
+  const src = read('supabase/functions/norva-catalog/index.ts');
+  assert.ok(src.includes('async function attachExactFileTracks('), 'exact variant cache join missing');
+  assert.ok(src.includes('__file_audio_tracks'), 'exact audio tracks are not attached');
+  assert.ok(src.includes('audio_tracks_scope: audioTracks !== undefined ? "file"'), 'file scope marker missing');
+  assert.ok(src.includes('audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT'),
+    'audio-filtered details must not hide the matching variant behind the default cap');
+});
+
+test('live file probe replaces stale title languages and reports exact file identity', () => {
+  const enrichStart = watchSrc.indexOf('async enrichCloudPlaybackTracks(');
+  const enrichEnd = watchSrc.indexOf('\n    // True when the title is known', enrichStart);
+  const enrich = watchSrc.slice(enrichStart, enrichEnd);
+  assert.ok(enrich.includes('this.replaceExactContentAudioMetadata('),
+    'live probe must replace exact-file tracks and languages');
+  assert.ok(enrich.includes('if (isStaleEnrichment()) return;'),
+    'a late probe must not overwrite a newer file');
+  assert.ok(!enrich.includes('const merged = Array.from(new Set([...existing, ...langs]))'),
+    'live probe must not merge languages inherited from another version');
+
+  const reportStart = watchSrc.indexOf('\n    reportObservedAudioLanguages() {');
+  const reportEnd = watchSrc.indexOf('\n    updateAudioTracks()', reportStart);
+  const report = watchSrc.slice(reportStart, reportEnd);
+  for (const field of ['cloudSourceId,', 'itemType,', 'itemId: externalId', 'externalId,']) {
+    assert.ok(report.includes(field), `observed-language payload missing ${field}`);
+  }
+});
+
+test('resume snapshots keep exact metadata for alternate versions', () => {
+  const start = watchSrc.indexOf('sanitizeResumeContent(');
+  const end = watchSrc.indexOf('\n    sanitizeResumePlayback(', start);
+  const body = watchSrc.slice(start, end);
+  for (const field of ['cloudSourceId:', 'audioTracks:', 'audioTracksScope:', 'audioLanguages:', 'subtitleTracks:', 'subtitleTracksScope:']) {
+    assert.ok(body.includes(field), `resume version metadata missing ${field}`);
+  }
 });

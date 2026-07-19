@@ -257,7 +257,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 38;
+  const ENGINE_VERSION = 39;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -266,6 +266,7 @@
       this.log = typeof opts.log === 'function' ? opts.log : () => {};
       this.onReady = typeof opts.onReady === 'function' ? opts.onReady : () => {};
       this.onSeek = typeof opts.onSeek === 'function' ? opts.onSeek : () => {};
+      this.onFatal = typeof opts.onFatal === 'function' ? opts.onFatal : () => {};
       // libav log verbosity. Default ERROR: libav's INFO default floods the
       // console AND costs real CPU — FFmpeg formats + writes every line through
       // the Emscripten TTY once per block, and the matroska demuxer logs a
@@ -315,6 +316,7 @@
       this.destroyed = false;
       this._pumpRunning = false;
       this._stopRequested = false;
+      this._fatalSignaled = false;
       this._gate = null;          // resolver while pump waits for buffer to drain
       this._seeking = false;
       this._initSegPending = false;
@@ -355,6 +357,7 @@
         droppedOpenGop: 0,
         pumpExitReason: null, pumpExitRes: null, lastReadError: null,
         trailerBytesDropped: 0,
+        writeDiscontinuities: 0, firstWriteDiscontinuity: null,
       };
     }
 
@@ -1186,7 +1189,7 @@
       if (this.vS) streamCtxs.push([this.vS.codecpar, this.vS.time_base_num, this.vS.time_base_den]);
       if (this.aS) streamCtxs.push(this.copyAudio ? [this.aS.codecpar, this.aS.time_base_num, this.aS.time_base_den]
                                                   : [this.encCodecpar, 1, AAC_SAMPLE_RATE]);
-      let written = 0;
+      let expectedWritePos = 0;
       this._initSegPending = true;
       // Diagnostics: a fresh muxer emits a new init segment (ftyp+moov) then media
       // fragments. Reset the per-segment capture, bump the init counter, and mark the
@@ -1208,6 +1211,7 @@
       // in isolation, broken once concatenated) → CHUNK_DEMUXER_ERROR_APPEND_FAILED.
       // This records the first writes + counts backward seeks so we can prove it.
       d.writes = []; d.seekWrites = 0; d.writeHighWater = 0; d.firstSeek = null;
+      d.writeDiscontinuities = 0; d.firstWriteDiscontinuity = null;
       this._diagHeaderPhase = true;
       // Remove any stale 'output' device from a prior init (e.g. a re-seek) — it would
       // collide with the fresh device below.
@@ -1229,28 +1233,63 @@
         // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
         // be enqueued — endOfStream() finalises the buffer instead.
         if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + data.length; return; }
+        // Once continuity is lost, every later callback belongs to the invalid
+        // mux sequence. Drop it wholesale while the player tears this engine down.
+        if (this._fatalSignaled) {
+          d.fatalBytesDropped = (d.fatalBytesDropped || 0) + data.length;
+          return;
+        }
         // libav.js hands `data` as a signed Int8Array view into the Emscripten HEAP.
         // Copy it out as an UNSIGNED Uint8Array (reinterpret the same bytes) — the bytes
         // are identical for MSE, but every byte ≥128 must read unsigned or box-size math
         // (b<<24|…) goes negative and corrupts the diagnostics (e.g. 0xA1 -> 0xFFFFFFA1).
         const chunk = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+        // MediaSource consumes a byte stream, while libav also exposes the output
+        // file position. A rewrite or a gap appended in callback order corrupts the
+        // fMP4 several fragments later, even though the provider connection is still
+        // healthy. Stop before those bytes reach MSE and let the player reopen at the
+        // current source timestamp.
+        const writePos = Number(pos);
+        if (!Number.isFinite(writePos) || writePos !== expectedWritePos) {
+          d.writeDiscontinuities = (d.writeDiscontinuities || 0) + 1;
+          if (!d.firstWriteDiscontinuity) {
+            d.firstWriteDiscontinuity = {
+              pos: Number.isFinite(writePos) ? writePos : String(pos),
+              expected: expectedWritePos,
+              len: chunk.length,
+              atWrite: (d.writes || []).length,
+            };
+          }
+          this._stopRequested = true;
+          if (this._gate) { this._gate(); this._gate = null; }
+          const error = new Error(`MUX_WRITE_DISCONTINUITY:${String(pos)}!=${expectedWritePos}`);
+          if (!this._fatalSignaled) {
+            this._fatalSignaled = true;
+            try { this.report({ stage: 'mux:write-discontinuity', message: error.message }); } catch (_) {}
+            queueMicrotask(() => {
+              if (!this.destroyed) {
+                try { this.onFatal(error); } catch (_) {}
+              }
+            });
+          }
+          return;
+        }
         // Trace write position vs the running high-water mark BEFORE consuming.
         try {
           const isSeek = pos < d.writeHighWater;
           if (isSeek) { d.seekWrites++; if (d.firstSeek == null) d.firstSeek = { pos, len: chunk.length, highWater: d.writeHighWater, atWrite: d.writes.length }; }
-          if (d.writes.length < 40) {
-            const rec = { pos, len: chunk.length, seek: isSeek };
-            // Small writes are the structural ones (box headers / moof / size fields) —
-            // capture their full bytes so the failing tail can be read directly.
-            if (chunk.length <= 600) {
-              let hx = ''; for (let i = 0; i < chunk.length; i++) hx += (chunk[i] < 16 ? '0' : '') + chunk[i].toString(16);
-              rec.hex = hx;
-            }
-            d.writes.push(rec);
+          const rec = { pos, len: chunk.length, seek: isSeek };
+          // Small writes are the structural ones (box headers / moof / size fields) —
+          // capture their full bytes so the failing tail can be read directly.
+          if (chunk.length <= 600) {
+            let hx = ''; for (let i = 0; i < chunk.length; i++) hx += (chunk[i] < 16 ? '0' : '') + chunk[i].toString(16);
+            rec.hex = hx;
           }
+          d.writes.push(rec);
+          if (d.writes.length > 40) d.writes.shift();
           if (pos + chunk.length > d.writeHighWater) d.writeHighWater = pos + chunk.length;
         } catch (_) {}
-        written += chunk.length;
+        expectedWritePos += chunk.length;
         try {
           if (this._diagHeaderPhase) {
             d.initBytes += chunk.length;
@@ -1673,10 +1712,13 @@
         // write-position trace: backward seeks here mean the muxer is NOT streaming
         // linearly and call-order concatenation corrupts the stream.
         writes: d.writes, seekWrites: d.seekWrites, firstSeek: d.firstSeek, writeHighWater: d.writeHighWater,
+        writeDiscontinuities: d.writeDiscontinuities,
+        firstWriteDiscontinuity: d.firstWriteDiscontinuity,
         // append accounting
         appendCount: d.appendCount, appendBytes: d.appendBytes,
         recentAppends: d.recentAppends, appendErrors: d.appendErrors,
         sbErrorEvents: d.sbErrorEvents, trailerBytesDropped: d.trailerBytesDropped,
+        fatalBytesDropped: d.fatalBytesDropped || 0,
         queueLen: this.queue ? this.queue.length : null,
         // why the read loop stopped (early stop = source died, e.g. single-slot 458)
         pumpExitReason: d.pumpExitReason, pumpExitRes: d.pumpExitRes,

@@ -2136,6 +2136,17 @@ class HomePage {
             'mp4';
         const providerTmdbId = parent.providerTmdbId || parent.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null;
         const titleId = parent.titleId || parent.title_id || data.titleId || null;
+        const fileAudioTracks = variant.audio_tracks_scope === 'file' || variant.audioTracksScope === 'file'
+            ? (variant.audio_tracks || variant.audioTracks || [])
+            : null;
+        const fileSubtitleTracks = variant.subtitle_tracks_scope === 'file' || variant.subtitleTracksScope === 'file'
+            ? (variant.subtitle_tracks || variant.subtitleTracks || [])
+            : null;
+        const fileAudioLanguages = fileAudioTracks
+            ? [...new Set(fileAudioTracks
+                .map(track => MediaUtils.normalizeLanguagePreference(track?.lang || track?.language || ''))
+                .filter(code => code && code !== 'und' && code !== 'unknown'))]
+            : null;
 
         return {
             ...parent,
@@ -2170,6 +2181,18 @@ class HomePage {
             tmdb_id: providerTmdbId,
             title_id: titleId,
             titleId,
+            // Never inherit a grouped title's absolute stream indices into a
+            // sibling provider file. Only explicitly file-scoped tracks survive.
+            audio_tracks: fileAudioTracks,
+            audioTracks: fileAudioTracks,
+            audio_tracks_scope: fileAudioTracks !== null ? 'file' : null,
+            audioTracksScope: fileAudioTracks !== null ? 'file' : null,
+            audio_languages: fileAudioLanguages,
+            audioLanguages: fileAudioLanguages,
+            subtitle_tracks: fileSubtitleTracks,
+            subtitleTracks: fileSubtitleTracks,
+            subtitle_tracks_scope: fileSubtitleTracks !== null ? 'file' : null,
+            subtitleTracksScope: fileSubtitleTracks !== null ? 'file' : null,
             tmdb,
             metadata: {
                 ...metadata,

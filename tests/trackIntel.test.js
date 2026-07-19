@@ -30,6 +30,7 @@ test('IR version: Persian audio + Persian burned-in subtitles', () => {
 });
 
 test('AR-SUBS: Arabic burned-in subtitles (no subtitle stream)', () => {
+    assert.strictEqual(audio('AR-SUBS - The Secret Agent (2025)', 'أفلام أجنبية 2025', false), null);
     assert.deepStrictEqual(sub('AR-SUBS - The Secret Agent (2025)', 'أفلام أجنبية 2025', false), { name: 'Arabic', type: 'burned-in' });
 });
 
