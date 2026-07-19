@@ -490,7 +490,7 @@ test('an exact unknown mono track clears every stale language display field', ()
   assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
 });
 
-test('a raw container language stays hidden until strict speech certification', () => {
+test('an exact probe language is visible while Whisper proof remains a separate status', () => {
   const context = { window: {}, console, setTimeout, clearTimeout };
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
   const page = Object.create(context.window.WatchPage.prototype);
@@ -506,6 +506,17 @@ test('a raw container language stays hidden until strict speech certification', 
   assert.strictEqual(pending[0].language, null);
   assert.strictEqual(page.content.audioLanguages, null);
   assert.strictEqual(page.content.audioLanguageValidationStatus, 'pending');
+
+  const probed = page.replaceExactContentAudioMetadata(
+    [{ index: 1, lang: 'ita', title: 'Italian', codec: 'aac' }],
+    ['ita'],
+    'probed'
+  );
+
+  assert.strictEqual(probed[0].lang, 'it');
+  assert.strictEqual(probed[0].language, 'it');
+  assert.deepStrictEqual(Array.from(page.content.audioLanguages), ['it']);
+  assert.strictEqual(page.content.audioLanguageValidationStatus, 'probed');
 
   const verified = page.replaceExactContentAudioMetadata(
     [{ index: 1, lang: 'eng', title: 'English', codec: 'aac' }],
@@ -658,6 +669,24 @@ test('playback reads the exact file cache before any single-title fallback', () 
     'series episodes must never reuse or overwrite parent-title track indices');
   assert.ok(src.includes('String(titleRow?.variant_external_id ?? "") === String(itemId)'),
     'codec-profile tracks must belong to the exact played file');
+});
+
+test('playback keeps exact probe labels while Whisper proof is still pending', () => {
+  const playback = fs.readFileSync(
+    path.join(__dirname, '..', 'supabase', 'functions', 'norva-playback', 'index.ts'),
+    'utf8'
+  );
+  const watch = fs.readFileSync(
+    path.join(__dirname, '..', 'public', 'js', 'pages', 'WatchPage.js'),
+    'utf8'
+  );
+
+  assert.ok(playback.includes('audioTracks,'));
+  assert.ok(playback.includes('? "verified"'));
+  assert.ok(playback.includes('? "probed"'));
+  assert.ok(!playback.includes('audioTracks.map((track) => ({ ...track, lang: null }))'));
+  assert.ok(watch.includes("status === 'probed' || status === 'probed_union'"));
+  assert.ok(watch.includes("['verified', 'verified_union', 'probed', 'probed_union']"));
 });
 
 test('catalog variants expose only exact file-scoped tracks', () => {

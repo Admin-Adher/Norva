@@ -133,15 +133,30 @@ test('gateway-selected audio index survives the edge response metadata', () => {
   assert.ok(response.includes('audio_stream_index: gateway.audioStreamIndex ?? null'));
 });
 
-test('tagged-language verification and long Whisper work are variant-safe', () => {
+test('tagged-language verification uses the fast basic detector and remains variant-safe', () => {
   const migration = read('supabase/migrations/20260719170000_variant_file_audio_crawler.sql');
-  const fleetMigration = read('supabase/migrations/20260719180000_dynamic_enrichment_fleet.sql');
+  const fastMigration = read('supabase/migrations/20260719210000_fast_audio_language_detection.sql');
   const playback = read('supabase/functions/norva-playback/index.ts');
   const gatewaySource = read('services/media-gateway/src/index.js');
   const suspects = between(
-    fleetMigration,
+    fastMigration,
     'create or replace function public.file_audio_tag_suspect_variants(',
     '\nrevoke all on function public.file_audio_tag_suspect_variants(',
+  );
+  const basicOutcome = between(
+    fastMigration,
+    'create or replace function public.record_catalog_file_audio_whisper_outcome(',
+    '\nrevoke all on function public.record_catalog_file_audio_whisper_outcome(',
+  );
+  const detectedUpsert = between(
+    fastMigration,
+    'create or replace function public.upsert_catalog_file_detected_tracks(',
+    '\nrevoke all on function public.upsert_catalog_file_detected_tracks(',
+  );
+  const detectedFanout = between(
+    fastMigration,
+    'create or replace function public.fanout_detected_file_tracks_to_users(',
+    '\nrevoke all on function public.fanout_detected_file_tracks_to_users(',
   );
   const verifier = between(
     playback,
@@ -156,25 +171,42 @@ test('tagged-language verification and long Whisper work are variant-safe', () =
   assert.ok(suspects.includes('cache.audio_tracks'));
   assert.ok(suspects.includes('p_title_ids uuid[] default null'));
   assert.ok(suspects.includes('title.id = any(p_title_ids)'));
+  assert.ok(suspects.includes('candidate.audio_lang_verified_at is null'));
+  assert.ok(suspects.includes('cache.audio_whisper_retry_at'));
+  assert.ok(suspects.includes('variant.audio_whisper_retry_at'));
   assert.ok(playback.includes('db.rpc("file_audio_tag_suspect_variants"'));
   assert.ok(verifier.includes('if (fileScoped && variantId)'));
   assert.ok(verifier.includes('.from("cloud_title_variants")'));
   assert.ok(verifier.includes('const persisted = await shareFileTracks('));
-  assert.ok(verifier.includes('db.rpc("record_catalog_file_audio_verification"'));
-  assert.ok(verifier.includes('&consensus=4&strict=1'));
-  assert.ok(verifier.includes('det?.confident !== true'));
-  assert.ok(verifier.includes('det?.verified !== true'));
-  assert.ok(verifier.includes('stringOr(det?.validationStatus, "") !== "verified"'));
-  assert.ok(verifier.includes('stringOr(det?.method, "") !== "whisper-strict-consensus-v4"'));
-  assert.ok(verifier.includes('Number(det?.consensus ?? 0) < 4'));
-  assert.ok(verifier.includes('Number(det?.sampleCount ?? 0) < 4'));
-  assert.ok(verifier.includes('Number(det?.rejectedSpeechSampleCount ?? -1) !== 0'));
-  assert.ok(verifier.includes('Number(det?.minSampleProbability ?? 0) < 0.95'));
-  assert.ok(verifier.includes('Number(det?.minSampleWordCount ?? words) < 12'));
-  assert.ok(verifier.includes('Number(det?.minSampleUniqueWordCount ?? 0) < 8'));
+  assert.ok(verifier.includes('db.rpc("record_catalog_file_audio_whisper_outcome"'));
+  assert.ok(!verifier.includes('record_catalog_file_audio_verification'));
+  assert.ok(!basicOutcome.includes('audio_lang_verified_at'));
+  assert.ok(!basicOutcome.includes('audio_lang_verification'));
+  assert.ok(basicOutcome.includes('audio_whisper_retry_at = p_retry_at'));
+  assert.ok(detectedUpsert.includes('cache.audio_lang_verified_at is not null'));
+  assert.ok(detectedUpsert.includes("jsonb_build_object(\n        'status', 'detected'"));
+  assert.ok(!detectedUpsert.includes("in ('validating', 'pending')"));
+  assert.ok(playback.includes('"upsert_catalog_file_detected_tracks"'));
+  assert.ok(playback.includes('"fanout_detected_file_tracks_to_users"'));
+  assert.ok(detectedFanout.includes('v_owner_verified'));
+  assert.ok(detectedFanout.includes('v_cache_verified or not v_owner_verified'));
+  assert.ok(detectedFanout.includes('and observation.audio_verified_at is null'));
+  assert.ok(verifier.includes('`${detectBase}?index=${t.index}&dur=20`'));
+  assert.ok(verifier.includes('AbortSignal.timeout(90_000)'));
+  assert.ok(verifier.includes('if (!lang || words < 4)'));
+  assert.ok(verifier.includes('method: "whisper-basic-v1"'));
+  assert.ok(verifier.includes('await recordDetection(classified'));
+  assert.ok(verifier.includes('status: classified ? "detected" : "pending"'));
+  assert.ok(!verifier.includes('recordVerification'));
+  assert.ok(!verifier.includes('strict=1'));
+  assert.ok(!verifier.includes('whisper-strict-consensus-v4'));
   assert.ok(verifier.includes('speechVerifiedAt'));
-  assert.ok(verifier.includes('.slice(0, 1)'));
-  assert.ok(playback.includes('if (verificationWork >= 1 || verified >= verifyLimit) break'));
+  assert.ok(verifier.includes('.slice(0, 2)'));
+  assert.ok(playback.includes('if (verificationWork >= verifyLimit) break'));
+  assert.ok(!playback.includes('if (verificationWork >= 1 || verified >= verifyLimit) break'));
+  assert.ok(playback.includes('speechTarget === "tagged" ? limit : Math.ceil(limit / 2)'));
+  assert.ok(playback.includes('), 2));'));
+  assert.ok(!playback.includes('explicitVerifyIds.length * 32'));
   assert.ok(playback.includes('verificationWork += 1'));
   assert.ok(playback.includes('p_title_ids: explicitVerifyIds.length ? explicitVerifyIds : null'));
   assert.ok(playback.includes('fileScoped: fileWhisperScope'));
@@ -184,9 +216,8 @@ test('tagged-language verification and long Whisper work are variant-safe', () =
   assert.ok(migration.includes('add column if not exists audio_lang_verification jsonb'));
   assert.ok(migration.includes('add column if not exists audio_lang_retry_at timestamptz'));
   assert.ok(migration.includes('create or replace function public.record_catalog_file_audio_verification('));
-  assert.ok(verifier.includes('status: verified ? "verified" : "pending"'));
   assert.ok(verifier.includes('pendingVerdictCount'));
-  assert.ok(verifier.includes('minWhisperProbability: 0.95'));
+  assert.ok(verifier.includes('minWords: 4'));
   assert.ok(gatewaySource.includes('const consensusNeeded ='));
   assert.ok(gatewaySource.includes('WHISPER_STRICT_MIN_PROBABILITY'));
   assert.ok(gatewaySource.includes('WHISPER_STRICT_MIN_WORDS'));
@@ -200,7 +231,7 @@ test('tagged-language verification and long Whisper work are variant-safe', () =
   assert.ok(gatewaySource.includes("validationStatus: 'verified'"));
 });
 
-test('unknown audio tracks use the same consensus and resumable hard budget', () => {
+test('unknown audio tracks use the fast basic detector with resumable bounded work', () => {
   const migration = read('supabase/migrations/20260719170000_variant_file_audio_crawler.sql');
   const playback = read('supabase/functions/norva-playback/index.ts');
   const detector = between(
@@ -209,22 +240,24 @@ test('unknown audio tracks use the same consensus and resumable hard budget', ()
     '\n// Verify TAGGED-but-contradictory tracks',
   );
 
-  assert.ok(detector.includes('.slice(0, 1)'));
-  assert.ok(detector.includes('&consensus=4&strict=1'));
-  assert.ok(detector.includes('det?.confident === true'));
-  assert.ok(detector.includes('det?.verified === true'));
-  assert.ok(detector.includes('stringOr(det?.validationStatus, "") === "verified"'));
-  assert.ok(detector.includes('stringOr(det?.method, "") === "whisper-strict-consensus-v4"'));
-  assert.ok(detector.includes('Number(det?.consensus ?? 0) >= 4'));
-  assert.ok(detector.includes('Number(det?.sampleCount ?? 0) >= 4'));
-  assert.ok(detector.includes('Number(det?.rejectedSpeechSampleCount ?? -1) === 0'));
-  assert.ok(detector.includes('Number(det?.minSampleProbability ?? 0) >= 0.95'));
-  assert.ok(detector.includes('Number(det?.minSampleUniqueWordCount ?? 0) >= 8'));
+  assert.ok(detector.includes('.slice(0, 2)'));
+  assert.ok(detector.includes('for (const track of pending)'));
+  assert.ok(detector.includes('`${detectBase}?index=${track.index}&dur=20`'));
+  assert.ok(detector.includes('AbortSignal.timeout(90_000)'));
+  assert.ok(detector.includes('method: "whisper-basic-v1"'));
+  assert.ok(detector.includes('det?.confident === true && words >= 4'));
+  assert.ok(detector.includes('track.lidVerdict = "detected"'));
+  assert.ok(detector.includes('status: completed ? "detected" : "pending"'));
+  assert.ok(!detector.includes('track.lidVerdict = "verified"'));
+  assert.ok(!detector.includes('strict=1'));
+  assert.ok(!detector.includes('whisper-strict-consensus-v4'));
   assert.ok(detector.includes('lidAttemptedAt'));
-  assert.ok(detector.includes('if (!res.ok) return'));
+  assert.ok(detector.includes('if (!res.ok) continue'));
   assert.ok(detector.includes('record_catalog_file_audio_whisper_outcome'));
-  assert.ok(playback.includes('if (verificationWork > 0)'));
-  assert.ok(playback.includes('}).slice(0, 1)'));
+  assert.ok(!playback.includes('if (verificationWork > 0)'));
+  assert.ok(playback.includes('}).slice(0, Math.max(1, Math.min(limit, 4)))'));
+  assert.ok(playback.includes('const fileExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()'));
+  assert.ok(playback.includes('expiresAt: fileExpiresAt'));
   assert.ok(migration.includes('audio_whisper_retry_at'));
   assert.ok(migration.includes('record_catalog_file_audio_whisper_outcome'));
 });

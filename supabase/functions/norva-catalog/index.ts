@@ -1408,6 +1408,10 @@ function titleAudioLanguages(title: JsonRecord): string[] {
   const raw = (title as { file_audio_languages?: unknown }).file_audio_languages;
   return canonicalFileLanguages(raw);
 }
+function titleVerifiedAudioLanguages(title: JsonRecord): string[] {
+  const raw = (title as { file_audio_verified_languages?: unknown }).file_audio_verified_languages;
+  return canonicalFileLanguages(raw);
+}
 // Exact union of soft-subtitle languages across provider files owned by this
 // user. Absolute subtitle stream indices remain file-scoped.
 function titleSubtitleLanguages(title: JsonRecord): string[] {
@@ -2217,14 +2221,17 @@ function attachFileLanguageObservation(variant: JsonRecord, observation: JsonRec
   const externalId = String(variant.external_id ?? "");
   if (!externalId || String(observation.file_external_id ?? "") !== externalId) return;
   if (observation.audio_observed === true) {
+    const observedLanguages = canonicalFileLanguages(observation.audio_languages);
     variant.__file_audio_observed = true;
-    variant.__file_audio_validation_status = observation.audio_verified_at ? "verified" : "pending";
+    variant.__file_audio_languages = observedLanguages;
+    variant.__file_audio_validation_status = observation.audio_verified_at
+      ? "verified"
+      : observedLanguages.length ? "probed" : "pending";
     variant.__file_audio_verification = recordOrEmpty(observation.audio_verification);
     if (observation.audio_verified_at) {
-      variant.__file_audio_languages = canonicalFileLanguages(observation.audio_languages);
       variant.__file_audio_verified_at = observation.audio_verified_at;
     } else {
-      variant.__file_audio_declared_languages = canonicalFileLanguages(observation.audio_languages);
+      variant.__file_audio_declared_languages = observedLanguages;
     }
   }
   if (observation.subtitle_observed === true) {
@@ -2294,21 +2301,28 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
         .find(Boolean);
       if (!row) continue;
       if (row.audio_probed_at) {
+        const cachedLanguages = canonicalFileLanguages(publicFileTrackLanguages(row.audio_tracks));
+        const alreadyVerified = Boolean(variant.__file_audio_verified_at);
         variant.__file_audio_tracks = Array.isArray(row.audio_tracks) ? row.audio_tracks : [];
         variant.__file_audio_probed_at = row.audio_probed_at;
         variant.__file_audio_observed = true;
-        variant.__file_audio_validation_status = row.audio_lang_verified_at ? "verified" : "pending";
-        variant.__file_audio_verification = recordOrEmpty(
-          row.audio_lang_verification ?? row.audio_whisper_verification,
-        );
         if (row.audio_lang_verified_at) {
-          variant.__file_audio_verified_at = row.audio_lang_verified_at;
-          variant.__file_audio_languages = canonicalFileLanguages(
-            publicFileTrackLanguages(row.audio_tracks),
+          variant.__file_audio_validation_status = "verified";
+          variant.__file_audio_verification = recordOrEmpty(
+            row.audio_lang_verification ?? row.audio_whisper_verification,
           );
-        } else {
-          variant.__file_audio_declared_languages = canonicalFileLanguages(
-            publicFileTrackLanguages(row.audio_tracks),
+          variant.__file_audio_verified_at = row.audio_lang_verified_at;
+          variant.__file_audio_languages = cachedLanguages;
+        } else if (!alreadyVerified) {
+          const observedLanguages = Array.isArray(variant.__file_audio_languages) &&
+              (variant.__file_audio_languages as unknown[]).length
+            ? canonicalFileLanguages(variant.__file_audio_languages)
+            : cachedLanguages;
+          variant.__file_audio_languages = observedLanguages;
+          variant.__file_audio_declared_languages = observedLanguages;
+          variant.__file_audio_validation_status = observedLanguages.length ? "probed" : "pending";
+          variant.__file_audio_verification = recordOrEmpty(
+            row.audio_lang_verification ?? row.audio_whisper_verification,
           );
         }
       }
@@ -2358,14 +2372,18 @@ async function attachFlatMediaFileLanguages(
       attachFileLanguageObservation(variant, observations.get(String(variant.id ?? "")));
       if (variant.__file_audio_observed === true) {
         const verified = Boolean(variant.__file_audio_verified_at);
-        item.audio_languages = verified ? variant.__file_audio_languages : [];
-        item.audioLanguages = verified ? variant.__file_audio_languages : [];
+        const observedLanguages = canonicalFileLanguages(
+          variant.__file_audio_languages ?? variant.__file_audio_declared_languages,
+        );
+        item.audio_languages = observedLanguages;
+        item.audioLanguages = observedLanguages;
         item.audio_languages_scope = "file";
         item.audioLanguagesScope = "file";
         item.audio_languages_observed = true;
         item.audioLanguagesObserved = true;
-        item.audio_language_validation_status = verified ? "verified" : "pending";
-        item.audioLanguageValidationStatus = verified ? "verified" : "pending";
+        const validationStatus = verified ? "verified" : observedLanguages.length ? "probed" : "pending";
+        item.audio_language_validation_status = validationStatus;
+        item.audioLanguageValidationStatus = validationStatus;
         item.audio_language_verified_at = variant.__file_audio_verified_at;
         item.audioLanguageVerifiedAt = variant.__file_audio_verified_at;
       }
@@ -2433,13 +2451,10 @@ async function listVariantsByTitleIds(
       variants.sort((left, right) => {
         const matches = (variant: JsonRecord) => {
           if (!requiredCanonicalIso) return false;
-          const audioVerified = Boolean(variant.__file_audio_verified_at);
-          const orderedTrackMatch = audioVerified &&
-            Array.isArray(variant.__file_audio_tracks) &&
+          const orderedTrackMatch = Array.isArray(variant.__file_audio_tracks) &&
             (variant.__file_audio_tracks as JsonRecord[]).some((track) =>
               canonicalFileLanguage(track?.lang ?? track?.language) === requiredCanonicalIso);
-          const tenantLanguageMatch = audioVerified &&
-            variant.__file_audio_observed === true &&
+          const tenantLanguageMatch = variant.__file_audio_observed === true &&
             Array.isArray(variant.__file_audio_languages) &&
             (variant.__file_audio_languages as unknown[]).some((language) =>
               canonicalFileLanguage(language) === requiredCanonicalIso);
@@ -2624,10 +2639,26 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   const posterUrl = preferSecureImage(title.poster_url ?? defaultVariant.poster_url, tmdbImageUrl(tmdb.poster_path, "w500"));
   const backdropUrl = preferSecureImage(title.backdrop_url, tmdbImageUrl(tmdb.backdrop_path, "w780"));
   const serializedDefaultVariant = titleVariantItem(defaultVariant);
-  const verifiedAudioLanguages = titleAudioLanguages(title);
+  const observedAudioLanguages = titleAudioLanguages(title);
+  const verifiedAudioLanguages = titleVerifiedAudioLanguages(title);
   const anyAudioObserved = variants.some((variant) => variant.__file_audio_observed === true);
-  const titleAudioValidationStatus = verifiedAudioLanguages.length
+  const expectedVariantCount = Math.max(0, Number(title.variant_count) || 0);
+  const strictlyVerifiedVariants = variants.filter((variant) =>
+    variant.__file_audio_observed === true &&
+    canonicalFileLanguages(variant.__file_audio_languages).length > 0 &&
+    Boolean(variant.__file_audio_verified_at)
+  );
+  // Two grouped files can share the same language code while only one carries
+  // strict proof. Comparing title-level unions would then incorrectly certify
+  // both. A grouped badge is strict only when every owned version is loaded,
+  // observed, and independently verified.
+  const everyOwnedVersionStrictlyVerified = observedAudioLanguages.length > 0 &&
+    expectedVariantCount > 0 &&
+    variants.length >= expectedVariantCount &&
+    strictlyVerifiedVariants.length >= expectedVariantCount;
+  const titleAudioValidationStatus = everyOwnedVersionStrictlyVerified
     ? "verified_union"
+    : observedAudioLanguages.length ? "probed_union"
     : anyAudioObserved ? "pending" : "not_analyzed";
   return {
     id: title.id,
@@ -2682,8 +2713,10 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     added_at: title.created_at ?? null,
     // Real detected languages (crawl/capture) so the client card badge shows the actual
     // audio language instead of guessing from the title. Already on the cloud_titles row.
-    audio_languages: verifiedAudioLanguages,
-    audioLanguages: verifiedAudioLanguages,
+    audio_languages: observedAudioLanguages,
+    audioLanguages: observedAudioLanguages,
+    audio_verified_languages: verifiedAudioLanguages,
+    audioVerifiedLanguages: verifiedAudioLanguages,
     audio_language_validation_status: titleAudioValidationStatus,
     audioLanguageValidationStatus: titleAudioValidationStatus,
     // Ordered per-track map so the player labels each engine audio stream by absolute
@@ -2803,20 +2836,17 @@ function titleVariantItem(variant: JsonRecord) {
   const rawAudioTracks = Array.isArray(variant.__file_audio_tracks)
     ? variant.__file_audio_tracks as JsonRecord[]
     : undefined;
-  // Keep stream indexes so the player can select tracks, but never turn a raw
-  // container tag into a user-visible language before strict speech validation.
-  const audioTracks = rawAudioTracks?.map((track) => {
-    if (audioVerified) return track;
-    const pendingTrack = { ...track, lang: null };
-    delete pendingTrack.language;
-    return pendingTrack;
-  });
+  // Exact-file probe tags remain useful catalogue evidence. Whisper verification
+  // upgrades/corrects them, but a stricter verifier must never erase the probe.
+  const audioTracks = rawAudioTracks;
   const subtitleTracks = Array.isArray(variant.__file_subtitle_tracks)
     ? variant.__file_subtitle_tracks
     : undefined;
-  const audioLanguages = audioVerified && variant.__file_audio_observed === true
-    ? (Array.isArray(variant.__file_audio_languages) ? variant.__file_audio_languages : [])
-    : variant.__file_audio_observed === true ? [] : undefined;
+  const audioLanguages = variant.__file_audio_observed === true
+    ? canonicalFileLanguages(
+      variant.__file_audio_languages ?? variant.__file_audio_declared_languages,
+    )
+    : undefined;
   const subtitleLanguages = variant.__file_subtitle_observed === true
     ? (Array.isArray(variant.__file_subtitle_languages) ? variant.__file_subtitle_languages : [])
     : undefined;
@@ -2858,9 +2888,13 @@ function titleVariantItem(variant: JsonRecord) {
     audio_languages_observed: audioLanguages !== undefined,
     audioLanguagesObserved: audioLanguages !== undefined,
     audio_language_validation_status: audioVerified ? "verified" :
-      variant.__file_audio_observed === true ? "pending" : "not_analyzed",
+      variant.__file_audio_observed === true && (audioLanguages?.length ?? 0) > 0
+        ? "probed"
+        : variant.__file_audio_observed === true ? "pending" : "not_analyzed",
     audioLanguageValidationStatus: audioVerified ? "verified" :
-      variant.__file_audio_observed === true ? "pending" : "not_analyzed",
+      variant.__file_audio_observed === true && (audioLanguages?.length ?? 0) > 0
+        ? "probed"
+        : variant.__file_audio_observed === true ? "pending" : "not_analyzed",
     audio_language_verified_at: variant.__file_audio_verified_at,
     audioLanguageVerifiedAt: variant.__file_audio_verified_at,
     audio_language_verification: recordOrEmpty(variant.__file_audio_verification),

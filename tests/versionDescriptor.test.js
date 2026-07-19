@@ -149,6 +149,72 @@ test('an unprobed language prefix remains pending instead of becoming a claim', 
     assert.strictEqual(desc(mk('EN - X')).headline, 'Audio pending');
 });
 
+test('missing, failed, and rejected validation states fail closed without prefix language guesses', () => {
+    for (const status of [undefined, '', 'failed', 'rejected', 'unknown']) {
+        const item = mk('DE - In the Hand of Dante');
+        if (status === undefined) delete item.audio_language_validation_status;
+        else item.audio_language_validation_status = status;
+
+        const d = desc(item);
+        assert.strictEqual(d.headline, 'Audio pending', `descriptor status=${String(status)}`);
+        assert.doesNotMatch(`${d.headline} ${d.meta}`, /Likely|German/i);
+        assert.strictEqual(
+            M.versionLanguageBadge(item, {}),
+            'Audio pending',
+            `badge status=${String(status)}`
+        );
+        assert.doesNotMatch(M.versionLabel(item, 'Provider'), /Likely|German/i);
+        assert.match(M.versionLabel(item, 'Provider'), /Audio pending/);
+        assert.strictEqual(M.audioLanguageValidationStatus(item), 'not_analyzed');
+    }
+});
+
+test('a probed exact-file language is displayable without claiming speech verification', () => {
+    for (const status of ['probed', 'probed_union']) {
+        const item = mk('DE - In the Hand of Dante', {
+            audio_language_validation_status: status,
+            audio_tracks_scope: 'file',
+            audio_probed_at: '2026-07-19T00:00:00.000Z',
+            audio_tracks: [{ index: 0, lang: 'deu' }]
+        });
+
+        const d = desc(item);
+        assert.strictEqual(d.headline, 'German', status);
+        assert.doesNotMatch(d.headline, /Likely/i);
+        assert.strictEqual(M.versionLanguageBadge(item, {}), 'German', status);
+        assert.strictEqual(
+            M.versionLanguageBadge(item, { preferredAudioLanguage: 'de' }),
+            'Audio DE',
+            status
+        );
+        assert.match(M.versionLabel(item, 'Provider'), /German/);
+        assert.doesNotMatch(M.versionLabel(item, 'Provider'), /Likely/);
+    }
+});
+
+test('verified status without an exact language payload never falls back to a prefix', () => {
+    const item = mk('DE - In the Hand of Dante', {
+        audio_language_validation_status: 'verified'
+    });
+    const d = desc(item);
+
+    assert.strictEqual(d.headline, 'Audio unknown');
+    assert.doesNotMatch(`${d.headline} ${d.meta}`, /Likely|German/i);
+    assert.strictEqual(M.versionLanguageBadge(item, {}), 'Audio unknown');
+    assert.doesNotMatch(M.versionLabel(item, 'Provider'), /Likely|German/i);
+});
+
+test('a verified title union remains displayable without consulting release-name prefixes', () => {
+    const item = mk('DE - In the Hand of Dante', {
+        audio_language_validation_status: 'verified_union',
+        audio_languages_scope: 'title',
+        audio_languages: ['deu', 'eng']
+    });
+
+    assert.strictEqual(M.versionLanguageBadge(item, {}), 'Multi: DE/EN');
+    assert.doesNotMatch(M.versionLanguageBadge(item, {}), /Likely/i);
+});
+
 test('Netflix and Nordic are never presented as observed audio', () => {
     const nf = desc(mk('NF - X'));
     assert.strictEqual(nf.headline, 'Audio pending');

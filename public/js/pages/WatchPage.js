@@ -3056,16 +3056,27 @@ class WatchPage {
         return status === 'verified' || status === 'verified_union';
     }
 
+    isAudioLanguageKnown() {
+        const status = String(
+            this.audioLanguageValidationStatus ||
+            this.content?.audioLanguageValidationStatus ||
+            this.content?.audio_language_validation_status ||
+            ''
+        ).toLowerCase();
+        return status === 'verified' || status === 'verified_union' ||
+            status === 'probed' || status === 'probed_union';
+    }
+
     getTrackLabel(track, fallback, type = 'track') {
         if (!track) return fallback;
         if (type === 'subtitle') return this.getSubtitleTrackLabel(track, fallback);
 
         const parts = [];
-        const languageVerified = type !== 'audio' || this.isAudioLanguageVerified();
-        const title = languageVerified && !this.isGenericTrackTitle(track.title, type) ? track.title : null;
+        const languageKnown = type !== 'audio' || this.isAudioLanguageKnown();
+        const title = languageKnown && !this.isGenericTrackTitle(track.title, type) ? track.title : null;
         // Full language name ("French", "Japanese") rather than the bare code ("FR"),
         // matching the card badge + the native mobile player.
-        const language = languageVerified ? this.getLanguageDisplayName(track.language) : null;
+        const language = languageKnown ? this.getLanguageDisplayName(track.language) : null;
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
         const channels = track.channels ? `${track.channels}ch` : null;
 
@@ -6323,7 +6334,8 @@ class WatchPage {
     replaceExactContentAudioMetadata(rawTracks, rawLanguages = [], validationStatus = 'pending') {
         if (!this.content) return null;
         const normalizedValidation = String(validationStatus || 'pending').toLowerCase();
-        const verified = normalizedValidation === 'verified' || normalizedValidation === 'verified_union';
+        const languageKnown = ['verified', 'verified_union', 'probed', 'probed_union']
+            .includes(normalizedValidation);
         const hasExactTracks = Array.isArray(rawTracks);
         const tracks = hasExactTracks
             ? rawTracks.map((track) => {
@@ -6332,12 +6344,12 @@ class WatchPage {
                 return {
                     ...(track && typeof track === 'object' ? track : {}),
                     index,
-                    lang: verified && language && language !== 'und' ? language : null,
-                    language: verified && language && language !== 'und' ? language : null,
+                    lang: languageKnown && language && language !== 'und' ? language : null,
+                    language: languageKnown && language && language !== 'und' ? language : null,
                 };
             }).filter((track) => Number.isInteger(track.index))
             : null;
-        const languages = hasExactTracks && verified
+        const languages = hasExactTracks && languageKnown
             ? Array.from(new Set([
                 ...(Array.isArray(rawLanguages) ? rawLanguages : []),
                 ...tracks.map((track) => track.lang),
@@ -6618,7 +6630,7 @@ class WatchPage {
     // 2-3 -> "Multi: FR/EN/JA", >3 -> "Multi". Returns null when nothing is detected,
     // so callers keep "Default"/"Audio" rather than fabricating a language.
     contentAudioLanguageLabel() {
-        if (!this.isAudioLanguageVerified()) return null;
+        if (!this.isAudioLanguageKnown()) return null;
         const variantCount = Number(
             this.content?.variantCount ||
             this.content?.variant_count ||
@@ -6628,12 +6640,10 @@ class WatchPage {
         const scope = String(this.content?.audioTracksScope || this.content?.audio_tracks_scope || '').toLowerCase();
         if (variantCount > 1 && scope !== 'file') return null;
         const audio = this.content?.audioLanguages || this.content?.audio_languages || null;
-        const version = this.content?.versionLanguages || this.content?.version_languages || null;
         const hasAudio = Array.isArray(audio) && audio.length;
-        const hasVersion = Array.isArray(version) && version.length;
-        if (!hasAudio && !hasVersion) return null;
+        if (!hasAudio) return null;
         try {
-            const label = window.MediaUtils?.audioLanguageBadge?.(audio || [], version || []);
+            const label = window.MediaUtils?.audioLanguageBadge?.(audio || [], []);
             return label || null;
         } catch (_) {
             return null;
@@ -6689,13 +6699,13 @@ class WatchPage {
         if (!a) {
             return this.contentAudioLanguageLabel() ||
                 this.playingAudioVersionLabel() ||
-                (this.isAudioLanguageVerified() ? 'Default' : 'Audio language pending');
+                (this.isAudioLanguageKnown() ? 'Default' : 'Audio language pending');
         }
         const parts = [];
         // PRIMARY: the real per-track language from get_vod_info. When the provider
         // omits it (language:""), fall back to the title's detected language so a
         // real-language file still reads "French · AAC · 5.1" instead of codec-only.
-        const lang = this.isAudioLanguageVerified()
+        const lang = this.isAudioLanguageKnown()
             ? (this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel() || this.playingAudioVersionLabel())
             : null;
         if (lang) parts.push(lang);
@@ -6724,7 +6734,7 @@ class WatchPage {
         // switchable track list. Show the title's detected language (matches the card
         // badge + the native mobile player) instead of a meaningless "Default".
         const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
-        const fallback = this.isAudioLanguageVerified() ? 'Default' : 'Audio language pending';
+        const fallback = this.isAudioLanguageKnown() ? 'Default' : 'Audio language pending';
         return [{ source: 'none', index: -1, label: contentLabel || fallback, active: true }];
     }
 

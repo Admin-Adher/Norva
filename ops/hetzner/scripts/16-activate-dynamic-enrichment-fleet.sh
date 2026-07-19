@@ -16,7 +16,7 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${NORVA_ENV_FILE:-$HERE/.env}"
 API_BASE="${NORVA_API_BASE:-https://api.norva.tv}"
-DYNAMIC_CRON_URL="$API_BASE/functions/v1/norva-source-sync/cron/enrichment-fleet?limit=4"
+DYNAMIC_CRON_URL="$API_BASE/functions/v1/norva-source-sync/cron/enrichment-fleet?limit=8"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing environment file: $ENV_FILE" >&2

@@ -76,8 +76,10 @@ test('source-sync dispatcher forwards claimed ownership, never static ids', () =
   assert.match(route, /mode: speechVerification \? "whisper" : "probe"/);
   assert.match(route, /target: subtitleProbe \? "subtitle" : undefined/);
   assert.match(route, /fallthrough: false/);
-  assert.match(route, /limit: speechVerification \? 1 : 4/);
+  assert.match(route, /limit: speechVerification \? 2 : 4/);
+  assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
   assert.match(route, /fileScope: true/);
+  assert.match(route, /concurrency: 1/);
   assert.match(route, /p_lease_seconds: 1200/);
   assert.match(route, /responseReceived/);
   assert.match(route, /db\.rpc\("catalog_enrichment_fleet_preflight"\)/);
@@ -91,9 +93,15 @@ test('source-sync dispatcher forwards claimed ownership, never static ids', () =
 
 test('generic cron replaces movie detection jobs but preserves subtitle pregen and series coverage', () => {
   const migration = read('supabase/migrations/20260719180000_dynamic_enrichment_fleet.sql');
+  const tuning = read('supabase/migrations/20260719210000_fast_audio_language_detection.sql');
   const activate = read('ops/hetzner/scripts/16-activate-dynamic-enrichment-fleet.sh');
   assert.match(migration, /'norva-dynamic-enrichment-fleet'/);
   assert.match(migration, /\/norva-source-sync\/cron\/enrichment-fleet\?limit=4/);
+  assert.doesNotMatch(tuning, /cron\.schedule\(/);
+  assert.doesNotMatch(tuning, /cron\.alter_job/);
+  assert.doesNotMatch(tuning, /update cron\.job/);
+  assert.match(tuning, /operational state owned by postgres/);
+  assert.match(activate, /enrichment-fleet\?limit=8/);
   assert.match(migration, /cron\.alter_job\(dynamic_job_id, active => false\)/);
   assert.match(activate, /command like '%\/norva-playback\/audio-backfill%'/);
   assert.match(activate, /command not like '%transcribe-whitelist%'/);
@@ -137,7 +145,7 @@ test('stale completion tokens cannot release a newer lease', () => {
   assert.deepStrictEqual(state, { claimToken: 'new', leaseUntil: 900, dispatchCount: 5 });
 });
 
-test('speech-heavy lanes keep strict certification from falling behind raw probes', () => {
+test('speech-heavy lanes keep language detection from falling behind raw probes', () => {
   const isSpeech = (dispatchCount) => [1, 2, 4].includes(dispatchCount % 6);
   const isOverview = (dispatchCount) => dispatchCount % 6 === 5;
   assert.deepStrictEqual(
@@ -169,6 +177,7 @@ test('drained audio lanes rotate promptly to subtitles before the full sweep res
     '\nasync function finishEnrichmentFleetClaim(',
   );
   assert.match(delay, /summary\.exhausted === true\) && lane < 5\) return 30/);
+  assert.match(delay, /Number\(summary\.processed\) > 0\) return 30/);
 
   const nextDelay = (exhausted, lane) => exhausted && lane < 5 ? 30 : 6 * 60 * 60;
   assert.deepStrictEqual([0, 1, 2].map((lane) => nextDelay(true, lane)), [30, 30, 30]);
@@ -184,6 +193,27 @@ test('drained audio lanes rotate promptly to subtitles before the full sweep res
   const finalLaneDelay = (priorLanesWorked) => priorLanesWorked ? 30 : 6 * 60 * 60;
   assert.strictEqual(finalLaneDelay([4, 4, 4, 4].some((processed) => processed > 0)), 30);
   assert.strictEqual(finalLaneDelay([0, 0, 0, 0].some((processed) => processed > 0)), 6 * 60 * 60);
+});
+
+test('throughput tuning raises the fleet ceiling and speech batch without intra-provider concurrency', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const activation = read('ops/hetzner/scripts/16-activate-dynamic-enrichment-fleet.sh');
+  const route = between(
+    sourceSync,
+    'async function finishEnrichmentFleetClaim(',
+    '\nasync function cronRefreshDue(',
+  );
+
+  // Real throughput also includes provider/extraction time and must be measured
+  // after deployment. These are the structural ceilings: twice as many
+  // independent claims and twice as many bounded files per speech claim.
+  assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
+  assert.match(activation, /enrichment-fleet\?limit=8/);
+  assert.match(route, /limit: speechVerification \? 2 : 4/);
+  assert.match(route, /concurrency: 1/);
+  assert.match(route, /speechVerification \? 540_000 : 105_000/);
+  assert.match(route, /p_lease_seconds: 1200/);
+  assert.doesNotMatch(activation, /delete from public\.catalog_enrichment_dispatch_leases/);
 });
 
 test('fleet audit metrics describe only the explicit row set actually attempted', () => {

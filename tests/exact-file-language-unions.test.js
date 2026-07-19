@@ -142,6 +142,35 @@ test('title recompute invalidates facets only when exact arrays change', () => {
   assert.ok(!hydrate.includes("set refreshed_at = 'epoch'::timestamptz"));
 });
 
+test('probe evidence and speech verification remain separate catalogue facts', () => {
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'supabase', 'migrations', '20260719200000_restore_audio_probe_continuity.sql'),
+    'utf8'
+  );
+  const catalog = fs.readFileSync(
+    path.join(__dirname, '..', 'supabase', 'functions', 'norva-catalog', 'index.ts'),
+    'utf8'
+  );
+
+  assert.ok(migration.includes('file_audio_verified_languages'));
+  assert.match(migration, /\nbegin;\s*\n/);
+  assert.match(migration, /commit;\s*$/);
+  assert.ok(migration.includes('where variant_id = default_variant_id'));
+  assert.ok(!migration.includes('or matching_count = 1'));
+  assert.ok(!migration.includes('cloud_titles_file_audio_verified_languages_gin'));
+  assert.ok(migration.includes('and observation.audio_verified_at is not null'));
+  assert.ok(migration.includes('Audio facet continuity check failed'));
+  assert.ok(migration.includes('file_audio_verified_languages <@ title.file_audio_languages'));
+  assert.ok(catalog.includes('? "verified"'));
+  assert.ok(catalog.includes(': observedLanguages.length ? "probed" : "pending"'));
+  assert.ok(catalog.includes('? "verified_union"'));
+  assert.ok(catalog.includes(': observedAudioLanguages.length ? "probed_union"'));
+  assert.ok(catalog.includes('strictlyVerifiedVariants.length >= expectedVariantCount'));
+  assert.ok(catalog.includes('variants.length >= expectedVariantCount'));
+  assert.ok(catalog.includes('audio_languages: observedAudioLanguages'));
+  assert.ok(catalog.includes('audio_verified_languages: verifiedAudioLanguages'));
+});
+
 test('all exact-language RPC callers pass variant and file identity', () => {
   const migration = read('supabase/migrations/20260719130000_exact_file_language_unions.sql');
   const catalog = read('supabase/functions/norva-catalog/index.ts');

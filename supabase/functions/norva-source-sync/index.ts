@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
       // every active ready source on every tick, including catalogues uploaded
       // by users who register after this code is deployed.
       if (segments[1] === "enrichment-fleet") {
-        const limit = boundedInt(url.searchParams.get("limit"), 4, 1, 8);
+        const limit = boundedInt(url.searchParams.get("limit"), 8, 1, 8);
         const dryRun = url.searchParams.get("dryRun") === "1";
         return json(req, await cronEnrichmentFleet(supabase, limit, dryRun));
       }
@@ -1008,7 +1008,10 @@ function enrichmentFleetNextDelay(summary: JsonRecord, lane: number): number {
   if ((skipped === "exhausted" || summary.exhausted === true) && lane < 5) return 30;
   if (skipped === "exhausted") return 6 * 60 * 60;
   if (summary.exhausted === true) return 6 * 60 * 60;
-  if (Number(summary.processed) > 0) return 90;
+  // A successful bounded lane releases both the user and provider leases.
+  // Thirty seconds makes it eligible for the next minute tick without ever
+  // allowing two jobs for that account/provider to overlap.
+  if (Number(summary.processed) > 0) return 30;
   return 5 * 60;
 }
 
@@ -1108,19 +1111,18 @@ async function runEnrichmentFleetClaim(
   backfillToken: string,
 ) {
   const controller = new AbortController();
-  // Three of every six claims are speech-verification lanes. Raw ffprobe work
-  // handles four files at once while strict speech handles one, so the former
-  // 3-probe/1-speech weighting made the unverified backlog grow permanently.
-  // Two tagged lanes catch wrong container labels (French->Italian); one
-  // untagged lane resolves generic Audio 2/und tracks. The remaining lanes
-  // probe new files, extract subtitles, and gap-fill provider synopses.
+  // Three of every six claims are speech-verification lanes. Two tagged lanes
+  // catch wrong container labels (French->Italian); one untagged lane resolves
+  // generic Audio 2/und tracks. The remaining lanes probe new files, extract
+  // subtitles, and gap-fill provider synopses.
   const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 6;
   const subtitleProbe = lane === 3;
   const speechVerification = lane === 1 || lane === 2 || lane === 4;
   const providerOverview = lane === 5;
-  // Strict speech validation can consume six separated 30s samples. Each
-  // sample has a bounded 30s extraction + 60s Whisper budget, so the dispatcher
-  // must outlive the 540s worst case instead of orphaning a valid result at 105s.
+  // Fast language detection still owns a provider connection and is therefore
+  // sequential within one source. Two files per claim materially improve
+  // throughput while the 540s request budget and 1200s distributed lease keep
+  // a slow/silent multi-track file from overlapping the next provider job.
   const timeout = setTimeout(
     () => controller.abort(),
     speechVerification ? 540_000 : 105_000,
@@ -1166,10 +1168,10 @@ async function runEnrichmentFleetClaim(
           speechTarget,
           target: subtitleProbe ? "subtitle" : undefined,
           fileScope: true,
-          // Exact-file probing is sequential. Keep a single dispatch below the
-          // request budget so fetch cancellation cannot routinely orphan a
-          // 25-file worker; scale across independent providers, not within one.
-          limit: speechVerification ? 1 : 4,
+          // Both paths stay sequential inside a provider account. Speech uses
+          // a two-file batch; fleet-wide scaling happens across independently
+          // leased users/providers, never via intra-provider concurrency.
+          limit: speechVerification ? 2 : 4,
           concurrency: 1,
           // Lanes are explicit and individually bounded. fallthrough would
           // append a 15-series + 10-subtitle + Whisper chain after an empty

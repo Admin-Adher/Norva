@@ -2848,10 +2848,15 @@ class MoviesPage {
             movie.audio_language_validation_status ||
             (fileAudioTracks !== null ? 'pending' : 'not_analyzed')
         ).toLowerCase();
+        const audioLanguageKnown = ['verified', 'verified_union', 'probed', 'probed_union']
+            .includes(audioLanguageValidationStatus);
         const fileAudioLanguages = fileAudioTracks &&
-            ['verified', 'verified_union'].includes(audioLanguageValidationStatus)
-            ? [...new Set(fileAudioTracks
-                .map(track => MediaUtils.normalizeLanguagePreference(track?.lang || track?.language || ''))
+            audioLanguageKnown
+            ? [...new Set([
+                ...(movie.audioLanguages || movie.audio_languages || []),
+                ...fileAudioTracks
+                    .map(track => track?.lang || track?.language || '')
+            ].map(code => MediaUtils.normalizeLanguagePreference(code))
                 .filter(code => code && code !== 'und' && code !== 'unknown'))]
             : null;
         const versionList = (versions || [movie]).map(v => ({

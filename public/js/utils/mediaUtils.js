@@ -782,12 +782,35 @@ const MediaUtils = (() => {
         return Array.isArray(tracks) ? tracks : null;
     }
 
+    const DISPLAYABLE_AUDIO_LANGUAGE_STATUSES = new Set([
+        'verified',
+        'verified_union',
+        'probed',
+        'probed_union'
+    ]);
+
     function audioLanguageValidationStatus(item = {}) {
-        return String(
+        const status = String(
             item.audioLanguageValidationStatus ||
             item.audio_language_validation_status ||
             ''
-        ).toLowerCase();
+        ).toLowerCase().trim();
+        if (DISPLAYABLE_AUDIO_LANGUAGE_STATUSES.has(status)) return status;
+        if (status === 'pending' || status === 'not_analyzed') return status;
+        // Missing and unknown states fail closed. In particular, a failed or
+        // rejected speech analysis must never revive a release-name guess.
+        return 'not_analyzed';
+    }
+
+    function hasDisplayableAudioLanguage(item = {}) {
+        return DISPLAYABLE_AUDIO_LANGUAGE_STATUSES.has(
+            typeof item === 'string' ? item : audioLanguageValidationStatus(item)
+        );
+    }
+
+    function hasVerifiedAudioLanguage(item = {}) {
+        const status = typeof item === 'string' ? item : audioLanguageValidationStatus(item);
+        return status === 'verified' || status === 'verified_union';
     }
 
     // Distinct ISO audio languages from the title's REAL ffprobe probe (audio_tracks[].lang) — the
@@ -808,13 +831,15 @@ const MediaUtils = (() => {
         // Treat them only as a soft aggregate; exact confirmation requires a
         // file-scoped map (legacy unscoped single-file titles remain safe).
         if ((scope && scope !== 'file') || (!scope && variantCount > 1)) return null;
-        if (validation !== 'verified' && validation !== 'verified_union') return null;
+        if (!hasDisplayableAudioLanguage(validation)) return null;
         const raw = item.audio_tracks || item.audioTracks;
         if (!Array.isArray(raw)) return null;
         const langs = [];
         for (const track of raw) {
-            const lang = String((track && (track.lang || track.language)) || '').toLowerCase().trim();
-            if (/^[a-z]{2,3}$/.test(lang)) langs.push(lang);
+            const lang = normalizeLanguagePreference(
+                (track && (track.lang || track.language)) || ''
+            );
+            if (lang && lang !== 'und' && lang !== 'unknown') langs.push(lang);
         }
         return langs;
     }
@@ -839,7 +864,7 @@ const MediaUtils = (() => {
 
         const tracks = tracksFromCodecProfile(item, kind);
         if (Array.isArray(tracks)) {
-            if (kind === 'audio' && !['verified', 'verified_union'].includes(audioLanguageValidationStatus(item))) {
+            if (kind === 'audio' && !hasDisplayableAudioLanguage(item)) {
                 return { requested: language, state: 'unknown', confidence: 'unknown', source: 'container_tag', tag: null };
             }
             const trackLanguages = tracks.flatMap(track => languageArrayFromValue(track.language || track.lang || track.title || track.label));
@@ -926,20 +951,21 @@ const MediaUtils = (() => {
 
     function versionLanguageBadge(item, prefs = {}) {
         const validation = audioLanguageValidationStatus(item);
-        if (validation === 'pending' || validation === 'not_analyzed') return 'Audio pending';
+        if (!hasDisplayableAudioLanguage(validation)) return 'Audio pending';
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
         let subtitleCandidate = '';
-        const hasRequestedLanguage = Boolean(analysis.audio.requested || (analysis.subtitle.requested && analysis.subtitle.requested !== 'none'));
         if (analysis.audio.requested) {
-            if (analysis.audio.state === 'confirmed') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} confirmed`;
-            else if (analysis.audio.confidence === 'probable') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} likely`;
+            if (analysis.audio.state === 'confirmed') {
+                audioCandidate = hasVerifiedAudioLanguage(validation)
+                    ? `Audio ${languageDisplay(analysis.audio.requested)} confirmed`
+                    : `Audio ${languageDisplay(analysis.audio.requested)}`;
+            }
             else if (analysis.audio.state === 'confirmed_absent') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} unavailable`;
         }
         if (analysis.subtitle.requested && analysis.subtitle.requested !== 'none') {
             if (analysis.subtitle.state === 'confirmed') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles confirmed`;
-            else if (analysis.subtitle.confidence === 'probable') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles likely`;
             else if (analysis.subtitle.state === 'confirmed_absent') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles unavailable`;
         }
         if (analysis.audio.requested === 'original' && subtitleCandidate) {
@@ -949,32 +975,17 @@ const MediaUtils = (() => {
         }
         const firstCandidate = candidates.filter(Boolean)[0];
         if (firstCandidate) return firstCandidate;
-        // A leading region/language prefix on THIS variant's raw title ("DK - ", "IR - ",
-        // "NO - ") names the language of THIS dub — a per-variant signal. It outranks the
-        // probed audio_languages, which is stored at the TITLE level and, when a provider
-        // groups several different-language dubs under one title, leaks a sibling dub's
-        // language (e.g. the French "Mon ninja et moi" stamping {fr} onto the whole Ternet
-        // Ninja group, so the Danish/Norwegian/Persian panels wrongly read "French").
-        const rawForPrefix = String(item.raw_title || item.rawTitle || item.name || item.title || '')
-            .replace(/[▎▏▍▌│┃┆┊｜]/g, ' - '); // box-bar panels ("DK ▎ …") → hyphen so the prefix parser sees it
-        // Only a DASH/BAR-separated leading code is the IPTV region convention ("DK - ", "IR - ").
-        // A colon ("It: Chapter Two" → not Italian) or slash is normal title punctuation, not a
-        // region prefix — never let it override the probed audio.
-        const prefixLang = /^\s*[a-z0-9+]{2,6}\s*[-–—]\s+/i.test(rawForPrefix)
-            ? parseLeadingRegionTag(rawForPrefix)?.audioLang
-            : null;
-        if (prefixLang) return `Likely ${languageDisplayFull(prefixLang)}`;
-        // Real detected languages outrank title-parsing (the crawl fills these).
-        const detected = ['verified', 'verified_union'].includes(validation)
-            ? audioLanguageBadge(
-                item.audioLanguages || item.audio_languages,
-                item.versionLanguages || item.version_languages
-            )
-            : '';
+        // Only an exact, displayable probe/verification payload may name audio.
+        // Provider prefixes and version tags remain metadata, never evidence.
+        const probed = probedAudioLanguages(item);
+        const detected = audioLanguageBadge(
+            Array.isArray(probed) && probed.length
+                ? probed
+                : (item.audioLanguages || item.audio_languages),
+            []
+        );
         if (detected) return detected;
-        const parsed = parseVersionInfo(item.name || item.title || item.raw_title || item.rawTitle);
-        if (parsed.languageSummary) return parsed.languageSummary;
-        return hasRequestedLanguage ? 'Language not verified' : '';
+        return 'Audio unknown';
     }
 
     /**
@@ -1114,9 +1125,11 @@ const MediaUtils = (() => {
         const parts = [];
         if (sourceName) parts.push(sourceName);
         if (v.quality) parts.push(v.quality);
-        if (v.languageSummary || v.language) parts.push(v.languageSummary || v.language);
+        // The picker follows the same exact-evidence contract as cards. Parsed
+        // release-name prefixes may describe a market/category, not the soundtrack.
+        parts.push(versionLanguageBadge(item, {}));
         if (item.container_extension) parts.push(item.container_extension);
-        return parts.join(' - ') || 'Version';
+        return parts.filter(Boolean).join(' - ') || 'Version';
     }
 
     // === Filter persistence ===
@@ -1601,7 +1614,7 @@ const MediaUtils = (() => {
         if (scope !== 'file' || !Array.isArray(direct)) {
             return { languages: [], known: false, source: 'none' };
         }
-        if (isAudio && audioLanguageValidationStatus(item) !== 'verified') {
+        if (isAudio && !hasDisplayableAudioLanguage(item)) {
             return { languages: [], known: false, pending: true, source: 'speech-validation' };
         }
         return {
@@ -1701,15 +1714,15 @@ const MediaUtils = (() => {
                     : audioLanguageState.source;
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
         const prefix = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
-        const likelyAudio = prefix && prefix.audioLang ? languageDisplayFull(prefix.audioLang) : '';
+        const prefixAudioLabel = prefix && prefix.audioLang ? languageDisplayFull(prefix.audioLang) : '';
 
         // A version card represents one provider FILE. Lead with that file's
-        // observed soundtrack. Prefix/category/platform text is only a clearly
-        // marked fallback; "Netflix" and "Arabic subtitles" are not audio.
-        const headline = audioValidation === 'pending' || audioValidation === 'not_analyzed'
+        // exact observed soundtrack. Prefix/category/platform text is metadata,
+        // never audio evidence; "Netflix" and "Arabic subtitles" are not audio.
+        const headline = !hasDisplayableAudioLanguage(audioValidation)
             ? 'Audio pending'
-            : observedAudio || (likelyAudio ? `Likely ${likelyAudio}` : 'Audio unknown');
-        const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== likelyAudio
+            : observedAudio || 'Audio unknown';
+        const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
             ? marketLabel
             : '';
         const metaParts = [subtitleLabel, inferredMarket, provider, container];

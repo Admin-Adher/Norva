@@ -556,10 +556,12 @@ async function createPlaybackSession(
           url: pipe.url,
           tokenExpiresAt: expiresAt,
           ...(audioTracks.length ? {
-            audioTracks: audioLanguageVerified
-              ? audioTracks
-              : audioTracks.map((track) => ({ ...track, lang: null })),
-            audioLanguageValidationStatus: audioLanguageVerified ? "verified" : "pending",
+            audioTracks,
+            audioLanguageValidationStatus: audioLanguageVerified
+              ? "verified"
+              : audioTracks.some((track) => Boolean(stringOrNull(track.lang)))
+                ? "probed"
+                : "pending",
             audioLanguageVerifiedAt,
             audioLanguageVerification,
           } : {}),
@@ -2400,6 +2402,7 @@ async function shareFileTracks(
   hasAudio: boolean,
   hasSubtitle: boolean,
   audioValidationWrite = false,
+  audioDetectionWrite = false,
 ): Promise<boolean> {
   if (!serverHost || !externalId || (!hasAudio && !hasSubtitle)) return false;
   const args = {
@@ -2412,11 +2415,19 @@ async function shareFileTracks(
     p_has_subtitle: hasSubtitle,
   };
   try {
-    await db.rpc(
-      audioValidationWrite ? "upsert_catalog_file_validated_tracks" : "upsert_catalog_file_tracks",
+    const upsertRpc = audioValidationWrite
+      ? "upsert_catalog_file_validated_tracks"
+      : audioDetectionWrite
+      ? "upsert_catalog_file_detected_tracks"
+      : "upsert_catalog_file_tracks";
+    const { error } = await db.rpc(
+      upsertRpc,
       args,
     );
-  } catch (_) { /* best-effort global cache */ }
+    if (error) return false;
+  } catch (_) {
+    return false;
+  }
   // Fanout must use the canonical row after the upsert. Once speech validation
   // corrected a bad container tag, a later raw ffprobe may still report that
   // stale tag; forwarding the raw arguments would re-poison every owner even
@@ -2441,7 +2452,10 @@ async function shareFileTracks(
     }
   } catch (_) { /* rolling migration fallback uses the submitted map */ }
   try {
-    const { data, error } = await db.rpc("fanout_file_tracks_to_users", canonicalArgs);
+    const fanoutRpc = audioDetectionWrite
+      ? "fanout_detected_file_tracks_to_users"
+      : "fanout_file_tracks_to_users";
+    const { data, error } = await db.rpc(fanoutRpc, canonicalArgs);
     return !error && Number(data) > 0;
   } catch (_) {
     return false;
@@ -2534,9 +2548,11 @@ async function detectUntaggedAudioLanguages(opts: {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
   const unknownTracks = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index));
   if (!unknownTracks.length) return;
-  // Strict consensus already opens at least four bounded clips. Persist one per-track cursor
-  // per invocation so the Edge/provider budget cannot grow with track count.
-  const pending = unknownTracks.filter((t) => !t.lidAttemptedAt).slice(0, 1);
+  // The proven basic detector sweeps bounded offsets inside the gateway and stops on the first
+  // clear 20s speech window. Two tracks per file keep a two-file fleet claim inside its 540s
+  // request budget even when every gateway call reaches the 90s timeout. Per-track cursors make
+  // larger multi-audio files resumable without forcing strict multi-window consensus.
+  const pending = unknownTracks.filter((t) => !t.lidAttemptedAt).slice(0, 2);
 
   // Gateway byte-pipe token → derive the /detect-language base from the /raw URL. The gateway
   // extracts a WAV per track, runs whisper.cpp + a transcript detector locally (no paid API,
@@ -2546,37 +2562,31 @@ async function detectUntaggedAudioLanguages(opts: {
     try {
       const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
       const detectBase = pipe.url.replace("/raw/", "/detect-language/");
-      const track = pending[0];
-      const res = await fetch(
-        `${detectBase}?index=${track.index}&dur=30&consensus=4&strict=1`,
-        { signal: AbortSignal.timeout(480_000) },
-      );
-      // Transport/provider failures are not observations. Leave the cursor due
-      // instead of suppressing this unknown track for 30 days.
-      if (!res.ok) return;
-      const det = await res.json().catch(() => null) as JsonRecord | null;
-      const lang = normalizeIsoLang(stringOrNull(det?.language));
-      const words = Number(det?.wordCount ?? 0);
-      track.lidAttemptedAt = nowIso;
-      if (
-        lang &&
-        det?.confident === true &&
-        det?.verified === true &&
-        stringOr(det?.validationStatus, "") === "verified" &&
-        stringOr(det?.method, "") === "whisper-strict-consensus-v4" &&
-        Number(det?.consensus ?? 0) >= 4 &&
-        Number(det?.sampleCount ?? 0) >= 4 &&
-        Number(det?.rejectedSpeechSampleCount ?? -1) === 0 &&
-        Number(det?.minSampleProbability ?? 0) >= 0.95 &&
-        Number(det?.minSampleWordCount ?? words) >= 12 &&
-        Number(det?.minSampleUniqueWordCount ?? 0) >= 8
-      ) {
-        track.lang = lang;
-        track.lidVerdict = "verified";
-        track.speechVerifiedAt = nowIso;
-        track.speechVerdict = "detected";
-      } else {
-        track.lidVerdict = "pending";
+      for (const track of pending) {
+        try {
+          const res = await fetch(
+            `${detectBase}?index=${track.index}&dur=20`,
+            { signal: AbortSignal.timeout(90_000) },
+          );
+          // Transport/provider failures are not observations. Leave only this track due instead
+          // of suppressing it for the retry window; another track may still be readable.
+          if (!res.ok) continue;
+          const det = await res.json().catch(() => null) as JsonRecord | null;
+          const lang = normalizeIsoLang(stringOrNull(det?.language));
+          const words = Number(det?.wordCount ?? 0);
+          track.lidAttemptedAt = nowIso;
+          // Keep the old fast one-window detector, but never publish its final
+          // "best effort" from a silent/music sample containing fewer than
+          // four words.
+          if (lang && det?.confident === true && words >= 4) {
+            track.lang = lang;
+            track.lidVerdict = "detected";
+          } else {
+            track.lidVerdict = "pending";
+          }
+        } catch (_) {
+          // Best-effort per track: a transient failure keeps this exact cursor retryable.
+        }
       }
     } catch (_) {
       return;
@@ -2605,6 +2615,7 @@ async function detectUntaggedAudioLanguages(opts: {
       [],
       true,
       false,
+      false,
       true,
     );
     // Do not remove the candidate from the queue until the exact-file cache and
@@ -2625,7 +2636,12 @@ async function detectUntaggedAudioLanguages(opts: {
     try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
   }
   if (!fileScoped) {
-    try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false, true); } catch (_) { /* best-effort */ }
+    try {
+      await shareFileTracks(
+        db, serverHost, itemType, fileExternalId, enriched, [],
+        true, false, false, true,
+      );
+    } catch (_) { /* best-effort */ }
   }
   if (!complete) return;
 
@@ -2642,14 +2658,11 @@ async function detectUntaggedAudioLanguages(opts: {
         p_attempted_at: nowIso,
         p_retry_at: completed ? null : retryAt,
         p_provenance: {
-          method: "whisper-strict-consensus-v4",
-          status: completed ? "verified" : "pending",
-          consensus: 4,
-          sampleCount: 4,
-          allConfiguredWindowsScanned: true,
-          minWhisperProbability: 0.95,
-          minWordsPerSample: 12,
-          minUniqueWordsPerSample: 8,
+          method: "whisper-basic-v1",
+          status: completed ? "detected" : "pending",
+          sampleDurationSeconds: 20,
+          consensus: 1,
+          acceptance: "gateway-confident-language",
           trackCount: unknownTracks.length,
           pendingCount,
           attemptedAt: nowIso,
@@ -2671,8 +2684,8 @@ async function detectUntaggedAudioLanguages(opts: {
 // and whisper LID only ever ran on UNTAGGED tracks, so a wrong tag was permanent and
 // user-visible (player audio menu prefers cloud audio_tracks; language filters use
 // audio_languages). This listens to the ACTUAL speech via the gateway's whisper.cpp and
-// rewrites the track lang only after four separated, high-confidence speech windows agree.
-// Returns "corrected" | "confirmed" | "pending" — or null on a TRANSIENT failure (byte-pipe
+// rewrites the track lang after the basic detector finds a clear speech window (at least 4 words).
+// Returns "corrected" | "detected" | "pending" — or null on a TRANSIENT failure (byte-pipe
 // down, every clip 503/timeout), which must NOT mark the title verified (retry next tick).
 // A non-verdict is a retryable "pending" state, never a guessed language.
 async function verifyTaggedAudioLanguages(opts: {
@@ -2695,7 +2708,7 @@ async function verifyTaggedAudioLanguages(opts: {
   expiresAt: string;
   variantId?: string;
   fileScoped?: boolean;
-}): Promise<"corrected" | "confirmed" | "pending" | "partial" | null> {
+}): Promise<"corrected" | "detected" | "pending" | "partial" | null> {
   const {
     db, runtimeConfig, userId, targetUrl, audioTracks, suspectLangs, titleId,
     tmdbId, serverHost, itemType, fileExternalId, expiresAt, variantId,
@@ -2703,47 +2716,43 @@ async function verifyTaggedAudioLanguages(opts: {
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
   const nowIso = new Date().toISOString();
-  const recordVerification = async (
-    verified: boolean,
+  const recordDetection = async (
+    completed: boolean,
     provenance: JsonRecord,
     extra: JsonRecord = {},
   ) => {
-    const retryAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    const detected = stringOr(provenance.status, "") === "detected";
+    const retryAt = new Date(
+      Date.now() + (detected ? 90 : 1) * 24 * 3600 * 1000,
+    ).toISOString();
     try {
       if (fileScoped && variantId) {
-        await db.rpc("record_catalog_file_audio_verification", {
+        const { data, error } = await db.rpc("record_catalog_file_audio_whisper_outcome", {
           p_server_host: serverHost,
           p_item_type: itemType,
           p_external_id: fileExternalId,
-          p_verified: verified,
-          p_verified_at: nowIso,
-          p_retry_at: verified ? null : retryAt,
+          p_completed: completed,
+          p_attempted_at: nowIso,
+          // A completed basic detection is deliberately revisited after 90
+          // days, but it never creates or clears strict verification proof.
+          p_retry_at: retryAt,
           p_provenance: provenance,
         });
-        const { data: localMarked, error: localError } = await db.rpc(
-          "mark_cloud_title_file_audio_verification",
-          {
-            p_user_id: userId,
-            p_variant_id: variantId,
-            p_file_external_id: fileExternalId,
-            p_verified: verified,
-            p_verified_at: nowIso,
-            p_provenance: provenance,
-          },
-        );
-        // Rolling-migration/cache-miss fallback remains exact-tenant scoped.
-        if (localError || localMarked !== true) {
+        // Rolling-migration/cache-miss fallback remains exact-tenant scoped
+        // and only advances the basic-detector cursor. In particular it must
+        // never null audio_lang_verified_at from a stronger historical proof.
+        if (error || data !== true) {
           await db.from("cloud_title_variants")
-            .update(verified
-              ? { audio_lang_verified_at: nowIso, audio_lang_verify_retry_at: null }
-              : { audio_lang_verified_at: null, audio_lang_verify_retry_at: retryAt })
+            .update(completed
+              ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: retryAt }
+              : { audio_whisper_retry_at: retryAt })
             .eq("user_id", userId).eq("id", variantId);
         }
-      } else if (verified) {
-        await db.from("cloud_titles").update({ audio_lang_verified_at: nowIso, ...extra })
-          .eq("user_id", userId).eq("id", titleId);
-      } else if (Object.keys(extra).length) {
-        await db.from("cloud_titles").update(extra)
+      } else {
+        await db.from("cloud_titles").update({
+          ...extra,
+          ...(completed ? { whisper_attempted_at: nowIso } : {}),
+        })
           .eq("user_id", userId).eq("id", titleId);
       }
     } catch (_) { /* best-effort marker */ }
@@ -2751,12 +2760,10 @@ async function verifyTaggedAudioLanguages(opts: {
   const taggedTracks = audioTracks.filter(
     (t) => t.lang && suspectLangs.includes(t.lang) && Number.isInteger(t.index),
   );
-  // Large multi-audio releases are verified over several bounded jobs. The
-  // per-track cursor is stored only until the whole file has been sampled.
-  // One track is already at least four provider reads under strict consensus. Keep a hard
-  // per-invocation bound and persist the cursor; the fleet resumes this exact
-  // file on the next tick without risking an Edge timeout or provider lock.
-  const suspects = taggedTracks.filter((t) => !t.speechVerifiedAt).slice(0, 1);
+  // Keep the historical two-track cap. The gateway sweeps offsets internally and returns after
+  // the first clear 20s speech window, so two tracks remain bounded while multi-audio files stay
+  // resumable through the per-track cursor.
+  const suspects = taggedTracks.filter((t) => !t.speechVerifiedAt).slice(0, 2);
   const finalizeVerification = async (extra: JsonRecord = {}) => {
     const confirmedCount = taggedTracks.filter((t) => t.speechVerdict === "confirmed").length;
     const correctedCount = taggedTracks.filter((t) => t.speechVerdict === "corrected").length;
@@ -2766,20 +2773,20 @@ async function verifyTaggedAudioLanguages(opts: {
       (t) => !t.speechVerifiedAt ||
         !["confirmed", "corrected", "detected", "pending"].includes(String(t.speechVerdict || "")),
     ).length;
-    const verified = taggedTracks.length > 0 &&
+    const classified = taggedTracks.length > 0 &&
       pendingCount === 0 &&
       pendingVerdictCount === 0 &&
       audioTracks.every((track) => Boolean(track.lang)) &&
       confirmedCount + correctedCount + detectedCount === taggedTracks.length;
-    await recordVerification(verified, {
-      method: "whisper-strict-consensus-v4",
-      status: verified ? "verified" : "pending",
-      consensus: 4,
-      sampleCount: 4,
-      allConfiguredWindowsScanned: true,
-      minWhisperProbability: 0.95,
-      minWordsPerSample: 12,
-      minUniqueWordsPerSample: 8,
+    // Basic one-window LID is valuable detection evidence, not a strict
+    // certificate. Persist the corrected map and a long retry cursor, but never
+    // create audio_verified_at or a user-facing "confirmed" claim.
+    await recordDetection(classified, {
+      method: "whisper-basic-v1",
+      status: classified ? "detected" : "pending",
+      sampleDurationSeconds: 20,
+      consensus: 1,
+      minWords: 4,
       trackCount: taggedTracks.length,
       confirmedCount,
       correctedCount,
@@ -2788,8 +2795,8 @@ async function verifyTaggedAudioLanguages(opts: {
       pendingCount,
       attemptedAt: nowIso,
     }, extra);
-    if (!verified) return "pending" as const;
-    return correctedCount > 0 ? "corrected" as const : "confirmed" as const;
+    if (!classified) return "pending" as const;
+    return correctedCount > 0 ? "corrected" as const : "detected" as const;
   };
   if (!suspects.length) return await finalizeVerification();
   let detectBase: string;
@@ -2798,40 +2805,27 @@ async function verifyTaggedAudioLanguages(opts: {
     detectBase = pipe.url.replace("/raw/", "/detect-language/");
   } catch (_) { return null; }
 
-  let changed = false, confirmedTracks = 0, pendingTracks = 0, transient = 0, attempted = 0;
+  let changed = false, transient = 0, attempted = 0;
   for (const t of suspects) {
     try {
       const res = await fetch(
-        `${detectBase}?index=${t.index}&dur=30&consensus=4&strict=1`,
-        { signal: AbortSignal.timeout(480_000) },
+        `${detectBase}?index=${t.index}&dur=20`,
+        { signal: AbortSignal.timeout(90_000) },
       );
       if (!res.ok) { transient++; continue; } // incl. the gateway's 503 account-slot-busy
       const det = await res.json().catch(() => null) as JsonRecord | null;
       const lang = normalizeIsoLang(stringOrNull(det?.language));
       const words = Number(det?.wordCount ?? 0);
-      if (
-        !lang ||
-        det?.confident !== true ||
-        det?.verified !== true ||
-        stringOr(det?.validationStatus, "") !== "verified" ||
-        stringOr(det?.method, "") !== "whisper-strict-consensus-v4" ||
-        Number(det?.consensus ?? 0) < 4 ||
-        Number(det?.sampleCount ?? 0) < 4 ||
-        Number(det?.rejectedSpeechSampleCount ?? -1) !== 0 ||
-        Number(det?.minSampleProbability ?? 0) < 0.95 ||
-        Number(det?.minSampleWordCount ?? words) < 12 ||
-        Number(det?.minSampleUniqueWordCount ?? 0) < 8
-      ) {
+      if (!lang || words < 4) {
         t.speechVerifiedAt = nowIso;
         t.speechVerdict = "pending";
         attempted++;
-        pendingTracks++;
         continue;
       }
       t.speechVerifiedAt = nowIso;
       t.speechVerdict = lang === t.lang ? "confirmed" : "corrected";
       attempted++;
-      if (lang === t.lang) { confirmedTracks++; continue; }
+      if (lang === t.lang) continue;
       t.lang = lang;
       changed = true;
     } catch (_) { transient++; }
@@ -2863,6 +2857,7 @@ async function verifyTaggedAudioLanguages(opts: {
         [],
         true,
         false,
+        false,
         true,
       );
       if (!persisted) return null;
@@ -2878,7 +2873,12 @@ async function verifyTaggedAudioLanguages(opts: {
       try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort */ }
     }
     if (!fileScoped) {
-      try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false, true); } catch (_) { /* best-effort */ }
+      try {
+        await shareFileTracks(
+          db, serverHost, itemType, fileExternalId, enriched, [],
+          true, false, false, true,
+        );
+      } catch (_) { /* best-effort */ }
     }
     if (!complete) return "partial";
     return await finalizeVerification(
@@ -4507,10 +4507,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       ? (body.verifyTitleIds as unknown[]).map(String).filter(Boolean).slice(0, 10) : [];
     const verifyLimit = speechTarget === "untagged"
       ? 0
-      : explicitVerifyIds.length
-      ? Math.min(100, explicitVerifyIds.length * 32)
-      : Math.max(0, Math.min(Number(body.verifyLimit ?? Math.ceil(limit / 2)), 6));
-    let verified = 0, corrected = 0, pendingVerification = 0, verificationWork = 0;
+      : Math.max(0, Math.min(Number(
+        body.verifyLimit ?? (speechTarget === "tagged" ? limit : Math.ceil(limit / 2)),
+      ), 2));
+    let verified = 0, detectedTagged = 0, corrected = 0, pendingVerification = 0, verificationWork = 0;
     if (verifyLimit > 0) {
       try {
         const verifyRetryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
@@ -4539,7 +4539,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const vExp = new Date(Date.now() + 10 * 60 * 1000).toISOString();
         const verifyLeaseOwner = `verify:${crypto.randomUUID()}`;
         for (const t of suspectsAll) {
-          if (verificationWork >= 1 || verified >= verifyLimit) break;
+          if (verificationWork >= verifyLimit) break;
           const variant = t.default_variant_id ? svById.get(String(t.default_variant_id)) : null;
           if (!variant) continue;
           const vSourceId = stringOr(variant.source_id, "");
@@ -4569,7 +4569,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             .filter((x) => Number.isInteger(x.index));
           const identityKey = (await resolveSourceIdentity(vSourceId, userId, db)).key;
           if (!await claimProviderFileProbe(db, identityKey, verifyLeaseOwner, 900)) continue;
-          let outcome: "corrected" | "confirmed" | "pending" | "partial" | null = null;
+          let outcome: "corrected" | "detected" | "pending" | "partial" | null = null;
           try {
             outcome = await verifyTaggedAudioLanguages({
               db, runtimeConfig, userId, targetUrl, audioTracks: tracks,
@@ -4585,32 +4585,24 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           } finally {
             await releaseProviderFileProbe(db, identityKey, verifyLeaseOwner);
           }
-          // A transient/timeout still consumed this invocation's provider and
-          // Edge budget; do not fall through into another speech extraction.
+          // A transient/timeout still consumed one bounded work slot. Continue through the
+          // requested verifyLimit so a single bad file cannot monopolize every fleet tick.
           verificationWork += 1;
-          if (outcome === "confirmed" || outcome === "corrected") verified += 1;
+          if (outcome === "detected" || outcome === "corrected") detectedTagged += 1;
           if (outcome === "corrected") corrected += 1;
           if (outcome === "pending") pendingVerification += 1;
         }
       } catch (_) { /* verify phase is best-effort — never blocks the untagged phase */ }
     }
 
-    // One tagged-track consensus already consumes the entire speech budget for
-    // this invocation. Persisted cursors make the next fleet tick resumable;
-    // never start an additional unknown-track Whisper job in the same request.
-    if (verificationWork > 0) {
-      return {
-        mode: "whisper", scope: fileWhisperScope ? "file" : "title",
-        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
-        candidates: 0, detected: 0, hasMore: true,
-      };
-    }
+    // Explicit tagged lanes stop after their requested file budget. A generic/manual Whisper
+    // request may continue into the untagged phase, matching the former basic-detector workflow.
     if (speechTarget === "tagged") {
       return {
         mode: "whisper", scope: fileWhisperScope ? "file" : "title",
-        speechTarget, processed: 0, verificationWork: 0,
-        verified, corrected, pending: pendingVerification,
-        candidates: 0, detected: 0, hasMore: false,
+        speechTarget,
+        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
+        candidates: 0, detected: detectedTagged, hasMore: verifyLimit > 0 && verificationWork >= verifyLimit,
       };
     }
 
@@ -4639,7 +4631,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     if (!wrows || !wrows.length) {
       return {
         mode: "whisper", scope: fileWhisperScope ? "file" : "title",
-        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification, candidates: 0, detected: 0,
+        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
+        candidates: 0, detected: detectedTagged,
         lastId: afterId, hasMore: false,
       };
     }
@@ -4647,7 +4640,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     const candidates = whisperRows.filter((t: JsonRecord) => {
       const arr = Array.isArray(t.audio_tracks) ? t.audio_tracks as JsonRecord[] : [];
       return arr.some((x) => !stringOrNull(x?.lang));
-    }).slice(0, 1);
+    }).slice(0, Math.max(1, Math.min(limit, 4)));
     const wvIds = candidates.map((t: JsonRecord) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();
     if (wvIds.length) {
@@ -4656,7 +4649,6 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     }
 
     let detected = 0;
-    const wExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     const whisperLeaseOwner = `whisper:${crypto.randomUUID()}`;
     const footprintBySource = new Map<string, Awaited<ReturnType<typeof getFootprint>>>();
     const footprintHitsThisTick = new Map<string, number>();
@@ -4731,12 +4723,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           .filter((x) => Number.isInteger(x.index));
         const before = audioTracks.filter((x) => x.lang).length;
         try {
+          // Generate this capability immediately before each file. A previous
+          // shared five-minute expiry could elapse while the preceding
+          // multi-track file was still being sampled.
+          const fileExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
           await detectUntaggedAudioLanguages({
             db, runtimeConfig, userId, targetUrl, userAgent: null,
             audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
             serverHost: await resolveFileTracksKey(variantSourceId, userId, db, targetUrl),
             itemType: vit, fileExternalId: externalId,
-            sessionId: "whisper-backfill", expiresAt: wExp,
+            sessionId: "whisper-backfill", expiresAt: fileExpiresAt,
             variantId, fileScoped: fileWhisperScope,
           });
           if (footprint?.lowFootprint) {
@@ -4758,8 +4754,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     return {
       mode: "whisper", scope: fileWhisperScope ? "file" : "title",
       processed: candidates.length + verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
-      candidates: candidates.length, detected, lastId: candidates.length ? String(candidates[candidates.length - 1].id) : afterId,
-      hasMore: wrows.length === limit,
+      candidates: candidates.length, detected: detected + detectedTagged,
+      lastId: candidates.length ? String(candidates[candidates.length - 1].id) : afterId,
+      hasMore: whisperRows.length > candidates.length || wrows.length === limit,
     };
   }
 
