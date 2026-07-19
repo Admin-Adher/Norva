@@ -185,5 +185,7 @@ test('self-host deploy restarts every configured edge-runtime replica', () => {
   const src = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
   assert.match(src, /docker compose -f "\$COMPOSE" config --services/);
   assert.ok(src.includes("grep -E '^functions[0-9]*$'"));
-  assert.match(src, /restart "\$\{function_services\[@\]\}"/);
+  assert.match(src, /for service in "\$\{function_services\[@\]\}"/);
+  assert.match(src, /restart "\$service"/);
+  assert.match(src, /did not become healthy within 60 seconds/);
 });

@@ -55,7 +55,30 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     echo "ERROR: no edge-runtime service found in $COMPOSE" >&2
     exit 1
   fi
-  docker compose -f "$COMPOSE" restart "${function_services[@]}"
+  for service in "${function_services[@]}"; do
+    echo ">> Restarting $service"
+    docker compose -f "$COMPOSE" restart "$service"
+
+    container_id=$(docker compose -f "$COMPOSE" ps -q "$service")
+    [[ -n "$container_id" ]] || {
+      echo "ERROR: $service has no running container after restart" >&2
+      exit 1
+    }
+
+    deadline=$((SECONDS + 60))
+    while true; do
+      health=$(docker inspect --format \
+        '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$container_id")
+      [[ "$health" == "healthy" || "$health" == "running" ]] && break
+      if (( SECONDS >= deadline )); then
+        echo "ERROR: $service did not become healthy within 60 seconds (status: $health)" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+    echo "   $service is $health"
+  done
   echo ">> edge-runtime replicas restarted: ${function_services[*]}."
 else
   echo "   (docker/compose not found here — run on the box:"
