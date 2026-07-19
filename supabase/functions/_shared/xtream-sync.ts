@@ -975,6 +975,15 @@ async function providerKeyFromCategoryMaps(maps: Record<string, Map<string, stri
   return `x:${hex.slice(0, 24)}`;
 }
 
+function boundedProviderOverview(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = stringOrNull(value);
+    if (!text || /^(?:n\/?a|none|null|undefined|no (?:description|overview|plot)(?: available)?)$/i.test(text)) continue;
+    return text.slice(0, 4000);
+  }
+  return null;
+}
+
 function xtreamRows(
   sourceId: string,
   userId: string,
@@ -994,6 +1003,12 @@ function xtreamRows(
     const categoryName = categoryId
       ? categories.get(categoryId) ?? stringOrNull(item.category_name)
       : stringOrNull(item.category_name);
+    // Some providers include a synopsis directly in get_vod_streams/get_series.
+    // Keep it as a per-user fallback: unmatched and never-scanned catalogues have
+    // no TMDB identity yet, so dropping this text would make it unrecoverable.
+    const providerOverview = itemType === "movie" || itemType === "series"
+      ? boundedProviderOverview(item.plot, item.description, item.overview, item.desc)
+      : null;
     rows.push({
       user_id: userId,
       source_id: sourceId,
@@ -1009,6 +1024,7 @@ function xtreamRows(
         categoryName,
         rating: item.rating,
         added: item.added,
+        overview: providerOverview,
         providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
         providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),

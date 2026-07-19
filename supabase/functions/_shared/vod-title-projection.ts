@@ -69,6 +69,15 @@ async function resolveProjectionCacheKey(
   }
 }
 
+function boundedProviderOverview(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = stringOrNull(value);
+    if (!text || /^(?:n\/?a|none|null|undefined|no (?:description|overview|plot)(?: available)?)$/i.test(text)) continue;
+    return text.slice(0, 4000);
+  }
+  return null;
+}
+
 export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const rows = options.rows.filter((row) =>
     (row.item_type === "movie" || row.item_type === "series") &&
@@ -106,6 +115,11 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const title = stringOr(row.title, "Norva");
     const itemType = row.item_type === "series" ? "series" : "movie";
     const releaseYear = extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date);
+    const providerOverview = boundedProviderOverview(
+      metadata.overview,
+      metadata.description,
+      metadata.plot,
+    );
     const providerIds = providerIdsByExternalId.get(externalId) ?? { tmdbId: null, imdbId: null };
     const tmdbValidation = providerIds.tmdbId ? tmdbValidationById.get(tmdbValidationKey(itemType, providerIds.tmdbId)) : null;
     const trustedTmdbId = tmdbValidation?.valid ? providerIds.tmdbId : null;
@@ -135,6 +149,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
         backdrop_url: stringOrNull(row.backdrop_url) || tmdbValidation?.backdropUrl || null,
         metadata: compactRecord({
           categoryName: row.subtitle || metadata.categoryName,
+          overview: providerOverview,
           providerIds,
           tmdb: tmdbValidation?.valid ? tmdbValidation.details : undefined,
           // Per-language { title, overview } so the read path can serve each user
@@ -393,11 +408,13 @@ async function loadVodInfoIds(
   serverHost = "",
 ) {
   const result = new Map<string, ProviderIds>();
-  if (limit <= 0) return result;
+  // Reuse is a database read, not a provider call. Scan the whole sync batch even
+  // when the external-call budget is zero; the limit only caps unresolved files
+  // fetched from get_vod_info below.
   const candidates = rows
     .filter((row) => row.item_type === "movie")
     .sort((a, b) => Number(recordOrEmpty(b.metadata).added || 0) - Number(recordOrEmpty(a.metadata).added || 0))
-    .slice(0, limit);
+    .slice(0, REUSE_SCAN_CAP);
   if (!candidates.length) return result;
 
   // Cross-user reuse: the get_vod_info result (external_id -> tmdb/imdb id) is a property of
@@ -425,7 +442,8 @@ async function loadVodInfoIds(
     }
   }
 
-  const toFetch = candidates.filter((r) => pending.has(stringOr(r.external_id, "")));
+  const unresolved = candidates.filter((r) => pending.has(stringOr(r.external_id, "")));
+  const toFetch = limit > 0 ? unresolved.slice(0, limit) : [];
   const concurrency = 4;
   let cursor = 0;
   async function worker() {
@@ -516,7 +534,6 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   const validations = new Map<string, TmdbValidation>();
   // No early-return on a missing apiKey: the cross-user catalog_titles reuse below can still
   // populate validations from another user's already-validated titles (zero TMDB calls).
-  if (limit <= 0) return validations;
 
   const candidates: Array<{ key: string; itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null }> = [];
   const seen = new Set<string>();
@@ -551,6 +568,7 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   let toFetch = candidates;
   if (db && candidates.length) {
     const remaining = new Set(candidates.map((c) => c.key));
+    const candidateByKey = new Map(candidates.map((candidate) => [candidate.key, candidate]));
     const idsByType = { movie: [] as string[], series: [] as string[] };
     for (const c of candidates) idsByType[c.itemType].push(c.tmdbId);
     for (const itemType of ["movie", "series"] as const) {
@@ -558,7 +576,7 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
       for (let i = 0; i < ids.length; i += 200) {
         try {
           const { data } = await db.from("catalog_titles")
-            .select("provider_tmdb_id, poster_url, backdrop_url, metadata")
+            .select("provider_tmdb_id, title, release_year, poster_url, backdrop_url, metadata")
             .eq("item_type", itemType)
             .in("provider_tmdb_id", ids.slice(i, i + 200));
           for (const r of data ?? []) {
@@ -568,15 +586,23 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
             const tv = recordOrEmpty(md.tmdbValidation);
             if (tv.valid !== true) continue; // only reuse a trusted match
             const key = tmdbValidationKey(itemType, tmdbId);
+            const candidate = candidateByKey.get(key);
+            const reuseMatch = candidate
+              ? matchCatalogValidationCandidate(candidate, r as JsonRecord, md, tv)
+              : null;
+            // A provider-supplied TMDB id is not proof of identity. Re-run the
+            // title/year sanity gate against the current account before promoting
+            // a shared validation, otherwise a bad id can leak another film's text.
+            if (!reuseMatch) continue;
             validations.set(key, {
               valid: true,
-              title: stringOrNull(tv.title),
-              year: stringOrNull(tv.year),
+              title: reuseMatch.title,
+              year: reuseMatch.year,
               posterUrl: stringOrNull((r as JsonRecord).poster_url),
               backdropUrl: stringOrNull((r as JsonRecord).backdrop_url),
-              confidence: Number(tv.confidence) || 0,
+              confidence: reuseMatch.confidence,
               i18n: (md.i18n && typeof md.i18n === "object") ? md.i18n as Record<string, { title?: string; overview?: string }> : undefined,
-              reason: stringOr(tv.reason, "reused_from_catalog"),
+              reason: "reused_from_catalog_title_year_match",
               details: (md.tmdb && typeof md.tmdb === "object") ? md.tmdb as JsonRecord : undefined,
             });
             remaining.delete(key);
@@ -612,6 +638,47 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return validations;
+}
+
+function matchCatalogValidationCandidate(
+  candidate: { itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null },
+  catalogRow: JsonRecord,
+  metadata: JsonRecord,
+  validation: JsonRecord,
+) {
+  const details = recordOrEmpty(metadata.tmdb);
+  const i18n = recordOrEmpty(metadata.i18n);
+  const localizedTitles = Object.values(i18n)
+    .map((entry) => stringOr(recordOrEmpty(entry).title, ""))
+    .filter(Boolean);
+  const canonicalTitles = uniqueStrings([
+    validation.title,
+    catalogRow.title,
+    details.title,
+    details.name,
+    details.original_title,
+    details.original_name,
+    ...localizedTitles,
+  ]);
+  const cachedYear = stringOrNull(validation.year)
+    ?? stringOrNull(catalogRow.release_year)
+    ?? extractYear("", details.release_date ?? details.first_air_date);
+
+  // Exact-name remakes are common enough that a known, incompatible year must
+  // veto cache reuse instead of being outweighed by the title score.
+  if (
+    candidate.year && cachedYear
+    && Math.abs(Number(candidate.year) - Number(cachedYear)) > 1
+  ) return null;
+
+  const best = canonicalTitles
+    .map((title) => ({
+      title,
+      confidence: titleConfidence(candidate.title, title, candidate.year, cachedYear),
+    }))
+    .sort((a, b) => b.confidence - a.confidence)[0];
+  if (!best || best.confidence < 0.58) return null;
+  return { title: best.title, year: cachedYear, confidence: best.confidence };
 }
 
 // TMDB `translations` → per-language {title, overview} map. One TMDB call (with

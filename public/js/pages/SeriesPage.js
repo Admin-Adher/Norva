@@ -3354,6 +3354,12 @@ class SeriesPage {
             if (token !== this._ficheExtrasToken || !meta?.available) return;
 
             const plotEl = document.getElementById('series-plot');
+            const liveOverview = String(meta.overview || '').trim();
+            if (plotEl && liveOverview
+                && (!String(plotEl.textContent || '').trim()
+                    || plotEl.textContent === 'No summary available yet.')) {
+                plotEl.textContent = liveOverview;
+            }
             const people = [];
             const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
             if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);

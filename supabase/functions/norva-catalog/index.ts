@@ -366,6 +366,9 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
 
   const value: JsonRecord = {
     available: true,
+    // Return the requested-language synopsis as well as persisting it below, so
+    // a freshly imported title can fill its open fiche before the next read.
+    overview: stringOrNull(data.overview),
     trailerKey: trailer?.key ?? null,
     trailerName: trailer?.name ?? null,
     cast,
@@ -681,7 +684,7 @@ async function listMediaItems(url: URL, userId: string) {
           return row;
         });
         await localizeMediaTitles(items, userId, lang, itemType);
-        await attachMediaLanguages(items, userId);
+        await attachMediaLanguages(items, userId, itemType, lang);
         return { items, count: items.length, limit, offset: 0, hasMore: false };
       }
       // RPC unavailable (pre-migration / error) → fall through to the deduped grid.
@@ -728,7 +731,7 @@ async function listMediaItems(url: URL, userId: string) {
   }
 
   await localizeMediaTitles(items, userId, lang, itemType);
-  await attachMediaLanguages(items, userId);
+  await attachMediaLanguages(items, userId, itemType, lang);
 
   return {
     items,
@@ -783,8 +786,45 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
 // label every audio track with ZERO playback-time probe. cloud_media_items rows lack
 // these — look them up by provider_tmdb_id (per-user; always cloud_titles, not
 // catalog_titles). Best-effort, chunked — never fails the grid over a badge.
-async function attachMediaLanguages(items: Array<Record<string, any>>, userId: string) {
+function boundedProviderOverview(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = stringOrNull(value);
+    if (!text || /^(?:n\/?a|none|null|undefined|no (?:description|overview|plot)(?: available)?)$/i.test(text)) continue;
+    return text.slice(0, 4000);
+  }
+  return null;
+}
+
+function catalogTextStatusEligible(value: unknown): boolean {
+  return ["provider_verified", "matched", "manual"].includes(String(value ?? ""));
+}
+
+async function attachMediaLanguages(
+  items: Array<Record<string, any>>,
+  userId: string,
+  itemType: string | null,
+  lang: string | null,
+) {
   if (!items.length) return;
+  // Preserve provider-supplied summaries even when the title has no TMDB identity
+  // and has never been probed. Promote the compact metadata field to the response
+  // shape consumed by movie/series fiches before any catalogue lookup can return.
+  for (const row of items) {
+    const metadata = recordOrEmpty(row.metadata);
+    const providerOverview = boundedProviderOverview(
+      metadata.overview,
+      metadata.description,
+      metadata.plot,
+    );
+    const existingOverview = stringOrNull(row.overview)
+      ?? stringOrNull(row.description)
+      ?? stringOrNull(row.plot);
+    if (providerOverview && !existingOverview) {
+      row.overview = providerOverview;
+      row.description = providerOverview;
+      row.plot = providerOverview;
+    }
+  }
   const tmdbIds = [...new Set(items
     .map((row) => stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null))
     .filter((id): id is string => Boolean(id) && id !== "0"))];
@@ -796,16 +836,27 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
   // row. Overlaying the verified cloud_titles poster fixes matched titles that render
   // a broken/placeholder image in the grid + detail even though they're enriched.
   const artByTmdb = new Map<string, { poster: string | null; backdrop: string | null; verified: boolean }>();
+  // Every non-sentinel provider id is a candidate. Cross-user text is only accepted
+  // below when the per-user association is verified AND catalog_titles itself
+  // records tmdbValidation.valid=true. New imports reuse that validation inline.
+  const catalogCandidateIds = new Set<string>();
+  const weakCatalogIds = new Set<string>();
   for (let i = 0; i < tmdbIds.length; i += 500) {
-    const { data, error } = await db
+    let query = db
       .from("cloud_titles")
       .select("provider_tmdb_id, audio_languages, version_languages, audio_tracks, poster_url, backdrop_url, match_status")
       .eq("user_id", userId)
       .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
+    if (itemType === "movie" || itemType === "series") query = query.eq("item_type", itemType);
+    const { data, error } = await query;
     if (error) return; // best-effort; never fail the grid over the badge
     for (const row of data ?? []) {
       const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
       if (!id) continue;
+      if (String((row as JsonRecord).match_status) === "weak") weakCatalogIds.add(id);
+      if (catalogTextStatusEligible((row as JsonRecord).match_status) && !/^(tt)?0+$/i.test(id)) {
+        catalogCandidateIds.add(id);
+      }
       const next = {
         audio: titleAudioLanguages(row as JsonRecord),
         version: titleVersionLanguages(row as JsonRecord),
@@ -830,6 +881,9 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
       }
     }
   }
+  // A duplicated provider id with even one failed title/year validation is
+  // ambiguous for flat media rows (which carry no title_id). Fail closed.
+  for (const id of weakCatalogIds) catalogCandidateIds.delete(id);
   for (const row of items) {
     const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
     if (!id) continue;
@@ -854,21 +908,38 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
   // so it's read straight from catalog_titles. The player uses it to resolve a VOSTFR/VO
   // ("original") audio track to its real language ("Japanese"…) instead of a bare "Default".
   try {
-    const catByTmdb = new Map<string, { lang: string | null; overview: string | null; poster: string | null; backdrop: string | null }>();
-    for (let i = 0; i < tmdbIds.length; i += 500) {
+    const candidateIds = [...catalogCandidateIds];
+    if ((itemType !== "movie" && itemType !== "series") || !candidateIds.length) return;
+    const catByTmdb = new Map<string, {
+      lang: string | null;
+      localizedTitle: string | null;
+      localizedOverview: string | null;
+      fallbackOverview: string | null;
+      poster: string | null;
+      backdrop: string | null;
+    }>();
+    const localizedFields = lang
+      ? `, loc_title:metadata->i18n->${lang}->>title, loc_overview:metadata->i18n->${lang}->>overview`
+      : "";
+    for (let i = 0; i < candidateIds.length; i += 500) {
       // Extract just the overview field (metadata->tmdb->>overview) instead of the whole
       // metadata blob. catalog_titles is the GLOBAL enriched source — verified titles have
       // their per-user metadata.tmdb thinned, so the overview only survives here.
-      const { data } = await db
+      const { data } = await (db as any)
         .from("catalog_titles")
-        .select("provider_tmdb_id, original_language, poster_url, backdrop_url, ov:metadata->tmdb->>overview")
-        .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
+        .select(`provider_tmdb_id, original_language, poster_url, backdrop_url, trusted:metadata->tmdbValidation->>valid, base_overview:metadata->tmdb->>overview, legacy_overview:metadata->>overview, en_overview:metadata->i18n->en->>overview${localizedFields}`)
+        .eq("item_type", itemType)
+        .in("provider_tmdb_id", candidateIds.slice(i, i + 500));
       for (const c of data ?? []) {
         const id = stringOrNull((c as JsonRecord).provider_tmdb_id);
-        if (!id) continue;
+        if (!id || String((c as JsonRecord).trusted) !== "true") continue;
         catByTmdb.set(id, {
           lang: stringOrNull((c as JsonRecord).original_language),
-          overview: stringOrNull((c as JsonRecord).ov),
+          localizedTitle: stringOrNull((c as JsonRecord).loc_title),
+          localizedOverview: stringOrNull((c as JsonRecord).loc_overview),
+          fallbackOverview: stringOrNull((c as JsonRecord).base_overview)
+            ?? stringOrNull((c as JsonRecord).legacy_overview)
+            ?? stringOrNull((c as JsonRecord).en_overview),
           poster: stringOrNull((c as JsonRecord).poster_url),
           backdrop: stringOrNull((c as JsonRecord).backdrop_url),
         });
@@ -879,10 +950,22 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
       const cat = id ? catByTmdb.get(id) : null;
       if (!cat) continue;
       if (cat.lang) { row.original_language = cat.lang; row.originalLanguage = cat.lang; }
-      // Overview: surface it on the fields the client detail page reads.
-      if (cat.overview) {
-        row.overview = cat.overview; row.description = cat.overview; row.plot = cat.overview;
-        row.tmdb = { ...(isRecord(row.tmdb) ? row.tmdb : {}), overview: cat.overview };
+      // Text-only global reuse remains active while the full display cutover is OFF:
+      // cloud_titles.metadata is intentionally self-thinned after every new import.
+      if (cat.localizedTitle) { row.title = cat.localizedTitle; row.name = cat.localizedTitle; }
+      const rowTmdb = isRecord(row.tmdb) ? row.tmdb : {};
+      const existingOverview = stringOrNull(rowTmdb.overview)
+        ?? stringOrNull(row.overview)
+        ?? stringOrNull(row.description)
+        ?? stringOrNull(row.plot);
+      // A requested-language translation wins consistently on grids and rails.
+      // Otherwise the provider text wins and the catalogue remains fill-only.
+      const resolvedOverview = cat.localizedOverview
+        ?? existingOverview
+        ?? cat.fallbackOverview;
+      if (resolvedOverview && (cat.localizedOverview || !existingOverview)) {
+        row.overview = resolvedOverview; row.description = resolvedOverview; row.plot = resolvedOverview;
+        row.tmdb = { ...rowTmdb, overview: resolvedOverview };
       }
       // Poster/backdrop: catalog_titles is the global enriched source and the freshest
       // authority, so its art WINS over the per-user cloud_titles/provider poster (which
@@ -1137,7 +1220,9 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
         // placeholder). The genre picker / "See all" grid still exposes everything.
         .not("poster_url", "is", null)
         .contains("genre_buckets", [bucket]);
-      if (hidden.size) q = q.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
+      // Avoid an excessively-deep postgrest-js generic instantiation on this
+      // dynamically assembled overlap filter; runtime query semantics are unchanged.
+      if (hidden.size) q = (q as any).not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
       const { data, error } = await q
         .order("created_at", { ascending: false })
         .limit(buffer);
@@ -1213,7 +1298,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   }
   const selectedRows = selectedIds.map((id) => fullById.get(id)).filter((r): r is JsonRecord => !!r);
   const variantsByTitle = await listVariantsByTitleIds(selectedIds, userId);
-  await applyCatalogOverlay(selectedRows, itemType); // read-cutover flag (genre rails)
+  await applyCatalogOverlay(selectedRows, itemType, lang); // full or safe text-only overlay
 
   const rails = candidateBuckets
     .filter((bucketId) => (byBucket.get(bucketId)?.length ?? 0) >= GENRE_RAIL_MIN_ITEMS)
@@ -1414,7 +1499,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);
       const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
-      await applyCatalogOverlay(pageRows, itemType);
+      await applyCatalogOverlay(pageRows, itemType, lang);
       return {
         items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
         count: ranked.length,
@@ -1446,7 +1531,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     const pageRows = (data ?? []) as JsonRecord[];
     const total = count ?? null;
     const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
-    await applyCatalogOverlay(pageRows, itemType);
+    await applyCatalogOverlay(pageRows, itemType, lang);
     return {
       items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
       count: total,
@@ -1602,7 +1687,7 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
       throwDb(error, "Unable to list title rail");
     }
     const variantsByTitle = await listVariantsByTitleIds((titles ?? []).map((row) => String(row.id)), userId);
-    await applyCatalogOverlay((titles ?? []) as JsonRecord[], itemType); // read-cutover flag (title rail)
+    await applyCatalogOverlay((titles ?? []) as JsonRecord[], itemType, lang); // full or safe text-only overlay
     return {
       id,
       title,
@@ -1631,6 +1716,7 @@ async function listGenreRail(
       .filter((row) => titleGenres(row).some((value: string) => sameGenre(value, genre)))
       .sort((a, b) => String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? "")))
       .slice(0, limit);
+    await applyCatalogOverlay(titles, itemType, lang);
     const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
@@ -1676,6 +1762,7 @@ async function listPopularTitleRail(
         String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
       )
       .slice(0, limit);
+    await applyCatalogOverlay(titles, itemType, lang);
     const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
@@ -1741,6 +1828,7 @@ async function listBecauseYouWatchedRail(
         .slice(0, options.limit);
       if (!titles.length) continue;
 
+      await applyCatalogOverlay(titles, itemType, lang);
       const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
       return {
         id: `because-you-watched-${watchedId}`,
@@ -1807,7 +1895,11 @@ async function loadTitleById(userId: string, titleId: string) {
   return data ?? null;
 }
 
-async function listVerifiedTitleCandidates(userId: string, itemType: "movie" | "series", candidateLimit = 300) {
+async function listVerifiedTitleCandidates(
+  userId: string,
+  itemType: "movie" | "series",
+  candidateLimit = 300,
+) {
   const { data, error } = await db
     .from("cloud_titles")
     .select("*")
@@ -1819,9 +1911,7 @@ async function listVerifiedTitleCandidates(userId: string, itemType: "movie" | "
     .order("updated_at", { ascending: false })
     .limit(candidateLimit);
   if (error) throwDb(error, "Unable to list verified title candidates");
-  const rows = (data ?? []) as JsonRecord[];
-  await applyCatalogOverlay(rows, itemType); // read-cutover flag (genre/popular/because-you-watched rails)
-  return rows;
+  return (data ?? []) as JsonRecord[];
 }
 
 // Source-health awareness for playable cards (home audit 2026-07-04): a card whose
@@ -1901,14 +1991,103 @@ function catalogReadEnabled(): boolean {
   return (Deno.env.get("NORVA_CATALOG_READ_SOURCE") ?? "cloud_titles") === "catalog_titles";
 }
 
-// Batched (one query per page/rail) overlay of the migrated metadata fields onto the
-// rows IN PLACE; no-op + no query when the flag is off. Only the migrated fields are
+// Batched overlay of global display metadata. The full migrated-field replacement
+// remains flag-gated; the text-only synopsis/i18n repair below is permanently active.
 // touched — identity and per-user facet columns (id, variant_count, version_languages,
 // audio_languages, default_variant_id, match_status) are left intact. A title missing
 // from the catalog keeps its cloud_titles values (faithful fallback). Best-effort: any
 // error leaves the cloud_titles values untouched.
-async function applyCatalogOverlay(rows: JsonRecord[], itemType: string): Promise<void> {
-  if (!catalogReadEnabled() || !rows.length) return;
+type CatalogTextOverlay = {
+  localizedTitle: string | null;
+  localizedOverview: string | null;
+  englishOverview: string | null;
+  baseOverview: string | null;
+};
+
+// Permanent safe read path for title text removed by cloud_titles self-thinning.
+// Both the per-user association and global catalogue identity must be validated.
+// Assignments are fill-only and never touch year, artwork, genre or rating fields.
+async function applyCatalogTextOverlay(
+  rows: JsonRecord[],
+  itemType: string,
+  lang: string | null,
+): Promise<void> {
+  if (!rows.length || (itemType !== "movie" && itemType !== "series")) return;
+  const eligibleRows = rows.filter((row) => catalogTextStatusEligible(row.match_status));
+  const ids = [...new Set(eligibleRows
+    .map((r) => stringOrNull(r.provider_tmdb_id))
+    .filter((v): v is string => !!v && !/^(tt)?0+$/i.test(v)))];
+  if (!ids.length) return;
+
+  const textById = new Map<string, CatalogTextOverlay>();
+  const localizedFields = lang
+    ? `, loc_title:metadata->i18n->${lang}->>title, loc_overview:metadata->i18n->${lang}->>overview`
+    : "";
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data, error } = await (db as any)
+      .from("catalog_titles")
+      .select(`provider_tmdb_id, trusted:metadata->tmdbValidation->>valid, base_overview:metadata->tmdb->>overview, legacy_overview:metadata->>overview, en_overview:metadata->i18n->en->>overview${localizedFields}`)
+      .eq("item_type", itemType)
+      .in("provider_tmdb_id", ids.slice(i, i + 500));
+    if (error) return; // best-effort: preserve the cloud row on lookup failure
+    for (const row of data ?? []) {
+      const id = stringOrNull((row as JsonRecord).provider_tmdb_id);
+      if (!id || String((row as JsonRecord).trusted) !== "true") continue;
+      textById.set(id, {
+        localizedTitle: stringOrNull((row as JsonRecord).loc_title),
+        localizedOverview: stringOrNull((row as JsonRecord).loc_overview),
+        englishOverview: stringOrNull((row as JsonRecord).en_overview),
+        baseOverview: stringOrNull((row as JsonRecord).base_overview)
+          ?? stringOrNull((row as JsonRecord).legacy_overview),
+      });
+    }
+  }
+
+  for (const row of eligibleRows) {
+    const text = textById.get(String(row.provider_tmdb_id));
+    if (!text) continue;
+    const metadata = recordOrEmpty(row.metadata);
+    const tmdb = recordOrEmpty(metadata.tmdb);
+    const i18n = { ...recordOrEmpty(metadata.i18n) };
+    let changed = false;
+
+    const existingOverview = stringOrNull(tmdb.overview) ?? stringOrNull(metadata.overview);
+    const baseOverview = text.baseOverview ?? text.englishOverview;
+    if (!existingOverview && baseOverview) {
+      // Keep the shared fallback separate from per-user/provider metadata so
+      // titleRailItem can prefer a provider synopsis when no translation exists.
+      row.__catalog_base_overview = baseOverview;
+    }
+
+    if (lang && (text.localizedTitle || text.localizedOverview)) {
+      const localized = { ...recordOrEmpty(i18n[lang]) };
+      if (!stringOrNull(localized.title) && text.localizedTitle) {
+        localized.title = text.localizedTitle;
+        changed = true;
+      }
+      if (!stringOrNull(localized.overview) && text.localizedOverview) {
+        localized.overview = text.localizedOverview;
+        changed = true;
+      }
+      i18n[lang] = localized;
+    }
+
+    if (changed) row.metadata = { ...metadata, i18n };
+  }
+}
+
+// Full display overlay remains guarded by the quality-gated cutover flag. While
+// it stays OFF, only the validated text subset above is restored.
+async function applyCatalogOverlay(
+  rows: JsonRecord[],
+  itemType: string,
+  lang: string | null = null,
+): Promise<void> {
+  if (!rows.length) return;
+  if (!catalogReadEnabled()) {
+    await applyCatalogTextOverlay(rows, itemType, lang);
+    return;
+  }
   const ids = [...new Set(rows
     .map((r) => stringOrNull(r.provider_tmdb_id))
     .filter((v): v is string => !!v && !/^(tt)?0+$/i.test(v)))];
@@ -1937,6 +2116,7 @@ async function applyCatalogOverlay(rows: JsonRecord[], itemType: string): Promis
 
 function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string | null) {
   const defaultVariant = variants[0] ?? {};
+  const variantMetadata = recordOrEmpty(defaultVariant.metadata);
   const metadata = recordOrEmpty(title.metadata);
   const tmdb = titleTmdb(title);
   const genres = titleGenres(title);
@@ -1944,7 +2124,15 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   // drops categoryName from verified titles' metadata, so the column is the source of
   // truth (keeps the detail-page category label populated for rail-opened titles).
   const categoryName = stringOrNull(title.genre_category) ?? stringOrNull(metadata.categoryName);
-  const overview = stringOrNull(tmdb.overview ?? metadata.overview);
+  const providerOverview = boundedProviderOverview(
+    variantMetadata.overview,
+    variantMetadata.description,
+    variantMetadata.plot,
+  );
+  const overview = stringOrNull(tmdb.overview)
+    ?? stringOrNull(metadata.overview)
+    ?? providerOverview
+    ?? stringOrNull(title.__catalog_base_overview);
   // Localized display: serve the user's language from the per-title i18n when
   // present, else the catalogue default (i18n is stored by the enrichment).
   const i18n = recordOrEmpty(metadata.i18n);
