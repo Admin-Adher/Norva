@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 26,
+        version: 27,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -1554,6 +1554,7 @@ async function createBytePipeAccess(
   expiresAt: string,
   _db: SupabaseClient,
   userAgent: string | null = null,
+  scope: string | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
@@ -1565,6 +1566,7 @@ async function createBytePipeAccess(
     uid: userId,
     url: targetUrl,
     ...(userAgent ? { ua: userAgent } : {}),
+    ...(scope ? { scope } : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
   const signature = await hmacBase64Url(runtimeConfig.mediaGatewayToken, payload);
@@ -4149,6 +4151,280 @@ function isBanishStatus(status: number): boolean {
   return status === 401 || status === 403 || status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+function finiteBenchmarkNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function benchmarkLanguage(value: unknown): string | null {
+  const code = String(value || "").toLowerCase().trim();
+  return /^[a-z]{2,3}$/.test(code) ? code : null;
+}
+
+function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
+  const sample = recordOrEmpty(payload.sample);
+  const engine = recordOrEmpty(payload.engine);
+  const system = recordOrEmpty(payload.system);
+  const timings = recordOrEmpty(payload.timings);
+  const current = recordOrEmpty(payload.current);
+  const detectOnly = recordOrEmpty(payload.detectOnly);
+  const agreement = recordOrEmpty(payload.agreement);
+  const gains = recordOrEmpty(payload.gains);
+  return {
+    schemaVersion: finiteBenchmarkNumber(payload.schemaVersion, 1),
+    benchmarkId: stringOrNull(payload.benchmarkId),
+    persisted: false,
+    sample: {
+      trackIndex: finiteBenchmarkNumber(sample.trackIndex),
+      startSec: finiteBenchmarkNumber(sample.startSec),
+      requestedDurationSec: finiteBenchmarkNumber(sample.requestedDurationSec),
+      audioSec: finiteBenchmarkNumber(sample.audioSec),
+      wavBytes: finiteBenchmarkNumber(sample.wavBytes),
+      digest: stringOrNull(sample.digest),
+    },
+    engine: {
+      family: stringOr(engine.family, "whisper.cpp"),
+      model: stringOrNull(engine.model),
+      commit: stringOrNull(engine.commit),
+      binarySha256: stringOrNull(engine.binarySha256),
+      modelSha256: stringOrNull(engine.modelSha256),
+      runtimeVerified: engine.runtimeVerified === true,
+      threads: finiteBenchmarkNumber(engine.threads),
+    },
+    system: {
+      instance: stringOrNull(system.instance),
+      loadBefore: Array.isArray(system.loadBefore)
+        ? system.loadBefore.map((value) => finiteBenchmarkNumber(value)).slice(0, 3)
+        : [],
+      loadAfter: Array.isArray(system.loadAfter)
+        ? system.loadAfter.map((value) => finiteBenchmarkNumber(value)).slice(0, 3)
+        : [],
+      contended: system.contended === true,
+    },
+    order: Array.isArray(payload.order)
+      ? payload.order.map(String).filter((item) => item === "current" || item === "detect-only")
+      : [],
+    timings: {
+      extractMs: finiteBenchmarkNumber(timings.extractMs),
+      currentMs: finiteBenchmarkNumber(timings.currentMs),
+      detectOnlyMs: finiteBenchmarkNumber(timings.detectOnlyMs),
+      currentContainerCpuMs: timings.currentContainerCpuMs == null
+        ? null
+        : finiteBenchmarkNumber(timings.currentContainerCpuMs),
+      detectOnlyContainerCpuMs: timings.detectOnlyContainerCpuMs == null
+        ? null
+        : finiteBenchmarkNumber(timings.detectOnlyContainerCpuMs),
+      totalCurrentMs: finiteBenchmarkNumber(timings.totalCurrentMs),
+      totalDetectOnlyMs: finiteBenchmarkNumber(timings.totalDetectOnlyMs),
+    },
+    current: {
+      ok: current.ok === true,
+      candidateLanguage: benchmarkLanguage(current.candidateLanguage),
+      probability: finiteBenchmarkNumber(current.probability),
+      transcriptLanguage: benchmarkLanguage(current.transcriptLanguage),
+      transcriptConfident: current.transcriptConfident === true,
+      wordCount: finiteBenchmarkNumber(current.wordCount),
+      productionAccepted: current.productionAccepted === true,
+      productionLanguage: benchmarkLanguage(current.productionLanguage),
+    },
+    detectOnly: {
+      ok: detectOnly.ok === true,
+      candidateLanguage: benchmarkLanguage(detectOnly.candidateLanguage),
+      probability: finiteBenchmarkNumber(detectOnly.probability),
+      timedOut: detectOnly.timedOut === true,
+      error: stringOrNull(detectOnly.error),
+    },
+    agreement: {
+      whisperLanguage: agreement.whisperLanguage === true,
+      productionLanguage: agreement.productionLanguage === true,
+    },
+    gains: {
+      lidSpeedup: gains.lidSpeedup == null ? null : finiteBenchmarkNumber(gains.lidSpeedup),
+      endToEndSpeedup: gains.endToEndSpeedup == null
+        ? null
+        : finiteBenchmarkNumber(gains.endToEndSpeedup),
+    },
+  };
+}
+
+// Manual, service-gated and catalogue-read-only benchmark. One request means one exact
+// variant, one cached audio stream and one offset. The gateway reuses one WAV for both modes.
+async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<JsonRecord> {
+  let enabled = false;
+  try {
+    const { data } = await db
+      .from("admin_feature_flags")
+      .select("enabled,updated_at")
+      .eq("key", "lid_benchmark_enabled")
+      .maybeSingle();
+    const updatedAt = Date.parse(stringOr((data as JsonRecord | null)?.updated_at, ""));
+    enabled = (data as JsonRecord | null)?.enabled === true
+      && Number.isFinite(updatedAt)
+      && updatedAt >= Date.now() - 2 * 60 * 60 * 1000;
+  } catch (_) { enabled = false; }
+  if (!enabled) throw new HttpError(403, "LID benchmark is disabled or its operator lease expired");
+
+  const userId = stringOr(body.userId, "");
+  const variantId = stringOr(body.variantId, "");
+  const trackIndex = Number(body.index);
+  const start = finiteBenchmarkNumber(body.start, 600);
+  const dur = finiteBenchmarkNumber(body.dur, 20);
+  const order = stringOr(body.order, "") === "detect-first" ? "detect-first" : "current-first";
+  if (!userId || !variantId) throw new HttpError(400, "userId and variantId are required");
+  if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex > 1024) {
+    throw new HttpError(400, "A valid audio stream index is required");
+  }
+  if (start < 0 || start > 21600 || dur < 8 || dur > 30) {
+    throw new HttpError(400, "Invalid LID benchmark window");
+  }
+  if (await userHasLiveSession(db, userId)) {
+    return { mode: "lid-benchmark", persisted: false, skipped: "live-session" };
+  }
+  if (await accountPregenActive(db, userId)) {
+    return { mode: "lid-benchmark", persisted: false, skipped: "pregen-active" };
+  }
+
+  const { data: rawVariant, error: variantError } = await db
+    .from("cloud_title_variants")
+    .select("id,title_id,source_id,external_id,item_type,label,language,container_extension")
+    .eq("id", variantId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (variantError) throwDb(variantError, "Unable to load benchmark variant");
+  const variant = rawVariant as JsonRecord | null;
+  if (!variant) throw new HttpError(404, "Variant not found");
+  const sourceId = stringOr(variant.source_id, "");
+  const externalId = stringOr(variant.external_id, "");
+  const itemType = stringOr(variant.item_type, "movie");
+  if (!sourceId || !externalId || itemType !== "movie") {
+    throw new HttpError(400, "Benchmark requires an exact movie variant");
+  }
+
+  const target = await resolvePlaybackTarget(sourceId, itemType, externalId, userId, db);
+  const targetUrl = stringOrNull(target?.targetUrl);
+  if (!targetUrl) throw new HttpError(404, "Playback target unavailable");
+  const accountKey = providerAccountKeyFromUrl(targetUrl);
+  if (accountKey) {
+    const { data: busy, error: busyError } = await db.rpc("provider_account_busy", {
+      p_key: accountKey,
+    });
+    if (busyError) throwDb(busyError, "Unable to verify benchmark provider availability");
+    if (busy === true) {
+      return { mode: "lid-benchmark", persisted: false, skipped: "provider-account-busy" };
+    }
+  }
+  const footprint = await getFootprint(db, sourceId, userId);
+  if (footprint?.lowFootprint) {
+    return { mode: "lid-benchmark", persisted: false, skipped: "low-footprint-provider" };
+  }
+
+  const serverHost = await resolveFileTracksKey(sourceId, userId, db, targetUrl);
+  const { data: rawTracks, error: tracksError } = await db
+    .from("catalog_file_tracks")
+    .select("audio_tracks,audio_probed_at")
+    .eq("server_host", serverHost)
+    .eq("item_type", itemType)
+    .eq("external_id", externalId)
+    .maybeSingle();
+  if (tracksError) throwDb(tracksError, "Unable to load benchmark audio map");
+  const fileTracks = rawTracks as JsonRecord | null;
+  const tracks = (Array.isArray(fileTracks?.audio_tracks)
+    ? (fileTracks!.audio_tracks as JsonRecord[])
+    : [])
+    .map((track) => ({
+      index: Number(track?.index),
+      lang: normalizeIsoLang(stringOrNull(track?.lang)),
+    }))
+    .filter((track) => Number.isInteger(track.index));
+  const selectedTrack = tracks.find((track) => track.index === trackIndex);
+  if (!fileTracks?.audio_probed_at || !selectedTrack) {
+    return { mode: "lid-benchmark", persisted: false, skipped: "audio-track-not-cached" };
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Media gateway is not configured");
+  }
+  const identityKey = (await resolveSourceIdentity(sourceId, userId, db)).key;
+  const leaseOwner = `lid-benchmark:${crypto.randomUUID()}`;
+  const { data: leaseClaimed, error: leaseError } = await db.rpc("claim_provider_file_probe", {
+    p_identity_key: identityKey,
+    p_lease_owner: leaseOwner,
+    p_ttl_seconds: 240,
+  });
+  if (leaseError) throwDb(leaseError, "Unable to claim the benchmark provider lease");
+  if (leaseClaimed !== true) {
+    return { mode: "lid-benchmark", persisted: false, skipped: "provider-lease-busy" };
+  }
+
+  try {
+    // Close the race between the initial guards and the provider fetch. Viewer playback and
+    // subtitle generation always win; the strict distributed lease remains held until return.
+    if (await userHasLiveSession(db, userId)) {
+      return { mode: "lid-benchmark", persisted: false, skipped: "live-session-race" };
+    }
+    if (await accountPregenActive(db, userId)) {
+      return { mode: "lid-benchmark", persisted: false, skipped: "pregen-active-race" };
+    }
+    if (accountKey) {
+      const { data: busy, error: busyError } = await db.rpc("provider_account_busy", {
+        p_key: accountKey,
+      });
+      if (busyError) throwDb(busyError, "Unable to recheck benchmark provider availability");
+      if (busy === true) {
+        return { mode: "lid-benchmark", persisted: false, skipped: "provider-account-busy-race" };
+      }
+    }
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const pipe = await createBytePipeAccess(
+      `lid-benchmark:${crypto.randomUUID()}`,
+      userId,
+      targetUrl,
+      expiresAt,
+      db,
+      null,
+      "lid-benchmark",
+    );
+    const endpoint = pipe.url.replace("/raw/", "/benchmark-language/");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+      },
+      body: JSON.stringify({ index: trackIndex, start, dur, order }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    const payload = recordOrEmpty(await response.json().catch(() => ({})));
+    if (!response.ok) {
+      return {
+        mode: "lid-benchmark",
+        persisted: false,
+        status: response.status,
+        error: stringOr(payload.error, "Gateway benchmark failed"),
+        retryAfter: response.headers.get("retry-after"),
+      };
+    }
+    return {
+      mode: "lid-benchmark",
+      persisted: false,
+      variant: {
+        id: stringOr(variant.id, ""),
+        titleId: stringOr(variant.title_id, ""),
+        label: stringOrNull(variant.label),
+        declaredLanguage: normalizeIsoLang(stringOrNull(variant.language)),
+        container: stringOrNull(variant.container_extension),
+      },
+      // This is a cache hint only (often ffprobe metadata), never benchmark ground truth.
+      cachedLanguageHint: selectedTrack.lang,
+      benchmark: sanitizeLidBenchmarkResult(payload),
+    };
+  } finally {
+    await releaseProviderFileProbe(db, identityKey, leaseOwner);
+  }
+}
+
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
 // IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
@@ -4173,6 +4449,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     const { data: paused } = await db.rpc("feature_flag", { p_key: "enrichment_paused" });
     if (paused === true) return withAuditMeta({ paused: true, skipped: "enrichment_paused" });
   } catch (_) { /* fail-open: keep enriching if the flag can't be read */ }
+
+  if (stringOr(body.mode, "") === "lid-benchmark") {
+    return withAuditMeta(await runLidBenchmark(db, body));
+  }
 
   // One dimension per call by default. With fallthrough:true (set on the DAYTIME audio-films
   // crons), once the primary dimension runs out of candidates we DRAIN the next unfinished

@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
+const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 
 const app = express();
 
@@ -204,8 +205,22 @@ const INBAND_HEADER_TTL_MS = clampInt(process.env.INBAND_HEADER_TTL_MS, 5 * 60 *
 // or WHISPER_MODEL to disable the /detect-language endpoint.
 const WHISPER_BIN = process.env.WHISPER_BIN || '';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
+const WHISPER_MODEL_NAME = process.env.WHISPER_MODEL_NAME || (() => {
+    try { return fs.readFileSync('/opt/whisper/model-name', 'utf8').trim(); }
+    catch (_) { return path.basename(WHISPER_MODEL || '') || null; }
+})();
+const WHISPER_CPP_COMMIT = process.env.WHISPER_CPP_COMMIT || null;
+const WHISPER_BIN_BUILD_SHA256 = readBuildDigest('/opt/whisper/bin.sha256');
+const WHISPER_MODEL_BUILD_SHA256 = readBuildDigest('/opt/whisper/model.sha256');
+let WHISPER_BIN_SHA256 = null;
+let WHISPER_MODEL_SHA256 = null;
+let WHISPER_RUNTIME_VERIFIED = false;
 const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
 const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
+const LID_BENCHMARK_INSTANCE = process.env.RAILWAY_REPLICA_ID || crypto.randomUUID();
+let lidBenchmarkBusy = false;
+let whisperInferenceActive = 0;
+let argosInferenceActive = 0;
 // Bounded mid-film sweep for language detection: a film opens with logos/silence/music, so
 // sampling at offset 0 detects nothing. Try these offsets (seconds) in order and stop at the
 // first clip with real speech; a clip past the file's end yields no WAV and is skipped. Bounded
@@ -350,7 +365,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 69;
+const GATEWAY_VERSION = 70;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -426,6 +441,15 @@ app.get('/health', (req, res) => {
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
+        languageDetectEngine: WHISPER_BIN && WHISPER_MODEL ? {
+            family: 'whisper.cpp',
+            model: WHISPER_MODEL_NAME,
+            commit: WHISPER_CPP_COMMIT,
+            binarySha256: WHISPER_BIN_SHA256,
+            modelSha256: WHISPER_MODEL_SHA256,
+            runtimeVerified: WHISPER_RUNTIME_VERIFIED,
+            detectOnlyBenchmark: true,
+        } : null,
         translate: ARGOS_ENABLED,
         translateTargets: ARGOS_ENABLED ? argosTargets() : [],
         ocr: OCR_ENABLED,
@@ -437,6 +461,11 @@ app.get('/health', (req, res) => {
         ocrQueueDepth: ocrQueue.length,
         ocrBusy,
         translateQueueDepth: translateQueue.length,
+        translateBusy,
+        rawPumpCount: rawPumps.size,
+        whisperInferenceActive,
+        argosInferenceActive,
+        lidBenchmarkBusy,
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -955,6 +984,7 @@ app.get('/detect-language/:token', async (req, res) => {
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
 
     const trackIndex = Number.parseInt(req.query.index, 10);
@@ -1144,6 +1174,226 @@ app.get('/detect-language/:token', async (req, res) => {
     }
 });
 
+// Service-only A/B benchmark. A signed scope keeps browser-visible byte-pipe tokens from
+// enabling the double CPU work, while gateway Bearer auth keeps the route off the public path.
+// The provider is touched exactly once: both Whisper modes consume the same temporary WAV and
+// nothing is persisted here or by the edge benchmark caller.
+app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims || claims.scope !== 'lid-benchmark') {
+        return res.status(401).json({ error: 'Invalid LID benchmark token' });
+    }
+    if (Number(claims.exp) * 1000 < Date.now()) {
+        return res.status(401).json({ error: 'LID benchmark token expired' });
+    }
+    if (!WHISPER_BIN || !WHISPER_MODEL) {
+        return res.status(503).json({ error: 'Language detection not configured' });
+    }
+    if (
+        lidBenchmarkBusy ||
+        lidProductionCpuBusy() ||
+        activeSessionCount() > 0 ||
+        rawPumps.size > 0
+    ) {
+        res.setHeader('Retry-After', '30');
+        return res.status(429).json({ error: 'LID benchmark requires an idle gateway' });
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const trackIndex = Number.parseInt(body.index, 10);
+    const startOffset = Number.parseFloat(body.start);
+    const duration = Number.parseFloat(body.dur);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex > 1024) {
+        return res.status(400).json({ error: 'Invalid audio index' });
+    }
+    if (!Number.isFinite(startOffset) || startOffset < 0 || startOffset > 21600) {
+        return res.status(400).json({ error: 'Invalid benchmark offset' });
+    }
+    if (!Number.isFinite(duration) || duration < 8 || duration > 30) {
+        return res.status(400).json({ error: 'Benchmark duration must be between 8 and 30 seconds' });
+    }
+    const order = body.order === 'detect-first' ? 'detect-first' : 'current-first';
+    const lockKey = accountJobKey(claims.uid, claims.url);
+    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url)) {
+        res.setHeader('Retry-After', '30');
+        return res.status(429).json({ error: 'Provider account is busy' });
+    }
+
+    lidBenchmarkBusy = true;
+    res.setHeader('Cache-Control', 'no-store');
+    let wavPath = null;
+    try {
+        const extractStartedAt = performance.now();
+        const ex = await withAccountJobLock(lockKey, () =>
+            extractAudioWav(
+                claims.url,
+                claims.ua || FFMPEG_USER_AGENT,
+                trackIndex,
+                startOffset,
+                duration,
+                45_000,
+                claims.uid,
+            ));
+        const extractMs = Math.round((performance.now() - extractStartedAt) * 100) / 100;
+        if (!ex.ok) {
+            return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
+        }
+        wavPath = ex.path;
+
+        const stat = await fsp.stat(wavPath);
+        const wavBytes = stat.size;
+        const audioSec = Math.max(0, (wavBytes - 44) / (16000 * 2));
+        const sampleDigest = crypto.createHash('sha256')
+            .update(await fsp.readFile(wavPath))
+            .digest('hex');
+
+        let current = null;
+        let detectOnly = null;
+        let currentMs = 0;
+        let detectOnlyMs = 0;
+        let currentContainerCpuMs = null;
+        let detectOnlyContainerCpuMs = null;
+        const loadBefore = os.loadavg();
+        const runCurrent = async () => {
+            const cpuBefore = await readContainerCpuUsageMs();
+            const startedAt = performance.now();
+            const value = await runWhisperDetect(wavPath);
+            currentMs = Math.round((performance.now() - startedAt) * 100) / 100;
+            const cpuAfter = await readContainerCpuUsageMs();
+            currentContainerCpuMs = cpuBefore == null || cpuAfter == null
+                ? null
+                : Math.round((cpuAfter - cpuBefore) * 100) / 100;
+            return value;
+        };
+        const runDetectOnly = async () => {
+            const cpuBefore = await readContainerCpuUsageMs();
+            const startedAt = performance.now();
+            const value = await runWhisperDetectOnly({
+                bin: WHISPER_BIN,
+                model: WHISPER_MODEL,
+                wavPath,
+                threads: WHISPER_THREADS,
+                timeoutMs: WHISPER_TIMEOUT_MS,
+            });
+            detectOnlyMs = Math.round((performance.now() - startedAt) * 100) / 100;
+            const cpuAfter = await readContainerCpuUsageMs();
+            detectOnlyContainerCpuMs = cpuBefore == null || cpuAfter == null
+                ? null
+                : Math.round((cpuAfter - cpuBefore) * 100) / 100;
+            return value;
+        };
+        if (order === 'detect-first') {
+            detectOnly = await runDetectOnly();
+            current = await runCurrent();
+        } else {
+            current = await runCurrent();
+            detectOnly = await runDetectOnly();
+        }
+
+        const transcript = detectLanguageFromText(current.text);
+        const currentLanguage = String(current.lang || '').toLowerCase() || null;
+        const currentProbability = Number(current.prob || 0);
+        const currentConfident = Boolean(currentLanguage) && currentProbability >= 0.75;
+        const productionCandidate = transcript.confident
+            ? transcript.lang
+            : (currentLanguage || transcript.lang || null);
+        const productionLanguage = (transcript.confident === true || currentConfident)
+            && Number(transcript.words || 0) >= 4
+            ? productionCandidate
+            : null;
+        const totalCurrentMs = extractMs + currentMs;
+        const totalDetectOnlyMs = extractMs + detectOnlyMs;
+        const sameLanguage = Boolean(
+            currentLanguage &&
+            detectOnly.ok &&
+            detectOnly.lang &&
+            currentLanguage === detectOnly.lang,
+        );
+
+        return res.json({
+            schemaVersion: 1,
+            benchmarkId: crypto.randomUUID(),
+            persisted: false,
+            sample: {
+                trackIndex,
+                startSec: startOffset,
+                requestedDurationSec: duration,
+                audioSec: Math.round(audioSec * 1000) / 1000,
+                wavBytes,
+                digest: sampleDigest,
+            },
+            engine: {
+                family: 'whisper.cpp',
+                model: WHISPER_MODEL_NAME,
+                commit: WHISPER_CPP_COMMIT,
+                binarySha256: WHISPER_BIN_SHA256,
+                modelSha256: WHISPER_MODEL_SHA256,
+                runtimeVerified: WHISPER_RUNTIME_VERIFIED,
+                threads: WHISPER_THREADS,
+            },
+            system: {
+                instance: LID_BENCHMARK_INSTANCE,
+                loadBefore,
+                loadAfter: os.loadavg(),
+                contended: activeSessionCount() > 0 || rawPumps.size > 0 || lidProductionCpuBusy(),
+            },
+            order: order === 'detect-first'
+                ? ['detect-only', 'current']
+                : ['current', 'detect-only'],
+            timings: {
+                extractMs,
+                currentMs,
+                detectOnlyMs,
+                currentContainerCpuMs,
+                detectOnlyContainerCpuMs,
+                totalCurrentMs: Math.round(totalCurrentMs * 100) / 100,
+                totalDetectOnlyMs: Math.round(totalDetectOnlyMs * 100) / 100,
+            },
+            current: {
+                ok: Boolean(currentLanguage || current.text),
+                candidateLanguage: currentLanguage,
+                probability: currentProbability,
+                transcriptLanguage: transcript.confident ? transcript.lang : null,
+                transcriptConfident: transcript.confident === true,
+                wordCount: Number(transcript.words || 0),
+                productionAccepted: Boolean(productionLanguage),
+                productionLanguage,
+            },
+            detectOnly: {
+                ok: detectOnly.ok === true,
+                candidateLanguage: detectOnly.lang || null,
+                probability: Number(detectOnly.prob || 0),
+                timedOut: detectOnly.timedOut === true,
+                error: detectOnly.error || null,
+            },
+            agreement: {
+                whisperLanguage: sameLanguage,
+                productionLanguage: Boolean(
+                    productionLanguage &&
+                    detectOnly.ok &&
+                    productionLanguage === detectOnly.lang
+                ),
+            },
+            gains: {
+                lidSpeedup: detectOnlyMs > 0
+                    ? Math.round((currentMs / detectOnlyMs) * 1000) / 1000
+                    : null,
+                endToEndSpeedup: totalDetectOnlyMs > 0
+                    ? Math.round((totalCurrentMs / totalDetectOnlyMs) * 1000) / 1000
+                    : null,
+            },
+        });
+    } catch (error) {
+        return res.status(502).json({
+            error: 'LID benchmark failed',
+            details: String(error?.message || error),
+        });
+    } finally {
+        if (wavPath) fsp.unlink(wavPath).catch(() => {});
+        lidBenchmarkBusy = false;
+    }
+});
+
 // Phase 3: full timestamped transcription → WebVTT. Extracts the whole audio track (dur 0) or a
 // [start, start+dur] window (benchmarking) and runs whisper.cpp -ovtt. Returns the VTT + timings;
 // rtf = whisperMs / audioSec is the benchmark number (on-demand viable if rtf is small). Same
@@ -1153,6 +1403,7 @@ app.get('/transcribe/:token', async (req, res) => {
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const ua = claims.ua || FFMPEG_USER_AGENT;
 
     const trackIndex = Number.parseInt(req.query.index, 10);
@@ -1199,6 +1450,7 @@ app.post('/transcribe-async/:token', (req, res) => {
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
     if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid audio index' });
     const jobId = String(req.query.jobId || '');
@@ -1228,6 +1480,7 @@ app.post('/ocr-async/:token', (req, res) => {
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
     if (!OCR_ENABLED) return res.status(503).json({ error: 'OCR not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const index = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid subtitle index' });
     const jobId = String(req.query.jobId || '');
@@ -1255,6 +1508,7 @@ app.post('/storyboard-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
     if (!jobId || !isBackendUrl(callbackUrl)) {
@@ -1281,6 +1535,7 @@ app.post('/storyboard-async/:token', (req, res) => {
 // /xtream/* — not a byte-pipe token. Body: { jobId, callback, source, target, vtt }.
 app.post('/translate-async', requireGatewayAuth, (req, res) => {
     if (!ARGOS_ENABLED) return res.status(503).json({ error: 'Translation not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const body = req.body || {};
     const jobId = String(body.jobId || '');
     const callbackUrl = String(body.callback || '');
@@ -1301,6 +1556,7 @@ app.post('/translate-async', requireGatewayAuth, (req, res) => {
 // Sync translate (debug / benchmark): returns the translated VTT directly. Gateway-auth only.
 app.post('/translate', requireGatewayAuth, async (req, res) => {
     if (!ARGOS_ENABLED) return res.status(503).json({ error: 'Translation not configured' });
+    if (rejectWhileLidBenchmarkRuns(res)) return;
     const body = req.body || {};
     const source = String(body.source || '').toLowerCase();
     const target = String(body.target || '').toLowerCase();
@@ -1460,6 +1716,13 @@ function shiftVttBlocks(vtt, offsetSec) {
 // best-effort (empties on failure). `lang`/`prob` are parsed from whisper's own LID line.
 function runWhisperDetect(wavPath) {
     return new Promise((resolve) => {
+        whisperInferenceActive += 1;
+        let inferenceReleased = false;
+        const releaseInference = () => {
+            if (inferenceReleased) return;
+            inferenceReleased = true;
+            whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+        };
         const outPrefix = wavPath.replace(/\.wav$/i, '');
         const args = [
             '-m', WHISPER_MODEL,
@@ -1471,11 +1734,18 @@ function runWhisperDetect(wavPath) {
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
-        catch (_) { return resolve({ text: '', lang: null, prob: 0 }); }
+        catch (_) {
+            releaseInference();
+            return resolve({ text: '', lang: null, prob: 0 });
+        }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TIMEOUT_MS);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve({ text: '', lang: null, prob: 0 }); });
+        child.on('error', () => {
+            clearTimeout(timer);
+            releaseInference();
+            resolve({ text: '', lang: null, prob: 0 });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
@@ -1485,6 +1755,7 @@ function runWhisperDetect(wavPath) {
             try { text = await fsp.readFile(outPrefix + '.txt', 'utf8'); } catch (_) { text = ''; }
             fsp.unlink(outPrefix + '.txt').catch(() => {});
             if (code !== 0 && !text && !lang) console.warn(`[media-gateway] whisper exit ${code}: ${stderr.slice(-300)}`);
+            releaseInference();
             resolve({ text: String(text || '').trim(), lang, prob });
         });
     });
@@ -1552,6 +1823,13 @@ function cleanVtt(vtt) {
 // forceLang pins the source language. `timeoutMs` = the adaptive budget (whisperBudgetMs).
 function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOUT_MS) {
     return new Promise((resolve) => {
+        whisperInferenceActive += 1;
+        let inferenceReleased = false;
+        const releaseInference = () => {
+            if (inferenceReleased) return;
+            inferenceReleased = true;
+            whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+        };
         const t0 = Date.now();
         const outPrefix = wavPath.replace(/\.wav$/i, '');
         const args = [
@@ -1564,12 +1842,19 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
-        catch (e) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) }); }
+        catch (e) {
+            releaseInference();
+            return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) });
+        }
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            releaseInference();
+            resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
@@ -1582,6 +1867,7 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
             const failReason = vtt ? null
                 : timedOut ? `whisper killed by timeout after ${Math.round((Date.now() - t0) / 1000)}s (no partial VTT is written)`
                 : `whisper exit ${code} wrote no VTT: ${stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr'}`;
+            releaseInference();
             resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0, failReason });
         });
     });
@@ -2070,20 +2356,35 @@ async function drainTranslateQueue() {
 // Resolves { ok, vtt } or { ok:false, error } (the script emits a JSON error on stderr + exit code).
 function runArgos(vtt, source, target) {
     return new Promise((resolve) => {
+        argosInferenceActive += 1;
+        let inferenceReleased = false;
+        const releaseInference = () => {
+            if (inferenceReleased) return;
+            inferenceReleased = true;
+            argosInferenceActive = Math.max(0, argosInferenceActive - 1);
+        };
         let child;
         try {
             child = spawn(ARGOS_PYTHON_BIN, [ARGOS_TRANSLATE_SCRIPT], {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 env: { ...process.env, ARGOS_MODELS_DIR },
             });
-        } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        } catch (e) {
+            releaseInference();
+            return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) });
+        }
         let out = '', err = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, ARGOS_TRANSLATE_TIMEOUT_MS);
         child.stdout.on('data', (d) => { out += d.toString(); });
         child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            releaseInference();
+            resolve({ ok: false, error: String((e && e.message) || e) });
+        });
         child.on('close', (code) => {
             clearTimeout(timer);
+            releaseInference();
             if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
             let msg = `translate exit ${code}`;
             try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
@@ -2619,6 +2920,21 @@ app.use((err, req, res, next) => {
 
 async function bootstrap() {
     await fsp.mkdir(OUTPUT_DIR, { recursive: true });
+    if (WHISPER_BIN && WHISPER_MODEL) {
+        [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256] = await Promise.all([
+            hashFileSha256(WHISPER_BIN),
+            hashFileSha256(WHISPER_MODEL),
+        ]);
+        WHISPER_RUNTIME_VERIFIED = Boolean(
+            WHISPER_BIN_BUILD_SHA256 &&
+            WHISPER_MODEL_BUILD_SHA256 &&
+            WHISPER_BIN_SHA256 === WHISPER_BIN_BUILD_SHA256 &&
+            WHISPER_MODEL_SHA256 === WHISPER_MODEL_BUILD_SHA256
+        );
+        if (!WHISPER_RUNTIME_VERIFIED) {
+            console.warn('[media-gateway] Whisper runtime hashes do not match the pinned build');
+        }
+    }
     app.listen(PORT, () => {
         console.log(`Norva Media Gateway listening on ${PORT}`);
         console.log(`Output directory: ${OUTPUT_DIR}`);
@@ -3923,6 +4239,56 @@ function clampInt(value, fallback, min, max) {
     const parsed = Number.parseInt(String(value || ''), 10);
     if (!Number.isFinite(parsed)) return fallback;
     return Math.max(min, Math.min(max, parsed));
+}
+
+function readBuildDigest(filePath) {
+    try {
+        const digest = fs.readFileSync(filePath, 'utf8').trim().toLowerCase();
+        return /^[a-f0-9]{64}$/.test(digest) ? digest : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function hashFileSha256(filePath) {
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const input = fs.createReadStream(filePath);
+        input.on('error', reject);
+        input.on('data', (chunk) => hash.update(chunk));
+        input.on('end', () => resolve(hash.digest('hex')));
+    });
+}
+
+async function readContainerCpuUsageMs() {
+    try {
+        const stat = await fsp.readFile('/sys/fs/cgroup/cpu.stat', 'utf8');
+        const match = stat.match(/^usage_usec\s+(\d+)$/m);
+        return match ? Number(match[1]) / 1000 : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function lidProductionCpuBusy() {
+    return Boolean(
+        whisperInferenceActive > 0 ||
+        argosInferenceActive > 0 ||
+        accountJobLocks.size > 0 ||
+        transcribeBusy ||
+        translateBusy ||
+        ocrBusy ||
+        transcribeQueue.length ||
+        translateQueue.length ||
+        ocrQueue.length
+    );
+}
+
+function rejectWhileLidBenchmarkRuns(res) {
+    if (!lidBenchmarkBusy) return false;
+    res.setHeader('Retry-After', '30');
+    res.status(429).json({ error: 'LID benchmark temporarily owns the inference lane' });
+    return true;
 }
 
 function sleep(ms) {
