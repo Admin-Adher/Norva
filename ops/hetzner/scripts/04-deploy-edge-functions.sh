@@ -9,7 +9,7 @@
 #
 # This script:
 #   1. sanity-checks that every function in supabase/config.toml has a dir,
-#   2. restarts the edge-runtime container to pick up changes.
+#   2. restarts every configured edge-runtime replica to pick up changes.
 #
 # CI ADAPTATION (do this once, separately): .github/workflows/deploy-supabase-
 # functions.yml today runs `supabase functions deploy --project-ref
@@ -44,13 +44,22 @@ declared=$(grep -cE '^\[functions\.[a-z0-9-]+\]' "$CONFIG")
 present=$(find "$FUNCS_DIR" -maxdepth 1 -mindepth 1 -type d -name 'norva-*' | wc -l | tr -d ' ')
 echo ">> config.toml declares $declared functions; $present norva-* dirs present."
 
-echo ">> Restarting edge-runtime to reload functions"
+echo ">> Restarting edge-runtime replicas to reload functions"
 if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
-  docker compose -f "$COMPOSE" restart functions
-  echo ">> edge-runtime restarted."
+  # Kong round-robins across functions, functions2, ... . Discover the compose
+  # services so a deploy cannot leave a stale replica serving old code.
+  mapfile -t function_services < <(
+    docker compose -f "$COMPOSE" config --services | grep -E '^functions[0-9]*$'
+  )
+  if [[ ${#function_services[@]} -eq 0 ]]; then
+    echo "ERROR: no edge-runtime service found in $COMPOSE" >&2
+    exit 1
+  fi
+  docker compose -f "$COMPOSE" restart "${function_services[@]}"
+  echo ">> edge-runtime replicas restarted: ${function_services[*]}."
 else
   echo "   (docker/compose not found here — run on the box:"
-  echo "    docker compose -f docker-compose.supabase.yml restart functions )"
+  echo "    docker compose -f docker-compose.supabase.yml restart functions functions2 )"
 fi
 
 echo ">> Done. Smoke-test e.g.:  curl -i \$FUNCTIONS_BASE_URL/norva-playback  (expect 401 without auth)"

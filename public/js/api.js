@@ -601,7 +601,7 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '', year = '', minRating = '' } = {}) {
+    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '', year = '', minRating = '', addedDays = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 36));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -613,7 +613,7 @@ const CloudAdapter = (() => {
             // Audio-language / burned-in-subtitle / year / rating filter + "best for
             // my languages" sort + text search — forwarded to the catalog (empty
             // values dropped).
-            audio, subs, sort, prefAudio, prefSubs, q, year, minRating
+            audio, subs, sort, prefAudio, prefSubs, q, year, minRating, addedDays
         });
     }
 
@@ -1835,7 +1835,8 @@ const CloudAdapter = (() => {
                 audio: query.get('audio') || '', subs: query.get('subs') || '',
                 sort: query.get('sort') || '', prefAudio: query.get('prefAudio') || '',
                 prefSubs: query.get('prefSubs') || '', q: query.get('q') || '',
-                year: query.get('year') || '', minRating: query.get('minRating') || ''
+                year: query.get('year') || '', minRating: query.get('minRating') || '',
+                addedDays: query.get('addedDays') || ''
             });
             return {
                 ...payload,

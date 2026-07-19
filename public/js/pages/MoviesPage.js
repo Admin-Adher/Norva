@@ -426,7 +426,7 @@ class MoviesPage {
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
         this.activeBucket = bucket;
-        this.activeBucketLangKey = JSON.stringify(this.currentLanguageParams());
+        this.activeBucketLangKey = this.currentBucketViewKey();
         this.bucketLabel = (rail && (rail.title || rail.name)) || '';
         this.bucketOffset = 0;
         this.bucketHasMore = true;
