@@ -21,6 +21,7 @@ import wave
 PROTOCOL_VERSION = 1
 MODEL_DIR = Path(os.environ.get("ECAPA_MODEL_DIR", "/opt/ecapa-model")).resolve()
 MODEL_REVISION = os.environ.get("ECAPA_MODEL_REVISION", "unknown")[:120]
+RUNTIME_DIR = Path(os.environ.get("ECAPA_RUNTIME_DIR", "/tmp/ecapa-runtime")).resolve()
 ALLOWED_ROOT_RAW = os.environ.get("ECAPA_ALLOWED_WAV_ROOT", "")
 ALLOWED_ROOT = Path(ALLOWED_ROOT_RAW).resolve() if ALLOWED_ROOT_RAW else None
 THREADS = max(1, min(8, int(os.environ.get("ECAPA_THREADS", "2"))))
@@ -144,9 +145,14 @@ def load_engine():
         pass
 
     labels = load_labels()
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     classifier = EncoderClassifier.from_hparams(
         source=str(MODEL_DIR),
-        savedir=str(MODEL_DIR),
+        savedir=str(RUNTIME_DIR),
+        # The official immutable YAML names its Hugging Face repository as the
+        # pretrainer source. Override only that value so runtime stays offline
+        # and consumes the already SHA-pinned local checkpoint files.
+        overrides={"pretrained_path": str(MODEL_DIR)},
         run_opts={"device": "cpu"},
     )
     classifier.mods.eval()

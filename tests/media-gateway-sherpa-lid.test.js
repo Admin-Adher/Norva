@@ -342,5 +342,6 @@ test('prototype keeps the optional native import isolated to the worker', () => 
     );
     assert.doesNotMatch(bridge, /require\(['"]sherpa-onnx-node['"]\)/);
     assert.match(worker, /sherpa = require\('sherpa-onnx-node'\)/);
-    assert.match(worker, /sherpa\.readWaveFromBinary\(wavBinary\)/);
+    assert.match(worker, /sherpaAddon = require\('sherpa-onnx-node\/addon\.js'\)/);
+    assert.match(worker, /sherpaAddon\.readWaveFromBinary\(wavBinary\)/);
 });

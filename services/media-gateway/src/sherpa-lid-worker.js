@@ -178,8 +178,14 @@ async function startWorker() {
         // only a configured benchmark worker attempts it.
         const requireStartedAt = performance.now();
         let sherpa;
+        let sherpaAddon;
         try {
             sherpa = require('sherpa-onnx-node');
+            // The public wrapper exposes the LID class but v1.13.4 does not
+            // re-export readWaveFromBinary. Its pinned addon does, so load that
+            // byte decoder explicitly and keep inference on the exact buffer
+            // whose digest was validated below.
+            sherpaAddon = require('sherpa-onnx-node/addon.js');
         } catch (error) {
             throw Object.assign(
                 new Error(`optional sherpa-onnx-node dependency is unavailable: ${boundedError(error)}`),
@@ -189,7 +195,7 @@ async function startWorker() {
         const requireMs = performance.now() - requireStartedAt;
         if (
             typeof sherpa.SpokenLanguageIdentification !== 'function'
-            || typeof sherpa.readWaveFromBinary !== 'function'
+            || typeof sherpaAddon.readWaveFromBinary !== 'function'
         ) {
             throw Object.assign(new Error('sherpa addon does not expose the required API'), {
                 code: 'api-unavailable',
@@ -283,7 +289,7 @@ async function startWorker() {
                 const readStartedAt = performance.now();
                 // Decode the exact bytes just hashed. Using the path again here would reopen a
                 // TOCTOU window where a same-size WAV could change between validation and LID.
-                const wave = sherpa.readWaveFromBinary(wavBinary);
+                const wave = sherpaAddon.readWaveFromBinary(wavBinary);
                 const readWaveMs = performance.now() - readStartedAt;
                 if (
                     Number(wave?.sampleRate) !== 16_000

@@ -256,6 +256,13 @@ process.once('SIGINT', shutdown);
 
 fsp.mkdir(SAMPLE_ROOT, { recursive: true, mode: 0o700 })
     .then(() => sherpa.start())
+    .then((result) => {
+        if (result?.ok !== true) {
+            console.error(
+                `[lid-benchmark-worker] sherpa startup warning: ${safeError(result?.error)}`,
+            );
+        }
+    })
     .catch((error) => {
         console.error(`[lid-benchmark-worker] startup warning: ${safeError(error)}`);
     })

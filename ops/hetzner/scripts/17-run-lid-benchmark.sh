@@ -642,6 +642,7 @@ printf '%s\n' "$SUMMARY"
 REQUESTED="${#SAMPLES[@]}"
 USABLE="$(printf '%s' "$SUMMARY" | jq -r '.usable')"
 MIN_REQUIRED=$(( (REQUESTED * MIN_COMPLETION_PCT + 99) / 100 ))
+(( REQUESTED > 0 && MIN_REQUIRED < 1 )) && MIN_REQUIRED=1
 HASH_DRIFT="$(jq -s --arg commit "$EXPECTED_WHISPER_COMMIT" '[
   .[] | select(.response.benchmark != null) | select(
     .response.benchmark.engine.commit != $commit or

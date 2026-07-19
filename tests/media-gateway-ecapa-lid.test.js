@@ -277,6 +277,8 @@ test('Python worker is persistent, offline, path-bounded and never marks evidenc
   );
   assert.match(source, /HF_HUB_OFFLINE/);
   assert.match(source, /TRANSFORMERS_OFFLINE/);
+  assert.match(source, /savedir=str\(RUNTIME_DIR\)/);
+  assert.match(source, /overrides=\{"pretrained_path": str\(MODEL_DIR\)\}/);
   assert.match(source, /requested\.resolve\(strict=True\)/);
   assert.match(source, /resolved\.relative_to\(ALLOWED_ROOT\.resolve\(strict=True\)\)/);
   assert.match(source, /O_NOFOLLOW/);
