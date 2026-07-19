@@ -259,6 +259,13 @@ test('engine runtime recovery resumes MKV/MP4 once and keeps the selected audio 
   assert.ok(body.includes('audioStreamIndex: selectedAudioIndex'), 'engine retry must preserve selected audio');
   assert.ok(body.includes('fallbackEngineToTranscode(playbackAttemptId, resumeAt)'),
     'gateway fallback must receive the captured position');
+  assert.ok(
+    body.indexOf('fallbackEngineToTranscode(playbackAttemptId, resumeAt)')
+      < body.indexOf('tryNextVersion(resumeAt, playbackAttemptId)'),
+    'the selected exact file must reach Gateway transcode before any sibling-version failover'
+  );
+  assert.ok(!body.includes('if (resumeAt >= 300 && hasNextVersion)'),
+    'a deep seek must not silently switch to a sibling with different audio/subtitles');
   assert.ok(body.includes('Number.isFinite(visiblePosition) && visiblePosition > 0'),
     'a backward seek must resume from the visible playhead, not the monotone snapshot');
   assert.ok(body.includes('this._engineRuntimeRecoveryAttemptId === playbackAttemptId'),
@@ -479,6 +486,81 @@ test('engine-to-gateway fallback keeps the exact offset without restarting play(
   assert.ok(!body.includes('await this.play(c,'), 'play() would reset the retry budget and playback state');
   assert.ok(body.includes('await this.cleanupStaleCloudPlaybackSession(resultSessionId)'),
     'a stale gateway fallback resolve must release its provider session');
+});
+
+test('engine-to-gateway fallback remuxes the exact file at position with the actually playing audio', async () => {
+  const calls = [];
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    API: {
+      proxy: {
+        xtream: {
+          getStreamUrl: async (...args) => {
+            calls.push(args);
+            return { url: 'https://gateway.test/playlist.m3u8', sessionId: 'ar-session' };
+          }
+        }
+      }
+    }
+  };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {
+    sourceId: 'source-ar',
+    id: 'stream-ar',
+    type: 'movie',
+    containerExtension: 'mkv'
+  };
+  page.currentPlaybackMode = 'engine';
+  page._playbackAttemptId = 17;
+  page.isStalePlaybackAttempt = () => false;
+  page.getResumeSnapshotPosition = () => 0;
+  page.getMergedPlaybackPreferences = () => null;
+  page.savePlaybackPreferences = () => null;
+  page.selectedAudioTrackUserChoice = false;
+  page.directAudioStreamIndex = 1;
+  page.selectedAudioStreamIndex = 7;
+  page.audioTracks = [
+    { index: 1, language: 'en' },
+    { index: 7, language: 'fr' }
+  ];
+  page.currentStreamInfo = {
+    audioTracks: [
+      { index: 1, language: 'en', codec: 'aac', channels: 2 },
+      { index: 7, language: 'fr', codec: 'ac3', channels: 6 }
+    ]
+  };
+  page.showLoading = () => {};
+  page.updateTranscodeStatus = () => {};
+  page.waitForProviderSlotRelease = async () => {};
+  page.loadVideo = async (url, options) => {
+    page.loaded = { url, options };
+  };
+  page.cleanupStaleCloudPlaybackSession = async () => {};
+
+  const recovered = await page.fallbackEngineToTranscode(17, 3140);
+
+  assert.strictEqual(recovered, true);
+  assert.strictEqual(calls.length, 1);
+  const [sourceId, streamId, type, container, options] = calls[0];
+  assert.strictEqual(sourceId, 'source-ar');
+  assert.strictEqual(streamId, 'stream-ar');
+  assert.strictEqual(type, 'movie');
+  assert.strictEqual(container, 'mkv');
+  assert.strictEqual(options.mode, 'transcode');
+  assert.strictEqual(options.gatewayMode, 'remux');
+  assert.strictEqual(Object.hasOwn(options, 'audioMode'), false);
+  assert.strictEqual(options.audioStreamIndex, 1);
+  assert.strictEqual(options.audioCodec, 'aac');
+  assert.strictEqual(options.audioChannels, 2);
+  assert.strictEqual(options.seekOffset, 3140);
+  assert.strictEqual(options.resumeTime, 3140);
+  assert.strictEqual(page.content.id, 'stream-ar');
+  assert.strictEqual(page.loaded.options.resumeTarget, 3140);
+  assert.strictEqual(page.loaded.options.playbackPreferences, null);
 });
 
 test('delayed engine setup retries never destroy a replacement engine', () => {

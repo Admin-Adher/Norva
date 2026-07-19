@@ -3216,9 +3216,10 @@ class WatchPage {
         }
     }
 
-    // Engine could not demux this container (e.g. MPEG-TS, which this libav build lacks). Re-resolve
-    // the title forcing the gateway transcode path (server-side ffmpeg → browser-safe HLS) and play
-    // that. Only ever runs after an engine load already failed, so it can't regress a working title.
+    // Re-resolve the exact file through the Gateway after the browser engine fails.
+    // The Gateway starts with its fast remux lane (copying browser-safe H.264/AAC)
+    // and can promote only the unsafe codecs to encoding. Only ever runs after an
+    // engine failure, so it cannot regress a working title.
     async fallbackEngineToTranscode(playbackAttemptId, startOffsetOverride = null) {
         const c = this.content || {};
         if (!c.sourceId || !c.id) return false;
@@ -3240,7 +3241,7 @@ class WatchPage {
                 : (Number.isFinite(snapshotOffset) ? snapshotOffset : (Number(this.resumeTime) || 0))
         ));
         const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
-        const audioOptions = this.getSelectedAudioPlaybackOptions();
+        const audioOptions = this.getPlayingEngineAudioOptions();
         this.resumeTime = startOffset;
         console.warn(`[WatchPage] engine fallback to gateway transcode from ${startOffset}s`);
         try { this.showLoading(); } catch (_) {}
@@ -3250,11 +3251,12 @@ class WatchPage {
             await this.waitForProviderSlotRelease(900);
             if (fallbackBecameStale()) return true;
             if (this.currentPlaybackMode !== 'engine') return false;
-            // Force a FULL re-encode (not remux): the engine already proved this is non-browser-safe
-            // real media (TS, possibly mislabeled mp4), and a TS stream-copy remux into HLS is the
-            // exact thing that just failed. gatewayMode:'transcode' skips the doomed remux attempt.
+            // `mode:'transcode'` selects the Gateway session path; `gatewayMode:'remux'`
+            // asks it to copy safe H.264/AAC first. The API/gateway can still encode a
+            // codec the exact-file profile proves unsafe, without making every runtime
+            // MSE/mux failure replay linearly from byte zero.
             result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
-                mode: 'transcode', gatewayMode: 'transcode', audioMode: 'transcode',
+                mode: 'transcode', gatewayMode: 'remux',
                 ...audioOptions,
                 seekOffset: startOffset, startOffset, resumeTime: startOffset
             });
@@ -3324,9 +3326,9 @@ class WatchPage {
                         : (Number.isFinite(snapshotPosition) ? snapshotPosition : 0))
             ));
             const engineUrl = this.baseStreamUrl || this.currentUrl;
-            const selectedAudioIndex = Number.isInteger(this.selectedAudioStreamIndex)
-                ? this.selectedAudioStreamIndex
-                : (Number.isInteger(this.directAudioStreamIndex) ? this.directAudioStreamIndex : null);
+            const selectedAudioIndex = Number.isInteger(this.directAudioStreamIndex)
+                ? this.directAudioStreamIndex
+                : (Number.isInteger(this.selectedAudioStreamIndex) ? this.selectedAudioStreamIndex : null);
             const reason = String(error?.message || error || 'ENGINE_RUNTIME_FAILURE');
 
             if (!options.alreadyReported) {
@@ -3379,17 +3381,14 @@ class WatchPage {
             const hasNextVersion = Boolean(
                 this.versions && this.versionIndex < this.versions.length - 1
             );
-            // Server-side linear transcoding cannot efficiently materialise a playlist
-            // 30+ minutes into a non-seekable provider file. Prefer another equivalent
-            // version at the exact point before attempting that slow lane.
-            let versionAttempted = false;
-            if (resumeAt >= 300 && hasNextVersion) {
-                versionAttempted = true;
-                if (await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
-            }
-
+            // Keep the exact file the viewer selected. A sibling version can have a
+            // different dub/subtitle set, so switching merely because the playhead is
+            // deep into the film silently changes the content (for example AR-SUBS
+            // English audio -> a French dub). The Gateway accepts the absolute seek
+            // offset and selected file-local audio options; try that exact-file lane
+            // first, then fail over to a sibling only if it cannot be created.
             if (await this.fallbackEngineToTranscode(playbackAttemptId, resumeAt)) return true;
-            if (!versionAttempted && hasNextVersion && await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
+            if (hasNextVersion && await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
 
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
             this.handleEngineUnplayable(error);
@@ -6637,6 +6636,47 @@ class WatchPage {
             ...(this.currentStreamInfo || {}),
             audioTracks: this.audioTracks
         });
+    }
+
+    // The engine may auto-select a concrete stream without turning it into an
+    // explicit user preference. A lane recovery must nevertheless keep the audio
+    // that was actually playing. `directAudioStreamIndex` is the engine's live
+    // stream, so it wins over the UI selection; codec/channels let the Gateway
+    // decide whether that exact stream can be copied or needs audio encoding.
+    getPlayingEngineAudioOptions() {
+        const asStreamIndex = (value) => {
+            const parsed = Number(value);
+            return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+        };
+        const directIndex = asStreamIndex(this.directAudioStreamIndex);
+        const selectedIndex = asStreamIndex(this.selectedAudioStreamIndex);
+        const streamIndex = directIndex ?? selectedIndex;
+        if (!Number.isInteger(streamIndex)) return {};
+
+        const trackSets = [
+            this.audioTracks,
+            this.currentStreamInfo?.audioTracks,
+            this._relayAudioTracks,
+        ];
+        const matchingTracks = [];
+        for (const tracks of trackSets) {
+            if (!Array.isArray(tracks)) continue;
+            const match = tracks.find(candidate => asStreamIndex(candidate?.index) === streamIndex);
+            if (match) matchingTracks.push(match);
+        }
+
+        const codec = String(
+            matchingTracks.find(track => String(track?.codec || '').trim())?.codec || ''
+        ).trim();
+        const channels = Number(
+            matchingTracks.find(track => Number.isFinite(Number(track?.channels))
+                && Number(track.channels) > 0)?.channels
+        );
+        return {
+            audioStreamIndex: streamIndex,
+            ...(codec ? { audioCodec: codec } : {}),
+            ...(Number.isFinite(channels) && channels > 0 ? { audioChannels: channels } : {}),
+        };
     }
 
     async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {

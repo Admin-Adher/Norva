@@ -18,8 +18,10 @@
 (function () {
   'use strict';
 
-  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs';
+  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=40';
   const LIBAV_BASE = '/webengine/vendor/libav';
+  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=40';
+  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=40';
 
   // Audio codecs the browser decodes natively inside fMP4 → copy (no transcode).
   const AUDIO_COPY = new Set(['aac', 'opus', 'flac']);
@@ -257,7 +259,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 39;
+  const ENGINE_VERSION = 40;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -317,6 +319,12 @@
       this._pumpRunning = false;
       this._stopRequested = false;
       this._fatalSignaled = false;
+      // Mux batches are transactional: movenc can emit a partial moof before a
+      // packet write reports an error. Hold all onwrite chunks until the worker
+      // batch succeeds so malformed tails never reach MSE.
+      this._muxWriteStage = null;
+      this._commitMuxWrite = null;
+      this._muxGeneration = 0;
       this._gate = null;          // resolver while pump waits for buffer to drain
       this._seeking = false;
       this._initSegPending = false;
@@ -358,6 +366,9 @@
         pumpExitReason: null, pumpExitRes: null, lastReadError: null,
         trailerBytesDropped: 0,
         writeDiscontinuities: 0, firstWriteDiscontinuity: null,
+        muxPacketWriteErrors: 0, firstMuxPacketWriteError: null,
+        muxRejectedBytes: 0,
+        staleMuxBytesDropped: 0, firstStaleMuxDrop: null,
       };
     }
 
@@ -374,7 +385,14 @@
       const prefetchP = this._prefetchStart();
       const factory = await factoryP;
       const LibAV = factory.LibAV || factory.default.LibAV;
-      this.lib = await LibAV({ base: LIBAV_BASE });
+      // Pin every layer of the generated runtime to this engine revision. Busting
+      // only norvaEngine.js is insufficient: browsers can otherwise retain the old
+      // worker helper that ignored av_interleaved_write_frame failures.
+      this.lib = await LibAV({
+        base: LIBAV_BASE,
+        toImport: LIBAV_RUNTIME,
+        wasmurl: LIBAV_WASM,
+      });
       // Quiet libav at the source before any demuxing (see _verbose above). The
       // call proxies into the worker, so it governs the thread that does the work.
       // FATAL (not ERROR) for the normal path: MPEG-TS sources emit ERROR-level
@@ -546,6 +564,12 @@
     destroy() {
       this.destroyed = true;
       this._stopRequested = true;
+      // Invalidate an in-flight ff_write_multi result before terminating its
+      // worker. Any delayed onwrite/reply from this mux generation is stale.
+      this._muxGeneration += 1;
+      if (this._muxWriteStage) this._dropMuxStage(this._muxWriteStage, 'destroy');
+      this._muxWriteStage = null;
+      this._commitMuxWrite = null;
       // Cancel every in-flight byte-range fetch so the provider connection drops now and
       // the single slot is released for the next title (instead of lingering to timeout).
       try { this._ac.abort(); } catch (_) {}
@@ -1185,6 +1209,9 @@
 
     async _initMuxer() {
       const lib = this.lib;
+      const muxGeneration = ++this._muxGeneration;
+      this._muxWriteStage = null;
+      this._commitMuxWrite = null;
       const streamCtxs = [];
       if (this.vS) streamCtxs.push([this.vS.codecpar, this.vS.time_base_num, this.vS.time_base_den]);
       if (this.aS) streamCtxs.push(this.copyAudio ? [this.aS.codecpar, this.aS.time_base_num, this.aS.time_base_den]
@@ -1227,23 +1254,25 @@
       // forward — exactly what fMP4-over-MSE needs. ff_init_muxer then opens this device
       // instead of creating its own (device:false, open:true).
       await lib.mkstreamwriterdev('output');
-      lib.onwrite = (name, pos, data) => {
+      const commitMuxWrite = (name, pos, chunk) => {
+        if (this.destroyed || this._muxGeneration !== muxGeneration) {
+          d.staleMuxBytesDropped = (d.staleMuxBytesDropped || 0) + chunk.length;
+          if (!d.firstStaleMuxDrop) {
+            d.firstStaleMuxDrop = { reason: 'generation', generation: muxGeneration, bytes: chunk.length };
+          }
+          return;
+        }
         // The MP4 trailer (mfra/mfro, written by av_write_trailer) is file-seeking
         // metadata, NOT a media segment. Appending it to the SourceBuffer makes
         // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
         // be enqueued — endOfStream() finalises the buffer instead.
-        if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + data.length; return; }
+        if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + chunk.length; return; }
         // Once continuity is lost, every later callback belongs to the invalid
         // mux sequence. Drop it wholesale while the player tears this engine down.
         if (this._fatalSignaled) {
-          d.fatalBytesDropped = (d.fatalBytesDropped || 0) + data.length;
+          d.fatalBytesDropped = (d.fatalBytesDropped || 0) + chunk.length;
           return;
         }
-        // libav.js hands `data` as a signed Int8Array view into the Emscripten HEAP.
-        // Copy it out as an UNSIGNED Uint8Array (reinterpret the same bytes) — the bytes
-        // are identical for MSE, but every byte ≥128 must read unsigned or box-size math
-        // (b<<24|…) goes negative and corrupts the diagnostics (e.g. 0xA1 -> 0xFFFFFFA1).
-        const chunk = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
         // MediaSource consumes a byte stream, while libav also exposes the output
         // file position. A rewrite or a gap appended in callback order corrupts the
         // fMP4 several fragments later, even though the provider connection is still
@@ -1309,6 +1338,20 @@
         } catch (_) {}
         this.queue.push(chunk); this._drain();
       };
+      this._commitMuxWrite = commitMuxWrite;
+      lib.onwrite = (name, pos, data) => {
+        // libav.js hands `data` as a signed Int8Array view into the Emscripten HEAP.
+        // Copy it out as an UNSIGNED Uint8Array before the next wasm call can reuse
+        // that memory. During a checked packet write, keep it private until the
+        // whole ff_write_multi worker call is known to have succeeded.
+        const chunk = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+        const stage = this._muxWriteStage;
+        if (stage && stage.generation === muxGeneration && Array.isArray(stage.writes)) {
+          stage.writes.push({ name, pos, chunk });
+          return;
+        }
+        commitMuxWrite(name, pos, chunk);
+      };
       const muxRet = await lib.ff_init_muxer(
         { format_name: 'mp4', filename: 'output', open: true, device: false, codecpars: true }, streamCtxs);
       this.oc = muxRet[0];
@@ -1336,6 +1379,112 @@
       // so old-epoch cues would convert to the wrong local time. The player keeps the cues it
       // already added (correct for their times) and re-accumulates as the new region demuxes.
       if (this._subCues) this._subCues.clear();
+    }
+
+    // The vendored ff_write_multi is patched at build time to check every
+    // av_interleaved_write_frame return value inside the worker and throw a typed
+    // MUX_PACKET_WRITE_FAILED error. Keep its one-RPC-per-batch performance, but
+    // stage ALL onwrite callbacks until that batch promise resolves. A rejected
+    // batch can contain a partial moof; none of it may reach MediaSource.
+    async _writePacketsChecked(inPackets) {
+      if (!Array.isArray(inPackets) || !inPackets.length) return true;
+      if (this._stopRequested || this.destroyed || this._fatalSignaled) return false;
+
+      const generation = this._muxGeneration;
+      const commit = this._commitMuxWrite;
+      const stage = { generation, writes: [] };
+      this._muxWriteStage = stage;
+      try {
+        try {
+          await this.lib.ff_write_multi(this.oc, this.pkt, inPackets);
+        } catch (cause) {
+          if (this._muxWriteStage === stage) this._muxWriteStage = null;
+          if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+              commit !== this._commitMuxWrite) {
+            this._dropMuxStage(stage, 'stale-reject');
+            return false;
+          }
+          this._rejectMuxPacketWrite(stage, inPackets, cause);
+          return false;
+        }
+
+        if (this._muxWriteStage === stage) this._muxWriteStage = null;
+        if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
+            commit !== this._commitMuxWrite) {
+          this._dropMuxStage(stage, 'stale-success');
+          return false;
+        }
+        if (typeof commit !== 'function') {
+          this._rejectMuxPacketWrite(stage, inPackets,
+            new Error('MUX_PACKET_WRITE_FAILED:exception:MUX_WRITE_COMMITTER_MISSING'));
+          return false;
+        }
+
+        for (const write of stage.writes) commit(write.name, write.pos, write.chunk);
+        return !this._fatalSignaled;
+      } finally {
+        if (this._muxWriteStage === stage) this._muxWriteStage = null;
+      }
+    }
+
+    _dropMuxStage(stage, reason) {
+      const d = this._diag;
+      const writes = stage && Array.isArray(stage.writes) ? stage.writes : [];
+      let bytes = 0;
+      for (const write of writes) bytes += write && write.chunk ? write.chunk.length : 0;
+      d.staleMuxBytesDropped = (d.staleMuxBytesDropped || 0) + bytes;
+      if (!d.firstStaleMuxDrop) {
+        d.firstStaleMuxDrop = {
+          reason,
+          generation: stage && Number.isInteger(stage.generation) ? stage.generation : null,
+          chunks: writes.length,
+          bytes,
+        };
+      }
+    }
+
+    _rejectMuxPacketWrite(stage, inPackets, cause) {
+      const d = this._diag;
+      const writes = stage && Array.isArray(stage.writes) ? stage.writes : [];
+      let rejectedBytes = 0;
+      for (const write of writes) rejectedBytes += write && write.chunk ? write.chunk.length : 0;
+      const rawDetail = errStr(cause);
+      const typed = /MUX_PACKET_WRITE_FAILED:(-?\d+):([^\r\n]*)/.exec(rawDetail);
+      const ret = typed ? Number(typed[1]) : null;
+      const detail = typed ? typed[2] : rawDetail.slice(0, 240);
+      const message = typed
+        ? `MUX_PACKET_WRITE_FAILED:${typed[1]}:${detail}`
+        : `MUX_PACKET_WRITE_FAILED:exception:${detail}`;
+      const error = new Error(message);
+      const streamIndexes = [...new Set(inPackets
+        .map((packet) => Number(packet && packet.stream_index))
+        .filter(Number.isInteger))];
+
+      d.muxPacketWriteErrors = (d.muxPacketWriteErrors || 0) + 1;
+      d.muxRejectedBytes = (d.muxRejectedBytes || 0) + rejectedBytes;
+      if (!d.firstMuxPacketWriteError) {
+        d.firstMuxPacketWriteError = {
+          ret,
+          batchPackets: inPackets.length,
+          streamIndexes,
+          stagedChunks: writes.length,
+          stagedBytes: rejectedBytes,
+          stagedBoxes: writes.slice(0, 6).map((write) => mp4Boxes(write.chunk)),
+          detail: detail ? detail.slice(0, 240) : null,
+        };
+      }
+
+      this._stopRequested = true;
+      if (this._gate) { this._gate(); this._gate = null; }
+      if (!this._fatalSignaled) {
+        this._fatalSignaled = true;
+        try { this.report({ stage: 'mux:packet-write', message: error.message }); } catch (_) {}
+        queueMicrotask(() => {
+          if (!this.destroyed) {
+            try { this.onFatal(error); } catch (_) {}
+          }
+        });
+      }
     }
 
     async _seekDemuxer(t) {
@@ -1385,6 +1534,11 @@
     // ---- teardown for re-seek ---------------------------------------------
     async _resetForSeek() {
       const lib = this.lib;
+      // Make a delayed old-batch resolution uncommittable before freeing its muxer.
+      this._muxGeneration += 1;
+      if (this._muxWriteStage) this._dropMuxStage(this._muxWriteStage, 'seek-reset');
+      this._muxWriteStage = null;
+      this._commitMuxWrite = null;
       try { if (this.oc) await lib.ff_free_muxer(this.oc); } catch (_) {}
       this.oc = null;
       if (!this.copyAudio && this.aS) {
@@ -1476,7 +1630,7 @@
             try { this._captureSubtitlePacket(p); } catch (_) { /* ignore */ }
           }
         }
-        if (writeList.length) await lib.ff_write_multi(this.oc, this.pkt, writeList);
+        if (writeList.length && !(await this._writePacketsChecked(writeList))) return;
         if (++guard > 5000000) { this.report({ stage: 'pump', message: 'guard' }); break; }
       } while ((res === 0 || res === -lib.EAGAIN) && !this._stopRequested && !this.destroyed);
 
@@ -1509,7 +1663,7 @@
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);
         const enc = await this._encodeAudio(fr, true);
-        if (enc.length) await lib.ff_write_multi(this.oc, this.pkt, enc);
+        if (enc.length && !(await this._writePacketsChecked(enc))) return;
       }
       // Drop the trailer's bytes (mfra/mfro): they are file-seeking metadata, NOT a
       // valid MSE media segment. Appending them is what produced
@@ -1714,6 +1868,11 @@
         writes: d.writes, seekWrites: d.seekWrites, firstSeek: d.firstSeek, writeHighWater: d.writeHighWater,
         writeDiscontinuities: d.writeDiscontinuities,
         firstWriteDiscontinuity: d.firstWriteDiscontinuity,
+        muxPacketWriteErrors: d.muxPacketWriteErrors || 0,
+        firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
+        muxRejectedBytes: d.muxRejectedBytes || 0,
+        staleMuxBytesDropped: d.staleMuxBytesDropped || 0,
+        firstStaleMuxDrop: d.firstStaleMuxDrop || null,
         // append accounting
         appendCount: d.appendCount, appendBytes: d.appendBytes,
         recentAppends: d.recentAppends, appendErrors: d.appendErrors,
