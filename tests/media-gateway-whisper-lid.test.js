@@ -237,6 +237,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /productionPipelineCoverage: "not measured/);
   assert.match(runner, /detailed evidence: \$RESULTS/);
   assert.match(runner, /MIN_COMPLETION_PCT/);
+  assert.match(runner, /BENCH_OFFSET/);
   assert.match(runner, /--header "@\$AUTH_HEADER"/);
   assert.match(runner, /gateway_is_idle/);
   assert.match(runner, /max_parallel_workers_per_gather=0/);

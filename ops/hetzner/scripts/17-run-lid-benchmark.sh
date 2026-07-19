@@ -21,13 +21,16 @@
 #   FUNCTIONS_BASE=https://api.norva.tv/functions/v1
 #   GATEWAY_HEALTH=https://norva-production.up.railway.app/health
 #   MIN_COMPLETION_PCT=80
+#   BENCH_OFFSET=0   # skip N deterministic corpus rows for a targeted smoke
 # =============================================================================
 set -euo pipefail
 umask 077
 export PATH="$HOME/.local/bin:$PATH"
 
 LIMIT="${1:-0}"
+BENCH_OFFSET="${BENCH_OFFSET:-0}"
 [[ "$LIMIT" =~ ^[0-9]+$ ]] || { echo "limit must be a non-negative integer" >&2; exit 2; }
+[[ "$BENCH_OFFSET" =~ ^[0-9]+$ ]] || { echo "BENCH_OFFSET must be a non-negative integer" >&2; exit 2; }
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 2; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
@@ -269,12 +272,13 @@ select jsonb_build_object(
 )
 from numbered
 order by n
-${LIMIT:+limit $( [[ "$LIMIT" -gt 0 ]] && printf '%s' "$LIMIT" || printf '1000000' )};
+limit $( [[ "$LIMIT" -gt 0 ]] && printf '%s' "$LIMIT" || printf '1000000' )
+offset $BENCH_OFFSET;
 SQL
 )
 
 [[ "${#SAMPLES[@]}" -gt 0 ]] || { echo "the real corpus is empty" >&2; exit 1; }
-if [[ "$LIMIT" == "0" ]]; then
+if [[ "$LIMIT" == "0" && "$BENCH_OFFSET" == "0" ]]; then
   DANTE_COUNT="$(printf '%s\n' "${SAMPLES[@]}" | jq -s '[.[] | select(.cohort == "dante")] | length')"
   UNKNOWN_COUNT="$(printf '%s\n' "${SAMPLES[@]}" | jq -s '[.[] | select(.cohort == "unknown")] | length')"
   HISTORICAL_COUNT="$(printf '%s\n' "${SAMPLES[@]}" | jq -s '[.[] | select(.cohort == "historical-correction")] | length')"
