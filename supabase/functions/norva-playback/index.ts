@@ -104,8 +104,8 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 29,
-        lidBenchmarkProtocol: 1,
+        version: 30,
+        lidBenchmarkProtocol: 2,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -4167,6 +4167,76 @@ function benchmarkLanguage(value: unknown): string | null {
   return /^[a-z]{2,3}$/.test(code) ? code : null;
 }
 
+const LID_BENCHMARK_WAV_MAX_BYTES = 1536 * 1024;
+const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 * 1024;
+
+function invalidLidBenchmarkWavCapture(): never {
+  throw new HttpError(502, "Gateway returned an invalid LID benchmark WAV capture");
+}
+
+async function sanitizeLidBenchmarkWavCapture(payload: JsonRecord): Promise<JsonRecord> {
+  const sample = recordOrEmpty(payload.sample);
+  if (!isRecord(payload.wavCapture)) invalidLidBenchmarkWavCapture();
+  const capture = payload.wavCapture;
+  const bytes = capture.bytes;
+  const digest = capture.digest;
+  const base64 = capture.base64;
+  if (
+    capture.contentType !== "audio/wav" ||
+    capture.encoding !== "base64" ||
+    typeof bytes !== "number" ||
+    !Number.isSafeInteger(bytes) ||
+    bytes < 44 ||
+    bytes > LID_BENCHMARK_WAV_MAX_BYTES ||
+    typeof digest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(digest) ||
+    typeof base64 !== "string" ||
+    base64.length === 0 ||
+    base64.length > LID_BENCHMARK_WAV_BASE64_MAX_CHARS ||
+    base64.length !== Math.ceil(bytes / 3) * 4 ||
+    base64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) ||
+    sample.wavBytes !== bytes ||
+    sample.digest !== digest
+  ) {
+    invalidLidBenchmarkWavCapture();
+  }
+
+  let binary = "";
+  try {
+    binary = atob(base64);
+  } catch (_) {
+    invalidLidBenchmarkWavCapture();
+  }
+  if (binary.length !== bytes) invalidLidBenchmarkWavCapture();
+  const decoded = new Uint8Array(bytes);
+  for (let index = 0; index < bytes; index += 1) {
+    decoded[index] = binary.charCodeAt(index);
+  }
+  if (
+    decoded[0] !== 0x52 || decoded[1] !== 0x49 ||
+    decoded[2] !== 0x46 || decoded[3] !== 0x46 ||
+    decoded[8] !== 0x57 || decoded[9] !== 0x41 ||
+    decoded[10] !== 0x56 || decoded[11] !== 0x45
+  ) {
+    invalidLidBenchmarkWavCapture();
+  }
+  const hash = await crypto.subtle.digest("SHA-256", decoded);
+  const computedDigest = Array.from(
+    new Uint8Array(hash),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (computedDigest !== digest) invalidLidBenchmarkWavCapture();
+
+  return {
+    contentType: "audio/wav",
+    encoding: "base64",
+    bytes,
+    digest,
+    base64,
+  };
+}
+
 function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
   const sample = recordOrEmpty(payload.sample);
   const engine = recordOrEmpty(payload.engine);
@@ -4270,14 +4340,18 @@ async function runLidBenchmarkEndpoint(req: Request, db: SupabaseClient) {
     }
   } catch (_) { /* preserve the existing fail-open maintenance behavior */ }
   return {
-    ...(await runLidBenchmark(db, { ...body, mode: "lid-benchmark" })),
+    ...(await runLidBenchmark(db, { ...body, mode: "lid-benchmark" }, true)),
     audit,
   };
 }
 
 // Manual, service-gated and catalogue-read-only benchmark. One request means one exact
 // variant, one cached audio stream and one offset. The gateway reuses one WAV for both modes.
-async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<JsonRecord> {
+async function runLidBenchmark(
+  db: SupabaseClient,
+  body: JsonRecord,
+  allowWavCapture = false,
+): Promise<JsonRecord> {
   let enabled = false;
   try {
     const { data } = await db
@@ -4298,6 +4372,10 @@ async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<Js
   const start = finiteBenchmarkNumber(body.start, 600);
   const dur = finiteBenchmarkNumber(body.dur, 20);
   const order = stringOr(body.order, "") === "detect-first" ? "detect-first" : "current-first";
+  if (!allowWavCapture && body.captureWav === true) {
+    throw new HttpError(400, "WAV capture requires the dedicated LID benchmark endpoint");
+  }
+  const captureWav = allowWavCapture && body.captureWav === true;
   if (!userId || !variantId) throw new HttpError(400, "userId and variantId are required");
   if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex > 1024) {
     throw new HttpError(400, "A valid audio stream index is required");
@@ -4421,7 +4499,7 @@ async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<Js
         "content-type": "application/json",
         Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
       },
-      body: JSON.stringify({ index: trackIndex, start, dur, order }),
+      body: JSON.stringify({ index: trackIndex, start, dur, order, includeWav: captureWav }),
       signal: AbortSignal.timeout(180_000),
     });
     const payload = recordOrEmpty(await response.json().catch(() => ({})));
@@ -4439,6 +4517,10 @@ async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<Js
         retryAfter: response.headers.get("retry-after"),
       };
     }
+    const benchmark = sanitizeLidBenchmarkResult(payload);
+    if (captureWav) {
+      benchmark.wavCapture = await sanitizeLidBenchmarkWavCapture(payload);
+    }
     return {
       mode: "lid-benchmark",
       persisted: false,
@@ -4451,7 +4533,7 @@ async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<Js
       },
       // This is a cache hint only (often ffprobe metadata), never benchmark ground truth.
       cachedLanguageHint: selectedTrack.lang,
-      benchmark: sanitizeLidBenchmarkResult(payload),
+      benchmark,
     };
   } finally {
     await releaseProviderFileProbe(db, identityKey, leaseOwner);

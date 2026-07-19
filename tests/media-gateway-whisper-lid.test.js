@@ -224,7 +224,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(playback, /"lid-benchmark",\s*\n\s*\)/);
   assert.match(playback, /persisted: false/);
   assert.match(playback, /sanitizeTelemetryText\(stringOr\(payload\.details/);
-  assert.match(playback, /lidBenchmarkProtocol: 1/);
+  assert.match(playback, /lidBenchmarkProtocol: 2/);
   assert.match(playback, /segments\[0\] === "lid-benchmark"/);
   assert.match(
     dockerfile,
@@ -245,8 +245,8 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /BENCH_OFFSET/);
   assert.match(runner, /--header "@\$AUTH_HEADER"/);
   assert.match(runner, /gateway_is_idle/);
-  assert.match(runner, /lidBenchmarkProtocol >= 1/);
-  assert.match(runner, /\.version >= 72/);
+  assert.match(runner, /lidBenchmarkProtocol >= 2/);
+  assert.match(runner, /\.version >= 73/);
   assert.match(runner, /norva-playback\/lid-benchmark/);
   assert.doesNotMatch(runner, /norva-playback\/audio-backfill/);
   assert.match(runner, /http_status.*\^5\[0-9\]\[0-9\]\$/);
@@ -255,4 +255,44 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /engine\.gatewayVersion/);
   assert.match(runner, /max_parallel_workers_per_gather=0/);
   assert.match(flagMigration, /'lid_benchmark_enabled',\s*\n\s*false/);
+});
+
+test('operator WAV capture is opt-in, bounded, integrity-checked and service-endpoint only', () => {
+  const root = path.join(__dirname, '..');
+  const gateway = fs.readFileSync(
+    path.join(root, 'services/media-gateway/src/index.js'),
+    'utf8',
+  );
+  const playback = fs.readFileSync(
+    path.join(root, 'supabase/functions/norva-playback/index.ts'),
+    'utf8',
+  );
+
+  assert.match(gateway, /const LID_BENCHMARK_WAV_MAX_BYTES = 1536 \* 1024/);
+  assert.match(gateway, /const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 \* 1024/);
+  assert.match(gateway, /res\.setHeader\('Cache-Control', 'no-store'\)/);
+  assert.match(gateway, /claims\.scope !== 'lid-benchmark'/);
+  assert.match(gateway, /const includeWav = body\.includeWav === true/);
+  assert.match(gateway, /includeWav && wavBytes > LID_BENCHMARK_WAV_MAX_BYTES/);
+  assert.match(gateway, /wavBuffer\.subarray\(0, 4\)\.toString\('ascii'\) !== 'RIFF'/);
+  assert.match(gateway, /wavBuffer\.subarray\(8, 12\)\.toString\('ascii'\) !== 'WAVE'/);
+  assert.match(gateway, /const base64 = wavBuffer\.toString\('base64'\)/);
+  assert.match(gateway, /base64\.length > LID_BENCHMARK_WAV_BASE64_MAX_CHARS/);
+  assert.match(gateway, /digest: sampleDigest,\s*\n\s*base64,/);
+  assert.match(gateway, /\.\.\.\(wavCapture \? \{ wavCapture \} : \{\}\)/);
+
+  assert.match(playback, /const LID_BENCHMARK_WAV_MAX_BYTES = 1536 \* 1024/);
+  assert.match(playback, /const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 \* 1024/);
+  assert.match(playback, /runLidBenchmark\(db, \{ \.\.\.body, mode: "lid-benchmark" \}, true\)/);
+  assert.match(playback, /allowWavCapture = false/);
+  assert.match(playback, /!allowWavCapture && body\.captureWav === true/);
+  assert.match(playback, /const captureWav = allowWavCapture && body\.captureWav === true/);
+  assert.match(playback, /includeWav: captureWav/);
+  assert.match(playback, /base64\.length !== Math\.ceil\(bytes \/ 3\) \* 4/);
+  assert.match(playback, /sample\.wavBytes !== bytes/);
+  assert.match(playback, /sample\.digest !== digest/);
+  assert.match(playback, /decoded\[0\] !== 0x52[\s\S]*decoded\[11\] !== 0x45/);
+  assert.match(playback, /crypto\.subtle\.digest\("SHA-256", decoded\)/);
+  assert.match(playback, /benchmark\.wavCapture = await sanitizeLidBenchmarkWavCapture\(payload\)/);
+  assert.match(playback, /Gateway returned an invalid LID benchmark WAV capture/);
 });

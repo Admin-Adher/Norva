@@ -218,6 +218,11 @@ let WHISPER_RUNTIME_VERIFIED = false;
 const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
 const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
 const LID_BENCHMARK_INSTANCE = process.env.RAILWAY_REPLICA_ID || crypto.randomUUID();
+// Operator-only capture ceiling. A 30s 16 kHz mono PCM WAV is ~0.92 MiB raw
+// and ~1.22 MiB in base64, so one 1.5 MiB ceiling safely fits the expected
+// sample while failing closed on a format/configuration regression.
+const LID_BENCHMARK_WAV_MAX_BYTES = 1536 * 1024;
+const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 * 1024;
 let lidBenchmarkBusy = false;
 let whisperInferenceActive = 0;
 let argosInferenceActive = 0;
@@ -365,7 +370,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 72;
+const GATEWAY_VERSION = 73;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1179,6 +1184,7 @@ app.get('/detect-language/:token', async (req, res) => {
 // The provider is touched exactly once: both Whisper modes consume the same temporary WAV and
 // nothing is persisted here or by the edge benchmark caller.
 app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims || claims.scope !== 'lid-benchmark') {
         return res.status(401).json({ error: 'Invalid LID benchmark token' });
@@ -1213,6 +1219,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
         return res.status(400).json({ error: 'Benchmark duration must be between 8 and 30 seconds' });
     }
     const order = body.order === 'detect-first' ? 'detect-first' : 'current-first';
+    const includeWav = body.includeWav === true;
     const lockKey = accountJobKey(claims.uid, claims.url);
     if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url)) {
         res.setHeader('Retry-After', '30');
@@ -1220,7 +1227,6 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
     }
 
     lidBenchmarkBusy = true;
-    res.setHeader('Cache-Control', 'no-store');
     let wavPath = null;
     try {
         const extractStartedAt = performance.now();
@@ -1243,10 +1249,40 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
 
         const stat = await fsp.stat(wavPath);
         const wavBytes = stat.size;
+        if (!Number.isSafeInteger(wavBytes) || wavBytes < 44) {
+            return res.status(502).json({ error: 'Extracted WAV is invalid' });
+        }
+        if (includeWav && wavBytes > LID_BENCHMARK_WAV_MAX_BYTES) {
+            return res.status(413).json({ error: 'Benchmark WAV capture exceeds the operator limit' });
+        }
+        const wavBuffer = await fsp.readFile(wavPath);
+        if (wavBuffer.length !== wavBytes) {
+            return res.status(502).json({ error: 'Extracted WAV changed during benchmark setup' });
+        }
         const audioSec = Math.max(0, (wavBytes - 44) / (16000 * 2));
         const sampleDigest = crypto.createHash('sha256')
-            .update(await fsp.readFile(wavPath))
+            .update(wavBuffer)
             .digest('hex');
+        let wavCapture = null;
+        if (includeWav) {
+            if (
+                wavBuffer.subarray(0, 4).toString('ascii') !== 'RIFF' ||
+                wavBuffer.subarray(8, 12).toString('ascii') !== 'WAVE'
+            ) {
+                return res.status(502).json({ error: 'Extracted WAV header is invalid' });
+            }
+            const base64 = wavBuffer.toString('base64');
+            if (base64.length > LID_BENCHMARK_WAV_BASE64_MAX_CHARS) {
+                return res.status(413).json({ error: 'Benchmark WAV base64 exceeds the operator limit' });
+            }
+            wavCapture = {
+                contentType: 'audio/wav',
+                encoding: 'base64',
+                bytes: wavBytes,
+                digest: sampleDigest,
+                base64,
+            };
+        }
 
         let current = null;
         let detectOnly = null;
@@ -1384,6 +1420,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
                     ? Math.round((totalCurrentMs / totalDetectOnlyMs) * 1000) / 1000
                     : null,
             },
+            ...(wavCapture ? { wavCapture } : {}),
         });
     } catch (error) {
         return res.status(502).json({

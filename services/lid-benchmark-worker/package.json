@@ -1,0 +1,18 @@
+{
+  "name": "@norva/lid-benchmark-worker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Loopback-only persistent ECAPA and sherpa-onnx benchmark worker.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "dependencies": {
+    "express": "4.22.2",
+    "sherpa-onnx-node": "1.13.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

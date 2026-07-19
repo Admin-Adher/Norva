@@ -1,0 +1,26 @@
+name: norva-lid-benchmark
+
+services:
+  worker:
+    build:
+      context: ../../..
+      dockerfile: services/lid-benchmark-worker/Dockerfile
+    image: norva-lid-benchmark-worker:1
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8091:8091"
+    environment:
+      LID_BENCHMARK_WORKER_TOKEN: ${LID_BENCHMARK_WORKER_TOKEN:?required}
+      ECAPA_THREADS: ${ECAPA_THREADS:-2}
+      SHERPA_THREADS: ${SHERPA_THREADS:-2}
+    read_only: true
+    tmpfs:
+      - /tmp:nosuid,nodev,noexec,mode=1777,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 8g
+    cpus: 6

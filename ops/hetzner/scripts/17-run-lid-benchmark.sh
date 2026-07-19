@@ -2,8 +2,11 @@
 # =============================================================================
 # 17-run-lid-benchmark.sh — read-only, real-provider LID benchmark
 # =============================================================================
-# Runs one extraction per exact sample, then compares the current full Whisper
-# transcription path with whisper.cpp --detect-language on that same WAV.
+# Runs one extraction per exact sample, then compares on that exact same WAV:
+#   - the current full Whisper small transcription path
+#   - whisper.cpp small --detect-language
+#   - persistent SpeechBrain ECAPA/VoxLingua107
+#   - persistent sherpa-onnx Whisper tiny/int8
 #
 # Corpus:
 #   - every cached audio track of every "In the Hand of Dante" variant
@@ -22,6 +25,8 @@
 #   GATEWAY_HEALTH=https://norva-production.up.railway.app/health
 #   MIN_COMPLETION_PCT=80
 #   BENCH_OFFSET=0   # skip N deterministic corpus rows for a targeted smoke
+#   LID_WORKER_ENABLED=1
+#   LID_WORKER_URL=http://127.0.0.1:8091
 # =============================================================================
 set -euo pipefail
 umask 077
@@ -29,15 +34,29 @@ export PATH="$HOME/.local/bin:$PATH"
 
 LIMIT="${1:-0}"
 BENCH_OFFSET="${BENCH_OFFSET:-0}"
+LID_WORKER_ENABLED="${LID_WORKER_ENABLED:-1}"
 [[ "$LIMIT" =~ ^[0-9]+$ ]] || { echo "limit must be a non-negative integer" >&2; exit 2; }
 [[ "$BENCH_OFFSET" =~ ^[0-9]+$ ]] || { echo "BENCH_OFFSET must be a non-negative integer" >&2; exit 2; }
+[[ "$LID_WORKER_ENABLED" == "0" || "$LID_WORKER_ENABLED" == "1" ]] || {
+  echo "LID_WORKER_ENABLED must be 0 or 1" >&2
+  exit 2
+}
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 2; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+command -v base64 >/dev/null || { echo "base64 is required" >&2; exit 2; }
+command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 2; }
 
 FUNCTIONS_BASE="${FUNCTIONS_BASE:-https://api.norva.tv/functions/v1}"
 GATEWAY_HEALTH="${GATEWAY_HEALTH:-https://norva-production.up.railway.app/health}"
 PLAYBACK_HEALTH="${PLAYBACK_HEALTH:-$FUNCTIONS_BASE/norva-playback/health}"
+LID_WORKER_URL="${LID_WORKER_URL:-http://127.0.0.1:8091}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LID_WORKER_ENV="${LID_WORKER_ENV:-$SCRIPT_DIR/../lid-benchmark/.env}"
 EXPECTED_WHISPER_COMMIT="080bbbe85230f624f0b52127f1ae1218247989f9"
+EXPECTED_ECAPA_REVISION="0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9"
+EXPECTED_SHERPA_REVISION="65176e2deb88badc814a94058666cadccc29b61c"
+EXPECTED_SHERPA_ENCODER_SHA="d24fb083ae3b1041fc24e97971d60e280c9342201fbb67b0ab428a8b4a51a434"
+EXPECTED_SHERPA_DECODER_SHA="d2fece8dd42771f1df975c6c0445770d0c292bf7547c2cae04a6c0cc57540925"
 MIN_COMPLETION_PCT="${MIN_COMPLETION_PCT:-80}"
 [[ "$MIN_COMPLETION_PCT" =~ ^[0-9]+$ && "$MIN_COMPLETION_PCT" -le 100 ]] || {
   echo "MIN_COMPLETION_PCT must be between 0 and 100" >&2
@@ -55,6 +74,8 @@ mkdir -p "$RESULT_DIR"
 chmod 700 "$RESULT_DIR"
 RESULTS="$RESULT_DIR/$(date -u +%Y%m%dT%H%M%SZ)-whisper-detect-only.ndjson"
 AUTH_HEADER="$(mktemp /tmp/norva-lid-auth.XXXXXX)"
+WORKER_AUTH_HEADER=""
+SAMPLE_WAV=""
 FLAG_ENABLED=0
 
 disable_flag() {
@@ -64,6 +85,8 @@ disable_flag() {
       >/dev/null 2>&1 || true
   fi
   rm -f "$AUTH_HEADER"
+  [[ -z "$WORKER_AUTH_HEADER" ]] || rm -f "$WORKER_AUTH_HEADER"
+  [[ -z "$SAMPLE_WAV" ]] || rm -f "$SAMPLE_WAV"
 }
 trap disable_flag EXIT
 trap 'exit 130' INT
@@ -72,8 +95,8 @@ trap 'exit 143' TERM
 EDGE_HEALTH="$(curl -fsS --max-time 30 "$PLAYBACK_HEALTH")"
 printf '%s' "$EDGE_HEALTH" | jq -e '
   .ok == true and
-  .version >= 29 and
-  .lidBenchmarkProtocol >= 1
+  .version >= 30 and
+  .lidBenchmarkProtocol >= 2
 ' >/dev/null || {
   echo "norva-playback does not expose the read-only LID benchmark protocol" >&2
   printf '%s\n' "$EDGE_HEALTH" | jq '{version, lidBenchmarkProtocol}' >&2
@@ -83,7 +106,7 @@ printf '%s' "$EDGE_HEALTH" | jq -e '
 HEALTH="$(curl -fsS --max-time 30 "$GATEWAY_HEALTH")"
 printf '%s' "$HEALTH" | jq -e --arg commit "$EXPECTED_WHISPER_COMMIT" '
   .ok == true and
-  .version >= 72 and
+  .version >= 73 and
   .languageDetectEngine.detectOnlyBenchmark == true and
   .languageDetectEngine.runtimeVerified == true and
   .languageDetectEngine.model == "small" and
@@ -95,6 +118,42 @@ printf '%s' "$HEALTH" | jq -e --arg commit "$EXPECTED_WHISPER_COMMIT" '
   printf '%s\n' "$HEALTH" | jq '{version, languageDetectEngine}' >&2
   exit 1
 }
+
+WORKER_HEALTH='null'
+if [[ "$LID_WORKER_ENABLED" == "1" ]]; then
+  [[ -r "$LID_WORKER_ENV" ]] || {
+    echo "LID worker secret file is missing: $LID_WORKER_ENV" >&2
+    exit 1
+  }
+  WORKER_TOKEN="$(sed -n 's/^LID_BENCHMARK_WORKER_TOKEN=//p' "$LID_WORKER_ENV" | tail -n 1)"
+  [[ "${#WORKER_TOKEN}" -ge 32 && "$WORKER_TOKEN" != *$'\n'* && "$WORKER_TOKEN" != *$'\r'* ]] || {
+    echo "LID worker token is missing or invalid" >&2
+    exit 1
+  }
+  WORKER_AUTH_HEADER="$(mktemp /tmp/norva-lid-worker-auth.XXXXXX)"
+  printf 'Authorization: Bearer %s\n' "$WORKER_TOKEN" >"$WORKER_AUTH_HEADER"
+  chmod 600 "$WORKER_AUTH_HEADER"
+  unset WORKER_TOKEN
+
+  WORKER_HEALTH="$(curl -fsS --max-time 30 "$LID_WORKER_URL/health")"
+  printf '%s' "$WORKER_HEALTH" | jq -e \
+    --arg ecapa "$EXPECTED_ECAPA_REVISION" \
+    --arg sherpa "$EXPECTED_SHERPA_REVISION" \
+    --arg encoder "$EXPECTED_SHERPA_ENCODER_SHA" \
+    --arg decoder "$EXPECTED_SHERPA_DECODER_SHA" '
+      .ok == true and
+      .schemaVersion == 1 and
+      .busy == false and
+      .models.ecapa.revision == $ecapa and
+      .models.sherpa.revision == $sherpa and
+      any(.models.sherpa.files[]; .name == "tiny-encoder.int8.onnx" and .sha256 == $encoder) and
+      any(.models.sherpa.files[]; .name == "tiny-decoder.int8.onnx" and .sha256 == $decoder)
+    ' >/dev/null || {
+      echo "the persistent LID worker is not the pinned benchmark build" >&2
+      printf '%s\n' "$WORKER_HEALTH" | jq '{schemaVersion, busy, models}' >&2
+      exit 1
+    }
+fi
 
 TOKEN=$("${PSQL[@]}" -c \
   "select decrypted_secret from vault.decrypted_secrets where name='norva_backfill_token'")
@@ -327,6 +386,9 @@ for sample in "${SAMPLES[@]}"; do
   key="$(printf '%s' "$sample" | jq -r '.sampleKey')"
   cohort="$(printf '%s' "$sample" | jq -r '.cohort')"
   payload="$(printf '%s' "$sample" | jq -c '.payload')"
+  if [[ "$LID_WORKER_ENABLED" == "1" ]]; then
+    payload="$(printf '%s' "$payload" | jq -c '. + {captureWav:true}')"
+  fi
   response='{"runnerError":"request-not-run"}'
   http_status=0
   attempt=0
@@ -374,6 +436,66 @@ for sample in "${SAMPLES[@]}"; do
     sleep $((retry_after + attempt))
   done
 
+  if [[ "$LID_WORKER_ENABLED" == "1" ]] \
+      && printf '%s' "$response" | jq -e '.benchmark.wavCapture != null' >/dev/null 2>&1; then
+    SAMPLE_WAV="$(mktemp --suffix=.wav "$RESULT_DIR/.lid-sample.XXXXXX")"
+    chmod 600 "$SAMPLE_WAV"
+    expected_digest="$(printf '%s' "$response" | jq -r '.benchmark.wavCapture.digest // ""')"
+    expected_bytes="$(printf '%s' "$response" | jq -r '.benchmark.wavCapture.bytes // 0')"
+    capture_error=""
+    if ! printf '%s' "$response" | jq -er '.benchmark.wavCapture.base64' \
+        | base64 --decode >"$SAMPLE_WAV"; then
+      capture_error="capture-decode-failed"
+    elif [[ "$(wc -c <"$SAMPLE_WAV" | tr -d ' ')" != "$expected_bytes" ]]; then
+      capture_error="capture-size-mismatch"
+    elif [[ "$(sha256sum "$SAMPLE_WAV" | cut -d' ' -f1)" != "$expected_digest" ]]; then
+      capture_error="capture-digest-mismatch"
+    fi
+
+    if [[ -n "$capture_error" ]]; then
+      worker_response="$(jq -cn --arg error "$capture_error" \
+        '{ok:false,persisted:false,runnerError:$error}')"
+    else
+      if (( completed % 2 == 0 )); then
+        worker_order="ecapa-first"
+      else
+        worker_order="sherpa-first"
+      fi
+      set +e
+      worker_raw="$(curl -sS --max-time 300 -X POST \
+        "$LID_WORKER_URL/benchmark?order=$worker_order" \
+        --header "@$WORKER_AUTH_HEADER" \
+        -H 'Content-Type: audio/wav' \
+        -H "X-Norva-Sample-Sha256: $expected_digest" \
+        --data-binary "@$SAMPLE_WAV" \
+        --write-out $'\n%{http_code}')"
+      worker_curl_exit=$?
+      set -e
+      if [[ "$worker_curl_exit" -ne 0 ]]; then
+        worker_response="$(jq -cn --arg error "worker-curl-exit-$worker_curl_exit" \
+          '{ok:false,persisted:false,runnerError:$error}')"
+      else
+        worker_http_status="${worker_raw##*$'\n'}"
+        worker_response="${worker_raw%$'\n'*}"
+        if ! printf '%s' "$worker_response" | jq -e . >/dev/null 2>&1; then
+          worker_response='{"ok":false,"persisted":false,"runnerError":"worker-non-json-response"}'
+        elif [[ ! "$worker_http_status" =~ ^2[0-9][0-9]$ ]]; then
+          worker_response="$(printf '%s' "$worker_response" | jq -c \
+            --argjson status "$worker_http_status" '. + {httpStatus:$status}')"
+        fi
+      fi
+    fi
+    rm -f "$SAMPLE_WAV"
+    SAMPLE_WAV=""
+    response="$(printf '%s' "$response" | jq -c --argjson fastLid "$worker_response" '
+      .benchmark.fastLid = $fastLid | del(.benchmark.wavCapture)
+    ')"
+  else
+    # Never let operator audio enter the durable NDJSON, even if a future edge
+    # version accidentally returns it when the local worker is disabled.
+    response="$(printf '%s' "$response" | jq -c 'del(.benchmark.wavCapture)')"
+  fi
+
   safe_request="$(printf '%s' "$sample" | jq -c '{
     sampleKey,
     cohort,
@@ -393,12 +515,16 @@ for sample in "${SAMPLES[@]}"; do
       httpStatus:$httpStatus, attempts:$attempts}' \
     >>"$RESULTS"
   completed=$((completed + 1))
-  printf '[%3d/%3d] %-21s %s -> %s / %s (%sms vs %sms)%s\n' \
+  printf '[%3d/%3d] %-21s %s -> small=%s detect=%s ecapa=%s sherpa=%s (%sms/%sms/%sms/%sms)%s\n' \
     "$completed" "${#SAMPLES[@]}" "$cohort" "$key" \
     "$(printf '%s' "$response" | jq -r '.benchmark.current.productionLanguage // "-"')" \
     "$(printf '%s' "$response" | jq -r '.benchmark.detectOnly.candidateLanguage // "-"')" \
+    "$(printf '%s' "$response" | jq -r '.benchmark.fastLid.ecapa.candidateLanguage // "-"')" \
+    "$(printf '%s' "$response" | jq -r '.benchmark.fastLid.sherpa.lang // "-"')" \
     "$(printf '%s' "$response" | jq -r '.benchmark.timings.currentMs // "-"')" \
     "$(printf '%s' "$response" | jq -r '.benchmark.timings.detectOnlyMs // "-"')" \
+    "$(printf '%s' "$response" | jq -r '.benchmark.fastLid.ecapa.metrics.inferenceMs // "-"')" \
+    "$(printf '%s' "$response" | jq -r '.benchmark.fastLid.sherpa.metrics.inferenceMs // "-"')" \
     "$(printf '%s' "$response" | jq -r 'if .skipped then " skipped=" + .skipped elif .error then " error=" + .error + (if .details then " (" + .details + ")" else "" end) elif .runnerError then " error=" + .runnerError elif .benchmark.system.contended then " CONTENDED" else "" end')"
 done
 
@@ -420,6 +546,12 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
   [ .[] | select(.response.benchmark != null) ] as $completed |
   [ $completed[] | select(.response.benchmark.system.contended != true) ] as $usable |
   [ $usable[] | select(.response.benchmark.current.productionAccepted == true) ] as $acceptedCurrent |
+  [ $usable[] | select(.response.benchmark.fastLid.ecapa.ok == true) ] as $ecapaOutput |
+  [ $usable[] | select(.response.benchmark.fastLid.sherpa.ok == true) ] as $sherpaOutput |
+  [ $usable[] | select(
+      .response.benchmark.fastLid.ecapa.ok == true and
+      .response.benchmark.fastLid.sherpa.ok == true
+    ) ] as $bothFast |
   {
     requested: length,
     completed: ($completed | length),
@@ -445,12 +577,60 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
     agreementWithAcceptedCurrent: (if ($acceptedCurrent|length) == 0 then null else
       ([$acceptedCurrent[] | select(.response.benchmark.agreement.productionLanguage == true)] | length) /
         ($acceptedCurrent|length) end),
+    candidateCoverage: {
+      ecapa: (if ($usable|length) == 0 then null else ($ecapaOutput|length) / ($usable|length) end),
+      sherpaTinyInt8: (if ($usable|length) == 0 then null else
+        ($sherpaOutput|length) / ($usable|length) end)
+    },
+    agreementWithWhisperCandidate: {
+      ecapa: ([
+        $ecapaOutput[] |
+        select(.response.benchmark.current.candidateLanguage != null)
+      ] as $rows |
+        if ($rows|length) == 0 then null else
+          ([$rows[] | select(
+            .response.benchmark.fastLid.ecapa.candidateLanguage ==
+              .response.benchmark.current.candidateLanguage
+          )] | length) / ($rows|length)
+        end),
+      sherpaTinyInt8: ([
+        $sherpaOutput[] |
+        select(.response.benchmark.current.candidateLanguage != null)
+      ] as $rows |
+        if ($rows|length) == 0 then null else
+          ([$rows[] | select(
+            .response.benchmark.fastLid.sherpa.lang ==
+              .response.benchmark.current.candidateLanguage
+          )] | length) / ($rows|length)
+        end)
+    },
+    agreementEcapaSherpa: (if ($bothFast|length) == 0 then null else
+      ([$bothFast[] | select(.response.benchmark.fastLid.agreement == true)] | length) /
+        ($bothFast|length) end),
     medianInferenceSpeedup: ([$usable[].response.benchmark.gains.lidSpeedup | select(. != null)] | median),
     medianFixedWindowEndToEndSpeedup: ([$usable[].response.benchmark.gains.endToEndSpeedup | select(. != null)] | median),
+    medianInferenceMs: {
+      whisperCurrent: ([$usable[].response.benchmark.timings.currentMs | select(. != null)] | median),
+      whisperDetectOnly: ([$usable[].response.benchmark.timings.detectOnlyMs | select(. != null)] | median),
+      ecapa: ([$ecapaOutput[].response.benchmark.fastLid.ecapa.metrics.inferenceMs |
+        select(. != null)] | median),
+      sherpaTinyInt8: ([$sherpaOutput[].response.benchmark.fastLid.sherpa.metrics.inferenceMs |
+        select(. != null)] | median)
+    },
     fixedWindowCurrentTracksPerHour: ([$usable[].response.benchmark.timings.totalCurrentMs] |
       if length == 0 or add == 0 then null else 3600000 / (add / length) end),
     fixedWindowDetectOnlyTracksPerHour: ([$usable[].response.benchmark.timings.totalDetectOnlyMs] |
       if length == 0 or add == 0 then null else 3600000 / (add / length) end),
+    projectedFixedWindowTracksPerHour: {
+      ecapa: ([$ecapaOutput[] |
+        (.response.benchmark.timings.extractMs +
+          .response.benchmark.fastLid.ecapa.metrics.inferenceMs)] |
+        if length == 0 or add == 0 then null else 3600000 / (add / length) end),
+      sherpaTinyInt8: ([$sherpaOutput[] |
+        (.response.benchmark.timings.extractMs +
+          .response.benchmark.fastLid.sherpa.metrics.inferenceMs)] |
+        if length == 0 or add == 0 then null else 3600000 / (add / length) end)
+    },
     catalogueSnapshotUnchanged: $catalogueUnchanged,
     productionPipelineCoverage: "not measured: production sweeps 600,1500,300 while this engine benchmark uses one fixed 600s window",
     accuracy: "not scored: cachedLanguageHint is not human ground truth",
@@ -465,7 +645,7 @@ MIN_REQUIRED=$(( (REQUESTED * MIN_COMPLETION_PCT + 99) / 100 ))
 HASH_DRIFT="$(jq -s --arg commit "$EXPECTED_WHISPER_COMMIT" '[
   .[] | select(.response.benchmark != null) | select(
     .response.benchmark.engine.commit != $commit or
-    (.response.benchmark.engine.gatewayVersion // 0) < 72 or
+    (.response.benchmark.engine.gatewayVersion // 0) < 73 or
     .response.benchmark.engine.model != "small" or
     .response.benchmark.engine.runtimeVerified != true or
     ((.response.benchmark.engine.binarySha256 // "") | test("^[a-f0-9]{64}$") | not) or
@@ -473,8 +653,39 @@ HASH_DRIFT="$(jq -s --arg commit "$EXPECTED_WHISPER_COMMIT" '[
   )
 ] | length' "$RESULTS")"
 
-if [[ "$CATALOGUE_UNCHANGED" != "true" || "$USABLE" -lt "$MIN_REQUIRED" || "$HASH_DRIFT" != "0" ]]; then
-  echo "benchmark rejected: usable=$USABLE/$REQUESTED required=$MIN_REQUIRED hashDrift=$HASH_DRIFT catalogueUnchanged=$CATALOGUE_UNCHANGED" >&2
+FAST_LID_USABLE="$USABLE"
+FAST_LID_DRIFT=0
+if [[ "$LID_WORKER_ENABLED" == "1" ]]; then
+  FAST_LID_USABLE="$(jq -s '[
+    .[] | select(
+      .response.benchmark.system.contended != true and
+      .response.benchmark.fastLid.ecapa.ok == true and
+      .response.benchmark.fastLid.sherpa.ok == true
+    )
+  ] | length' "$RESULTS")"
+  FAST_LID_DRIFT="$(jq -s \
+    --arg ecapa "$EXPECTED_ECAPA_REVISION" \
+    --arg sherpa "$EXPECTED_SHERPA_REVISION" \
+    --arg encoder "$EXPECTED_SHERPA_ENCODER_SHA" \
+    --arg decoder "$EXPECTED_SHERPA_DECODER_SHA" '[
+      .[] | select(.response.benchmark.fastLid != null) | select(
+        .response.benchmark.fastLid.models.ecapa.revision != $ecapa or
+        .response.benchmark.fastLid.models.sherpa.revision != $sherpa or
+        (any(.response.benchmark.fastLid.models.sherpa.files[];
+          .name == "tiny-encoder.int8.onnx" and .sha256 == $encoder) | not) or
+        (any(.response.benchmark.fastLid.models.sherpa.files[];
+          .name == "tiny-decoder.int8.onnx" and .sha256 == $decoder) | not) or
+        .response.benchmark.fastLid.sherpa.engine.packageVersion != "1.13.4" or
+        .response.benchmark.fastLid.sherpa.engine.encoderSha256 != $encoder or
+        .response.benchmark.fastLid.sherpa.engine.decoderSha256 != $decoder
+      )
+    ] | length' "$RESULTS")"
+fi
+
+if [[ "$CATALOGUE_UNCHANGED" != "true" || "$USABLE" -lt "$MIN_REQUIRED" \
+    || "$FAST_LID_USABLE" -lt "$MIN_REQUIRED" || "$HASH_DRIFT" != "0" \
+    || "$FAST_LID_DRIFT" != "0" ]]; then
+  echo "benchmark rejected: usable=$USABLE/$REQUESTED fastLidUsable=$FAST_LID_USABLE required=$MIN_REQUIRED hashDrift=$HASH_DRIFT fastLidDrift=$FAST_LID_DRIFT catalogueUnchanged=$CATALOGUE_UNCHANGED" >&2
   echo "evidence preserved at $RESULTS" >&2
   exit 1
 fi
