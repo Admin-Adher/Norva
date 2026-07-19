@@ -14,6 +14,7 @@ const {
     inspectPcm16MonoWav,
 } = require('../services/media-gateway/src/sherpa-lid-bridge');
 const {
+    canonicalLanguage,
     inspectPcm16MonoWavSync,
     resolveAllowedRegularFileSync,
 } = require('../services/media-gateway/src/sherpa-lid-worker');
@@ -147,6 +148,13 @@ test('WAV inspection accepts only bounded mono 16 kHz PCM16 files under the allo
     } finally {
         await fx.cleanup();
     }
+});
+
+test('Sherpa language aliases use the same canonical codes as the other engines', () => {
+    assert.equal(canonicalLanguage('iw'), 'he');
+    assert.equal(canonicalLanguage('JW'), 'jv');
+    assert.equal(canonicalLanguage('fr'), 'fr');
+    assert.equal(canonicalLanguage('not-a-language'), null);
 });
 
 test('bridge stays optional and reports persistent-worker metrics without a probability', async () => {

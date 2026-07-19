@@ -298,6 +298,10 @@ class EcapaLidWorker {
     };
   }
 
+  start() {
+    return this._ensureStarted();
+  }
+
   async classify(wavPath) {
     if (this.closed) {
       throw new EcapaLidError('CLOSED', 'ECAPA worker bridge is closed');

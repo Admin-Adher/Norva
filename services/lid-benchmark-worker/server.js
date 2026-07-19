@@ -128,20 +128,24 @@ app.disable('x-powered-by');
 let busy = false;
 let completed = 0;
 let failed = 0;
+let startupError = null;
 
 app.get('/health', (_req, res) => {
+    const ecapaHealth = ecapa.health();
+    const sherpaHealth = sherpa.status();
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-        ok: true,
+        ok: startupError === null && ecapaHealth.ready === true && sherpaHealth.ready === true,
         service: 'norva-lid-benchmark-worker',
         schemaVersion: 1,
         busy,
         completed,
         failed,
+        startupError,
         models: manifest,
         engines: {
-            ecapa: ecapa.health(),
-            sherpa: sherpa.status(),
+            ecapa: ecapaHealth,
+            sherpa: sherpaHealth,
         },
         system: {
             load: os.loadavg(),
@@ -255,15 +259,14 @@ process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
 
 fsp.mkdir(SAMPLE_ROOT, { recursive: true, mode: 0o700 })
-    .then(() => sherpa.start())
-    .then((result) => {
-        if (result?.ok !== true) {
-            console.error(
-                `[lid-benchmark-worker] sherpa startup warning: ${safeError(result?.error)}`,
-            );
+    .then(async () => {
+        const [, sherpaResult] = await Promise.all([ecapa.start(), sherpa.start()]);
+        if (sherpaResult?.ok !== true) {
+            throw new Error(safeError(sherpaResult?.error));
         }
     })
     .catch((error) => {
+        startupError = safeError(error);
         console.error(`[lid-benchmark-worker] startup warning: ${safeError(error)}`);
     })
     .finally(() => {

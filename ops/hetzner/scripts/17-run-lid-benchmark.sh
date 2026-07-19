@@ -144,6 +144,8 @@ if [[ "$LID_WORKER_ENABLED" == "1" ]]; then
       .ok == true and
       .schemaVersion == 1 and
       .busy == false and
+      .engines.ecapa.ready == true and
+      .engines.sherpa.ready == true and
       .models.ecapa.revision == $ecapa and
       .models.sherpa.revision == $sherpa and
       any(.models.sherpa.files[]; .name == "tiny-encoder.int8.onnx" and .sha256 == $encoder) and
@@ -544,7 +546,10 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
     else (($s[length/2-1] + $s[length/2]) / 2)
     end;
   [ .[] | select(.response.benchmark != null) ] as $completed |
-  [ $completed[] | select(.response.benchmark.system.contended != true) ] as $usable |
+  [ $completed[] | select(
+      .response.benchmark.system.contended != true and
+      (.attempts // 1) == 1
+    ) ] as $usable |
   [ $usable[] | select(.response.benchmark.current.productionAccepted == true) ] as $acceptedCurrent |
   [ $usable[] | select(.response.benchmark.fastLid.ecapa.ok == true) ] as $ecapaOutput |
   [ $usable[] | select(.response.benchmark.fastLid.sherpa.ok == true) ] as $sherpaOutput |
@@ -556,6 +561,7 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
     requested: length,
     completed: ($completed | length),
     usable: ($usable | length),
+    retriedExcluded: ([$completed[] | select((.attempts // 1) != 1)] | length),
     skipped: ([ .[] | select(.response.skipped != null) ] | group_by(.response.skipped) |
       map({key: .[0].response.skipped, value: length}) | from_entries),
     failures: ([ .[] | select(.response.benchmark == null and .response.skipped == null) |
@@ -617,6 +623,12 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
       sherpaTinyInt8: ([$sherpaOutput[].response.benchmark.fastLid.sherpa.metrics.inferenceMs |
         select(. != null)] | median)
     },
+    medianFastEngineWallMs: {
+      ecapa: ([$ecapaOutput[].response.benchmark.fastLid.timings.ecapaWallMs |
+        select(. != null)] | median),
+      sherpaTinyInt8: ([$sherpaOutput[].response.benchmark.fastLid.timings.sherpaWallMs |
+        select(. != null)] | median)
+    },
     fixedWindowCurrentTracksPerHour: ([$usable[].response.benchmark.timings.totalCurrentMs] |
       if length == 0 or add == 0 then null else 3600000 / (add / length) end),
     fixedWindowDetectOnlyTracksPerHour: ([$usable[].response.benchmark.timings.totalDetectOnlyMs] |
@@ -624,13 +636,14 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
     projectedFixedWindowTracksPerHour: {
       ecapa: ([$ecapaOutput[] |
         (.response.benchmark.timings.extractMs +
-          .response.benchmark.fastLid.ecapa.metrics.inferenceMs)] |
+          .response.benchmark.fastLid.timings.ecapaWallMs)] |
         if length == 0 or add == 0 then null else 3600000 / (add / length) end),
       sherpaTinyInt8: ([$sherpaOutput[] |
         (.response.benchmark.timings.extractMs +
-          .response.benchmark.fastLid.sherpa.metrics.inferenceMs)] |
+          .response.benchmark.fastLid.timings.sherpaWallMs)] |
         if length == 0 or add == 0 then null else 3600000 / (add / length) end)
     },
+    throughputScope: "serial fixed-window projection: provider extraction plus per-engine service wall; excludes retries, queueing before extraction and WAV HTTP upload",
     catalogueSnapshotUnchanged: $catalogueUnchanged,
     productionPipelineCoverage: "not measured: production sweeps 600,1500,300 while this engine benchmark uses one fixed 600s window",
     accuracy: "not scored: cachedLanguageHint is not human ground truth",

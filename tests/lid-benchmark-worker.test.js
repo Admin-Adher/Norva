@@ -49,6 +49,11 @@ test('worker is authenticated, loopback-only and destroys every WAV', () => {
   assert.match(server, /persisted: false/);
   assert.match(server, /ecapa\.classify\(wavPath\)/);
   assert.match(server, /sherpa\.detect\(wavPath\)/);
+  assert.match(server, /Promise\.all\(\[ecapa\.start\(\), sherpa\.start\(\)\]\)/);
+  assert.match(
+    server,
+    /startupError === null && ecapaHealth\.ready === true && sherpaHealth\.ready === true/,
+  );
   assert.match(compose, /127\.0\.0\.1:8091:8091/);
   assert.match(compose, /read_only: true/);
   assert.match(compose, /no-new-privileges:true/);
@@ -68,6 +73,22 @@ test('real-data runner never persists captured operator audio', () => {
   assert.match(runner, /del\(\.benchmark\.wavCapture\)/);
   assert.match(runner, /rm -f "\$SAMPLE_WAV"/);
   assert.match(runner, /candidateCoverage/);
+  assert.match(runner, /\.engines\.ecapa\.ready == true/);
+  assert.match(runner, /\.engines\.sherpa\.ready == true/);
+  assert.match(runner, /retriedExcluded/);
+  assert.match(runner, /\(\.attempts \/\/ 1\) == 1/);
   assert.match(runner, /projectedFixedWindowTracksPerHour/);
+  assert.match(
+    runner,
+    /benchmark\.timings\.extractMs \+\s*\.response\.benchmark\.fastLid\.timings\.ecapaWallMs/,
+  );
+  assert.match(
+    runner,
+    /benchmark\.timings\.extractMs \+\s*\.response\.benchmark\.fastLid\.timings\.sherpaWallMs/,
+  );
+  assert.doesNotMatch(
+    runner,
+    /benchmark\.timings\.extractMs \+\s*\.response\.benchmark\.fastLid\.(?:ecapa|sherpa)\.metrics\.inferenceMs/,
+  );
   assert.match(runner, /accuracy: "not scored: cachedLanguageHint is not human ground truth"/);
 });

@@ -29,6 +29,13 @@ function isInsideRoot(rootPath, filePath) {
         && !path.isAbsolute(relative);
 }
 
+function canonicalLanguage(value) {
+    const language = String(value || '').trim().toLowerCase();
+    if (language === 'iw') return 'he';
+    if (language === 'jw') return 'jv';
+    return /^[a-z]{2,3}$/.test(language) ? language : null;
+}
+
 function resolveAllowedRegularFileSync(filePath, allowedRoot) {
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) {
         throw new Error('file path must be absolute');
@@ -308,9 +315,9 @@ async function startWorker() {
                     samples: wave.samples,
                 });
                 const inferenceStartedAt = performance.now();
-                const lang = String(identifier.compute(stream) || '').toLowerCase();
+                const lang = canonicalLanguage(identifier.compute(stream));
                 const inferenceMs = performance.now() - inferenceStartedAt;
-                if (!/^[a-z]{2,3}$/.test(lang)) {
+                if (!lang) {
                     throw Object.assign(new Error('sherpa returned no valid language code'), {
                         code: 'invalid-language',
                     });
@@ -378,6 +385,7 @@ if (!isMainThread) {
 module.exports = {
     PROTOCOL,
     boundedError,
+    canonicalLanguage,
     deltaCpu,
     inspectPcm16MonoWavSync,
     resolveAllowedRegularFileSync,

@@ -194,6 +194,31 @@ test('bridge keeps one worker alive and returns bounded raw benchmark evidence',
   });
 });
 
+test('start preloads the persistent ECAPA worker before any provider WAV is touched', async () => {
+  await withWavFixture(async ({ root }) => {
+    let spawnCount = 0;
+    const bridge = new EcapaLidWorker({
+      allowedRoot: root,
+      pythonBin: '/fake/python',
+      modelDir: '/fake/model',
+      startupTimeoutMs: 1000,
+      requestTimeoutMs: 1000,
+      spawnImpl: () => {
+        spawnCount += 1;
+        return fakeWorkerProcess();
+      },
+    });
+    try {
+      const ready = await bridge.start();
+      assert.equal(ready.engine.model, 'lang-id-voxlingua107-ecapa');
+      assert.equal(bridge.health().ready, true);
+      assert.equal(spawnCount, 1);
+    } finally {
+      bridge.close();
+    }
+  });
+});
+
 test('timed-out inference kills the worker and the next request restarts cleanly', async () => {
   await withWavFixture(async ({ root, wavPath }) => {
     let spawnCount = 0;
