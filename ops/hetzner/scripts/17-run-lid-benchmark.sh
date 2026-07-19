@@ -351,7 +351,12 @@ for sample in "${SAMPLES[@]}"; do
       if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
         response='{"runnerError":"non-json-response"}'
       fi
-      if [[ "$http_status" == "408" || "$http_status" == "429" || "$http_status" =~ ^5[0-9][0-9]$ ]]; then
+      provider_auth_terminal="$(printf '%s' "$response" | jq -r '
+        ((.details // "") | test("(401|403|unauthorized|forbidden|authorization failed)"; "i"))
+      ')"
+      if [[ "$provider_auth_terminal" == "true" ]]; then
+        transient=false
+      elif [[ "$http_status" == "408" || "$http_status" == "429" || "$http_status" =~ ^5[0-9][0-9]$ ]]; then
         transient=true
       else
         transient="$(printf '%s' "$response" | jq -r '

@@ -250,6 +250,8 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /norva-playback\/lid-benchmark/);
   assert.doesNotMatch(runner, /norva-playback\/audio-backfill/);
   assert.match(runner, /http_status.*\^5\[0-9\]\[0-9\]\$/);
+  assert.match(runner, /provider_auth_terminal/);
+  assert.match(runner, /authorization failed/);
   assert.match(runner, /engine\.gatewayVersion/);
   assert.match(runner, /max_parallel_workers_per_gather=0/);
   assert.match(flagMigration, /'lid_benchmark_enabled',\s*\n\s*false/);
