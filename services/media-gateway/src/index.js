@@ -101,9 +101,9 @@ function abortRawPumps(filter, keepSid, reason) {
 // account preempts them: the viewer outranks any background job, and on a single-slot panel the
 // two connections otherwise fight for minutes (the viewer eats 458s while the extraction reads
 // the whole film). Preempted jobs re-queue as 'deferred' — they resume once the viewer stops.
-const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted }>
-function registerAccountExtraction(proxyKey, child) {
-    const entry = { child, preempted: false };
+const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted, reportActivity }>
+function registerAccountExtraction(proxyKey, child, reportActivity = true) {
+    const entry = { child, preempted: false, reportActivity };
     if (!proxyKey) return entry;
     let set = accountExtractions.get(proxyKey);
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
@@ -365,7 +365,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 70;
+const GATEWAY_VERSION = 71;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -1233,6 +1233,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
                 duration,
                 45_000,
                 claims.uid,
+                false,
             ));
         const extractMs = Math.round((performance.now() - extractStartedAt) * 100) / 100;
         if (!ex.ok) {
@@ -1577,7 +1578,16 @@ app.post('/translate', requireGatewayAuth, async (req, res) => {
 // null of the first version made 7 failed pregen jobs indistinguishable in the admin.
 // `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs` defaults to
 // 30 s (LID clip) — pass a longer value for a full-film extraction.
-function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000, proxyKey = '') {
+function extractAudioWav(
+    url,
+    ua,
+    trackIndex,
+    startOffset,
+    dur,
+    timeoutMs = 30_000,
+    proxyKey = '',
+    reportActivity = true,
+) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
@@ -1603,7 +1613,7 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
-        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, reportActivity);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -4338,7 +4348,9 @@ function activeProviderAccountKeys() {
         if (s && s.sourceUrl && isSessionBlockingProviderSlot(s)) keys.add(proxyKeyFromUrl(s.sourceUrl));
     }
     for (const p of rawPumps) { if (p && p.proxyKey) keys.add(p.proxyKey); }
-    for (const key of accountExtractions.keys()) keys.add(key);
+    for (const [key, entries] of accountExtractions) {
+        if ([...entries].some((entry) => entry.reportActivity !== false)) keys.add(key);
+    }
     keys.delete('');
     return [...keys].map(decodeAccountKey).slice(0, 64);
 }
