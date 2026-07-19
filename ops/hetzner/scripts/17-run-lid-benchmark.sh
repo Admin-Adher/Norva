@@ -24,6 +24,7 @@
 # =============================================================================
 set -euo pipefail
 umask 077
+export PATH="$HOME/.local/bin:$PATH"
 
 LIMIT="${1:-0}"
 [[ "$LIMIT" =~ ^[0-9]+$ ]] || { echo "limit must be a non-negative integer" >&2; exit 2; }
