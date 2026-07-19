@@ -6184,43 +6184,169 @@ class WatchPage {
         return Array.isArray(v) && v.some(t => /^multi$/i.test(String(t)));
     }
 
+    repairAudioPreferenceFromExactTracks(exactTracks) {
+        const tracks = Array.isArray(exactTracks)
+            ? exactTracks.filter(track => Number.isInteger(Number(track?.index)))
+            : [];
+        if (!tracks.length) return false;
+
+        const repair = (preferences) => {
+            const normalized = this.normalizePlaybackPreferences(preferences);
+            const audio = normalized?.audio;
+            if (!audio) return normalized;
+
+            const streamIndex = Number(audio.streamIndex ?? audio.stream_index);
+            const savedLanguage = this.normalizeTrackLanguage(audio.language || audio.lang);
+            let exact = Number.isInteger(streamIndex)
+                ? tracks.find(track => Number(track.index) === streamIndex)
+                : null;
+            if (!exact && savedLanguage && savedLanguage !== 'und') {
+                exact = tracks.find(track =>
+                    this.normalizeTrackLanguage(track.lang || track.language) === savedLanguage
+                );
+            }
+            // A single exact file track is also an unambiguous fallback for an old
+            // preference that carried only a now-invalid language label.
+            if (!exact && tracks.length === 1) exact = tracks[0];
+            if (!exact) return normalized;
+
+            const language = this.normalizeTrackLanguage(exact.lang || exact.language);
+            const correctedAudio = {
+                ...audio,
+                source: 'probe',
+                streamIndex: Number(exact.index),
+            };
+            delete correctedAudio.stream_index;
+            if (language && language !== 'und') {
+                correctedAudio.language = language;
+                correctedAudio.label = this.getLanguageDisplayName(language) || language.toUpperCase();
+            } else {
+                delete correctedAudio.language;
+                delete correctedAudio.lang;
+                delete correctedAudio.label;
+            }
+            return { ...normalized, audio: correctedAudio };
+        };
+
+        let changed = false;
+        const beforePending = JSON.stringify(this.pendingPlaybackPreferences || null);
+        const repairedPending = repair(this.pendingPlaybackPreferences);
+        if (repairedPending) this.pendingPlaybackPreferences = repairedPending;
+        changed = beforePending !== JSON.stringify(this.pendingPlaybackPreferences || null);
+
+        if (this.content) {
+            const stored = this.content.playbackPreferences || this.content.playback_preferences || null;
+            const repairedStored = repair(stored);
+            if (repairedStored) {
+                const beforeStored = JSON.stringify(stored);
+                this.content.playbackPreferences = repairedStored;
+                this.content.playback_preferences = repairedStored;
+                changed = changed || beforeStored !== JSON.stringify(repairedStored);
+            }
+        }
+        return changed;
+    }
+
     // Populate this.audioTracks from the relay's ordered per-track probe so a
     // direct-play MULTI file shows real, switchable language tracks (not just "Multi").
     // Each track carries the ABSOLUTE ffmpeg stream index, so selecting a non-default
     // language restarts via the gateway with the correct -map. The default track keeps
-    // playing zero-egress until the user picks another. No-op unless >=2 known languages.
+    // playing zero-egress until the user picks another. A single exact track is still
+    // materialized so an old title/preference label cannot overwrite its real language.
     applyCloudMultiAudioTracks(probe) {
         const raw = Array.isArray(probe?.audioTracks) ? probe.audioTracks : [];
         // Raw ORDERED tracks (audio-relative) kept for the engine path, which maps
         // them to its demuxed streams by index (and falls back to position).
-        this._relayAudioTracks = raw.map((t) => ({ index: Number(t?.index), lang: this.normalizeTrackLanguage(t?.lang) }));
-        // index -> language from the relay probe (first wins, kept in track order).
-        const langByIdx = new Map();
-        for (const t of raw) {
-            const idx = Number(t?.index);
-            const lang = this.normalizeTrackLanguage(t?.lang);
-            if (Number.isInteger(idx) && lang && lang !== 'und' && !langByIdx.has(idx)) langByIdx.set(idx, lang);
+        this._relayAudioTracks = raw
+            .map((t) => {
+                const language = this.normalizeTrackLanguage(t?.lang || t?.language);
+                return {
+                    index: Number(t?.index),
+                    lang: language && language !== 'und' ? language : null
+                };
+            })
+            .filter((track) => Number.isInteger(track.index));
+        this.repairAudioPreferenceFromExactTracks(this._relayAudioTracks);
+
+        // index -> exact language from the relay probe (including null/unknown).
+        // Presence matters: an exact unknown must clear a stale sibling/title label
+        // instead of silently preserving it.
+        const exactByIdx = new Map();
+        for (const t of this._relayAudioTracks) {
+            if (!exactByIdx.has(t.index)) exactByIdx.set(t.index, t.lang);
+        }
+        const exactLanguage = (track, position) => {
+            const index = Number(track?.index);
+            if (Number.isInteger(index) && exactByIdx.has(index)) return exactByIdx.get(index);
+            return position < this._relayAudioTracks.length
+                ? this._relayAudioTracks[position].lang
+                : undefined;
+        };
+        // A track object may come from an older codec/title profile. Its display
+        // fields are not safe to merge into an exact-file probe: keeping a stale
+        // `title: "French"` while replacing only `language` would render
+        // "French - English" (or still "French" when the exact language is unknown).
+        // Preserve only transport/codec facts that remain useful to playback.
+        const technicalTrackMetadata = (track) => {
+            const safe = {};
+            [
+                'index', 'order', 'codec', 'profile', 'channels',
+                'channelLayout', 'channel_layout',
+                'sampleRate', 'sample_rate',
+                'bitRate', 'bit_rate',
+                'default'
+            ].forEach((key) => {
+                if (track?.[key] !== undefined) safe[key] = track[key];
+            });
+            return safe;
+        };
+        const reconcileTrackList = (tracks) => tracks.map((track, position) => {
+            const language = exactLanguage(track, position);
+            if (language === undefined) return track;
+            return {
+                ...technicalTrackMetadata(track),
+                language: language || null,
+                lang: language || null
+            };
+        });
+
+        if (Array.isArray(this.currentStreamInfo?.audioTracks)) {
+            this.currentStreamInfo = {
+                ...this.currentStreamInfo,
+                audioTracks: reconcileTrackList(this.currentStreamInfo.audioTracks)
+            };
         }
         // Engine mode owns the track LIST (every demuxed stream); the relay only
-        // supplies the language labels, merged in by absolute stream index.
-        if (this.currentPlaybackMode === 'engine' && Array.isArray(this.audioTracks) && this.audioTracks.length >= 2) {
-            this.audioTracks = this.audioTracks.map(t => ({ ...t, language: t.language || langByIdx.get(t.index) || null }));
+        // supplies the exact language labels, merged in by absolute stream index.
+        if (this.currentPlaybackMode === 'engine' && Array.isArray(this.audioTracks) && this.audioTracks.length) {
+            this.audioTracks = reconcileTrackList(this.audioTracks);
             this.updateAudioTracks();
             return;
         }
         // Direct play: build the switchable list from the relay probe (dedupe by lang).
         const seen = new Set();
         const usable = [];
-        for (const [idx, lang] of langByIdx) {
+        for (const [idx, lang] of exactByIdx) {
+            if (!lang) continue;
             if (seen.has(lang)) continue;
             seen.add(lang);
             usable.push({ index: idx, language: lang });
         }
-        if (usable.length < 2) return; // single/unknown -> keep the single-label path
+        if (!usable.length) {
+            if (Array.isArray(this.audioTracks) && this.audioTracks.length) {
+                this.audioTracks = reconcileTrackList(this.audioTracks);
+            }
+            return;
+        }
         const defLang = this.normalizeTrackLanguage(probe?.audioDefaultLanguage);
         let defPos = usable.findIndex(t => t.language === defLang);
         if (defPos < 0) defPos = 0;
-        this.audioTracks = usable.map((t, i) => ({ index: t.index, language: t.language, default: i === defPos }));
+        this.audioTracks = usable.map((t, i) => {
+            const existing = (Array.isArray(this.currentStreamInfo?.audioTracks)
+                ? this.currentStreamInfo.audioTracks
+                : []).find(track => Number(track?.index) === Number(t.index));
+            return { ...(existing || {}), index: t.index, language: t.language, lang: t.language, default: i === defPos };
+        });
         if (!Number.isInteger(this.directAudioStreamIndex)) this.directAudioStreamIndex = usable[defPos].index;
         if (!this.selectedAudioTrackUserChoice && !Number.isInteger(this.selectedAudioStreamIndex)) {
             this.selectedAudioStreamIndex = usable[defPos].index;

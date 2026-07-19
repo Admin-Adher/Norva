@@ -318,6 +318,144 @@ test('version failover remaps a language preference instead of reusing the old f
   assert.notStrictEqual(options.audioStreamIndex, 7);
 });
 
+test('an in-session version switch replaces a stale French mono label without a stored preference', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {};
+  page.pendingPlaybackPreferences = null;
+  // Real load order: codecProfile is applied while mode is still null, then the
+  // exact session map arrives immediately before the engine is opened.
+  page.currentPlaybackMode = null;
+  page.audioTracks = [{
+    index: 1,
+    language: 'fr',
+    title: 'French',
+    label: 'French',
+    name: 'French',
+    codec: 'aac',
+    channels: 2,
+    bitRate: 128000,
+    default: true
+  }];
+  page.currentStreamInfo = {
+    audioTracks: [{
+      index: 1,
+      language: 'fr',
+      title: 'French',
+      label: 'French',
+      name: 'French',
+      codec: 'aac',
+      channels: 2,
+      bitRate: 128000,
+      default: true
+    }]
+  };
+  page.selectedAudioStreamIndex = 1;
+  page.selectedAudioTrackUserChoice = false;
+  page.directAudioStreamIndex = null;
+  page.updateAudioTracks = () => {};
+
+  page.applyCloudMultiAudioTracks({
+    audioTracks: [{ index: 1, language: 'eng' }]
+  });
+
+  assert.strictEqual(page.pendingPlaybackPreferences, null);
+  assert.strictEqual(page._relayAudioTracks[0].lang, 'en');
+  assert.strictEqual(page.audioTracks[0].language, 'en');
+  assert.strictEqual(page.currentStreamInfo.audioTracks[0].language, 'en');
+  assert.strictEqual(page.audioTracks[0].codec, 'aac');
+  assert.strictEqual(page.audioTracks[0].channels, 2);
+  assert.strictEqual(page.audioTracks[0].bitRate, 128000);
+  for (const key of ['title', 'label', 'name']) {
+    assert.strictEqual(Object.hasOwn(page.audioTracks[0], key), false);
+    assert.strictEqual(Object.hasOwn(page.currentStreamInfo.audioTracks[0], key), false);
+  }
+  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'English - AAC - 2ch');
+  assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
+});
+
+test('an exact single-file track repairs a stale French resume preference', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {
+    playbackPreferences: {
+      audio: { source: 'probe', streamIndex: 1, language: 'fr', label: 'French' }
+    }
+  };
+  page.pendingPlaybackPreferences = {
+    audio: { source: 'probe', streamIndex: 1, language: 'fr', label: 'French' }
+  };
+  page.currentPlaybackMode = 'engine';
+  page.audioTracks = [{ index: 1, language: 'fr', default: true }];
+  page.currentStreamInfo = {
+    audioTracks: [{ index: 1, language: 'fr', default: true }]
+  };
+  page.updateAudioTracks = () => {};
+
+  // Gateway/codec profiles use both `lang` and `language` in practice. The exact
+  // file probe is authoritative over historical title/resume metadata.
+  page.applyCloudMultiAudioTracks({
+    audioTracks: [{ index: 1, language: 'eng' }]
+  });
+
+  assert.strictEqual(page._relayAudioTracks[0].lang, 'en');
+  assert.strictEqual(page.audioTracks[0].language, 'en');
+  assert.strictEqual(page.currentStreamInfo.audioTracks[0].language, 'en');
+  assert.strictEqual(page.pendingPlaybackPreferences.audio.language, 'en');
+  assert.strictEqual(page.pendingPlaybackPreferences.audio.label, 'English');
+  assert.strictEqual(page.content.playbackPreferences.audio.language, 'en');
+  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'English');
+});
+
+test('an exact unknown mono track clears every stale language display field', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {};
+  page.pendingPlaybackPreferences = null;
+  page.currentPlaybackMode = null;
+  page.audioTracks = [{
+    index: 1,
+    language: 'fr',
+    title: 'French',
+    label: 'French',
+    name: 'French',
+    codec: 'aac',
+    default: true
+  }];
+  page.currentStreamInfo = {
+    audioTracks: [{
+      index: 1,
+      language: 'fr',
+      title: 'French',
+      label: 'French',
+      name: 'French',
+      codec: 'aac',
+      default: true
+    }]
+  };
+  page.selectedAudioStreamIndex = 1;
+  page.selectedAudioTrackUserChoice = false;
+  page.directAudioStreamIndex = null;
+  page.updateAudioTracks = () => {};
+
+  page.applyCloudMultiAudioTracks({
+    audioTracks: [{ index: 1, lang: null }]
+  });
+
+  assert.strictEqual(page.audioTracks[0].language, null);
+  assert.strictEqual(page.currentStreamInfo.audioTracks[0].language, null);
+  assert.strictEqual(page.audioTracks[0].codec, 'aac');
+  for (const key of ['title', 'label', 'name']) {
+    assert.strictEqual(Object.hasOwn(page.audioTracks[0], key), false);
+    assert.strictEqual(Object.hasOwn(page.currentStreamInfo.audioTracks[0], key), false);
+  }
+  assert.strictEqual(page.getProbeAudioTracks()[0].label, 'AAC');
+  assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
+});
+
 test('a fatal callback during engine load cannot start a competing fallback', () => {
   const start = watchSrc.indexOf('async playWithEngine(');
   const end = watchSrc.indexOf('\n    async fallbackEngineToTranscode(', start);
