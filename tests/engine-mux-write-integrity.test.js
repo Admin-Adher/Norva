@@ -73,11 +73,11 @@ test('every generated wasm helper checks packet-write errors inside the worker',
 
 test('engine cache-busts the loader, worker glue, and wasm binary together', () => {
     const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.ok(src.includes("libav-norva.mjs?v=40"),
+    assert.ok(src.includes("libav-norva.mjs?v=42"),
         'dynamic loader import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=40"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=42"),
         'worker glue import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=40"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=42"),
         'wasm binary fetch must be revisioned');
     assert.ok(src.includes('toImport: LIBAV_RUNTIME'));
     assert.ok(src.includes('wasmurl: LIBAV_WASM'));
@@ -197,4 +197,76 @@ test('a batch resolved after a seek generation change is dropped without replaci
     assert.strictEqual(engine._diag.firstStaleMuxDrop.reason, 'stale-success');
     assert.deepStrictEqual(reports, [], 'an intentionally obsolete mux must not trigger recovery');
     assert.deepStrictEqual(fatals, []);
+});
+
+test('the cumulative MP4 parser accepts fragmented boxes split across AVIO writes', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    const box = (type, bodyBytes) => {
+        const out = new Uint8Array(8 + bodyBytes);
+        new DataView(out.buffer).setUint32(0, out.length);
+        for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+        return out;
+    };
+    const stream = Buffer.concat([
+        Buffer.from(box('ftyp', 20)),
+        Buffer.from(box('moov', 31)),
+        Buffer.from(box('moof', 17)),
+        Buffer.from(box('mdat', 4096)),
+    ]);
+
+    for (const [start, end] of [[0, 5], [5, 37], [37, 111], [111, stream.length]]) {
+        engine._diagTrackBoxes(new Uint8Array(stream.subarray(start, end)));
+    }
+
+    assert.strictEqual(engine._diag.boxBad, null);
+    assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(engine._diag.boxSeq)),
+        ['ftyp(28)', 'moov(39)', 'moof(25)', 'mdat(4104)']);
+});
+
+test('an ISO-BMFF size-zero box consumes later AVIO blocks through EOF', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+
+    engine._diagTrackBoxes(new Uint8Array([
+        0, 0, 0, 0, 0x6d, 0x64, 0x61, 0x74, 1, 2, 3,
+    ]));
+    engine._diagTrackBoxes(new Uint8Array([
+        0x38, 0, 0, 0, 0x67, 0x61, 0x72, 0x62,
+    ]));
+
+    assert.strictEqual(engine._diag.boxBad, null);
+    assert.strictEqual(engine._diag.boxOpenEnded, true);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(engine._diag.boxSeq)), ['mdat(EOF)']);
+});
+
+test('a structurally impossible MP4 boundary is rejected before MediaSource', async () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine, reports, fatals } = makeEngine(NorvaEngine);
+    const badChunk = new Uint8Array([0x38, 0, 0, 0, 0x67, 0x61, 0x72, 0x62]);
+
+    engine._diagTrackBoxes(badChunk);
+    assert.match(engine._diag.boxBad, /type="garb"/);
+    assert.match(engine._diag.boxBad, /size=939524096/);
+    assert.strictEqual(engine._rejectInvalidMuxStructure(badChunk), true);
+    await Promise.resolve();
+
+    assert.strictEqual(engine._stopRequested, true);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.strictEqual(engine._diag.muxStructureErrors, 1);
+    assert.strictEqual(engine._diag.muxRejectedBytes, badChunk.length);
+    assert.strictEqual(engine._diag.firstMuxStructureError.rejectedBytes, badChunk.length);
+    assert.strictEqual(reports[0].stage, 'mux:structure');
+    assert.match(reports[0].message, /MUX_STRUCTURE_INVALID/);
+    assert.strictEqual(fatals.length, 1);
+    assert.match(fatals[0].message, /MUX_STRUCTURE_INVALID/);
+
+    const source = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
+    const guard = source.slice(
+        source.indexOf('this._diagTrackBoxes(chunk);'),
+        source.indexOf('this.queue.push(chunk); this._drain();'),
+    );
+    assert.ok(guard.includes('this._rejectInvalidMuxStructure(chunk)'),
+        'the structural guard must run before the chunk is queued for MediaSource');
 });

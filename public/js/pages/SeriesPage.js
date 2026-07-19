@@ -70,7 +70,7 @@ class SeriesPage {
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
-        this.startedSeriesIds = new Set(); // series with at least one episode in history
+        this.startedSeriesIds = new Set(); // source-aware series keys with a resumable episode
         this.historyItems = [];
         this.serverSettings = {};
 
@@ -891,17 +891,20 @@ class SeriesPage {
 
     async loadWatchState() {
         try {
-            const history = await API.history.getAll(500);
+            const history = await API.history.getAll(5000);
             const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.historyItems = (history || []).filter(item => {
-                const sourceId = item.source_id || item.sourceId || item.data?.sourceId;
-                return sourceId && activeSourceIds.has(String(sourceId));
+                const sourceId = this.historySourceId(item);
+                return sourceId != null && activeSourceIds.has(String(sourceId));
             });
             this.startedSeriesIds = new Set();
             for (const h of this.historyItems) {
-                if (h.item_type === 'episode' && h.data?.seriesId) {
-                    this.startedSeriesIds.add(String(h.data.seriesId));
-                }
+                if (h.item_type !== 'episode' || !this.isEpisodeInProgress(h)) continue;
+                const key = this.seriesProgressKey(
+                    this.historySourceId(h),
+                    this.historySeriesId(h)
+                );
+                if (key) this.startedSeriesIds.add(key);
             }
         } catch (err) {
             console.warn('Error loading watch history:', err);
@@ -917,7 +920,13 @@ class SeriesPage {
     }
 
     isGroupStarted(items) {
-        return items.some(i => this.startedSeriesIds.has(String(i.series_id)));
+        return items.some(item => {
+            const key = this.seriesProgressKey(
+                item?.sourceId ?? item?.source_id,
+                item?.series_id ?? item?.seriesId
+            );
+            return key ? this.startedSeriesIds.has(key) : false;
+        });
     }
 
     async loadSources() {
@@ -1734,12 +1743,73 @@ class SeriesPage {
 
     // === Continue Watching row ===
 
+    seriesProgressKey(sourceId, seriesId) {
+        if (sourceId == null || sourceId === '' || seriesId == null || seriesId === '') return null;
+        return `${String(sourceId)}:${String(seriesId)}`;
+    }
+
+    episodeProgressKey(sourceId, seriesId, episodeId) {
+        const seriesKey = this.seriesProgressKey(sourceId, seriesId);
+        if (!seriesKey || episodeId == null || episodeId === '') return null;
+        return `${seriesKey}:${String(episodeId)}`;
+    }
+
+    historySourceId(history) {
+        return history?.source_id
+            ?? history?.sourceId
+            ?? history?.data?.sourceId
+            ?? history?.data?.source_id
+            ?? null;
+    }
+
+    historySeriesId(history) {
+        return history?.data?.seriesId
+            ?? history?.data?.series_id
+            ?? history?.seriesId
+            ?? history?.series_id
+            ?? null;
+    }
+
+    historyEpisodeProgressKey(history) {
+        return this.episodeProgressKey(
+            this.historySourceId(history),
+            this.historySeriesId(history),
+            history?.item_id ?? history?.itemId
+        );
+    }
+
+    episodeProgressKeyForSeries(episodeId, series = this.currentSeries) {
+        return this.episodeProgressKey(
+            series?.sourceId ?? series?.source_id,
+            series?.series_id ?? series?.seriesId,
+            episodeId
+        );
+    }
+
+    getEpisodeHistory(historyMap, episodeId, series = this.currentSeries) {
+        const key = this.episodeProgressKeyForSeries(episodeId, series);
+        return key ? (historyMap?.get(key) || null) : null;
+    }
+
     getResumeOffset(progress, duration = 0) {
         const position = Math.max(0, Math.floor(Number(progress) || 0));
         const total = Math.max(0, Math.floor(Number(duration) || 0));
         if (position < 12) return 0;
         if (total > 0 && position >= total * 0.95) return 0;
-        return Math.max(0, position - 3);
+        return position;
+    }
+
+    isEpisodeInProgress(history) {
+        if (!history || history.completed === true) return false;
+        return this.getResumeOffset(history.progress, history.duration) > 0;
+    }
+
+    isEpisodeWatched(history) {
+        if (!history) return false;
+        if (history.completed === true) return true;
+        const progress = Math.max(0, Number(history.progress) || 0);
+        const duration = Math.max(0, Number(history.duration) || 0);
+        return duration > 0 && progress >= duration * 0.95;
     }
 
     renderContinueWatching() {
@@ -1748,9 +1818,12 @@ class SeriesPage {
         const seen = new Set();
         const inProgress = [];
         for (const h of (this.historyItems || [])) {
-            if (h.item_type !== 'episode' || !h.data?.seriesId) continue;
-            if (this.getResumeOffset(h.progress, h.duration) <= 0) continue;
-            const key = `${h.data.sourceId}:${h.data.seriesId}`;
+            if (h.item_type !== 'episode' || !this.isEpisodeInProgress(h)) continue;
+            const key = this.seriesProgressKey(
+                this.historySourceId(h),
+                this.historySeriesId(h)
+            );
+            if (!key) continue;
             if (seen.has(key)) continue;
             seen.add(key);
             inProgress.push(h);
@@ -1764,8 +1837,9 @@ class SeriesPage {
 
         this.continueList.innerHTML = inProgress.map(h => {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
+            const historyKey = this.historyEpisodeProgressKey(h);
             return `
-            <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}">
+            <div class="continue-card" data-history-key="${MediaUtils.escapeHtml(historyKey || '')}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
@@ -1784,7 +1858,8 @@ class SeriesPage {
                 card.setAttribute('aria-label', `Resume ${title}`);
             }
             card.addEventListener('click', () => {
-                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
+                const h = inProgress.find(x =>
+                    this.historyEpisodeProgressKey(x) === card.dataset.historyKey);
                 if (h) this.resumeEpisodeFromHistory(h);
             });
         });
@@ -1806,8 +1881,8 @@ class SeriesPage {
     async resumeEpisodeFromHistory(h) {
         const watch = this.app.pages.watch;
         if (!watch) return;
-        const sourceId = parseInt(h.source_id || h.data?.sourceId);
-        const seriesId = h.data?.seriesId;
+        const sourceId = parseInt(this.historySourceId(h));
+        const seriesId = this.historySeriesId(h);
         if (!sourceId || !seriesId) return;
 
         const resumeOffset = this.getResumeOffset(h.progress, h.duration);
@@ -2073,12 +2148,18 @@ class SeriesPage {
     }
 
     _tvPreviewProgress(group) {
-        const keys = new Set((group?.items || []).map(item => `${item.sourceId}:${item.series_id}`));
+        const keys = new Set((group?.items || [])
+            .map(item => this.seriesProgressKey(
+                item?.sourceId ?? item?.source_id,
+                item?.series_id ?? item?.seriesId
+            ))
+            .filter(Boolean));
         return (this.historyItems || []).find((history) => {
-            if (history.item_type !== 'episode' || !history.data?.seriesId) return false;
-            const sourceId = history.data?.sourceId ?? history.source_id;
-            return keys.has(`${sourceId}:${history.data.seriesId}`) &&
-                this.getResumeOffset(history.progress, history.duration) > 0;
+            if (history.item_type !== 'episode' || !this.isEpisodeInProgress(history)) return false;
+            return keys.has(this.seriesProgressKey(
+                this.historySourceId(history),
+                this.historySeriesId(history)
+            ));
         }) || null;
     }
 
@@ -2463,11 +2544,22 @@ class SeriesPage {
 
     getSeriesHistoryMap(series = this.currentSeries) {
         const watchedEpisodes = new Map();
+        const sourceId = series?.sourceId ?? series?.source_id;
+        const seriesId = series?.series_id ?? series?.seriesId;
+        const seriesKey = this.seriesProgressKey(sourceId, seriesId);
+        if (!seriesKey) return watchedEpisodes;
+
         for (const h of (this.historyItems || [])) {
-            if (h.item_type === 'episode' && String(h.data?.seriesId) === String(series?.series_id)) {
-                const ratio = h.duration > 0 ? h.progress / h.duration : 0;
-                watchedEpisodes.set(String(h.item_id), { ...h, ratio });
-            }
+            if (h.item_type !== 'episode') continue;
+            if (this.seriesProgressKey(this.historySourceId(h), this.historySeriesId(h)) !== seriesKey) continue;
+            const key = this.historyEpisodeProgressKey(h);
+            if (!key) continue;
+            const ratio = h.duration > 0 ? h.progress / h.duration : 0;
+            const candidate = { ...h, ratio };
+            const existing = watchedEpisodes.get(key);
+            const candidateTs = Date.parse(candidate.updated_at || candidate.updatedAt || '') || 0;
+            const existingTs = Date.parse(existing?.updated_at || existing?.updatedAt || '') || 0;
+            if (!existing || candidateTs > existingTs) watchedEpisodes.set(key, candidate);
         }
         return watchedEpisodes;
     }
@@ -2480,10 +2572,15 @@ class SeriesPage {
     async setEpisodeWatched(episodeId, seasonNum, episodeNum, watched, series = this.currentSeries) {
         if (!series || episodeId == null) return;
         const eid = String(episodeId);
-        const sid = String(series.series_id);
-        // Scope every lookup by (episode item_id + this series) so a movie or another
-        // series that happens to share the numeric id is never touched.
-        const sameEp = (h) => h.item_type === 'episode' && String(h.item_id) === eid && String(h.data?.seriesId) === sid;
+        const rawSeriesId = series.series_id ?? series.seriesId;
+        if (rawSeriesId == null || rawSeriesId === '') return;
+        const sid = String(rawSeriesId);
+        const sourceId = series.sourceId ?? series.source_id;
+        const episodeKey = this.episodeProgressKey(sourceId, sid, eid);
+        // Xtream ids are provider-local: source + series + episode must all match.
+        const sameEp = (h) => h.item_type === 'episode'
+            && episodeKey
+            && this.historyEpisodeProgressKey(h) === episodeKey;
         if (watched) {
             const ep = this.findEpisodeById(eid) || {};
             const duration = MediaUtils.parseDurationToSeconds(ep.duration)
@@ -2492,41 +2589,56 @@ class SeriesPage {
                 title: this.getSeriesDisplayTitle(series),
                 subtitle: `S${seasonNum} E${episodeNum}`,
                 poster: this.getSeriesPoster(series),
-                sourceId: series.sourceId,
-                seriesId: series.series_id,
+                sourceId,
+                seriesId: rawSeriesId,
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
             };
             const saved = await API.history.save({
-                id: eid, type: 'episode', sourceId: series.sourceId,
+                id: eid, type: 'episode', sourceId,
                 progress: duration, duration, completed: true, data,
             });
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
             // Keep the server's DB id so a later unwatch deletes THIS exact row.
-            this.historyItems.push({ id: saved?.id ?? saved?.item?.id ?? null, item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
+            this.historyItems.push({
+                id: saved?.id ?? saved?.item?.id ?? null,
+                source_id: sourceId,
+                item_type: 'episode',
+                item_id: eid,
+                progress: duration,
+                duration,
+                completed: true,
+                data
+            });
         } else {
             // Keyed delete (source+type+item): reaches the server row even when it was written
             // by ANOTHER device (the old list-then-find scanned a 20s-stale 500-row window and
             // could silently delete nothing — the card came back at reload).
             const existing = (this.historyItems || []).find(sameEp);
             await API.history.remove(existing?.id != null ? existing.id : eid,
-                { sourceId: series.sourceId, itemType: 'episode', itemId: eid });
+                { sourceId, itemType: 'episode', itemId: eid });
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
         }
         // Keep the grid's "started" set in sync for BOTH mark and unmark (mirrors how
         // loadWatchState derives it), so the watched-filter isn't stale before a reload.
         if (this.startedSeriesIds) {
+            const seriesKey = this.seriesProgressKey(sourceId, sid);
             const stillStarted = (this.historyItems || []).some(
-                h => h.item_type === 'episode' && String(h.data?.seriesId) === sid);
-            if (stillStarted) this.startedSeriesIds.add(series.series_id);
-            else this.startedSeriesIds.delete(series.series_id);
+                h => h.item_type === 'episode'
+                    && this.seriesProgressKey(this.historySourceId(h), this.historySeriesId(h)) === seriesKey
+                    && this.isEpisodeInProgress(h));
+            if (seriesKey && stillStarted) this.startedSeriesIds.add(seriesKey);
+            else if (seriesKey) this.startedSeriesIds.delete(seriesKey);
         }
     }
 
     async toggleEpisodeWatched(row) {
         const episodeId = row?.dataset?.episodeId;
         if (!episodeId || !this.currentSeries) return;
-        const watched = (this.getSeriesHistoryMap().get(String(episodeId))?.ratio || 0) >= 0.95;
+        const history = this.getSeriesHistoryMap().get(
+            this.episodeProgressKeyForSeries(episodeId)
+        );
+        const watched = this.isEpisodeWatched(history);
         const btn = row.querySelector('.episode-mark');
         if (btn) btn.disabled = true;
         try {
@@ -2548,7 +2660,8 @@ class SeriesPage {
         if (!eps.length) return;
         const map = this.getSeriesHistoryMap(series);
         // If every episode is already watched → the button un-watches the whole season.
-        const allWatched = eps.every(ep => (map.get(String(ep.id))?.ratio || 0) >= 0.95);
+        const allWatched = eps.every(ep =>
+            this.isEpisodeWatched(this.getEpisodeHistory(map, ep.id, series)));
         const target = !allWatched;
         // Guard CSS.escape like the sibling downloadSeason (some WebViews lack it).
         const esc = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
@@ -2561,7 +2674,7 @@ class SeriesPage {
                 // Bail if the user switched version / left mid-loop, so we never write
                 // watch rows for these episodes onto a DIFFERENT series.
                 if (this.currentSeries !== series) break;
-                const already = (map.get(String(ep.id))?.ratio || 0) >= 0.95;
+                const already = this.isEpisodeWatched(this.getEpisodeHistory(map, ep.id, series));
                 if (already === target) continue;
                 try {
                     await this.setEpisodeWatched(ep.id, seasonNum, ep.episode_num || '', target, series);
@@ -2583,7 +2696,8 @@ class SeriesPage {
         this.seasonsContainer.querySelectorAll('.season-mark-all').forEach(btn => {
             const s = btn.dataset.season;
             const eps = Array.isArray(this.currentSeriesInfo.episodes?.[s]) ? this.currentSeriesInfo.episodes[s] : [];
-            const allWatched = eps.length > 0 && eps.every(ep => (map.get(String(ep.id))?.ratio || 0) >= 0.95);
+            const allWatched = eps.length > 0 && eps.every(ep =>
+                this.isEpisodeWatched(this.getEpisodeHistory(map, ep.id)));
             btn.textContent = allWatched ? 'Mark season as unwatched' : 'Mark season as watched';
             btn.classList.toggle('is-watched', allWatched);
         });
@@ -2600,9 +2714,10 @@ class SeriesPage {
 
         this.seasonsContainer.querySelectorAll('.episode-item').forEach(row => {
             const id = String(row.dataset.episodeId);
-            const ratio = map.get(id)?.ratio || 0;
-            const watched = ratio >= 0.95;
-            const inProgress = ratio > 0.02 && ratio < 0.95;
+            const history = this.getEpisodeHistory(map, id);
+            const ratio = history?.ratio || 0;
+            const watched = this.isEpisodeWatched(history);
+            const inProgress = this.isEpisodeInProgress(history);
             const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
             const titleRow = row.querySelector('.episode-title-row');
 
@@ -2624,7 +2739,7 @@ class SeriesPage {
 
             // progress bar
             let bar = row.querySelector('.episode-progress');
-            if (pct > 0 && pct < 95) {
+            if (inProgress && pct > 0 && pct < 95) {
                 if (!bar) {
                     bar = document.createElement('div');
                     bar.className = 'episode-progress';
@@ -2662,8 +2777,8 @@ class SeriesPage {
 
         // primary action + "Play from start" reflect the recomputed featured episode
         if (this.primaryActionBtn && featured) {
-            const h = map.get(featuredId);
-            const isResuming = (h?.ratio || 0) > 0.02 && (h?.ratio || 0) < 0.95;
+            const h = this.getEpisodeHistory(map, featuredId);
+            const isResuming = this.isEpisodeInProgress(h);
             const minsLeft = (isResuming && h?.duration > 0) ? Math.max(0, Math.round((h.duration - h.progress) / 60)) : 0;
             const label = `${featured.label}${minsLeft ? ` · ${minsLeft} min left` : ''}`;
             this.primaryActionBtn.disabled = false;
@@ -2702,9 +2817,8 @@ class SeriesPage {
         const tsOf = (v) => (v && v.updated_at) ? (Date.parse(v.updated_at) || 0) : 0;
         let inProgress = null, inProgressTs = -1;
         for (const row of flatEpisodes) {
-            const st = watchedEpisodes.get(String(row.episode.id));
-            const ratio = st?.ratio || 0;
-            if (ratio > 0.02 && ratio < 0.95 && tsOf(st) > inProgressTs) {
+            const st = this.getEpisodeHistory(watchedEpisodes, row.episode.id);
+            if (this.isEpisodeInProgress(st) && tsOf(st) > inProgressTs) {
                 inProgressTs = tsOf(st); inProgress = row;
             }
         }
@@ -2717,13 +2831,13 @@ class SeriesPage {
 
         let lastCompletedIndex = -1;
         flatEpisodes.forEach((row, index) => {
-            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
-            if (ratio >= 0.95) lastCompletedIndex = Math.max(lastCompletedIndex, index);
+            const history = this.getEpisodeHistory(watchedEpisodes, row.episode.id);
+            if (this.isEpisodeWatched(history)) lastCompletedIndex = Math.max(lastCompletedIndex, index);
         });
 
         const next = flatEpisodes[lastCompletedIndex + 1] || flatEpisodes.find(row => {
-            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
-            return ratio < 0.95;
+            const history = this.getEpisodeHistory(watchedEpisodes, row.episode.id);
+            return !this.isEpisodeWatched(history);
         });
 
         if (next) {
@@ -2875,11 +2989,12 @@ class SeriesPage {
     // for the active season and lazily for the rest (identical markup in both paths).
     _episodeListInnerHtml(episodes, seasonNum, watchedEpisodes, featured, series) {
         return (Array.isArray(episodes) ? episodes : []).map(ep => {
-            const history = watchedEpisodes.get(String(ep.id));
+            const history = this.getEpisodeHistory(watchedEpisodes, ep.id, series);
             const ratio = history?.ratio || 0;
             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-            const watched = ratio >= 0.95;
-            const marker = (ratio > 0.02 && ratio < 0.95)
+            const watched = this.isEpisodeWatched(history);
+            const inProgress = this.isEpisodeInProgress(history);
+            const marker = inProgress
                 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
             const duration = this.formatEpisodeDuration(ep.duration);
@@ -2900,7 +3015,7 @@ class SeriesPage {
                                         ${isUpNext ? '<span class="episode-upnext-flag">Up next</span>' : ''}
                                     </div>
                                     ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
-                                    ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
+                                    ${inProgress && ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
                                 </div>
                                 <div class="episode-actions">
                                     <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
@@ -3211,9 +3326,10 @@ class SeriesPage {
             }
 
             // Resume context: how far into the featured episode we are, and minutes left.
-            const featuredHist = featured ? watchedEpisodes.get(String(featured.episode.id)) : null;
-            const featuredRatio = featuredHist?.ratio || 0;
-            const isResuming = featuredRatio > 0.02 && featuredRatio < 0.95;
+            const featuredHist = featured
+                ? this.getEpisodeHistory(watchedEpisodes, featured.episode.id, series)
+                : null;
+            const isResuming = this.isEpisodeInProgress(featuredHist);
             const minsLeft = (isResuming && featuredHist?.duration > 0)
                 ? Math.max(0, Math.round((featuredHist.duration - featuredHist.progress) / 60)) : 0;
             if (this.primaryActionBtn) {
@@ -3571,8 +3687,15 @@ class SeriesPage {
 
         const watch = this.app.pages.watch;
         if (!watch) return;
+        const episodeKey = this.episodeProgressKey(
+            sourceId,
+            this.currentSeries?.series_id ?? this.currentSeries?.seriesId,
+            episodeId
+        );
         const h = (this.historyItems || []).find(x =>
-            x.item_type === 'episode' && String(x.item_id) === String(episodeId));
+            x.item_type === 'episode'
+                && episodeKey
+                && this.historyEpisodeProgressKey(x) === episodeKey);
         // "Play from start" forces offset 0; otherwise resume where history left off.
         const resumeOffset = (!fromStart && h) ? this.getResumeOffset(h.progress, h.duration) : 0;
         const resumePlan = this.getGatewayResumePlan(resumeOffset);

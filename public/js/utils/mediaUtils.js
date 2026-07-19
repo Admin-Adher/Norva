@@ -782,6 +782,14 @@ const MediaUtils = (() => {
         return Array.isArray(tracks) ? tracks : null;
     }
 
+    function audioLanguageValidationStatus(item = {}) {
+        return String(
+            item.audioLanguageValidationStatus ||
+            item.audio_language_validation_status ||
+            ''
+        ).toLowerCase();
+    }
+
     // Distinct ISO audio languages from the title's REAL ffprobe probe (audio_tracks[].lang) — the
     // SAME per-stream signal the catalogue's audio filter matches on. Returns null when the title
     // was never probed (no audio_tracks), [] when probed but empty — so "absent" is only ever
@@ -789,6 +797,7 @@ const MediaUtils = (() => {
     // over-claims languages the user's own file may not have).
     function probedAudioLanguages(item = {}) {
         const scope = String(item.audioTracksScope || item.audio_tracks_scope || '').toLowerCase();
+        const validation = audioLanguageValidationStatus(item);
         const variantCount = Number(
             item.variantCount ||
             item.variant_count ||
@@ -799,6 +808,7 @@ const MediaUtils = (() => {
         // Treat them only as a soft aggregate; exact confirmation requires a
         // file-scoped map (legacy unscoped single-file titles remain safe).
         if ((scope && scope !== 'file') || (!scope && variantCount > 1)) return null;
+        if (validation !== 'verified' && validation !== 'verified_union') return null;
         const raw = item.audio_tracks || item.audioTracks;
         if (!Array.isArray(raw)) return null;
         const langs = [];
@@ -829,6 +839,9 @@ const MediaUtils = (() => {
 
         const tracks = tracksFromCodecProfile(item, kind);
         if (Array.isArray(tracks)) {
+            if (kind === 'audio' && !['verified', 'verified_union'].includes(audioLanguageValidationStatus(item))) {
+                return { requested: language, state: 'unknown', confidence: 'unknown', source: 'container_tag', tag: null };
+            }
             const trackLanguages = tracks.flatMap(track => languageArrayFromValue(track.language || track.lang || track.title || track.label));
             return trackLanguages.includes(language)
                 ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'probe', tag: null }
@@ -912,6 +925,8 @@ const MediaUtils = (() => {
     }
 
     function versionLanguageBadge(item, prefs = {}) {
+        const validation = audioLanguageValidationStatus(item);
+        if (validation === 'pending' || validation === 'not_analyzed') return 'Audio pending';
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
@@ -948,12 +963,14 @@ const MediaUtils = (() => {
         const prefixLang = /^\s*[a-z0-9+]{2,6}\s*[-–—]\s+/i.test(rawForPrefix)
             ? parseLeadingRegionTag(rawForPrefix)?.audioLang
             : null;
-        if (prefixLang) return languageDisplayFull(prefixLang);
+        if (prefixLang) return `Likely ${languageDisplayFull(prefixLang)}`;
         // Real detected languages outrank title-parsing (the crawl fills these).
-        const detected = audioLanguageBadge(
-            item.audioLanguages || item.audio_languages,
-            item.versionLanguages || item.version_languages
-        );
+        const detected = ['verified', 'verified_union'].includes(validation)
+            ? audioLanguageBadge(
+                item.audioLanguages || item.audio_languages,
+                item.versionLanguages || item.version_languages
+            )
+            : '';
         if (detected) return detected;
         const parsed = parseVersionInfo(item.name || item.title || item.raw_title || item.rawTitle);
         if (parsed.languageSummary) return parsed.languageSummary;
@@ -1570,6 +1587,30 @@ const MediaUtils = (() => {
         return langs;
     }
 
+    function versionFileLanguageState(item = {}, kind = 'audio') {
+        const isAudio = kind === 'audio';
+        const direct = isAudio
+            ? (item.audioLanguages || item.audio_languages)
+            : (item.subtitleLanguages || item.subtitle_languages);
+        const scope = String(isAudio
+            ? (item.audioLanguagesScope || item.audio_languages_scope || '')
+            : (item.subtitleLanguagesScope || item.subtitle_languages_scope || '')).toLowerCase();
+        const observed = isAudio
+            ? (item.audioLanguagesObserved === true || item.audio_languages_observed === true)
+            : (item.subtitleLanguagesObserved === true || item.subtitle_languages_observed === true);
+        if (scope !== 'file' || !Array.isArray(direct)) {
+            return { languages: [], known: false, source: 'none' };
+        }
+        if (isAudio && audioLanguageValidationStatus(item) !== 'verified') {
+            return { languages: [], known: false, pending: true, source: 'speech-validation' };
+        }
+        return {
+            languages: versionTrackLanguages(direct.map((lang) => ({ lang }))),
+            known: observed || direct.length > 0,
+            source: 'file-languages'
+        };
+    }
+
     function versionAudioHeadline(state) {
         if (!state.known) return '';
         const tracks = state.tracks || [];
@@ -1578,6 +1619,9 @@ const MediaUtils = (() => {
         if (!count) return 'Audio unavailable';
         if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : 'Audio';
         if (count <= 3 && langs.length === count) return langs.map(languageDisplay).join(' / ');
+        // Large multi-audio files can expose dozens of tracks. Describe the
+        // available language choice instead of implying the first track is primary.
+        if (langs.length > 3) return `${langs.length} audio languages`;
         const first = normalizeLanguagePreference(
             tracks[0] && (tracks[0].lang || tracks[0].language || tracks[0].iso_639_1 || tracks[0].iso639 || tracks[0].code || '')
         );
@@ -1588,13 +1632,28 @@ const MediaUtils = (() => {
         return `${count} audios`;
     }
 
-    function versionSubtitleLabel(item, state) {
+    function versionAudioLanguageHeadline(state) {
+        if (!state.known) return '';
+        const langs = state.languages || [];
+        if (!langs.length) return 'Audio unknown';
+        if (langs.length === 1) return languageDisplayFull(langs[0]);
+        if (langs.length <= 3) return langs.map(languageDisplay).join(' / ');
+        return `${langs.length} audio languages`;
+    }
+
+    function versionSubtitleLabel(item, state, languageState) {
         if (state.known && state.tracks.length) {
             const langs = versionTrackLanguages(state.tracks);
             if (state.tracks.length > 3) return `${state.tracks.length} ST`;
             if (langs.length === 1) return `ST ${languageDisplay(langs[0])}`;
             if (langs.length >= 2 && langs.length <= 3) return `ST ${langs.map(languageDisplay).join('/')}`;
             return `${state.tracks.length} ST`;
+        }
+        if (languageState.known && languageState.languages.length) {
+            const langs = languageState.languages;
+            if (langs.length > 3) return `${langs.length} ST`;
+            if (langs.length === 1) return `ST ${languageDisplay(langs[0])}`;
+            return `ST ${langs.map(languageDisplay).join('/')}`;
         }
         const tag = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
         if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
@@ -1619,16 +1678,37 @@ const MediaUtils = (() => {
         const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
         const quality = versionQuality(item);
         const audioState = versionTrackState(item, 'audio');
+        const audioValidation = audioLanguageValidationStatus(item);
         const subtitleState = versionTrackState(item, 'subtitle');
-        const observedAudio = versionAudioHeadline(audioState);
-        const subtitleLabel = versionSubtitleLabel(item, subtitleState);
+        const audioLanguageState = versionFileLanguageState(item, 'audio');
+        const subtitleLanguageState = versionFileLanguageState(item, 'subtitle');
+        // During cache convergence, a global ordered-track row can be known-empty
+        // while this tenant already owns a non-empty exact language observation.
+        // The empty row must not hide that stronger file-scoped evidence.
+        const observedAudio = audioState.known && audioState.tracks.length
+            ? versionAudioHeadline(audioState)
+            : audioLanguageState.known && audioLanguageState.languages.length
+                ? versionAudioLanguageHeadline(audioLanguageState)
+                : audioState.known
+                    ? versionAudioHeadline(audioState)
+                    : versionAudioLanguageHeadline(audioLanguageState);
+        const observedAudioSource = audioState.known && audioState.tracks.length
+            ? audioState.source
+            : audioLanguageState.known && audioLanguageState.languages.length
+                ? audioLanguageState.source
+                : audioState.known
+                    ? audioState.source
+                    : audioLanguageState.source;
+        const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
         const prefix = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
         const likelyAudio = prefix && prefix.audioLang ? languageDisplayFull(prefix.audioLang) : '';
 
         // A version card represents one provider FILE. Lead with that file's
         // observed soundtrack. Prefix/category/platform text is only a clearly
         // marked fallback; "Netflix" and "Arabic subtitles" are not audio.
-        const headline = observedAudio || (likelyAudio ? `Likely ${likelyAudio}` : 'Audio unknown');
+        const headline = audioValidation === 'pending' || audioValidation === 'not_analyzed'
+            ? 'Audio pending'
+            : observedAudio || (likelyAudio ? `Likely ${likelyAudio}` : 'Audio unknown');
         const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== likelyAudio
             ? marketLabel
             : '';
@@ -1642,7 +1722,15 @@ const MediaUtils = (() => {
         // sibling, disambiguate with the raw provider category.
         const sigOf = (it) => {
             const m = versionMarket(it);
-            const a = versionAudioHeadline(versionTrackState(it, 'audio'));
+            const trackState = versionTrackState(it, 'audio');
+            const languageState = versionFileLanguageState(it, 'audio');
+            const a = trackState.known && trackState.tracks.length
+                ? versionAudioHeadline(trackState)
+                : languageState.known && languageState.languages.length
+                    ? versionAudioLanguageHeadline(languageState)
+                    : trackState.known
+                        ? versionAudioHeadline(trackState)
+                        : versionAudioLanguageHeadline(languageState);
             return [
                 a,
                 m ? m.label : '',
@@ -1658,7 +1746,13 @@ const MediaUtils = (() => {
             if (cat && cat !== headline) meta = meta ? `${meta} · ${cat}` : cat;
         }
 
-        return { headline, meta, badge, tier, audioSource: audioState.source };
+        return {
+            headline,
+            meta,
+            badge,
+            tier,
+            audioSource: observedAudioSource
+        };
     }
 
     return {
@@ -1669,6 +1763,7 @@ const MediaUtils = (() => {
         resolveContentLanguage,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
+        audioLanguageValidationStatus,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         versionDescriptor,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,

@@ -805,6 +805,23 @@ const CloudAdapter = (() => {
         const subtitleTracks = raw.subtitle_tracks_scope === 'file' || raw.subtitleTracksScope === 'file'
             ? (raw.subtitle_tracks || raw.subtitleTracks || [])
             : null;
+        const audioLanguages = raw.audio_languages_scope === 'file' || raw.audioLanguagesScope === 'file'
+            ? (raw.audio_languages || raw.audioLanguages || [])
+            : null;
+        const audioLanguageValidationStatus = String(
+            raw.audio_language_validation_status ||
+            raw.audioLanguageValidationStatus ||
+            ''
+        ).toLowerCase() || (audioLanguages !== null ? 'pending' : 'not_analyzed');
+        const audioLanguageVerifiedAt = raw.audio_language_verified_at ||
+            raw.audioLanguageVerifiedAt ||
+            null;
+        const audioLanguageVerification = raw.audio_language_verification ||
+            raw.audioLanguageVerification ||
+            {};
+        const subtitleLanguages = raw.subtitle_languages_scope === 'file' || raw.subtitleLanguagesScope === 'file'
+            ? (raw.subtitle_languages || raw.subtitleLanguages || [])
+            : null;
         const providerTmdbId = context.providerTmdbId || null;
 
         return {
@@ -847,12 +864,34 @@ const CloudAdapter = (() => {
             audioTracksScope: audioTracks !== null ? 'file' : null,
             audio_probed_at: raw.audio_probed_at || raw.audioProbedAt || null,
             audioProbedAt: raw.audioProbedAt || raw.audio_probed_at || null,
+            audio_languages: audioLanguages,
+            audioLanguages,
+            audio_languages_scope: audioLanguages !== null ? 'file' : null,
+            audioLanguagesScope: audioLanguages !== null ? 'file' : null,
+            audio_languages_observed: audioLanguages !== null &&
+                (raw.audio_languages_observed === true || raw.audioLanguagesObserved === true),
+            audioLanguagesObserved: audioLanguages !== null &&
+                (raw.audioLanguagesObserved === true || raw.audio_languages_observed === true),
+            audio_language_validation_status: audioLanguageValidationStatus,
+            audioLanguageValidationStatus,
+            audio_language_verified_at: audioLanguageVerifiedAt,
+            audioLanguageVerifiedAt,
+            audio_language_verification: audioLanguageVerification,
+            audioLanguageVerification,
             subtitle_tracks: subtitleTracks,
             subtitleTracks,
             subtitle_tracks_scope: subtitleTracks !== null ? 'file' : null,
             subtitleTracksScope: subtitleTracks !== null ? 'file' : null,
             subtitle_probed_at: raw.subtitle_probed_at || raw.subtitleProbedAt || null,
             subtitleProbedAt: raw.subtitleProbedAt || raw.subtitle_probed_at || null,
+            subtitle_languages: subtitleLanguages,
+            subtitleLanguages,
+            subtitle_languages_scope: subtitleLanguages !== null ? 'file' : null,
+            subtitleLanguagesScope: subtitleLanguages !== null ? 'file' : null,
+            subtitle_languages_observed: subtitleLanguages !== null &&
+                (raw.subtitle_languages_observed === true || raw.subtitleLanguagesObserved === true),
+            subtitleLanguagesObserved: subtitleLanguages !== null &&
+                (raw.subtitleLanguagesObserved === true || raw.subtitle_languages_observed === true),
             provider_tmdb_id: providerTmdbId,
             providerTmdbId,
             tmdb_id: providerTmdbId,

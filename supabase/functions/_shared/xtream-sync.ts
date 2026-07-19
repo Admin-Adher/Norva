@@ -108,11 +108,34 @@ export async function recordProviderIdentity(
   try {
     const { data } = await db.from("cloud_sources").select("display_name").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const name = stringOr((data as JsonRecord | null)?.display_name, providerKey);
-    await db.rpc("norva_resolve_provider_identity", {
+    const { data: identityId, error: identityError } = await db.rpc("norva_resolve_provider_identity", {
       p_source_id: sourceId,
       p_provider_key: providerKey,
       p_display_name: name,
     });
+    if (identityError) {
+      console.warn("[provider-identity] resolver failed", sourceId, identityError.code ?? identityError.message);
+      return;
+    }
+    // Persist a server-verified source -> identity link for cross-tenant
+    // scheduling/leases. cloud_sources.config_hint is owner-editable and is
+    // therefore not safe as a global provider lock key.
+    if (typeof identityId === "string" && /^[0-9a-f-]{36}$/i.test(identityId)) {
+      const { error: linkError } = await db.from("catalog_source_provider_identities").upsert({
+        source_id: sourceId,
+        user_id: userId,
+        identity_id: identityId,
+        provider_key: providerKey,
+        verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "source_id" });
+      if (linkError) {
+        // Best-effort during a staggered edge/schema rollout, but observable:
+        // an unmapped source remains safe (source-scoped lease) while losing
+        // cross-tenant provider serialization until the next successful sync.
+        console.warn("[provider-identity] scheduler link failed", sourceId, linkError.code ?? linkError.message);
+      }
+    }
   } catch (_) { /* best-effort */ }
 }
 

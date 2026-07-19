@@ -16,15 +16,21 @@ function extract(source, anchor, endAnchor) {
 }
 
 function gatewayStrip() {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'services', 'media-gateway', 'src', 'index.js'), 'utf8');
-    const code = extract(src, 'const SDH_BARE_LINE', '\n}\n') + '\n}\nreturn stripSdhAnnotations;';
+    const src = fs.readFileSync(path.join(__dirname, '..', 'services', 'media-gateway', 'src', 'index.js'), 'utf8')
+        .replace(/\r\n/g, '\n');
+    const code = extract(src, 'const SDH_BARE_LINE', '\nfunction collapseRepeats')
+        + '\nreturn stripSdhAnnotations;';
     return new Function(code)();
 }
 
 function playerStrip() {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'pages', 'WatchPage.js'), 'utf8');
-    const body = extract(src, '_stripSdhAnnotations(text) {', '\n    }\n');
-    const code = 'return function stripSdh(text) {' + body.slice(body.indexOf('{') + 1) + '\n};';
+    const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'pages', 'WatchPage.js'), 'utf8')
+        .replace(/\r\n/g, '\n');
+    const method = extract(src, '_stripSdhAnnotations(text) {', '\n\n    attachGeneratedSubtitleTrack');
+    const open = method.indexOf('{');
+    const close = method.lastIndexOf('\n    }');
+    assert.ok(open >= 0 && close > open, 'player SDH method body not found');
+    const code = 'return function stripSdh(text) {' + method.slice(open + 1, close) + '\n};';
     return new Function(code)();
 }
 

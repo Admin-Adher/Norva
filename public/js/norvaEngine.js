@@ -18,10 +18,16 @@
 (function () {
   'use strict';
 
-  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=40';
+  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=42';
   const LIBAV_BASE = '/webengine/vendor/libav';
-  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=40';
-  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=40';
+  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=42';
+  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=42';
+  const STREAM_TOP_LEVEL_BOXES = new Set([
+    'ftyp', 'free', 'skip', 'wide', 'mdat', 'moov', 'moof', 'mfra', 'mfro',
+    'sidx', 'ssix', 'styp', 'prft', 'emsg', 'pdin', 'uuid',
+  ]);
+  const MAX_STREAM_MDAT_BYTES = 256 * 1024 * 1024;
+  const MAX_STREAM_METADATA_BOX_BYTES = 64 * 1024 * 1024;
 
   // Audio codecs the browser decodes natively inside fMP4 → copy (no transcode).
   const AUDIO_COPY = new Set(['aac', 'opus', 'flac']);
@@ -259,7 +265,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 40;
+  const ENGINE_VERSION = 42;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -367,6 +373,7 @@
         trailerBytesDropped: 0,
         writeDiscontinuities: 0, firstWriteDiscontinuity: null,
         muxPacketWriteErrors: 0, firstMuxPacketWriteError: null,
+        muxStructureErrors: 0, firstMuxStructureError: null,
         muxRejectedBytes: 0,
         staleMuxBytesDropped: 0, firstStaleMuxDrop: null,
       };
@@ -1230,7 +1237,7 @@
       // box parsing is useless — this stitches them). Reveals the real structure
       // Chromium sees: ftyp moov moof mdat moof mdat … and flags any anomaly (a 2nd
       // moov/ftyp = spurious re-init; a box whose size doesn't add up).
-      this._boxCarry = null; d.boxRemain = 0; d.boxSeq = []; d.boxBad = null;
+      this._boxCarry = null; d.boxRemain = 0; d.boxOpenEnded = false; d.boxSeq = []; d.boxBad = null;
       d.moofCount = 0; d.moovCount = 0; d.ftypCount = 0; d.boxTotal = 0;
       // Write-position trace. A streaming muxer must write strictly forward; if movenc
       // seeks BACK (pos < the running high-water mark) to patch a box size, appending
@@ -1336,6 +1343,12 @@
           }
           this._diagTrackBoxes(chunk);
         } catch (_) {}
+        // libav can report a successful packet write while movenc has already
+        // emitted a structurally impossible top-level MP4 boundary. Chromium
+        // only rejects that byte stream several seconds later, after valid
+        // media has already played. Stop at the first impossible box and hand
+        // recovery an exact source timestamp before any corrupt bytes reach MSE.
+        if (d.boxBad && this._rejectInvalidMuxStructure(chunk)) return;
         this.queue.push(chunk); this._drain();
       };
       this._commitMuxWrite = commitMuxWrite;
@@ -1485,6 +1498,36 @@
           }
         });
       }
+    }
+
+    _rejectInvalidMuxStructure(chunk) {
+      const d = this._diag;
+      if (!d?.boxBad || this._fatalSignaled) return false;
+      const rejectedBytes = chunk?.length || 0;
+      const detail = String(d.boxBad).slice(0, 300);
+      const error = new Error(`MUX_STRUCTURE_INVALID:${detail}`);
+
+      d.muxStructureErrors = (d.muxStructureErrors || 0) + 1;
+      d.muxRejectedBytes = (d.muxRejectedBytes || 0) + rejectedBytes;
+      if (!d.firstMuxStructureError) {
+        d.firstMuxStructureError = {
+          detail,
+          rejectedBytes,
+          boxTotal: d.boxTotal || 0,
+          boxSeq: Array.isArray(d.boxSeq) ? d.boxSeq.slice(-8) : [],
+        };
+      }
+
+      this._stopRequested = true;
+      if (this._gate) { this._gate(); this._gate = null; }
+      this._fatalSignaled = true;
+      try { this.report({ stage: 'mux:structure', message: error.message }); } catch (_) {}
+      queueMicrotask(() => {
+        if (!this.destroyed) {
+          try { this.onFatal(error); } catch (_) {}
+        }
+      });
+      return true;
     }
 
     async _seekDemuxer(t) {
@@ -1781,10 +1824,17 @@
     // Stitch the muxer's AVIO-block writes back into a top-level box sequence. State
     // lives on this._boxCarry (a partial box header straddling two blocks) and
     // this._diag.boxRemain (bytes left in the box currently being skipped). Diagnostics
-    // only; swallows everything.
+    // The parser itself never throws. Its first impossible boundary is also used
+    // by commitMuxWrite as a hard guard before the offending chunk reaches MSE.
     _diagTrackBoxes(chunk) {
       const d = this._diag;
-      d.boxTotal += chunk.length;
+      d.boxTotal = (d.boxTotal || 0) + chunk.length;
+      if (!Array.isArray(d.boxSeq)) d.boxSeq = [];
+      if (!Number.isFinite(d.boxRemain)) d.boxRemain = 0;
+      if (d.boxBad === undefined) d.boxBad = null;
+      // ISO-BMFF size=0 means that this box owns every remaining byte through
+      // EOF. Later AVIO writes are body bytes, not fresh top-level headers.
+      if (d.boxOpenEnded) return;
       let buf = chunk;
       if (this._boxCarry && this._boxCarry.length) {
         buf = new Uint8Array(this._boxCarry.length + chunk.length);
@@ -1809,7 +1859,7 @@
           size = (((buf[p + 8] << 24) | (buf[p + 9] << 16) | (buf[p + 10] << 8) | buf[p + 11]) >>> 0) * 4294967296
                + (((buf[p + 12] << 24) | (buf[p + 13] << 16) | (buf[p + 14] << 8) | buf[p + 15]) >>> 0);
           hdr = 16;
-        } else if (size === 0) { size = (len - p); }
+        }
         // Raw hex of the first few box headers — the ground truth of what bytes are
         // actually at each boundary (settles any size/type ambiguity).
         if (!d.boxHex) d.boxHex = [];
@@ -1818,7 +1868,10 @@
           for (let i = p; i < Math.min(p + 16, len); i++) hx += (buf[i] < 16 ? '0' : '') + buf[i].toString(16);
           d.boxHex.push(hx);
         }
-        if (!/^[\x20-\x7e]{4}$/.test(type) || size < hdr) {
+        const maxSize = type === 'mdat' ? MAX_STREAM_MDAT_BYTES : MAX_STREAM_METADATA_BOX_BYTES;
+        if (!STREAM_TOP_LEVEL_BOXES.has(type)
+            || !Number.isSafeInteger(size)
+            || (size !== 0 && (size < hdr || size > maxSize))) {
           if (!d.boxBad) d.boxBad = 'bad box after ' + d.boxSeq.length + ' boxes (~' + Math.round(d.boxTotal / 1024) + 'KB) type="' + type + '" size=' + size;
           return;                              // desynced — stop, the bad-box marker is the finding
         }
@@ -1826,8 +1879,13 @@
         else if (type === 'moov') d.moovCount++;
         else if (type === 'ftyp') d.ftypCount++;
         // Keep a compact sequence: collapse runs of moof/mdat so it stays readable.
-        if (d.boxSeq.length < 60) d.boxSeq.push(type + '(' + size + ')');
+        if (d.boxSeq.length < 60) d.boxSeq.push(type + '(' + (size === 0 ? 'EOF' : size) + ')');
         else if (d.boxSeq[d.boxSeq.length - 1] !== '…') d.boxSeq.push('…');
+        if (size === 0) {
+          d.boxOpenEnded = true;
+          this._boxCarry = null;
+          return;
+        }
         p += hdr; d.boxRemain = size - hdr;
       }
     }
@@ -1870,6 +1928,8 @@
         firstWriteDiscontinuity: d.firstWriteDiscontinuity,
         muxPacketWriteErrors: d.muxPacketWriteErrors || 0,
         firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
+        muxStructureErrors: d.muxStructureErrors || 0,
+        firstMuxStructureError: d.firstMuxStructureError || null,
         muxRejectedBytes: d.muxRejectedBytes || 0,
         staleMuxBytesDropped: d.staleMuxBytesDropped || 0,
         firstStaleMuxDrop: d.firstStaleMuxDrop || null,

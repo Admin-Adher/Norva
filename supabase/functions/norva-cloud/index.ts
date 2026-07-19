@@ -2669,14 +2669,13 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
     if (data) return { item: data };
   }
 
-  // 2) Fallback: the same title under ANY source (most-recent). This keeps
+  // 2) Renewal fallback: only source-less legacy rows are eligible. Xtream item
   //    cross-device resume working when the physical source id changes — a user
-  //    renewing/re-adding their line gets a fresh source uuid, and the reaper's
-  //    FK (on delete set null) orphans the old rows to source_id=null. Without
-  //    this fallback those rows become invisible to the per-title resume read
-  //    and the position is silently lost. Scoped to the same profile + exact
-  //    item, so it never leaks across accounts.
-  const { data, error } = await base()
+  //    ids are provider-local, so another source with the same id can be a
+  //    completely unrelated title.
+  let fallback = base();
+  if (sourceId) fallback = fallback.is("source_id", null);
+  const { data, error } = await fallback
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -2686,27 +2685,36 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
 
 async function listHistory(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
-  const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
+  const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 5_000);
   const itemType = stringOrNull(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"));
   const sources = await listHistorySources(userId, db);
   if (!sources.length) return { history: [] };
   const readySourceIds = sources.map((s) => s.id);
 
-  let query = db
-    .from("cloud_watch_history")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("profile_id", profileId)
-    .in("source_id", readySourceIds);
+  // PostgREST commonly caps one response at 1,000 rows. Walk bounded 500-row
+  // windows inside the edge function so old cards keep their true watch state.
+  const data: JsonRecord[] = [];
+  const pageSize = 500;
+  for (let offset = 0; data.length < limit; offset += pageSize) {
+    const take = Math.min(pageSize, limit - data.length);
+    let query = db
+      .from("cloud_watch_history")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .in("source_id", readySourceIds);
   // Cross-device "recent live channels" reuse this table with item_type='live'.
   // A default history read (Continue Watching) must NOT surface those as resumable
   // titles — so exclude 'live' unless it is explicitly requested (?itemType=live).
-  if (itemType) query = query.eq("item_type", itemType);
-  else query = query.neq("item_type", "live");
-  const { data, error } = await query
-    .order("updated_at", { ascending: false })
-    .limit(limit);
-  if (error) throwDb(error, "Unable to list history");
+    if (itemType) query = query.eq("item_type", itemType);
+    else query = query.neq("item_type", "live");
+    const { data: page, error } = await query
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + take - 1);
+    if (error) throwDb(error, "Unable to list history");
+    data.push(...((page ?? []) as JsonRecord[]));
+    if ((page?.length ?? 0) < take) break;
+  }
 
   // Orphan handling (Layer 1): hide resume cards for movies the provider has since dropped
   // from its catalogue — the "Continue Watching shows a media that 404s on click" problem.
@@ -2718,7 +2726,7 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
   const stableSourceIds = new Set(
     sources.filter((s) => s.status === "ready" || s.status === "completed").map((s) => s.id),
   );
-  const history = await pruneUnavailableHistory(data ?? [], userId, stableSourceIds, db);
+  const history = await pruneUnavailableHistory(data, userId, stableSourceIds, db);
   return { history };
 }
 
@@ -2801,47 +2809,27 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   if (sourceId) await assertOwnedSource(sourceId, userId, db);
   const profileId = await resolveProfileId(req, userId, db);
 
-  // A progress-only update (e.g. the native player's onProgress, which only
-  // knows source/item/position) must NOT wipe the rich metadata an earlier
-  // save stored. Load the existing row and merge: incoming fields win, but
-  // title/poster/name/duration are preserved when the update omits them —
-  // otherwise Continue Watching shows a placeholder ("Norva" + the logo)
-  // after a cross-device resume.
-  let existingQuery = db
-    .from("cloud_watch_history")
-    .select("item_name,parent_item_id,duration_seconds,data,progress_seconds,completed,watched_at")
-    .eq("profile_id", profileId)
-    .eq("item_type", itemType)
-    .eq("item_id", itemId);
-  existingQuery = sourceId
-    ? existingQuery.eq("source_id", sourceId)
-    : existingQuery.is("source_id", null);
-  const { data: existing } = await existingQuery.maybeSingle();
-
-  const mergedData = { ...recordOrEmpty(existing?.data), ...recordOrEmpty(body.data) };
   const incomingDuration = boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000);
   const incomingProgress = boundedInt(body.progressSeconds ?? body.progress_seconds ?? body.progress, 0, 0, 10_000_000);
 
-  // Temporal guard (sync audit 2026-07-17 P2): with two devices heartbeating the same title,
-  // arrival order at Postgres used to decide — a delayed packet could REGRESS a fresher
-  // position. A tick that stamps when it was CAPTURED (watchedAt) only overwrites progress if
-  // it is newer than what's stored; force saves (pause/seek/exit) always pass, and legacy
-  // clients that send no watchedAt keep the old last-write-wins.
+  // Every client stamps when the position was CAPTURED. The database RPC compares
+  // that timestamp atomically inside INSERT .. ON CONFLICT, so two devices racing
+  // cannot let the later-arriving but older packet regress progress. A deliberate
+  // backward seek is still accepted because its capture time is newer.
   const incomingWatchedAt = stringOrNull(body.watchedAt ?? body.watched_at);
-  const incomingWatchedAtMs = incomingWatchedAt ? (Date.parse(incomingWatchedAt) || 0) : 0;
-  const existingWatchedAtMs = Date.parse(stringOr(existing?.watched_at, "")) || 0;
-  const stale = body.force !== true
-    && incomingWatchedAtMs > 0
-    && existingWatchedAtMs > 0
-    && incomingWatchedAtMs < existingWatchedAtMs;
+  const receivedAtMs = Date.now();
+  const incomingWatchedAtMs = incomingWatchedAt ? Date.parse(incomingWatchedAt) : 0;
+  // Never let a device with a fast/malicious clock freeze every other device
+  // behind a far-future value. Past capture times remain meaningful; any future
+  // value is clamped to this server's receipt time.
+  const capturedAt = new Date(
+    incomingWatchedAtMs > 0 ? Math.min(incomingWatchedAtMs, receivedAtMs) : receivedAtMs,
+  ).toISOString();
 
   // `completed` is the manual "mark watched" flag: preserved when the save doesn't mention it
-  // (heartbeats used to reset it to false on every tick — audit P3), except that a REAL
-  // re-watch (≥60s of progress) honestly clears it, so cross-device resume works again while a
-  // 30-second accidental open still can't undo a deliberate mark.
-  const completed = body.completed !== undefined
-    ? Boolean(body.completed)
-    : (Boolean(existing?.completed) && incomingProgress < 60);
+  // (heartbeats used to reset it to false on every tick). The RPC applies the
+  // ≥60s real-rewatch rule atomically against the winning row.
+  const completed = body.completed !== undefined ? Boolean(body.completed) : null;
 
   const row = {
     user_id: userId,
@@ -2849,27 +2837,30 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
     source_id: sourceId,
     item_type: itemType,
     item_id: itemId,
-    parent_item_id: stringOrNull(body.parentItemId ?? body.parent_item_id)
-      ?? stringOrNull(existing?.parent_item_id),
-    item_name: stringOrNull(body.itemName ?? body.item_name ?? body.name)
-      ?? stringOrNull(existing?.item_name),
-    progress_seconds: stale ? boundedInt(existing?.progress_seconds, 0, 0, 10_000_000) : incomingProgress,
-    // Keep a known duration if this update doesn't carry one (e.g. native exit
-    // before the player resolved the duration).
-    duration_seconds: incomingDuration > 0
-      ? incomingDuration
-      : boundedInt(existing?.duration_seconds, 0, 0, 10_000_000),
-    completed: stale ? Boolean(existing?.completed ?? false) : completed,
-    data: mergedData,
-    watched_at: stale
-      ? stringOr(existing?.watched_at, new Date().toISOString())
-      : (incomingWatchedAt ?? new Date().toISOString()),
+    parent_item_id: stringOrNull(body.parentItemId ?? body.parent_item_id),
+    item_name: stringOrNull(body.itemName ?? body.item_name ?? body.name),
+    progress_seconds: incomingProgress,
+    // Zero means "not supplied"; the RPC keeps the existing known duration.
+    duration_seconds: incomingDuration,
+    completed,
+    data: recordOrEmpty(body.data),
+    watched_at: capturedAt,
   };
 
-  const { data, error } = await db
-    .from("cloud_watch_history")
-    .upsert(row, { onConflict: "profile_id,source_id,item_type,item_id" })
-    .select("*")
+  const { data, error } = await db.rpc("upsert_cloud_watch_history_causal", {
+    p_user_id: row.user_id,
+    p_profile_id: row.profile_id,
+    p_source_id: row.source_id,
+    p_item_type: row.item_type,
+    p_item_id: row.item_id,
+    p_parent_item_id: row.parent_item_id,
+    p_item_name: row.item_name,
+    p_progress_seconds: row.progress_seconds,
+    p_duration_seconds: row.duration_seconds,
+    p_completed: row.completed,
+    p_data: row.data,
+    p_watched_at: row.watched_at,
+  })
     .single();
   if (error) throwDb(error, "Unable to save history");
 
@@ -3310,15 +3301,40 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       startupMs: gateway.startupMs,
     });
   }
+  const gatewaySessionResponse = gateway.session && typeof gateway.session === "object"
+    ? {
+      ...gateway.session,
+      audioStreamIndex: gateway.audioStreamIndex ?? null,
+      audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
+      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
+      actualStartOffset: gateway.actualStartOffset ?? 0,
+      actual_start_offset: gateway.actualStartOffset ?? 0,
+      localSeekTarget: gateway.localSeekTarget ?? 0,
+      local_seek_target: gateway.localSeekTarget ?? 0,
+      sourceTimestamps: gateway.sourceTimestamps === true,
+      source_timestamps: gateway.sourceTimestamps === true,
+    }
+    : gateway.session;
   return {
     session,
     playback: {
       mode,
       status: gateway.status,
       url: gateway.hlsUrl,
-      gatewaySession: gateway.session,
+      gatewaySession: gatewaySessionResponse,
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
+      audioStreamIndex: gateway.audioStreamIndex ?? null,
+      audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
+      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
+      actualStartOffset: gateway.actualStartOffset ?? 0,
+      actual_start_offset: gateway.actualStartOffset ?? 0,
+      localSeekTarget: gateway.localSeekTarget ?? 0,
+      local_seek_target: gateway.localSeekTarget ?? 0,
+      sourceTimestamps: gateway.sourceTimestamps === true,
+      source_timestamps: gateway.sourceTimestamps === true,
       codecProfile: gateway.codecProfile ?? null,
     },
   };
@@ -3547,7 +3563,21 @@ async function createGatewaySession(
     .select("*")
     .single();
     if (error) throwDb(error, "Unable to create pending gateway session");
-    return { status: "pending", session: data, hlsUrl: null, startupMs: null };
+    return {
+      status: "pending",
+      session: data,
+      hlsUrl: null,
+      startupMs: null,
+      audioStreamIndex: boundedNullableInt(
+        playbackHint.audioStreamIndex ?? playbackHint.audio_stream_index,
+        0,
+        1024,
+      ),
+      requestedSeekOffset: 0,
+      actualStartOffset: 0,
+      localSeekTarget: 0,
+      sourceTimestamps: false,
+    };
   }
 
   const seekOffset = boundedNullableNumber(
@@ -3582,6 +3612,39 @@ async function createGatewaySession(
     throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   }
   const codecProfile = recordOrEmpty(gatewayBody.codecProfile ?? gatewayBody.codec_profile);
+  const audioStreamIndex = boundedNullableInt(
+    gatewayBody.audioStreamIndex ??
+      gatewayBody.audio_stream_index ??
+      playbackHint.audioStreamIndex ??
+      playbackHint.audio_stream_index,
+    0,
+    1024,
+  );
+  const requestedSeekOffset = boundedNullableNumber(
+    gatewayBody.requestedSeekOffset ??
+      gatewayBody.requested_seek_offset ??
+      gatewayBody.seekOffset ??
+      gatewayBody.seek_offset ??
+      seekOffset,
+    0,
+    24 * 60 * 60,
+  ) ?? 0;
+  const actualStartOffset = boundedNullableNumber(
+    gatewayBody.actualStartOffset ??
+      gatewayBody.actual_start_offset ??
+      requestedSeekOffset,
+    0,
+    24 * 60 * 60,
+  ) ?? requestedSeekOffset;
+  const localSeekTarget = boundedNullableNumber(
+    gatewayBody.localSeekTarget ??
+      gatewayBody.local_seek_target ??
+      Math.max(0, requestedSeekOffset - actualStartOffset),
+    0,
+    24 * 60 * 60,
+  ) ?? Math.max(0, requestedSeekOffset - actualStartOffset);
+  const sourceTimestamps = gatewayBody.sourceTimestamps === true
+    || gatewayBody.source_timestamps === true;
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
 
   const { data, error } = await db
@@ -3598,7 +3661,18 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, codecProfile };
+  return {
+    status: data.status,
+    session: data,
+    hlsUrl: data.hls_url,
+    startupMs,
+    codecProfile,
+    audioStreamIndex,
+    requestedSeekOffset,
+    actualStartOffset,
+    localSeekTarget,
+    sourceTimestamps,
+  };
 }
 
 async function recordPlaybackStartupObservation(

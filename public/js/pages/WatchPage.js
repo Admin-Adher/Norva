@@ -104,8 +104,16 @@ class WatchPage {
         this.baseStreamUrl = null;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
+        this.audioLanguageValidationStatus = String(
+            options.audioLanguageValidationStatus ||
+            options.audio_language_validation_status ||
+            this.content?.audioLanguageValidationStatus ||
+            this.content?.audio_language_validation_status ||
+            'not_analyzed'
+        ).toLowerCase();
         this.probeDuration = null;
         this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
         this.audioTracks = [];
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
@@ -328,6 +336,10 @@ class WatchPage {
         this.video?.addEventListener('seeked', () => {
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
+            Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            if (this._subEngine) {
+                Promise.resolve(this.subtitleWindowTick(this._subEngine, true)).catch(() => {});
+            }
         });
         this.video?.addEventListener('loadeddata', () => {
             this.applyPendingLocalSeek();
@@ -426,8 +438,8 @@ class WatchPage {
 
         this.updateDurationState();
 
-        window.addEventListener('pagehide', () => this.persistPlaybackStateForExit());
-        window.addEventListener('beforeunload', () => this.persistPlaybackStateForExit());
+        window.addEventListener('pagehide', () => this.persistPlaybackStateAndSessionsForExit());
+        window.addEventListener('beforeunload', () => this.persistPlaybackStateAndSessionsForExit());
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') {
                 this.persistPlaybackStateForExit();
@@ -452,7 +464,8 @@ class WatchPage {
             'type', 'id', 'title', 'subtitle', 'poster', 'description', 'year', 'rating',
             'sourceId', 'cloudSourceId', 'seriesId', 'categoryId', 'currentSeason',
             'currentEpisode', 'containerExtension', 'durationHint', 'titleId',
-            'variantCount', '_variantCount', 'providerTmdbId'
+            'variantCount', '_variantCount', 'providerTmdbId',
+            'audioLanguageValidationStatus', 'audioLanguageVerifiedAt'
         ].forEach(key => {
             if (content[key] !== undefined && content[key] !== null) copy[key] = content[key];
         });
@@ -474,6 +487,14 @@ class WatchPage {
                         ? (version.audioTracksScope || version.audio_tracks_scope || 'file')
                         : null,
                     audioLanguages: Array.isArray(audioLanguages) ? audioLanguages : null,
+                    audioLanguageValidationStatus: String(
+                        version.audioLanguageValidationStatus ||
+                        version.audio_language_validation_status ||
+                        'not_analyzed'
+                    ).toLowerCase(),
+                    audioLanguageVerifiedAt: version.audioLanguageVerifiedAt ||
+                        version.audio_language_verified_at ||
+                        null,
                     subtitleTracks: Array.isArray(subtitleTracks) ? subtitleTracks : null,
                     subtitleTracksScope: Array.isArray(subtitleTracks)
                         ? (version.subtitleTracksScope || version.subtitle_tracks_scope || 'file')
@@ -848,6 +869,11 @@ class WatchPage {
     }
 
     getResumeSnapshotPosition() {
+        // During a seek/restart the native clock can still expose the old
+        // playhead. Persist the user's explicit target across devices.
+        if (Number.isFinite(this._pendingSeekTarget)) {
+            return Math.max(0, Math.floor(this._pendingSeekTarget));
+        }
         this.trackPlaybackPosition();
         const position = Math.max(
             this._lastKnownPlaybackPosition || 0,
@@ -883,12 +909,20 @@ class WatchPage {
         this.saveProgress({ force: true });
     }
 
+    persistPlaybackStateAndSessionsForExit() {
+        this.persistPlaybackStateForExit();
+        // A full navigation/tab close aborts media bytes in the browser, but the
+        // cloud coordinator otherwise keeps the logical provider slot until TTL.
+        // keepalive lets the tiny expiry POST outlive page teardown.
+        this.stopCloudPlaybackSessions({ keepalive: true }).catch(() => {});
+    }
+
     getResumeRestorePosition(position, duration = 0) {
         const rawPosition = Math.max(0, Math.floor(Number(position) || 0));
         const rawDuration = Math.max(0, Math.floor(Number(duration) || 0));
         if (rawPosition < 12) return 0;
         if (rawDuration > 0 && rawPosition >= rawDuration * 0.95) return 0;
-        return Math.max(0, rawPosition - 3);
+        return rawPosition;
     }
 
     saveResumeSnapshotThrottled(force = false) {
@@ -1270,6 +1304,51 @@ class WatchPage {
             || session.id
             || nestedSession.id
             || null;
+        const audioStreamIndex = Number(
+            extra.audioStreamIndex ??
+            extra.audio_stream_index ??
+            root.audioStreamIndex ??
+            root.audio_stream_index ??
+            nestedPlayback.audioStreamIndex ??
+            nestedPlayback.audio_stream_index ??
+            gatewaySession?.audioStreamIndex ??
+            gatewaySession?.audio_stream_index
+        );
+        const requestedSeekOffset = Number(
+            extra.requestedSeekOffset ??
+            extra.requested_seek_offset ??
+            root.requestedSeekOffset ??
+            root.requested_seek_offset ??
+            nestedPlayback.requestedSeekOffset ??
+            nestedPlayback.requested_seek_offset ??
+            seekOffset
+        );
+        const actualStartOffset = Number(
+            extra.actualStartOffset ??
+            extra.actual_start_offset ??
+            root.actualStartOffset ??
+            root.actual_start_offset ??
+            nestedPlayback.actualStartOffset ??
+            nestedPlayback.actual_start_offset ??
+            seekOffset
+        );
+        const localSeekTarget = Number(
+            extra.localSeekTarget ??
+            extra.local_seek_target ??
+            root.localSeekTarget ??
+            root.local_seek_target ??
+            nestedPlayback.localSeekTarget ??
+            nestedPlayback.local_seek_target
+        );
+        const sourceTimestamps = Boolean(
+            extra.sourceTimestamps ??
+            extra.source_timestamps ??
+            root.sourceTimestamps ??
+            root.source_timestamps ??
+            nestedPlayback.sourceTimestamps ??
+            nestedPlayback.source_timestamps ??
+            false
+        );
 
         return {
             ...nestedPlayback,
@@ -1295,6 +1374,19 @@ class WatchPage {
                 || nestedPlayback.audioMode
                 || nestedPlayback.audio_mode
                 || null,
+            audioStreamIndex: Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0
+                ? audioStreamIndex
+                : null,
+            requestedSeekOffset: Number.isFinite(requestedSeekOffset) && requestedSeekOffset > 0
+                ? requestedSeekOffset
+                : 0,
+            actualStartOffset: Number.isFinite(actualStartOffset) && actualStartOffset > 0
+                ? actualStartOffset
+                : 0,
+            localSeekTarget: Number.isFinite(localSeekTarget) && localSeekTarget > 0
+                ? localSeekTarget
+                : 0,
+            sourceTimestamps,
             seekOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0,
             startOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0
         };
@@ -1318,6 +1410,28 @@ class WatchPage {
      * @param {Object} playback - Cloud playback metadata
      */
     async play(content, streamUrl, playback = {}) {
+        const replacingActiveWatch = this.app?.currentPage === 'watch'
+            && this.content
+            && (
+                String(this.content.sourceId ?? '') !== String(content?.sourceId ?? '')
+                || String(this.content.id ?? '') !== String(content?.id ?? '')
+                || Number(this.currentSeason || 0) !== Number(content?.currentSeason || 0)
+                || Number(this.currentEpisode || 0) !== Number(content?.currentEpisode || 0)
+            );
+        if (replacingActiveWatch) {
+            // Capture the outgoing episode before assigning the incoming identity.
+            // Otherwise a same-route handoff can write the old media clock under
+            // the next episode's history key.
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+            await Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            this._suspendResumeSnapshotSave = true;
+            try {
+                await this.stop();
+            } finally {
+                this._suspendResumeSnapshotSave = false;
+            }
+        }
         const playbackAttemptId = this.beginPlaybackAttempt();
         // Fresh user-initiated playback → reset the engine mid-stream retry budget (the
         // automatic engine retries in onError don't go through play(), so they don't reset it).
@@ -1389,8 +1503,13 @@ class WatchPage {
             playbackMetadata.resumeTime ??
             0
         );
-        const loadSeekOffset = Number.isFinite(sessionStartOffset) && sessionStartOffset > 0
-            ? Math.floor(sessionStartOffset)
+        let loadSeekOffset = Number(
+            playbackMetadata.actualStartOffset ??
+            playbackMetadata.actual_start_offset ??
+            sessionStartOffset
+        );
+        loadSeekOffset = Number.isFinite(loadSeekOffset) && loadSeekOffset > 0
+            ? loadSeekOffset
             : (this.resumeTime || 0);
         this.containerExtension = content.containerExtension || 'mp4';
         // Remember where playback was actually launched from so the Back arrow
@@ -1472,7 +1591,12 @@ class WatchPage {
         // Paint the player shell (poster + title + loading animation) FIRST so the
         // player appears instantly on click — before stopping the previous stream
         // or waiting on the gateway session. The stream loads into this shell.
-        this.app.navigateTo('watch', true);
+        // Staying on #watch (next/previous episode or internal replay) is a media
+        // handoff, not a page exit. Calling navigateTo here would invoke hide(),
+        // tear down the new identity and clear its resume snapshot.
+        if (this.app?.currentPage !== 'watch') {
+            this.app.navigateTo('watch', true);
+        }
         document.getElementById('page-watch')?.scrollTo(0, 0);
         this.titleEl.textContent = content.title || '';
         this.subtitleEl.textContent = content.subtitle || '';
@@ -1503,10 +1627,31 @@ class WatchPage {
             streamUrl = resolved.url;
             playbackMetadata = this.playbackMetadataFromResult({ ...playback, ...resolved });
             this._resumePlaybackMetadata = playbackMetadata;
+            const resolvedStartOffset = Number(
+                playbackMetadata.actualStartOffset ??
+                playbackMetadata.actual_start_offset ??
+                playbackMetadata.seekOffset ??
+                playbackMetadata.startOffset
+            );
+            if (Number.isFinite(resolvedStartOffset) && resolvedStartOffset >= 0) {
+                loadSeekOffset = resolvedStartOffset;
+            }
             const resolvedSessionId = playbackMetadata.sessionId || playbackMetadata.cloudPlaybackSessionId;
             if (resolvedSessionId) {
                 cloudPlaybackSessionId = resolvedSessionId;
                 content.cloudPlaybackSessionId = resolvedSessionId;
+            }
+            const resolvedAudioTracks = Array.isArray(playbackMetadata.audioTracks)
+                ? playbackMetadata.audioTracks
+                : (Array.isArray(playbackMetadata.audio_tracks) ? playbackMetadata.audio_tracks : null);
+            if (resolvedAudioTracks !== null) {
+                this.replaceExactContentAudioMetadata(
+                    resolvedAudioTracks,
+                    playbackMetadata.audioLanguages || playbackMetadata.audio_languages || [],
+                    playbackMetadata.audioLanguageValidationStatus ||
+                        playbackMetadata.audio_language_validation_status ||
+                        'pending'
+                );
             }
             // The resolver may have enriched content (e.g. episode seriesInfo
             // for next-episode handoff, or a fuller subtitle) while the shell
@@ -1527,6 +1672,16 @@ class WatchPage {
             startTime: this.resumeTime || 0,
             codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
             seekOffset: loadSeekOffset,
+            actualStartOffset: playbackMetadata.actualStartOffset ?? playbackMetadata.actual_start_offset ?? loadSeekOffset,
+            requestedSeekOffset: playbackMetadata.requestedSeekOffset ?? playbackMetadata.requested_seek_offset ?? this.resumeTime ?? 0,
+            localSeekTarget: playbackMetadata.localSeekTarget ?? playbackMetadata.local_seek_target ?? null,
+            sourceTimestamps: playbackMetadata.sourceTimestamps ?? playbackMetadata.source_timestamps ?? false,
+            audioStreamIndex: playbackMetadata.audioStreamIndex ?? playbackMetadata.audio_stream_index ?? null,
+            audioLanguageValidationStatus: playbackMetadata.audioLanguageValidationStatus ||
+                playbackMetadata.audio_language_validation_status ||
+                content.audioLanguageValidationStatus ||
+                content.audio_language_validation_status ||
+                'not_analyzed',
             // Per-track audio languages the SERVER probed for this engine session
             // (the engine can't read them itself). Must be forwarded explicitly —
             // loadVideo gets a fresh options object, not the full playback metadata.
@@ -1537,11 +1692,6 @@ class WatchPage {
             subtitleTracks: playbackMetadata.subtitleTracks || playbackMetadata.subtitle_tracks || null
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-
-        const localResumeTarget = Math.max(0, (this.resumeTime || 0) - (loadSeekOffset || 0));
-        if (localResumeTarget > 0.25 && this.isGatewayPlaybackUrl(streamUrl)) {
-            this.queuePendingLocalSeek(localResumeTarget);
-        }
 
         // Show Now Playing indicator in navbar
         this.showNowPlaying(content.title);
@@ -1708,6 +1858,7 @@ class WatchPage {
             await NorvaCast.requestSession();
             try { this.video?.pause(); } catch (_) { }
 
+            const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
             toreDown = true;
             await this.releasePlaybackPipelineForRetry();
             await this.waitForProviderSlotRelease(900);
@@ -1717,7 +1868,7 @@ class WatchPage {
                 this.containerExtension || 'mp4',
                 {
                     gatewayMode: 'transcode', audioMode: 'transcode',
-                    ...this.getSelectedAudioPlaybackOptions(),
+                    ...activeAudioOptions,
                     seekOffset: position, startOffset: position, resumeTime: position
                 });
             if (!result?.url || !/^https?:\/\//i.test(result.url)) {
@@ -1913,6 +2064,10 @@ class WatchPage {
     async saveCastProgress() {
         if (!this.content || !window.NorvaCast?.isCasting?.()) return;
         const rel = window.NorvaCast.remotePosition() || 0;
+        // Timestamp the observation when it is captured from the receiver. A
+        // delayed network response must not be mistaken for newer progress and
+        // overwrite a fresher web/TV save from another device.
+        const watchedAt = new Date().toISOString();
         const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + rel));
         const total = this._castTotalDuration();
         const duration = total > 0 ? Math.floor(total) : Math.floor(this._lastKnownPlaybackDuration || 0);
@@ -1937,7 +2092,7 @@ class WatchPage {
                 id: this.content.id,
                 type: this.content.type === 'movie' ? 'movie' : 'episode',
                 sourceId: this.content.sourceId,
-                progress, duration, data
+                progress, duration, watchedAt, data
             });
         } catch (err) {
             console.warn('[Cast] progress save failed:', err);
@@ -1991,7 +2146,7 @@ class WatchPage {
         document.getElementById('watch-cast-bar')?.classList.add('hidden');
         this.updateCastButton();
         // Resume locally where the receiver stopped.
-        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote - 2));
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote));
         if (this.content?.sourceId && this.content?.id) {
             this.content.resumeTime = absolute;
             this.resumeTime = absolute;
@@ -2475,7 +2630,7 @@ class WatchPage {
         this.activeCloudPlaybackSessionIds.add(id);
     }
 
-    async stopCloudPlaybackSessions() {
+    async stopCloudPlaybackSessions(options = {}) {
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
@@ -2491,7 +2646,7 @@ class WatchPage {
 
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
-            await expireSession(sessionId);
+            await expireSession(sessionId, options);
         })).then(results => {
             results.forEach(result => {
                 if (result.status === 'rejected') {
@@ -2887,15 +3042,26 @@ class WatchPage {
         return base;
     }
 
+    isAudioLanguageVerified() {
+        const status = String(
+            this.audioLanguageValidationStatus ||
+            this.content?.audioLanguageValidationStatus ||
+            this.content?.audio_language_validation_status ||
+            ''
+        ).toLowerCase();
+        return status === 'verified' || status === 'verified_union';
+    }
+
     getTrackLabel(track, fallback, type = 'track') {
         if (!track) return fallback;
         if (type === 'subtitle') return this.getSubtitleTrackLabel(track, fallback);
 
         const parts = [];
-        const title = !this.isGenericTrackTitle(track.title, type) ? track.title : null;
+        const languageVerified = type !== 'audio' || this.isAudioLanguageVerified();
+        const title = languageVerified && !this.isGenericTrackTitle(track.title, type) ? track.title : null;
         // Full language name ("French", "Japanese") rather than the bare code ("FR"),
         // matching the card badge + the native mobile player.
-        const language = this.getLanguageDisplayName(track.language);
+        const language = languageVerified ? this.getLanguageDisplayName(track.language) : null;
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
         const channels = track.channels ? `${track.channels}ch` : null;
 
@@ -3060,6 +3226,7 @@ class WatchPage {
         }
         this.currentPlaybackMode = 'engine';
         this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
 
         // Single-slot providers (e.g. super8k) answer HTTP 458 "max connections" while
@@ -3274,17 +3441,22 @@ class WatchPage {
             await this.cleanupStaleCloudPlaybackSession(resultSessionId);
             return false;
         }
-        result.seekOffset = startOffset;
-        result.startOffset = startOffset;
+        const resultMetadata = this.playbackMetadataFromResult(result);
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(resultMetadata, startOffset, startOffset);
         c.cloudPlaybackSessionId = resultSessionId || null;
         try {
-            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
                 playbackAttemptId,
-                seekOffset: startOffset,
-                startOffset,
+                seekOffset: measuredSeek.actualStartOffset,
+                startOffset: measuredSeek.actualStartOffset,
+                actualStartOffset: measuredSeek.actualStartOffset,
+                requestedSeekOffset: startOffset,
+                localSeekTarget: measuredSeek.localSeekTarget,
+                sourceTimestamps: measuredSeek.sourceTimestamps,
                 resumeTarget: startOffset,
                 cloudPlaybackSessionId: resultSessionId || null,
                 playbackPreferences,
+                ...audioOptions,
             }));
             if (fallbackBecameStale()) {
                 await this.cleanupStaleCloudPlaybackSession(resultSessionId);
@@ -3378,17 +3550,14 @@ class WatchPage {
                 return true;
             }
 
-            const hasNextVersion = Boolean(
-                this.versions && this.versionIndex < this.versions.length - 1
-            );
             // Keep the exact file the viewer selected. A sibling version can have a
             // different dub/subtitle set, so switching merely because the playhead is
             // deep into the film silently changes the content (for example AR-SUBS
             // English audio -> a French dub). The Gateway accepts the absolute seek
-            // offset and selected file-local audio options; try that exact-file lane
-            // first, then fail over to a sibling only if it cannot be created.
+            // offset and selected file-local audio options; the recovery ladder stays
+            // on that exact file. If it is unavailable, surface the failure and let the
+            // viewer explicitly choose another labelled version.
             if (await this.fallbackEngineToTranscode(playbackAttemptId, resumeAt)) return true;
-            if (hasNextVersion && await this.tryNextVersion(resumeAt, playbackAttemptId)) return true;
 
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
             this.handleEngineUnplayable(error);
@@ -3673,6 +3842,8 @@ class WatchPage {
         this.currentProcessingOptions = {};
         this.probeDuration = null;
         this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = options.sourceTimestamps === true
+            || options.source_timestamps === true;
         this._videoEncodeFallbackTried = false;
         this.cloudAudioInfo = null;
         this.audioTracks = [];
@@ -3687,6 +3858,16 @@ class WatchPage {
         this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
+        const playbackAudioStreamIndex = Number(
+            options.audioStreamIndex ??
+            options.audio_stream_index ??
+            options.gatewaySession?.audioStreamIndex ??
+            options.gatewaySession?.audio_stream_index
+        );
+        if (Number.isInteger(playbackAudioStreamIndex) && playbackAudioStreamIndex >= 0) {
+            this.directAudioStreamIndex = playbackAudioStreamIndex;
+            this.selectedAudioStreamIndex = playbackAudioStreamIndex;
+        }
         // Reset the AI-subtitle UI state for the incoming title. The cached VTT is title-keyed,
         // so a genuine replay of the same title keeps its 'ready' state; any other title starts idle.
         const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleKey() && this.aiSubtitleVtt;
@@ -3967,12 +4148,35 @@ class WatchPage {
             this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
             this.currentProcessingOptions = {};
             const startOffset = isGatewaySessionUrl
-                ? Math.max(0, Math.floor(Number(options.seekOffset ?? this.resumeTime ?? 0) || 0))
+                ? Math.max(0, Number(
+                    options.actualStartOffset ??
+                    options.actual_start_offset ??
+                    options.seekOffset ??
+                    this.resumeTime ??
+                    0
+                ) || 0)
                 : 0;
             this.streamStartOffset = startOffset;
             this.trackPlaybackPosition({ position: startOffset, force: true });
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
             this.playHls(finalUrl, { playbackAttemptId });
+            const requestedOffset = Number(
+                options.requestedSeekOffset ??
+                options.requested_seek_offset ??
+                options.resumeTarget ??
+                options.startTime ??
+                options.seekOffset ??
+                startOffset
+            );
+            const reportedLocalTarget = Number(
+                options.localSeekTarget ?? options.local_seek_target
+            );
+            const localTarget = Number.isFinite(reportedLocalTarget)
+                ? Math.max(0, reportedLocalTarget)
+                : Math.max(0, (Number.isFinite(requestedOffset) ? requestedOffset : startOffset) - startOffset);
+            if (isGatewaySessionUrl && localTarget > 0.25) {
+                this.queuePendingLocalSeek(localTarget);
+            }
         } else {
             // Direct playback for mp4/mkv/avi
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
@@ -4281,6 +4485,7 @@ class WatchPage {
         this.currentProcessingOptions = {};
         this.probeDuration = null;
         this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
         this._videoEncodeFallbackTried = false;
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
@@ -4365,9 +4570,9 @@ class WatchPage {
         const target = (nextPercent / 100) * duration;
         this.recordIntroSeekSignal(target);
         this.setProgressValue(nextPercent);
+        this._pendingSeekTarget = target;
         this.trackPlaybackPosition({ position: target, force: true });
         this.saveResumeSnapshotThrottled(true);
-        this._pendingSeekTarget = target;
         const debounceGatewaySeek = this.currentPlaybackMode === 'gateway-session'
             && this.canRestartForSeek(target);
         Promise.resolve(this.seekToTime(target, { immediate: !debounceGatewaySeek }))
@@ -4426,12 +4631,16 @@ class WatchPage {
         }
         this._seekDebounceTimer = setTimeout(() => {
             const nextTarget = this._pendingSeekTarget;
-            this._pendingSeekTarget = null;
             this._seekDebounceTimer = null;
             Promise.resolve(this.seekToTime(nextTarget, { immediate: true }))
                 .catch(error => {
                     console.error('[WatchPage] Scheduled seek failed:', error);
                     this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+                })
+                .finally(() => {
+                    if (!this._timelineScrubbing && this._pendingSeekTarget === nextTarget) {
+                        this._pendingSeekTarget = null;
+                    }
                 });
         }, delay);
     }
@@ -4608,11 +4817,12 @@ class WatchPage {
             ? options.requestId
             : ++this._gatewaySeekRequestId;
         const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
-        const { target, preRoll, sessionStart, localSeekTarget } = seekPlan;
+        const { target, preRoll, sessionStart } = seekPlan;
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
         const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
 
         this.showLoading();
         this.hidePlaybackError();
@@ -4640,7 +4850,7 @@ class WatchPage {
             ...(MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
-            ...this.getSelectedAudioPlaybackOptions(),
+            ...activeAudioOptions,
             seekOffset: sessionStart,
             startOffset: sessionStart,
             resumeTime: sessionStart
@@ -4680,14 +4890,21 @@ class WatchPage {
             return;
         }
 
+        const resultMetadata = this.playbackMetadataFromResult(result);
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(resultMetadata, target, sessionStart);
         this.content.cloudPlaybackSessionId = result.sessionId || null;
         this.resumeTime = target;
-        await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-            seekOffset: sessionStart,
-            startOffset: sessionStart,
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
+            seekOffset: measuredSeek.actualStartOffset,
+            startOffset: measuredSeek.actualStartOffset,
+            actualStartOffset: measuredSeek.actualStartOffset,
+            requestedSeekOffset: target,
+            localSeekTarget: measuredSeek.localSeekTarget,
+            sourceTimestamps: measuredSeek.sourceTimestamps,
             playbackAttemptId: this._playbackAttemptId,
             cloudPlaybackSessionId: result.sessionId || null,
-            playbackPreferences
+            playbackPreferences,
+            ...activeAudioOptions,
         }));
         this._gatewaySeekRetry = {
             target,
@@ -4696,8 +4913,6 @@ class WatchPage {
             playbackAttemptId: this._playbackAttemptId,
             requestId
         };
-        this.queuePendingLocalSeek(localSeekTarget);
-
         if (autoplay) {
             this.video?.play?.().catch(e => {
                 if (e.name !== 'AbortError') console.error('[WatchPage] Gateway seek play error:', e);
@@ -5260,8 +5475,9 @@ class WatchPage {
     }
 
     /**
-     * Terminal playback failure: try the next version of the title,
-     * otherwise stop the spinner and show a clear error message.
+     * Terminal playback failure: exhaust the exact-file recovery lanes, then
+     * stop the spinner and show a clear error. Versions can carry different
+     * dubs or burned-in subtitles, so they are never switched automatically.
      */
     async handlePlaybackFailure(message) {
         const playbackAttemptId = this._playbackAttemptId;
@@ -5296,11 +5512,8 @@ class WatchPage {
                 await this.reportPlaybackStatus('broken', message);
             }
             await this.releasePlaybackPipelineForRetry();
-            const attempted = await this.tryNextVersion(null, playbackAttemptId);
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            if (!attempted) {
-                this.showPlaybackError(message);
-            }
+            this.showPlaybackError(message);
         } finally {
             this._handlingPlaybackFailure = false;
         }
@@ -5406,9 +5619,10 @@ class WatchPage {
         this.showLoading();
         this.updateTranscodeStatus('transcoding', 'Norva Gateway');
 
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+        const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         try {
             await this.releasePlaybackPipelineForRetry();
-            const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
             const playbackHint = {
@@ -5420,7 +5634,7 @@ class WatchPage {
                 mode: 'transcode',
                 gatewayMode: 'transcode',
                 audioMode: 'transcode',
-                ...this.getSelectedAudioPlaybackOptions(),
+                ...activeAudioOptions,
                 seekOffset: position,
                 startOffset: position,
                 resumeTime: position
@@ -5455,7 +5669,8 @@ class WatchPage {
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
                 playbackAttemptId: this._playbackAttemptId,
                 seekOffset: position,
-                startOffset: position
+                startOffset: position,
+                ...activeAudioOptions,
             }));
             return true;
         } catch (error) {
@@ -5477,7 +5692,7 @@ class WatchPage {
         }
 
         this._videoEncodeFallbackTried = true;
-        const position = Math.max(0, Math.floor(this.getPlaybackPosition()) - 2);
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
         const autoplay = true;
         const info = this.currentStreamInfo || {};
         const processingOptions = {
@@ -5648,6 +5863,10 @@ class WatchPage {
             window.location.reload();
             return;
         }
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+        const retryPosition = positionOverride !== null
+            ? Math.max(0, Math.floor(positionOverride))
+            : Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         this._inPlaceRetryRunning = true;
         try {
             this.hidePlaybackError();
@@ -5662,13 +5881,11 @@ class WatchPage {
             await this.releasePlaybackPipelineForRetry();
             await this.waitForProviderSlotRelease(800);
 
-            const position = positionOverride !== null
-                ? Math.max(0, Math.floor(positionOverride))
-                : Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
+            const position = retryPosition;
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
             const playbackHint = {
-                ...this.getSelectedAudioPlaybackOptions(),
+                ...activeAudioOptions,
                 seekOffset: position,
                 startOffset: position,
                 resumeTime: position
@@ -5678,7 +5895,8 @@ class WatchPage {
             if (!result?.url) throw new Error('No stream URL from retry');
             this.content.cloudPlaybackSessionId = result.sessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-                playbackAttemptId: this._playbackAttemptId
+                playbackAttemptId: this._playbackAttemptId,
+                ...activeAudioOptions,
             }));
         } catch (error) {
             // A slot still busy after the retry is a provider-side state — a full page
@@ -5863,6 +6081,11 @@ class WatchPage {
         const nextAudioLanguages = Array.isArray(next.audioLanguages)
             ? next.audioLanguages
             : (Array.isArray(next.audio_languages) ? next.audio_languages : []);
+        const nextAudioValidationStatus = String(
+            next.audioLanguageValidationStatus ||
+            next.audio_language_validation_status ||
+            'not_analyzed'
+        ).toLowerCase();
         const nextSubtitleTracks = Array.isArray(next.subtitleTracks)
             ? next.subtitleTracks
             : (Array.isArray(next.subtitle_tracks) ? next.subtitle_tracks : null);
@@ -5879,7 +6102,7 @@ class WatchPage {
             // Resume close to where the previous version failed
             const position = positionOverride !== null
                 ? Math.max(0, Math.floor(Number(positionOverride) || 0))
-                : Math.max(0, Math.floor(this.getPlaybackPosition()) - 5);
+                : Math.max(0, Math.floor(this.getPlaybackPosition()));
             const result = await API.proxy.xtream.getStreamUrl(nextSourceId, nextStreamId, next.type || 'movie', nextContainer, {
                 ...nextAudioOptions,
                 seekOffset: position,
@@ -5898,6 +6121,11 @@ class WatchPage {
                 const resultAudioLanguages = Array.isArray(result.audioLanguages)
                     ? result.audioLanguages
                     : (Array.isArray(result.audio_languages) ? result.audio_languages : null);
+                const resultAudioValidationStatus = String(
+                    result.audioLanguageValidationStatus ||
+                    result.audio_language_validation_status ||
+                    nextAudioValidationStatus
+                ).toLowerCase();
                 const resultSubtitleTracks = Array.isArray(result.subtitleTracks)
                     ? result.subtitleTracks
                     : (Array.isArray(result.subtitle_tracks) ? result.subtitle_tracks : null);
@@ -5926,7 +6154,11 @@ class WatchPage {
                 this.content.container_extension = nextContainer;
                 this.content.versionIndex = nextIndex;
                 this.content.version_index = nextIndex;
-                this.replaceExactContentAudioMetadata(exactAudioTracks, exactAudioLanguages);
+                this.replaceExactContentAudioMetadata(
+                    exactAudioTracks,
+                    exactAudioLanguages,
+                    resultAudioValidationStatus
+                );
                 this.content.subtitleTracks = exactSubtitleTracks;
                 this.content.subtitle_tracks = exactSubtitleTracks;
                 this.content.subtitleTracksScope = exactSubtitleTracks !== null ? 'file' : null;
@@ -6084,8 +6316,10 @@ class WatchPage {
             .filter((t) => Number.isInteger(t.index));
     }
 
-    replaceExactContentAudioMetadata(rawTracks, rawLanguages = []) {
+    replaceExactContentAudioMetadata(rawTracks, rawLanguages = [], validationStatus = 'pending') {
         if (!this.content) return null;
+        const normalizedValidation = String(validationStatus || 'pending').toLowerCase();
+        const verified = normalizedValidation === 'verified' || normalizedValidation === 'verified_union';
         const hasExactTracks = Array.isArray(rawTracks);
         const tracks = hasExactTracks
             ? rawTracks.map((track) => {
@@ -6094,11 +6328,12 @@ class WatchPage {
                 return {
                     ...(track && typeof track === 'object' ? track : {}),
                     index,
-                    lang: language && language !== 'und' ? language : null,
+                    lang: verified && language && language !== 'und' ? language : null,
+                    language: verified && language && language !== 'und' ? language : null,
                 };
             }).filter((track) => Number.isInteger(track.index))
             : null;
-        const languages = hasExactTracks
+        const languages = hasExactTracks && verified
             ? Array.from(new Set([
                 ...(Array.isArray(rawLanguages) ? rawLanguages : []),
                 ...tracks.map((track) => track.lang),
@@ -6113,6 +6348,9 @@ class WatchPage {
         this.content.audio_tracks_scope = scope;
         this.content.audioLanguages = languages;
         this.content.audio_languages = languages;
+        this.content.audioLanguageValidationStatus = normalizedValidation;
+        this.content.audio_language_validation_status = normalizedValidation;
+        this.audioLanguageValidationStatus = normalizedValidation;
         return tracks;
     }
 
@@ -6132,7 +6370,13 @@ class WatchPage {
             // identical to the live-probe path — only the source of the data differs.
             const pre = this.getContentAudioTracks();
             if (pre.length) {
-                this.replaceExactContentAudioMetadata(pre);
+                this.replaceExactContentAudioMetadata(
+                    pre,
+                    this.content?.audioLanguages || this.content?.audio_languages || [],
+                    this.content?.audioLanguageValidationStatus ||
+                        this.content?.audio_language_validation_status ||
+                        'pending'
+                );
                 this.applyCloudMultiAudioTracks({ audioTracks: pre });
                 this.updateAudioTracks();
                 return;
@@ -6165,7 +6409,10 @@ class WatchPage {
             if (hasExactProbe) {
                 const exactTracks = this.replaceExactContentAudioMetadata(
                     Array.isArray(probe?.audioTracks) ? probe.audioTracks : [],
-                    Array.isArray(probe?.audioLanguages) ? probe.audioLanguages : []
+                    Array.isArray(probe?.audioLanguages) ? probe.audioLanguages : [],
+                    probe?.audioLanguageValidationStatus ||
+                        probe?.audio_language_validation_status ||
+                        'pending'
                 );
                 this.applyCloudMultiAudioTracks({ ...probe, audioTracks: exactTracks || [] });
             }
@@ -6367,6 +6614,7 @@ class WatchPage {
     // 2-3 -> "Multi: FR/EN/JA", >3 -> "Multi". Returns null when nothing is detected,
     // so callers keep "Default"/"Audio" rather than fabricating a language.
     contentAudioLanguageLabel() {
+        if (!this.isAudioLanguageVerified()) return null;
         const variantCount = Number(
             this.content?.variantCount ||
             this.content?.variant_count ||
@@ -6409,6 +6657,10 @@ class WatchPage {
     // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
     playingAudioVersionLabel() {
         try {
+            // Provider filename tags (VF/VO/region prefixes) are routing hints,
+            // not proof of spoken language. Never surface them as a player-track
+            // language while strict speech validation is pending.
+            if (!this.isAudioLanguageVerified()) return null;
             const name = this.currentEpisodeRawTitle() || this.content?.title || '';
             const info = window.MediaUtils?.parseVersionInfo?.(name);
             const audioSig = (info?.audioSignals || [])[0];
@@ -6430,12 +6682,18 @@ class WatchPage {
     }
 
     getCloudAudioLabel(a) {
-        if (!a) return this.contentAudioLanguageLabel() || this.playingAudioVersionLabel() || 'Default';
+        if (!a) {
+            return this.contentAudioLanguageLabel() ||
+                this.playingAudioVersionLabel() ||
+                (this.isAudioLanguageVerified() ? 'Default' : 'Audio language pending');
+        }
         const parts = [];
         // PRIMARY: the real per-track language from get_vod_info. When the provider
         // omits it (language:""), fall back to the title's detected language so a
         // real-language file still reads "French · AAC · 5.1" instead of codec-only.
-        const lang = this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
+        const lang = this.isAudioLanguageVerified()
+            ? (this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel() || this.playingAudioVersionLabel())
+            : null;
         if (lang) parts.push(lang);
         if (a.codec) parts.push(String(a.codec).toUpperCase());
         const ch = this.formatChannelLayout(a.channelLayout, a.channels);
@@ -6462,7 +6720,8 @@ class WatchPage {
         // switchable track list. Show the title's detected language (matches the card
         // badge + the native mobile player) instead of a meaningless "Default".
         const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
-        return [{ source: 'none', index: -1, label: contentLabel || 'Default', active: true }];
+        const fallback = this.isAudioLanguageVerified() ? 'Default' : 'Audio language pending';
+        return [{ source: 'none', index: -1, label: contentLabel || fallback, active: true }];
     }
 
     // Persist only a COMPLETE ordered map already returned by the trusted
@@ -6679,6 +6938,31 @@ class WatchPage {
         };
     }
 
+    getMeasuredGatewaySeekPlan(playback, targetTime, fallbackStart = targetTime) {
+        const metadata = this.playbackMetadataFromResult(playback);
+        const target = Math.max(0, Number(targetTime) || 0);
+        const measured = Number(metadata.actualStartOffset ?? metadata.actual_start_offset);
+        const sourceTimestamps = metadata.sourceTimestamps === true
+            || metadata.source_timestamps === true;
+        const actualStartOffset = sourceTimestamps
+            && Number.isFinite(measured)
+            && measured >= 0
+            && measured <= target + 1
+            ? measured
+            : Math.max(0, Number(fallbackStart) || 0);
+        const reportedLocal = Number(metadata.localSeekTarget ?? metadata.local_seek_target);
+        const localSeekTarget = sourceTimestamps && Number.isFinite(reportedLocal)
+            ? Math.max(0, reportedLocal)
+            : Math.max(0, target - actualStartOffset);
+        return { actualStartOffset, localSeekTarget, sourceTimestamps };
+    }
+
+    getCurrentAudioPlaybackOptions() {
+        const explicit = this.getSelectedAudioPlaybackOptions();
+        if (Number.isInteger(Number(explicit.audioStreamIndex))) return explicit;
+        return this.getPlayingEngineAudioOptions();
+    }
+
     async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
         if (this.isStaleAudioSwitch(requestId)) return false;
 
@@ -6752,10 +7036,9 @@ class WatchPage {
         const selected = this.getSelectedAudioTrack();
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
-        const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
+        const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()));
         const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
         const sessionStart = Math.max(0, targetPosition - preRoll);
-        const localSeekTarget = Math.max(0, targetPosition - sessionStart);
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
@@ -6827,13 +7110,23 @@ class WatchPage {
         this.content.cloudPlaybackSessionId = result.sessionId || null;
         this.resumeTime = targetPosition;
         const effectiveSessionStart = Number(playbackHint.seekOffset) || sessionStart;
-        const effectiveLocalSeekTarget = Math.max(0, targetPosition - effectiveSessionStart);
-        await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-            seekOffset: effectiveSessionStart,
-            startOffset: effectiveSessionStart,
+        const resultMetadata = this.playbackMetadataFromResult(result);
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(
+            resultMetadata,
+            targetPosition,
+            effectiveSessionStart
+        );
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
+            seekOffset: measuredSeek.actualStartOffset,
+            startOffset: measuredSeek.actualStartOffset,
+            actualStartOffset: measuredSeek.actualStartOffset,
+            requestedSeekOffset: targetPosition,
+            localSeekTarget: measuredSeek.localSeekTarget,
+            sourceTimestamps: measuredSeek.sourceTimestamps,
             playbackAttemptId: this._playbackAttemptId,
             cloudPlaybackSessionId: result.sessionId || null,
-            playbackPreferences
+            playbackPreferences,
+            ...audioOptions,
         }));
         this._gatewaySeekRetry = {
             target: targetPosition,
@@ -6842,8 +7135,6 @@ class WatchPage {
             playbackAttemptId: this._playbackAttemptId,
             audioSwitchRequestId: requestId
         };
-        this.queuePendingLocalSeek(effectiveLocalSeekTarget);
-
         if (autoplay) {
             this.video?.play?.().catch(e => {
                 if (e.name !== 'AbortError') console.error('[WatchPage] Gateway audio switch play error:', e);
@@ -7376,7 +7667,10 @@ class WatchPage {
             return;
         }
         const headers = engine.lastEtag ? { 'If-None-Match': engine.lastEtag } : undefined;
-        const added = await this.fetchSubtitleCues(engine, url, 0, { headers });
+        const sessionTimeOffset = engine.sourceTimestamps
+            ? -Math.max(0, Number(engine.streamStartOffset) || 0)
+            : 0;
+        const added = await this.fetchSubtitleCues(engine, url, sessionTimeOffset, { headers });
         engine.busy = false;
         if (engine !== this._subEngine) return;
 
@@ -7409,7 +7703,9 @@ class WatchPage {
         // User sought back before the covered range: reload a window there
         const seekedBack = engine.coveredStartLocal !== undefined &&
             localPos < engine.coveredStartLocal - 5;
-        const needsNext = force || seekedBack ||
+        const jumpedForward = engine.windowEndLocal !== undefined &&
+            localPos > engine.windowEndLocal + 5;
+        const needsNext = force || seekedBack || jumpedForward ||
             engine.windowEndLocal === undefined ||
             localPos >= engine.windowEndLocal - 120;
         if (!needsNext) return;
@@ -7420,9 +7716,11 @@ class WatchPage {
         // the file). A 15-min first window is why the initial subtitle took ~30s to appear.
         // Fetch a SMALL window first (fast first cues), then extend with large windows — the
         // next tick fires immediately because windowEndLocal lands just ahead of the playhead.
-        const WINDOW = (force || seekedBack) ? 90 : 900;
+        const WINDOW = (force || seekedBack || jumpedForward) ? 90 : 900;
         // Absolute position in the source file = local time + session seek offset
-        const windowStartLocal = (force || seekedBack) ? Math.max(0, localPos - 5) : (engine.windowEndLocal ?? 0);
+        const windowStartLocal = (force || seekedBack || jumpedForward)
+            ? Math.max(0, localPos - 5)
+            : (engine.windowEndLocal ?? 0);
         engine.coveredStartLocal = engine.coveredStartLocal === undefined
             ? windowStartLocal
             : Math.min(engine.coveredStartLocal, windowStartLocal);
@@ -7524,6 +7822,9 @@ class WatchPage {
             gatewaySubtitleUrl,
             gatewayWindowBase,
             sourceUrl: this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl,
+            sourceTimestamps: this.currentPlaybackMode === 'gateway-session'
+                && this.gatewaySourceTimestamps === true,
+            streamStartOffset: this.streamStartOffset || 0,
             failures: 0
         };
         this._subEngine = engine;
@@ -9826,9 +10127,20 @@ class WatchPage {
     }
 
     hide() {
-        // Called when page becomes hidden
-        // Don't stop playback here - allow background playback
         this.cancelNextEpisode();
+        // A navbar click, browser Back/Forward, or programmatic route change does
+        // not pass through goBack(). Leaving the watch route must still persist
+        // the visible position and tear down every playback lane immediately;
+        // otherwise the hidden <video> keeps decoding/playing in the background
+        // and continues holding the provider's single connection slot.
+        if (this._goingBack) return;
+        this.trackPlaybackPosition({ force: true });
+        this.saveResumeSnapshotThrottled(true);
+        Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+        this._suspendResumeSnapshotSave = true;
+        this.stop();
+        this._suspendResumeSnapshotSave = false;
+        this.clearResumeSnapshot();
     }
     // ============================================================
     // Watch History Tracking
@@ -9874,9 +10186,9 @@ class WatchPage {
                 sourceId: this.content.sourceId,
                 progress,
                 duration,
-                // Temporal guard (audit 2026-07-17 P2): the server only lets a NEWER tick
-                // overwrite progress — a delayed packet from a second device can no longer
-                // regress a fresher position. Force saves (pause/seek/exit) always pass.
+                // Temporal guard: the database only lets a NEWER capture overwrite
+                // progress, atomically across devices. `force` requests an immediate
+                // flush; it no longer bypasses ordering for delayed exit packets.
                 watchedAt: new Date().toISOString(),
                 ...(options.force ? { force: true } : {})
             };

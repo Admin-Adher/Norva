@@ -212,6 +212,27 @@ const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_00
 // (≤ length) so it never hammers a single-connection provider. Override via WHISPER_SWEEP_OFFSETS.
 const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,300')
     .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
+// A language shown as verified in Norva is held to a materially stronger contract than the
+// best-effort LID endpoint used during development. Four separated, information-rich speech
+// windows must agree unanimously. Extra fallback windows let silence/credits or a late offset
+// fail without weakening the four-sample requirement. The edge persists only `verified: true`.
+const WHISPER_STRICT_OFFSETS = [
+    ...new Set((process.env.WHISPER_STRICT_OFFSETS || '180,600,1200,2400,60,3000')
+        .split(',').map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n >= 0)),
+];
+const WHISPER_STRICT_CONSENSUS = 4;
+const WHISPER_STRICT_MIN_PROBABILITY = Math.min(
+    0.999,
+    Math.max(0.95, Number(process.env.WHISPER_STRICT_MIN_PROBABILITY) || 0.95),
+);
+const WHISPER_STRICT_MIN_WORDS = clampInt(process.env.WHISPER_STRICT_MIN_WORDS, 12, 12, 40);
+const WHISPER_STRICT_MIN_UNIQUE_WORDS = clampInt(
+    process.env.WHISPER_STRICT_MIN_UNIQUE_WORDS,
+    8,
+    8,
+    30,
+);
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
 // This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
 // whisperBudgetMs) because a long film at a flat 20 min was mathematically guaranteed to be
@@ -329,7 +350,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 64;
+const GATEWAY_VERSION = 69;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -938,16 +959,32 @@ app.get('/detect-language/:token', async (req, res) => {
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
-    const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 20, 4), 60);
+    const strict = ['1', 'true', 'yes'].includes(String(req.query.strict || '').toLowerCase());
+    const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || (strict ? 30 : 20), 4), 60);
     // An explicit ?start pins a single offset (caller knows where speech is); otherwise sweep the
     // bounded mid-film offsets and stop at the first clip that actually contains speech.
     const explicitStart = Number.parseFloat(req.query.start);
-    const offsets = (Number.isFinite(explicitStart) && explicitStart >= 0) ? [explicitStart] : WHISPER_SWEEP_OFFSETS;
+    if (strict && Number.isFinite(explicitStart)) {
+        return res.status(400).json({ error: 'Strict language validation requires separated samples' });
+    }
+    const offsets = (Number.isFinite(explicitStart) && explicitStart >= 0)
+        ? [explicitStart]
+        : (strict ? WHISPER_STRICT_OFFSETS : WHISPER_SWEEP_OFFSETS);
+    const consensusNeeded = strict
+        ? WHISPER_STRICT_CONSENSUS
+        : Math.max(1, Math.min(3, Number.parseInt(req.query.consensus, 10) || 1));
+    if (strict && offsets.length < consensusNeeded) {
+        return res.status(503).json({ error: 'Strict language validation needs at least four configured offsets' });
+    }
 
     try {
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
         let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
+        const votes = new Map();
+        const strictSamples = [];
+        let bestStrictAccepted = null;
+        let strictRejectedSpeechSamples = 0;
         const lockKey = accountJobKey(claims.uid, claims.url);
         for (const off of offsets) {
             let wavPath = null;
@@ -965,32 +1002,143 @@ app.get('/detect-language/:token', async (req, res) => {
                 extractions++;
                 const whisper = await runWhisperDetect(wavPath);
                 const det = detectLanguageFromText(whisper.text);
-                // Prefer the transcript detector when confident (disambiguates script families);
-                // otherwise fall back to whisper.cpp's own language id.
-                const language = det.confident ? det.lang : (whisper.lang || null);
+                // Strict validation never promotes a single-model guess. Whisper must be highly
+                // confident on each window; when the independent transcript detector has enough
+                // evidence, it must agree. Any accepted-language disagreement leaves the file
+                // pending rather than choosing a majority.
+                const whisperLang = String(whisper.lang || '').toLowerCase() || null;
+                const whisperProbability = Number(whisper.prob || 0);
+                const uniqueWordCount = new Set(
+                    String(whisper.text || '').toLowerCase().match(/\p{L}+/gu) || [],
+                ).size;
+                const transcriptDisagrees = det.confident === true
+                    && Boolean(det.lang)
+                    && det.lang !== whisperLang;
+                const whisperConfident = Boolean(whisperLang) && whisperProbability >= (
+                    strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75
+                );
+                const enoughWords = Number(det.words || 0) >= (
+                    strict ? WHISPER_STRICT_MIN_WORDS : 4
+                ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
+                const strictAccepted = strict
+                    && whisperConfident
+                    && enoughWords
+                    && !transcriptDisagrees;
+                if (strict && enoughWords && !strictAccepted) {
+                    strictRejectedSpeechSamples++;
+                }
+                const confident = strict
+                    ? strictAccepted
+                    : (det.confident === true || whisperConfident);
+                const candidate = strict
+                    ? whisperLang
+                    : (det.confident ? det.lang : (whisperLang || det.lang || null));
+                const language = confident ? candidate : null;
                 const result = {
                     language,
-                    candidate: det.lang || whisper.lang || null,
-                    confidence: det.confident ? det.score : (whisper.prob || 0),
-                    whisperLang: whisper.lang || null,
+                    candidate,
+                    confidence: strict
+                        ? whisperProbability
+                        : (det.confident ? det.score : whisperProbability),
+                    confident,
+                    verified: false,
+                    validationStatus: 'pending',
+                    method: strict
+                        ? 'whisper-strict-consensus-v4'
+                        : (det.confident ? 'transcript' : (whisperConfident ? 'whisper' : 'pending')),
+                    consensus: 0,
+                    whisperLang,
+                    transcriptLang: det.confident ? det.lang : null,
+                    transcriptAgrees: det.confident ? det.lang === whisperLang : null,
+                    minProbability: strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75,
                     wordCount: det.words,
+                    uniqueWordCount,
                     sample: String(whisper.text || '').slice(0, 160),
                     offset: off,
                 };
                 // "Good" = a clear transcript with a language → real speech. Stop sweeping. A
                 // silent/music clip yields ~no words → keep the best partial and try the next offset.
                 if (language && det.words >= 4) {
-                    res.setHeader('Cache-Control', 'private, max-age=3600');
-                    return res.json(result);
+                    const voteCount = (votes.get(language) || 0) + 1;
+                    votes.set(language, voteCount);
+                    result.consensus = voteCount;
+                    if (strict) {
+                        strictSamples.push({
+                            offset: off,
+                            language,
+                            probability: whisperProbability,
+                            wordCount: det.words,
+                            uniqueWordCount,
+                            transcriptAgrees: result.transcriptAgrees,
+                        });
+                        if (!bestStrictAccepted || result.wordCount > bestStrictAccepted.wordCount) {
+                            bestStrictAccepted = result;
+                        }
+                    }
+                    // Non-strict discovery may stop as soon as its requested vote count is met.
+                    // Strict certification deliberately consumes every configured window: a
+                    // fifth/sixth accepted sample that disagrees must veto four earlier votes.
+                    if (!strict && voteCount >= consensusNeeded) {
+                        res.setHeader('Cache-Control', 'private, max-age=3600');
+                        return res.json(result);
+                    }
                 }
                 if (!best || result.wordCount > best.wordCount) best = result;
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
         if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
-        // No clip had clear speech → return the best partial (language may be null).
+        if (
+            strict &&
+            bestStrictAccepted &&
+            strictSamples.length >= consensusNeeded &&
+            votes.size === 1 &&
+            strictRejectedSpeechSamples === 0
+        ) {
+            const language = strictSamples[0].language;
+            const verified = {
+                ...bestStrictAccepted,
+                language,
+                candidate: language,
+                confident: true,
+                verified: true,
+                validationStatus: 'verified',
+                consensus: strictSamples.length,
+                samples: strictSamples,
+                sampleCount: strictSamples.length,
+                rejectedSpeechSampleCount: 0,
+                minSampleProbability: Math.min(...strictSamples.map((sample) => sample.probability)),
+                minSampleWordCount: Math.min(...strictSamples.map((sample) => sample.wordCount)),
+                minSampleUniqueWordCount: Math.min(
+                    ...strictSamples.map((sample) => sample.uniqueWordCount),
+                ),
+            };
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+            return res.json(verified);
+        }
+        // No strict consensus is not a language result. It is a retryable pending state, so no
+        // caller can accidentally surface `candidate` as if it had been validated.
+        if (best && consensusNeeded > 1) {
+            best = {
+                ...best,
+                language: null,
+                confident: false,
+                verified: false,
+                validationStatus: 'pending',
+                consensus: Math.max(0, ...votes.values()),
+                sampleCount: strictSamples.length,
+                rejectedSpeechSampleCount: strict ? strictRejectedSpeechSamples : undefined,
+                samples: strict ? strictSamples : undefined,
+            };
+        }
         res.setHeader('Cache-Control', 'private, max-age=3600');
-        return res.json(best || { language: null, candidate: null, confidence: 0, whisperLang: null, wordCount: 0, sample: '' });
+        return res.json(best || {
+            language: null, candidate: null, confidence: 0, confident: false,
+            verified: false, validationStatus: 'pending',
+            method: strict ? 'whisper-strict-consensus-v4' : 'pending',
+            consensus: 0, whisperLang: null, transcriptLang: null,
+            wordCount: 0, sampleCount: 0, sample: '',
+        });
     } catch (err) {
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
     }
@@ -2378,6 +2526,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
+        await observeSessionStartOffset(session);
 
         res.status(201).json({
             id,
@@ -2386,6 +2535,10 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioMode: audioModeForSession(session),
             videoMode: videoModeForSession(session),
             audioStreamIndex: session.audioStreamIndex,
+            requestedSeekOffset: session.seekOffset || 0,
+            actualStartOffset: session.actualStartOffset || 0,
+            localSeekTarget: session.localSeekTarget || 0,
+            sourceTimestamps: session.sourceTimestamps === true,
             codecProfile: session.codecProfile,
             codecProfileSource: session.codecProfileSource || null,
             hlsUrl,
@@ -2403,7 +2556,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
 app.delete('/raw-pumps', requireGatewayAuth, (req, res) => {
     const ownerKey = String(req.query.ownerKey || req.body?.ownerKey || '').trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(ownerKey)) return res.status(400).json({ error: 'ownerKey (sha256 hex) required' });
-    const aborted = abortRawPumps((p) => p.ownerHash === ownerKey, null, 'coordinator eviction');
+    const sid = String(req.query.sid || req.body?.sid || '').trim();
+    const globalCleanup = req.query.global === '1' || req.body?.global === true;
+    if (!sid && !globalCleanup) {
+        return res.status(400).json({ error: 'sid required (or global=1 for explicit owner cleanup)' });
+    }
+    const aborted = abortRawPumps(
+        (p) => p.ownerHash === ownerKey && (globalCleanup || p.sid === sid),
+        null,
+        globalCleanup ? 'explicit owner eviction' : `coordinator eviction ${sid.slice(0, 8)}`
+    );
     res.json({ ok: true, aborted });
 });
 
@@ -2539,6 +2701,7 @@ function startFfmpeg(session) {
     const audioMap = audioMapForSession(session);
     const inputProbeArgs = inputProbeArgsForSession(session);
     const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
+    const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
     const args = [
         '-hide_banner',
@@ -2561,6 +2724,7 @@ function startFfmpeg(session) {
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
         '-fflags', '+genpts',
+        ...(preserveCopySeekTimestamps ? ['-copyts'] : []),
         ...inputProbeArgs,
         ...preInputSeek,
         '-i', session.sourceUrl,
@@ -2597,6 +2761,9 @@ function startFfmpeg(session) {
 
     args.push(
         '-fps_mode', 'passthrough',
+        ...(preserveCopySeekTimestamps
+            ? ['-avoid_negative_ts', 'disabled', '-mpegts_copyts', '1', '-muxpreload', '0', '-muxdelay', '0']
+            : []),
         '-f', 'hls',
         '-hls_time', '4',
         '-hls_list_size', '0',
@@ -2671,6 +2838,49 @@ function seekArgsForSession(session, encodeVideo) {
     // clean. Trade-off: startup scales with the resume point (linear read from
     // byte 0), so far resumes take longer to first frame.
     return { preInputSeek: ['-seekable', '0'], postInputSeek: ['-ss', String(seekOffset)] };
+}
+
+function usesSourceTimestampedCopySeek(session, encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session)) {
+    return !encodeVideo && Number(session.seekOffset) > 0;
+}
+
+async function observeSessionStartOffset(session) {
+    const requested = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
+    session.actualStartOffset = requested;
+    session.localSeekTarget = 0;
+    session.sourceTimestamps = false;
+    if (!usesSourceTimestampedCopySeek(session) || requested <= 0) return;
+
+    try {
+        const deadline = Date.now() + 5_000;
+        let firstSegment = '';
+        while (Date.now() < deadline) {
+            const files = await fsp.readdir(session.outputDir).catch(() => []);
+            firstSegment = files.filter((name) => /^segment-\d+\.ts$/i.test(name)).sort()[0] || '';
+            if (firstSegment) break;
+            await sleep(50);
+        }
+        if (!firstSegment) throw new Error('first HLS segment not ready');
+        const segmentPath = path.join(session.outputDir, firstSegment);
+        const payload = await runFfprobe([
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=start_time',
+            '-print_format', 'json',
+            segmentPath,
+        ], 5_000, segmentPath);
+        const observed = Number(payload?.streams?.[0]?.start_time);
+        if (!Number.isFinite(observed) || observed < 0 || observed > requested + 1) {
+            throw new Error(`invalid first video PTS ${String(payload?.streams?.[0]?.start_time)}`);
+        }
+        session.actualStartOffset = Math.max(0, observed);
+        session.localSeekTarget = Math.max(0, requested - session.actualStartOffset);
+        session.sourceTimestamps = true;
+    } catch (error) {
+        // Fail safe: playback remains usable at the requested session offset.
+        // The client only performs the local fine seek when measurement succeeds.
+        console.warn(`[media-gateway] unable to measure exact copy-seek start for ${session.id}: ${error.message || error}`);
+    }
 }
 
 function inputProbeArgsForSession(session) {
@@ -3349,6 +3559,10 @@ function serializeSession(req, session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: session.audioStreamIndex,
+        requestedSeekOffset: session.seekOffset || 0,
+        actualStartOffset: session.actualStartOffset || 0,
+        localSeekTarget: session.localSeekTarget || 0,
+        sourceTimestamps: session.sourceTimestamps === true,
         codecProfile: session.codecProfile,
         codecProfileSource: session.codecProfileSource || null,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
@@ -3368,6 +3582,10 @@ function debugSession(session) {
         mode: session.mode,
         audioMode: audioModeForSession(session),
         audioStreamIndex: session.audioStreamIndex,
+        requestedSeekOffset: session.seekOffset || 0,
+        actualStartOffset: session.actualStartOffset || 0,
+        localSeekTarget: session.localSeekTarget || 0,
+        sourceTimestamps: session.sourceTimestamps === true,
         audioMap: audioMapForSession(session),
         audioCodec: session.audioCodec,
         audioChannels: session.audioChannels,

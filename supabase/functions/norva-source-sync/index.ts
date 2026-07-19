@@ -10,6 +10,7 @@ import {
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
+import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-source-sync", version: 8, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true, yearBackfill: true });
+      return json(req, { ok: true, service: "norva-source-sync", version: 10, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true, yearBackfill: true, dynamicEnrichmentFleet: true });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
     // of due, entitled sources through the same sync state machine — locked,
@@ -92,6 +93,15 @@ Deno.serve(async (req) => {
       }
       if (segments[1] === "refresh-due") {
         return json(req, await cronRefreshDue(supabase));
+      }
+      // Dynamic audio/subtitle fleet.  Unlike the historical jobs, this route
+      // contains no account or source allow-list: the database queue reconciles
+      // every active ready source on every tick, including catalogues uploaded
+      // by users who register after this code is deployed.
+      if (segments[1] === "enrichment-fleet") {
+        const limit = boundedInt(url.searchParams.get("limit"), 4, 1, 8);
+        const dryRun = url.searchParams.get("dryRun") === "1";
+        return json(req, await cronEnrichmentFleet(supabase, limit, dryRun));
       }
       // Service-authed finalize drivers (no user session), for recovering a
       // source whose client-side finalize was interrupted:
@@ -953,21 +963,330 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   return { ...summary, focused };
 }
 
-// Premium per-user background refresh — the step-5 state machine. Picks a small
-// batch of DUE sources, ENFORCES the auto_refresh_background entitlement (skips
-// anyone who isn't premium), and takes a compare-and-set lock so overlapping
-// ticks can never double-run. Per source it runs a DETECTION-ONLY refresh in the
-// background: fetch the provider catalogue and compare its signature against our
-// last full import. That's the wall-clock-safe, app-closed "is there new content?"
-// signal premium pays for — on a change it records a capped "what's new" event
-// (surfaced in-app on open). It deliberately does NOT import or materialize here:
-// the full delete+rebuild+materialization overruns a single isolate on big
-// catalogues, so the proven client-driven, batched import/finalize still runs on
-// the next open. We return the HTTP response at once (work runs in the
-// background); on success the next window is scheduled, on a provider error it
-// backs off exponentially. Locking also pushes the due window out by the lock
-// TTL, so a source isn't re-picked mid-run — and if the isolate dies first, the
-// lock self-frees after that same TTL and the source is retried on a later tick.
+// Dynamic, source-backed catalogue/audio maintenance fleet. Claims are durable
+// in Postgres; provider work is backgrounded after the cron response.
+type EnrichmentFleetClaim = {
+  source_id: string;
+  user_id: string;
+  claim_token: string;
+  failure_count?: number;
+  dispatch_count?: number;
+};
+
+function enrichmentFleetSummary(payload: unknown): JsonRecord {
+  const body = recordOrEmpty(payload);
+  // The fleet always dispatches one explicit dimension (fallthrough=false).
+  // Persist only that dimension's top-level counters/cursor. Summing `tried`
+  // or borrowing a nested result would make one scheduler completion appear
+  // to have attempted rows that belonged to another lane.
+  const processed = Math.max(0, Number(body.processed) || 0);
+  return compactRecord({
+    mode: stringOrNull(body.mode),
+    processed,
+    updated: Math.max(0, Number(body.updated) || 0),
+    lastId: processed > 0 ? stringOrNull(body.lastId) : null,
+    skipped: stringOrNull(body.skipped ?? body.stoppedAt),
+    paused: body.paused === true,
+    hasMore: body.hasMore === true,
+    exhausted: body.exhausted === true || (
+      processed === 0
+      && body.hasMore !== true
+      && stringOrNull(body.skipped ?? body.stoppedAt) === null
+    ),
+  });
+}
+
+function enrichmentFleetNextDelay(summary: JsonRecord, lane: number): number {
+  const skipped = stringOr(summary.skipped, "");
+  if (summary.paused === true) return 30 * 60;
+  if (skipped === "live-session" || skipped === "pregen-active") return 5 * 60;
+  if (skipped === "circuit_open") return 60 * 60;
+  // An empty explicit lane must rotate promptly: drained media/speech lanes
+  // must not postpone synopsis recovery by hours. The final (provider overview)
+  // lane requests a 6h rest; finish_catalog_enrichment_source clamps that to 30s
+  // whenever any earlier lane in this same sweep reported work/hasMore.
+  if ((skipped === "exhausted" || summary.exhausted === true) && lane < 5) return 30;
+  if (skipped === "exhausted") return 6 * 60 * 60;
+  if (summary.exhausted === true) return 6 * 60 * 60;
+  if (Number(summary.processed) > 0) return 90;
+  return 5 * 60;
+}
+
+async function finishEnrichmentFleetClaim(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+  success: boolean,
+  delaySeconds: number,
+  result: JsonRecord,
+  releaseLeases = true,
+) {
+  const { error } = await db.rpc("finish_catalog_enrichment_source", {
+    p_source_id: claim.source_id,
+    p_claim_token: claim.claim_token,
+    p_success: success,
+    p_next_delay_seconds: delaySeconds,
+    p_release_leases: releaseLeases,
+    p_result: result,
+  });
+  if (error) {
+    console.error("[enrichment-fleet] unable to finish claim", claim.source_id, error.message);
+  }
+}
+
+async function runProviderOverviewFleetLane(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+) {
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("source_type,config_ciphertext")
+    .eq("id", claim.source_id)
+    .eq("user_id", claim.user_id)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load synopsis source: ${error.message}`);
+  if (!source) throw new Error("Synopsis source no longer exists");
+  if (String(source.source_type) !== "xtream") {
+    return {
+      mode: "provider-overview",
+      processed: 0,
+      updated: 0,
+      skipped: "unsupported-source",
+      hasMore: false,
+      exhausted: true,
+    };
+  }
+
+  // Cross-account fan-out is allowed only after the server-derived stream-id
+  // identity is present. Never fall back to owner-editable source hints.
+  const { data: verifiedIdentity, error: identityError } = await db
+    .from("catalog_source_provider_identities")
+    .select("identity_id")
+    .eq("source_id", claim.source_id)
+    .eq("user_id", claim.user_id)
+    .maybeSingle();
+  if (identityError) throw new Error(`Unable to verify synopsis provider identity: ${identityError.message}`);
+  if (!verifiedIdentity?.identity_id) {
+    return {
+      mode: "provider-overview",
+      processed: 0,
+      updated: 0,
+      skipped: "provider-identity-pending",
+      paused: true,
+      hasMore: true,
+      exhausted: false,
+    };
+  }
+
+  if (!source.config_ciphertext) throw new Error("Xtream source has no managed cloud configuration");
+  const runtimeConfig = await getRuntimeConfig(db);
+  const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+  const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
+  const username = stringOr(config.username, "");
+  const password = stringOr(config.password, "");
+  if (!username || !password) throw new Error("Xtream source credentials are incomplete");
+
+  return await backfillProviderOverviews({
+    db,
+    userId: claim.user_id,
+    sourceId: claim.source_id,
+    limit: 4,
+    concurrency: 2,
+    fetchVodInfo: (externalId) => fetchProviderMetadata(runtimeConfig, {
+      serverUrl,
+      username,
+      password,
+      action: "get_vod_info",
+      params: { vod_id: externalId },
+      timeoutMs: 12_000,
+    }),
+  });
+}
+
+async function runEnrichmentFleetClaim(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+  backfillToken: string,
+) {
+  const controller = new AbortController();
+  // Three of every six claims are speech-verification lanes. Raw ffprobe work
+  // handles four files at once while strict speech handles one, so the former
+  // 3-probe/1-speech weighting made the unverified backlog grow permanently.
+  // Two tagged lanes catch wrong container labels (French->Italian); one
+  // untagged lane resolves generic Audio 2/und tracks. The remaining lanes
+  // probe new files, extract subtitles, and gap-fill provider synopses.
+  const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 6;
+  const subtitleProbe = lane === 3;
+  const speechVerification = lane === 1 || lane === 2 || lane === 4;
+  const providerOverview = lane === 5;
+  // Strict speech validation can consume six separated 30s samples. Each
+  // sample has a bounded 30s extraction + 60s Whisper budget, so the dispatcher
+  // must outlive the 540s worst case instead of orphaning a valid result at 105s.
+  const timeout = setTimeout(
+    () => controller.abort(),
+    speechVerification ? 540_000 : 105_000,
+  );
+  // Raw probes currently find a usable container tag for nearly every file,
+  // hence two tagged lanes. Keep one dedicated untagged lane so generic
+  // "Audio 2" tracks cannot starve behind that much larger backlog.
+  const speechTarget = speechVerification
+    ? (lane === 4 ? "untagged" : "tagged")
+    : undefined;
+  let responseReceived = false;
+  let localLane = false;
+  try {
+    if (providerOverview) {
+      localLane = true;
+      const result = await runProviderOverviewFleetLane(db, claim);
+      const summary = enrichmentFleetSummary(result);
+      await finishEnrichmentFleetClaim(
+        db,
+        claim,
+        true,
+        enrichmentFleetNextDelay(summary, lane),
+        summary,
+      );
+      return;
+    }
+
+    const response = await fetch(
+      `${trimTrailingSlash(SUPABASE_URL)}/functions/v1/norva-playback/audio-backfill`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${backfillToken}`,
+          apikey: SUPABASE_SERVICE_KEY,
+          "X-Norva-Enrichment-Dispatcher": "dynamic-v1",
+        },
+        body: JSON.stringify({
+          userId: claim.user_id,
+          sourceId: claim.source_id,
+          type: "movie",
+          mode: speechVerification ? "whisper" : "probe",
+          speechTarget,
+          target: subtitleProbe ? "subtitle" : undefined,
+          fileScope: true,
+          // Exact-file probing is sequential. Keep a single dispatch below the
+          // request budget so fetch cancellation cannot routinely orphan a
+          // 25-file worker; scale across independent providers, not within one.
+          limit: speechVerification ? 1 : 4,
+          concurrency: 1,
+          // Lanes are explicit and individually bounded. fallthrough would
+          // append a 15-series + 10-subtitle + Whisper chain after an empty
+          // primary queue, defeating this request's four-file safety budget.
+          fallthrough: false,
+        }),
+        signal: controller.signal,
+      },
+    );
+    responseReceived = true;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(`audio-backfill ${response.status}: ${stringOr(recordOrEmpty(payload).error, "request failed")}`);
+    }
+    const summary = enrichmentFleetSummary(payload);
+    await finishEnrichmentFleetClaim(
+      db,
+      claim,
+      true,
+      enrichmentFleetNextDelay(summary, lane),
+      summary,
+    );
+  } catch (error) {
+    const failures = Math.max(0, Number(claim.failure_count) || 0) + 1;
+    const retrySeconds = Math.min(6 * 60 * 60, 5 * 60 * Math.pow(2, Math.min(failures - 1, 6)));
+    const message = error instanceof Error ? error.message : "audio-backfill failed";
+    console.error("[enrichment-fleet] source failed", claim.source_id, message);
+    await finishEnrichmentFleetClaim(
+      db,
+      claim,
+      false,
+      retrySeconds,
+      { error: message.slice(0, 500), failureCount: failures },
+      // Abort/network errors do not prove the remote worker stopped: fetch
+      // cancellation is not propagated into norva-playback. Keep both global
+      // leases until expiry so an orphan cannot overlap the next tick. A
+      // completed HTTP error response or local synopsis lane is safe to release.
+      localLane || responseReceived,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Claim a bounded, fair batch and return immediately. The actual provider work
+// runs under EdgeRuntime.waitUntil, exactly like the existing refresh driver, so
+// pg_net never holds a cron worker for a long container probe.
+async function cronEnrichmentFleet(db: SupabaseClient, limit: number, dryRun = false) {
+  const backfillToken = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  if (!backfillToken) {
+    throw new HttpError(503, "NORVA_BACKFILL_TOKEN is not configured");
+  }
+
+  if (dryRun) {
+    // Prove the exact RPC signature is deployed, not merely that a table with
+    // the expected name exists.
+    const { data: schema, error } = await db.rpc("catalog_enrichment_fleet_preflight");
+    if (error) throw new HttpError(503, "Dynamic enrichment schema is not ready", error);
+
+    // Authenticate against the real playback maintenance route without
+    // claiming work or opening a provider connection. An authorized empty body
+    // deterministically reaches validation and returns 400 Missing userId;
+    // 401 proves the two workers disagree on NORVA_BACKFILL_TOKEN.
+    const probeController = new AbortController();
+    const probeTimeout = setTimeout(() => probeController.abort(), 8_000);
+    try {
+      const response = await fetch(
+        `${trimTrailingSlash(SUPABASE_URL)}/functions/v1/norva-playback/audio-backfill`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${backfillToken}`,
+            apikey: SUPABASE_SERVICE_KEY,
+            "X-Norva-Enrichment-Dispatcher": "preflight",
+          },
+          body: "{}",
+          signal: probeController.signal,
+        },
+      );
+      const payload = recordOrEmpty(await response.json().catch(() => ({})));
+      if (response.status !== 400 || !stringOr(payload.error, "").includes("Missing userId")) {
+        throw new HttpError(503, "Playback backfill authentication preflight failed", {
+          status: response.status,
+          error: stringOrNull(payload.error),
+        });
+      }
+    } finally {
+      clearTimeout(probeTimeout);
+    }
+    return { ok: true, dryRun: true, dispatcher: "dynamic-v1", schema };
+  }
+
+  const { data, error } = await db.rpc("claim_catalog_enrichment_sources", {
+    p_limit: limit,
+    p_lease_seconds: 1200,
+  });
+  if (error) throw new HttpError(500, "Unable to claim enrichment sources", error);
+
+  const claims = (Array.isArray(data) ? data : [])
+    .map((row) => row as EnrichmentFleetClaim)
+    .filter((row) => row.source_id && row.user_id && row.claim_token);
+  if (claims.length) {
+    runInBackground(Promise.all(
+      claims.map((claim) => runEnrichmentFleetClaim(db, claim, backfillToken)),
+    ));
+  }
+  return {
+    ok: true,
+    claimed: claims.length,
+    sources: claims.map((claim) => claim.source_id),
+  };
+}
+
+// Premium per-user background refresh. It owns an independent due window and
+// compare-and-set lock because detection-only catalogue refresh can outlive the
+// initiating cron request.
 async function cronRefreshDue(db: SupabaseClient) {
   const CADENCE_MS = 6 * 60 * 60 * 1000;   // premium cadence: every 6h
   const LOCK_TTL_MS = 12 * 60 * 1000;      // a stuck/crashed run frees after 12 min

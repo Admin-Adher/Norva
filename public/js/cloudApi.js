@@ -1117,11 +1117,11 @@
         history: {
             list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                 () => request('GET', `/history${query(params)}`)),
-            // Targeted single-title lookup (?itemId&itemType[&sourceId]) → { item } for
-            // cross-device resume-to-position. Same 'hist:' cache prefix as list so a
-            // save() invalidates it too. Params differ (itemId present) so no key clash.
-            getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
-                () => request('GET', `/history${query(params)}`)),
+            // Targeted single-title lookup is the authoritative cross-device
+            // resume read. Never cache it in one tab: another device cannot
+            // invalidate this process-local cache and would otherwise leave a
+            // just-saved position stale for up to HISTORY_TTL_MS.
+            getItem: (params = {}) => request('GET', `/history${query(params)}`),
             save: (item) => request('POST', '/history', item, { keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
             remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`).then((r) => { invalidateCache('hist'); return r; }),
             // Keyed removal (sourceId+itemId+itemType) — one round-trip, immune to the stale
@@ -1149,7 +1149,12 @@
         playback: {
             createSession: (session) => playbackRequest(session),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
-            expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
+            expireSession: (id, options = {}) => playbackSessionRequest(
+                'POST',
+                `/playback/sessions/${encodeURIComponent(id)}/expire`,
+                null,
+                options
+            ),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
             summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`),
             // Phase 3 AI subtitles (whisper transcript): read the cross-user cache state
@@ -1228,10 +1233,14 @@
             history: {
                 list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                     () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
-                // Targeted single-title lookup for a QR-paired screen (TV) — same cloud
-                // row as web/phone, reached with the device token. Returns { item }.
-                getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
-                    () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
+                // Same authoritative uncached read for paired TVs: a phone/web
+                // save cannot invalidate the TV process's local cache.
+                getItem: (params = {}) => request(
+                    'GET',
+                    `/device/history${query(params)}`,
+                    null,
+                    { token: getDeviceToken() }
+                ),
                 save: (item) => request('POST', '/device/history', item, { token: getDeviceToken(), keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
                 remove: (id) => request('DELETE', `/device/history/${encodeURIComponent(id)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; }),
                 removeByKeys: (params = {}) => request('DELETE', `/device/history${query(params)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; })

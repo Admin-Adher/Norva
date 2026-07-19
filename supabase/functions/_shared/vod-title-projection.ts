@@ -47,25 +47,26 @@ const DEFAULT_TMDB_VALIDATE_LIMIT = 120;
 // are well under it, so in practice every already-known title is filled in one pass.
 const REUSE_SCAN_CAP = 4000;
 
-// Phase B.2: key the tmdb/imdb id sub-cache on the SAME stable provider identity the playback path
-// uses (identity_id -> providerKey -> hostname), so mirrors of one panel share resolved ids instead of
-// fragmenting by hostname. Best-effort: any failure falls back to the hostname (old behaviour).
+// Key every cross-user exact-file cache on the same SERVER-WRITTEN identity as
+// playback. cloud_sources.config_hint is owner-editable and must never decide
+// which other tenants' cache rows a source may reuse. Sources that have not yet
+// accumulated enough imported IDs for identity resolution stay isolated on
+// their own source UUID until the sync engine writes the verified link.
 async function resolveProjectionCacheKey(
-  db: SupabaseClient, sourceId: string, userId: string, serverUrl: string,
+  db: SupabaseClient, sourceId: string, userId: string, _serverUrl: string,
 ): Promise<string> {
   try {
-    const { data } = await db.from("cloud_sources").select("config_hint")
-      .eq("id", sourceId).eq("user_id", userId).maybeSingle();
-    const hint = (data?.config_hint && typeof data.config_hint === "object") ? data.config_hint as JsonRecord : {};
-    const host = stringOr(hint.serverHost, "") || hostFromUrl(serverUrl);
-    const providerKey = stringOr(hint.providerKey, "");
-    if (!providerKey) return host;
-    const { data: idRow } = await db.from("catalog_provider_identities").select("identity_id")
-      .eq("provider_key", providerKey).maybeSingle();
-    const identityId = stringOr((idRow as JsonRecord | null)?.identity_id, "");
-    return identityId || providerKey;
+    const { data, error } = await db
+      .from("catalog_source_provider_identities")
+      .select("identity_id")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    const identityId = stringOr((data as JsonRecord | null)?.identity_id, "");
+    return identityId || `source:${sourceId}`;
   } catch (_) {
-    return hostFromUrl(serverUrl);
+    return `source:${sourceId}`;
   }
 }
 

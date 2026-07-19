@@ -301,12 +301,12 @@ export class ProviderSessionCoordinator {
     const ownerKey = stringOrNull(body.ownerKey ?? body.owner_key);
     const sourceKey = stringOrNull(body.sourceKey ?? body.source_key ?? body.sourceId ?? body.source_id);
 
-    const matches = state.active.filter((session) => {
-      if (playbackSessionId && session.playbackSessionId === playbackSessionId) return true;
-      if (gatewaySessionId && session.gatewaySessionId === gatewaySessionId) return true;
-      if (ownerKey && session.ownerKey === ownerKey && (!sourceKey || session.sourceKey === sourceKey)) return true;
-      return false;
-    });
+    const matches = state.active.filter((session) => matchesSessionEndRequest(session, {
+      playbackSessionId,
+      gatewaySessionId,
+      ownerKey,
+      sourceKey,
+    }));
 
     const gatewayExpired = await this.expireSessions(matches);
     const rawAborted = await this.expireRawPumps(matches.filter((session) => session.lane === "raw" && !session.gatewaySessionId));
@@ -374,11 +374,18 @@ export class ProviderSessionCoordinator {
   // or credentials). Mirrors expireSessions for the raw lane.
   async expireRawPumps(sessions) {
     if (!sessions.length || !this.env.NORVA_MEDIA_GATEWAY_URL || !this.env.NORVA_MEDIA_GATEWAY_TOKEN) return 0;
-    const owners = [...new Set(sessions.map((session) => session.ownerKey).filter(Boolean))];
+    // One coordinator is source-scoped, but one owner can legitimately stream
+    // another source at the same time. Expire only the exact playback byte-pipe.
+    const targets = [...new Map(sessions
+      .filter((session) => session.ownerKey && session.playbackSessionId)
+      .map((session) => [
+        `${session.ownerKey}:${session.playbackSessionId}`,
+        { ownerKey: session.ownerKey, playbackSessionId: session.playbackSessionId },
+      ])).values()];
     let aborted = 0;
-    await Promise.allSettled(owners.map(async (ownerKey) => {
+    await Promise.allSettled(targets.map(async ({ ownerKey, playbackSessionId }) => {
       const response = await fetch(
-        `${trimTrailingSlash(this.env.NORVA_MEDIA_GATEWAY_URL)}/raw-pumps?ownerKey=${encodeURIComponent(ownerKey)}`,
+        `${trimTrailingSlash(this.env.NORVA_MEDIA_GATEWAY_URL)}/raw-pumps?ownerKey=${encodeURIComponent(ownerKey)}&sid=${encodeURIComponent(playbackSessionId)}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${this.env.NORVA_MEDIA_GATEWAY_TOKEN}` },
@@ -1874,6 +1881,29 @@ function isConflictingSession(session, next) {
   if (session.sourceKey && next.sourceKey && session.sourceKey !== next.sourceKey) return false;
   if (next.deviceKey && session.deviceKey && next.deviceKey === session.deviceKey) return true;
   return true;
+}
+
+function matchesSessionEndRequest(session, request) {
+  if (!session) return false;
+  const playbackSessionId = stringOrNull(request?.playbackSessionId);
+  const gatewaySessionId = stringOrNull(request?.gatewaySessionId);
+  const ownerKey = stringOrNull(request?.ownerKey);
+  const sourceKey = stringOrNull(request?.sourceKey);
+
+  if (playbackSessionId && session.playbackSessionId === playbackSessionId) return true;
+  if (gatewaySessionId && session.gatewaySessionId === gatewaySessionId) return true;
+
+  // A caller that supplies an exact session id is ending only that generation.
+  // Falling through to owner/source matching here lets a delayed teardown for
+  // the old raw/engine session delete the replacement Gateway session that was
+  // just created for the same account and source.
+  if (playbackSessionId || gatewaySessionId) return false;
+
+  return Boolean(
+    ownerKey &&
+    session.ownerKey === ownerKey &&
+    (!sourceKey || session.sourceKey === sourceKey)
+  );
 }
 
 function publicSession(session) {

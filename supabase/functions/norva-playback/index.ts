@@ -384,6 +384,9 @@ async function createPlaybackSession(
       // All best-effort — never blocks or breaks playback.
       let audioTracks: Array<{ index: number; lang: string | null }> = [];
       let subtitleTracks: JsonRecord[] = [];
+      let audioLanguageVerified = false;
+      let audioLanguageVerifiedAt: string | null = null;
+      let audioLanguageVerification: JsonRecord = {};
       const titleRow = await resolveEngineAudioTitleRow(db, userId, sourceId, itemType, itemId, requestedPlaybackHint)
         .catch(() => null);
       let haveAudio = false;
@@ -402,7 +405,7 @@ async function createPlaybackSession(
       if (serverHost && fileExternalId) {
         try {
           const { data: fr } = await db.from("catalog_file_tracks")
-            .select("audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at")
+            .select("audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at, audio_lang_verified_at, audio_lang_verification")
             .eq("server_host", serverHost).eq("item_type", itemType).eq("external_id", fileExternalId)
             .maybeSingle();
           const fileRow = fr as JsonRecord | null;
@@ -412,6 +415,9 @@ async function createPlaybackSession(
                 .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) })).filter((t) => Number.isInteger(t.index));
               audioTracks = ga;
               haveAudio = true;
+              audioLanguageVerified = Boolean(fileRow.audio_lang_verified_at);
+              audioLanguageVerifiedAt = stringOrNull(fileRow.audio_lang_verified_at);
+              audioLanguageVerification = recordOrEmpty(fileRow.audio_lang_verification);
             }
             if (fileRow.subtitle_probed_at) {
               const gs = Array.isArray(fileRow.subtitle_tracks) ? fileRow.subtitle_tracks as JsonRecord[] : [];
@@ -518,6 +524,8 @@ async function createPlaybackSession(
               db, runtimeConfig: rc, userId, targetUrl, userAgent,
               audioTracks, titleId: titleRow.id, tmdbId: stringOrNull(titleRow.provider_tmdb_id),
               serverHost, itemType, fileExternalId, sessionId: session.id, expiresAt,
+              variantId: stringOrNull(titleRow.variant_id) || undefined,
+              fileScoped: Boolean(titleRow.variant_id),
             }));
           }
         }
@@ -547,7 +555,14 @@ async function createPlaybackSession(
           mode: "relay",
           url: pipe.url,
           tokenExpiresAt: expiresAt,
-          ...(audioTracks.length ? { audioTracks } : {}),
+          ...(audioTracks.length ? {
+            audioTracks: audioLanguageVerified
+              ? audioTracks
+              : audioTracks.map((track) => ({ ...track, lang: null })),
+            audioLanguageValidationStatus: audioLanguageVerified ? "verified" : "pending",
+            audioLanguageVerifiedAt,
+            audioLanguageVerification,
+          } : {}),
           ...(subtitleTracks.length ? { subtitleTracks } : {}),
         },
       };
@@ -606,16 +621,41 @@ async function createPlaybackSession(
     firstUsefulCodecProfile(requestedPlaybackHint.codecProfile, requestedPlaybackHint.codec_profile),
     recordOrEmpty(gateway.codecProfile),
   );
+  const gatewaySessionResponse = gateway.session && typeof gateway.session === "object"
+    ? {
+      ...gateway.session,
+      audioStreamIndex: gateway.audioStreamIndex ?? null,
+      audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
+      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
+      actualStartOffset: gateway.actualStartOffset ?? 0,
+      actual_start_offset: gateway.actualStartOffset ?? 0,
+      localSeekTarget: gateway.localSeekTarget ?? 0,
+      local_seek_target: gateway.localSeekTarget ?? 0,
+      sourceTimestamps: gateway.sourceTimestamps === true,
+      source_timestamps: gateway.sourceTimestamps === true,
+    }
+    : gateway.session;
   return {
     session,
     playback: {
       mode,
       status: gateway.status,
       url: gateway.hlsUrl,
-      gatewaySession: gateway.session,
+      gatewaySession: gatewaySessionResponse,
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
       audioMode: gateway.audioMode ?? null,
+      audioStreamIndex: gateway.audioStreamIndex ?? null,
+      audio_stream_index: gateway.audioStreamIndex ?? null,
+      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
+      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
+      actualStartOffset: gateway.actualStartOffset ?? 0,
+      actual_start_offset: gateway.actualStartOffset ?? 0,
+      localSeekTarget: gateway.localSeekTarget ?? 0,
+      local_seek_target: gateway.localSeekTarget ?? 0,
+      sourceTimestamps: gateway.sourceTimestamps === true,
+      source_timestamps: gateway.sourceTimestamps === true,
       codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
     },
   };
@@ -1186,7 +1226,9 @@ function mediaReadFromCatalog(): boolean {
   return (Deno.env.get("NORVA_CATALOG_MEDIA_READ_SOURCE") || "").trim() === "catalog_media_items";
 }
 
-// Provider identity for a source (non-secret, from config_hint). Cached in-isolate so
+// Provider identity for a source. The cross-tenant key comes only from the
+// server-written source→identity link; config_hint is owner-editable and is
+// retained solely for the tenant's configured host.
 // the playback path adds at most one lookup per source per isolate.
 //  - host: the configured provider hostname.
 //  - key:  the canonical CROSS-MIRROR cache key. Phase B: the STABLE provider IDENTITY id when the
@@ -1195,10 +1237,9 @@ function mediaReadFromCatalog(): boolean {
 //          (DNS aliases / reverse-proxies) for one Xtream panel, and the panel's category taxonomy
 //          drifts, so keying on either hostname or providerKey FRAGMENTS the cache. The identity id
 //          (resolved from stream-ID overlap, see docs/PROVIDER-IDENTITY-DEDUP.md §8) is invariant to
-//          both. Falls back to providerKey, then host, so an unresolved/deleted-provider source keeps
-//          the old behaviour exactly (defensive).
-//  - fingerprint: the raw providerKey (pre-identity). Kept so a read can fall back to the old key
-//          during the transition window before the cache backfill runs.
+//          both. An unresolved source falls back to a source-scoped key, never
+//          another tenant's providerKey/host cache row.
+//  - fingerprint: server-written provider fingerprint when available.
 const sourceIdentityCache = new Map<string, { host: string; key: string; fingerprint: string }>();
 async function resolveSourceIdentity(sourceId: string, userId: string, db: SupabaseClient): Promise<{ host: string; key: string; fingerprint: string }> {
   const cacheKey = `${userId}:${sourceId}`;
@@ -1212,22 +1253,20 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
     .maybeSingle();
   const hint = recordOrEmpty(data?.config_hint);
   const host = stringOr(hint.serverHost, "");
-  const providerKey = stringOr(hint.providerKey, "");
-  let key = providerKey || host;
-  if (providerKey) {
-    // Upgrade to the canonical identity id when this fingerprint resolves to one (Phase B). A missing
-    // identity (unresolved / deleted provider) simply keeps the providerKey — no regression.
-    try {
-      const { data: idRow } = await db
-        .from("catalog_provider_identities")
-        .select("identity_id")
-        .eq("provider_key", providerKey)
-        .maybeSingle();
-      const identityId = stringOr((idRow as JsonRecord | null)?.identity_id, "");
-      if (identityId) key = identityId;
-    } catch (_) { /* keep the providerKey fallback */ }
-  }
-  const identity = { host, key, fingerprint: providerKey || host };
+  let identityId = "";
+  let providerKey = "";
+  try {
+    const { data: verifiedLink } = await db
+      .from("catalog_source_provider_identities")
+      .select("identity_id,provider_key")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    identityId = stringOr((verifiedLink as JsonRecord | null)?.identity_id, "");
+    providerKey = stringOr((verifiedLink as JsonRecord | null)?.provider_key, "");
+  } catch (_) { /* rolling migration: use the tenant-scoped fallback */ }
+  const key = identityId || `source:${sourceId}`;
+  const identity = { host, key, fingerprint: providerKey || key };
   sourceIdentityCache.set(cacheKey, identity);
   return identity;
 }
@@ -1236,11 +1275,11 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
 async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
   return (await resolveSourceIdentity(sourceId, userId, db)).host;
 }
-// Cross-mirror cache key for catalog_file_tracks. Falls back to the stream URL host when
-// the source has neither providerKey nor serverHost (rare; preserves old behaviour).
-async function resolveFileTracksKey(sourceId: string, userId: string, db: SupabaseClient, fallbackUrl: string): Promise<string> {
+// Cross-mirror cache key for catalog_file_tracks. The fallback is source-scoped,
+// so an owner-editable host cannot authorize a cross-tenant cache read/write.
+async function resolveFileTracksKey(sourceId: string, userId: string, db: SupabaseClient, _fallbackUrl: string): Promise<string> {
   const { key } = await resolveSourceIdentity(sourceId, userId, db);
-  return key || hostFromUrl(fallbackUrl);
+  return key || `source:${sourceId}`;
 }
 
 // Anti-ban footprint policy for a source's provider identity. Returns null unless the identity
@@ -1544,6 +1583,11 @@ async function createGatewaySession(
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    const audioStreamIndex = boundedNullableInt(
+      playbackHint.audioStreamIndex ?? playbackHint.audio_stream_index,
+      0,
+      1024,
+    );
     const { data, error } = await db
       .from("cloud_gateway_sessions")
       .insert({
@@ -1556,7 +1600,17 @@ async function createGatewaySession(
       .select("*")
       .single();
     if (error) throwDb(error, "Unable to create pending gateway session");
-    return { status: "pending", session: data, hlsUrl: null, startupMs: null };
+    return {
+      status: "pending",
+      session: data,
+      hlsUrl: null,
+      startupMs: null,
+      audioStreamIndex,
+      requestedSeekOffset: gatewayHints.seekOffset ?? 0,
+      actualStartOffset: gatewayHints.seekOffset ?? 0,
+      localSeekTarget: 0,
+      sourceTimestamps: false,
+    };
   }
 
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -1588,6 +1642,42 @@ async function createGatewaySession(
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
   const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
+  // The gateway resolves the absolute ffmpeg stream index it actually mapped.
+  // Preserve it end-to-end so the player can distinguish the requested track
+  // from the browser/HLS default and avoid relabeling English as French.
+  const audioStreamIndex = boundedNullableInt(
+    gatewayBody.audioStreamIndex ??
+      gatewayBody.audio_stream_index ??
+      gatewayHints.audioStreamIndex ??
+      gatewayHints.audio_stream_index,
+    0,
+    1024,
+  );
+  const requestedSeekOffset = boundedNullableNumber(
+    gatewayBody.requestedSeekOffset ??
+      gatewayBody.requested_seek_offset ??
+      gatewayBody.seekOffset ??
+      gatewayBody.seek_offset ??
+      gatewayHints.seekOffset,
+    0,
+    24 * 60 * 60,
+  ) ?? 0;
+  const actualStartOffset = boundedNullableNumber(
+    gatewayBody.actualStartOffset ??
+      gatewayBody.actual_start_offset ??
+      requestedSeekOffset,
+    0,
+    24 * 60 * 60,
+  ) ?? requestedSeekOffset;
+  const localSeekTarget = boundedNullableNumber(
+    gatewayBody.localSeekTarget ??
+      gatewayBody.local_seek_target ??
+      Math.max(0, requestedSeekOffset - actualStartOffset),
+    0,
+    24 * 60 * 60,
+  ) ?? Math.max(0, requestedSeekOffset - actualStartOffset);
+  const sourceTimestamps = gatewayBody.sourceTimestamps === true
+    || gatewayBody.source_timestamps === true;
   const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
 
   const { data, error } = await db
@@ -1604,7 +1694,19 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, audioMode, codecProfile };
+  return {
+    status: data.status,
+    session: data,
+    hlsUrl: data.hls_url,
+    startupMs,
+    audioMode,
+    audioStreamIndex,
+    requestedSeekOffset,
+    actualStartOffset,
+    localSeekTarget,
+    sourceTimestamps,
+    codecProfile,
+  };
 }
 
 async function requestGatewaySession(
@@ -2156,12 +2258,21 @@ function choosePlaybackMode(requestedMode: string, body: JsonRecord) {
 
 // ISO-639-2/local -> ISO-639-1 for the audio_languages column.
 function normalizeIsoLang(value: string | null): string | null {
-  const v = String(value || "").toLowerCase().trim();
-  if (!v || v === "und") return null;
+  const v = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
+  if (!v || ["und", "mis", "mul", "zxx", "nar"].includes(v)) return null;
   const map: Record<string, string> = {
-    fre: "fr", fra: "fr", eng: "en", ger: "de", deu: "de", spa: "es", ita: "it",
-    por: "pt", dut: "nl", nld: "nl", ara: "ar", rus: "ru", tur: "tr", pol: "pl",
-    hin: "hi", jpn: "ja", kor: "ko", zho: "zh", chi: "zh",
+    alb: "sq", sqi: "sq", ara: "ar", arm: "hy", hye: "hy", baq: "eu", eus: "eu",
+    ben: "bn", bos: "bs", bul: "bg", bur: "my", mya: "my", cat: "ca",
+    chi: "zh", zho: "zh", cze: "cs", ces: "cs", dan: "da", dut: "nl", nld: "nl",
+    eng: "en", est: "et", fil: "tl", fin: "fi", fre: "fr", fra: "fr",
+    geo: "ka", kat: "ka", ger: "de", deu: "de", gre: "el", ell: "el",
+    heb: "he", hin: "hi", hrv: "hr", hun: "hu", ice: "is", isl: "is",
+    ind: "id", ita: "it", jpn: "ja", kor: "ko", lav: "lv", lit: "lt",
+    mac: "mk", mkd: "mk", may: "ms", msa: "ms", nob: "no", nor: "no",
+    per: "fa", fas: "fa", pol: "pl", por: "pt", rum: "ro", ron: "ro",
+    rus: "ru", slo: "sk", slk: "sk", slv: "sl", spa: "es", srp: "sr",
+    swe: "sv", tam: "ta", tel: "te", tha: "th", tur: "tr", ukr: "uk",
+    urd: "ur", vie: "vi",
   };
   const code = map[v] || v;
   return /^[a-z]{2}$/.test(code) ? code : null;
@@ -2288,8 +2399,9 @@ async function shareFileTracks(
   subtitleTracks: JsonRecord[],
   hasAudio: boolean,
   hasSubtitle: boolean,
-): Promise<void> {
-  if (!serverHost || !externalId || (!hasAudio && !hasSubtitle)) return;
+  audioValidationWrite = false,
+): Promise<boolean> {
+  if (!serverHost || !externalId || (!hasAudio && !hasSubtitle)) return false;
   const args = {
     p_server_host: serverHost,
     p_item_type: itemType,
@@ -2299,8 +2411,79 @@ async function shareFileTracks(
     p_has_audio: hasAudio,
     p_has_subtitle: hasSubtitle,
   };
-  try { await db.rpc("upsert_catalog_file_tracks", args); } catch (_) { /* best-effort global cache */ }
-  try { await db.rpc("fanout_file_tracks_to_users", args); } catch (_) { /* best-effort fan-out */ }
+  try {
+    await db.rpc(
+      audioValidationWrite ? "upsert_catalog_file_validated_tracks" : "upsert_catalog_file_tracks",
+      args,
+    );
+  } catch (_) { /* best-effort global cache */ }
+  // Fanout must use the canonical row after the upsert. Once speech validation
+  // corrected a bad container tag, a later raw ffprobe may still report that
+  // stale tag; forwarding the raw arguments would re-poison every owner even
+  // when the canonical cache correctly preserved the verified language.
+  let canonicalArgs = args;
+  try {
+    const { data: canonical } = await db.from("catalog_file_tracks")
+      .select("audio_tracks,subtitle_tracks,audio_probed_at,subtitle_probed_at")
+      .eq("server_host", serverHost)
+      .eq("item_type", itemType)
+      .eq("external_id", externalId)
+      .maybeSingle();
+    const row = canonical as JsonRecord | null;
+    if (row) {
+      canonicalArgs = {
+        ...args,
+        p_audio_tracks: Array.isArray(row.audio_tracks) ? row.audio_tracks : audioTracks,
+        p_subtitle_tracks: Array.isArray(row.subtitle_tracks) ? row.subtitle_tracks : subtitleTracks,
+        p_has_audio: hasAudio && Boolean(row.audio_probed_at),
+        p_has_subtitle: hasSubtitle && Boolean(row.subtitle_probed_at),
+      };
+    }
+  } catch (_) { /* rolling migration fallback uses the submitted map */ }
+  try {
+    const { data, error } = await db.rpc("fanout_file_tracks_to_users", canonicalArgs);
+    return !error && Number(data) > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Distributed crawler lease: provider_account_busy protects human playback,
+// while this prevents two autonomous workers from probing one canonical provider
+// identity at the same time. Fail-open during a rolling migration so an older DB
+// cannot take the whole enrichment fleet down; the viewer lock still applies.
+async function claimProviderFileProbe(
+  db: SupabaseClient,
+  identityKey: string,
+  owner: string,
+  ttlSeconds = 150,
+): Promise<boolean> {
+  if (!identityKey || !owner) return true;
+  try {
+    const { data, error } = await db.rpc("claim_provider_file_probe", {
+      p_identity_key: identityKey,
+      p_lease_owner: owner,
+      p_ttl_seconds: Math.max(30, Math.min(900, Math.round(ttlSeconds))),
+    });
+    if (error) return true;
+    return data === true;
+  } catch (_) {
+    return true;
+  }
+}
+
+async function releaseProviderFileProbe(
+  db: SupabaseClient,
+  identityKey: string,
+  owner: string,
+): Promise<void> {
+  if (!identityKey || !owner) return;
+  try {
+    await db.rpc("release_provider_file_probe", {
+      p_identity_key: identityKey,
+      p_lease_owner: owner,
+    });
+  } catch (_) { /* lease expiry is the crash-safe fallback */ }
 }
 
 // Keep a best-effort task alive past the response on Supabase Edge (background work) without
@@ -2325,7 +2508,14 @@ async function detectUntaggedAudioLanguages(opts: {
   userId: string;
   targetUrl: string;
   userAgent: string | null;
-  audioTracks: Array<{ index: number; lang: string | null }>;
+  audioTracks: Array<{
+    index: number;
+    lang: string | null;
+    lidAttemptedAt?: string | null;
+    lidVerdict?: string | null;
+    speechVerifiedAt?: string | null;
+    speechVerdict?: string | null;
+  }>;
   titleId: string;
   tmdbId: string | null;
   serverHost: string;
@@ -2333,52 +2523,147 @@ async function detectUntaggedAudioLanguages(opts: {
   fileExternalId: string;
   sessionId: string;
   expiresAt: string;
+  variantId?: string;
+  fileScoped?: boolean;
 }): Promise<void> {
-  const { db, runtimeConfig, userId, targetUrl, userAgent, audioTracks, titleId, tmdbId, serverHost, itemType, fileExternalId, sessionId, expiresAt } = opts;
+  const {
+    db, runtimeConfig, userId, targetUrl, userAgent, audioTracks, titleId, tmdbId,
+    serverHost, itemType, fileExternalId, sessionId, expiresAt, variantId,
+    fileScoped = false,
+  } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
-  const untagged = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index)).slice(0, 5);
-  if (!untagged.length) return;
+  const unknownTracks = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index));
+  if (!unknownTracks.length) return;
+  // Strict consensus already opens at least four bounded clips. Persist one per-track cursor
+  // per invocation so the Edge/provider budget cannot grow with track count.
+  const pending = unknownTracks.filter((t) => !t.lidAttemptedAt).slice(0, 1);
 
   // Gateway byte-pipe token → derive the /detect-language base from the /raw URL. The gateway
   // extracts a WAV per track, runs whisper.cpp + a transcript detector locally (no paid API,
   // no relay round-trip), and returns the language. ENRICH-only.
-  let detectBase: string;
-  try {
-    const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
-    detectBase = pipe.url.replace("/raw/", "/detect-language/");
-  } catch (_) { return; }
-
-  const byIndex = new Map(audioTracks.map((t) => [t.index, t]));
-  let filled = 0;
-  for (const t of untagged) {
+  const nowIso = new Date().toISOString();
+  if (pending.length) {
     try {
-      const res = await fetch(`${detectBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(90_000) });
-      if (!res.ok) continue;
+      const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
+      const detectBase = pipe.url.replace("/raw/", "/detect-language/");
+      const track = pending[0];
+      const res = await fetch(
+        `${detectBase}?index=${track.index}&dur=30&consensus=4&strict=1`,
+        { signal: AbortSignal.timeout(480_000) },
+      );
+      // Transport/provider failures are not observations. Leave the cursor due
+      // instead of suppressing this unknown track for 30 days.
+      if (!res.ok) return;
       const det = await res.json().catch(() => null) as JsonRecord | null;
       const lang = normalizeIsoLang(stringOrNull(det?.language));
-      if (lang) { const entry = byIndex.get(t.index); if (entry) { entry.lang = lang; filled++; } }
-    } catch (_) { /* best-effort per track */ }
-  }
-  const nowIso = new Date().toISOString();
-  if (!filled) {
-    // Mark attempted even on no-detection (silent/music/undetectable) so the backfill queue
-    // advances instead of re-trying this file every tick. 30d retry window (see the candidate
-    // query) lets a future detector improvement re-attempt it.
-    try { await db.from("cloud_titles").update({ whisper_attempted_at: nowIso }).eq("user_id", userId).eq("id", titleId); } catch (_) { /* best-effort */ }
-    return;
+      const words = Number(det?.wordCount ?? 0);
+      track.lidAttemptedAt = nowIso;
+      if (
+        lang &&
+        det?.confident === true &&
+        det?.verified === true &&
+        stringOr(det?.validationStatus, "") === "verified" &&
+        stringOr(det?.method, "") === "whisper-strict-consensus-v4" &&
+        Number(det?.consensus ?? 0) >= 4 &&
+        Number(det?.sampleCount ?? 0) >= 4 &&
+        Number(det?.rejectedSpeechSampleCount ?? -1) === 0 &&
+        Number(det?.minSampleProbability ?? 0) >= 0.95 &&
+        Number(det?.minSampleWordCount ?? words) >= 12 &&
+        Number(det?.minSampleUniqueWordCount ?? 0) >= 8
+      ) {
+        track.lang = lang;
+        track.lidVerdict = "verified";
+        track.speechVerifiedAt = nowIso;
+        track.speechVerdict = "detected";
+      } else {
+        track.lidVerdict = "pending";
+      }
+    } catch (_) {
+      return;
+    }
   }
 
-  const enriched = audioTracks.map((t) => ({ index: t.index, lang: t.lang ?? null }));
+  const complete = unknownTracks.every((t) => Boolean(t.lang || t.lidAttemptedAt));
+  const enriched = audioTracks.map((t) => ({
+    index: t.index,
+    lang: t.lang ?? null,
+    ...(!complete && t.lidAttemptedAt
+      ? { lidAttemptedAt: t.lidAttemptedAt, lidVerdict: t.lidVerdict ?? null }
+      : {}),
+    ...(t.speechVerifiedAt && t.speechVerdict === "detected"
+      ? { speechVerifiedAt: t.speechVerifiedAt, speechVerdict: t.speechVerdict }
+      : {}),
+  }));
   const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
-  try {
-    await db.from("cloud_titles")
-      .update({ audio_tracks: enriched, audio_languages: codes, audio_probed_at: nowIso, whisper_attempted_at: nowIso })
-      .eq("user_id", userId).eq("id", titleId);
-    if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
-      try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
-    }
-  } catch (_) { /* best-effort persist */ }
-  try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false); } catch (_) { /* best-effort */ }
+  if (fileScoped) {
+    const persisted = await shareFileTracks(
+      db,
+      serverHost,
+      itemType,
+      fileExternalId,
+      enriched,
+      [],
+      true,
+      false,
+      true,
+    );
+    // Do not remove the candidate from the queue until the exact-file cache and
+    // tenant fanout actually accepted the detected map.
+    if (!persisted) return;
+  } else {
+    try {
+      await db.from("cloud_titles").update({
+        audio_tracks: enriched,
+        audio_languages: codes,
+        audio_probed_at: nowIso,
+        ...(complete && !enriched.some((t) => !t.lang) ? { whisper_attempted_at: nowIso } : {}),
+      })
+        .eq("user_id", userId).eq("id", titleId);
+    } catch (_) { /* best-effort legacy title persist */ }
+  }
+  if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+    try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
+  }
+  if (!fileScoped) {
+    try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false, true); } catch (_) { /* best-effort */ }
+  }
+  if (!complete) return;
+
+  const pendingCount = enriched.filter((t) => !t.lang).length;
+  const completed = pendingCount === 0;
+  const retryAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  if (fileScoped && variantId) {
+    try {
+      const { data, error } = await db.rpc("record_catalog_file_audio_whisper_outcome", {
+        p_server_host: serverHost,
+        p_item_type: itemType,
+        p_external_id: fileExternalId,
+        p_completed: completed,
+        p_attempted_at: nowIso,
+        p_retry_at: completed ? null : retryAt,
+        p_provenance: {
+          method: "whisper-strict-consensus-v4",
+          status: completed ? "verified" : "pending",
+          consensus: 4,
+          sampleCount: 4,
+          allConfiguredWindowsScanned: true,
+          minWhisperProbability: 0.95,
+          minWordsPerSample: 12,
+          minUniqueWordsPerSample: 8,
+          trackCount: unknownTracks.length,
+          pendingCount,
+          attemptedAt: nowIso,
+        },
+      });
+      if (error || data !== true) {
+        await db.from("cloud_title_variants")
+          .update(completed
+            ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: null }
+            : { audio_whisper_retry_at: retryAt })
+          .eq("user_id", userId).eq("id", variantId);
+      }
+    } catch (_) { /* rolling migration fallback retries naturally */ }
+  }
 }
 
 // Verify TAGGED-but-contradictory tracks (mistagged containers — "German" on a French film).
@@ -2386,17 +2671,21 @@ async function detectUntaggedAudioLanguages(opts: {
 // and whisper LID only ever ran on UNTAGGED tracks, so a wrong tag was permanent and
 // user-visible (player audio menu prefers cloud audio_tracks; language filters use
 // audio_languages). This listens to the ACTUAL speech via the gateway's whisper.cpp and
-// rewrites the track lang when the verdict is confident (≥4 clear words).
-// Returns "corrected" | "confirmed" | "unclear" — or null on a TRANSIENT failure (byte-pipe
+// rewrites the track lang only after four separated, high-confidence speech windows agree.
+// Returns "corrected" | "confirmed" | "pending" — or null on a TRANSIENT failure (byte-pipe
 // down, every clip 503/timeout), which must NOT mark the title verified (retry next tick).
-// "unclear" (silence/music at the sampled offsets) IS marked — re-listening soon won't do
-// better, and unmarked rows would clog the cursor-less verify queue head forever.
+// A non-verdict is a retryable "pending" state, never a guessed language.
 async function verifyTaggedAudioLanguages(opts: {
   db: SupabaseClient;
   runtimeConfig: RuntimeConfig;
   userId: string;
   targetUrl: string;
-  audioTracks: Array<{ index: number; lang: string | null }>;
+  audioTracks: Array<{
+    index: number;
+    lang: string | null;
+    speechVerifiedAt?: string | null;
+    speechVerdict?: string | null;
+  }>;
   suspectLangs: string[];
   titleId: string;
   tmdbId: string | null;
@@ -2404,53 +2693,198 @@ async function verifyTaggedAudioLanguages(opts: {
   itemType: string;
   fileExternalId: string;
   expiresAt: string;
-}): Promise<"corrected" | "confirmed" | "unclear" | null> {
-  const { db, runtimeConfig, userId, targetUrl, audioTracks, suspectLangs, titleId, tmdbId, serverHost, itemType, fileExternalId, expiresAt } = opts;
+  variantId?: string;
+  fileScoped?: boolean;
+}): Promise<"corrected" | "confirmed" | "pending" | "partial" | null> {
+  const {
+    db, runtimeConfig, userId, targetUrl, audioTracks, suspectLangs, titleId,
+    tmdbId, serverHost, itemType, fileExternalId, expiresAt, variantId,
+    fileScoped = false,
+  } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
   const nowIso = new Date().toISOString();
-  const markVerified = async (extra: JsonRecord = {}) => {
+  const recordVerification = async (
+    verified: boolean,
+    provenance: JsonRecord,
+    extra: JsonRecord = {},
+  ) => {
+    const retryAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
     try {
-      await db.from("cloud_titles").update({ audio_lang_verified_at: nowIso, ...extra })
-        .eq("user_id", userId).eq("id", titleId);
+      if (fileScoped && variantId) {
+        await db.rpc("record_catalog_file_audio_verification", {
+          p_server_host: serverHost,
+          p_item_type: itemType,
+          p_external_id: fileExternalId,
+          p_verified: verified,
+          p_verified_at: nowIso,
+          p_retry_at: verified ? null : retryAt,
+          p_provenance: provenance,
+        });
+        const { data: localMarked, error: localError } = await db.rpc(
+          "mark_cloud_title_file_audio_verification",
+          {
+            p_user_id: userId,
+            p_variant_id: variantId,
+            p_file_external_id: fileExternalId,
+            p_verified: verified,
+            p_verified_at: nowIso,
+            p_provenance: provenance,
+          },
+        );
+        // Rolling-migration/cache-miss fallback remains exact-tenant scoped.
+        if (localError || localMarked !== true) {
+          await db.from("cloud_title_variants")
+            .update(verified
+              ? { audio_lang_verified_at: nowIso, audio_lang_verify_retry_at: null }
+              : { audio_lang_verified_at: null, audio_lang_verify_retry_at: retryAt })
+            .eq("user_id", userId).eq("id", variantId);
+        }
+      } else if (verified) {
+        await db.from("cloud_titles").update({ audio_lang_verified_at: nowIso, ...extra })
+          .eq("user_id", userId).eq("id", titleId);
+      } else if (Object.keys(extra).length) {
+        await db.from("cloud_titles").update(extra)
+          .eq("user_id", userId).eq("id", titleId);
+      }
     } catch (_) { /* best-effort marker */ }
   };
-  const suspects = audioTracks.filter((t) => t.lang && suspectLangs.includes(t.lang) && Number.isInteger(t.index)).slice(0, 2);
-  if (!suspects.length) { await markVerified(); return "confirmed"; } // summary/map disagree — nothing to listen to
+  const taggedTracks = audioTracks.filter(
+    (t) => t.lang && suspectLangs.includes(t.lang) && Number.isInteger(t.index),
+  );
+  // Large multi-audio releases are verified over several bounded jobs. The
+  // per-track cursor is stored only until the whole file has been sampled.
+  // One track is already at least four provider reads under strict consensus. Keep a hard
+  // per-invocation bound and persist the cursor; the fleet resumes this exact
+  // file on the next tick without risking an Edge timeout or provider lock.
+  const suspects = taggedTracks.filter((t) => !t.speechVerifiedAt).slice(0, 1);
+  const finalizeVerification = async (extra: JsonRecord = {}) => {
+    const confirmedCount = taggedTracks.filter((t) => t.speechVerdict === "confirmed").length;
+    const correctedCount = taggedTracks.filter((t) => t.speechVerdict === "corrected").length;
+    const pendingVerdictCount = taggedTracks.filter((t) => t.speechVerdict === "pending").length;
+    const detectedCount = taggedTracks.filter((t) => t.speechVerdict === "detected").length;
+    const pendingCount = taggedTracks.filter(
+      (t) => !t.speechVerifiedAt ||
+        !["confirmed", "corrected", "detected", "pending"].includes(String(t.speechVerdict || "")),
+    ).length;
+    const verified = taggedTracks.length > 0 &&
+      pendingCount === 0 &&
+      pendingVerdictCount === 0 &&
+      audioTracks.every((track) => Boolean(track.lang)) &&
+      confirmedCount + correctedCount + detectedCount === taggedTracks.length;
+    await recordVerification(verified, {
+      method: "whisper-strict-consensus-v4",
+      status: verified ? "verified" : "pending",
+      consensus: 4,
+      sampleCount: 4,
+      allConfiguredWindowsScanned: true,
+      minWhisperProbability: 0.95,
+      minWordsPerSample: 12,
+      minUniqueWordsPerSample: 8,
+      trackCount: taggedTracks.length,
+      confirmedCount,
+      correctedCount,
+      detectedCount,
+      pendingVerdictCount,
+      pendingCount,
+      attemptedAt: nowIso,
+    }, extra);
+    if (!verified) return "pending" as const;
+    return correctedCount > 0 ? "corrected" as const : "confirmed" as const;
+  };
+  if (!suspects.length) return await finalizeVerification();
   let detectBase: string;
   try {
     const pipe = await createBytePipeAccess("whisper-verify", userId, targetUrl, expiresAt, db, null);
     detectBase = pipe.url.replace("/raw/", "/detect-language/");
   } catch (_) { return null; }
 
-  let changed = false, confirmedTracks = 0, silent = 0, transient = 0;
+  let changed = false, confirmedTracks = 0, pendingTracks = 0, transient = 0, attempted = 0;
   for (const t of suspects) {
     try {
-      const res = await fetch(`${detectBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(90_000) });
+      const res = await fetch(
+        `${detectBase}?index=${t.index}&dur=30&consensus=4&strict=1`,
+        { signal: AbortSignal.timeout(480_000) },
+      );
       if (!res.ok) { transient++; continue; } // incl. the gateway's 503 account-slot-busy
       const det = await res.json().catch(() => null) as JsonRecord | null;
       const lang = normalizeIsoLang(stringOrNull(det?.language));
       const words = Number(det?.wordCount ?? 0);
-      if (!lang || words < 4) { silent++; continue; }   // no clear speech at the sampled offsets
-      if (lang === t.lang) { confirmedTracks++; continue; } // the tag was right after all
-      t.lang = lang; changed = true;                    // the spoken language wins
+      if (
+        !lang ||
+        det?.confident !== true ||
+        det?.verified !== true ||
+        stringOr(det?.validationStatus, "") !== "verified" ||
+        stringOr(det?.method, "") !== "whisper-strict-consensus-v4" ||
+        Number(det?.consensus ?? 0) < 4 ||
+        Number(det?.sampleCount ?? 0) < 4 ||
+        Number(det?.rejectedSpeechSampleCount ?? -1) !== 0 ||
+        Number(det?.minSampleProbability ?? 0) < 0.95 ||
+        Number(det?.minSampleWordCount ?? words) < 12 ||
+        Number(det?.minSampleUniqueWordCount ?? 0) < 8
+      ) {
+        t.speechVerifiedAt = nowIso;
+        t.speechVerdict = "pending";
+        attempted++;
+        pendingTracks++;
+        continue;
+      }
+      t.speechVerifiedAt = nowIso;
+      t.speechVerdict = lang === t.lang ? "confirmed" : "corrected";
+      attempted++;
+      if (lang === t.lang) { confirmedTracks++; continue; }
+      t.lang = lang;
+      changed = true;
     } catch (_) { transient++; }
   }
 
-  if (changed) {
-    const enriched = audioTracks.map((t) => ({ index: t.index, lang: t.lang ?? null }));
+  {
+    if (!attempted) {
+      if (transient > 0) return null;
+      return "pending";
+    }
+    const complete = taggedTracks.every((t) => Boolean(t.speechVerifiedAt));
+    // Keep the cursor while a large file is partial; strip it once complete so
+    // the variant-level 90-day recheck can sample every track again.
+    const enriched = audioTracks.map((t) => ({
+      index: t.index,
+      lang: t.lang ?? null,
+      ...(!complete && t.speechVerifiedAt
+        ? { speechVerifiedAt: t.speechVerifiedAt, speechVerdict: t.speechVerdict ?? null }
+        : {}),
+    }));
     const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
-    await markVerified({ audio_tracks: enriched, audio_languages: codes });
+    if (fileScoped) {
+      const persisted = await shareFileTracks(
+        db,
+        serverHost,
+        itemType,
+        fileExternalId,
+        enriched,
+        [],
+        true,
+        false,
+        true,
+      );
+      if (!persisted) return null;
+    } else if (!complete) {
+      try {
+        await db.from("cloud_titles").update({ audio_tracks: enriched })
+          .eq("user_id", userId).eq("id", titleId);
+      } catch (_) { return null; }
+    }
     // NOTE: the global mirror is a race-safe UNION — it gains the corrected lang but cannot
     // unlearn the wrong one (union semantics protect other panels' genuinely-foreign files).
-    if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+    if (changed && codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
       try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort */ }
     }
-    try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false); } catch (_) { /* best-effort */ }
-    return "corrected";
+    if (!fileScoped) {
+      try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false, true); } catch (_) { /* best-effort */ }
+    }
+    if (!complete) return "partial";
+    return await finalizeVerification(
+      fileScoped ? {} : { audio_tracks: enriched, audio_languages: codes },
+    );
   }
-  if (!confirmedTracks && !silent) return null;          // pure transport failure → retry next tick
-  await markVerified();
-  return confirmedTracks && !silent ? "confirmed" : "unclear";
 }
 
 // Resolve the parent title plus the exact variant codec profile. The parent is
@@ -4054,6 +4488,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       return { mode: "whisper", skipped: "pregen-active", processed: 0, candidates: 0, detected: 0 };
     }
     await bumpEnrichmentHeartbeat(db, userId);
+    const fileWhisperScope = body.fileScope !== false;
+    const speechTarget = ["tagged", "untagged"].includes(stringOr(body.speechTarget, ""))
+      ? stringOr(body.speechTarget, "")
+      : "";
 
     // ── Phase VERIFY (fix "German tag on a French film", "Bangla tag on a Hindi film") ──
     // Container tags that contradict strong signals — whisper listens to the actual speech
@@ -4067,24 +4505,30 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     // BEFORE the untagged phase. 90d re-verify window; best-effort throughout.
     const explicitVerifyIds = Array.isArray(body.verifyTitleIds)
       ? (body.verifyTitleIds as unknown[]).map(String).filter(Boolean).slice(0, 10) : [];
-    const verifyLimit = explicitVerifyIds.length
-      ? explicitVerifyIds.length
+    const verifyLimit = speechTarget === "untagged"
+      ? 0
+      : explicitVerifyIds.length
+      ? Math.min(100, explicitVerifyIds.length * 32)
       : Math.max(0, Math.min(Number(body.verifyLimit ?? Math.ceil(limit / 2)), 6));
-    let verified = 0, corrected = 0;
+    let verified = 0, corrected = 0, pendingVerification = 0, verificationWork = 0;
     if (verifyLimit > 0) {
       try {
         const verifyRetryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
         // Per-panel crons (sourceId set) filter AFTER resolving variants → over-fetch.
-        const overFetch = sourceId ? verifyLimit * 5 : verifyLimit;
-        const { data: srows } = explicitVerifyIds.length
-          ? await db.from("cloud_titles")
-              .select("id, default_variant_id, provider_tmdb_id, audio_tracks, audio_languages")
-              .eq("user_id", userId).eq("item_type", itemType)
-              .in("id", explicitVerifyIds)
-              .not("audio_tracks", "is", null)
-          : await db.rpc("audio_tag_suspects", {
-              p_user: userId, p_item_type: itemType, p_limit: overFetch, p_retry_before: verifyRetryBefore,
-            });
+        const { data: srows } = fileWhisperScope
+          ? await db.rpc("file_audio_tag_suspect_variants", {
+              p_user: userId,
+              p_source: sourceId || null,
+              p_limit: verifyLimit,
+              p_retry_before: verifyRetryBefore,
+              p_title_ids: explicitVerifyIds.length ? explicitVerifyIds : null,
+            })
+            : await db.rpc("audio_tag_suspects", {
+                p_user: userId,
+                p_item_type: itemType,
+                p_limit: sourceId ? verifyLimit * 5 : verifyLimit,
+                p_retry_before: verifyRetryBefore,
+              });
         const suspectsAll = (srows ?? []) as JsonRecord[];
         const svIds = suspectsAll.map((t) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
         const svById = new Map<string, JsonRecord>();
@@ -4092,9 +4536,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", svIds);
           for (const v of vs ?? []) svById.set(String(v.id), v as JsonRecord);
         }
-        const vExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        const vExp = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        const verifyLeaseOwner = `verify:${crypto.randomUUID()}`;
         for (const t of suspectsAll) {
-          if (verified >= verifyLimit) break;
+          if (verificationWork >= 1 || verified >= verifyLimit) break;
           const variant = t.default_variant_id ? svById.get(String(t.default_variant_id)) : null;
           if (!variant) continue;
           const vSourceId = stringOr(variant.source_id, "");
@@ -4115,42 +4560,94 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             if (ak) { try { const { data: b } = await db.rpc("provider_account_busy", { p_key: ak }); if (b === true) continue; } catch (_) { /* fail-open */ } }
           }
           const tracks = ((t.audio_tracks as JsonRecord[]) || [])
-            .map((x) => ({ index: Number(x?.index), lang: stringOrNull(x?.lang) }))
+            .map((x) => ({
+              index: Number(x?.index),
+              lang: normalizeIsoLang(stringOrNull(x?.lang)),
+              speechVerifiedAt: stringOrNull(x?.speechVerifiedAt ?? x?.speech_verified_at),
+              speechVerdict: stringOrNull(x?.speechVerdict ?? x?.speech_verdict),
+            }))
             .filter((x) => Number.isInteger(x.index));
-          const outcome = await verifyTaggedAudioLanguages({
-            db, runtimeConfig, userId, targetUrl, audioTracks: tracks,
-            suspectLangs: [...new Set(tracks.map((x) => x.lang).filter((l): l is string => Boolean(l) && l !== "fr"))],
-            titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
-            serverHost: await resolveFileTracksKey(vSourceId, userId, db, targetUrl),
-            itemType: vit, fileExternalId: externalId, expiresAt: vExp,
-          });
-          if (outcome) verified += 1;
+          const identityKey = (await resolveSourceIdentity(vSourceId, userId, db)).key;
+          if (!await claimProviderFileProbe(db, identityKey, verifyLeaseOwner, 900)) continue;
+          let outcome: "corrected" | "confirmed" | "pending" | "partial" | null = null;
+          try {
+            outcome = await verifyTaggedAudioLanguages({
+              db, runtimeConfig, userId, targetUrl, audioTracks: tracks,
+              // Every tagged language is eligible: a provider tag saying French
+              // can itself be wrong (the user's concrete French→Italian case).
+              suspectLangs: [...new Set(tracks.map((x) => x.lang).filter((l): l is string => Boolean(l)))],
+              titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
+              serverHost: await resolveFileTracksKey(vSourceId, userId, db, targetUrl),
+              itemType: vit, fileExternalId: externalId, expiresAt: vExp,
+              variantId: stringOrNull(variant.id) || undefined,
+              fileScoped: fileWhisperScope,
+            });
+          } finally {
+            await releaseProviderFileProbe(db, identityKey, verifyLeaseOwner);
+          }
+          // A transient/timeout still consumed this invocation's provider and
+          // Edge budget; do not fall through into another speech extraction.
+          verificationWork += 1;
+          if (outcome === "confirmed" || outcome === "corrected") verified += 1;
           if (outcome === "corrected") corrected += 1;
+          if (outcome === "pending") pendingVerification += 1;
         }
       } catch (_) { /* verify phase is best-effort — never blocks the untagged phase */ }
     }
 
-    const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
+    // One tagged-track consensus already consumes the entire speech budget for
+    // this invocation. Persisted cursors make the next fleet tick resumable;
+    // never start an additional unknown-track Whisper job in the same request.
+    if (verificationWork > 0) {
+      return {
+        mode: "whisper", scope: fileWhisperScope ? "file" : "title",
+        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
+        candidates: 0, detected: 0, hasMore: true,
+      };
+    }
+    if (speechTarget === "tagged") {
+      return {
+        mode: "whisper", scope: fileWhisperScope ? "file" : "title",
+        speechTarget, processed: 0, verificationWork: 0,
+        verified, corrected, pending: pendingVerification,
+        candidates: 0, detected: 0, hasMore: false,
+      };
+    }
+
+    const wConcurrency = fileWhisperScope
+      ? 1
+      : Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
     // Select REAL candidates DB-side via RPC (raw jsonb @>): titles whose audio_tracks still hold
     // an untagged (lang null) track, skipping those attempted within the retry window so the queue
     // advances instead of re-trying the same front forever. (The old in-memory filter scanned the
     // first N titles by id, so the sparse untagged residual was almost never in the window → it did
     // nothing. PostgREST can't cleanly express the jsonb-array containment, hence the RPC.)
     const whisperRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-    const { data: wrows, error: wErr } = await db.rpc("whisper_candidate_titles", {
-      p_user: userId, p_item_type: itemType, p_limit: limit,
-      p_retry_before: whisperRetryBefore, p_after: afterId || null,
-      p_source: sourceId || null,   // per-panel scope: keep whisper's provider hit on this source's host only
-    });
+    const { data: wrows, error: wErr } = fileWhisperScope
+      ? await db.rpc("file_whisper_candidate_variants", {
+          p_user: userId,
+          p_source: sourceId || null,
+          p_limit: limit,
+          p_retry_before: whisperRetryBefore,
+        })
+      : await db.rpc("whisper_candidate_titles", {
+          p_user: userId, p_item_type: itemType, p_limit: limit,
+          p_retry_before: whisperRetryBefore, p_after: afterId || null,
+          p_source: sourceId || null,
+        });
     if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
-    if (!wrows || !wrows.length) return { mode: "whisper", processed: verified, verified, corrected, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
-    const wLastId = String(wrows[wrows.length - 1].id);
-
+    if (!wrows || !wrows.length) {
+      return {
+        mode: "whisper", scope: fileWhisperScope ? "file" : "title",
+        processed: verificationWork, verificationWork, verified, corrected, pending: pendingVerification, candidates: 0, detected: 0,
+        lastId: afterId, hasMore: false,
+      };
+    }
     const whisperRows = wrows as JsonRecord[];
     const candidates = whisperRows.filter((t: JsonRecord) => {
       const arr = Array.isArray(t.audio_tracks) ? t.audio_tracks as JsonRecord[] : [];
       return arr.some((x) => !stringOrNull(x?.lang));
-    });
+    }).slice(0, 1);
     const wvIds = candidates.map((t: JsonRecord) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();
     if (wvIds.length) {
@@ -4160,41 +4657,110 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
     let detected = 0;
     const wExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const whisperLeaseOwner = `whisper:${crypto.randomUUID()}`;
+    const footprintBySource = new Map<string, Awaited<ReturnType<typeof getFootprint>>>();
+    const footprintHitsThisTick = new Map<string, number>();
     // STRUCTURAL dead-ends (no variant / no source+external id) are permanent — mark them attempted so
     // they leave the candidate set and can't clog the cursor-less front-of-queue forever. TRANSIENT
     // failures (URL won't resolve, thrown errors) are NOT marked: a provider outage must not defer a
     // whole provider's untagged tracks for the 30-day retry window — they retry next run.
-    const markWhisperAttempted = (titleId: string) =>
-      db.from("cloud_titles").update({ whisper_attempted_at: new Date().toISOString() })
-        .eq("id", titleId).eq("user_id", userId).then(() => {}, () => {});
+    const markWhisperAttempted = (titleId: string, variantId: string) =>
+      (fileWhisperScope
+        ? db.from("cloud_title_variants")
+            .update({ audio_whisper_attempted_at: new Date().toISOString() })
+            .eq("id", variantId).eq("user_id", userId)
+        : db.from("cloud_titles")
+            .update({ whisper_attempted_at: new Date().toISOString() })
+            .eq("id", titleId).eq("user_id", userId)
+      ).then(() => {}, () => {});
     const runOne = async (t: JsonRecord) => {
       const titleId = String(t.id);
+      const variantId = stringOr(t.default_variant_id, "");
       try {
-        const variant = wvById.get(String(t.default_variant_id));
-        if (!variant) { await markWhisperAttempted(titleId); return; }
-        const sourceId = stringOr(variant.source_id, ""), externalId = stringOr(variant.external_id, ""), vit = stringOr(variant.item_type, itemType);
-        if (!sourceId || !externalId) { await markWhisperAttempted(titleId); return; }
+        const variant = wvById.get(variantId);
+        if (!variant) { await markWhisperAttempted(titleId, variantId); return; }
+        const variantSourceId = stringOr(variant.source_id, "");
+        const externalId = stringOr(variant.external_id, "");
+        const vit = stringOr(variant.item_type, itemType);
+        if (!variantSourceId || !externalId) {
+          await markWhisperAttempted(titleId, variantId);
+          return;
+        }
         const targetUrl = vit === "series"
-          ? await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null)
-          : ((await resolvePlaybackTarget(sourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
+          ? await resolveSeriesEpisodeUrl(variantSourceId, externalId, userId, db).catch(() => null)
+          : ((await resolvePlaybackTarget(variantSourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
         if (!targetUrl) return;
+        if (body.ignoreLiveSession !== true) {
+          const accountKey = providerAccountKeyFromUrl(targetUrl);
+          if (accountKey) {
+            try {
+              const { data: busy } = await db.rpc("provider_account_busy", { p_key: accountKey });
+              if (busy === true) return;
+            } catch (_) { /* fail-open */ }
+          }
+        }
+        let footprint = footprintBySource.get(variantSourceId);
+        if (footprint === undefined) {
+          footprint = await getFootprint(db, variantSourceId, userId);
+          footprintBySource.set(variantSourceId, footprint);
+        }
+        if (footprint?.lowFootprint && !footprint.allowed) return;
+        if (footprint?.lowFootprint && footprint.maxPerHour != null) {
+          const localHits = footprintHitsThisTick.get(footprint.identityKey) ?? 0;
+          if (footprint.hits + localHits >= footprint.maxPerHour) return;
+        }
+        const identityKey = (await resolveSourceIdentity(variantSourceId, userId, db)).key;
+        // Up to five sequential 90s language detections can run for one file.
+        // Keep the distributed lease longer than that worst-case provider hold.
+        if (!await claimProviderFileProbe(db, identityKey, whisperLeaseOwner, 600)) return;
+        if (footprint?.lowFootprint) {
+          footprintHitsThisTick.set(
+            footprint.identityKey,
+            (footprintHitsThisTick.get(footprint.identityKey) ?? 0) + 1,
+          );
+        }
         const audioTracks = ((t.audio_tracks as JsonRecord[]) || [])
-          .map((x) => ({ index: Number(x?.index), lang: stringOrNull(x?.lang) }))
+          .map((x) => ({
+            index: Number(x?.index),
+            lang: stringOrNull(x?.lang),
+            lidAttemptedAt: stringOrNull(x?.lidAttemptedAt ?? x?.lid_attempted_at),
+            lidVerdict: stringOrNull(x?.lidVerdict ?? x?.lid_verdict),
+            speechVerifiedAt: stringOrNull(x?.speechVerifiedAt ?? x?.speech_verified_at),
+            speechVerdict: stringOrNull(x?.speechVerdict ?? x?.speech_verdict),
+          }))
           .filter((x) => Number.isInteger(x.index));
         const before = audioTracks.filter((x) => x.lang).length;
-        await detectUntaggedAudioLanguages({
-          db, runtimeConfig, userId, targetUrl, userAgent: null,
-          audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
-          serverHost: await resolveFileTracksKey(sourceId, userId, db, targetUrl), itemType: vit, fileExternalId: externalId,
-          sessionId: "whisper-backfill", expiresAt: wExp,
-        });
+        try {
+          await detectUntaggedAudioLanguages({
+            db, runtimeConfig, userId, targetUrl, userAgent: null,
+            audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
+            serverHost: await resolveFileTracksKey(variantSourceId, userId, db, targetUrl),
+            itemType: vit, fileExternalId: externalId,
+            sessionId: "whisper-backfill", expiresAt: wExp,
+            variantId, fileScoped: fileWhisperScope,
+          });
+          if (footprint?.lowFootprint) {
+            try {
+              await db.rpc("provider_footprint_record_hit", {
+                p_identity_key: footprint.identityKey,
+              });
+            } catch (_) { /* best-effort budget accounting */ }
+          }
+        } finally {
+          await releaseProviderFileProbe(db, identityKey, whisperLeaseOwner);
+        }
         if (audioTracks.filter((x) => x.lang).length > before) detected += 1;
       } catch (_) { /* best-effort per title */ }
     };
     for (let i = 0; i < candidates.length; i += wConcurrency) {
       await Promise.all(candidates.slice(i, i + wConcurrency).map(runOne));
     }
-    return { mode: "whisper", processed: wrows.length + verified, verified, corrected, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
+    return {
+      mode: "whisper", scope: fileWhisperScope ? "file" : "title",
+      processed: candidates.length + verificationWork, verificationWork, verified, corrected, pending: pendingVerification,
+      candidates: candidates.length, detected, lastId: candidates.length ? String(candidates[candidates.length - 1].id) : afterId,
+      hasMore: wrows.length === limit,
+    };
   }
 
   // Generic audio/subtitle crawling resolves a representative episode for a
@@ -4242,11 +4808,28 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // language signal in the title, so they MUST be probed; ~60% expose a real default-track
   // language via the cheap get_vod_info (mode=vod). Excluded from the tag-targeted crons.
   const untaggedOnly = body.untaggedOnly === true || stringOr(body.untaggedOnly, "") === "1";
+  // A header probe belongs to one provider file, not to a grouped logical title.
+  // afterId keeps the legacy title cursor; fileScope:false is a rollback switch.
+  const exactFileScope =
+    itemType === "movie" &&
+    mode === "probe" &&
+    !afterId &&
+    body.fileScope !== false;
   // Per-panel scope (sourceId) → audio_backfill_candidates RPC: the SAME filter (audio unresolved
   // + 30d probe-retry window, OR never subtitle-probed) but scoped to one source, variant-driven so
   // work is bounded by that source. Account-wide (no sourceId) keeps the original PostgREST path.
-  const titlesResult = sourceId
-    ? await db.rpc("audio_backfill_candidates", {
+  const titlesResult = exactFileScope
+    ? await db.rpc("file_audio_backfill_candidates", {
+        p_user: userId,
+        p_source: sourceId || null,
+        p_item_type: itemType,
+        p_target: subtitleTarget ? "subtitle" : "audio",
+        p_require_tags: requireTags.length ? requireTags : null,
+        p_untagged_only: untaggedOnly,
+        p_limit: limit,
+      })
+    : sourceId
+      ? await db.rpc("audio_backfill_candidates", {
         p_user: userId,
         p_source: sourceId,
         p_item_type: itemType,
@@ -4254,8 +4837,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         p_require_tags: requireTags.length ? requireTags : null,
         p_untagged_only: untaggedOnly,
         p_limit: limit,
-      })
-    : await (() => {
+        })
+      : await (() => {
         let q = db
           .from("cloud_titles")
           .select("id, default_variant_id, provider_tmdb_id")
@@ -4292,7 +4875,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const titles = titlesResult.data as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[] | null;
   const error = titlesResult.error;
   if (error) throwDb(error, "Unable to list titles for backfill");
-  if (!titles || !titles.length) return { processed: 0, updated: 0, lastId: afterId, hasMore: false };
+  if (!titles || !titles.length) {
+    return {
+      mode, scope: exactFileScope ? "file" : "title",
+      processed: 0, updated: 0, lastId: afterId, hasMore: false,
+    };
+  }
 
   const variantIds = titles.map((t) => t.default_variant_id).filter(Boolean) as string[];
   const variantById = new Map<string, JsonRecord>();
@@ -4306,11 +4894,18 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
   let updated = 0;
   const debug = stringOr(body.debug, "") === "1";
-  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0, accountBusy: 0 };
+  const diag = {
+    noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0,
+    relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0,
+    accountBusy: 0, cacheHydrated: 0, identityBusy: 0, circuitOpen: 0,
+    persistenceFailed: 0,
+  };
   // Circuit-breaker tallies for this tick: cbOk = provider served us at least once; cbBanish =
   // auth/rate/5xx rejections. Recorded once at the end of the tick (see below).
   let cbOk = 0;
   let cbBanish = 0;
+  const probeHealthByIdentity = new Map<string, { ok: number; banish: number }>();
+  const circuitOpenByIdentity = new Map<string, boolean>();
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -4325,8 +4920,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   }
   // Low-footprint pacing: serialize (concurrency 1), cap this tick to the remaining hourly budget,
   // and jitter each provider hit so the crawl doesn't look like a metronome.
-  const effConcurrency = footprint?.lowFootprint ? 1 : concurrency;
-  let lowFpProbed = 0;
+  const effConcurrency = exactFileScope || footprint?.lowFootprint ? 1 : concurrency;
+  const footprintByCandidateSource = new Map<string, Awaited<ReturnType<typeof getFootprint>>>();
+  const footprintHitsByIdentity = new Map<string, number>();
+  const probeLeaseOwner = `file-probe:${crypto.randomUUID()}`;
 
   // Account busy-lock, TICK LEVEL (per-source crons: 62-65, 79-80 — the ones that caused the
   // incident). If a human is watching THIS source's provider account right now, skip the whole
@@ -4391,6 +4988,50 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       const variantItemType = stringOr(variant.item_type, itemType);
       if (!sourceId || !externalId) { diag.noTarget++; return; }
 
+      // Reuse a fresh exact-file cache before opening a provider connection.
+      // A file observed by one account is therefore free for every later owner.
+      let fileServerKey = "";
+      if (exactFileScope) {
+        try {
+          fileServerKey = await resolveFileTracksKey(sourceId, userId, db, "");
+          if (fileServerKey) {
+            const { data: cached } = await db.from("catalog_file_tracks")
+              .select("audio_tracks,subtitle_tracks,audio_probed_at,subtitle_probed_at")
+              .eq("server_host", fileServerKey)
+              .eq("item_type", variantItemType)
+              .eq("external_id", externalId)
+              .maybeSingle();
+            const fileRow = cached as JsonRecord | null;
+            const audioAt = Date.parse(stringOr(fileRow?.audio_probed_at, ""));
+            const hasFreshAudio = Number.isFinite(audioAt) &&
+              audioAt >= Date.now() - 180 * 24 * 3600 * 1000;
+            const hasSubtitles = Boolean(fileRow?.subtitle_probed_at);
+            const satisfiesTarget = subtitleTarget ? hasSubtitles : hasFreshAudio;
+            if (fileRow && satisfiesTarget) {
+              const { error: hydrateError } = await db.rpc("merge_cloud_title_file_languages", {
+                p_user_id: userId,
+                p_title_id: String(title.id),
+                p_variant_id: String(variant.id),
+                p_file_external_id: externalId,
+                p_audio_tracks: hasFreshAudio && Array.isArray(fileRow.audio_tracks)
+                  ? fileRow.audio_tracks
+                  : [],
+                p_subtitle_tracks: hasSubtitles && Array.isArray(fileRow.subtitle_tracks)
+                  ? fileRow.subtitle_tracks
+                  : [],
+                p_has_audio: hasFreshAudio,
+                p_has_subtitle: hasSubtitles,
+              });
+              if (!hydrateError) {
+                diag.cacheHydrated++;
+                updated++;
+                return;
+              }
+            }
+          }
+        } catch (_) { /* cache miss/unavailable => probe normally */ }
+      }
+
       // Series have no directly-streamable id (provider 406s on a series id) — resolve a
       // representative episode first. A series' audio is consistent across episodes.
       let targetUrl: string | null;
@@ -4428,17 +5069,75 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         }
       }
 
-      let info: JsonRecord | null = null;
-      let token = "";
-      if (footprint?.lowFootprint && mode === "probe") {
+      const candidateIdentityKey = mode === "probe"
+        ? (probeIdentityKey || (await resolveSourceIdentity(sourceId, userId, db)).key)
+        : "";
+      if (mode === "probe" && !probeIdentityKey && candidateIdentityKey) {
+        let circuitOpen = circuitOpenByIdentity.get(candidateIdentityKey);
+        if (circuitOpen === undefined) {
+          try {
+            const { data: state } = await db.rpc("provider_probe_circuit_state", {
+              p_identity_key: candidateIdentityKey,
+            });
+            const row = (Array.isArray(state) ? state[0] : state) as JsonRecord | null;
+            circuitOpen = row?.open === true;
+          } catch (_) {
+            circuitOpen = false;
+          }
+          circuitOpenByIdentity.set(candidateIdentityKey, circuitOpen);
+        }
+        if (circuitOpen) {
+          diag.circuitOpen++;
+          return;
+        }
+      }
+      let candidateFootprint = footprint;
+      if (!candidateFootprint && mode === "probe") {
+        candidateFootprint = footprintByCandidateSource.get(sourceId);
+        if (candidateFootprint === undefined) {
+          candidateFootprint = await getFootprint(db, sourceId, userId);
+          footprintByCandidateSource.set(sourceId, candidateFootprint);
+        }
+      }
+      if (candidateFootprint?.lowFootprint) {
+        const localHits = footprintHitsByIdentity.get(candidateFootprint.identityKey) ?? 0;
+        if (
+          !candidateFootprint.allowed ||
+          (
+            candidateFootprint.maxPerHour != null &&
+            candidateFootprint.hits + localHits >= candidateFootprint.maxPerHour
+          )
+        ) {
+          diag.footprintCapped++;
+          return;
+        }
+      }
+      if (!await claimProviderFileProbe(db, candidateIdentityKey, probeLeaseOwner)) {
+        diag.identityBusy++;
+        return;
+      }
+      if (candidateFootprint?.lowFootprint) {
+        footprintHitsByIdentity.set(
+          candidateFootprint.identityKey,
+          (footprintHitsByIdentity.get(candidateFootprint.identityKey) ?? 0) + 1,
+        );
+      }
+      const noteProbeHealth = (ok: boolean) => {
+        if (ok) cbOk++;
+        else cbBanish++;
+        if (!candidateIdentityKey) return;
+        const health = probeHealthByIdentity.get(candidateIdentityKey) ?? { ok: 0, banish: 0 };
+        if (ok) health.ok++;
+        else health.banish++;
+        probeHealthByIdentity.set(candidateIdentityKey, health);
+      };
+      try {
+        let info: JsonRecord | null = null;
+        let token = "";
+      if (candidateFootprint?.lowFootprint && mode === "probe") {
         // Low-footprint provider (anti-ban): route the header-probe through the gateway's
         // RESIDENTIAL IP instead of the Cloudflare relay, so a mono-connection anti-abuse
         // account is seen from ONE household IP (probe + metadata + playback). Same JSON shape.
-        if (footprint.maxPerHour != null && (footprint.hits + lowFpProbed) >= footprint.maxPerHour) {
-          diag.footprintCapped++;
-          return; // over the hourly budget → leave this title for a later tick (no stamp)
-        }
-        lowFpProbed++;
         // Human-like spacing between provider hits (concurrency is forced to 1 here).
         await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 1000)));
         try {
@@ -4449,15 +5148,19 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           });
           if (!gw.ok) {
             diag.relayNotOk++;
-            if (isBanishStatus(gw.status)) cbBanish++;
+            if (isBanishStatus(gw.status)) noteProbeHealth(false);
             if (debug && !sample) sample = { stage: "gatewayProbeNotOk", status: gw.status, host: new URL(targetUrl).host };
             return;
           }
           info = await gw.json().catch(() => null);
-          cbOk++;
-        } catch (_) { diag.relayNotOk++; cbBanish++; return; }
+          noteProbeHealth(true);
+        } catch (_) { diag.relayNotOk++; noteProbeHealth(false); return; }
         // Count the provider hit against the identity's hourly budget (observability + cap).
-        try { await db.rpc("provider_footprint_record_hit", { p_identity_key: footprint.identityKey }); } catch (_) { /* best-effort */ }
+        try {
+          await db.rpc("provider_footprint_record_hit", {
+            p_identity_key: candidateFootprint.identityKey,
+          });
+        } catch (_) { /* best-effort */ }
       } else {
         const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
         const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
@@ -4467,14 +5170,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
         if (!res.ok) {
           diag.relayNotOk++;
-          if (isBanishStatus(res.status)) cbBanish++;
+          if (isBanishStatus(res.status)) noteProbeHealth(false);
           if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
           return;
         }
         info = await res.json().catch(() => null);
-        cbOk++;
+        noteProbeHealth(true);
       }
-      if (debug && !sample) {
+      if (debug && !sample && token) {
         let relayHead: JsonRecord = {};
         try {
           const rr = await fetch(`${runtimeConfig.relayBaseUrl}/relay/${token}`, { headers: { range: "bytes=0-400" } });
@@ -4501,6 +5204,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       const subtitleFields: JsonRecord = mode === "probe"
         ? { subtitle_tracks: orderedSubtitles, subtitle_probed_at: new Date().toISOString() }
         : {};
+      // Absolute stream indexes are exact-file data. Keep untagged entries so
+      // the offline Whisper queue can name them later without re-probing.
+      const orderedTracks = mode === "probe" && info && Array.isArray(info.audioTracks)
+        ? (info.audioTracks as JsonRecord[])
+            .map((t) => ({
+              index: Number(t?.index),
+              lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)),
+            }))
+            .filter((t) => Number.isInteger(t.index))
+        : [];
 
       const codes = new Set<string>();
       if (mode === "probe") {
@@ -4508,7 +5221,26 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const hasTracks = (Array.isArray(info?.audioTracks) && info.audioTracks.length) || orderedSubtitles.length;
         // Truly empty (no langs AND no tracks at all) = header-parse failed → mark probed
         // (incl. subtitles) so the crawl advances, mirroring the audio progression marker.
-        if (!incoming.length && !hasTracks) { diag.relayEmpty++; await markProbed(subtitleFields); return; }
+        if (!incoming.length && !hasTracks) {
+          diag.relayEmpty++;
+          if (exactFileScope) {
+            const persisted = await shareFileTracks(
+              db,
+              fileServerKey || await resolveFileTracksKey(sourceId, userId, db, targetUrl),
+              variantItemType,
+              externalId,
+              [],
+              [],
+              true,
+              true,
+            );
+            if (persisted) updated++;
+            else diag.persistenceFailed++;
+          } else {
+            await markProbed(subtitleFields);
+          }
+          return;
+        }
         for (const code of incoming) { const normalized = normalizeIsoLang(stringOrNull(code)); if (normalized) codes.add(normalized); }
       } else {
         const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
@@ -4517,19 +5249,57 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       }
       // No audio language resolved, but the probe SUCCEEDED (tracks/subs present): still
       // persist subtitles + advance the audio marker so we don't re-probe forever.
-      if (!codes.size) { diag.noLang++; await markProbed(subtitleFields); return; }
+      if (!codes.size) {
+        diag.noLang++;
+        if (exactFileScope) {
+          const persisted = await shareFileTracks(
+            db,
+            fileServerKey || await resolveFileTracksKey(sourceId, userId, db, targetUrl),
+            variantItemType,
+            externalId,
+            orderedTracks,
+            orderedSubtitles,
+            true,
+            true,
+          );
+          if (persisted) updated++;
+          else diag.persistenceFailed++;
+        } else {
+          await markProbed(subtitleFields);
+        }
+        return;
+      }
 
       // Capture the ORDERED per-track map (absolute index -> lang) alongside the deduped
       // set, so the player never has to probe at playback. mode=probe only — it's the
       // path carrying the full container track list. Undetermined tracks kept (lang null)
       // to preserve index/position alignment for the engine.
-      const orderedTracks = mode === "probe" && info && Array.isArray(info.audioTracks)
-        ? (info.audioTracks as JsonRecord[])
-            .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
-            .filter((t) => Number.isInteger(t.index))
-        : [];
-
       const sortedCodes = [...codes].sort();
+      if (exactFileScope) {
+        const persisted = await shareFileTracks(
+          db,
+          fileServerKey || await resolveFileTracksKey(sourceId, userId, db, targetUrl),
+          variantItemType,
+          externalId,
+          orderedTracks,
+          orderedSubtitles,
+          true,
+          true,
+        );
+        if (persisted) updated++;
+        else diag.persistenceFailed++;
+        const tmdbId = stringOrNull(title.provider_tmdb_id);
+        if (tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+          try {
+            await db.rpc("merge_catalog_title_audio", {
+              p_item_type: itemType,
+              p_provider_tmdb_id: tmdbId,
+              p_codes: sortedCodes,
+            });
+          } catch (_) { /* best-effort global union */ }
+        }
+        return;
+      }
       const updatePayload: JsonRecord = { ...subtitleFields, audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() };
       if (orderedTracks.length) updatePayload.audio_tracks = orderedTracks;
       const { error: updateError } = await db
@@ -4558,6 +5328,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       if (mode === "probe") {
         await shareFileTracks(db, await resolveFileTracksKey(sourceId, userId, db, targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
       }
+      } finally {
+        await releaseProviderFileProbe(db, candidateIdentityKey, probeLeaseOwner);
+      }
     } catch (e) {
       diag.exception++;
       if (debug && !sample) sample = { stage: "exception", error: String(e).slice(0, 200) };
@@ -4580,10 +5353,17 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // Feed the circuit breaker ONE tick outcome (one write, no per-item row contention): a healthy
   // response anywhere in the tick clears it; a tick that's nothing but auth/rate/5xx rejections
   // advances it toward opening + back-off. Best-effort — never fail the crawl on a bookkeeping error.
-  if (probeIdentityKey && mode === "probe" && (cbOk > 0 || cbBanish > 0)) {
-    try {
-      await db.rpc("provider_probe_circuit_record_tick", { p_identity_key: probeIdentityKey, p_ok_count: cbOk, p_fail_count: cbBanish });
-    } catch (_) { /* best-effort */ }
+  if (mode === "probe") {
+    for (const [identityKey, health] of probeHealthByIdentity) {
+      if (!health.ok && !health.banish) continue;
+      try {
+        await db.rpc("provider_probe_circuit_record_tick", {
+          p_identity_key: identityKey,
+          p_ok_count: health.ok,
+          p_fail_count: health.banish,
+        });
+      } catch (_) { /* best-effort */ }
+    }
   }
 
   // If the whole tick did no provider work because the account(s) were busy (account-wide path,
@@ -4593,8 +5373,19 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   if (diag.accountBusy > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
     return { mode, processed: 0, updated: 0, diag, skipped: "account-busy", lastId: afterId, hasMore: true };
   }
+  if (diag.identityBusy > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
+    return { mode, processed: 0, updated: 0, diag, skipped: "identity-busy", lastId: afterId, hasMore: true };
+  }
+  if (diag.circuitOpen > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
+    return { mode, processed: 0, updated: 0, diag, skipped: "circuit-open", lastId: afterId, hasMore: true };
+  }
 
-  return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit, ...(cbBanish || cbOk ? { probeHealth: { ok: cbOk, banish: cbBanish } } : {}) };
+  return {
+    mode, scope: exactFileScope ? "file" : "title",
+    processed: titles.length, updated, diag, ...(debug ? { sample } : {}),
+    lastId, hasMore: titles.length === limit,
+    ...(cbBanish || cbOk ? { probeHealth: { ok: cbOk, banish: cbBanish } } : {}),
+  };
 }
 
 // Read-cutover trust artifact (docs/roadmap/global-title-cache-design.md): prove

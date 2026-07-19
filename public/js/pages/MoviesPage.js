@@ -58,7 +58,7 @@ class MoviesPage {
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
-        this.watchState = new Map(); // item_id -> { progress, duration, ratio }
+        this.watchState = new Map(); // source_id:item_id -> { progress, duration, ratio }
         this.serverSettings = {};
         this.hiddenCategoryIds = new Set();
         this.currentMovie = null;
@@ -844,7 +844,7 @@ class MoviesPage {
 
     async loadWatchState() {
         try {
-            const history = await API.history.getAll(500);
+            const history = await API.history.getAll(5000);
             const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.watchState = new Map();
             this.historyItems = (history || []).filter(item => {
@@ -854,12 +854,14 @@ class MoviesPage {
             for (const h of this.historyItems) {
                 if (h.item_type !== 'movie') continue;
                 const ratio = h.duration > 0 ? h.progress / h.duration : 0;
-                this.watchState.set(String(h.item_id), {
+                const sourceId = h.source_id || h.sourceId || h.data?.sourceId || null;
+                this.watchState.set(this._watchStateKey(sourceId, h.item_id), {
                     progress: h.progress,
                     duration: h.duration,
                     ratio,
+                    completed: Boolean(h.completed),
                     updatedAt: h.updated_at,
-                    sourceId: h.source_id || h.sourceId || h.data?.sourceId,
+                    sourceId,
                     data: h.data
                 });
             }
@@ -879,12 +881,15 @@ class MoviesPage {
     getWatchStatus(items) {
         // A group is "watched"/"in progress" if any version is
         let best = null;
+        let watched = false;
         for (const item of items) {
             const state = this._watchStateFor(item);
-            if (state && (!best || state.ratio > best.ratio)) best = state;
+            if (state?.completed || state?.ratio >= 0.95) watched = true;
+            if (state && this.getResumeOffset(state.progress, state.duration) > 0
+                && (!best || state.ratio > best.ratio)) best = state;
         }
-        if (!best || best.ratio <= 0.01) return { status: 'unwatched', ratio: 0 };
-        if (best.ratio >= 0.9) return { status: 'watched', ratio: 1 };
+        if (watched) return { status: 'watched', ratio: 1 };
+        if (!best) return { status: 'unwatched', ratio: 0 };
         return { status: 'inprogress', ratio: best.ratio };
     }
 
@@ -1778,7 +1783,7 @@ class MoviesPage {
         const total = Math.max(0, Math.floor(Number(duration) || 0));
         if (position < 12) return 0;
         if (total > 0 && position >= total * 0.95) return 0;
-        return Math.max(0, position - 3);
+        return position;
     }
 
     renderContinueWatching() {
@@ -1857,10 +1862,7 @@ class MoviesPage {
 
     openGroup(group, { focusVersions = false, selectedMovie = null } = {}) {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        const resumeVersion = ordered.find(item => {
-            const state = this._watchStateFor(item);
-            return state && state.ratio > 0.01 && state.ratio < 0.9;
-        });
+        const resumeVersion = this._selectInProgressVersion(ordered);
         this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
             versions: ordered,
             focusVersions
@@ -1950,22 +1952,29 @@ class MoviesPage {
         return m ? `${h} h ${m} min` : `${h} h`;
     }
 
-    // watchState is keyed by stream_id only, but Xtream stream_ids can collide across
-    // sources. Return the state only when it belongs to THIS item's source (when both are
-    // known), so a sibling version from another source can't borrow its progress/resume.
-    // Falls through when either source is unknown → identical to the old behaviour.
+    _watchStateKey(sourceId, itemId) {
+        const id = String(itemId ?? '');
+        return sourceId == null || sourceId === '' ? id : `${String(sourceId)}:${id}`;
+    }
+
+    // Xtream stream ids are only unique inside one provider account. Exact
+    // source+stream identity prevents one provider's progress from being painted
+    // onto another provider's card. Legacy id-only fallback is allowed only when
+    // the item itself genuinely has no source identity.
     _watchStateFor(item) {
-        const state = this.watchState.get(String(item?.stream_id));
-        if (state && state.sourceId != null && item?.sourceId != null &&
-            String(state.sourceId) !== String(item.sourceId)) return null;
-        return state || null;
+        const itemId = item?.stream_id ?? item?.streamId ?? item?.item_id ?? item?.id;
+        const sourceId = item?.sourceId ?? item?.source_id ?? item?.cloudSourceId ?? item?.cloud_source_id;
+        if (sourceId != null && sourceId !== '') {
+            return this.watchState.get(this._watchStateKey(sourceId, itemId)) || null;
+        }
+        return this.watchState.get(this._watchStateKey(null, itemId)) || null;
     }
 
     getMovieWatchState(movie = this.currentMovie) {
         const state = this._watchStateFor(movie);
         if (!state) return { status: 'unwatched', ratio: 0, progress: 0, duration: 0, resumeTime: 0 };
         const resumeTime = this.getResumeOffset(state.progress, state.duration);
-        if (state.ratio >= 0.9) return { ...state, status: 'watched', resumeTime: 0 };
+        if (state.completed || state.ratio >= 0.95) return { ...state, status: 'watched', resumeTime: 0 };
         if (resumeTime > 0) return { ...state, status: 'inprogress', resumeTime };
         return { ...state, status: 'unwatched', resumeTime: 0 };
     }
@@ -1975,6 +1984,19 @@ class MoviesPage {
         if (state.status === 'inprogress') return 'Resume';
         if (state.status === 'watched') return 'Restart';
         return 'Play';
+    }
+
+    _selectInProgressVersion(items = []) {
+        return items
+            .map((item, order) => ({ item, order, state: this.getMovieWatchState(item) }))
+            .filter(entry => entry.state.status === 'inprogress')
+            .sort((left, right) => {
+                const leftUpdated = Date.parse(left.state.updatedAt || 0) || 0;
+                const rightUpdated = Date.parse(right.state.updatedAt || 0) || 0;
+                return rightUpdated - leftUpdated
+                    || Number(right.state.progress || 0) - Number(left.state.progress || 0)
+                    || left.order - right.order;
+            })[0]?.item || null;
     }
 
     syncDetailFavoriteButton() {
@@ -2323,7 +2345,8 @@ class MoviesPage {
         });
         card.classList.add('tv-preview-active');
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+        const selected = this._selectInProgressVersion(ordered) || ordered[0];
+        this.showMovieDetails(group, selected, { versions: ordered, isTvPreview: true });
     }
 
     // On page entry, seed the panel with the first card so it's never empty.
@@ -2341,8 +2364,9 @@ class MoviesPage {
         // guard: backing out to the grid and re-focusing this same card must re-preview.
         this._lastPreviewCard = null;
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const selected = this._selectInProgressVersion(ordered) || ordered[0];
         // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
-        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+        this.showMovieDetails(group, selected, { versions: ordered, isTvPreview: true });
         // OK/commit ENTERS the fiche so the viewer can navigate it (Play, versions, favorite,
         // more-like-this) rather than auto-playing.
         this._loadPanelExtras();
@@ -2525,7 +2549,7 @@ class MoviesPage {
         const state = this.getMovieWatchState(movie);
         const progressEl = document.getElementById('movie-detail-progress');
         if (progressEl) {
-            progressEl.classList.toggle('hidden', !(state.ratio > 0.01 && state.ratio < 0.9));
+            progressEl.classList.toggle('hidden', state.status !== 'inprogress');
             const fill = progressEl.querySelector('div');
             if (fill) fill.style.width = `${Math.max(0, Math.min(100, Math.round((state.ratio || 0) * 100)))}%`;
         }
@@ -2720,8 +2744,8 @@ class MoviesPage {
 
     async playGroup(group) {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        const best = ordered[0];
-        const watch = this.watchState.get(String(best.stream_id));
+        const best = this._selectInProgressVersion(ordered) || ordered[0];
+        const watch = this._watchStateFor(best);
         const resumeTime = watch ? this.getResumeOffset(watch.progress, watch.duration) : 0;
         await this.playMovie(best, {
             versions: ordered,
@@ -2819,7 +2843,13 @@ class MoviesPage {
         const fileAudioTracks = movie.audio_tracks_scope === 'file' || movie.audioTracksScope === 'file'
             ? (movie.audioTracks || movie.audio_tracks || [])
             : null;
-        const fileAudioLanguages = fileAudioTracks
+        const audioLanguageValidationStatus = String(
+            movie.audioLanguageValidationStatus ||
+            movie.audio_language_validation_status ||
+            (fileAudioTracks !== null ? 'pending' : 'not_analyzed')
+        ).toLowerCase();
+        const fileAudioLanguages = fileAudioTracks &&
+            ['verified', 'verified_union'].includes(audioLanguageValidationStatus)
             ? [...new Set(fileAudioTracks
                 .map(track => MediaUtils.normalizeLanguagePreference(track?.lang || track?.language || ''))
                 .filter(code => code && code !== 'und' && code !== 'unknown'))]
@@ -2834,6 +2864,12 @@ class MoviesPage {
             audioTracks: v.audio_tracks_scope === 'file' || v.audioTracksScope === 'file'
                 ? (v.audioTracks || v.audio_tracks || [])
                 : null,
+            audioLanguageValidationStatus: String(
+                v.audioLanguageValidationStatus ||
+                v.audio_language_validation_status ||
+                'not_analyzed'
+            ).toLowerCase(),
+            audioLanguageVerifiedAt: v.audioLanguageVerifiedAt || v.audio_language_verified_at || null,
             subtitleTracks: v.subtitle_tracks_scope === 'file' || v.subtitleTracksScope === 'file'
                 ? (v.subtitleTracks || v.subtitle_tracks || [])
                 : null
@@ -2858,6 +2894,9 @@ class MoviesPage {
             versionIndex: 0,
             variantCount: Math.max(1, Number(movie.variantCount || movie.variant_count || versionList.length || 1)),
             audioLanguages: fileAudioLanguages,
+            audioLanguageValidationStatus,
+            audioLanguageVerifiedAt: movie.audioLanguageVerifiedAt || movie.audio_language_verified_at || null,
+            audioLanguageVerification: movie.audioLanguageVerification || movie.audio_language_verification || {},
             versionLanguages: movie.versionLanguages || movie.version_languages || null,
             originalLanguage: movie.originalLanguage || movie.original_language || null,
             // Exact-file ordered language map served on the selected variant by

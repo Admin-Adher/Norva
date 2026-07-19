@@ -209,6 +209,8 @@ test('gateway: raw-pump ledger wired at /raw, /sessions and DELETE /raw-pumps', 
     || /stoppedConflictingSessions \+= abortRawPumps\(/.test(src), '/sessions must abort conflicting raw pumps');
   assert.ok(src.includes("app.delete('/raw-pumps', requireGatewayAuth"), 'coordinator kill-switch endpoint missing');
   assert.ok(src.includes('ownerHash: claims.uid ? sha256Hex(claims.uid) : null'), 'owner hash keying missing');
+  assert.ok(src.includes("sid required (or global=1 for explicit owner cleanup)"), 'kill-switch must be session-scoped by default');
+  assert.ok(src.includes("p.ownerHash === ownerKey && (globalCleanup || p.sid === sid)"), 'kill-switch must spare sibling sessions');
 });
 
 test('gateway: same-session concurrent range reads are spared (keepSid)', () => {
@@ -221,6 +223,7 @@ test('relay coordinator: zombie reaping, alarm, raw-lane eviction', () => {
   const src = read('services/norva-relay/src/index.js');
   assert.ok(src.includes('async expireRawPumps(sessions)'), 'expireRawPumps missing');
   assert.ok(src.includes('/raw-pumps?ownerKey='), 'gateway kill-switch call missing');
+  assert.ok(src.includes('&sid='), 'gateway kill-switch must identify the exact relay session');
   assert.ok(src.includes('async alarm()'), 'DO alarm handler missing');
   assert.ok(src.includes('setAlarm(Math.min(...expiries)'), 'alarm arming missing');
   assert.ok(src.includes('lapsed.filter((session) => session.gatewaySessionId)'), 'lapsed gateway reaping missing');
@@ -259,11 +262,8 @@ test('engine runtime recovery resumes MKV/MP4 once and keeps the selected audio 
   assert.ok(body.includes('audioStreamIndex: selectedAudioIndex'), 'engine retry must preserve selected audio');
   assert.ok(body.includes('fallbackEngineToTranscode(playbackAttemptId, resumeAt)'),
     'gateway fallback must receive the captured position');
-  assert.ok(
-    body.indexOf('fallbackEngineToTranscode(playbackAttemptId, resumeAt)')
-      < body.indexOf('tryNextVersion(resumeAt, playbackAttemptId)'),
-    'the selected exact file must reach Gateway transcode before any sibling-version failover'
-  );
+  assert.ok(!body.includes('tryNextVersion('),
+    'runtime recovery must never switch to a sibling version with different audio/subtitles');
   assert.ok(!body.includes('if (resumeAt >= 300 && hasNextVersion)'),
     'a deep seek must not silently switch to a sibling with different audio/subtitles');
   assert.ok(body.includes('Number.isFinite(visiblePosition) && visiblePosition > 0'),
@@ -275,6 +275,18 @@ test('engine runtime recovery resumes MKV/MP4 once and keeps the selected audio 
     'the remembered playhead must be captured before the snapshot getter can observe a reset video');
   assert.ok(body.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;'),
     'an obsolete recovery must not surface its error over a newer title');
+});
+
+test('terminal VOD failure surfaces the exact-file error instead of silently changing version', () => {
+  const start = watchSrc.indexOf('async handlePlaybackFailure(');
+  const end = watchSrc.indexOf('\n    isFormatPlaybackError(', start);
+  const body = watchSrc.slice(start, end);
+  assert.ok(body.includes('retryWithCloudGatewayTranscode(message)'));
+  assert.ok(body.includes('retryWithCloudRelay(message)'));
+  assert.ok(body.includes('retryWithFullVideoTranscode(message)'));
+  assert.ok(body.includes('this.showPlaybackError(message)'));
+  assert.ok(!body.includes('tryNextVersion('),
+    'a failed exact file must not become a different dub behind the viewer’s back');
 });
 
 test('version failover is scoped to the playback attempt and cannot replace a newer title', () => {
@@ -297,7 +309,8 @@ test('version failover is scoped to the playback attempt and cannot replace a ne
     'failover must replace the content-level container alias');
   assert.ok(body.includes('this.content.versionIndex = nextIndex'),
     'the resumable content object must retain the selected version index');
-  assert.ok(body.includes('this.replaceExactContentAudioMetadata(exactAudioTracks, exactAudioLanguages)'),
+  assert.ok(body.includes('this.replaceExactContentAudioMetadata(')
+      && body.includes('resultAudioValidationStatus'),
     'failover must replace, not merge, exact-file audio metadata');
   assert.ok(body.includes('this.getLanguageSafeFailoverPreferences()'),
     'failover must retain language semantics without reusing a file-relative stream index');
@@ -330,6 +343,7 @@ test('an in-session version switch replaces a stale French mono label without a 
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
   const page = Object.create(context.window.WatchPage.prototype);
   page.content = {};
+  page.audioLanguageValidationStatus = 'verified';
   page.pendingPlaybackPreferences = null;
   // Real load order: codecProfile is applied while mode is still null, then the
   // exact session map arrives immediately before the engine is opened.
@@ -387,10 +401,12 @@ test('an exact single-file track repairs a stale French resume preference', () =
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
   const page = Object.create(context.window.WatchPage.prototype);
   page.content = {
+    audioLanguageValidationStatus: 'verified',
     playbackPreferences: {
       audio: { source: 'probe', streamIndex: 1, language: 'fr', label: 'French' }
     }
   };
+  page.audioLanguageValidationStatus = 'verified';
   page.pendingPlaybackPreferences = {
     audio: { source: 'probe', streamIndex: 1, language: 'fr', label: 'French' }
   };
@@ -461,6 +477,35 @@ test('an exact unknown mono track clears every stale language display field', ()
   }
   assert.strictEqual(page.getProbeAudioTracks()[0].label, 'AAC');
   assert.strictEqual(page.getProbeAudioTracks()[0].active, true);
+});
+
+test('a raw container language stays hidden until strict speech certification', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = {};
+
+  const pending = page.replaceExactContentAudioMetadata(
+    [{ index: 1, lang: 'fre', title: 'French', codec: 'aac' }],
+    ['fre'],
+    'pending'
+  );
+
+  assert.strictEqual(pending[0].lang, null);
+  assert.strictEqual(pending[0].language, null);
+  assert.strictEqual(page.content.audioLanguages, null);
+  assert.strictEqual(page.content.audioLanguageValidationStatus, 'pending');
+
+  const verified = page.replaceExactContentAudioMetadata(
+    [{ index: 1, lang: 'eng', title: 'English', codec: 'aac' }],
+    ['eng'],
+    'verified'
+  );
+
+  assert.strictEqual(verified[0].lang, 'en');
+  assert.strictEqual(verified[0].language, 'en');
+  assert.deepStrictEqual(Array.from(page.content.audioLanguages), ['en']);
+  assert.strictEqual(page.content.audioLanguageValidationStatus, 'verified');
 });
 
 test('a fatal callback during engine load cannot start a competing fallback', () => {

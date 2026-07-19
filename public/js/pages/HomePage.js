@@ -1690,7 +1690,7 @@ class HomePage {
         const total = Math.max(0, Math.floor(Number(duration) || 0));
         if (position < 12) return 0;
         if (total > 0 && position >= total * 0.95) return 0;
-        return Math.max(0, position - 3);
+        return position;
     }
 
     renderHistory(items) {

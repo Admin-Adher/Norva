@@ -67,6 +67,55 @@ test('catalog never promotes code-only or title hints to exact file evidence', (
   assert.ok(!record.includes('fanout_file_tracks_to_users'));
 });
 
+test('catalog exposes tenant exact-file language sets without manufacturing track indexes', () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const observations = between(
+    catalog,
+    'async function fileLanguageObservationsByVariant(',
+    '\n// Attach the GLOBAL cache entry',
+  );
+  const variantItem = between(
+    catalog,
+    'function titleVariantItem(',
+    '\nasync function listRawMediaRail(',
+  );
+  const mediaUtils = read('public/js/utils/mediaUtils.js');
+
+  assert.ok(observations.includes('cloud_title_file_language_observations'));
+  assert.ok(observations.includes('audio_observed'));
+  assert.ok(observations.includes('__file_audio_languages'));
+  assert.ok(!observations.includes('audio_tracks'));
+  assert.ok(variantItem.includes('audio_languages_scope: audioLanguages !== undefined ? "file"'));
+  assert.ok(variantItem.includes('subtitle_languages_scope: subtitleLanguages !== undefined ? "file"'));
+  assert.ok(mediaUtils.includes("source: 'file-languages'"));
+  assert.ok(mediaUtils.includes("if (scope !== 'file'"));
+});
+
+test('flat movie pages join tenant observations by owned media variant', () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const flat = between(
+    catalog,
+    'async function attachFlatMediaFileLanguages(',
+    '\nasync function listVariantsByTitleIds(',
+  );
+  assert.ok(flat.includes('.eq("user_id", userId)'));
+  assert.ok(flat.includes('.in("media_item_id"'));
+  assert.ok(flat.includes('audio_languages_scope = "file"'));
+  assert.ok(!flat.includes('audio_tracks ='));
+});
+
+test('an audio-filtered rail prefers the exact tenant-observed matching version', () => {
+  const catalog = read('supabase/functions/norva-catalog/index.ts');
+  const variants = between(
+    catalog,
+    'async function listVariantsByTitleIds(',
+    '\n// User display language',
+  );
+  assert.ok(variants.includes('variant.__file_audio_observed === true'));
+  assert.ok(variants.includes('variant.__file_audio_languages'));
+  assert.ok(variants.includes('orderedTrackMatch || tenantLanguageMatch'));
+});
+
 test('title recompute invalidates facets only when exact arrays change', () => {
   const migration = read('supabase/migrations/20260719130000_exact_file_language_unions.sql');
   const recompute = between(
