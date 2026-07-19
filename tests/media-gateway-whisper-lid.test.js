@@ -238,5 +238,6 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /MIN_COMPLETION_PCT/);
   assert.match(runner, /--header "@\$AUTH_HEADER"/);
   assert.match(runner, /gateway_is_idle/);
+  assert.match(runner, /max_parallel_workers_per_gather=0/);
   assert.match(flagMigration, /'lid_benchmark_enabled',\s*\n\s*false/);
 });

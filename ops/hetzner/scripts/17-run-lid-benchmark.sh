@@ -39,7 +39,13 @@ MIN_COMPLETION_PCT="${MIN_COMPLETION_PCT:-80}"
   echo "MIN_COMPLETION_PCT must be between 0 and 100" >&2
   exit 2
 }
-PSQL=(docker exec -i norva-db psql -U postgres -d postgres -Atq -v ON_ERROR_STOP=1)
+# Keep benchmark bookkeeping strictly serial and low-memory: production can
+# already be using PostgreSQL's small 64 MiB container /dev/shm.
+PSQL=(
+  docker exec -i
+  -e "PGOPTIONS=-c max_parallel_workers_per_gather=0 -c jit=off -c work_mem=8MB"
+  norva-db psql -U postgres -d postgres -Atq -v ON_ERROR_STOP=1
+)
 RESULT_DIR="${RESULT_DIR:-$HOME/.local/state/norva/lid-benchmarks}"
 mkdir -p "$RESULT_DIR"
 chmod 700 "$RESULT_DIR"
