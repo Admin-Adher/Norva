@@ -246,7 +246,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /--header "@\$AUTH_HEADER"/);
   assert.match(runner, /gateway_is_idle/);
   assert.match(runner, /lidBenchmarkProtocol >= 1/);
-  assert.match(runner, /\.version >= 71/);
+  assert.match(runner, /\.version >= 72/);
   assert.match(runner, /norva-playback\/lid-benchmark/);
   assert.doesNotMatch(runner, /norva-playback\/audio-backfill/);
   assert.match(runner, /http_status.*\^5\[0-9\]\[0-9\]\$/);

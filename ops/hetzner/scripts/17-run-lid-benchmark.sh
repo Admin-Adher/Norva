@@ -83,7 +83,7 @@ printf '%s' "$EDGE_HEALTH" | jq -e '
 HEALTH="$(curl -fsS --max-time 30 "$GATEWAY_HEALTH")"
 printf '%s' "$HEALTH" | jq -e --arg commit "$EXPECTED_WHISPER_COMMIT" '
   .ok == true and
-  .version >= 71 and
+  .version >= 72 and
   .languageDetectEngine.detectOnlyBenchmark == true and
   .languageDetectEngine.runtimeVerified == true and
   .languageDetectEngine.model == "small" and
@@ -460,7 +460,7 @@ MIN_REQUIRED=$(( (REQUESTED * MIN_COMPLETION_PCT + 99) / 100 ))
 HASH_DRIFT="$(jq -s --arg commit "$EXPECTED_WHISPER_COMMIT" '[
   .[] | select(.response.benchmark != null) | select(
     .response.benchmark.engine.commit != $commit or
-    (.response.benchmark.engine.gatewayVersion // 0) < 71 or
+    (.response.benchmark.engine.gatewayVersion // 0) < 72 or
     .response.benchmark.engine.model != "small" or
     .response.benchmark.engine.runtimeVerified != true or
     ((.response.benchmark.engine.binarySha256 // "") | test("^[a-f0-9]{64}$") | not) or
