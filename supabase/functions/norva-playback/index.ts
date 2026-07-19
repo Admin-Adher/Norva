@@ -13,6 +13,12 @@ type RuntimeConfig = {
   whisperDetect: boolean; // Phase 2: detect untagged audio-track languages via the relay (Workers AI). Off by default.
 };
 type CloudIdentity = { userId: string; deviceId?: string };
+type LidDetectionPolicy = {
+  enabled: boolean;
+  mode: "off" | "shadow" | "primary" | "conflict";
+  untaggedScope: string | null;
+  taggedScope: string | null;
+};
 
 class HttpError extends Error {
   status: number;
@@ -89,6 +95,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
+let lidDetectionPolicyCache: { value: LidDetectionPolicy; expiresAt: number } | null = null;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -100,12 +107,16 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
       const config = await getRuntimeConfig(supabase);
+      const lidPolicy = await getLidDetectionPolicy(supabase);
       const entitlementRuntime = getEntitlementRuntime();
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 30,
+        version: 31,
         lidBenchmarkProtocol: 2,
+        lidDetectOnlyProtocol: 1,
+        audioLidEnabled: lidPolicy.enabled,
+        lidDetectOnlyMode: lidPolicy.mode,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2222,6 +2233,58 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   return value;
 }
 
+// Dynamic, database-backed rollout policy. This deliberately does not piggyback on
+// getRuntimeConfig(): that helper may skip the database when every secret comes from env,
+// whereas an operational LID kill switch must take effect on both inline and fleet work
+// within one short cache window. A read failure preserves the historical detector but fails
+// closed for every detect-only scope.
+async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPolicy> {
+  if (lidDetectionPolicyCache && lidDetectionPolicyCache.expiresAt > Date.now()) {
+    return lidDetectionPolicyCache.value;
+  }
+  let value: LidDetectionPolicy = {
+    enabled: true,
+    mode: "off",
+    untaggedScope: null,
+    taggedScope: null,
+  };
+  try {
+    const { data, error } = await db
+      .from("admin_feature_flags")
+      .select("key,enabled")
+      .in("key", [
+        "audio_lid_enabled",
+        "lid_detect_only_shadow_enabled",
+        "lid_detect_only_production_enabled",
+      ]);
+    if (error) throw error;
+    const flags = new Map<string, boolean>();
+    for (const row of data ?? []) {
+      if (typeof row.key === "string") flags.set(row.key, row.enabled === true);
+    }
+    const enabled = !flags.has("audio_lid_enabled") || flags.get("audio_lid_enabled") === true;
+    const primary = flags.get("lid_detect_only_production_enabled") === true;
+    const shadow = flags.get("lid_detect_only_shadow_enabled") === true;
+    const conflict = primary && shadow;
+    value = {
+      enabled,
+      mode: !enabled ? "off" : (conflict ? "conflict" : (primary ? "primary" : (shadow ? "shadow" : "off"))),
+      // Detect-only writes are restricted to previously untagged streams. A wrong tagged
+      // correction can contaminate global union facets and is materially harder to roll back.
+      untaggedScope: enabled && !conflict
+        ? (primary ? "lid-production-detect-only" : (shadow ? "lid-shadow" : null))
+        : null,
+      // Shadow always returns the historical full-transcript verdict. Primary mode keeps
+      // tagged verification entirely on that historical path.
+      taggedScope: enabled && shadow && !conflict ? "lid-shadow" : null,
+    };
+  } catch (_) {
+    // Historical behaviour remains available; no unsigned/implicit fast mode is ever selected.
+  }
+  lidDetectionPolicyCache = { value, expiresAt: Date.now() + 30_000 };
+  return value;
+}
+
 async function decryptSourceConfig(ciphertext: string, runtimeConfig: RuntimeConfig): Promise<JsonRecord> {
   if (!runtimeConfig.sourceConfigKey) throw new HttpError(503, "Norva Cloud source encryption is not configured");
   const [scheme, version, ivPart, dataPart] = ciphertext.split(".");
@@ -2286,6 +2349,53 @@ function normalizeIsoLang(value: string | null): string | null {
   };
   const code = map[v] || v;
   return /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+type BasicLidEvidence = {
+  accepted: boolean;
+  lang: string | null;
+  method: "whisper-detect-only-v1" | "whisper-basic-v1";
+  fastPath: boolean;
+  confidence: number;
+};
+
+// Keep the old >=4-word contract and add a distinct detect-only contract. In particular,
+// wordCount=0 is correct for -dl and can never be confused with a transcript. The Edge
+// independently enforces the 0.95 floor even if a gateway replica is misconfigured lower.
+function basicLidEvidence(det: JsonRecord | null): BasicLidEvidence {
+  const lang = normalizeIsoLang(stringOrNull(det?.language));
+  const words = Number(det?.wordCount ?? 0);
+  const confidence = Number(det?.confidence ?? 0);
+  const fastPath = det?.method === "whisper-detect-only-v1";
+  if (fastPath) {
+    const accepted = Boolean(
+      lang &&
+      det?.confident === true &&
+      det?.verified === false &&
+      det?.fastPathAccepted === true &&
+      det?.fallbackUsed === false &&
+      det?.validationStatus === "pending" &&
+      det?.evidence === "lid-only-high-confidence" &&
+      Number.isFinite(confidence) &&
+      confidence >= 0.95 &&
+      confidence <= 1 &&
+      words === 0,
+    );
+    return {
+      accepted,
+      lang,
+      method: "whisper-detect-only-v1",
+      fastPath: true,
+      confidence,
+    };
+  }
+  return {
+    accepted: Boolean(lang && det?.confident === true && words >= 4),
+    lang,
+    method: "whisper-basic-v1",
+    fastPath: false,
+    confidence,
+  };
 }
 
 // Probe a title's container for the ORDERED per-track audio map and persist it to
@@ -2464,7 +2574,27 @@ async function shareFileTracks(
       ? "fanout_detected_file_tracks_to_users"
       : "fanout_file_tracks_to_users";
     const { data, error } = await db.rpc(fanoutRpc, canonicalArgs);
-    return !error && Number(data) > 0;
+    const persisted = !error && Number(data) > 0;
+    if (persisted && audioDetectionWrite && canonicalArgs.p_has_audio) {
+      try {
+        const { error: provenanceError } = await db.rpc(
+          "refresh_catalog_file_audio_detection_provenance",
+          {
+            p_server_host: serverHost,
+            p_item_type: itemType,
+            p_external_id: externalId,
+            p_audio_tracks: canonicalArgs.p_audio_tracks,
+          },
+        );
+        if (provenanceError) {
+          console.warn("[norva-playback] audio LID provenance refresh deferred");
+        }
+      } catch (_) {
+        // Rolling migration fallback: per-track lidMethod remains durable and the next
+        // detection write repairs the aggregate canonical/owner provenance.
+      }
+    }
+    return persisted;
   } catch (_) {
     return false;
   }
@@ -2535,6 +2665,8 @@ async function detectUntaggedAudioLanguages(opts: {
     lang: string | null;
     lidAttemptedAt?: string | null;
     lidVerdict?: string | null;
+    lidMethod?: string | null;
+    lidConfidence?: number | null;
     speechVerifiedAt?: string | null;
     speechVerdict?: string | null;
   }>;
@@ -2554,11 +2686,14 @@ async function detectUntaggedAudioLanguages(opts: {
     fileScoped = false,
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
+  const lidPolicy = await getLidDetectionPolicy(db);
+  if (!lidPolicy.enabled) return;
   const unknownTracks = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index));
   if (!unknownTracks.length) return;
   // The proven basic detector sweeps bounded offsets inside the gateway and stops on the first
   // clear 20s speech window. Two tracks per file keep a two-file fleet claim inside its 540s
-  // request budget even when every gateway call reaches the 90s timeout. Per-track cursors make
+  // request budget even when every gateway call reaches the 120s shadow-safe timeout. Per-track
+  // cursors make
   // larger multi-audio files resumable without forcing strict multi-window consensus.
   const pending = unknownTracks.filter((t) => !t.lidAttemptedAt).slice(0, 2);
 
@@ -2568,27 +2703,40 @@ async function detectUntaggedAudioLanguages(opts: {
   const nowIso = new Date().toISOString();
   if (pending.length) {
     try {
-      const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
+      const pipe = await createBytePipeAccess(
+        sessionId,
+        userId,
+        targetUrl,
+        expiresAt,
+        db,
+        userAgent,
+        // Primary writes are limited to canonical exact-file identities. Legacy title-only
+        // rows keep the full transcript path; shadow remains safe because it returns that
+        // same historical verdict.
+        fileScoped
+          ? lidPolicy.untaggedScope
+          : (lidPolicy.mode === "shadow" ? "lid-shadow" : null),
+      );
       const detectBase = pipe.url.replace("/raw/", "/detect-language/");
       for (const track of pending) {
         try {
           const res = await fetch(
             `${detectBase}?index=${track.index}&dur=20`,
-            { signal: AbortSignal.timeout(90_000) },
+            { signal: AbortSignal.timeout(120_000) },
           );
           // Transport/provider failures are not observations. Leave only this track due instead
           // of suppressing it for the retry window; another track may still be readable.
           if (!res.ok) continue;
           const det = await res.json().catch(() => null) as JsonRecord | null;
-          const lang = normalizeIsoLang(stringOrNull(det?.language));
-          const words = Number(det?.wordCount ?? 0);
+          const evidence = basicLidEvidence(det);
           track.lidAttemptedAt = nowIso;
-          // Keep the old fast one-window detector, but never publish its final
-          // "best effort" from a silent/music sample containing fewer than
-          // four words.
-          if (lang && det?.confident === true && words >= 4) {
-            track.lang = lang;
+          // The legacy path still needs >=4 transcript words. Detect-only instead carries
+          // an explicit high-confidence evidence contract and correctly reports zero words.
+          if (evidence.accepted && evidence.lang) {
+            track.lang = evidence.lang;
             track.lidVerdict = "detected";
+            track.lidMethod = evidence.method;
+            track.lidConfidence = evidence.confidence;
           } else {
             track.lidVerdict = "pending";
           }
@@ -2608,10 +2756,27 @@ async function detectUntaggedAudioLanguages(opts: {
     ...(!complete && t.lidAttemptedAt
       ? { lidAttemptedAt: t.lidAttemptedAt, lidVerdict: t.lidVerdict ?? null }
       : {}),
+    ...(t.lidMethod
+      ? {
+        lidMethod: t.lidMethod,
+        lidConfidence: typeof t.lidConfidence === "number" && Number.isFinite(t.lidConfidence)
+          ? t.lidConfidence
+          : null,
+      }
+      : {}),
     ...(t.speechVerifiedAt && t.speechVerdict === "detected"
       ? { speechVerifiedAt: t.speechVerifiedAt, speechVerdict: t.speechVerdict }
       : {}),
   }));
+  const detectionMethods = [...new Set(
+    enriched.map((t) => t.lidMethod).filter((method): method is string => Boolean(method)),
+  )].sort();
+  const detectOnlyDetectedCount = enriched.filter(
+    (t) => t.lidMethod === "whisper-detect-only-v1",
+  ).length;
+  const transcriptDetectedCount = enriched.filter(
+    (t) => t.lidMethod === "whisper-basic-v1",
+  ).length;
   const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
   if (fileScoped) {
     const persisted = await shareFileTracks(
@@ -2640,7 +2805,15 @@ async function detectUntaggedAudioLanguages(opts: {
         .eq("user_id", userId).eq("id", titleId);
     } catch (_) { /* best-effort legacy title persist */ }
   }
-  if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+  // A global title-language UNION cannot cheaply unlearn one wrong canary result. Keep
+  // detect-only evidence exact-file/tenant scoped until calibration promotes the engine;
+  // historical transcript results retain the existing global merge.
+  if (
+    detectOnlyDetectedCount === 0 &&
+    codes.length &&
+    tmdbId &&
+    !/^(tt)?0+$/i.test(tmdbId)
+  ) {
     try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
   }
   if (!fileScoped) {
@@ -2666,11 +2839,16 @@ async function detectUntaggedAudioLanguages(opts: {
         p_attempted_at: nowIso,
         p_retry_at: completed ? null : retryAt,
         p_provenance: {
-          method: "whisper-basic-v1",
+          method: detectOnlyDetectedCount > 0
+            ? "whisper-detect-only-v1"
+            : "whisper-basic-v1",
+          detectionMethods,
           status: completed ? "detected" : "pending",
           sampleDurationSeconds: 20,
           consensus: 1,
-          acceptance: "gateway-confident-language",
+          acceptance: "explicit-gateway-evidence-v2",
+          detectOnlyDetectedCount,
+          transcriptDetectedCount,
           trackCount: unknownTracks.length,
           pendingCount,
           attemptedAt: nowIso,
@@ -2723,7 +2901,10 @@ async function verifyTaggedAudioLanguages(opts: {
     fileScoped = false,
   } = opts;
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
+  const lidPolicy = await getLidDetectionPolicy(db);
+  if (!lidPolicy.enabled) return null;
   const nowIso = new Date().toISOString();
+  const detectionMethods = new Set<string>();
   const recordDetection = async (
     completed: boolean,
     provenance: JsonRecord,
@@ -2791,6 +2972,7 @@ async function verifyTaggedAudioLanguages(opts: {
     // create audio_verified_at or a user-facing "confirmed" claim.
     await recordDetection(classified, {
       method: "whisper-basic-v1",
+      detectionMethods: [...detectionMethods].sort(),
       status: classified ? "detected" : "pending",
       sampleDurationSeconds: 20,
       consensus: 1,
@@ -2809,7 +2991,15 @@ async function verifyTaggedAudioLanguages(opts: {
   if (!suspects.length) return await finalizeVerification();
   let detectBase: string;
   try {
-    const pipe = await createBytePipeAccess("whisper-verify", userId, targetUrl, expiresAt, db, null);
+    const pipe = await createBytePipeAccess(
+      "whisper-verify",
+      userId,
+      targetUrl,
+      expiresAt,
+      db,
+      null,
+      lidPolicy.taggedScope,
+    );
     detectBase = pipe.url.replace("/raw/", "/detect-language/");
   } catch (_) { return null; }
 
@@ -2818,18 +3008,19 @@ async function verifyTaggedAudioLanguages(opts: {
     try {
       const res = await fetch(
         `${detectBase}?index=${t.index}&dur=20`,
-        { signal: AbortSignal.timeout(90_000) },
+        { signal: AbortSignal.timeout(120_000) },
       );
       if (!res.ok) { transient++; continue; } // incl. the gateway's 503 account-slot-busy
       const det = await res.json().catch(() => null) as JsonRecord | null;
-      const lang = normalizeIsoLang(stringOrNull(det?.language));
-      const words = Number(det?.wordCount ?? 0);
-      if (!lang || words < 4) {
+      const evidence = basicLidEvidence(det);
+      const lang = evidence.lang;
+      if (!evidence.accepted || !lang) {
         t.speechVerifiedAt = nowIso;
         t.speechVerdict = "pending";
         attempted++;
         continue;
       }
+      detectionMethods.add(evidence.method);
       t.speechVerifiedAt = nowIso;
       t.speechVerdict = lang === t.lang ? "confirmed" : "corrected";
       attempted++;
@@ -5112,6 +5303,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             lang: stringOrNull(x?.lang),
             lidAttemptedAt: stringOrNull(x?.lidAttemptedAt ?? x?.lid_attempted_at),
             lidVerdict: stringOrNull(x?.lidVerdict ?? x?.lid_verdict),
+            lidMethod: stringOrNull(x?.lidMethod ?? x?.lid_method),
+            lidConfidence: (x?.lidConfidence ?? x?.lid_confidence) != null &&
+                Number.isFinite(Number(x?.lidConfidence ?? x?.lid_confidence))
+              ? Number(x?.lidConfidence ?? x?.lid_confidence)
+              : null,
             speechVerifiedAt: stringOrNull(x?.speechVerifiedAt ?? x?.speech_verified_at),
             speechVerdict: stringOrNull(x?.speechVerdict ?? x?.speech_verdict),
           }))

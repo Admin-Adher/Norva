@@ -133,7 +133,7 @@ test('gateway-selected audio index survives the edge response metadata', () => {
   assert.ok(response.includes('audio_stream_index: gateway.audioStreamIndex ?? null'));
 });
 
-test('tagged-language verification uses the fast basic detector and remains variant-safe', () => {
+test('tagged-language verification keeps the historical transcript verdict variant-safe', () => {
   const migration = read('supabase/migrations/20260719170000_variant_file_audio_crawler.sql');
   const fastMigration = read('supabase/migrations/20260719210000_fast_audio_language_detection.sql');
   const playback = read('supabase/functions/norva-playback/index.ts');
@@ -192,9 +192,11 @@ test('tagged-language verification uses the fast basic detector and remains vari
   assert.ok(detectedFanout.includes('v_cache_verified or not v_owner_verified'));
   assert.ok(detectedFanout.includes('and observation.audio_verified_at is null'));
   assert.ok(verifier.includes('`${detectBase}?index=${t.index}&dur=20`'));
-  assert.ok(verifier.includes('AbortSignal.timeout(90_000)'));
-  assert.ok(verifier.includes('if (!lang || words < 4)'));
+  assert.ok(verifier.includes('AbortSignal.timeout(120_000)'));
+  assert.ok(verifier.includes('const evidence = basicLidEvidence(det)'));
+  assert.ok(verifier.includes('if (!evidence.accepted || !lang)'));
   assert.ok(verifier.includes('method: "whisper-basic-v1"'));
+  assert.ok(verifier.includes('detectionMethods: [...detectionMethods].sort()'));
   assert.ok(verifier.includes('await recordDetection(classified'));
   assert.ok(verifier.includes('status: classified ? "detected" : "pending"'));
   assert.ok(!verifier.includes('recordVerification'));
@@ -231,7 +233,7 @@ test('tagged-language verification uses the fast basic detector and remains vari
   assert.ok(gatewaySource.includes("validationStatus: 'verified'"));
 });
 
-test('unknown audio tracks use the fast basic detector with resumable bounded work', () => {
+test('unknown audio tracks accept explicit basic-LID evidence with resumable bounded work', () => {
   const migration = read('supabase/migrations/20260719170000_variant_file_audio_crawler.sql');
   const playback = read('supabase/functions/norva-playback/index.ts');
   const detector = between(
@@ -243,9 +245,12 @@ test('unknown audio tracks use the fast basic detector with resumable bounded wo
   assert.ok(detector.includes('.slice(0, 2)'));
   assert.ok(detector.includes('for (const track of pending)'));
   assert.ok(detector.includes('`${detectBase}?index=${track.index}&dur=20`'));
-  assert.ok(detector.includes('AbortSignal.timeout(90_000)'));
-  assert.ok(detector.includes('method: "whisper-basic-v1"'));
-  assert.ok(detector.includes('det?.confident === true && words >= 4'));
+  assert.ok(detector.includes('AbortSignal.timeout(120_000)'));
+  assert.ok(detector.includes('const evidence = basicLidEvidence(det)'));
+  assert.ok(detector.includes('if (evidence.accepted && evidence.lang)'));
+  assert.ok(detector.includes('track.lidMethod = evidence.method'));
+  assert.ok(detector.includes('track.lidConfidence = evidence.confidence'));
+  assert.ok(detector.includes('enriched.map((t) => t.lidMethod)'));
   assert.ok(detector.includes('track.lidVerdict = "detected"'));
   assert.ok(detector.includes('status: completed ? "detected" : "pending"'));
   assert.ok(!detector.includes('track.lidVerdict = "verified"'));
@@ -260,6 +265,127 @@ test('unknown audio tracks use the fast basic detector with resumable bounded wo
   assert.ok(playback.includes('expiresAt: fileExpiresAt'));
   assert.ok(migration.includes('audio_whisper_retry_at'));
   assert.ok(migration.includes('record_catalog_file_audio_whisper_outcome'));
+});
+
+test('Edge rollout is signed, dynamically reversible and keeps fast evidence scoped', () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const migration = read('supabase/migrations/20260720120000_audio_lid_rollout_flags.sql');
+  const bytePipe = between(
+    playback,
+    'async function createBytePipeAccess(',
+    '\nasync function createGatewaySession(',
+  );
+  const policy = between(
+    playback,
+    'async function getLidDetectionPolicy(',
+    '\nasync function decryptSourceConfig(',
+  );
+  const evidence = between(
+    playback,
+    'function basicLidEvidence(',
+    '\n// Probe a title',
+  );
+  const detector = between(
+    playback,
+    'async function detectUntaggedAudioLanguages(',
+    '\n// Verify TAGGED-but-contradictory tracks',
+  );
+  const verifier = between(
+    playback,
+    'async function verifyTaggedAudioLanguages(',
+    '\n// Resolve the parent title plus the exact variant codec profile',
+  );
+  const health = between(
+    playback,
+    'if (req.method === "GET" && segments[0] === "health")',
+    '\n    if (req.method === "GET" && segments[0] === "telemetry"',
+  );
+
+  // A browser query parameter cannot opt into a rollout. The Edge embeds the
+  // selected scope inside the HMAC-signed byte-pipe payload.
+  assert.ok(bytePipe.includes('...(scope ? { scope } : {})'));
+  assert.ok(bytePipe.includes('hmacBase64Url(runtimeConfig.mediaGatewayToken, payload)'));
+  assert.ok(
+    bytePipe.indexOf('...(scope ? { scope } : {})') <
+      bytePipe.indexOf('hmacBase64Url(runtimeConfig.mediaGatewayToken, payload)'),
+  );
+
+  // The database is consulted independently from runtime secrets, so the kill
+  // switch and rollout mode refresh even when all gateway config comes from env.
+  assert.ok(policy.includes('.from("admin_feature_flags")'));
+  for (const flag of [
+    'audio_lid_enabled',
+    'lid_detect_only_shadow_enabled',
+    'lid_detect_only_production_enabled',
+  ]) {
+    assert.ok(policy.includes(`"${flag}"`));
+    assert.ok(migration.includes(`'${flag}'`));
+  }
+  assert.ok(policy.includes('lidDetectionPolicyCache = { value, expiresAt: Date.now() + 30_000 }'));
+  assert.match(policy, /const enabled = !flags\.has\("audio_lid_enabled"\)[\s\S]*=== true/);
+  assert.ok(policy.includes('const conflict = primary && shadow'));
+  assert.match(
+    policy,
+    /mode: !enabled \? "off" : \(conflict \? "conflict" : \(primary \? "primary" : \(shadow \? "shadow" : "off"\)\)\)/,
+  );
+  assert.match(
+    policy,
+    /untaggedScope: enabled[\s\S]*primary \? "lid-production-detect-only"[\s\S]*shadow \? "lid-shadow"/,
+  );
+  // Primary is deliberately absent from taggedScope: mistag correction remains
+  // on full transcription. Shadow may compare, but its returned verdict is full.
+  assert.ok(policy.includes('taggedScope: enabled && shadow && !conflict ? "lid-shadow" : null'));
+  assert.ok(detector.includes('lidPolicy.untaggedScope'));
+  assert.ok(verifier.includes('lidPolicy.taggedScope'));
+  assert.ok(detector.includes('if (!lidPolicy.enabled) return'));
+  assert.ok(verifier.includes('if (!lidPolicy.enabled) return null'));
+
+  assert.match(migration, /'audio_lid_enabled',\s*\n\s*true/);
+  assert.match(migration, /'lid_detect_only_shadow_enabled',\s*\n\s*false/);
+  assert.match(migration, /'lid_detect_only_production_enabled',\s*\n\s*false/);
+  assert.ok(migration.includes('on conflict (key) do nothing'));
+
+  // Legacy transcripts retain their >=4-word guard. Detect-only must carry
+  // every explicit contract field and may never impersonate verification.
+  assert.ok(evidence.includes('det?.method === "whisper-detect-only-v1"'));
+  assert.ok(evidence.includes('det?.evidence === "lid-only-high-confidence"'));
+  assert.ok(evidence.includes('det?.fastPathAccepted === true'));
+  assert.ok(evidence.includes('det?.confident === true'));
+  assert.ok(evidence.includes('det?.verified === false'));
+  assert.ok(evidence.includes('det?.fallbackUsed === false'));
+  assert.ok(evidence.includes('det?.validationStatus === "pending"'));
+  assert.ok(evidence.includes('confidence >= 0.95'));
+  assert.ok(evidence.includes('words === 0'));
+  assert.ok(evidence.includes('det?.confident === true && words >= 4'));
+
+  // A fast canary result stays exact-file/tenant scoped. The irreversible
+  // title-wide union is reserved for historical transcript detections. Method
+  // evidence survives resumable multi-pass files, so a later fallback pass
+  // cannot accidentally merge an earlier fast language.
+  assert.ok(detector.includes('track.lidMethod = evidence.method'));
+  assert.ok(detector.includes('lidMethod: t.lidMethod'));
+  assert.ok(detector.includes('enriched.map((t) => t.lidMethod)'));
+  assert.ok(detector.includes('t.lidMethod === "whisper-detect-only-v1"'));
+  assert.ok(detector.includes('detectOnlyDetectedCount === 0'));
+  assert.ok(detector.includes('db.rpc("merge_catalog_title_audio"'));
+  assert.ok(
+    detector.indexOf('detectOnlyDetectedCount === 0') <
+      detector.indexOf('db.rpc("merge_catalog_title_audio"'),
+  );
+  assert.ok(detector.includes('method: detectOnlyDetectedCount > 0'));
+  assert.ok(detector.includes('? "whisper-detect-only-v1"'));
+  assert.ok(playback.includes('lidMethod: stringOrNull(x?.lidMethod ?? x?.lid_method)'));
+  assert.ok(playback.includes('"refresh_catalog_file_audio_detection_provenance"'));
+  assert.ok(migration.includes('create or replace function public.refresh_catalog_file_audio_detection_provenance('));
+  assert.ok(migration.includes("track->>'lidMethod' = 'whisper-detect-only-v1'"));
+  assert.ok(migration.includes("'method', v_method"));
+  assert.ok(migration.includes('observation.audio_verified_at is null'));
+  assert.ok(detector.includes(': "whisper-basic-v1"'));
+
+  assert.ok(health.includes('version: 31'));
+  assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
+  assert.ok(health.includes('audioLidEnabled: lidPolicy.enabled'));
+  assert.ok(health.includes('lidDetectOnlyMode: lidPolicy.mode'));
 });
 
 test('database language parser collapses terminology and bibliographic aliases', () => {

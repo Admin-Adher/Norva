@@ -217,6 +217,24 @@ let WHISPER_MODEL_SHA256 = null;
 let WHISPER_RUNTIME_VERIFIED = false;
 const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
 const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
+// Production detect-only is capability-gated twice: a signed Edge scope selects the mode
+// for one exact request, while this environment switch can disable the new runtime on every
+// gateway replica without trusting a browser-controlled query parameter. The signed scope is
+// OFF by default in the database; strict validation never enters this path.
+const WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE =
+    (process.env.WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE || 'true') === 'true';
+const WHISPER_DETECT_ONLY_TIMEOUT_MS = clampInt(
+    process.env.WHISPER_DETECT_ONLY_TIMEOUT_MS,
+    15_000,
+    5_000,
+    60_000,
+);
+const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math.min(
+    0.999,
+    Math.max(0.95, Number(process.env.WHISPER_DETECT_ONLY_MIN_PROBABILITY) || 0.95),
+);
+const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only';
+const LID_SHADOW_SCOPE = 'lid-shadow';
 const LID_BENCHMARK_INSTANCE = process.env.RAILWAY_REPLICA_ID || crypto.randomUUID();
 // Operator-only capture ceiling. A 30s 16 kHz mono PCM WAV is ~0.92 MiB raw
 // and ~1.22 MiB in base64, so one 1.5 MiB ceiling safely fits the expected
@@ -226,6 +244,24 @@ const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 * 1024;
 let lidBenchmarkBusy = false;
 let whisperInferenceActive = 0;
 let argosInferenceActive = 0;
+const lidDetectOnlyStats = {
+    primaryAttempts: 0,
+    primaryAccepted: 0,
+    primaryFallbacks: 0,
+    shadowAttempts: 0,
+    shadowEligible: 0,
+    shadowAgreements: 0,
+    shadowDisagreements: 0,
+    shadowNoFullVerdict: 0,
+    failures: 0,
+    timeouts: 0,
+    totalFastMs: 0,
+    shadowFullRuns: 0,
+    shadowFullMs: 0,
+    fallbackFullRuns: 0,
+    fallbackFullMs: 0,
+    last: null,
+};
 // Bounded mid-film sweep for language detection: a film opens with logos/silence/music, so
 // sampling at offset 0 detects nothing. Try these offsets (seconds) in order and stop at the
 // first clip with real speech; a clip past the file's end yields no WAV and is skipped. Bounded
@@ -370,7 +406,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 73;
+const GATEWAY_VERSION = 74;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -454,7 +490,43 @@ app.get('/health', (req, res) => {
             modelSha256: WHISPER_MODEL_SHA256,
             runtimeVerified: WHISPER_RUNTIME_VERIFIED,
             detectOnlyBenchmark: true,
+            detectOnlyProductionAvailable: WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE,
+            detectOnlyMinProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY,
+            detectOnlyTimeoutMs: WHISPER_DETECT_ONLY_TIMEOUT_MS,
         } : null,
+        lidDetectOnlyStats: {
+            ...lidDetectOnlyStats,
+            instance: LID_BENCHMARK_INSTANCE,
+            averageFastMs: (
+                lidDetectOnlyStats.primaryAttempts + lidDetectOnlyStats.shadowAttempts
+            ) > 0
+                ? Math.round(
+                    lidDetectOnlyStats.totalFastMs /
+                    (lidDetectOnlyStats.primaryAttempts + lidDetectOnlyStats.shadowAttempts),
+                )
+                : null,
+            averageShadowFullMs: lidDetectOnlyStats.shadowFullRuns > 0
+                ? Math.round(lidDetectOnlyStats.shadowFullMs / lidDetectOnlyStats.shadowFullRuns)
+                : null,
+            averageFallbackFullMs: lidDetectOnlyStats.fallbackFullRuns > 0
+                ? Math.round(lidDetectOnlyStats.fallbackFullMs / lidDetectOnlyStats.fallbackFullRuns)
+                : null,
+            shadowComparable: lidDetectOnlyStats.shadowAgreements +
+                lidDetectOnlyStats.shadowDisagreements,
+            shadowAgreementRate: (
+                lidDetectOnlyStats.shadowAgreements + lidDetectOnlyStats.shadowDisagreements
+            ) > 0
+                ? Number((
+                    lidDetectOnlyStats.shadowAgreements /
+                    (lidDetectOnlyStats.shadowAgreements + lidDetectOnlyStats.shadowDisagreements)
+                ).toFixed(4))
+                : null,
+            primaryAcceptanceRate: lidDetectOnlyStats.primaryAttempts > 0
+                ? Number((
+                    lidDetectOnlyStats.primaryAccepted / lidDetectOnlyStats.primaryAttempts
+                ).toFixed(4))
+                : null,
+        },
         translate: ARGOS_ENABLED,
         translateTargets: ARGOS_ENABLED ? argosTargets() : [],
         ocr: OCR_ENABLED,
@@ -995,6 +1067,13 @@ app.get('/detect-language/:token', async (req, res) => {
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
     const strict = ['1', 'true', 'yes'].includes(String(req.query.strict || '').toLowerCase());
+    const detectOnlyMode = !strict && WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE
+        ? (
+            claims.scope === LID_DETECT_ONLY_SCOPE
+                ? 'primary'
+                : (claims.scope === LID_SHADOW_SCOPE ? 'shadow' : 'off')
+        )
+        : 'off';
     const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || (strict ? 30 : 20), 4), 60);
     // An explicit ?start pins a single offset (caller knows where speech is); otherwise sweep the
     // bounded mid-film offsets and stop at the first clip that actually contains speech.
@@ -1035,65 +1114,178 @@ app.get('/detect-language/:token', async (req, res) => {
                 if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
                 wavPath = ex.path;
                 extractions++;
-                const whisper = await runWhisperDetect(wavPath);
-                const det = detectLanguageFromText(whisper.text);
-                // Strict validation never promotes a single-model guess. Whisper must be highly
-                // confident on each window; when the independent transcript detector has enough
-                // evidence, it must agree. Any accepted-language disagreement leaves the file
-                // pending rather than choosing a majority.
-                const whisperLang = String(whisper.lang || '').toLowerCase() || null;
-                const whisperProbability = Number(whisper.prob || 0);
-                const uniqueWordCount = new Set(
-                    String(whisper.text || '').toLowerCase().match(/\p{L}+/gu) || [],
-                ).size;
-                const transcriptDisagrees = det.confident === true
-                    && Boolean(det.lang)
-                    && det.lang !== whisperLang;
-                const whisperConfident = Boolean(whisperLang) && whisperProbability >= (
-                    strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75
-                );
-                const enoughWords = Number(det.words || 0) >= (
-                    strict ? WHISPER_STRICT_MIN_WORDS : 4
-                ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
-                const strictAccepted = strict
-                    && whisperConfident
-                    && enoughWords
-                    && !transcriptDisagrees;
-                if (strict && enoughWords && !strictAccepted) {
-                    strictRejectedSpeechSamples++;
+                let fast = null;
+                let fastEligible = false;
+                let result = null;
+                if (detectOnlyMode !== 'off') {
+                    fast = await runProductionWhisperDetectOnly(wavPath, detectOnlyMode);
+                    fastEligible = fast.ok === true
+                        && /^[a-z]{2,3}$/.test(String(fast.lang || ''))
+                        && Number(fast.prob || 0) >= WHISPER_DETECT_ONLY_MIN_PROBABILITY;
+                    if (detectOnlyMode === 'primary' && fastEligible) {
+                        lidDetectOnlyStats.primaryAccepted++;
+                        lidDetectOnlyStats.last = {
+                            at: new Date().toISOString(),
+                            mode: detectOnlyMode,
+                            outcome: 'accepted',
+                            probability: Number(fast.prob || 0),
+                            elapsedMs: fast.elapsedMs,
+                        };
+                        // Detect-only supplies no transcript. Never fabricate wordCount and never
+                        // turn this basic catalogue evidence into strict language certification.
+                        result = {
+                            language: fast.lang,
+                            candidate: fast.lang,
+                            confidence: fast.prob,
+                            confident: true,
+                            verified: false,
+                            validationStatus: 'pending',
+                            method: 'whisper-detect-only-v1',
+                            evidence: 'lid-only-high-confidence',
+                            acceptanceBasis: 'whisper-lid-probability',
+                            fastPathAccepted: true,
+                            fallbackUsed: false,
+                            consensus: 0,
+                            whisperLang: fast.lang,
+                            transcriptLang: null,
+                            transcriptAgrees: null,
+                            minProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY,
+                            wordCount: 0,
+                            uniqueWordCount: 0,
+                            sample: '',
+                            offset: off,
+                        };
+                    }
                 }
-                const confident = strict
-                    ? strictAccepted
-                    : (det.confident === true || whisperConfident);
-                const candidate = strict
-                    ? whisperLang
-                    : (det.confident ? det.lang : (whisperLang || det.lang || null));
-                const language = confident ? candidate : null;
-                const result = {
-                    language,
-                    candidate,
-                    confidence: strict
-                        ? whisperProbability
-                        : (det.confident ? det.score : whisperProbability),
-                    confident,
-                    verified: false,
-                    validationStatus: 'pending',
-                    method: strict
-                        ? 'whisper-strict-consensus-v4'
-                        : (det.confident ? 'transcript' : (whisperConfident ? 'whisper' : 'pending')),
-                    consensus: 0,
-                    whisperLang,
-                    transcriptLang: det.confident ? det.lang : null,
-                    transcriptAgrees: det.confident ? det.lang === whisperLang : null,
-                    minProbability: strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75,
-                    wordCount: det.words,
-                    uniqueWordCount,
-                    sample: String(whisper.text || '').slice(0, 160),
-                    offset: off,
-                };
+                if (!result) {
+                    if (detectOnlyMode === 'primary') lidDetectOnlyStats.primaryFallbacks++;
+                    const fullStartedAt = Date.now();
+                    const whisper = await runWhisperDetect(wavPath);
+                    const fullElapsedMs = Date.now() - fullStartedAt;
+                    if (detectOnlyMode === 'shadow') {
+                        lidDetectOnlyStats.shadowFullRuns++;
+                        lidDetectOnlyStats.shadowFullMs += fullElapsedMs;
+                    } else if (detectOnlyMode === 'primary') {
+                        lidDetectOnlyStats.fallbackFullRuns++;
+                        lidDetectOnlyStats.fallbackFullMs += fullElapsedMs;
+                    }
+                    const det = detectLanguageFromText(whisper.text);
+                    // Strict validation never promotes a single-model guess. Whisper must be
+                    // highly confident on each window; when the independent transcript detector
+                    // has enough evidence, it must agree. Any accepted-language disagreement
+                    // leaves the file pending rather than choosing a majority.
+                    const whisperLang = String(whisper.lang || '').toLowerCase() || null;
+                    const whisperProbability = Number(whisper.prob || 0);
+                    const uniqueWordCount = new Set(
+                        String(whisper.text || '').toLowerCase().match(/\p{L}+/gu) || [],
+                    ).size;
+                    const transcriptDisagrees = det.confident === true
+                        && Boolean(det.lang)
+                        && det.lang !== whisperLang;
+                    const whisperConfident = Boolean(whisperLang) && whisperProbability >= (
+                        strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75
+                    );
+                    const enoughWords = Number(det.words || 0) >= (
+                        strict ? WHISPER_STRICT_MIN_WORDS : 4
+                    ) && (!strict || uniqueWordCount >= WHISPER_STRICT_MIN_UNIQUE_WORDS);
+                    const strictAccepted = strict
+                        && whisperConfident
+                        && enoughWords
+                        && !transcriptDisagrees;
+                    if (strict && enoughWords && !strictAccepted) {
+                        strictRejectedSpeechSamples++;
+                    }
+                    const confident = strict
+                        ? strictAccepted
+                        : (det.confident === true || whisperConfident);
+                    const candidate = strict
+                        ? whisperLang
+                        : (det.confident ? det.lang : (whisperLang || det.lang || null));
+                    const language = confident ? candidate : null;
+                    result = {
+                        language,
+                        candidate,
+                        confidence: strict
+                            ? whisperProbability
+                            : (det.confident ? det.score : whisperProbability),
+                        confident,
+                        verified: false,
+                        validationStatus: 'pending',
+                        method: strict
+                            ? 'whisper-strict-consensus-v4'
+                            : (det.confident ? 'transcript' : (whisperConfident ? 'whisper' : 'pending')),
+                        consensus: 0,
+                        whisperLang,
+                        transcriptLang: det.confident ? det.lang : null,
+                        transcriptAgrees: det.confident ? det.lang === whisperLang : null,
+                        minProbability: strict ? WHISPER_STRICT_MIN_PROBABILITY : 0.75,
+                        wordCount: det.words,
+                        uniqueWordCount,
+                        sample: String(whisper.text || '').slice(0, 160),
+                        offset: off,
+                        ...(detectOnlyMode === 'primary' ? { fallbackUsed: true } : {}),
+                    };
+                    if (detectOnlyMode === 'shadow' && fast) {
+                        // Compare only against a verdict the historical Edge would really
+                        // persist. Whisper can emit a language on silence/music, but without
+                        // four transcript words the legacy contract is still pending.
+                        const fullLanguage = result.confident === true
+                            && Number(result.wordCount || 0) >= 4
+                            ? (result.language || null)
+                            : null;
+                        if (fastEligible) {
+                            lidDetectOnlyStats.shadowEligible++;
+                            if (!fullLanguage) {
+                                lidDetectOnlyStats.shadowNoFullVerdict++;
+                            } else if (fullLanguage === fast.lang) {
+                                lidDetectOnlyStats.shadowAgreements++;
+                            } else {
+                                lidDetectOnlyStats.shadowDisagreements++;
+                            }
+                        }
+                        const shadowOutcome = !fast.ok
+                            ? 'fast-failed'
+                            : (!fastEligible
+                                ? 'below-threshold'
+                                : (!fullLanguage
+                                    ? 'full-pending'
+                                    : (fullLanguage === fast.lang ? 'agree' : 'disagree')));
+                        lidDetectOnlyStats.last = {
+                            at: new Date().toISOString(),
+                            mode: detectOnlyMode,
+                            outcome: shadowOutcome,
+                            probability: Number(fast.prob || 0),
+                            elapsedMs: fast.elapsedMs,
+                        };
+                        // Diagnostic only: the language/method/wordCount returned above remain
+                        // entirely those of the historical transcription path.
+                        result.detectOnlyShadow = {
+                            candidate: fast.ok ? fast.lang : null,
+                            confidence: Number(fast.prob || 0),
+                            eligible: fastEligible,
+                            agreesWithFull: fastEligible && fullLanguage
+                                ? fast.lang === fullLanguage
+                                : null,
+                            elapsedMs: fast.elapsedMs,
+                            fullElapsedMs,
+                        };
+                    } else if (detectOnlyMode === 'primary') {
+                        lidDetectOnlyStats.last = {
+                            at: new Date().toISOString(),
+                            mode: detectOnlyMode,
+                            outcome: 'fallback',
+                            probability: Number(fast?.prob || 0),
+                            elapsedMs: fast?.elapsedMs ?? null,
+                        };
+                    }
+                }
+                const language = result.language;
                 // "Good" = a clear transcript with a language → real speech. Stop sweeping. A
                 // silent/music clip yields ~no words → keep the best partial and try the next offset.
-                if (language && det.words >= 4) {
+                if (
+                    language &&
+                    (result.fastPathAccepted === true || Number(result.wordCount || 0) >= 4)
+                ) {
                     const voteCount = (votes.get(language) || 0) + 1;
                     votes.set(language, voteCount);
                     result.consensus = voteCount;
@@ -1101,9 +1293,9 @@ app.get('/detect-language/:token', async (req, res) => {
                         strictSamples.push({
                             offset: off,
                             language,
-                            probability: whisperProbability,
-                            wordCount: det.words,
-                            uniqueWordCount,
+                            probability: Number(result.confidence || 0),
+                            wordCount: Number(result.wordCount || 0),
+                            uniqueWordCount: Number(result.uniqueWordCount || 0),
                             transcriptAgrees: result.transcriptAgrees,
                         });
                         if (!bestStrictAccepted || result.wordCount > bestStrictAccepted.wordCount) {
@@ -1758,6 +1950,44 @@ function shiftVttBlocks(vtt, offsetSec) {
         out.push(lines.join('\n'));
     }
     return out;
+}
+
+// Run whisper.cpp's language-only mode under the same CPU activity guard as full
+// transcription. The helper always settles after the child is closed, so a timeout cannot
+// overlap the fallback process on the same replica.
+async function runProductionWhisperDetectOnly(wavPath, mode) {
+    if (mode === 'primary') lidDetectOnlyStats.primaryAttempts++;
+    else lidDetectOnlyStats.shadowAttempts++;
+    whisperInferenceActive += 1;
+    const startedAt = Date.now();
+    try {
+        const value = await runWhisperDetectOnly({
+            bin: WHISPER_BIN,
+            model: WHISPER_MODEL,
+            wavPath,
+            threads: WHISPER_THREADS,
+            timeoutMs: WHISPER_DETECT_ONLY_TIMEOUT_MS,
+        });
+        const elapsedMs = Date.now() - startedAt;
+        lidDetectOnlyStats.totalFastMs += elapsedMs;
+        if (value.ok !== true) lidDetectOnlyStats.failures++;
+        if (value.timedOut === true) lidDetectOnlyStats.timeouts++;
+        return { ...value, elapsedMs };
+    } catch (error) {
+        const elapsedMs = Date.now() - startedAt;
+        lidDetectOnlyStats.totalFastMs += elapsedMs;
+        lidDetectOnlyStats.failures++;
+        return {
+            ok: false,
+            lang: null,
+            prob: 0,
+            timedOut: false,
+            error: String(error?.message || error),
+            elapsedMs,
+        };
+    } finally {
+        whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+    }
 }
 
 // Run whisper.cpp on a WAV: auto-detect language + transcribe. Resolves { text, lang, prob };

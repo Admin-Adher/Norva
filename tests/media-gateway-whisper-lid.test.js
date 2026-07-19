@@ -179,6 +179,141 @@ test('a timed-out detect-only process must close before the comparison can conti
   assert.equal(result.error, 'timeout');
 });
 
+test('production detect-only is signed-scope only, non-strict and falls back on the same WAV', () => {
+  const root = path.join(__dirname, '..');
+  const gateway = fs.readFileSync(
+    path.join(root, 'services/media-gateway/src/index.js'),
+    'utf8',
+  );
+  const routeStart = gateway.indexOf("app.get('/detect-language/:token'");
+  const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
+  assert.notEqual(routeStart, -1);
+  assert.notEqual(routeEnd, -1);
+  const route = gateway.slice(routeStart, routeEnd);
+
+  assert.match(gateway, /const GATEWAY_VERSION = 74/);
+  assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
+  assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
+  assert.match(
+    route,
+    /const detectOnlyMode = !strict && WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE/,
+  );
+  assert.match(route, /claims\.scope === LID_DETECT_ONLY_SCOPE[\s\S]*\? 'primary'/);
+  assert.match(route, /claims\.scope === LID_SHADOW_SCOPE \? 'shadow' : 'off'/);
+  assert.match(route, /if \(detectOnlyMode !== 'off'\) \{/);
+
+  // Only primary may short-circuit. Shadow always proceeds to the historical
+  // transcription result and merely appends diagnostics.
+  assert.match(route, /if \(detectOnlyMode === 'primary' && fastEligible\) \{/);
+  assert.match(route, /if \(!result\) \{[\s\S]*runWhisperDetect\(wavPath\)/);
+  assert.match(
+    route,
+    /runProductionWhisperDetectOnly\(wavPath, detectOnlyMode\)[\s\S]*runWhisperDetect\(wavPath\)/,
+  );
+  assert.match(route, /if \(detectOnlyMode === 'shadow' && fast\) \{/);
+  assert.match(
+    route,
+    /const fullLanguage = result\.confident === true[\s\S]*Number\(result\.wordCount \|\| 0\) >= 4/,
+  );
+  assert.match(route, /result\.detectOnlyShadow = \{/);
+  assert.match(
+    route,
+    /Diagnostic only:[\s\S]*language\/method\/wordCount returned above remain[\s\S]*historical transcription path/,
+  );
+
+  // The accepted fast response is deliberately a non-certifying LID contract.
+  for (const field of [
+    "method: 'whisper-detect-only-v1'",
+    "evidence: 'lid-only-high-confidence'",
+    "acceptanceBasis: 'whisper-lid-probability'",
+    'fastPathAccepted: true',
+    'confident: true',
+    'verified: false',
+    "validationStatus: 'pending'",
+    'fallbackUsed: false',
+    'wordCount: 0',
+    'uniqueWordCount: 0',
+  ]) {
+    assert.ok(route.includes(field), `missing explicit fast-contract field: ${field}`);
+  }
+  assert.match(
+    gateway,
+    /const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math\.min\([\s\S]*Math\.max\(0\.95,/,
+  );
+  assert.match(
+    route,
+    /Number\(fast\.prob \|\| 0\) >= WHISPER_DETECT_ONLY_MIN_PROBABILITY/,
+  );
+  assert.match(
+    route,
+    /result\.fastPathAccepted === true \|\| Number\(result\.wordCount \|\| 0\) >= 4/,
+  );
+
+  // Strict mode cannot enter either detect-only scope and retains the stronger,
+  // multi-window full-transcript consensus.
+  assert.match(route, /const detectOnlyMode = !strict/);
+  assert.match(route, /const offsets =[\s\S]*strict \? WHISPER_STRICT_OFFSETS : WHISPER_SWEEP_OFFSETS/);
+  assert.match(route, /strictSamples\.length >= consensusNeeded/);
+  assert.match(route, /strictRejectedSpeechSamples === 0/);
+  assert.match(route, /method: strict[\s\S]*\? 'whisper-strict-consensus-v4'/);
+});
+
+test('production LID health exposes the kill switch, threshold and bounded rollout counters', () => {
+  const root = path.join(__dirname, '..');
+  const gateway = fs.readFileSync(
+    path.join(root, 'services/media-gateway/src/index.js'),
+    'utf8',
+  );
+  const healthStart = gateway.indexOf("app.get('/health'");
+  const healthEnd = gateway.indexOf("app.get('/debug/failures'", healthStart);
+  assert.notEqual(healthStart, -1);
+  assert.notEqual(healthEnd, -1);
+  const health = gateway.slice(healthStart, healthEnd);
+
+  assert.match(
+    gateway,
+    /const WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE =[\s\S]*WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE[\s\S]*=== 'true'/,
+  );
+  assert.match(health, /version: GATEWAY_VERSION/);
+  assert.match(health, /detectOnlyProductionAvailable: WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE/);
+  assert.match(health, /detectOnlyMinProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY/);
+  assert.match(health, /detectOnlyTimeoutMs: WHISPER_DETECT_ONLY_TIMEOUT_MS/);
+  assert.match(health, /lidDetectOnlyStats: \{/);
+  assert.match(health, /\.\.\.lidDetectOnlyStats/);
+  assert.match(
+    health,
+    /averageFastMs:[\s\S]*lidDetectOnlyStats\.primaryAttempts \+ lidDetectOnlyStats\.shadowAttempts/,
+  );
+  assert.match(health, /shadowAgreementRate:[\s\S]*lidDetectOnlyStats\.shadowAgreements/);
+  assert.match(health, /primaryAcceptanceRate:[\s\S]*lidDetectOnlyStats\.primaryAccepted/);
+
+  const statsStart = gateway.indexOf('const lidDetectOnlyStats = {');
+  const statsEnd = gateway.indexOf('\n};', statsStart);
+  assert.notEqual(statsStart, -1);
+  assert.notEqual(statsEnd, -1);
+  const stats = gateway.slice(statsStart, statsEnd);
+  for (const counter of [
+    'primaryAttempts',
+    'primaryAccepted',
+    'primaryFallbacks',
+    'shadowAttempts',
+    'shadowEligible',
+    'shadowAgreements',
+    'shadowDisagreements',
+    'shadowNoFullVerdict',
+    'failures',
+    'timeouts',
+    'totalFastMs',
+    'shadowFullRuns',
+    'shadowFullMs',
+    'fallbackFullRuns',
+    'fallbackFullMs',
+    'last',
+  ]) {
+    assert.match(stats, new RegExp(`\\b${counter}:`), `missing health counter ${counter}`);
+  }
+});
+
 test('LID benchmark is service-only, scoped, read-only and reproducibly pinned', () => {
   const root = path.join(__dirname, '..');
   const gateway = fs.readFileSync(
