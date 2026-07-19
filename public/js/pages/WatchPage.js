@@ -104,13 +104,10 @@ class WatchPage {
         this.baseStreamUrl = null;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
-        this.audioLanguageValidationStatus = String(
-            options.audioLanguageValidationStatus ||
-            options.audio_language_validation_status ||
-            this.content?.audioLanguageValidationStatus ||
-            this.content?.audio_language_validation_status ||
-            'not_analyzed'
-        ).toLowerCase();
+        // Playback metadata does not exist while App constructs its page
+        // controllers. The exact status is assigned in play(), once content
+        // and the resolved cloud session are available.
+        this.audioLanguageValidationStatus = 'not_analyzed';
         this.probeDuration = null;
         this.streamStartOffset = 0;
         this.gatewaySourceTimestamps = false;
@@ -1454,6 +1451,13 @@ class WatchPage {
 
         this.content = content;
         this.contentType = content.type;
+        this.audioLanguageValidationStatus = String(
+            playbackMetadata.audioLanguageValidationStatus ||
+            playbackMetadata.audio_language_validation_status ||
+            content.audioLanguageValidationStatus ||
+            content.audio_language_validation_status ||
+            'not_analyzed'
+        ).toLowerCase();
         this.seriesInfo = content.seriesInfo || null;
         this.currentSeason = content.currentSeason || null;
         this.currentEpisode = content.currentEpisode || null;

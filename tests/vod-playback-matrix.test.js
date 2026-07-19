@@ -83,6 +83,17 @@ test('non-demuxable legacy containers route to gateway transcode', () => {
 // ── 2) provider-busy classification (the regex bug) ────────────────────────────
 const watchSrc = read('public/js/pages/WatchPage.js');
 
+test('WatchPage constructor does not read playback options before play()', () => {
+  const start = watchSrc.indexOf('constructor(app) {');
+  const end = watchSrc.indexOf('\n    async play(', start);
+  const constructorBody = watchSrc.slice(start, end);
+  assert.notStrictEqual(start, -1, 'WatchPage constructor missing');
+  assert.notStrictEqual(end, -1, 'WatchPage play method missing');
+  assert.ok(constructorBody.includes("this.audioLanguageValidationStatus = 'not_analyzed'"));
+  assert.ok(!constructorBody.includes('options.audioLanguageValidationStatus'));
+  assert.ok(!constructorBody.includes('options.audio_language_validation_status'));
+});
+
 function extractRegex(source, methodName) {
   const i = source.indexOf(`${methodName}(message)`);
   assert.notStrictEqual(i, -1, `${methodName} not found`);
