@@ -377,7 +377,7 @@ for sample in "${SAMPLES[@]}"; do
     "$(printf '%s' "$response" | jq -r '.benchmark.detectOnly.candidateLanguage // "-"')" \
     "$(printf '%s' "$response" | jq -r '.benchmark.timings.currentMs // "-"')" \
     "$(printf '%s' "$response" | jq -r '.benchmark.timings.detectOnlyMs // "-"')" \
-    "$(printf '%s' "$response" | jq -r 'if .skipped then " skipped=" + .skipped elif .error then " error=" + .error elif .runnerError then " error=" + .runnerError elif .benchmark.system.contended then " CONTENDED" else "" end')"
+    "$(printf '%s' "$response" | jq -r 'if .skipped then " skipped=" + .skipped elif .error then " error=" + .error + (if .details then " (" + .details + ")" else "" end) elif .runnerError then " error=" + .runnerError elif .benchmark.system.contended then " CONTENDED" else "" end')"
 done
 
 AFTER_FINGERPRINT="$(catalogue_fingerprint)"
@@ -407,10 +407,11 @@ SUMMARY="$(jq -s --argjson catalogueUnchanged "$CATALOGUE_UNCHANGED" '
     failures: ([ .[] | select(.response.benchmark == null and .response.skipped == null) |
       {
         status: (.response.status // .httpStatus),
-        error: (.response.error // .response.runnerError // "unknown")
+        error: (.response.error // .response.runnerError // "unknown"),
+        details: (.response.details // null)
       }
-    ] | group_by([.status, .error]) | map({
-      status: .[0].status, error: .[0].error, count: length
+    ] | group_by([.status, .error, .details]) | map({
+      status: .[0].status, error: .[0].error, details: .[0].details, count: length
     })),
     contended: ([$completed[] | select(.response.benchmark.system.contended == true)] | length),
     usableByCohort: ($usable | group_by(.cohort) |

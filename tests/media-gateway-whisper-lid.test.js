@@ -220,6 +220,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(playback, /operator lease expired/);
   assert.match(playback, /"lid-benchmark",\s*\n\s*\)/);
   assert.match(playback, /persisted: false/);
+  assert.match(playback, /sanitizeTelemetryText\(stringOr\(payload\.details/);
   assert.match(
     dockerfile,
     /ARG WHISPER_CPP_COMMIT=[0-9a-f]{40}/,

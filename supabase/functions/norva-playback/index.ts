@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 27,
+        version: 28,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -4398,11 +4398,16 @@ async function runLidBenchmark(db: SupabaseClient, body: JsonRecord): Promise<Js
     });
     const payload = recordOrEmpty(await response.json().catch(() => ({})));
     if (!response.ok) {
+      const safeDetails = truncateText(
+        sanitizeTelemetryText(stringOr(payload.details, "")),
+        300,
+      );
       return {
         mode: "lid-benchmark",
         persisted: false,
         status: response.status,
         error: stringOr(payload.error, "Gateway benchmark failed"),
+        details: safeDetails || null,
         retryAfter: response.headers.get("retry-after"),
       };
     }
