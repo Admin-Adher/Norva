@@ -104,7 +104,8 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 28,
+        version: 29,
+        lidBenchmarkProtocol: 1,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -145,6 +146,11 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
+    }
+    // Dedicated route: an older edge replica returns 404 instead of interpreting a
+    // benchmark payload as a normal audio-backfill mutation during a rolling deploy.
+    if (req.method === "POST" && segments[0] === "lid-benchmark") {
+      return json(req, await runLidBenchmarkEndpoint(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "transcribe-callback") {
       return json(req, await runTranscribeCallback(req, supabase));
@@ -4183,6 +4189,7 @@ function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
       digest: stringOrNull(sample.digest),
     },
     engine: {
+      gatewayVersion: finiteBenchmarkNumber(engine.gatewayVersion),
       family: stringOr(engine.family, "whisper.cpp"),
       model: stringOrNull(engine.model),
       commit: stringOrNull(engine.commit),
@@ -4244,6 +4251,27 @@ function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
         ? null
         : finiteBenchmarkNumber(gains.endToEndSpeedup),
     },
+  };
+}
+
+async function runLidBenchmarkEndpoint(req: Request, db: SupabaseClient) {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const audit = {
+    userId: stringOr(body.userId, "") || null,
+    sourceId: stringOr(body.sourceId, "") || null,
+  };
+  try {
+    const { data: paused } = await db.rpc("feature_flag", { p_key: "enrichment_paused" });
+    if (paused === true) {
+      return { paused: true, skipped: "enrichment_paused", persisted: false, audit };
+    }
+  } catch (_) { /* preserve the existing fail-open maintenance behavior */ }
+  return {
+    ...(await runLidBenchmark(db, { ...body, mode: "lid-benchmark" })),
+    audit,
   };
 }
 

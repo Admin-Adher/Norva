@@ -212,6 +212,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(gateway, /binarySha256: WHISPER_BIN_SHA256/);
   assert.match(gateway, /modelSha256: WHISPER_MODEL_SHA256/);
   assert.match(gateway, /runtimeVerified: WHISPER_RUNTIME_VERIFIED/);
+  assert.match(gateway, /gatewayVersion: GATEWAY_VERSION/);
   assert.match(gateway, /lidProductionCpuBusy\(\)/);
   assert.match(gateway, /digest\('hex'\);\s*\n/);
   assert.match(gateway, /runWhisperDetect\(wavPath\)/);
@@ -223,6 +224,8 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(playback, /"lid-benchmark",\s*\n\s*\)/);
   assert.match(playback, /persisted: false/);
   assert.match(playback, /sanitizeTelemetryText\(stringOr\(payload\.details/);
+  assert.match(playback, /lidBenchmarkProtocol: 1/);
+  assert.match(playback, /segments\[0\] === "lid-benchmark"/);
   assert.match(
     dockerfile,
     /ARG WHISPER_CPP_COMMIT=[0-9a-f]{40}/,
@@ -242,6 +245,12 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(runner, /BENCH_OFFSET/);
   assert.match(runner, /--header "@\$AUTH_HEADER"/);
   assert.match(runner, /gateway_is_idle/);
+  assert.match(runner, /lidBenchmarkProtocol >= 1/);
+  assert.match(runner, /\.version >= 71/);
+  assert.match(runner, /norva-playback\/lid-benchmark/);
+  assert.doesNotMatch(runner, /norva-playback\/audio-backfill/);
+  assert.match(runner, /http_status.*\^5\[0-9\]\[0-9\]\$/);
+  assert.match(runner, /engine\.gatewayVersion/);
   assert.match(runner, /max_parallel_workers_per_gather=0/);
   assert.match(flagMigration, /'lid_benchmark_enabled',\s*\n\s*false/);
 });

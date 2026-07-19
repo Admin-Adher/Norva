@@ -36,6 +36,7 @@ command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 FUNCTIONS_BASE="${FUNCTIONS_BASE:-https://api.norva.tv/functions/v1}"
 GATEWAY_HEALTH="${GATEWAY_HEALTH:-https://norva-production.up.railway.app/health}"
+PLAYBACK_HEALTH="${PLAYBACK_HEALTH:-$FUNCTIONS_BASE/norva-playback/health}"
 EXPECTED_WHISPER_COMMIT="080bbbe85230f624f0b52127f1ae1218247989f9"
 MIN_COMPLETION_PCT="${MIN_COMPLETION_PCT:-80}"
 [[ "$MIN_COMPLETION_PCT" =~ ^[0-9]+$ && "$MIN_COMPLETION_PCT" -le 100 ]] || {
@@ -68,17 +69,21 @@ trap disable_flag EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-TOKEN=$("${PSQL[@]}" -c \
-  "select decrypted_secret from vault.decrypted_secrets where name='norva_backfill_token'")
-[[ -n "$TOKEN" ]] || { echo "norva_backfill_token is missing" >&2; exit 1; }
-printf 'Authorization: Bearer %s\n' "$TOKEN" >"$AUTH_HEADER"
-chmod 600 "$AUTH_HEADER"
-unset TOKEN
+EDGE_HEALTH="$(curl -fsS --max-time 30 "$PLAYBACK_HEALTH")"
+printf '%s' "$EDGE_HEALTH" | jq -e '
+  .ok == true and
+  .version >= 29 and
+  .lidBenchmarkProtocol >= 1
+' >/dev/null || {
+  echo "norva-playback does not expose the read-only LID benchmark protocol" >&2
+  printf '%s\n' "$EDGE_HEALTH" | jq '{version, lidBenchmarkProtocol}' >&2
+  exit 1
+}
 
 HEALTH="$(curl -fsS --max-time 30 "$GATEWAY_HEALTH")"
 printf '%s' "$HEALTH" | jq -e --arg commit "$EXPECTED_WHISPER_COMMIT" '
   .ok == true and
-  .version >= 70 and
+  .version >= 71 and
   .languageDetectEngine.detectOnlyBenchmark == true and
   .languageDetectEngine.runtimeVerified == true and
   .languageDetectEngine.model == "small" and
@@ -90,6 +95,13 @@ printf '%s' "$HEALTH" | jq -e --arg commit "$EXPECTED_WHISPER_COMMIT" '
   printf '%s\n' "$HEALTH" | jq '{version, languageDetectEngine}' >&2
   exit 1
 }
+
+TOKEN=$("${PSQL[@]}" -c \
+  "select decrypted_secret from vault.decrypted_secrets where name='norva_backfill_token'")
+[[ -n "$TOKEN" ]] || { echo "norva_backfill_token is missing" >&2; exit 1; }
+printf 'Authorization: Bearer %s\n' "$TOKEN" >"$AUTH_HEADER"
+chmod 600 "$AUTH_HEADER"
+unset TOKEN
 
 gateway_is_idle() {
   printf '%s' "$1" | jq -e '
@@ -322,7 +334,7 @@ for sample in "${SAMPLES[@]}"; do
     attempt=$((attempt + 1))
     set +e
     raw="$(printf '%s' "$payload" | curl -sS --max-time 190 -X POST \
-      "$FUNCTIONS_BASE/norva-playback/audio-backfill" \
+      "$FUNCTIONS_BASE/norva-playback/lid-benchmark" \
       --header "@$AUTH_HEADER" \
       -H 'Content-Type: application/json' \
       --data-binary @- \
@@ -339,11 +351,12 @@ for sample in "${SAMPLES[@]}"; do
       if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
         response='{"runnerError":"non-json-response"}'
       fi
-      if [[ "$http_status" == "429" || "$http_status" == "502" || "$http_status" == "503" ]]; then
+      if [[ "$http_status" == "408" || "$http_status" == "429" || "$http_status" =~ ^5[0-9][0-9]$ ]]; then
         transient=true
       else
         transient="$(printf '%s' "$response" | jq -r '
-          ((.status // 0) == 429 or (.status // 0) == 502 or (.status // 0) == 503) or
+          ((.status // 0) == 408 or (.status // 0) == 429 or
+            ((.status // 0) >= 500 and (.status // 0) <= 599)) or
           ((.skipped // "") | test("^(live-session|live-session-race|pregen-active|pregen-active-race|provider-account-busy|provider-account-busy-race|provider-lease-busy)$")) or
           (.runnerError != null)
         ')"
@@ -447,6 +460,7 @@ MIN_REQUIRED=$(( (REQUESTED * MIN_COMPLETION_PCT + 99) / 100 ))
 HASH_DRIFT="$(jq -s --arg commit "$EXPECTED_WHISPER_COMMIT" '[
   .[] | select(.response.benchmark != null) | select(
     .response.benchmark.engine.commit != $commit or
+    (.response.benchmark.engine.gatewayVersion // 0) < 71 or
     .response.benchmark.engine.model != "small" or
     .response.benchmark.engine.runtimeVerified != true or
     ((.response.benchmark.engine.binarySha256 // "") | test("^[a-f0-9]{64}$") | not) or

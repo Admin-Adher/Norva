@@ -1324,6 +1324,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
                 digest: sampleDigest,
             },
             engine: {
+                gatewayVersion: GATEWAY_VERSION,
                 family: 'whisper.cpp',
                 model: WHISPER_MODEL_NAME,
                 commit: WHISPER_CPP_COMMIT,
