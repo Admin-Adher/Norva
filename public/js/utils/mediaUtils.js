@@ -1134,16 +1134,44 @@ const MediaUtils = (() => {
 
     // === Filter persistence ===
 
+    function filterStorageScope() {
+        try {
+            const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+            const userId = session?.user?.id;
+            if (userId) return `user-${encodeURIComponent(String(userId))}`;
+
+            const deviceId = localStorage.getItem('norva-cloud-device-id');
+            if (deviceId) return `device-${encodeURIComponent(String(deviceId))}`;
+        } catch (_) { /* malformed or unavailable storage -> local scope */ }
+        return 'local';
+    }
+
+    function filterStorageKey(pageKey) {
+        return `norva-filters-v2-${filterStorageScope()}-${String(pageKey || '')}`;
+    }
+
     function saveFilters(pageKey, filters) {
         try {
-            localStorage.setItem(`norva-filters-${pageKey}`, JSON.stringify(filters));
+            localStorage.setItem(filterStorageKey(pageKey), JSON.stringify(filters));
         } catch (e) { /* storage full/unavailable */ }
     }
 
     function loadFilters(pageKey) {
         try {
-            const raw = localStorage.getItem(`norva-filters-${pageKey}`);
-            return raw ? JSON.parse(raw) : null;
+            const key = filterStorageKey(pageKey);
+            const raw = localStorage.getItem(key);
+            if (raw) return JSON.parse(raw);
+
+            // One-time migration from the historical browser-global key. Removing
+            // it prevents a second signed-in account from inheriting the first
+            // account's catalogue view on the same device.
+            const legacyKey = `norva-filters-${pageKey}`;
+            const legacyRaw = localStorage.getItem(legacyKey);
+            if (!legacyRaw) return null;
+            const filters = JSON.parse(legacyRaw);
+            localStorage.setItem(key, legacyRaw);
+            localStorage.removeItem(legacyKey);
+            return filters;
         } catch (e) {
             return null;
         }

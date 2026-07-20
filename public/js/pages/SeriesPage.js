@@ -73,6 +73,8 @@ class SeriesPage {
         this.startedSeriesIds = new Set(); // source-aware series keys with a resumable episode
         this.historyItems = [];
         this.serverSettings = {};
+        this._genreFilterHydrated = false;
+        this._categoriesRestored = false;
 
         this.restoreFilters();
         this.init();
@@ -85,8 +87,14 @@ class SeriesPage {
             searchId: 'series-category-search',
             listId: 'series-category-list',
             allLabel: 'All Categories',
-            onChange: () => this.onFiltersChanged()
+            onChange: () => {
+                // An explicit category interaction wins over any still-pending
+                // restore from a partial provider response.
+                this._categoriesRestored = true;
+                this.onFiltersChanged();
+            }
         });
+        this.restoreSavedCategories([]);
 
         this.sourceSelect?.addEventListener('change', async () => {
             await this.loadCategories();
@@ -102,6 +110,9 @@ class SeriesPage {
         // to paint, then discard stale generations before touching the catalogue.
         this.searchInput?.addEventListener('input', () => {
             clearTimeout(this._searchTimeout);
+            // Storage is cheap and synchronous; only the expensive catalogue
+            // rerender stays debounced.
+            this.persistFilters();
             if (this._searchIdleCallback !== null) {
                 if (typeof window.cancelIdleCallback === 'function') {
                     window.cancelIdleCallback(this._searchIdleCallback);
@@ -204,6 +215,7 @@ class SeriesPage {
         if (this.ratingSelect && s.rating) this.ratingSelect.value = s.rating;
         if (this.watchedSelect && s.watched) this.watchedSelect.value = s.watched;
         if (this.addedSelect && s.added) this.addedSelect.value = s.added;
+        if (this.statusSelect && s.status) this.statusSelect.value = s.status;
         if (this.audioSelect && s.audio) this.audioSelect.value = s.audio;
         if (this.subtitleSelect && s.subtitle) this.subtitleSelect.value = s.subtitle;
         if (this.searchInput && s.search) this.searchInput.value = s.search;
@@ -212,9 +224,11 @@ class SeriesPage {
     }
 
     persistFilters() {
-        MediaUtils.saveFilters('series', {
+        const selectedCategories = [...(this.categoryMulti?.getSelected() || [])];
+        const filters = {
             sort: this.sortSelect?.value || 'default',
-            genre: this.genreSelect?.value || '',
+            genre: this.genreSelect?.value ||
+                (!this._genreFilterHydrated ? this.savedFilters?.genre || '' : ''),
             year: this.yearSelect?.value || '',
             rating: this.ratingSelect?.value || '',
             watched: this.watchedSelect?.value || '',
@@ -225,8 +239,29 @@ class SeriesPage {
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
             favoritesOnly: this.showFavoritesOnly,
-            categories: [...(this.categoryMulti?.getSelected() || [])]
-        });
+            categories: (!this._categoriesRestored && this.savedFilters?.categories?.length)
+                ? [...new Set([...this.savedFilters.categories, ...selectedCategories])]
+                : selectedCategories
+        };
+        this.savedFilters = filters;
+        MediaUtils.saveFilters('series', filters);
+    }
+
+    restoreSavedCategories(availableOptions = this.categoryMulti?.options || []) {
+        const saved = this.savedFilters?.categories;
+        if (!Array.isArray(saved) || !saved.length || this._categoriesRestored || !this.categoryMulti) return;
+        const realOptions = Array.isArray(availableOptions) ? availableOptions : [];
+        const available = new Set(realOptions.map(option => option.value));
+        const missing = saved.filter(value => !available.has(value));
+        const taxonomy = window.GenreTaxonomy;
+        const provisional = missing.map(value => ({
+            value,
+            label: taxonomy?.label?.(value) || value
+        }));
+        this.categoryMulti.setOptions([...realOptions, ...provisional], { keepSelection: false });
+        this.categoryMulti.setSelected(saved);
+        // Keep retrying while a provider/category response is only partial.
+        this._categoriesRestored = missing.length === 0;
     }
 
     onFiltersChanged() {
@@ -290,9 +325,9 @@ class SeriesPage {
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
         if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (tv && this.addedSelect?.value) params.addedDays = this.addedSelect.value;
+        if (this.addedSelect?.value) params.addedDays = this.addedSelect.value;
         const sort = this.sortSelect?.value || '';
-        if (tv && sort && sort !== 'default') params.sort = sort;
+        if (sort && sort !== 'default') params.sort = sort;
         if (sort === 'lang-match') {
             params.sort = 'lang-match';
             const prefs = this.getPreferences();
@@ -330,6 +365,8 @@ class SeriesPage {
         this.audioSelect?.classList.toggle('hidden', !cloud);
         this.subtitleSelect?.classList.toggle('hidden', !cloud);
         if (!cloud) return;
+        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio);
+        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle);
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
@@ -339,22 +376,42 @@ class SeriesPage {
         this._facetsLoadedAt = now;
         try {
             const facets = await API.media.languageFacets({ type: 'series' });
-            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio);
-            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles);
+            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio);
+            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle);
+            this.renderActiveFilterChips();
         } catch (_) {
             this._facetsLoadedAt = 0; // allow a retry on the next show
         }
     }
 
-    applyFacetOptions(select, anyLabel, facets) {
-        if (!select || !Array.isArray(facets) || !facets.length) return;
+    applyFacetOptions(select, anyLabel, facets, savedValue = '') {
+        if (!select || !Array.isArray(facets)) return;
+        const current = select.value || savedValue || '';
+        if (!facets.length && !current) return;
+        const existing = Array.from(select.options || []);
+        if (!facets.length && existing.some(option => option.value === current)) {
+            if (!select.value) select.value = current;
+            return;
+        }
+        const options = facets.length
+            ? facets.slice()
+            : existing
+                .filter(option => option.value)
+                .map(option => ({ value: option.value, label: option.text?.trim() || option.value.toUpperCase() }));
+        if (current && !options.some(f => f.value === current)) {
+            const previous = existing.find(option => option.value === current)?.text?.trim();
+            options.push({ value: current, label: previous || current.toUpperCase() });
+        }
         const desired = [`<option value="">${anyLabel}</option>`]
-            .concat(facets.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
+            .concat(options.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
             .join('');
+        if (select.innerHTML === desired && savedValue && !select.value
+            && options.some(f => f.value === savedValue)) {
+            select.value = savedValue;
+        }
         if (select.innerHTML === desired) return; // unchanged → don't disturb an open dropdown
-        const current = select.value;
         select.innerHTML = desired;
-        if (current && facets.some(f => f.value === current)) select.value = current;
+        if (current && options.some(f => f.value === current)) select.value = current;
     }
 
     // Open a genre bucket from the filter dropdown, reusing the rail "See all"
@@ -548,7 +605,10 @@ class SeriesPage {
         this.bucketObserver?.disconnect();
         this.bucketObserver = null;
         // Drop the genre selection (set silently — the next view renders below).
-        if (this.categoryMulti?.getSelected().size) this.categoryMulti.setSelected([]);
+        if (this.categoryMulti?.getSelected().size) {
+            this._categoriesRestored = true;
+            this.categoryMulti.setSelected([]);
+        }
         // Backing out of a GENRE keeps the user's language/year/rating filters
         // (they weren't set by the bucket) — onFiltersChanged routes to the right
         // view for whatever remains. Backing out of the catalogue-wide language
@@ -599,6 +659,9 @@ class SeriesPage {
     }
 
     resetFilters() {
+        // Clear is explicit; do not let pending dynamic restores resurrect values.
+        this._genreFilterHydrated = true;
+        this._categoriesRestored = true;
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
          this.watchedSelect, this.addedSelect, this.statusSelect,
          this.audioSelect, this.subtitleSelect].forEach(sel => {
@@ -615,7 +678,9 @@ class SeriesPage {
     hasActiveFilters() {
         return Boolean(
             (this.sortSelect?.value && this.sortSelect.value !== 'default') ||
-            this.genreSelect?.value || this.yearSelect?.value || this.ratingSelect?.value ||
+            this.genreSelect?.value ||
+            (!this._genreFilterHydrated && this.savedFilters?.genre) ||
+            this.yearSelect?.value || this.ratingSelect?.value ||
             this.watchedSelect?.value || this.addedSelect?.value || this.statusSelect?.value ||
             this.audioSelect?.value || this.subtitleSelect?.value ||
             this.searchInput?.value || this.showFavoritesOnly ||
@@ -638,7 +703,10 @@ class SeriesPage {
 
         const catCount = this.categoryMulti?.getSelected().size || 0;
         if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
-            clear: () => this.categoryMulti?.setSelected([]) });
+            clear: () => {
+                this._categoriesRestored = true;
+                this.categoryMulti?.setSelected([]);
+            } });
 
         if (this.sortSelect?.value && this.sortSelect.value !== 'default')
             chips.push({ label: optText(this.sortSelect), clear: () => { this.sortSelect.value = 'default'; } });
@@ -699,6 +767,8 @@ class SeriesPage {
     _coldPaintFromCache() {
         try {
             if (!this.container) return;
+            if (this.hasActiveFilters() || this.savedFilters?.audio || this.savedFilters?.subtitle
+                || this.savedFilters?.categories?.length) return;
             if (this.seriesList && this.seriesList.length) return;                // real data already in memory
             if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return; // warm in-session return
             const s = this.app?.sourceSummary;
@@ -740,9 +810,19 @@ class SeriesPage {
             await this.loadSources();
         }
 
-        await Promise.all([this.loadFavorites(), this.loadWatchState(), this.loadServerSettings(), this.loadPlaybackStatuses()]);
-        this.renderContinueWatching();
         this.populateLanguageFacets();
+        const initialLoads = [
+            this.loadFavorites(),
+            this.loadWatchState(),
+            this.loadServerSettings(),
+            this.loadPlaybackStatuses()
+        ];
+        if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
+            initialLoads.push(this.loadCategories());
+        }
+        await Promise.all(initialLoads);
+        this.renderContinueWatching();
+        this.renderActiveFilterChips();
         // While the page is visible, refresh the language menus periodically so they
         // track the crawl in near-real-time. Gentle (server-memoized 60s, skips DOM work
         // when unchanged); cleared in hide().
@@ -1000,10 +1080,7 @@ class SeriesPage {
             }));
             this.categoryMulti.setOptions(options);
 
-            if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
-                this.categoryMulti.setSelected(this.savedFilters.categories);
-                this._categoriesRestored = true;
-            }
+            this.restoreSavedCategories(options);
         } catch (err) {
             console.error('Error loading categories:', err);
         }
@@ -1022,6 +1099,7 @@ class SeriesPage {
                 .filter(g => Number(g.count) > 0)
                 .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
             this.categoryMulti.setOptions(options);
+            this.restoreSavedCategories(options);
         } catch (err) {
             console.error('Error loading cloud series genres:', err);
         }
@@ -1261,6 +1339,7 @@ class SeriesPage {
         if (hasStatus && this.savedFilters?.status) {
             this.statusSelect.value = this.savedFilters.status;
         }
+        this._genreFilterHydrated = true;
     }
 
     // === Filtering, grouping, sorting ===
