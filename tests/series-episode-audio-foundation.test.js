@@ -15,6 +15,16 @@ const migration = fs.readFileSync(
   ),
   'utf8',
 );
+const backlogPriorityMigration = fs.readFileSync(
+  path.join(
+    __dirname,
+    '..',
+    'supabase',
+    'migrations',
+    '20260720183000_prioritize_exact_series_audio_backlog.sql',
+  ),
+  'utf8',
+);
 const seriesInfoSource = fs.readFileSync(
   path.join(__dirname, '..', 'supabase', 'functions', 'norva-series-info', 'index.ts'),
   'utf8',
@@ -243,6 +253,35 @@ test('series inventory queue is exact, retry-bounded, and service-role-only', ()
   assert.ok(outcome.includes("v_now + interval '24 hours'"));
   assert.ok(outcome.includes('least(12, inventory.consecutive_failures + 1)'));
   assert.ok(!outcome.includes('config_hint'));
+});
+
+test('legacy series rows only prioritize exact inventory and never populate episodes', () => {
+  assert.match(backlogPriorityMigration, /\nbegin;\s*\n/);
+  assert.match(backlogPriorityMigration, /commit;\s*$/);
+  assert.match(
+    backlogPriorityMigration,
+    /legacy_parent\.server_host = identity\.identity_id::text/,
+  );
+  assert.match(backlogPriorityMigration, /legacy_parent\.item_type = 'series'/);
+  assert.match(backlogPriorityMigration, /jsonb_array_elements\(/);
+  assert.match(
+    backlogPriorityMigration,
+    /in \('und', 'un', 'mis', 'mul', 'zxx', 'nar', 'unknown'\)/,
+  );
+  assert.match(
+    backlogPriorityMigration,
+    /case when exists \([\s\S]*?\) then 0 else 1 end,\s*case when inventory\.source_id is null/,
+  );
+  assert.doesNotMatch(
+    backlogPriorityMigration,
+    /\b(insert|update)\s+(into\s+)?public\.catalog_series_episode_memberships/i,
+  );
+  assert.doesNotMatch(backlogPriorityMigration, /register_catalog_series_episodes/i);
+  assert.doesNotMatch(backlogPriorityMigration, /cloud_series_info_cache/i);
+  assert.match(
+    backlogPriorityMigration,
+    /revoke all on function public\.catalog_series_inventory_candidates\([\s\S]*?grant execute[\s\S]*?to service_role;/,
+  );
 });
 
 test('cascade ledger dispatch accepts episodes without changing the movie transaction', () => {
