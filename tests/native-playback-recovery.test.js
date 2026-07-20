@@ -314,6 +314,35 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
   );
 });
 
+test('ChannelList clears a failed live selection instead of showing a ghost Playing state', () => {
+  const source = read('public/js/components/ChannelList.js');
+  const selectFlow = section(
+    source,
+    'async selectChannel(dataset)',
+    'async expireStaleCloudPlaybackSession(sessionId)',
+  );
+  const failureFlow = section(
+    selectFlow,
+    'this._streamResolveQueue = resolveTask.catch((err) => {',
+    'return this._streamResolveQueue;',
+  );
+
+  assert.match(
+    failureFlow,
+    /const isCurrentSelection = selectSeq === this\._selectRequestSeq;/,
+    'a stale rejection must not clear a newer channel selection',
+  );
+  assert.match(failureFlow, /this\.currentChannel = null;/);
+  assert.match(failureFlow, /classList\.remove\('active', 'nav-active'\)/);
+  assert.match(failureFlow, /guide\?\.refreshPreview\?\./);
+  assert.match(failureFlow, /guide\?\.updateHighlights\?\./);
+  assert.match(
+    failureFlow,
+    /if \(isCurrentSelection && window\.app\?\.player\?\.showError\)/,
+    'a stale rejection must not place an error over a newer successful zap',
+  );
+});
+
 test('standalone cancels stale delayed recovery but keeps same-route Android restore valid', () => {
   const source = read('public/js/utils/standalone.js');
   const recovery = section(

@@ -3205,9 +3205,31 @@ class ChannelList {
         });
         this._streamResolveQueue = resolveTask.catch((err) => {
             console.error('[ChannelList] Failed to resolve live stream:', err);
+            // The selection is marked active before the async resolver runs so the
+            // guide can react immediately. If playback never reaches a playable
+            // state, keeping currentChannel makes the preview claim the channel is
+            // "Playing" indefinitely. Only clear/report the still-current request:
+            // an older rejected request must not disturb a newer successful zap.
+            // Keep LiveGuideFusion.currentChannel as the preview selection, but
+            // rebuild its button/highlights from the now-idle playback state.
+            const isCurrentSelection = selectSeq === this._selectRequestSeq;
+            if (isCurrentSelection &&
+                this.currentChannel &&
+                String(this.currentChannel.id) === String(channel.id) &&
+                String(this.currentChannel.sourceId) === String(channel.sourceId)) {
+                this.currentChannel = null;
+                this.currentRenderId = null;
+                this.currentRenderGroup = null;
+                this.container?.querySelectorAll('.channel-item.active').forEach(el => {
+                    el.classList.remove('active', 'nav-active');
+                });
+                const guide = window.app?.liveGuideFusion;
+                try { guide?.refreshPreview?.(guide.currentChannel || channel); } catch (_) { /* best-effort */ }
+                try { guide?.updateHighlights?.(); } catch (_) { /* best-effort */ }
+            }
             // Never leave an endless spinner: prepareLiveSwitch already tore down the
-            // previous channel, so surface a clear message on ANY resolve failure.
-            if (window.app?.player?.showError) {
+            // previous channel, so surface a clear message for the current failure.
+            if (isCurrentSelection && window.app?.player?.showError) {
                 const msg = (err && err.liveProviderBackoff)
                     ? 'The provider is momentarily saturated (one connection at a time).<br>Try again in a few seconds.'
                     : "This channel isn't responding — the provider refused or timed out the connection (dead or unavailable channel).<br>Try another channel.";
