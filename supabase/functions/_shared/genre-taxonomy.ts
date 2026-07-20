@@ -31,7 +31,7 @@ export const GENRE_BUCKETS: GenreBucket[] = [
   { id: "kdrama", label: "K-Drama" },
   { id: "telerealite", label: "Reality TV" },
   { id: "documentaires", label: "Documentaries" },
-  { id: "arabe", label: "Arabic" },
+  { id: "arabe", label: "Arabic Collection" },
   { id: "autres", label: "Other" },
 ];
 
@@ -98,8 +98,10 @@ function hasAny(haystack: string, needles: string[]): boolean {
   return needles.some((n) => haystack.includes(n));
 }
 
-const ADULT_MARKERS = ["adulte", "adult", "mature", "18", "ecchi", "hentai", "seinen", "بالغين"];
-const ANIM_MARKERS = ["animation", "anime", "anim", "dessin", "cartoon", "manga", "رسوم", "انمي", "كرتون"];
+const ADULT_MARKERS = ["adulte", "adult", "mature", "ecchi", "hentai", "seinen", "بالغين"];
+// Keep animation detection explicit. The former generic "anim" substring
+// classified ANIMAL PLANET / ANIMAUX as Kids Animation.
+const ANIM_MARKERS = ["animation", "animacion", "animacao", "animazione", "anime", "dessin", "cartoon", "manga", "رسوم", "انمي", "كرتون"];
 // Anime (Japanese animation) is a distinct audience from Western kids cartoons — it
 // belongs in the "Adult Animation" rail, not "Kids Animation". These markers catch the
 // anime/manga wording specifically ("anime", "animé/animée/animés" all normalise to
@@ -122,7 +124,9 @@ function isArabicCategory(catN: string): boolean {
 }
 const isAnimation = (catN: string) => hasAny(catN, ANIM_MARKERS);
 const isAnime = (catN: string) => hasAny(catN, ANIME_MARKERS);
-const isAdult = (catN: string) => hasAny(catN, ADULT_MARKERS);
+// 18 is an adult marker only as its own normalized token ("18+" becomes
+// "18"). It must never match a release year such as 2018.
+const isAdult = (catN: string) => hasAny(catN, ADULT_MARKERS) || /(^| )18( |$)/.test(catN);
 const isKids = (catN: string) => hasAny(catN, KIDS_MARKERS);
 const isKDrama = (catN: string) => hasAny(catN, KDRAMA_MARKERS);
 const isReality = (catN: string) => hasAny(catN, REALITY_MARKERS);

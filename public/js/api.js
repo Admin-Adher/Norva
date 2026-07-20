@@ -601,13 +601,14 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '', year = '', minRating = '', addedDays = '' } = {}) {
+    async function getGenreItems({ type = 'movie', bucket = '', source = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '', year = '', minRating = '', addedDays = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 36));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
         return cloudHomeApi().genreItems({
             type: normalizedType,
             bucket,
+            source,
             limit: normalizedLimit,
             offset: normalizedOffset,
             // Audio-language / burned-in-subtitle / year / rating filter + "best for
@@ -1932,6 +1933,7 @@ const CloudAdapter = (() => {
             const offset = Math.max(0, Number.parseInt(query.get('offset') || '0', 10) || 0);
             const payload = await getGenreItems({
                 type: requestedType, bucket: query.get('bucket') || '', limit, offset,
+                source: query.get('source') || '',
                 audio: query.get('audio') || '', subs: query.get('subs') || '',
                 sort: query.get('sort') || '', prefAudio: query.get('prefAudio') || '',
                 prefSubs: query.get('prefSubs') || '', q: query.get('q') || '',

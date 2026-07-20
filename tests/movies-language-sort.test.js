@@ -16,7 +16,7 @@ test('Movies language bucket forwards explicit sort filters to the server', () =
   assert.match(src, /this\.activeBucketLangKey = this\.currentBucketViewKey\(\);/);
 });
 
-test('Newest + French requests the all-language bucket with sort=year', async () => {
+test('Newest + French forwards category OR and provider scope to genre-items', async () => {
   const src = read('public/js/pages/MoviesPage.js');
   let captured;
   const sandbox = {
@@ -36,7 +36,7 @@ test('Newest + French requests the all-language bucket with sort=year', async ()
 
   const page = Object.create(sandbox.window.MoviesPage.prototype);
   Object.assign(page, {
-    activeBucket: 'all',
+    activeBucket: 'action,drame',
     bucketLoading: false,
     bucketHasMore: true,
     bucketOffset: 0,
@@ -50,6 +50,8 @@ test('Newest + French requests the all-language bucket with sort=year', async ()
     addedSelect: { value: '' },
     sortSelect: { value: 'year' },
     searchInput: { value: '' },
+    sourceSelect: { value: '900001' },
+    sources: [{ id: 900001, cloudId: '11111111-1111-4111-8111-111111111111' }],
     watchedSelect: { value: '' },
     showFavoritesOnly: false,
     groupDuplicates: true,
@@ -59,7 +61,8 @@ test('Newest + French requests the all-language bucket with sort=year', async ()
   await page.loadBucketPage();
   assert.deepStrictEqual(JSON.parse(JSON.stringify(captured)), {
     type: 'movie',
-    bucket: 'all',
+    bucket: 'action,drame',
+    source: '11111111-1111-4111-8111-111111111111',
     limit: 36,
     offset: 0,
     audio: 'fr',
@@ -73,12 +76,14 @@ test('Movies API relay preserves Added to catalog with language filters', () => 
   const adapterEnd = src.indexOf('async function getGenreSummary', adapterStart);
   const adapterBlock = src.slice(adapterStart, adapterEnd);
   assert.match(adapterBlock, /addedDays = ''/);
+  assert.match(adapterBlock, /source = ''/);
   assert.match(adapterBlock, /minRating, addedDays/);
 
   const handlerStart = src.indexOf("if (method === 'GET' && path === '/media/genre-items')");
   const handlerEnd = src.indexOf("if (method === 'GET' && path === '/media/genre-summary')", handlerStart);
   const handlerBlock = src.slice(handlerStart, handlerEnd);
   assert.match(handlerBlock, /addedDays: query\.get\('addedDays'\) \|\| ''/);
+  assert.match(handlerBlock, /source: query\.get\('source'\) \|\| ''/);
 });
 
 test('API adapter retains Newest, French, and Added to catalog parameters', async () => {
@@ -153,7 +158,8 @@ test('API adapter retains Newest, French, and Added to catalog parameters', asyn
 
   await sandbox.window.API.media.genreItems({
     type: 'movie',
-    bucket: 'all',
+    bucket: 'action,drame',
+    source: '11111111-1111-4111-8111-111111111111',
     limit: 36,
     offset: 0,
     audio: 'fr',
@@ -161,7 +167,8 @@ test('API adapter retains Newest, French, and Added to catalog parameters', asyn
     addedDays: '30'
   });
 
-  assert.equal(captured.bucket, 'all');
+  assert.equal(captured.bucket, 'action,drame');
+  assert.equal(captured.source, '11111111-1111-4111-8111-111111111111');
   assert.equal(captured.audio, 'fr');
   assert.equal(captured.sort, 'year');
   assert.equal(captured.addedDays, '30');

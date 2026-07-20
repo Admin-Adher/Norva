@@ -72,6 +72,10 @@ test('classifyTitle fixtures match the SQL port (norva_classify_buckets)', () =>
   eq('IT - ANIMAZIONE', null, ['animation_kids'], 'generic animation stays kids');
   eq('DREAMWORKS ANIMATION', null, ['animation_kids'], 'western studio animation → kids');
   eq('KU - CARTOON SORANI', null, ['animation_kids'], 'cartoon → kids');
+  eq('ANIMAL PLANET', null, ['autres'], 'animal is not an animation marker');
+  eq('ANIMAUX', null, ['autres'], 'animaux is not an animation marker');
+  eq('ANIMATION 2018', null, ['animation_kids'], 'release year 2018 is not an adult marker');
+  eq('ANIMATION 18+', null, ['animation_adult'], 'standalone 18+ remains an adult marker');
   // Anime category moves a TMDB "Animation" title from kids to adult (no double-membership).
   eq('FR - MANGA', ['Animation'], ['animation_adult'], 'anime category promotes TMDB animation to adult');
   // Explicit kids marker still wins over the anime marker.
@@ -85,4 +89,9 @@ test('classifyTitle fixtures match the SQL port (norva_classify_buckets)', () =>
 
   // Unclassifiable → autres
   eq('DE - FILME', null, ['autres'], 'unclassifiable provider category');
+});
+
+test('Arabic category label describes a collection, not an audio language claim', () => {
+  const T = loadTaxonomy();
+  assert.equal(T.label('arabe'), 'Arabic Collection');
 });

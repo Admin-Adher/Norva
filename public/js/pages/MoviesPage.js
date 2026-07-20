@@ -90,9 +90,20 @@ class MoviesPage {
 
         // Source change reloads everything
         this.sourceSelect?.addEventListener('change', async () => {
+            // Save immediately: a refresh while the scoped facets are loading must
+            // keep the provider the user just selected.
+            this.persistFilters();
             await this.loadCategories();
+            // Category availability can change with the provider scope. Persist the
+            // still-valid selection after setOptions has removed unavailable buckets.
+            this.persistFilters();
             await this.loadPlaybackStatuses();
-            await this.loadMovies();
+            const buckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (buckets.length || this.isLanguageFilterActive()) {
+                this.onFiltersChanged();
+            } else {
+                await this.loadMovies();
+            }
         });
 
         // Search with debounce. Android TV gets a little more breathing room so
@@ -215,6 +226,10 @@ class MoviesPage {
 
     applyFiltersToUI() {
         const s = this.savedFilters || {};
+        if (this.sourceSelect && s.source && Array.from(this.sourceSelect.options || [])
+            .some(option => String(option.value) === String(s.source))) {
+            this.sourceSelect.value = String(s.source);
+        }
         if (this.sortSelect && s.sort) this.sortSelect.value = s.sort;
         if (this.yearSelect && s.year) this.yearSelect.value = s.year;
         if (this.ratingSelect && s.rating) this.ratingSelect.value = s.rating;
@@ -231,6 +246,7 @@ class MoviesPage {
     persistFilters() {
         const selectedCategories = [...(this.categoryMulti?.getSelected() || [])];
         const filters = {
+            source: this.sourceSelect?.value || '',
             sort: this.sortSelect?.value || 'default',
             genre: this.genreSelect?.value ||
                 (!this._genreFilterHydrated ? this.savedFilters?.genre || '' : ''),
@@ -279,22 +295,13 @@ class MoviesPage {
         // Cloud: picking a genre opens that genre's full grid — the same dense,
         // server-side view as a rail's "See all" — so the dropdown behaves like
         // Manage Content's genres.
-        if (this.isCloudPagedMode() && !this._isTvMode()) {
+        if (this.isCloudPagedMode()) {
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
-            if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+            if (buckets.length) { this.openGenreBucket(buckets); return; }
             // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
             // no genre selected → a catalogue-wide grid filtered server-side by each
             // title's available version languages.
             if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
-        }
-        // Android TV: the flat-grid endpoint (list_media_items_deduped, version-level)
-        // can't filter by audio/subtitles — those live on the title-level, language-aware
-        // path (genre-items / cloud_titles, GIN-indexed). So on TV too, an active language
-        // filter routes through the SAME bucket grid web/mobile use → identical filtered
-        // results across devices. Genre/default views keep the TV split-view flat grid.
-        if (this.isCloudPagedMode() && this._isTvMode() && this.isLanguageFilterActive()) {
-            this.openLanguageBucket();
-            return;
         }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
@@ -328,6 +335,8 @@ class MoviesPage {
     // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
         const params = {};
+        const source = this.selectedCloudSourceId();
+        if (source) params.source = source;
         if (this.audioSelect?.value) params.audio = this.audioSelect.value;
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
@@ -346,6 +355,16 @@ class MoviesPage {
         const search = (this.searchInput?.value || '').trim();
         if (search) params.q = search;
         return params;
+    }
+
+    selectedCloudSourceId() {
+        const selected = String(this.sourceSelect?.value || '').trim();
+        if (!selected) return '';
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selected)) {
+            return selected;
+        }
+        const source = (this.sources || []).find(item => String(item.id) === selected);
+        return String(source?.cloudId || source?.cloud_id || '').trim();
     }
 
     // A bucket grid's identity is the full set of server-side params plus the
@@ -426,14 +445,19 @@ class MoviesPage {
     // Open a genre bucket from the filter dropdown, reusing the rail "See all"
     // grid (paged, server-side). No-op if that bucket is already showing.
     openGenreBucket(bucket) {
-        if (!bucket) return;
+        const buckets = [...new Set((Array.isArray(bucket) ? bucket : String(bucket || '').split(','))
+            .map(value => String(value || '').trim())
+            .filter(Boolean))];
+        if (!buckets.length) return;
         // Re-open (re-render) when the same genre is active but the language params
         // changed, so toggling an audio/subtitle filter refreshes the grid.
         const langKey = this.currentBucketViewKey();
-        if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
+        const bucketParam = buckets.join(',');
+        if (this.activeBucket === bucketParam && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
-        const label = (T && T.label) ? T.label(bucket) : bucket;
-        this.openBucket({ id: `genre-${bucket}`, title: label, curation: { bucket } });
+        const labels = buckets.map(value => (T && T.label) ? T.label(value) : value);
+        const label = labels.length === 1 ? labels[0] : labels.join(' + ');
+        this.openBucket({ id: `genre-${bucketParam}`, title: label, curation: { bucket: bucketParam } });
     }
 
     // Netflix-style default: with no active filter/search, the cloud Movies page
@@ -442,7 +466,8 @@ class MoviesPage {
     shouldShowRails() {
         // The TV mockup is a stable flat poster grid feeding the persistent preview
         // panel. Web/mobile keep the curated genre rails.
-        return !this._isTvMode() && this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
+        return !this._isTvMode() && this.isCloudPagedMode() && !!window.GenreRails
+            && !this.sourceSelect?.value && !this.hasActiveFilters();
     }
 
     async renderGenreRails() {
@@ -736,7 +761,7 @@ class MoviesPage {
     _coldPaintFromCache() {
         try {
             if (!this.container) return;
-            if (this.hasActiveFilters() || this.savedFilters?.audio || this.savedFilters?.subtitle
+            if (this.hasActiveFilters() || this.savedFilters?.source || this.savedFilters?.audio || this.savedFilters?.subtitle
                 || this.savedFilters?.categories?.length) return;
             if (this.movies && this.movies.length) return;                        // real data already in memory
             if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return; // warm in-session return
@@ -806,12 +831,12 @@ class MoviesPage {
         }
 
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
-        if (this.isCloudPagedMode() && !this._isTvMode()) {
+        if (this.isCloudPagedMode()) {
             const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
             if (selectedBuckets.length) {
                 if (!this.categories.length) await this.loadCategories();
                 this.activeBucket = null;
-                this.openGenreBucket(selectedBuckets[0]);
+                this.openGenreBucket(selectedBuckets);
                 return;
             }
             if (this.isLanguageFilterActive()) {
@@ -999,6 +1024,11 @@ class MoviesPage {
                 option.textContent = s.name;
                 this.sourceSelect.appendChild(option);
             });
+            const savedSource = String(this.savedFilters?.source || '');
+            if (savedSource && Array.from(this.sourceSelect.options || [])
+                .some(option => String(option.value) === savedSource)) {
+                this.sourceSelect.value = savedSource;
+            }
         } catch (err) {
             console.error('Error loading sources:', err);
         }
@@ -1071,11 +1101,26 @@ class MoviesPage {
             // Mirror Manage Content: the dropdown lists the clean, curated genre
             // buckets (with counts) instead of the raw provider category names.
             // Picking a genre opens that genre's full grid (see onFiltersChanged).
-            const payload = await API.media.genreSummary({ type: 'movie' });
+            const source = this.selectedCloudSourceId();
+            const payload = await API.media.genreSummary({ type: 'movie', ...(source ? { source } : {}) });
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
+            // The API exposes the profile mask at payload.hidden. Keep accepting
+            // the per-row flag as well for compatibility with an older response
+            // shape, but never restore a hidden saved selection into the picker.
+            const hiddenBuckets = new Set([
+                ...(Array.isArray(payload?.hidden) ? payload.hidden.map(String) : []),
+                ...genres.filter(g => g.hidden).map(g => String(g.bucket))
+            ]);
+            if (Array.isArray(this.savedFilters?.categories)) {
+                const visibleSaved = this.savedFilters.categories.filter(bucket => !hiddenBuckets.has(String(bucket)));
+                if (visibleSaved.length !== this.savedFilters.categories.length) {
+                    this.savedFilters.categories = visibleSaved;
+                    MediaUtils.saveFilters('movies', this.savedFilters);
+                }
+            }
             this.categories = genres;
             const options = genres
-                .filter(g => Number(g.count) > 0)
+                .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
                 .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
@@ -1141,20 +1186,12 @@ class MoviesPage {
     }
 
     cloudPageParams(offset = 0) {
-        const selectedCats = [...(this.categoryMulti?.getSelected() || [])];
-        let sourceId = this.sourceSelect?.value || '';
-        let categoryId = '';
+        const sourceId = this.sourceSelect?.value || '';
+        const categoryId = '';
         const tvLanguageParams = {};
 
-        if (selectedCats.length === 1) {
-            const [selectedSourceId, selectedCategoryId] = selectedCats[0].split(':');
-            categoryId = selectedCategoryId || '';
-            if (!sourceId) sourceId = selectedSourceId || '';
-        }
-
-        // Web/mobile use the dedicated language bucket below. TV intentionally
-        // stays in its split-view grid, so forward the same server language keys
-        // through the paged catalogue request instead of silently ignoring them.
+        // Defensive fallback for direct flat-grid TV loads. Normal category and
+        // language interactions route through genre-items on every device.
         if (this._isTvMode()) {
             if (this.audioSelect?.value) tvLanguageParams.audio = this.audioSelect.value;
             if (this.subtitleSelect?.value) tvLanguageParams.subs = this.subtitleSelect.value;

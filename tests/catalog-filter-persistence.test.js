@@ -516,6 +516,151 @@ for (const spec of [
     });
 }
 
+test('MoviesPage persists and restores the selected provider scope', () => {
+    const { Page, saves } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    const page = Object.create(Page.prototype);
+    Object.assign(page, {
+        sourceSelect: new FakeSelect(
+            '<option value="">All Sources</option>' +
+            '<option value="900001">AtlasPro</option>'
+        ),
+        savedFilters: {},
+        categoryMulti: { getSelected: () => new Set() },
+        groupDuplicates: true,
+        showFavoritesOnly: false,
+        _genreFilterHydrated: true,
+        _categoriesRestored: true
+    });
+    page.sourceSelect.value = '900001';
+
+    page.persistFilters();
+    assert.equal(saves.at(-1).filters.source, '900001');
+
+    page.sourceSelect.value = '';
+    page.savedFilters = saves.at(-1).filters;
+    page.applyFiltersToUI();
+    assert.equal(page.sourceSelect.value, '900001');
+});
+
+test('MoviesPage sends all selected categories as one OR bucket', () => {
+    const { Page, context } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    context.window.GenreTaxonomy = {
+        label: (bucket) => ({ action: 'Action', drame: 'Drama' }[bucket] || bucket)
+    };
+    const page = Object.create(Page.prototype);
+    let opened;
+    Object.assign(page, {
+        currentBucketViewKey: () => 'filters',
+        openBucket: (rail) => { opened = rail; }
+    });
+
+    page.openGenreBucket(['action', 'drame', 'action']);
+
+    assert.equal(opened.curation.bucket, 'action,drame');
+    assert.equal(opened.title, 'Action + Drama');
+});
+
+test('MoviesPage routes cloud TV categories through genre-items', () => {
+    const { Page } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    const page = Object.create(Page.prototype);
+    let opened;
+    Object.assign(page, {
+        categoryMulti: { getSelected: () => new Set(['action', 'drame']) },
+        persistFilters: () => {},
+        renderActiveFilterChips: () => {},
+        isCloudPagedMode: () => true,
+        _isTvMode: () => true,
+        openGenreBucket: (buckets) => { opened = [...buckets]; },
+        isLanguageFilterActive: () => false
+    });
+
+    page.onFiltersChanged();
+    assert.deepEqual(opened, ['action', 'drame']);
+});
+
+test('MoviesPage scopes cloud categories and removes hidden profile genres', async () => {
+    const { Page, context, saves } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    let request;
+    context.API = {
+        media: {
+            genreSummary: async (params) => {
+                request = params;
+                return {
+                    hidden: ['horreur'],
+                    genres: [
+                        { bucket: 'horreur', label: 'Horror', count: 42 },
+                        { bucket: 'jeunesse', label: 'Kids', count: 21, hidden: true },
+                        { bucket: 'action', label: 'Action', count: 10 }
+                    ]
+                };
+            }
+        }
+    };
+    const page = Object.create(Page.prototype);
+    let options = [];
+    Object.assign(page, {
+        sourceSelect: { value: '900001' },
+        sources: [{ id: 900001, cloudId: '11111111-1111-4111-8111-111111111111' }],
+        savedFilters: { categories: ['horreur', 'jeunesse', 'action'] },
+        categoryMulti: { setOptions: (next) => { options = next; } },
+        restoreSavedCategories: () => {}
+    });
+
+    await page.loadCloudCategories();
+
+    assert.deepEqual(JSON.parse(JSON.stringify(request)), {
+        type: 'movie',
+        source: '11111111-1111-4111-8111-111111111111'
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(options)), [
+        { value: 'action', label: 'Action · 10' }
+    ]);
+    assert.deepEqual(page.savedFilters.categories, ['action']);
+    assert.deepEqual(saves.at(-1).filters.categories, ['action']);
+});
+
+test('MoviesPage forwards the selected provider to genre item queries', () => {
+    const { Page } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    const page = Object.create(Page.prototype);
+    Object.assign(page, {
+        sourceSelect: { value: '900001' },
+        sources: [{ id: 900001, cloudId: '11111111-1111-4111-8111-111111111111' }],
+        audioSelect: { value: '' },
+        subtitleSelect: { value: '' },
+        yearSelect: { value: '' },
+        ratingSelect: { value: '' },
+        addedSelect: { value: '' },
+        sortSelect: { value: 'default' },
+        searchInput: { value: '' }
+    });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(page.currentLanguageParams())), {
+        source: '11111111-1111-4111-8111-111111111111'
+    });
+});
+
+test('MoviesPage flat TV params never reinterpret a genre bucket as a source id', () => {
+    const { Page } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
+    const page = Object.create(Page.prototype);
+    Object.assign(page, {
+        categoryMulti: { getSelected: () => new Set(['action']) },
+        sourceSelect: { value: '' },
+        sortSelect: { value: 'default' },
+        searchInput: { value: '' },
+        yearSelect: { value: '' },
+        ratingSelect: { value: '' },
+        addedSelect: { value: '' },
+        audioSelect: { value: '' },
+        subtitleSelect: { value: '' },
+        cloudPageSize: 120,
+        _isTvMode: () => true
+    });
+
+    const params = page.cloudPageParams(0);
+    assert.equal(params.sourceId, '');
+    assert.equal(params.categoryId, '');
+});
+
 function createStorage(initial = {}) {
     const values = new Map(Object.entries(initial));
     return {

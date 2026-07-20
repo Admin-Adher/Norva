@@ -139,6 +139,42 @@ export async function recordProviderIdentity(
   } catch (_) { /* best-effort */ }
 }
 
+// Some Xtream mirrors return items whose category_id is absent from that
+// mirror's categories endpoint. Reuse an unambiguous label from the exact same
+// external item on another source that the server has already verified as the
+// same provider identity. This is a database-only repair: it opens no provider
+// connection and consumes no playback slot.
+async function hydrateMirrorCategoryNames(
+  db: SupabaseClient,
+  sourceId: string,
+): Promise<void> {
+  try {
+    await Promise.all((["movie", "series"] as const).map(async (itemType) => {
+      const { error } = await db.rpc("norva_hydrate_source_category_names", {
+        p_source_id: sourceId,
+        p_item_type: itemType,
+        p_limit: 2000,
+      });
+      if (error) {
+        console.warn("[category-hydration] mirror repair failed", sourceId, itemType, error.code ?? error.message);
+      }
+    }));
+  } catch (_) { /* best-effort */ }
+}
+
+// Category hydration is useful cleanup, never part of the sync handoff contract.
+// Keep the edge isolate alive when supported; local/test runtimes safely fall
+// back to a caught fire-and-forget promise.
+function runCategoryHydrationInBackground(task: Promise<void>): void {
+  const safe = task.catch((error) => {
+    console.warn("[category-hydration] background repair failed", error instanceof Error ? error.message : error);
+  });
+  const runtime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(safe);
+}
+
 export function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): JsonRecord {
   return {
     v: 1,
@@ -839,6 +875,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    runCategoryHydrationInBackground(hydrateMirrorCategoryNames(db, sourceId));
 
     // "What's new" feed: record a capped event when the catalogue grew.
     await maybeRecordContentEvent(db, userId, sourceId, previousSignature, {

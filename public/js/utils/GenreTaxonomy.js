@@ -23,7 +23,7 @@
         { id: 'kdrama', label: 'K-Drama' },
         { id: 'telerealite', label: 'Reality TV' },
         { id: 'documentaires', label: 'Documentaries' },
-        { id: 'arabe', label: 'Arabic' },
+        { id: 'arabe', label: 'Arabic Collection' },
         { id: 'autres', label: 'Other' }
     ];
     const BUCKET_ORDER = BUCKETS.map((b) => b.id);
@@ -61,8 +61,10 @@
         return false;
     }
 
-    const ADULT_MARKERS = ['adulte', 'adult', 'mature', '18', 'ecchi', 'hentai', 'seinen', 'بالغين'];
-    const ANIM_MARKERS = ['animation', 'anime', 'anim', 'dessin', 'cartoon', 'manga', 'رسوم', 'انمي', 'كرتون'];
+    const ADULT_MARKERS = ['adulte', 'adult', 'mature', 'ecchi', 'hentai', 'seinen', 'بالغين'];
+    // Keep animation detection explicit. The former generic "anim" substring
+    // classified ANIMAL PLANET / ANIMAUX as Kids Animation.
+    const ANIM_MARKERS = ['animation', 'animacion', 'animacao', 'animazione', 'anime', 'dessin', 'cartoon', 'manga', 'رسوم', 'انمي', 'كرتون'];
     // Anime (Japanese animation) → "Adult Animation" rail, not "Kids Animation". Catches
     // anime/manga wording specifically ("anime"/"animé/animée/animés" all normalise to
     // contain "anime"; "manga") without catching general Western animation words that only
@@ -81,7 +83,9 @@
     }
     const isAnimation = (catN) => hasAny(catN, ANIM_MARKERS);
     const isAnime = (catN) => hasAny(catN, ANIME_MARKERS);
-    const isAdult = (catN) => hasAny(catN, ADULT_MARKERS);
+    // 18 is an adult marker only as its own normalized token ("18+" becomes
+    // "18"). It must never match a release year such as 2018.
+    const isAdult = (catN) => hasAny(catN, ADULT_MARKERS) || /(^| )18( |$)/.test(catN);
     const isKids = (catN) => hasAny(catN, KIDS_MARKERS);
     const isKDrama = (catN) => hasAny(catN, KDRAMA_MARKERS);
     const isReality = (catN) => hasAny(catN, REALITY_MARKERS);

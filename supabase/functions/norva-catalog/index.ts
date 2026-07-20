@@ -1145,7 +1145,7 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
       if (gbc && typeof gbc === "object") {
         for (const [bucketId, rawN] of Object.entries(gbc)) {
           const n = Number(rawN) || 0;
-          if (bucketId && bucketId !== "autres" && n > 0) counts.set(bucketId, n);
+          if (bucketId && n > 0) counts.set(bucketId, n);
         }
         usedSummary = true;
       }
@@ -1164,7 +1164,7 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
       for (const row of (data ?? []) as Array<{ bucket?: unknown; n?: unknown }>) {
         const bucketId = String(row.bucket ?? "");
         const n = Number(row.n) || 0;
-        if (bucketId && bucketId !== "autres" && n) counts.set(bucketId, n);
+        if (bucketId && n) counts.set(bucketId, n);
       }
     } catch (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
@@ -1172,9 +1172,51 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
     }
   }
 
+  // Older cached summaries and the source-scoped RPC intentionally omitted the
+  // fallback bucket. That made a sizeable part of real provider catalogues
+  // impossible to reach from the category picker ("Other" is ~10% for a typical
+  // large account). Count it directly through the GIN-indexed genre_buckets
+  // column when it is absent. The optional child join keeps source-scoped counts
+  // aligned with the source selector.
+  if (!counts.has("autres")) {
+    const select = sourceId
+      ? "id,cloud_title_variants!inner(source_id)"
+      : "id";
+    let q: any = db.from("cloud_titles").select(select, { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .gt("variant_count", 0)
+      .contains("genre_buckets", ["autres"]);
+    if (sourceId) q = q.eq("cloud_title_variants.source_id", sourceId);
+    const { count, error } = await q;
+    if (!error && Number(count) > 0) counts.set("autres", Number(count));
+  }
+
   const hidden = await getHiddenGenres(req, userId);
+  // A visible bucket can overlap a hidden one. genre-items drops such titles
+  // entirely, so recompute the small set of visible counts when profile hiding
+  // is active; otherwise the picker advertises more results than its grid can
+  // legally return. Normal profiles stay on the single cached summary read.
+  if (hidden.size) {
+    await Promise.all([...counts.keys()]
+      .filter((bucketId) => !hidden.has(bucketId))
+      .map(async (bucketId) => {
+        const select = sourceId
+          ? "id,cloud_title_variants!inner(source_id)"
+          : "id";
+        let q: any = db.from("cloud_titles").select(select, { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("item_type", itemType)
+          .gt("variant_count", 0)
+          .contains("genre_buckets", [bucketId])
+          .not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
+        if (sourceId) q = q.eq("cloud_title_variants.source_id", sourceId);
+        const { count, error } = await q;
+        if (!error) counts.set(bucketId, Number(count) || 0);
+      }));
+  }
   const genres = BUCKET_ORDER
-    .filter((bucketId) => bucketId !== "autres" && (counts.get(bucketId) ?? 0) > 0)
+    .filter((bucketId) => !hidden.has(bucketId) && (counts.get(bucketId) ?? 0) > 0)
     .map((bucketId) => ({
       bucket: bucketId,
       label: bucketLabel(bucketId),
@@ -1418,6 +1460,26 @@ function titleSubtitleLanguages(title: JsonRecord): string[] {
   const raw = (title as { file_subtitle_languages?: unknown }).file_subtitle_languages;
   return canonicalFileLanguages(raw);
 }
+// When the catalogue is scoped to one provider, the title-level arrays above
+// are too broad: they are the union of every owned variant. PostgREST embeds
+// the selected source's exact per-file observations so strict filters and the
+// language-preference sort cannot borrow a language from another provider.
+function titleSourceObservationLanguages(title: JsonRecord, key: "audio_languages" | "subtitle_languages"): string[] {
+  const variants = Array.isArray(title.cloud_title_variants)
+    ? title.cloud_title_variants as JsonRecord[]
+    : [];
+  const values: unknown[] = [];
+  for (const variant of variants) {
+    const observations = Array.isArray(variant.cloud_title_file_language_observations)
+      ? variant.cloud_title_file_language_observations as JsonRecord[]
+      : [];
+    for (const observation of observations) {
+      const languages = observation[key];
+      if (Array.isArray(languages)) values.push(...languages);
+    }
+  }
+  return canonicalFileLanguages(values);
+}
 // Distinct ISO-639 languages from a legacy title-level ordered map. Exact menus,
 // filters, and sorting use file_audio_languages instead.
 function titleAudioTrackLanguages(title: JsonRecord): string[] {
@@ -1461,13 +1523,25 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const lang = railLang(url);
   const bucketParam = (url.searchParams.get("bucket") || "").trim();
-  // "all" = no genre constraint (catalogue-wide), used by the client when filtering
-  // or sorting by language without a genre selected.
-  const bucket = bucketParam === "all" ? "" : bucketParam;
+  // "all" = no genre constraint. Otherwise the category picker may send
+  // several curated buckets as a comma-separated list. They are OR-ed so the
+  // multi-select never silently degrades to its first value.
+  const requestedBuckets = bucketParam === "all"
+    ? []
+    : [...new Set(bucketParam.split(",").map((value) => value.trim()).filter(Boolean))];
   const limit = boundedInt(url.searchParams.get("limit"), 36, 1, 100);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
   const candidateLimit = boundedInt(url.searchParams.get("candidates"), 6000, 100, 8000);
   if (!bucketParam) throw new HttpError(400, "Missing bucket");
+  if (requestedBuckets.some((bucket) => !BUCKET_ORDER.includes(bucket))) {
+    throw new HttpError(400, "Invalid genre bucket");
+  }
+
+  const sourceParam = (url.searchParams.get("source") || "").trim();
+  const sourceId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceParam)
+      ? sourceParam
+      : null;
 
   // Optional exact audio/soft-subtitle filters + "best for my languages"
   // sort. All additive: absent → the query and result are identical to before.
@@ -1489,9 +1563,22 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // Optional text search so it composes with the language grid (the "all" bucket).
   const search = (url.searchParams.get("q") || "").trim();
 
+  const hasStrictLanguageFilter = Boolean(audioIso || subIso);
+  const needsSourceLanguageEvidence = Boolean(
+    sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso),
+  );
+  const titleSelect = sourceId
+    ? needsSourceLanguageEvidence
+      ? `*,cloud_title_variants!inner(source_id,cloud_title_file_language_observations${hasStrictLanguageFilter ? "!inner" : ""}(audio_languages,subtitle_languages))`
+      : "*,cloud_title_variants!inner(source_id)"
+    : "*";
+
   const hidden = await getHiddenGenres(req, userId);
   // The bucket itself is hidden → nothing to show.
-  if (bucket && hidden.has(bucket)) return { items: [], count: 0, limit, offset, hasMore: false };
+  const buckets = requestedBuckets.filter((bucket) => !hidden.has(bucket));
+  if (requestedBuckets.length && !buckets.length) {
+    return { items: [], count: 0, limit, offset, hasMore: false };
+  }
 
   // Build the shared SQL filter. genre_buckets is the denormalised curated-bucket
   // set (migration 20260704160000), GIN-indexed — so a bucket's grid is filtered
@@ -1502,16 +1589,26 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // sees no Horror anywhere" rule).
   const applyFilters = (q: any) => {
     let out = q.eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
-    if (bucket) out = out.contains("genre_buckets", [bucket]);
+    if (buckets.length) out = out.overlaps("genre_buckets", buckets);
+    if (sourceId) out = out.eq("cloud_title_variants.source_id", sourceId);
     if (hidden.size) out = out.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
     if (addedAfterDate !== null) out = out.gte("created_at", addedAfterDate);
-    // Both filters use exact language unions derived from this user's owned
-    // provider files. They intentionally ignore optimistic/global title hints.
-    if (audioIso) out = out.contains("file_audio_languages", [audioIso]);
-    if (subIso) out = out.contains("file_subtitle_languages", [subIso]);
+    // Both filters use exact per-file evidence. With a selected provider, keep
+    // the predicate inside that provider's variants instead of consulting the
+    // title-wide union (which may contain languages owned by another source).
+    if (audioIso) {
+      out = sourceId
+        ? out.contains("cloud_title_variants.cloud_title_file_language_observations.audio_languages", [audioIso])
+        : out.contains("file_audio_languages", [audioIso]);
+    }
+    if (subIso) {
+      out = sourceId
+        ? out.contains("cloud_title_variants.cloud_title_file_language_observations.subtitle_languages", [subIso])
+        : out.contains("file_subtitle_languages", [subIso]);
+    }
     return out;
   };
 
@@ -1520,7 +1617,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // it's bounded by the (usually language/genre-narrowed) filter. Every other
     // view uses exact SQL count + range pagination over the whole catalogue.
     if (langSort && (prefAudioIso || prefSubIso)) {
-      const { data, error } = await applyFilters(db.from("cloud_titles").select("*"))
+      const { data, error } = await applyFilters(db.from("cloud_titles").select(titleSelect))
         .order("created_at", { ascending: false })
         .limit(candidateLimit);
       if (error) {
@@ -1528,7 +1625,16 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         throwDb(error, "Unable to list genre items");
       }
       const ranked = ((data ?? []) as JsonRecord[])
-        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubIso) }))
+        .map((title, index) => ({
+          title,
+          index,
+          rank: languageMatchRank(
+            sourceId ? titleSourceObservationLanguages(title, "subtitle_languages") : titleSubtitleLanguages(title),
+            sourceId ? titleSourceObservationLanguages(title, "audio_languages") : titleAudioLanguages(title),
+            prefAudioIso,
+            prefSubIso,
+          ),
+        }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);
@@ -1537,6 +1643,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         userId,
         audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
         audioIso,
+        sourceId,
       );
       await applyCatalogOverlay(pageRows, itemType, lang);
       return {
@@ -1547,7 +1654,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
       };
     }
 
-    const { data, count, error } = await applyFilters(db.from("cloud_titles").select("*", { count: "exact" }))
+    const { data, count, error } = await applyFilters(db.from("cloud_titles").select(titleSelect, { count: "exact" }))
       .order(sort === "year-asc" ? "release_year" :
         sort === "rating" ? "rating_num" :
         sort === "added" ? "created_at" :
@@ -1574,6 +1681,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
       userId,
       audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
       audioIso,
+      sourceId,
     );
     await applyCatalogOverlay(pageRows, itemType, lang);
     return {
@@ -2406,6 +2514,7 @@ async function listVariantsByTitleIds(
   userId?: string,
   exposedLimit = HOME_RAIL_VARIANT_LIMIT,
   requiredAudioIso: string | null = null,
+  sourceId: string | null = null,
 ) {
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
@@ -2420,6 +2529,7 @@ async function listVariantsByTitleIds(
       .order("last_observed_ttff_ms", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
     if (userId) query = query.eq("user_id", userId);
+    if (sourceId) query = query.eq("source_id", sourceId);
     const { data, error } = await query;
     if (error) {
       if (isMissingMaterialization(error)) return variantsByTitle;
