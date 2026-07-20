@@ -16,8 +16,8 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 35
-        versionCode 19
-        versionName "3.8.6-hybrid"
+        versionCode 20
+        versionName "3.8.7-hybrid"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).

@@ -2988,6 +2988,32 @@ class ChannelList {
             (!dataset.sourceId || String(c.sourceId) === String(dataset.sourceId))
         );
         if (!channel) return;
+        // Native shells resolve provider sessions before opening PlayerActivity.
+        // Claim the intent before that async work so a double tap cannot create
+        // two provider/Gateway sessions, and so it cancels any delayed recovery
+        // belonging to the previously watched channel.
+        const nativeItemId = channel.streamId ?? channel.stream_id ?? channel.id;
+        const nativeIntentClaim = window.__norvaNative?.beginPlaybackIntent
+            ? window.__norvaNative.beginPlaybackIntent(
+                    channel.sourceId,
+                    'channel',
+                    nativeItemId
+                )
+            : null;
+        if (nativeIntentClaim === false) return;
+        if (nativeIntentClaim) {
+            // One-shot handoff to standalone VideoPlayer.play. Keep it
+            // non-enumerable so channel spreads/telemetry cannot copy a stale claim.
+            try {
+                Object.defineProperty(channel, '__norvaNativeIntentClaim', {
+                    value: nativeIntentClaim,
+                    configurable: true,
+                    writable: true
+                });
+            } catch (_) {
+                channel.__norvaNativeIntentClaim = nativeIntentClaim;
+            }
+        }
         const selectSeq = ++this._selectRequestSeq;
 
         // Stamp the zap start (user click) so the player can measure the full

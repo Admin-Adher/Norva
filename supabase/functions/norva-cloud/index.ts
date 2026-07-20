@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { vodTransportExpiresAt } from "../_shared/playback-expiry.mjs";
+import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import {
   buildLiveMaterializationPlan,
   clearLiveMaterialization,
@@ -191,7 +191,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 21,
+        version: 22,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -3245,12 +3245,15 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const mode = choosePlaybackMode(requestedMode, body);
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  // Keep the revocable entitlement session short, while allowing the actual
+  // transcode transport to cover a complete VOD or a bounded long Live session.
+  const transportExpiresAt = playbackTransportExpiresAt({
+    itemType,
+    playbackHint: requestedPlaybackHint,
+    sessionTtlSeconds: ttlSeconds,
+  });
   const gatewayTransportExpiresAt = mode === "transcode"
-    ? vodTransportExpiresAt({
-      itemType,
-      playbackHint: requestedPlaybackHint,
-      sessionTtlSeconds: ttlSeconds,
-    })
+    ? transportExpiresAt
     : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
   const edgeCoordination = mode === "transcode"
@@ -3390,31 +3393,107 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
 }
 
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
-  const { data: existing, error: loadError } = await db
+  // Resolve every gateway identifier only after proving that this playback
+  // session belongs to the authenticated user. The service-role client must
+  // never accept caller-provided gateway IDs.
+  const { data: session, error } = await db
     .from("cloud_playback_sessions")
-    .select("id, source_id, cloud_gateway_sessions(external_session_id)")
+    .select("*, cloud_gateway_sessions(*)")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
-  if (loadError) throwDb(loadError, "Unable to load playback session");
+  if (error) throwDb(error, "Unable to load playback session");
+  if (!session) throw new HttpError(404, "Playback session not found");
 
-  const { data, error } = await db
+  const gatewaySessions = Array.isArray(session.cloud_gateway_sessions)
+    ? session.cloud_gateway_sessions
+    : [];
+  const runtimeConfig = await getRuntimeConfig(db);
+  const closedGatewayIds: string[] = [];
+  const gatewayErrors: unknown[] = [];
+  let rawPumpsAborted = 0;
+
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    // A signed /raw pipe has no cloud_gateway_sessions row. Abort it by the
+    // authenticated owner's hash plus the already-authorized playback ID.
+    try {
+      const ownerKey = await sha256Hex(userId);
+      const rawUrl = new URL(`${runtimeConfig.mediaGatewayUrl}/raw-pumps`);
+      rawUrl.searchParams.set("ownerKey", ownerKey);
+      rawUrl.searchParams.set("sid", id);
+      const rawResponse = await fetch(rawUrl.toString(), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      });
+      if (!rawResponse.ok && rawResponse.status !== 404) {
+        const body = await rawResponse.text().catch(() => "");
+        throw new HttpError(rawResponse.status, "Media gateway refused raw-pump expiry", body);
+      }
+      const rawResult = await rawResponse.json().catch(() => ({} as JsonRecord));
+      rawPumpsAborted = boundedInt((rawResult as JsonRecord).aborted, 0, 0, 1000);
+    } catch (rawError) {
+      gatewayErrors.push(rawError);
+    }
+
+    await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
+      const externalSessionId = stringOrNull(gateway.external_session_id);
+      if (!externalSessionId) return;
+
+      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      });
+      if (!response.ok && response.status !== 404) {
+        const body = await response.text().catch(() => "");
+        throw new HttpError(response.status, "Media gateway refused session expiry", body);
+      }
+      closedGatewayIds.push(String(gateway.id ?? externalSessionId));
+    })).then((results) => {
+      results.forEach((result) => {
+        if (result.status === "rejected") gatewayErrors.push(result.reason);
+      });
+    });
+  }
+
+  await endEdgeSessionCoordinator({
+    userId,
+    sourceId: stringOrNull(session.source_id),
+    playbackSessionId: id,
+    gatewaySessionId: gatewaySessions
+      .map((gateway: JsonRecord) => stringOrNull(gateway.external_session_id))
+      .find(Boolean) ?? null,
+  }, db);
+
+  if (gatewaySessions.length) {
+    const gatewayIds = gatewaySessions
+      .map((gateway: JsonRecord) => stringOrNull(gateway.id))
+      .filter((gatewayId: string | null): gatewayId is string => Boolean(gatewayId));
+    if (gatewayIds.length) {
+      const { error: gatewayUpdateError } = await db
+        .from("cloud_gateway_sessions")
+        .update({ status: "expired", expires_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("playback_session_id", id)
+        .in("id", gatewayIds);
+      if (gatewayUpdateError) throwDb(gatewayUpdateError, "Unable to expire gateway sessions");
+    }
+  }
+
+  const { data: expired, error: updateError } = await db
     .from("cloud_playback_sessions")
     .update({ status: "expired", expires_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", userId)
     .select("*")
     .single();
-  if (error) throwDb(error, "Unable to expire playback session");
+  if (updateError) throwDb(updateError, "Unable to expire playback session");
 
-  await endEdgeSessionCoordinator({
-    userId,
-    sourceId: stringOrNull(existing?.source_id),
-    playbackSessionId: id,
-    gatewaySessionId: gatewaySessionIdFromSession(existing),
-  }, db);
-
-  return { session: data };
+  return {
+    session: expired,
+    gatewayClosed: closedGatewayIds.length,
+    rawPumpsAborted,
+    gatewayErrors: gatewayErrors.length,
+  };
 }
 
 async function prepareEdgeSessionCoordinator(
@@ -3532,16 +3611,6 @@ async function requestEdgeCoordinator(runtimeConfig: RuntimeConfig, path: string
     console.warn("[norva-cloud] edge coordinator unavailable", error instanceof Error ? error.message : error);
     return null;
   }
-}
-
-function gatewaySessionIdFromSession(session: unknown) {
-  const record = recordOrEmpty(session);
-  const rows = Array.isArray(record.cloud_gateway_sessions) ? record.cloud_gateway_sessions : [];
-  for (const row of rows) {
-    const id = stringOrNull(recordOrEmpty(row).external_session_id);
-    if (id) return id;
-  }
-  return null;
 }
 
 async function createRelayAccess(

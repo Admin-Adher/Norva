@@ -63,7 +63,7 @@ test('unknown-duration VOD is usable but raw credential lifetime stays bounded',
   );
 });
 
-test('raw lifetime extension is restricted to VOD engine callers', async () => {
+test('engine raw helper stays VOD-specific while live transport gets a 12-hour credential', async () => {
   const expiry = await import(expiryModuleUrl);
   assert.equal(
     expiry.engineRawTokenTtlSeconds({
@@ -73,14 +73,25 @@ test('raw lifetime extension is restricted to VOD engine callers', async () => {
     }),
     15 * 60,
   );
+
+  for (const itemType of ['live', 'channel']) {
+    assert.ok(
+      expiry.playbackTransportTtlSeconds({
+        itemType,
+        sessionTtlSeconds: 15 * 60,
+      }) >= 12 * 60 * 60,
+      `${itemType} transport must survive a long viewing session`,
+    );
+  }
 });
 
-test('gateway VOD transport shares the bounded duration-aware policy', async () => {
+test('playback transport keeps VOD duration-aware and live independent from entitlement expiry', async () => {
   const expiry = await import(expiryModuleUrl);
   const nowMs = Date.parse('2026-07-20T12:00:00.000Z');
 
+  assert.equal(expiry.DEFAULT_PLAYBACK_SESSION_TTL_SECONDS, 15 * 60);
   assert.equal(
-    expiry.vodTransportExpiresAt({
+    expiry.playbackTransportExpiresAt({
       nowMs,
       itemType: 'movie',
       playbackHint: { durationSeconds: 100 * 60 },
@@ -88,13 +99,44 @@ test('gateway VOD transport shares the bounded duration-aware policy', async () 
     }),
     '2026-07-20T14:40:00.000Z',
   );
-  assert.equal(
-    expiry.vodTransportTtlSeconds({
+  assert.ok(
+    expiry.playbackTransportTtlSeconds({
       itemType: 'live',
       playbackHint: { durationSeconds: 100 * 60 },
       sessionTtlSeconds: 15 * 60,
+    }) >= 12 * 60 * 60,
+  );
+  const channelTransportExpiry = expiry.playbackTransportExpiresAt({
+    nowMs,
+    itemType: 'channel',
+    sessionTtlSeconds: 15 * 60,
+  });
+  assert.ok(
+    Date.parse(channelTransportExpiry) - nowMs >= 12 * 60 * 60 * 1000,
+  );
+});
+
+test('native fallback survives long live playback and remains duration-aware for VOD', async () => {
+  const expiry = await import(expiryModuleUrl);
+  const nowMs = Date.parse('2026-07-20T12:00:00.000Z');
+
+  for (const itemType of ['live', 'channel']) {
+    assert.ok(
+      expiry.nativeFallbackTokenTtlSeconds({
+        itemType,
+        sessionTtlSeconds: 15 * 60,
+      }) >= 12 * 60 * 60,
+      `${itemType} native fallback must still be valid when a late direct-stream failure occurs`,
+    );
+  }
+  assert.equal(
+    expiry.nativeFallbackTokenExpiresAt({
+      nowMs,
+      itemType: 'movie',
+      playbackHint: { codecProfile: { durationSeconds: 100 * 60 } },
+      sessionTtlSeconds: 15 * 60,
     }),
-    15 * 60,
+    '2026-07-20T14:40:00.000Z',
   );
 });
 
@@ -128,6 +170,31 @@ test('edge keeps session expiry short while signing VOD engine raw URL with its 
   assert.match(source, /expires_at: expiresAt/);
 });
 
+test('norva-playback signs the dormant native fallback with its own transport expiry', () => {
+  const source = fs.readFileSync(
+    path.join(root, 'supabase', 'functions', 'norva-playback', 'index.ts'),
+    'utf8',
+  );
+  const directStart = source.indexOf('if (mode === "direct")');
+  const directEnd = source.indexOf('\n  if (mode === "relay")', directStart);
+  assert.notEqual(directStart, -1);
+  assert.notEqual(directEnd, -1);
+  const directBranch = source.slice(directStart, directEnd);
+
+  assert.match(
+    source,
+    /nativeFallbackTokenExpiresAt[\s\S]{0,160}from\s+["']\.\.\/_shared\/playback-expiry\.mjs["']/,
+  );
+  assert.match(directBranch, /fallbackExpiresAt = nativeFallbackTokenExpiresAt\(\{/);
+  assert.match(directBranch, /playbackHint:\s*requestedPlaybackHint/);
+  assert.match(directBranch, /sessionTtlSeconds:\s*ttlSeconds/);
+  assert.match(
+    directBranch,
+    /createBytePipeAccess\(\s*session\.id,\s*userId,\s*targetUrl,\s*fallbackExpiresAt,/,
+  );
+  assert.match(directBranch, /fallbackUrl,\s*fallbackExpiresAt,\s*expiresAt,/);
+});
+
 test('gateway /raw accepts a valid duration-aware expiration beyond 15 minutes', () => {
   const gateway = fs.readFileSync(
     path.join(root, 'services', 'media-gateway', 'src', 'index.js'),
@@ -152,18 +219,35 @@ test('gateway /raw accepts a valid duration-aware expiration beyond 15 minutes',
 });
 
 for (const edgeFile of ['norva-playback', 'norva-cloud']) {
-  test(`${edgeFile} keeps entitlement short and gives VOD gateway/coordinator the transport expiry`, () => {
+  test(`${edgeFile} keeps entitlement and relay short while gateway gets the media transport expiry`, () => {
     const source = fs.readFileSync(
       path.join(root, 'supabase', 'functions', edgeFile, 'index.ts'),
       'utf8',
     );
-    const start = source.indexOf('const gatewayTransportExpiresAt = mode === "transcode"');
+    const start = source.indexOf('const ttlSeconds = boundedInt(');
     assert.notEqual(start, -1);
     const branch = source.slice(start, source.indexOf('\n  if (sourceId && gateway.startupMs)', start));
 
-    assert.match(branch, /vodTransportExpiresAt\(\{/);
-    assert.match(branch, /playbackHint:\s*requestedPlaybackHint/);
+    assert.match(
+      source,
+      /playbackTransportExpiresAt[\s\S]{0,160}from\s+["']\.\.\/_shared\/playback-expiry\.mjs["']/,
+    );
+    assert.match(branch, /boundedInt\([^;]+900,\s*60,\s*7200\)/);
+    assert.match(branch, /const expiresAt = new Date\(Date\.now\(\) \+ ttlSeconds \* 1000\)\.toISOString\(\)/);
+    assert.match(
+      branch,
+      /const transportExpiresAt = playbackTransportExpiresAt\(\{\s*itemType,\s*playbackHint:\s*requestedPlaybackHint,\s*sessionTtlSeconds:\s*ttlSeconds,\s*\}\)/,
+    );
     assert.match(branch, /expires_at:\s*expiresAt/);
+    assert.match(
+      branch,
+      /const gatewayTransportExpiresAt = mode === "transcode"\s*\? transportExpiresAt\s*:\s*expiresAt/,
+    );
+    assert.match(
+      branch,
+      /createRelayAccess\(session\.id,\s*userId,\s*targetUrl,\s*expiresAt,/,
+    );
+    assert.match(branch, /tokenExpiresAt:\s*expiresAt/);
     assert.match(branch, /prepareEdgeSessionCoordinator\(\{[\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);
     assert.match(branch, /createGatewaySession\([\s\S]*?gatewayTransportExpiresAt/);
     assert.match(branch, /commitEdgeSessionCoordinator\([\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);

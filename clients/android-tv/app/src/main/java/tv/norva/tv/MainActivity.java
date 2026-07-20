@@ -733,11 +733,30 @@ public class MainActivity extends Activity {
         final boolean ended = data.getBooleanExtra("ended", false);
         final boolean playNext = data.getBooleanExtra("playNext", false);
         final boolean openEpisodes = data.getBooleanExtra("openEpisodes", false);
+        final boolean retryPlayback = data.getBooleanExtra("retryPlayback", false);
+        final String retryReason = data.getStringExtra("retryReason");
         if (sourceId == null || itemId == null) return;
         // finish() persisted this same final position into the prefs net; deliver it through the
         // confirmed pump (retry + onProgressSaved-clears) instead of the old one-shot
         // evaluateJavascript that rendered false silently on a page without the bridge.
         if (pos > 0) flushPendingNativeProgress();
+        // Direct + signed fallback were exhausted. Keep the current catalogue/detail
+        // route open and ask it to mint a fresh provider session, then relaunch the
+        // native player at the same VOD timestamp. This prevents a transient Atlas
+        // EOF from closing the player and exposing Home.
+        if (retryPlayback) {
+            final String retryJs = "window.__norvaNative && window.__norvaNative.retryPlayback && "
+                    + "window.__norvaNative.retryPlayback("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ","
+                    + pos + "," + jsStr(retryReason) + ")";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { webView.evaluateJavascript(retryJs, null); } catch (Exception ignored) { }
+                }
+            });
+            return;
+        }
 
         // Launcher "Play Next": keep the row in sync with real progress. A title
         // watched to (nearly) the end leaves the row; an in-progress one joins it.

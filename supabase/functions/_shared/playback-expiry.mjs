@@ -13,6 +13,11 @@ export const MAX_PLAYBACK_SESSION_TTL_SECONDS = 2 * SECONDS_PER_HOUR;
 export const ENGINE_RAW_TOKEN_GRACE_SECONDS = SECONDS_PER_HOUR;
 export const ENGINE_RAW_TOKEN_UNKNOWN_DURATION_SECONDS = 4 * SECONDS_PER_HOUR;
 export const ENGINE_RAW_TOKEN_MAX_SECONDS = 8 * SECONDS_PER_HOUR;
+// A native player normally reads the provider URL directly and only touches its
+// signed Gateway fallback if that direct connection dies later. Live sessions
+// routinely last several hours, so tying that dormant fallback to the 15-minute
+// entitlement TTL makes it expired precisely when it is finally needed.
+export const NATIVE_LIVE_FALLBACK_TOKEN_SECONDS = 12 * SECONDS_PER_HOUR;
 
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -81,7 +86,47 @@ export function vodTransportExpiresAt({
   return new Date(safeNowMs + vodTransportTtlSeconds(options) * 1000).toISOString();
 }
 
+/**
+ * Credential/session lifetime for the actual media transport. VOD is duration
+ * aware; live has no finite duration and receives a bounded 12-hour window.
+ * The separate playback entitlement record intentionally remains short-lived.
+ */
+export function playbackTransportTtlSeconds(options = {}) {
+  const itemType = options?.itemType;
+  const transportTtl = vodTransportTtlSeconds(options);
+  if (itemType === "live" || itemType === "channel") {
+    return Math.max(transportTtl, NATIVE_LIVE_FALLBACK_TOKEN_SECONDS);
+  }
+  return transportTtl;
+}
+
+export function playbackTransportExpiresAt({
+  nowMs = Date.now(),
+  ...options
+} = {}) {
+  const safeNowMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  return new Date(safeNowMs + playbackTransportTtlSeconds(options) * 1000).toISOString();
+}
+
 // Compatibility names for the browser byte-pipe. Raw tokens and gateway
 // transcode sessions deliberately share the same duration-aware VOD policy.
 export const engineRawTokenTtlSeconds = vodTransportTtlSeconds;
 export const engineRawTokenExpiresAt = vodTransportExpiresAt;
+
+/**
+ * Lifetime of the dormant /raw fallback handed to Android TV/phone alongside
+ * a direct provider URL. VOD reuses the duration-aware transport policy; live
+ * needs a long fixed window because it has no media duration to derive one.
+ * The entitlement session itself remains short-lived and is unaffected.
+ */
+export function nativeFallbackTokenTtlSeconds(options = {}) {
+  return playbackTransportTtlSeconds(options);
+}
+
+export function nativeFallbackTokenExpiresAt({
+  nowMs = Date.now(),
+  ...options
+} = {}) {
+  const safeNowMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  return new Date(safeNowMs + nativeFallbackTokenTtlSeconds(options) * 1000).toISOString();
+}

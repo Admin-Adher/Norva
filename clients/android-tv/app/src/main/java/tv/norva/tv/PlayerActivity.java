@@ -126,7 +126,8 @@ public class PlayerActivity extends Activity {
     private boolean userSeeking = false;
 
     private int videoW = 0, videoH = 0;
-    private int playRetries = 0; // transient-error retry budget per stream
+    private int playRetries = 0; // one reconnect of the active lane before changing transport
+    private int recoveryGeneration = 0; // invalidates delayed reconnects after a newer recovery action
     private int aspectMode = 0; // 0 fit, 1 zoom (crop), 2 stretch
     private final String[] ASPECT_LABELS = {"Normal", "Zoom", "Stretch"};
     private final float[] SPEEDS = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f};
@@ -143,9 +144,18 @@ public class PlayerActivity extends Activity {
     private String subKey;                 // SharedPreferences key for the subtitle choice
     private boolean subPrefRestored = false; // apply the saved subtitle pref only once
     private String streamHost;               // host of the stream URL, shown in errors
+    private String originalUrl;               // residential/direct URL used again after a healthy mid-stream stall
     private String fallbackUrl;              // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
+    private boolean everReady = false;        // direct or fallback reached STATE_READY at least once
+    private boolean firstFrameRendered = false;
+    private boolean freshStreamRequested = false;
+    private String freshStreamReason;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+    private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
+    private final Runnable healthyRecoveryReset = new Runnable() {
+        @Override public void run() { playRetries = 0; }
+    };
 
     // End-of-stream: "À suivre" overlay (series binge) and exit reporting.
     private String nextTitle;                 // next-episode label, null for movies/live
@@ -222,36 +232,7 @@ public class PlayerActivity extends Activity {
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
-            // 1) Gateway byte-pipe fallback — the recovery this exact failure was built
-            //    for. onPlayerError reaches it only on a thrown IO error; a silent stall
-            //    raises none, so trigger it from here too (once).
-            if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
-                switchToFallback();
-                return;
-            }
-            // 2) Already on the fallback (or none available): one delayed re-prepare, in
-            //    case the provider's single slot has just been released.
-            if (playRetries < 1 && player != null) {
-                playRetries++;
-                spinner.setVisibility(View.VISIBLE);
-                errorView.setVisibility(View.GONE);
-                handler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (player != null) { player.prepare(); player.play(); }
-                    }
-                }, 1500);
-                return;
-            }
-            // 3) Exhausted: surface the failure AND report it, so silent stalls stop being
-            //    invisible to LocalServer playback-status health tracking (only thrown
-            //    errors reported 'broken' before).
-            spinner.setVisibility(View.GONE);
-            errorView.setText("No data received (35s timeout).\n"
-                    + "The provider accepts the connection but sends no playable stream."
-                    + (streamHost != null ? "\nHost: " + streamHost : ""));
-            errorView.setVisibility(View.VISIBLE);
-            reportPlaybackStatus("broken", "no_data_timeout");
+            recoverPlayback("no_data_timeout");
         }
     };
 
@@ -268,6 +249,7 @@ public class PlayerActivity extends Activity {
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
+        originalUrl = url;
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
         nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
@@ -352,7 +334,7 @@ public class PlayerActivity extends Activity {
                     handler.removeCallbacks(bufferWatchdog);
                 }
                 if (state == Player.STATE_READY) {
-                    playRetries = 0;           // healthy playback resets the retry budget
+                    everReady = true;
                     errorView.setVisibility(View.GONE);
                     reportPlaybackStatus("ok", null);
                     if (player.getDuration() > 0) {
@@ -373,12 +355,24 @@ public class PlayerActivity extends Activity {
                     // once the track list is known (no-op if none was saved).
                     maybeRestoreSubtitlePref();
                 }
-                if (state == Player.STATE_ENDED) onStreamEnded();
+                if (state == Player.STATE_ENDED) {
+                    if (isPrematureEnd()) recoverPlayback("premature_end");
+                    else onStreamEnded();
+                }
                 updatePlayPauseLabel();
             }
 
             @Override
-            public void onIsPlayingChanged(boolean isPlaying) { updatePlayPauseLabel(); }
+            public void onIsPlayingChanged(boolean isPlaying) {
+                handler.removeCallbacks(healthyRecoveryReset);
+                if (isPlaying) handler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
+                updatePlayPauseLabel();
+            }
+
+            @Override
+            public void onRenderedFirstFrame() {
+                firstFrameRendered = true;
+            }
 
             @Override
             public void onPlayerError(PlaybackException error) {
@@ -395,20 +389,8 @@ public class PlayerActivity extends Activity {
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
                 // accepted. Switch to the gateway fallback once before retrying/erroring.
-                if (recoverable && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
-                    switchToFallback();
-                    return;
-                }
-                if (recoverable && playRetries < 1 && player != null) {
-                    playRetries++;
-                    spinner.setVisibility(View.VISIBLE);
-                    errorView.setVisibility(View.GONE);
-                    handler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (player != null) { player.prepare(); player.play(); }
-                        }
-                    }, 1500);
+                if (recoverable) {
+                    recoverPlayback(error.getErrorCodeName());
                     return;
                 }
                 spinner.setVisibility(View.GONE);
@@ -630,15 +612,107 @@ public class PlayerActivity extends Activity {
         finish();
     }
 
+    private boolean isLiveContent() {
+        return "channel".equals(itemType) || "live".equals(itemType);
+    }
+
+    /**
+     * A provider EOF is not a natural end for live. For VOD, require a rendered
+     * frame and a position close to the declared duration before marking watched
+     * or launching the next episode.
+     */
+    private boolean isPrematureEnd() {
+        if (isLiveContent()) return true;
+        if (!firstFrameRendered || player == null) return true;
+        long duration = player.getDuration();
+        long position = Math.max(0, player.getCurrentPosition());
+        if (duration <= 0 || duration == C.TIME_UNSET) return true;
+        return position < duration - 30_000L && position < Math.round(duration * 0.97d);
+    }
+
+    private long recoverPositionMs() {
+        if (player == null || isLiveContent()) return 0L;
+        long duration = player.getDuration();
+        long position = Math.max(0, player.getCurrentPosition());
+        return duration > 0 ? Math.min(position, Math.max(0, duration - 1_000L)) : position;
+    }
+
+    private void recoverPlayback(final String reason) {
+        if (player == null || freshStreamRequested) return;
+        final int scheduledGeneration = ++recoveryGeneration;
+        handler.removeCallbacks(bufferWatchdog);
+        handler.removeCallbacks(healthyRecoveryReset);
+        spinner.setVisibility(View.VISIBLE);
+        errorView.setVisibility(View.GONE);
+
+        // Startup failure: residential URL was never proven healthy, so use the
+        // Gateway fallback immediately. Mid-stream: reconnect the already-good
+        // direct Atlas route once before moving traffic to the datacenter.
+        if (!everReady && !fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
+            switchToFallback();
+            return;
+        }
+        if (playRetries < 1) {
+            playRetries++;
+            final MediaItem current = player.getCurrentMediaItem();
+            final long position = recoverPositionMs();
+            handler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (player == null || freshStreamRequested
+                            || scheduledGeneration != recoveryGeneration) return;
+                    MediaItem item = current != null ? current : MediaItem.fromUri(
+                            fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl);
+                    player.setMediaItem(item, position);
+                    player.prepare();
+                    player.setPlayWhenReady(true);
+                }
+            }, 1_500L);
+            return;
+        }
+        if (!fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
+            switchToFallback();
+            return;
+        }
+        requestFreshStream(reason);
+    }
+
+    /**
+     * Both the direct provider URL and its signed fallback were exhausted. Hand
+     * the exact item + position back to the still-open WebView so it resolves a
+     * fresh provider URL/session and relaunches without navigating to Home.
+     */
+    private void requestFreshStream(String reason) {
+        if (freshStreamRequested) return;
+        recoveryGeneration++;
+        if (sourceId == null || sourceId.isEmpty() || itemId == null || itemId.isEmpty()) {
+            spinner.setVisibility(View.GONE);
+            errorView.setText("Playback interrupted."
+                    + (streamHost != null ? "\nHost: " + streamHost : ""));
+            errorView.setVisibility(View.VISIBLE);
+            reportPlaybackStatus("broken", reason);
+            return;
+        }
+        freshStreamRequested = true;
+        freshStreamReason = reason;
+        errorView.setText("Reconnecting…");
+        errorView.setVisibility(View.VISIBLE);
+        reportPlaybackStatus("reconnecting", reason);
+        handler.postDelayed(new Runnable() {
+            @Override public void run() { finish(); }
+        }, 350L);
+    }
+
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
     private void switchToFallback() {
+        recoveryGeneration++;
         fallbackTried = true;
-        playRetries = 0;             // fresh retry budget for the new URL
+        playRetries = 0;
         streamHost = hostOf(fallbackUrl);
         handler.removeCallbacks(bufferWatchdog);
         errorView.setVisibility(View.GONE);
         spinner.setVisibility(View.VISIBLE);
-        player.setMediaItem(MediaItem.fromUri(fallbackUrl));
+        long position = recoverPositionMs();
+        player.setMediaItem(MediaItem.fromUri(fallbackUrl), position);
         player.prepare();
         player.setPlayWhenReady(true);
     }
@@ -1622,6 +1696,8 @@ public class PlayerActivity extends Activity {
                 data.putExtra("ended", endedNaturally);
                 data.putExtra("playNext", playNextChosen);
                 data.putExtra("openEpisodes", openEpisodesChosen);
+                data.putExtra("retryPlayback", freshStreamRequested);
+                if (freshStreamReason != null) data.putExtra("retryReason", freshStreamReason);
                 // Graceful exit: persist the FINAL position into the SharedPreferences net and
                 // KEEP it there — it is only cleared once the web layer confirms the cloud save
                 // (onProgressSaved). Clearing here used to lose the position whenever the

@@ -924,12 +924,27 @@ public class MainActivity extends Activity {
         final long pos = data.getLongExtra("positionSeconds", 0);
         final long dur = data.getLongExtra("durationSeconds", 0);
         final boolean ended = data.getBooleanExtra("ended", false);
+        // Persist the last known position before a fresh-session relaunch. The
+        // retry branch returns early below, so this must run first or an
+        // interruption would silently lose cross-device progress.
         if (sourceId != null && itemId != null && pos > 0) {
             final String js = "window.__norvaNative && window.__norvaNative.onProgress("
                     + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
             runOnUiThread(() -> {
                 try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
             });
+        }
+        final boolean retryPlayback = data.getBooleanExtra("retryPlayback", false);
+        if (retryPlayback && sourceId != null && itemId != null) {
+            final String retryReason = data.getStringExtra("retryReason");
+            final String jsRetry = "window.__norvaNative && window.__norvaNative.retryPlayback"
+                    + " && window.__norvaNative.retryPlayback("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
+                    + "," + pos + "," + jsStr(retryReason) + ")";
+            runOnUiThread(() -> {
+                try { webView.evaluateJavascript(jsRetry, null); } catch (Exception ignored) { }
+            });
+            return;
         }
         // Natural end → ask the web to autoplay the next episode (a no-op for movies).
         if (ended && itemId != null) {

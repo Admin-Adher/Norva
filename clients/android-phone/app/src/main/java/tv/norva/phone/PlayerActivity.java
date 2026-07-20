@@ -99,7 +99,12 @@ public class PlayerActivity extends Activity {
     private boolean isLocal = false;     // offline (encrypted local file) playback
     private String fallbackUrl;          // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
-    private boolean watchdogRetried = false; // one re-prepare budget for a silent no-data stall
+    private int playRetries = 0;          // one in-place reconnect before asking JS for a fresh session
+    private int recoveryGeneration = 0;   // invalidates delayed reconnects after a newer recovery action
+    private boolean everReady = false;    // direct or fallback reached STATE_READY at least once
+    private boolean firstFrameRendered = false;
+    private boolean freshStreamRequested = false;
+    private String freshStreamReason;
     private String sourceId;
     private String itemType;
     private String itemId;
@@ -152,6 +157,10 @@ public class PlayerActivity extends Activity {
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+    private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
+    private final Runnable healthyRecoveryReset = new Runnable() {
+        @Override public void run() { playRetries = 0; }
+    };
     // A stream that connects but never delivers playable bytes throws NO
     // PlaybackException, so it never reaches the onPlayerError recovery ladder. Drive
     // the same recovery here: switch to the gateway fallback once, then a single
@@ -160,23 +169,7 @@ public class PlayerActivity extends Activity {
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
-            if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
-                switchToFallback();
-                return;
-            }
-            if (!watchdogRetried && player != null) {
-                watchdogRetried = true;
-                if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-                errHandler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (player != null) { player.prepare(); player.setPlayWhenReady(true); }
-                    }
-                }, 1500);
-                return;
-            }
-            showStreamError(getString(R.string.player_no_data)
-                    + (streamHost != null ? "\nHost: " + streamHost : ""));
+            recoverPlayback("no_data_timeout");
         }
     };
 
@@ -372,7 +365,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_READY) {
                     errHandler.removeCallbacks(bufferWatchdog);
-                    watchdogRetried = false;   // healthy playback re-grants the re-prepare budget (mirror TV's playRetries reset)
+                    everReady = true;
                     if (errorPanel != null) errorPanel.setVisibility(View.GONE);
                     if (!resumeApplied && resumeSeconds > 0) {
                         resumeApplied = true;
@@ -385,8 +378,12 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_ENDED) {
                     errHandler.removeCallbacks(bufferWatchdog);
-                    endedNaturally = true;
-                    finish();
+                    if (isPrematureEnd()) {
+                        recoverPlayback(isLiveContent() ? "live_eof" : "premature_eof");
+                    } else {
+                        endedNaturally = true;
+                        finish();
+                    }
                 }
             }
 
@@ -402,21 +399,8 @@ public class PlayerActivity extends Activity {
                 // once, then one delayed re-prepare (the provider frees its lone slot
                 // ~8s after the prior drop), and only then surface the error.
                 if (isRecoverableError(error)) {
-                    if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried) {
-                        switchToFallback();
-                        return;
-                    }
-                    if (!watchdogRetried && player != null) {
-                        watchdogRetried = true;
-                        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-                        errHandler.postDelayed(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (player != null) { player.prepare(); player.setPlayWhenReady(true); }
-                            }
-                        }, 1500);
-                        return;
-                    }
+                    recoverPlayback(error.getErrorCodeName());
+                    return;
                 }
                 // Surface the real failure on screen (error code, HTTP status, cause,
                 // host) instead of a silent hang — so it can be read/screenshotted.
@@ -425,7 +409,16 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
+                errHandler.removeCallbacks(healthyRecoveryReset);
+                if (isPlaying) {
+                    errHandler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
+                }
                 refreshPipActions(); // keep the PiP button icon in sync
+            }
+
+            @Override
+            public void onRenderedFirstFrame() {
+                firstFrameRendered = true;
             }
 
             @Override
@@ -541,28 +534,115 @@ public class PlayerActivity extends Activity {
         errorPanel.bringToFront();
     }
 
-    /** Re-prepare from the original URL after the user taps Retry on the error panel. */
+    /** A manual retry must resolve a new provider/Gateway session, not reuse a stale signed URL. */
     private void retryPlayback() {
-        if (player == null) return;
-        fallbackTried = false;
-        watchdogRetried = false;
+        requestFreshStream("manual_retry");
+    }
+
+    private boolean isLiveContent() {
+        return "channel".equals(itemType) || "live".equals(itemType);
+    }
+
+    /**
+     * A provider EOF is never a natural end for live. For VOD, require at least
+     * one rendered frame and a position close to the declared duration before
+     * marking the title watched or returning an ended result to the web layer.
+     */
+    private boolean isPrematureEnd() {
+        if (isLiveContent()) return true;
+        if (!firstFrameRendered || player == null) return true;
+        long duration = player.getDuration();
+        long position = Math.max(0, player.getCurrentPosition());
+        // An unknown duration makes EOF ambiguous: recover instead of marking
+        // the title watched or advancing a series incorrectly.
+        if (duration <= 0 || duration == C.TIME_UNSET) return true;
+        return position < duration - 30_000L && position < Math.round(duration * 0.97d);
+    }
+
+    /** Preserve the current VOD position across direct/fallback reconnects. */
+    private long recoverPositionMs() {
+        if (player == null || isLiveContent()) return 0L;
+        long duration = player.getDuration();
+        long position = Math.max(0, player.getCurrentPosition());
+        return duration > 0
+                ? Math.min(position, Math.max(0, duration - 1_000L))
+                : position;
+    }
+
+    /**
+     * Recover without ejecting the viewer: retry the proven current route once,
+     * then try the Gateway fallback, then ask the web layer to resolve a brand-new
+     * session. The retry budget resets only after 60 seconds of healthy playback,
+     * preventing rapid READY/EOF loops from retrying forever.
+     */
+    private void recoverPlayback(final String reason) {
+        if (player == null || freshStreamRequested) return;
+        final int scheduledGeneration = ++recoveryGeneration;
         errHandler.removeCallbacks(bufferWatchdog);
+        errHandler.removeCallbacks(healthyRecoveryReset);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-        streamHost = hostOf(originalUrl);
-        player.setMediaItem(originalMediaItem != null
-                ? originalMediaItem : new MediaItem.Builder().setUri(originalUrl).build());
-        player.prepare();
-        player.setPlayWhenReady(true);
+
+        // A startup failure never proved the residential route healthy, so move
+        // to the supplied Gateway fallback immediately. Mid-stream, reconnect the
+        // already-good route once before moving traffic to the datacenter.
+        if (!everReady && !fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
+            switchToFallback();
+            return;
+        }
+        if (playRetries < 1) {
+            playRetries++;
+            final MediaItem current = player.getCurrentMediaItem();
+            final long position = recoverPositionMs();
+            errHandler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (player == null || freshStreamRequested
+                            || scheduledGeneration != recoveryGeneration) return;
+                    MediaItem item = current != null ? current : new MediaItem.Builder()
+                            .setUri(fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl)
+                            .build();
+                    player.setMediaItem(item, position);
+                    player.prepare();
+                    player.setPlayWhenReady(true);
+                }
+            }, 1_500L);
+            return;
+        }
+        if (!fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
+            switchToFallback();
+            return;
+        }
+        requestFreshStream(reason);
+    }
+
+    /** Hand exhausted playback back to the WebView for a fresh provider resolution. */
+    private void requestFreshStream(String reason) {
+        if (freshStreamRequested) return;
+        recoveryGeneration++;
+        if (isLocal || sourceId == null || sourceId.isEmpty()
+                || itemId == null || itemId.isEmpty()) {
+            showStreamError(getString(R.string.player_no_data)
+                    + (streamHost != null ? "\nHost: " + streamHost : ""));
+            return;
+        }
+        freshStreamRequested = true;
+        freshStreamReason = reason == null ? "playback_interrupted" : reason;
+        showStreamError("Reconnecting\u2026");
+        errHandler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (!isFinishing()) finish();
+            }
+        }, 350L);
     }
 
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
     private void switchToFallback() {
+        recoveryGeneration++;
         fallbackTried = true;
-        watchdogRetried = false;      // fresh re-prepare budget for the fallback URL
+        playRetries = 0;              // one fresh in-place retry budget for the fallback URL
         streamHost = hostOf(fallbackUrl);
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-        player.setMediaItem(new MediaItem.Builder().setUri(fallbackUrl).build());
+        player.setMediaItem(new MediaItem.Builder().setUri(fallbackUrl).build(), recoverPositionMs());
         player.prepare();
         player.setPlayWhenReady(true);
     }
@@ -1062,6 +1142,16 @@ public class PlayerActivity extends Activity {
                 data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
                 data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
             }
+            if (freshStreamRequested) {
+                if (data == null) data = new Intent();
+                data.putExtra("sourceId", sourceId);
+                data.putExtra("itemType", itemType);
+                data.putExtra("itemId", itemId);
+                data.putExtra("positionSeconds", player == null
+                        ? 0L : Math.max(0, player.getCurrentPosition() / 1000));
+                data.putExtra("retryPlayback", true);
+                data.putExtra("retryReason", freshStreamReason);
+            }
             if (data != null) setResult(RESULT_OK, data);
             // Online exits are relayed to cloud by MainActivity.onActivityResult, so
             // drop any pending copy. Offline playback is launched WITHOUT a result
@@ -1142,7 +1232,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        errHandler.removeCallbacks(bufferWatchdog);
+        errHandler.removeCallbacksAndMessages(null);
         if (pipReceiver != null) { try { unregisterReceiver(pipReceiver); } catch (Exception ignored) { } pipReceiver = null; }
         if (castSupport != null) { castSupport.stop(); castSupport = null; }
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }

@@ -2,7 +2,11 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
-import { engineRawTokenExpiresAt, vodTransportExpiresAt } from "../_shared/playback-expiry.mjs";
+import {
+  engineRawTokenExpiresAt,
+  nativeFallbackTokenExpiresAt,
+  playbackTransportExpiresAt,
+} from "../_shared/playback-expiry.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -129,7 +133,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 35,
+        version: 36,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -375,12 +379,13 @@ async function createPlaybackSession(
   // Entitlement/concurrency stays short-lived, but a VOD gateway transport must
   // survive the whole movie/episode. Explicit teardown and the cross-device
   // coordinator still stop it immediately when playback ends or is replaced.
+  const transportExpiresAt = playbackTransportExpiresAt({
+    itemType,
+    playbackHint: requestedPlaybackHint,
+    sessionTtlSeconds: ttlSeconds,
+  });
   const gatewayTransportExpiresAt = mode === "transcode"
-    ? vodTransportExpiresAt({
-      itemType,
-      playbackHint: requestedPlaybackHint,
-      sessionTtlSeconds: ttlSeconds,
-    })
+    ? transportExpiresAt
     : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
 
@@ -443,11 +448,33 @@ async function createPlaybackSession(
     // actually fetches it. Best-effort: if the gateway isn't configured, direct
     // still works without a fallback.
     let fallbackUrl: string | null = null;
+    let fallbackExpiresAt: string | null = null;
     try {
-      const fb = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
+      fallbackExpiresAt = nativeFallbackTokenExpiresAt({
+        itemType,
+        playbackHint: requestedPlaybackHint,
+        sessionTtlSeconds: ttlSeconds,
+      });
+      const fb = await createBytePipeAccess(
+        session.id,
+        userId,
+        targetUrl,
+        fallbackExpiresAt,
+        db,
+        userAgent,
+      );
       fallbackUrl = fb.url;
     } catch (_) { /* gateway not configured — no fallback, direct unaffected */ }
-    return { session, playback: { mode, url: targetUrl, fallbackUrl, expiresAt } };
+    return {
+      session,
+      playback: {
+        mode,
+        url: targetUrl,
+        fallbackUrl,
+        fallbackExpiresAt,
+        expiresAt,
+      },
+    };
   }
 
   if (mode === "relay") {
@@ -706,8 +733,18 @@ async function createPlaybackSession(
         },
       };
     }
+    // Relay credentials stay aligned with the revocable entitlement session.
+    // Unlike a Gateway session, the stateless relay does not currently consult
+    // the coordinator/session ledger on every segment request.
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
-    return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
+    return {
+      session,
+      playback: {
+        mode,
+        url: relay.url,
+        tokenExpiresAt: expiresAt,
+      },
+    };
   }
 
   let gateway;
@@ -830,8 +867,31 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   const runtimeConfig = await getRuntimeConfig(db);
   const closedGatewayIds: string[] = [];
   const gatewayErrors: unknown[] = [];
+  let rawPumpsAborted = 0;
 
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    // Direct/native sessions may have switched to their long-lived signed /raw
+    // fallback. It has no cloud_gateway_sessions row, so explicitly abort its
+    // active pump on normal exit instead of leaving a provider slot occupied.
+    try {
+      const ownerKey = await sha256Hex(userId);
+      const rawUrl = new URL(`${runtimeConfig.mediaGatewayUrl}/raw-pumps`);
+      rawUrl.searchParams.set("ownerKey", ownerKey);
+      rawUrl.searchParams.set("sid", id);
+      const rawResponse = await fetch(rawUrl.toString(), {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      });
+      if (!rawResponse.ok && rawResponse.status !== 404) {
+        const body = await rawResponse.text().catch(() => "");
+        throw new HttpError(rawResponse.status, "Media gateway refused raw-pump expiry", body);
+      }
+      const rawResult = await rawResponse.json().catch(() => ({} as JsonRecord));
+      rawPumpsAborted = boundedInt((rawResult as JsonRecord).aborted, 0, 0, 1000);
+    } catch (rawError) {
+      gatewayErrors.push(rawError);
+    }
+
     await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
       const externalSessionId = stringOrNull(gateway.external_session_id);
       if (!externalSessionId) return;
@@ -886,6 +946,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   return {
     session: expired,
     gatewayClosed: closedGatewayIds.length,
+    rawPumpsAborted,
     gatewayErrors: gatewayErrors.length,
   };
 }

@@ -511,10 +511,21 @@ const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DE
 // goes quiet. Bigger gaps give the provider real silence to release between tries.
 const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 3, 0, 8);
 const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 9000];
+// Some providers accept HTTP and return 200/206 headers but never produce a
+// single byte. Validate first-byte delivery before committing response headers,
+// then close a stream that later goes truly idle so the player can reconnect.
+const RAW_FIRST_BYTE_TIMEOUT_MS = clampInt(process.env.RAW_FIRST_BYTE_TIMEOUT_MS, 5_000, 1_000, 15_000);
+// The native clients give the complete startup roughly 35s. This deadline is
+// authoritative across DNS/connect/headers, prefix sniffing and every backoff;
+// the 7s margin leaves time for the 504 to reach the player and arm its fallback.
+const RAW_STARTUP_DEADLINE_MS = clampInt(process.env.RAW_STARTUP_DEADLINE_MS, 27_000, 5_000, 28_000);
+const RAW_NO_DATA_RETRY_LIMIT = clampInt(process.env.RAW_NO_DATA_RETRY_LIMIT, 2, 0, 3);
+const RAW_IDLE_TIMEOUT_MS = clampInt(process.env.RAW_IDLE_TIMEOUT_MS, 20_000, 5_000, 60_000);
+const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 77;
+const GATEWAY_VERSION = 78;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -570,6 +581,18 @@ const probeStats = {
     last: null,
     lastFailure: null
 };
+const rawStreamStats = {
+    requests: 0,
+    firstByteTimeouts: 0,
+    prefixTimeouts: 0,
+    startupTimeouts: 0,
+    firstByteReadErrors: 0,
+    emptyBodies: 0,
+    nonMediaBodies: 0,
+    providerRetries: 0,
+    idleTimeouts: 0,
+    lastFailure: null
+};
 const sessionStartupStats = {
     attempts: 0,
     successes: 0,
@@ -602,6 +625,13 @@ app.get('/health', (req, res) => {
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
+        rawStreamHealth: {
+            ...rawStreamStats,
+            firstByteTimeoutMs: RAW_FIRST_BYTE_TIMEOUT_MS,
+            startupDeadlineMs: RAW_STARTUP_DEADLINE_MS,
+            noDataRetryLimit: RAW_NO_DATA_RETRY_LIMIT,
+            idleTimeoutMs: RAW_IDLE_TIMEOUT_MS
+        },
         sessionStartupStats: {
             ...sessionStartupStats,
             averageMs: sessionStartupStats.successes > 0
@@ -866,56 +896,289 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
 // session HMAC token signed by the playback function with the shared gateway
 // token, carried in the path; the engine fetches it cross-origin with Range.
 // ── /raw junk-body guard (2026-07-18 mobile VOD incident) ────────────────────────
-// Textual content-types that legit stream bytes never carry. Everything else
-// (video/*, audio/*, application/octet-stream, absent header) pipes untouched.
-const NON_MEDIA_CONTENT_TYPE_RE = /^\s*(?:text\/|application\/(?:json|problem\+json|xml|xhtml\+xml))/i;
+// Textual content-types are inspected for provider error pages; recognized HLS,
+// DASH and Smooth Streaming manifests remain valid stream payloads.
+const NON_MEDIA_CONTENT_TYPE_RE = /^\s*(?:text\/|application\/(?:json|xml|[\w.-]+\+(?:json|xml)))/i;
 
-// One read of the response body — the leading chunk decides. A busy/ban page
-// arrives whole in the first chunk; real media leads with its container magic.
-async function sniffLeadingBytes(webBody, signal) {
-    const reader = webBody.getReader();
-    try {
-        const { value, done } = await reader.read();
-        return { chunk: done || !value ? Buffer.alloc(0) : Buffer.from(value), reader };
-    } catch (err) {
-        if (!(signal && signal.aborted)) {
-            console.warn('[media-gateway] /raw body sniff failed:', redactCreds(String((err && err.message) || err)));
+function rawStartupRemainingMs(deadlineAt) {
+    return Math.max(0, Number(deadlineAt || 0) - Date.now());
+}
+
+// Each provider attempt owns a controller linked to the client request. Its
+// timer is the route-wide deadline, not a fresh per-attempt allowance. A chosen
+// response clears only that timer and remains linked to the client for streaming.
+function createRawAttemptGuard(parentSignal, deadlineAt) {
+    const controller = new AbortController();
+    let deadlineTimer = null;
+    let deadlineExpired = false;
+    const onParentAbort = () => {
+        try { controller.abort(parentSignal && parentSignal.reason); } catch (_) {}
+    };
+    if (parentSignal) {
+        if (parentSignal.aborted) onParentAbort();
+        else {
+            parentSignal.addEventListener('abort', onParentAbort, { once: true });
+            if (parentSignal.aborted) onParentAbort();
         }
-        return { chunk: Buffer.alloc(0), reader };
+    }
+    const remaining = rawStartupRemainingMs(deadlineAt);
+    if (!controller.signal.aborted) {
+        if (remaining <= 0) {
+            deadlineExpired = true;
+            try { controller.abort(new Error('raw_startup_deadline')); } catch (_) {}
+        } else {
+            deadlineTimer = setTimeout(() => {
+                deadlineExpired = true;
+                try { controller.abort(new Error('raw_startup_deadline')); } catch (_) {}
+            }, remaining);
+            if (typeof deadlineTimer.unref === 'function') deadlineTimer.unref();
+        }
+    }
+    const clearDeadline = () => {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    };
+    return {
+        controller,
+        signal: controller.signal,
+        get deadlineExpired() { return deadlineExpired; },
+        abort(reason = 'raw_attempt_abandoned') {
+            try { controller.abort(new Error(reason)); } catch (_) {}
+        },
+        completeStartup: clearDeadline,
+        dispose() {
+            clearDeadline();
+            if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
+        },
+    };
+}
+
+// Cancellation is deliberately fire-and-forget: a broken provider must not be
+// able to keep the HTTP handler alive by never resolving ReadableStream.cancel().
+function cancelRawBodyBestEffort(cancelable) {
+    if (!cancelable || typeof cancelable.cancel !== 'function') return;
+    const release = () => {
+        if (typeof cancelable.releaseLock === 'function') {
+            try { cancelable.releaseLock(); } catch (_) {}
+        }
+    };
+    try {
+        Promise.resolve(cancelable.cancel()).catch(() => {}).finally(release);
+    } catch (_) {
+        release();
     }
 }
 
-// Container magics of everything the /raw lane pipes (mp4/mov, mkv/webm, MPEG-TS,
-// flv, avi/wav, ogg, mp3/ADTS, HLS playlist). Unknown BINARY leaders still pipe
-// (fail-open: the player's own sniffer decides); only a text-shaped body under a
-// textual content-type is refused — that shape is a busy/ban page, not a stream.
-function looksLikeMediaStart(buf) {
-    if (!buf || buf.length === 0) return false; // empty 2xx body = dead link, not a stream
+function abandonRawAttempt(guard, cancelable, reason) {
+    if (guard) guard.abort(reason);
+    cancelRawBodyBestEffort(cancelable);
+    if (guard) guard.dispose();
+}
+
+function waitForRawBackoff(delayMs, deadlineAt, signal) {
+    if (signal && signal.aborted) return Promise.resolve('aborted');
+    const remaining = rawStartupRemainingMs(deadlineAt);
+    if (remaining <= 0) return Promise.resolve('deadline');
+    const requested = Math.max(0, Number(delayMs) || 0);
+    const waitMs = Math.min(requested, remaining);
+    const reachesDeadline = requested >= remaining;
+    return new Promise((resolve) => {
+        let settled = false;
+        let timer = null;
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', onAbort);
+            resolve(result);
+        };
+        const onAbort = () => finish('aborted');
+        if (signal) {
+            signal.addEventListener('abort', onAbort, { once: true });
+            if (signal.aborted) onAbort();
+        }
+        if (!settled) timer = setTimeout(() => finish(reachesDeadline ? 'deadline' : 'complete'), waitMs);
+    });
+}
+
+function readRawPrefixChunk(reader, signal, timeoutMs) {
+    if (signal && signal.aborted) return Promise.resolve({ aborted: true });
+    let timer = null;
+    let onAbort = null;
+    const read = reader.read()
+        .then(({ value, done }) => ({ value, done, timedOut: false, aborted: false }))
+        .catch((error) => ({ error, done: false, timedOut: false, aborted: false }));
+    const stop = new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ timedOut: true, done: false, aborted: false }), Math.max(1, timeoutMs));
+        if (signal) {
+            onAbort = () => resolve({ aborted: true, done: false, timedOut: false });
+            signal.addEventListener('abort', onAbort, { once: true });
+            if (signal.aborted) onAbort();
+        }
+    });
+    return Promise.race([read, stop]).finally(() => {
+        if (timer) clearTimeout(timer);
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+    });
+}
+
+// Text-shaped provider errors can be split over several network chunks. Read a
+// bounded prefix, while retaining every consumed byte for replay into the pipe.
+// If an ambiguous prefix stalls after at least one byte, it fails open; the idle
+// watchdog remains responsible for a provider that stops mid-stream.
+async function sniffLeadingBytes(webBody, signal, timeoutMs, inspectPrefix) {
+    let reader = null;
+    try {
+        reader = webBody.getReader();
+    } catch (error) {
+        return { chunk: Buffer.alloc(0), reader, timedOut: false, error };
+    }
+    const chunks = [];
+    let totalBytes = 0;
+    let classification = 'need-more';
+    const sniffDeadlineAt = Date.now() + Math.max(1, timeoutMs || RAW_FIRST_BYTE_TIMEOUT_MS);
+    while (totalBytes < RAW_PREFIX_SNIFF_BYTES) {
+        const remaining = rawStartupRemainingMs(sniffDeadlineAt);
+        if (remaining <= 0) {
+            return {
+                chunk: chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0),
+                reader,
+                timedOut: totalBytes === 0,
+                prefixTimedOut: totalBytes > 0,
+                classification,
+            };
+        }
+        const next = await readRawPrefixChunk(reader, signal, remaining);
+        if (next.aborted) {
+            return {
+                chunk: chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0),
+                reader,
+                timedOut: false,
+                aborted: true,
+                classification,
+            };
+        }
+        if (next.timedOut) {
+            return {
+                chunk: chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0),
+                reader,
+                timedOut: totalBytes === 0,
+                prefixTimedOut: totalBytes > 0,
+                classification,
+            };
+        }
+        if (next.error) {
+            if (!(signal && signal.aborted)) {
+                console.warn('[media-gateway] /raw prefix read failed:', redactCreds(String((next.error && next.error.message) || next.error)));
+            }
+            return {
+                chunk: chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0),
+                reader,
+                timedOut: false,
+                error: next.error,
+                classification,
+            };
+        }
+        if (next.value && next.value.length) {
+            const value = Buffer.from(next.value);
+            chunks.push(value);
+            totalBytes += value.length;
+        }
+        const leading = chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0);
+        const sample = leading.subarray(0, RAW_PREFIX_SNIFF_BYTES);
+        classification = typeof inspectPrefix === 'function'
+            ? inspectPrefix(sample, Boolean(next.done))
+            : (sample.length ? 'media' : 'need-more');
+        if (next.done || classification !== 'need-more' || sample.length >= RAW_PREFIX_SNIFF_BYTES) {
+            return { chunk: leading, reader, timedOut: false, classification };
+        }
+    }
+    return {
+        chunk: chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0),
+        reader,
+        timedOut: false,
+        classification,
+    };
+}
+
+// Container magics of the binary formats /raw commonly pipes. Text manifests
+// are classified separately so BOMs and split network chunks remain valid.
+function hasKnownRawMediaMagic(buf) {
+    if (!buf || buf.length === 0) return false;
     const head = buf.toString('latin1', 0, Math.min(buf.length, 16));
     if (buf.length >= 8 && head.slice(4, 8) === 'ftyp') return true; // mp4 / mov
     if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return true; // mkv/webm (EBML)
     if (head.startsWith('FLV')) return true;
-    if (buf[0] === 0x47 && (buf.length < 189 || buf[188] === 0x47)) return true; // MPEG-TS sync byte(s)
+    if (buf.length >= 189 && buf[0] === 0x47 && buf[188] === 0x47) return true; // MPEG-TS packet sync bytes
     if (head.startsWith('RIFF')) return true; // avi / wav
-    if (head.startsWith('OggS')) return true;
-    if (head.startsWith('ID3') || (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return true; // mp3 / ADTS
-    if (head.startsWith('#EXTM3U')) return true; // HLS playlist relayed as-is
-    return !looksLikeTextStart(buf);
+    if (head.startsWith('OggS') || head.startsWith('fLaC')) return true;
+    return head.startsWith('ID3') || (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0); // mp3 / ADTS
 }
 
-// "Text-shaped": printable ASCII + whitespace across the whole sample (optional
-// UTF-8 BOM). An HTML/JSON/XML busy page matches; any real container hits a
-// control byte within the first few bytes.
+// "Text-shaped": printable UTF-8 + whitespace across the bounded sample
+// (optional UTF-8 BOM). Fatal decoding keeps arbitrary binary fail-open, while
+// streaming decode tolerates a multi-byte character split at the sample edge.
 function looksLikeTextStart(buf) {
     let i = 0;
     if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) i = 3;
-    const n = Math.min(buf.length, 256);
-    for (; i < n; i += 1) {
-        const b = buf[i];
-        const printable = (b >= 0x20 && b !== 0x7f) || b === 0x09 || b === 0x0a || b === 0x0d;
+    const n = Math.min(buf.length, RAW_PREFIX_SNIFF_BYTES);
+    let text;
+    try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(buf.subarray(i, n), { stream: true });
+    } catch (_) {
+        return false;
+    }
+    for (const char of text) {
+        const cp = char.codePointAt(0);
+        const printable = cp === 0x09 || cp === 0x0a || cp === 0x0d
+            || (cp >= 0x20 && cp !== 0x7f && !(cp >= 0x80 && cp <= 0x9f));
         if (!printable) return false;
     }
     return true;
+}
+
+function normalizedRawTextPrefix(buf) {
+    return buf.toString('utf8', 0, Math.min(buf.length, RAW_PREFIX_SNIFF_BYTES))
+        .replace(/^\uFEFF/, '')
+        .replace(/^\s+/, '');
+}
+
+function isRawTextManifest(text) {
+    if (/^#EXTM3U(?:[\r\n]|$)/i.test(text)) return true;
+    return /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<(?:MPD|SmoothStreamingMedia)\b/i.test(text);
+}
+
+function isExplicitRawProviderError(text) {
+    if (/^(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(text)) return true;
+    if (/^[{[]/.test(text) && /["'](?:error|message|detail|status)["']\s*:/i.test(text)) return true;
+    return /\b(?:user_multi_ip|maximum?\s+connections?|max[_ -]?connections?|too\s+many\s+connections?|account\s+(?:is\s+)?(?:expired|disabled|blocked)|unauthori[sz]ed|access\s+denied|forbidden|provider\s+busy)\b/i.test(text);
+}
+
+// Returns need-more only while a short textual prefix might still become a
+// known manifest or an explicit provider error. Unknown complete text from an
+// octet-stream remains fail-open; unknown text under a textual MIME is refused.
+function classifyRawPrefix(buf, contentType, startsAtZero, complete = false) {
+    if (!buf || buf.length === 0) return 'need-more';
+    if (hasKnownRawMediaMagic(buf)) return 'media';
+    const text = normalizedRawTextPrefix(buf);
+    if (isRawTextManifest(text)) return 'media';
+    const textualType = NON_MEDIA_CONTENT_TYPE_RE.test(String(contentType || ''));
+    if ((textualType || startsAtZero) && isExplicitRawProviderError(text)) return 'non-media';
+    if (!looksLikeTextStart(buf)) return 'media';
+    if (textualType && (complete || buf.length >= RAW_PREFIX_SNIFF_BYTES)) return 'non-media';
+    if (complete || buf.length >= RAW_PREFIX_SNIFF_BYTES) return 'media';
+    return 'need-more';
+}
+
+function rawResponseStartsAtZero(upstream) {
+    if (upstream.status === 200) return true; // provider ignored Range: bytes begin at zero
+    return /^bytes\s+0-/i.test(String(upstream.headers.get('content-range') || ''));
+}
+
+function isDeclaredEmptyRawResponse(upstream) {
+    if (!upstream.body || upstream.status === 204 || upstream.status === 205) return true;
+    const contentLength = String(upstream.headers.get('content-length') || '').trim();
+    return /^0+$/.test(contentLength);
 }
 
 // Rebuild a Node stream from a sniffed body: replay the leading chunk, then pump
@@ -929,22 +1192,85 @@ function readableFromSniffedBody(sniffed) {
         read() {
             if (leading) { const c = leading; leading = null; this.push(c); return; }
             reader.read().then(({ value, done }) => {
-                if (done) this.push(null);
+                if (done) {
+                    try { reader.releaseLock(); } catch (_) {}
+                    this.push(null);
+                }
                 else this.push(Buffer.from(value));
-            }).catch((err) => this.destroy(err));
+            }).catch((err) => {
+                try { reader.releaseLock(); } catch (_) {}
+                this.destroy(err);
+            });
         },
         destroy(err, cb) {
-            Promise.resolve().then(() => reader.cancel()).catch(() => {}).then(() => cb(err));
+            cancelRawBodyBestEffort(reader);
+            cb(err);
         },
     });
 }
 
+function rememberRawFailure(kind, upstreamStatus = null) {
+    rawStreamStats.lastFailure = {
+        kind,
+        upstreamStatus: Number.isInteger(upstreamStatus) ? upstreamStatus : null,
+        at: new Date().toISOString()
+    };
+}
+
+function sendRawStartupTimeout(res, upstreamStatus = null) {
+    rawStreamStats.startupTimeouts += 1;
+    rememberRawFailure('startup_deadline', upstreamStatus);
+    if (res.headersSent) {
+        try { res.destroy(); } catch (_) {}
+        return;
+    }
+    res.status(504).json({
+        error: 'Provider stream startup exceeded the gateway deadline',
+        code: 'PROVIDER_STARTUP_TIMEOUT',
+        upstreamStatus: Number.isInteger(upstreamStatus) ? upstreamStatus : null,
+    });
+}
+
+// Stop an already-started response when the provider goes silent. Pauses caused
+// by downstream backpressure suspend the timer, so a slow/paused client is not
+// mistaken for a dead upstream connection.
+function attachRawIdleWatchdog(nodeStream, res, ac) {
+    let timer = null;
+    const clear = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+    };
+    const arm = () => {
+        clear();
+        if (res.writableNeedDrain || nodeStream.readableFlowing === false) return;
+        timer = setTimeout(() => {
+            rawStreamStats.idleTimeouts += 1;
+            rememberRawFailure('upstream_idle_timeout');
+            console.warn(`[media-gateway] /raw upstream idle for ${RAW_IDLE_TIMEOUT_MS}ms; closing so the player can reconnect`);
+            try { ac.abort(); } catch (_) {}
+            try { nodeStream.destroy(new Error('provider_no_data_idle_timeout')); } catch (_) {}
+            try { res.destroy(); } catch (_) {}
+        }, RAW_IDLE_TIMEOUT_MS);
+    };
+    nodeStream.on('data', arm);
+    nodeStream.on('resume', arm);
+    nodeStream.on('pause', clear);
+    nodeStream.on('end', clear);
+    nodeStream.on('close', clear);
+    nodeStream.on('error', clear);
+    res.on('drain', arm);
+    res.on('close', clear);
+    arm();
+}
+
 app.get('/raw/:token', async (req, res) => {
+    rawStreamStats.requests += 1;
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
 
     const ac = new AbortController();
+    let activeAttemptGuard = null;
     // Supersede any pump left by a PREVIOUS playback session on this account —
     // same-session concurrency (parallel range reads) is spared via claims.sid.
     const pumpProxyKey = proxyKeyFromUrl(claims.url);
@@ -962,11 +1288,16 @@ app.get('/raw/:token', async (req, res) => {
     const rawPlaybackReason = `raw playback ${String(claims.sid || 'unknown').slice(0, 8)}`;
     preemptAccountExtractions(pumpProxyKey, rawPlaybackReason);
     preemptAccountBackgroundWhispers(pumpProxyKey, rawPlaybackReason);
-    res.on('close', () => { ac.abort(); releaseRawPump(pump); });
+    res.on('close', () => {
+        ac.abort();
+        if (activeAttemptGuard) activeAttemptGuard.dispose();
+        releaseRawPump(pump);
+    });
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
     if (req.headers.accept) headers.accept = req.headers.accept;
     const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
+    const startupDeadlineAt = Date.now() + RAW_STARTUP_DEADLINE_MS;
 
     // Retry transient provider auth/slot failures (single-slot 401/403/429/458) so a
     // burst of byte-range reads doesn't get one connection rejected and abort the
@@ -974,58 +1305,172 @@ app.get('/raw/:token', async (req, res) => {
     // while the PRIOR session's slot is still releasing (~8s), so the first /raw 458s
     // and playback dies (PROBE_HTTP_458). The backoff below spans that release window.
     // Anything else (206/200/404/...) passes straight through.
-    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT;
+    // Auth/fetch/non-media retries and no-data retries have independent budgets,
+    // but all attempts consume the same hard wall-clock deadline.
+    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT;
     let upstream = null;
-    let sniffedBody = null; // { chunk, reader } when a suspect 2xx body was sniffed and proved to be real media
+    let sniffedBody = null; // { chunk, reader } validated before response headers are committed
+    let noDataAttempts = 0;
+    let providerRetryAttempts = 0;
+    const waitForRetry = async (attempt, upstreamStatus = null) => {
+        const delayMs = RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000;
+        const outcome = await waitForRawBackoff(delayMs, startupDeadlineAt, ac.signal);
+        if (outcome === 'complete') return true;
+        if (outcome === 'aborted' || ac.signal.aborted) {
+            try { res.end(); } catch (_) {}
+            return false;
+        }
+        sendRawStartupTimeout(res, upstreamStatus);
+        return false;
+    };
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (rawStartupRemainingMs(startupDeadlineAt) <= 0) {
+            sendRawStartupTimeout(res, upstream && upstream.status);
+            return;
+        }
+        const attemptGuard = createRawAttemptGuard(ac.signal, startupDeadlineAt);
+        upstream = null;
         try {
-            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal, dispatcher: pickProxyAgent(claims.uid || proxyKeyFromUrl(claims.url)) || undefined });
+            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: attemptGuard.signal, dispatcher: pickProxyAgent(claims.uid || proxyKeyFromUrl(claims.url)) || undefined });
         } catch (err) {
+            const hitDeadline = attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0;
+            abandonRawAttempt(attemptGuard, null, 'raw_fetch_failed');
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
-            if (attempt >= maxAttempts) {
+            if (hitDeadline) { sendRawStartupTimeout(res); return; }
+            if (providerRetryAttempts >= RAW_PROVIDER_RETRY_LIMIT || attempt >= maxAttempts) {
+                rememberRawFailure('provider_fetch_failed');
                 return res.status(502).json({ error: 'Byte pipe failed', details: String((err && err.message) || err) });
             }
-            await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+            providerRetryAttempts += 1;
+            rawStreamStats.providerRetries += 1;
+            if (!await waitForRetry(attempt)) return;
             continue;
         }
+        if (ac.signal.aborted) {
+            abandonRawAttempt(attemptGuard, upstream.body, 'raw_client_aborted');
+            try { res.end(); } catch (_) {}
+            return;
+        }
+        if (attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
+            const status = upstream.status;
+            abandonRawAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
+            sendRawStartupTimeout(res, status);
+            return;
+        }
         const retryable = upstream.status === 401 || upstream.status === 403 || upstream.status === 429 || upstream.status === 458;
-        if (retryable && attempt < maxAttempts) {
-            try { await upstream.body?.cancel(); } catch (_) {} // free the slot before retrying
-            if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
-            console.warn(`[media-gateway] /raw provider ${upstream.status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1]}ms`);
-            await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+        if (retryable && providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
+            providerRetryAttempts += 1;
+            rawStreamStats.providerRetries += 1;
+            const status = upstream.status;
+            abandonRawAttempt(attemptGuard, upstream.body, 'raw_retryable_provider_status');
+            console.warn(`[media-gateway] /raw provider ${status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
+            if (!await waitForRetry(attempt, status)) return;
             continue;
         }
         // A single-slot panel refusing a connection often answers with an HTML/JSON
         // "busy"/ban page on HTTP 200 (2026-07-18 mobile VOD incident). Piped through,
         // those bytes reach the native player as an unparseable "container"
         // (ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) — a dead-end its recovery ladder
-        // used to ignore, whereas a real HTTP error arms fallback/retry. Only textual
-        // content-types are suspected (panels routinely mislabel real media as
-        // octet-stream, and players ignore the header anyway), and the leading bytes
-        // are sniffed so a panel that mislabels REAL media as text keeps playing.
+        // used to ignore, whereas a real HTTP error arms fallback/retry. Textual MIME
+        // bodies and explicit provider-error signatures are suspected, while unknown
+        // octet-stream/binary prefixes fail open because panels mislabel real media.
         // Junk retries like a 458: same slot-release window, same backoff.
-        if (method === 'GET' && upstream.ok && upstream.body
-            && NON_MEDIA_CONTENT_TYPE_RE.test(String(upstream.headers.get('content-type') || ''))) {
-            const probe = await sniffLeadingBytes(upstream.body, ac.signal);
-            if (ac.signal.aborted) { try { await probe.reader.cancel(); } catch (_) {} try { res.end(); } catch (_) {} return; }
-            if (looksLikeMediaStart(probe.chunk)) { sniffedBody = probe; break; }
-            try { await probe.reader.cancel(); } catch (_) {} // free the slot before retrying
-            if (attempt < maxAttempts) {
-                console.warn(`[media-gateway] /raw provider sent a non-media body (status ${upstream.status}, attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1]}ms`);
-                await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+        if (method === 'GET' && upstream.ok) {
+            const contentType = String(upstream.headers.get('content-type') || '');
+            const startsAtZero = rawResponseStartsAtZero(upstream);
+            let probe = null;
+            let noDataKind = null;
+            if (isDeclaredEmptyRawResponse(upstream)) {
+                noDataKind = 'empty_body';
+            } else {
+                const sniffTimeoutMs = Math.min(RAW_FIRST_BYTE_TIMEOUT_MS, rawStartupRemainingMs(startupDeadlineAt));
+                if (sniffTimeoutMs <= 0) {
+                    const status = upstream.status;
+                    abandonRawAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
+                    sendRawStartupTimeout(res, status);
+                    return;
+                }
+                probe = await sniffLeadingBytes(
+                    upstream.body,
+                    attemptGuard.signal,
+                    sniffTimeoutMs,
+                    (prefix, complete) => classifyRawPrefix(prefix, contentType, startsAtZero, complete),
+                );
+                if (ac.signal.aborted) {
+                    abandonRawAttempt(attemptGuard, probe.reader, 'raw_client_aborted');
+                    try { res.end(); } catch (_) {}
+                    return;
+                }
+                if (attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
+                    const status = upstream.status;
+                    abandonRawAttempt(attemptGuard, probe.reader, 'raw_startup_deadline');
+                    sendRawStartupTimeout(res, status);
+                    return;
+                }
+                if (probe.error) noDataKind = 'first_byte_read_error';
+                else if (probe.timedOut) noDataKind = 'first_byte_timeout';
+                else if (probe.prefixTimedOut) noDataKind = 'prefix_timeout';
+                else if (!probe.chunk.length) noDataKind = 'empty_body';
+            }
+            if (noDataKind) {
+                noDataAttempts += 1;
+                if (noDataKind === 'first_byte_timeout') rawStreamStats.firstByteTimeouts += 1;
+                else if (noDataKind === 'prefix_timeout') rawStreamStats.prefixTimeouts += 1;
+                else if (noDataKind === 'first_byte_read_error') rawStreamStats.firstByteReadErrors += 1;
+                else rawStreamStats.emptyBodies += 1;
+                rememberRawFailure(noDataKind, upstream.status);
+                const status = upstream.status;
+                abandonRawAttempt(attemptGuard, probe ? probe.reader : upstream.body, `raw_${noDataKind}`);
+                if (noDataAttempts <= RAW_NO_DATA_RETRY_LIMIT && attempt < maxAttempts) {
+                    rawStreamStats.providerRetries += 1;
+                    console.warn(`[media-gateway] /raw provider sent no playable bytes (${noDataKind}, status ${status}, attempt ${noDataAttempts}/${1 + RAW_NO_DATA_RETRY_LIMIT}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
+                    if (!await waitForRetry(attempt, status)) return;
+                    continue;
+                }
+                return res.status(504).json({
+                    error: 'Provider accepted the connection but sent no stream bytes',
+                    code: 'PROVIDER_NO_DATA',
+                    upstreamStatus: upstream.status,
+                });
+            }
+            const nonMediaBody = probe.classification === 'non-media';
+            if (!nonMediaBody) {
+                sniffedBody = probe;
+                activeAttemptGuard = attemptGuard;
+                break;
+            }
+            rawStreamStats.nonMediaBodies += 1;
+            rememberRawFailure('non_media_body', upstream.status);
+            const status = upstream.status;
+            abandonRawAttempt(attemptGuard, probe.reader, 'raw_non_media_body');
+            if (providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
+                providerRetryAttempts += 1;
+                rawStreamStats.providerRetries += 1;
+                console.warn(`[media-gateway] /raw provider sent a non-media body (status ${status}, attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
+                if (!await waitForRetry(attempt, status)) return;
                 continue;
             }
-            console.warn(`[media-gateway] /raw provider kept sending a non-media body (status ${upstream.status}); refusing to pipe it as a stream`);
+            console.warn(`[media-gateway] /raw provider kept sending a non-media body (status ${status}); refusing to pipe it as a stream`);
             return res.status(502).json({
                 error: 'Provider returned a non-media body (busy/ban page) instead of stream bytes',
-                upstreamStatus: upstream.status,
-                contentType: String(upstream.headers.get('content-type') || '') || null,
+                code: 'PROVIDER_NON_MEDIA_BODY',
+                upstreamStatus: status,
+                contentType: contentType || null,
             });
         }
+        activeAttemptGuard = attemptGuard;
         break;
     }
     if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
+    if (!upstream || !activeAttemptGuard || activeAttemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
+        const status = upstream && upstream.status;
+        const cancelable = sniffedBody ? sniffedBody.reader : upstream && upstream.body;
+        if (activeAttemptGuard) abandonRawAttempt(activeAttemptGuard, cancelable, 'raw_startup_deadline');
+        activeAttemptGuard = null;
+        sendRawStartupTimeout(res, status);
+        return;
+    }
+    activeAttemptGuard.completeStartup();
 
     res.status(upstream.status);
     for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
@@ -1034,10 +1479,16 @@ app.get('/raw/:token', async (req, res) => {
     }
     if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=30');
-    if (method === 'HEAD' || !upstream.body) { res.end(); return; }
+    if (method === 'HEAD' || !upstream.body) {
+        activeAttemptGuard.dispose();
+        activeAttemptGuard = null;
+        res.end();
+        return;
+    }
     const nodeStream = sniffedBody
         ? readableFromSniffedBody(sniffedBody)
         : require('stream').Readable.fromWeb(upstream.body);
+    attachRawIdleWatchdog(nodeStream, res, ac);
     // In-band header capture: if this response carries the file's LEADING bytes, tee them
     // (best-effort) so a later codec probe reads the header locally instead of opening a
     // second provider connection. Attached BEFORE pipe() so no leading chunk is missed;
@@ -1056,6 +1507,11 @@ app.get('/raw/:token', async (req, res) => {
         try { res.destroy(); } catch (_) { /* already gone */ }
     });
     res.on('error', () => { try { nodeStream.destroy(); } catch (_) { /* already gone */ } });
+    // Do not wait for the first body chunk to commit the response. In particular,
+    // a final/non-retryable provider error may have useful HTTP status headers but
+    // a body that never arrives; flushing lets the player react and disconnect now
+    // instead of holding the provider slot until the post-start idle watchdog fires.
+    res.flushHeaders();
     nodeStream.pipe(res);
 });
 
