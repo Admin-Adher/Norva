@@ -1085,6 +1085,13 @@ const CloudAdapter = (() => {
             container,
             streamType: type,
             itemType: type,
+            // Series playback uses the episode id as itemId. Keep the provider's
+            // parent series id so the server can prove that exact episode belongs
+            // to the selected catalog variant before sharing any track metadata.
+            audioSeriesId: query.get('audioSeriesId')
+                || query.get('audio_series_id')
+                || query.get('seriesId')
+                || query.get('series_id'),
             seekOffset,
             startOffset: seekOffset,
             resumeTime: seekOffset,

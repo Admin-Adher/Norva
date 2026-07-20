@@ -58,8 +58,18 @@ function proxyKeyFromUrl(url) {
     try {
         const u = new URL(url);
         const segs = u.pathname.split('/').filter(Boolean);
-        return u.host + (segs.length >= 2 ? '/' + segs[1] : '');
+        let username = segs.length >= 2 ? segs[1] : u.searchParams.get('username');
+        if (username) {
+            try { username = decodeURIComponent(username); } catch (_) { /* keep raw */ }
+        }
+        return u.host + (username ? '/' + username : '');
     } catch (_) { return String(url || ''); }
+}
+function providerAccountKeyFromCredentials(serverUrl, username) {
+    try {
+        const u = new URL(serverUrl);
+        return u.host + (username ? '/' + String(username) : '');
+    } catch (_) { return ''; }
 }
 // ── Raw byte-pipe ledger ─────────────────────────────────────────────────────
 // One playback session per provider account: pumps are tagged with their playback
@@ -126,14 +136,16 @@ function preemptAccountExtractions(proxyKey, reason) {
 // True while THIS box holds the account's provider slot for a viewer: a live transcode session
 // or an engine /raw byte-pump. Checked before the edge pregen-gate — it is instant, and it sees
 // what the edge can't (a paused viewer whose ffmpeg is still transcoding, a mid-film raw pump).
-function accountSlotBusyLocally(url) {
-    const key = proxyKeyFromUrl(url || '');
+function accountKeyBusyLocally(key) {
     if (!key) return false;
     for (const s of sessions.values()) {
         if (s && s.sourceUrl && proxyKeyFromUrl(s.sourceUrl) === key && isSessionBlockingProviderSlot(s)) return true;
     }
     for (const p of rawPumps) { if (p && p.proxyKey === key) return true; }
     return false;
+}
+function accountSlotBusyLocally(url) {
+    return accountKeyBusyLocally(proxyKeyFromUrl(url || ''));
 }
 
 function pickProxyAgent(key) {
@@ -642,7 +654,14 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             streamId,
             limit: normalizedAction === 'get_short_epg' ? limit : ''
         });
-        const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+        const payload = await fetchProviderJson(
+            url,
+            sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+            XTREAM_REQUEST_TIMEOUT_MS,
+            {
+                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
+            },
+        );
         res.json(payload);
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
@@ -674,7 +693,14 @@ app.post('/xtream/series-info', requireGatewayAuth, async (req, res) => {
             action: 'get_series_info',
             params: { series_id: seriesId }
         });
-        const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+        const payload = await fetchProviderJson(
+            url,
+            sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+            XTREAM_REQUEST_TIMEOUT_MS,
+            {
+                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
+            },
+        );
         res.json(payload);
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
@@ -723,6 +749,9 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
             url,
             sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
             XTREAM_METADATA_TIMEOUT_MS,
+            {
+                backgroundAccountKey: providerAccountKeyFromCredentials(serverUrl, username),
+            },
         );
         res.json(payload);
     } catch (err) {
@@ -1077,12 +1106,16 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
         // provider connection — that overlap is exactly the user_multi_ip / account-sharing signal
         // that got the account banned. Match on the account key (host + username in the stream path).
         const probeKey = proxyKeyFromUrl(url);
-        const accountBusy = Array.from(sessions.values()).some(
-            (s) => s && s.sourceUrl && proxyKeyFromUrl(s.sourceUrl) === probeKey && isSessionBlockingProviderSlot(s));
-        if (accountBusy) {
+        if (accountSlotBusyLocally(url)) {
             return res.status(409).json({ error: 'Account busy (active playback)', code: 'account_busy' });
         }
-        const profile = await probeCodecProfile(url, ua); // ffprobe via the residential proxy
+        if (probeKey && accountExtractions.get(probeKey)?.size) {
+            return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
+        }
+        // Register the provider-connected ffprobe in the same preemption ledger
+        // as LID/transcription. A viewer pressing Play can therefore kill this
+        // short background probe immediately instead of waiting for its timeout.
+        const profile = await probeCodecProfile(url, ua, { background: true });
         const audioTracks = Array.isArray(profile?.audioTracks) ? profile.audioTracks : [];
         const subtitles = Array.isArray(profile?.subtitles) ? profile.subtitles : [];
         const audioLanguages = [];
@@ -4197,7 +4230,7 @@ async function probeFromHeaderBytes(sourceUrl) {
 //   3. provider probe (opens a connection)                -> probeStats.successes
 // A successful profile for a source URL is reused for CODEC_PROFILE_CACHE_TTL_MS. Failures
 // and empty profiles are NOT cached, so a transient refusal retries on the next call.
-async function probeCodecProfile(sourceUrl, userAgent) {
+async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
     if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
         const hit = codecProfileCache.get(sourceUrl);
         if (hit) {
@@ -4219,12 +4252,12 @@ async function probeCodecProfile(sourceUrl, userAgent) {
             }
         } catch (_) { /* fall back to the provider probe */ }
     }
-    const profile = await probeCodecProfileUncached(sourceUrl, userAgent);
+    const profile = await probeCodecProfileUncached(sourceUrl, userAgent, options);
     cacheCodecProfile(sourceUrl, profile);
     return profile;
 }
 
-async function probeCodecProfileUncached(sourceUrl, userAgent) {
+async function probeCodecProfileUncached(sourceUrl, userAgent, options = {}) {
     const startedAt = Date.now();
     probeStats.attempts += 1;
     const args = [
@@ -4240,7 +4273,7 @@ async function probeCodecProfileUncached(sourceUrl, userAgent) {
         sourceUrl
     ];
 
-    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
+    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, options);
     const profile = buildCodecProfile(payload, startedAt, 'gateway_probe');
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
     const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
@@ -4301,17 +4334,59 @@ function subtitleKind(codec) {
     return normalized ? 'unknown' : '';
 }
 
-function runFfprobe(args, timeoutMs, sourceUrl) {
+function backgroundProbeError(status, code, publicMessage) {
+    const error = new Error(publicMessage);
+    error.status = status;
+    error.code = code;
+    error.publicMessage = publicMessage;
+    return error;
+}
+
+function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     return new Promise((resolve, reject) => {
+        const backgroundKey = options.background === true ? proxyKeyFromUrl(sourceUrl) : '';
+        // The route-level guard is intentionally repeated at the exact spawn boundary.
+        // probeCodecProfile may await a local-header probe first; without this atomic
+        // check, a viewer can start in the meantime or two background requests can both
+        // pass the HTTP guard and open provider connections.
+        if (backgroundKey && accountSlotBusyLocally(sourceUrl)) {
+            reject(backgroundProbeError(
+                409,
+                'account_busy',
+                'Account busy (active playback)',
+            ));
+            return;
+        }
+        if (backgroundKey && accountExtractions.get(backgroundKey)?.size) {
+            reject(backgroundProbeError(
+                429,
+                'background_busy',
+                'Account busy (background extraction)',
+            ));
+            return;
+        }
         const child = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        const registration = options.background === true
+            ? registerAccountExtraction(backgroundKey, child)
+            : null;
+        const releaseRegistration = () => registration?.release?.();
+        const terminalError = (fallback) => registration?.preempted
+            ? backgroundProbeError(
+                409,
+                'viewer_preempted',
+                'Codec probe preempted by active playback',
+            )
+            : fallback;
         let stdout = '';
         let stderr = '';
         let finished = false;
         const timer = setTimeout(() => {
             if (finished) return;
             finished = true;
-            child.kill('SIGTERM');
-            reject(new Error('Codec probe timeout'));
+            const error = terminalError(new Error('Codec probe timeout'));
+            child.kill(registration?.preempted ? 'SIGKILL' : 'SIGTERM');
+            releaseRegistration();
+            reject(error);
         }, timeoutMs);
 
         child.stdout.on('data', (chunk) => {
@@ -4326,14 +4401,18 @@ function runFfprobe(args, timeoutMs, sourceUrl) {
             if (finished) return;
             finished = true;
             clearTimeout(timer);
-            reject(err);
+            releaseRegistration();
+            reject(terminalError(err));
         });
         child.on('exit', (code, signal) => {
             if (finished) return;
             finished = true;
             clearTimeout(timer);
+            releaseRegistration();
             if (code !== 0) {
-                reject(new Error(`Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`));
+                reject(terminalError(new Error(
+                    `Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
+                )));
                 return;
             }
             try {
@@ -4712,8 +4791,20 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
     return url.href;
 }
 
-async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS) {
+async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS, options = {}) {
     const controller = new AbortController();
+    const backgroundKey = String(options.backgroundAccountKey || '');
+    if (backgroundKey && accountKeyBusyLocally(backgroundKey)) {
+        throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
+    }
+    if (backgroundKey && accountExtractions.get(backgroundKey)?.size) {
+        throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
+    }
+    // Register before the first await. A viewer that starts after the local
+    // guard atomically aborts this metadata fetch and takes the provider slot.
+    const registration = backgroundKey
+        ? registerAccountExtraction(backgroundKey, { kill: () => controller.abort() })
+        : null;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const response = await fetch(url, {
@@ -4737,6 +4828,13 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         }
         return payload;
     } catch (err) {
+        if (registration?.preempted) {
+            throw backgroundProbeError(
+                409,
+                'viewer_preempted',
+                'Provider metadata request preempted by active playback',
+            );
+        }
         if (err.status) throw err;
         const error = new Error('Unable to reach IPTV provider');
         error.status = err.name === 'AbortError' ? 504 : 502;
@@ -4745,6 +4843,7 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         throw error;
     } finally {
         clearTimeout(timer);
+        registration?.release?.();
     }
 }
 

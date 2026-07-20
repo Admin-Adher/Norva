@@ -16,7 +16,13 @@ import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_s
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
 
 type JsonRecord = Record<string, unknown>;
-type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
+type RuntimeConfig = {
+  sourceConfigKey: string;
+  mediaGatewayUrl: string;
+  mediaGatewayToken: string;
+  relayBaseUrl: string;
+  relayTokenSecret: string;
+};
 
 class HttpError extends Error {
   status: number;
@@ -48,6 +54,8 @@ const SUPABASE_SERVICE_KEY =
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const ENV_MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_RELAY_BASE_URL = (Deno.env.get("NORVA_RELAY_BASE_URL") ?? "").replace(/\/+$/, "");
+const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -68,7 +76,21 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-source-sync", version: 10, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true, yearBackfill: true, dynamicEnrichmentFleet: true });
+      return json(req, {
+        ok: true,
+        service: "norva-source-sync",
+        version: 10,
+        liveMaterialization: true,
+        syncProgress: true,
+        catalogFinalize: true,
+        catalogFinalizeBatches: true,
+        liveFinalizeBatches: true,
+        yearBackfill: true,
+        dynamicEnrichmentFleet: true,
+        enrichmentFleetCycle: 12,
+        seriesEpisodeInventory: true,
+        exactEpisodeAudioPipeline: true,
+      });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
     // of due, entitled sources through the same sync state machine — locked,
@@ -982,8 +1004,17 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
   const processed = Math.max(0, Number(body.processed) || 0);
   return compactRecord({
     mode: stringOrNull(body.mode),
+    itemType: stringOrNull(body.itemType),
+    attempted: Math.max(0, Number(body.attempted) || 0),
     processed,
-    updated: Math.max(0, Number(body.updated) || 0),
+    candidates: Math.max(0, Number(body.candidates) || 0),
+    updated: Math.max(0, Number(body.updated ?? body.persisted) || 0),
+    persisted: Math.max(0, Number(body.persisted) || 0),
+    resolved: Math.max(0, Number(body.resolved) || 0),
+    deferred: Math.max(0, Number(body.deferred) || 0),
+    registeredEpisodes: Math.max(0, Number(body.registeredEpisodes) || 0),
+    failed: Math.max(0, Number(body.failed) || 0),
+    backpressured: Math.max(0, Number(body.backpressured) || 0),
     lastId: processed > 0 ? stringOrNull(body.lastId) : null,
     skipped: stringOrNull(body.skipped ?? body.stoppedAt),
     paused: body.paused === true,
@@ -999,13 +1030,14 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
 function enrichmentFleetNextDelay(summary: JsonRecord, lane: number): number {
   const skipped = stringOr(summary.skipped, "");
   if (summary.paused === true) return 30 * 60;
+  if (skipped === "episode-audio-scan-disabled") return 30;
   if (skipped === "live-session" || skipped === "pregen-active") return 5 * 60;
   if (skipped === "circuit_open") return 60 * 60;
   // An empty explicit lane must rotate promptly: drained media/speech lanes
   // must not postpone synopsis recovery by hours. The final (provider overview)
   // lane requests a 6h rest; finish_catalog_enrichment_source clamps that to 30s
   // whenever any earlier lane in this same sweep reported work/hasMore.
-  if ((skipped === "exhausted" || summary.exhausted === true) && lane < 5) return 30;
+  if ((skipped === "exhausted" || summary.exhausted === true) && lane < 11) return 30;
   if (skipped === "exhausted") return 6 * 60 * 60;
   if (summary.exhausted === true) return 6 * 60 * 60;
   // A successful bounded lane releases both the user and provider leases.
@@ -1105,37 +1137,310 @@ async function runProviderOverviewFleetLane(
   });
 }
 
+async function recordSeriesInventoryOutcome(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+  parentSeriesId: string,
+  success: boolean,
+  episodeCount: number | null,
+  retryAt: string,
+  details: JsonRecord,
+) {
+  const { error } = await db.rpc("record_catalog_series_inventory_outcome", {
+    p_user: claim.user_id,
+    p_source: claim.source_id,
+    p_parent_series_id: parentSeriesId,
+    p_success: success,
+    p_episode_count: episodeCount,
+    p_retry_at: retryAt,
+    p_details: details,
+  });
+  if (error) {
+    console.warn(
+      "[enrichment-fleet] unable to record series inventory outcome",
+      claim.source_id,
+      parentSeriesId,
+      error.message,
+    );
+  }
+}
+
+async function runSeriesInventoryFleetLane(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+) {
+  try {
+    const { data: enabled, error } = await db.rpc("feature_flag", {
+      p_key: "episode_audio_scan_enabled",
+    });
+    if (error || enabled !== true) {
+      return {
+        mode: "series-inventory",
+        itemType: "series",
+        processed: 0,
+        skipped: "episode-audio-scan-disabled",
+        hasMore: false,
+      };
+    }
+  } catch (_) {
+    return {
+      mode: "series-inventory",
+      itemType: "series",
+      processed: 0,
+      skipped: "episode-audio-scan-disabled",
+      hasMore: false,
+    };
+  }
+
+  const { data: source, error: sourceError } = await db
+    .from("cloud_sources")
+    .select("source_type,config_ciphertext")
+    .eq("id", claim.source_id)
+    .eq("user_id", claim.user_id)
+    .maybeSingle();
+  if (sourceError) throw new Error(`Unable to load series inventory source: ${sourceError.message}`);
+  if (!source) throw new Error("Series inventory source no longer exists");
+  if (String(source.source_type) !== "xtream") {
+    return {
+      mode: "series-inventory",
+      itemType: "series",
+      processed: 0,
+      skipped: "unsupported-source",
+      hasMore: false,
+      exhausted: true,
+    };
+  }
+  if (!source.config_ciphertext) {
+    throw new Error("Xtream source has no managed cloud configuration");
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    return {
+      mode: "series-inventory",
+      itemType: "series",
+      processed: 0,
+      skipped: "media-gateway-unavailable",
+      hasMore: true,
+    };
+  }
+  const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+  const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
+  const username = stringOr(config.username, "");
+  const password = stringOr(config.password, "");
+  if (!serverUrl || !username || !password) {
+    throw new Error("Xtream source credentials are incomplete");
+  }
+  let serverHost = "";
+  try {
+    serverHost = new URL(serverUrl).host;
+  } catch (_) {
+    throw new Error("Xtream source host is invalid");
+  }
+  const accountKey = `${serverHost}/${username}`;
+  const providerBusy = async (): Promise<"busy" | "idle" | "unavailable"> => {
+    try {
+      const { data, error } = await db.rpc("provider_account_busy", {
+        p_key: accountKey,
+      });
+      if (error) return "unavailable";
+      return data === true ? "busy" : "idle";
+    } catch (_) {
+      return "unavailable";
+    }
+  };
+  const initialAvailability = await providerBusy();
+  if (initialAvailability !== "idle") {
+    return {
+      mode: "series-inventory",
+      itemType: "series",
+      processed: 0,
+      skipped: initialAvailability === "busy"
+        ? "provider-account-busy"
+        : "provider-guard-unavailable",
+      hasMore: true,
+    };
+  }
+
+  const limit = 2;
+  const { data: candidateRows, error: candidateError } = await db.rpc(
+    "catalog_series_inventory_candidates",
+    {
+      p_user: claim.user_id,
+      p_source: claim.source_id,
+      p_limit: limit,
+    },
+  );
+  if (candidateError) {
+    throw new Error(`Unable to load series inventory candidates: ${candidateError.message}`);
+  }
+  const candidates = (Array.isArray(candidateRows) ? candidateRows : [])
+    .map((row) => stringOr((row as JsonRecord)?.parent_series_id, ""))
+    .filter(Boolean);
+  let processed = 0;
+  let registeredEpisodes = 0;
+  let failed = 0;
+  let skipped: string | null = null;
+
+  for (const parentSeriesId of candidates) {
+    const availability = await providerBusy();
+    if (availability !== "idle") {
+      skipped = availability === "busy"
+        ? "provider-account-busy"
+        : "provider-guard-unavailable";
+      break;
+    }
+    processed += 1;
+    try {
+      const payload = recordOrEmpty(stripSeriesInventoryCredentials(
+        await fetchSeriesInventoryMetadata(
+          runtimeConfig,
+          {
+            serverUrl,
+            username,
+            password,
+            parentSeriesId,
+            userId: claim.user_id,
+          },
+        ),
+      ));
+      const episodes = payload.episodes;
+      if (!Array.isArray(episodes) && !isRecord(episodes)) {
+        throw new Error("Provider returned no authoritative episode inventory");
+      }
+      const { data: episodeCount, error: registerError } = await db.rpc(
+        "register_catalog_series_episodes",
+        {
+          p_user_id: claim.user_id,
+          p_source_id: claim.source_id,
+          p_parent_series_id: parentSeriesId,
+          p_payload: payload,
+        },
+      );
+      if (registerError) {
+        throw new Error(`Episode registry rejected the provider payload: ${registerError.message}`);
+      }
+      const count = Math.max(0, Number(episodeCount) || 0);
+      if (count <= 0) {
+        throw new Error("Provider returned an empty or non-authoritative episode inventory");
+      }
+      const nowIso = new Date().toISOString();
+      const { error: cacheError } = await db.from("cloud_series_info_cache").upsert(
+        {
+          server_host: serverHost,
+          series_id: parentSeriesId,
+          payload,
+          fetched_at: nowIso,
+          updated_at: nowIso,
+        },
+        { onConflict: "server_host,series_id" },
+      );
+      if (cacheError) {
+        console.warn("[enrichment-fleet] series-info cache write deferred", cacheError.message);
+      }
+      try {
+        await db.rpc("hydrate_catalog_episode_file_tracks", {
+          p_user_id: claim.user_id,
+          p_source_id: claim.source_id,
+          p_parent_series_id: parentSeriesId,
+          p_episode_ids: null,
+        });
+      } catch (_) { /* best-effort cache reuse */ }
+      await recordSeriesInventoryOutcome(
+        db,
+        claim,
+        parentSeriesId,
+        true,
+        count,
+        new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        { method: "gateway-series-info-v1", status: "registered" },
+      );
+      registeredEpisodes += count;
+    } catch (error) {
+      failed += 1;
+      const status = error instanceof HttpError ? error.status : 0;
+      await recordSeriesInventoryOutcome(
+        db,
+        claim,
+        parentSeriesId,
+        false,
+        null,
+        new Date(Date.now() + (status === 429 ? 60 : 24 * 60) * 60 * 1000).toISOString(),
+        {
+          method: "gateway-series-info-v1",
+          status: "retry",
+          providerStatus: status || null,
+        },
+      );
+      // One provider-level refusal predicts the same result for the rest of the
+      // batch. Stop immediately instead of multiplying rate-limit/auth failures.
+      if (status === 401 || status === 403 || status === 429 || status >= 500) {
+        skipped = status === 429 ? "provider-backpressure" : "provider-metadata-failed";
+        break;
+      }
+    }
+  }
+  return {
+    mode: "series-inventory",
+    itemType: "series",
+    candidates: candidates.length,
+    processed,
+    updated: registeredEpisodes,
+    registeredEpisodes,
+    failed,
+    skipped,
+    hasMore: candidates.length >= limit,
+  };
+}
+
 async function runEnrichmentFleetClaim(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
   backfillToken: string,
 ) {
   const controller = new AbortController();
-  // Three of every six claims are speech-verification lanes. Two tagged lanes
-  // catch wrong container labels (French->Italian); one untagged lane resolves
-  // generic Audio 2/und tracks. The remaining lanes probe new files, extract
-  // subtitles, and gap-fill provider synopses.
-  const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 6;
+  // Six of every twelve claims preserve the historical 50% movie speech share.
+  // Three individually bounded lanes extend the exact-file pipeline to series:
+  // exact episode inventory, header probe, then speech LID. Episode work is
+  // feature-flagged and starts at one audio file/claim.
+  const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 12;
   const subtitleProbe = lane === 3;
-  const speechVerification = lane === 1 || lane === 2 || lane === 4;
-  const providerOverview = lane === 5;
+  const seriesInventory = lane === 5;
+  const episodeProbe = lane === 7;
+  const episodeSpeech = lane === 9;
+  const speechVerification =
+    lane === 1 || lane === 2 || lane === 4 || lane === 6 || lane === 8 || lane === 10;
+  const providerOverview = lane === 11;
   // Fast language detection still owns a provider connection and is therefore
   // sequential within one source. Two files per claim materially improve
   // throughput while the 540s request budget and 1200s distributed lease keep
   // a slow/silent multi-track file from overlapping the next provider job.
   const timeout = setTimeout(
     () => controller.abort(),
-    speechVerification ? 540_000 : 105_000,
+    (speechVerification || episodeSpeech) ? 540_000 : 105_000,
   );
   // Raw probes currently find a usable container tag for nearly every file,
   // hence two tagged lanes. Keep one dedicated untagged lane so generic
   // "Audio 2" tracks cannot starve behind that much larger backlog.
   const speechTarget = speechVerification
-    ? (lane === 4 ? "untagged" : "tagged")
+    ? (lane === 4 || lane === 8 ? "untagged" : "tagged")
     : undefined;
   let responseReceived = false;
   let localLane = false;
   try {
+    if (seriesInventory) {
+      localLane = true;
+      const result = await runSeriesInventoryFleetLane(db, claim);
+      const summary = enrichmentFleetSummary(result);
+      await finishEnrichmentFleetClaim(
+        db,
+        claim,
+        true,
+        enrichmentFleetNextDelay(summary, lane),
+        summary,
+      );
+      return;
+    }
     if (providerOverview) {
       localLane = true;
       const result = await runProviderOverviewFleetLane(db, claim);
@@ -1163,15 +1468,15 @@ async function runEnrichmentFleetClaim(
         body: JSON.stringify({
           userId: claim.user_id,
           sourceId: claim.source_id,
-          type: "movie",
-          mode: speechVerification ? "whisper" : "probe",
+          type: episodeProbe || episodeSpeech ? "episode" : "movie",
+          mode: speechVerification || episodeSpeech ? "whisper" : "probe",
           speechTarget,
           target: subtitleProbe ? "subtitle" : undefined,
           fileScope: true,
           // Both paths stay sequential inside a provider account. Speech uses
           // a two-file batch; fleet-wide scaling happens across independently
           // leased users/providers, never via intra-provider concurrency.
-          limit: speechVerification ? 2 : 4,
+          limit: episodeProbe || episodeSpeech ? 1 : speechVerification ? 2 : 4,
           concurrency: 1,
           // Lanes are explicit and individually bounded. fallthrough would
           // append a 15-series + 10-subtitle + Whisper chain after an empty
@@ -2299,20 +2604,42 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   let sourceConfigKey = ENV_SOURCE_CONFIG_KEY;
   let mediaGatewayUrl = ENV_MEDIA_GATEWAY_URL;
   let mediaGatewayToken = ENV_MEDIA_GATEWAY_TOKEN;
-  if (!sourceConfigKey || !mediaGatewayUrl || !mediaGatewayToken) {
+  let relayBaseUrl = ENV_RELAY_BASE_URL;
+  let relayTokenSecret = ENV_RELAY_TOKEN_SECRET;
+  if (
+    !sourceConfigKey
+    || !mediaGatewayUrl
+    || !mediaGatewayToken
+    || !relayBaseUrl
+    || !relayTokenSecret
+  ) {
     const { data, error } = await db
       .from("cloud_runtime_config")
       .select("key, value")
-      .in("key", ["NORVA_SOURCE_CONFIG_KEY", "NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"]);
+      .in("key", [
+        "NORVA_SOURCE_CONFIG_KEY",
+        "NORVA_MEDIA_GATEWAY_URL",
+        "NORVA_MEDIA_GATEWAY_TOKEN",
+        "NORVA_RELAY_BASE_URL",
+        "RELAY_TOKEN_SECRET",
+      ]);
     if (error) console.warn("[norva-source-sync] runtime config unavailable", error.message);
     for (const item of data ?? []) {
       if (typeof item.value !== "string" || !item.value) continue;
       if (item.key === "NORVA_SOURCE_CONFIG_KEY" && !sourceConfigKey) sourceConfigKey = item.value;
       else if (item.key === "NORVA_MEDIA_GATEWAY_URL" && !mediaGatewayUrl) mediaGatewayUrl = item.value.replace(/\/+$/, "");
       else if (item.key === "NORVA_MEDIA_GATEWAY_TOKEN" && !mediaGatewayToken) mediaGatewayToken = item.value;
+      else if (item.key === "NORVA_RELAY_BASE_URL" && !relayBaseUrl) relayBaseUrl = item.value.replace(/\/+$/, "");
+      else if (item.key === "RELAY_TOKEN_SECRET" && !relayTokenSecret) relayTokenSecret = item.value;
     }
   }
-  const value = { sourceConfigKey, mediaGatewayUrl, mediaGatewayToken };
+  const value = {
+    sourceConfigKey,
+    mediaGatewayUrl,
+    mediaGatewayToken,
+    relayBaseUrl,
+    relayTokenSecret,
+  };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }
@@ -2347,6 +2674,118 @@ async function fetchJson(url: string, timeoutMs: number) {
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
   return payload;
+}
+
+function stripSeriesInventoryCredentials(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripSeriesInventoryCredentials);
+  if (isRecord(value)) {
+    const safe: JsonRecord = {};
+    for (const [key, child] of Object.entries(value)) {
+      // Xtream commonly embeds the full /series/USER/PASS/... URL here.
+      if (key.toLowerCase() === "direct_source") continue;
+      safe[key] = stripSeriesInventoryCredentials(child);
+    }
+    return safe;
+  }
+  return value;
+}
+
+async function fetchSeriesInventoryMetadata(
+  runtimeConfig: RuntimeConfig,
+  args: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    parentSeriesId: string;
+    userId: string;
+  },
+): Promise<unknown> {
+  const providerUrl = xtreamApiUrl(
+    {
+      serverUrl: args.serverUrl,
+      username: args.username,
+      password: args.password,
+      action: "get_series_info",
+    },
+    { series_id: args.parentSeriesId },
+  );
+  // Some panels accept only the Cloudflare relay IP while others require the
+  // media gateway's sticky provider IP. Use the same proven order as the
+  // interactive series fiche; fall through only on infrastructure failures.
+  if (runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret) {
+    try {
+      const token = await signSeriesInventoryRelayToken(runtimeConfig.relayTokenSecret, {
+        sid: `series-inventory-${args.parentSeriesId}`,
+        uid: args.userId,
+        url: providerUrl,
+        ttlSeconds: 120,
+      });
+      const response = await fetchWithTimeout(
+        `${runtimeConfig.relayBaseUrl}/series-info/${token}`,
+        30_000,
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new HttpError(response.status, "Relay refused the series inventory request", payload);
+      }
+      return payload;
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn(
+        "[norva-source-sync] relay series inventory unavailable, falling back",
+        status,
+      );
+    }
+  }
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return await requestGatewayMetadata(
+        runtimeConfig,
+        {
+          serverUrl: args.serverUrl,
+          username: args.username,
+          password: args.password,
+          action: "get_series_info",
+          params: { series_id: args.parentSeriesId },
+        },
+        45_000,
+      );
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn(
+        "[norva-source-sync] gateway series inventory unavailable, falling back",
+        status,
+      );
+    }
+  }
+  return await fetchJson(providerUrl, 20_000);
+}
+
+async function signSeriesInventoryRelayToken(
+  secret: string,
+  claims: { sid: string; uid: string; url: string; ttlSeconds: number },
+): Promise<string> {
+  const payload = JSON.stringify({
+    v: 1,
+    sid: claims.sid,
+    uid: claims.uid,
+    url: claims.url,
+    ua: "VLC/3.0.20 LibVLC/3.0.20",
+    exp: Math.floor(Date.now() / 1000) + claims.ttlSeconds,
+  });
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, encoder.encode(payload)),
+  );
+  return `${base64Url(encoder.encode(payload))}.${base64Url(signature)}`;
 }
 
 // Fetch Xtream catalogue/VOD metadata, preferring the media gateway so the crawl

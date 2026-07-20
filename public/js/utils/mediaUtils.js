@@ -1263,6 +1263,18 @@ const MediaUtils = (() => {
         const data = item.data || {};
         const rawType = firstValue(base.streamType, base.itemType, item.streamType, item.stream_type, item.itemType, item.item_type, item.type);
         const streamType = rawType === 'episode' ? 'series' : rawType;
+        const audioSeriesId = streamType === 'series'
+            ? firstValue(
+                base.audioSeriesId, base.audio_series_id, base.seriesId, base.series_id,
+                item.audioSeriesId, item.audio_series_id, item.seriesId, item.series_id,
+                item.parentExternalId, item.parent_external_id,
+                data.audioSeriesId, data.audio_series_id, data.seriesId, data.series_id,
+                data.parentExternalId, data.parent_external_id,
+                variant.audioSeriesId, variant.audio_series_id,
+                variant.seriesId, variant.series_id,
+                variant.parentExternalId, variant.parent_external_id
+            )
+            : undefined;
         const codec = firstRecord(
             item.codecProfile,
             item.codec_profile,
@@ -1277,6 +1289,7 @@ const MediaUtils = (() => {
             ...base,
             streamType,
             itemType: streamType,
+            audioSeriesId,
             container: base.container || item.container_extension || item.containerExtension || data.containerExtension || variant.container_extension || variant.containerExtension,
             audioCodec: firstValue(item.audioCodec, item.audio_codec, codec.audioCodec, codec.audio_codec, codec.audio),
             audioProfile: firstValue(item.audioProfile, item.audio_profile, codec.audioProfile, codec.audio_profile),

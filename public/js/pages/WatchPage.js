@@ -2115,6 +2115,7 @@ class WatchPage {
             const hint = {
                 gatewayMode: 'transcode', audioMode: 'transcode',
                 ...this.getSelectedAudioPlaybackOptions?.(),
+                audioSeriesId: this.content.seriesId || this.content.series_id || undefined,
                 seekOffset: 0, startOffset: 0, resumeTime: 0
             };
             if (Number.isInteger(audioStreamIndex)) hint.audioStreamIndex = audioStreamIndex;
@@ -3440,6 +3441,9 @@ class WatchPage {
             result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
                 mode: 'transcode', gatewayMode: 'remux',
                 ...audioOptions,
+                ...(type === 'series' && (c.seriesId || c.series_id)
+                    ? { audioSeriesId: c.seriesId || c.series_id }
+                    : {}),
                 seekOffset: startOffset, startOffset, resumeTime: startOffset
             });
         } catch (err) {
@@ -9607,8 +9611,16 @@ class WatchPage {
             await this.releasePlaybackPipelineForRetry();
             const playbackPreferences = this.getPlaybackPreferences();
             const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
-                : { container, streamType: 'series' };
+                ? MediaUtils.playbackHintFromItem(episode, {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: this.content.seriesId || this.content.series_id
+                })
+                : {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: this.content.seriesId || this.content.series_id
+                };
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;
@@ -9959,8 +9971,16 @@ class WatchPage {
             const container = ep.container_extension || 'mp4';
             const playbackPreferences = this.getPlaybackPreferences();
             const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(ep, { container, streamType: 'series' })
-                : { container, streamType: 'series' };
+                ? MediaUtils.playbackHintFromItem(ep, {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: this.content.seriesId || this.content.series_id
+                })
+                : {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: this.content.seriesId || this.content.series_id
+                };
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;

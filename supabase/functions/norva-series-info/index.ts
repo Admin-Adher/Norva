@@ -69,15 +69,30 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-series-info", version: 1 });
+      return json(req, {
+        ok: true,
+        service: "norva-series-info",
+        version: 1,
+        exactEpisodeInventory: true,
+      });
     }
     if (req.method === "GET" && segments[0] === "sources" && segments[2] === "series-info") {
       const identity = await requireIdentity(req, supabase);
-      const seriesInfo = await getXtreamSeriesInfo(url, segments[1], identity.userId, supabase);
+      const sourceId = segments[1];
+      const seriesInfoResult = await getXtreamSeriesInfo(url, sourceId, identity.userId, supabase);
+      const seriesInfo = seriesInfoResult.payload;
       // Augment with the title's TMDB source language (global, from catalog_titles) so the player
       // can resolve a VOSTFR/VO ("original") audio track to its real language. Best-effort; it
       // sits next to the provider payload and never replaces a provider field.
       const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
+      // Build the server-trusted parent-series -> exact-episode inventory on
+      // both cache hits and provider fetches. This is deliberately best-effort:
+      // a rolling migration must never make a series fiche unavailable, while
+      // playback/LID will stay fail-closed for cross-user episode sharing until
+      // the corresponding inventory row exists.
+      if (seriesInfoResult.exactInventorySafe) {
+        await registerSeriesEpisodes(supabase, identity.userId, sourceId, seriesId, seriesInfo);
+      }
       const originalLanguage = await lookupSeriesOriginalLanguage(supabase, segments[1], seriesId);
       return json(req, originalLanguage ? { ...seriesInfo, original_language: originalLanguage } : seriesInfo);
     }
@@ -115,6 +130,56 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   if (deviceError) throwDb(deviceError, "Unable to verify device token");
   if (!device) throw new HttpError(401, "Invalid bearer token");
   return { userId: device.user_id, deviceId: device.id };
+}
+
+async function registerSeriesEpisodes(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  parentSeriesId: string,
+  payload: JsonRecord,
+): Promise<void> {
+  if (!userId || !sourceId || !parentSeriesId || !isRecord(payload)) return;
+  try {
+    const { data: episodeCount, error } = await db.rpc("register_catalog_series_episodes", {
+      p_user_id: userId,
+      p_source_id: sourceId,
+      p_parent_series_id: parentSeriesId,
+      p_payload: payload,
+    });
+    if (error) {
+      console.warn("[norva-series-info] episode inventory deferred", error.message);
+      return;
+    }
+    const count = Math.max(0, Number(episodeCount) || 0);
+    if (count <= 0) return;
+    const { error: hydrateError } = await db.rpc("hydrate_catalog_episode_file_tracks", {
+      p_user_id: userId,
+      p_source_id: sourceId,
+      p_parent_series_id: parentSeriesId,
+      p_episode_ids: null,
+    });
+    if (hydrateError) {
+      console.warn("[norva-series-info] episode cache hydration deferred", hydrateError.message);
+    }
+    const { error: outcomeError } = await db.rpc("record_catalog_series_inventory_outcome", {
+      p_user: userId,
+      p_source: sourceId,
+      p_parent_series_id: parentSeriesId,
+      p_success: true,
+      p_episode_count: count,
+      p_retry_at: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      p_details: { method: "interactive-series-info-v1", status: "registered" },
+    });
+    if (outcomeError) {
+      console.warn("[norva-series-info] episode inventory outcome deferred", outcomeError.message);
+    }
+  } catch (error) {
+    console.warn(
+      "[norva-series-info] episode inventory deferred",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 // Best-effort lookup of the title's TMDB original_language (the global catalog fact behind
@@ -172,7 +237,10 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const serverHost = providerHost(serverUrl);
   const cached = serverHost ? await readSeriesInfoCache(db, serverHost, seriesId) : null;
   if (cached && Date.now() - cached.fetchedAt < SERIES_INFO_FRESH_MS) {
-    return cached.payload;
+    // This legacy cache is keyed by raw host, not canonical provider identity.
+    // It is safe to display, but it cannot prove episode ownership for exact
+    // cross-account audio sharing.
+    return { payload: cached.payload, exactInventorySafe: false };
   }
 
   let payload: JsonRecord;
@@ -187,7 +255,7 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
         "[norva-series-info] provider fetch failed, serving stale cache",
         error instanceof Error ? error.message : error,
       );
-      return cached.payload;
+      return { payload: cached.payload, exactInventorySafe: false };
     }
     throw error;
   }
@@ -203,7 +271,7 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   if (serverHost && isCacheableSeriesInfo(payload)) {
     await writeSeriesInfoCache(db, serverHost, seriesId, payload);
   }
-  return payload;
+  return { payload, exactInventorySafe: true };
 }
 
 async function fetchSeriesInfoFromProvider(
@@ -385,6 +453,7 @@ function providerHost(value: string): string {
 function isCacheableSeriesInfo(payload: JsonRecord): boolean {
   const episodes = payload.episodes;
   if (isRecord(episodes) && Object.keys(episodes).length > 0) return true;
+  if (Array.isArray(episodes) && episodes.length > 0) return true;
   const info = payload.info;
   if (isRecord(info) && Object.keys(info).length > 0) return true;
   return false;

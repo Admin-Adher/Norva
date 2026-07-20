@@ -479,7 +479,9 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(cascade.includes('.select("policy_version,daily_cap,expires_at")'));
   assert.ok(cascade.includes('Math.max(0, freshAttempts ?? 0) >= freshCap'));
   assert.ok(cascade.includes('durationSeconds: LID_CASCADE_SAMPLE_SECONDS'));
-  assert.ok(cascade.includes('if (extractResponse.status === 429) return true'));
+  assert.ok(cascade.includes(
+    'if (extractResponse.status === 409 || extractResponse.status === 429) return true',
+  ));
   assert.ok(cascade.includes('normalizeIsoLang(stringOrNull(canonicalTrack.lang))'));
   assert.ok(cascade.includes('normalizeIsoLang(stringOrNull(canonicalTrack.language))'));
   assert.ok(knownLanguageGuard.includes('v_old_known <@ v_new_known'));

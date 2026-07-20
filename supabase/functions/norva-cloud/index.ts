@@ -3200,9 +3200,39 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const itemType = stringOr(body.itemType ?? body.item_type, "");
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
+  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const requestedMode = stringOr(body.mode, "auto");
-  if (!targetUrl && sourceId && itemType && itemId) {
-    targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db);
+  const parentSeriesId = itemType === "series"
+    ? stringOr(
+      requestedPlaybackHint.audioSeriesId
+        ?? requestedPlaybackHint.audio_series_id
+        ?? requestedPlaybackHint.seriesId
+        ?? requestedPlaybackHint.series_id,
+      "",
+    )
+    : "";
+  const exactEpisodeCoordinates = sourceId && itemType === "series" && itemId
+    ? await resolveCatalogSeriesEpisodeCoordinates(
+      db,
+      userId,
+      sourceId,
+      parentSeriesId,
+      itemId,
+    )
+    : null;
+  // Owned coordinates are authoritative. Ignore a caller-supplied URL whenever
+  // source/item coordinates are present so arbitrary bytes cannot be associated
+  // with another catalog item during a rolling fallback to norva-cloud.
+  if (sourceId && itemType && itemId) {
+    targetUrl = await resolvePlaybackTarget(
+      sourceId,
+      itemType,
+      itemId,
+      userId,
+      db,
+      requestedPlaybackHint,
+      exactEpisodeCoordinates,
+    );
   }
   if (!itemType || !itemId || !targetUrl) {
     throw new HttpError(400, "itemType, itemId and targetUrl are required");
@@ -3215,7 +3245,6 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   const targetUrlHash = await sha256Hex(targetUrl);
-  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const edgeCoordination = mode === "transcode"
     ? await prepareEdgeSessionCoordinator({
       userId,
@@ -3810,13 +3839,60 @@ function xtreamPlaybackContainer(hint: JsonRecord, streamTypeValue: unknown) {
   return storedContainer;
 }
 
+async function resolveCatalogSeriesEpisodeCoordinates(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  parentSeriesId: string,
+  episodeId: string,
+): Promise<JsonRecord | null> {
+  try {
+    const { data, error } = await db.rpc("catalog_series_episode_coordinates_by_episode", {
+      p_user_id: userId,
+      p_source_id: sourceId,
+      p_episode_id: episodeId,
+    });
+    if (error) return null;
+    const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    if (
+      !row
+      || stringOr(row.user_id, "") !== userId
+      || stringOr(row.source_id, "") !== sourceId
+      || stringOr(row.episode_id, "") !== episodeId
+      || !stringOr(row.container_extension, "")
+    ) {
+      return null;
+    }
+    if (parentSeriesId && stringOr(row.parent_series_id, "") !== parentSeriesId) {
+      throw new HttpError(409, "Episode does not belong to the requested parent series");
+    }
+    return row;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    return null;
+  }
+}
+
 async function resolvePlaybackTarget(
   sourceId: string,
   itemType: string,
   itemId: string,
   userId: string,
   db: SupabaseClient,
+  requestHint: JsonRecord = {},
+  exactEpisodeCoordinates: JsonRecord | null = null,
 ) {
+  if (exactEpisodeCoordinates) {
+    const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+    return xtreamStreamUrl({
+      serverUrl: stringOr(sourceConfig.serverUrl, ""),
+      username: stringOr(sourceConfig.username, ""),
+      password: stringOr(sourceConfig.password, ""),
+      streamType: "series",
+      streamId: stringOr(exactEpisodeCoordinates.episode_id, ""),
+      container: stringOr(exactEpisodeCoordinates.container_extension, "mp4"),
+    });
+  }
   const { data: item, error } = await db
     .from("cloud_media_items")
     .select("playback_hint")
@@ -3835,7 +3911,7 @@ async function resolvePlaybackTarget(
         password: stringOr(sourceConfig.password, ""),
         streamType: "series",
         streamId: itemId,
-        container: "mp4",
+        container: stringOr(requestHint.container, "mp4"),
       });
     }
     throw new HttpError(404, "Media item not found");

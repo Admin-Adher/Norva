@@ -142,6 +142,7 @@ Deno.serve(async (req) => {
         lidCascadeAttemptsToday: lidPolicy.cascadeAttemptsToday,
         lidCascadeExpiresAt: lidPolicy.cascadeExpiresAt,
         lidCascadeWorkerConfigured: Boolean(config.lidWorkerUrl && config.lidWorkerToken),
+        exactEpisodeAudioPipeline: true,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -309,11 +310,54 @@ async function createPlaybackSession(
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
   const requestedMode = stringOr(body.mode, "auto");
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
+  const parentSeriesId = itemType === "series"
+    ? stringOr(
+      requestedPlaybackHint.audioSeriesId ??
+        requestedPlaybackHint.audio_series_id ??
+        requestedPlaybackHint.seriesId ??
+        requestedPlaybackHint.series_id,
+      "",
+    )
+    : "";
+  const episodeCoordinates = sourceId && itemType === "series" && itemId
+    ? await resolveCatalogSeriesEpisodeCoordinates(
+      db,
+      userId,
+      sourceId,
+      parentSeriesId,
+      itemId,
+    )
+    : null;
+  if (episodeCoordinates) {
+    requestedPlaybackHint = {
+      ...requestedPlaybackHint,
+      container: stringOr(episodeCoordinates.container_extension, "mp4"),
+      audioSeriesId: stringOr(episodeCoordinates.parent_series_id, parentSeriesId),
+    };
+  }
   const userAgent = stringOrNull(body.userAgent ?? body.user_agent);
   const clientMetadata = clientTelemetryMetadataFromBody(body);
 
-  if (!targetUrl && sourceId && itemType && itemId) {
-    const resolved = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+  // Coordinates owned by the user are authoritative. Never let a caller attach
+  // arbitrary bytes to an otherwise valid source/item tuple: exact-file caches
+  // and language fanout are keyed from those coordinates.
+  if (sourceId && itemType && itemId) {
+    const resolved = episodeCoordinates
+      ? await resolveExactEpisodePlaybackTarget(
+        sourceId,
+        userId,
+        episodeCoordinates,
+        requestedPlaybackHint,
+        db,
+      )
+      : await resolvePlaybackTarget(
+        sourceId,
+        itemType,
+        itemId,
+        userId,
+        db,
+        requestedPlaybackHint,
+      );
     targetUrl = resolved.targetUrl;
     requestedPlaybackHint = mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint);
   }
@@ -436,19 +480,25 @@ async function createPlaybackSession(
 
       // Cross-mirror cache key (providerKey when known, else the host) — drives the
       // global file-track read, the share/fan-out, and the whisper-detect cache below.
-      const serverHost = await resolveFileTracksKey(stringOr(sourceId, ""), userId, db, targetUrl);
+      const serverHost = episodeCoordinates
+        ? stringOr(episodeCoordinates.server_host, "")
+        : await resolveFileTracksKey(stringOr(sourceId, ""), userId, db, targetUrl);
       // itemId is the PLAYED file (episode id for series), whereas audioSeriesId
       // only resolves the parent title row. File caches must stay episode-exact.
       const fileExternalId = itemId;
+      const fileCacheItemType = itemType === "series"
+        ? (episodeCoordinates ? "episode" : "")
+        : itemType;
+      const exactFileCacheSafe = itemType === "movie" || fileCacheItemType === "episode";
 
       // Cross-user reuse: another user (or the crawl) may have already probed this exact
       // provider file. Pull from the global per-file cache (no provider hit) and fill this
       // user's row, before ever falling back to a probe.
-      if (serverHost && fileExternalId) {
+      if (exactFileCacheSafe && serverHost && fileExternalId) {
         try {
           const { data: fr } = await db.from("catalog_file_tracks")
             .select("audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at, audio_lang_verified_at, audio_lang_verification")
-            .eq("server_host", serverHost).eq("item_type", itemType).eq("external_id", fileExternalId)
+            .eq("server_host", serverHost).eq("item_type", fileCacheItemType).eq("external_id", fileExternalId)
             .maybeSingle();
           const fileRow = fr as JsonRecord | null;
           if (fileRow) {
@@ -476,6 +526,12 @@ async function createPlaybackSession(
       // is a safe second source when the global file cache has not caught up.
       const exactVariantProfile = itemType === "movie"
         && String(titleRow?.variant_external_id ?? "") === String(itemId);
+      const exactEpisodeTitle = itemType === "series"
+        && fileCacheItemType === "episode"
+        && Boolean(episodeCoordinates)
+        && String(titleRow?.id ?? "") === String(episodeCoordinates?.title_id ?? "")
+        && String(titleRow?.variant_id ?? "") === String(episodeCoordinates?.variant_id ?? "");
+      const exactFileScopedTitle = exactVariantProfile || exactEpisodeTitle;
       const variantProfile = exactVariantProfile
         ? recordOrEmpty(titleRow?.variant_codec_profile)
         : {};
@@ -550,24 +606,24 @@ async function createPlaybackSession(
             }
           } catch (_) { /* best-effort persist */ }
         }
-        if (probeOk) {
-          await shareFileTracks(db, serverHost, itemType, fileExternalId,
+        if (probeOk && exactFileCacheSafe) {
+          await shareFileTracks(db, serverHost, fileCacheItemType, fileExternalId,
             gotAudio ? probed.audioTracks : [], gotSub ? probed.subtitleTracks : [], gotAudio, gotSub);
         }
         // Phase 2 (flag-gated): a freshly probed file may still carry UNTAGGED audio tracks
         // (lang null) — no provider/demux language. Detect them via Whisper IN THE BACKGROUND
         // and re-persist, so the next play is fully named. Runs once (right after the first
         // probe), best-effort, never blocks the response. Off unless NORVA_WHISPER_DETECT=true.
-        if (gotAudio && titleRow?.id && singleMovieTitle && serverHost && fileExternalId
+        if (gotAudio && titleRow?.id && exactFileScopedTitle && serverHost && fileExternalId
           && audioTracks.length >= 2 && audioTracks.some((t) => !t.lang)) {
           const rc = await getRuntimeConfig(db);
           if (rc.whisperDetect && rc.mediaGatewayUrl && rc.mediaGatewayToken) {
             runBackground(detectUntaggedAudioLanguages({
               db, runtimeConfig: rc, userId, targetUrl, userAgent,
               audioTracks, titleId: titleRow.id, tmdbId: stringOrNull(titleRow.provider_tmdb_id),
-              serverHost, itemType, fileExternalId, sessionId: session.id, expiresAt,
+              serverHost, itemType: fileCacheItemType, fileExternalId, sessionId: session.id, expiresAt,
               variantId: stringOrNull(titleRow.variant_id) || undefined,
-              fileScoped: Boolean(titleRow.variant_id),
+              fileScoped: exactFileScopedTitle,
             }));
           }
         }
@@ -577,7 +633,12 @@ async function createPlaybackSession(
       // resolved parent variant with the exact played file id after track
       // validation. For series, the variant is the parent while itemId remains
       // the exact episode, so the SQL layer can keep episode evidence distinct.
-      if (titleRow?.id && titleRow.variant_id && (haveAudio || haveSub)) {
+      if (
+        titleRow?.id
+        && titleRow.variant_id
+        && (itemType === "movie" || exactEpisodeTitle)
+        && (haveAudio || haveSub)
+      ) {
         try {
           await db.rpc("merge_cloud_title_file_languages", {
             p_user_id: userId,
@@ -1350,6 +1411,75 @@ async function getFootprint(
   } catch (_) {
     return null;
   }
+}
+
+async function resolveCatalogSeriesEpisodeCoordinates(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  parentSeriesId: string,
+  episodeId: string,
+): Promise<JsonRecord | null> {
+  try {
+    const { data, error } = await db.rpc("catalog_series_episode_coordinates_by_episode", {
+      p_user_id: userId,
+      p_source_id: sourceId,
+      p_episode_id: episodeId,
+    });
+    if (error) return null;
+    const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    if (
+      !row
+      || stringOr(row.user_id, "") !== userId
+      || stringOr(row.source_id, "") !== sourceId
+      || stringOr(row.episode_id, "") !== episodeId
+      || !stringOr(row.title_id, "")
+      || !stringOr(row.variant_id, "")
+      || !stringOr(row.server_host, "")
+    ) {
+      return null;
+    }
+    if (parentSeriesId && stringOr(row.parent_series_id, "") !== parentSeriesId) {
+      throw new HttpError(409, "Episode does not belong to the requested parent series");
+    }
+    return row;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    // Rolling-deploy safety: playback remains available before the exact episode
+    // registry migration lands, but no episode cache/fanout is trusted.
+    return null;
+  }
+}
+
+async function resolveExactEpisodePlaybackTarget(
+  sourceId: string,
+  userId: string,
+  episodeCoordinates: JsonRecord,
+  requestHint: JsonRecord,
+  db: SupabaseClient,
+) {
+  const episodeId = stringOr(episodeCoordinates.episode_id, "");
+  const container = stringOr(episodeCoordinates.container_extension, "mp4");
+  if (!episodeId || !container) {
+    throw new HttpError(404, "Exact episode coordinates are incomplete");
+  }
+  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  return {
+    targetUrl: xtreamStreamUrl({
+      serverUrl: stringOr(sourceConfig.serverUrl, ""),
+      username: stringOr(sourceConfig.username, ""),
+      password: stringOr(sourceConfig.password, ""),
+      streamType: "series",
+      streamId: episodeId,
+      container,
+    }),
+    playbackHint: mergePlaybackHints(recordOrEmpty(requestHint), {
+      container,
+      streamType: "series",
+      itemType: "series",
+      audioSeriesId: stringOr(episodeCoordinates.parent_series_id, ""),
+    }),
+  };
 }
 
 async function resolvePlaybackTarget(
@@ -2543,7 +2673,7 @@ async function selectLidCascadeCohort(
     policy.cascadePolicyVersion !== LID_CASCADE_POLICY_VERSION ||
     !policy.cascadeSeed ||
     !serverHost ||
-    itemType !== "movie" ||
+    (itemType !== "movie" && itemType !== "episode") ||
     !fileExternalId ||
     policy.cascadeDailyCap <= 0 ||
     policy.cascadeAttemptsToday >= policy.cascadeDailyCap
@@ -2827,7 +2957,7 @@ async function runLidCascadeAttempt(opts: {
     // language attempt, must not consume the rollout cap, and must not fall
     // through to the legacy writer in this invocation. Gateway health keeps
     // the aggregate backpressure counter; the exact file remains retryable.
-    if (extractResponse.status === 429) return true;
+    if (extractResponse.status === 409 || extractResponse.status === 429) return true;
     if (!extractResponse.ok) {
       throw new Error(`gateway-status-${extractResponse.status}`);
     }
@@ -3281,12 +3411,14 @@ async function shareFileTracks(
     }
   } catch (_) { /* rolling migration fallback uses the submitted map */ }
   try {
-    const fanoutRpc = audioDetectionWrite
+    const fanoutRpc = itemType === "episode"
+      ? "fanout_episode_file_tracks_to_users"
+      : audioDetectionWrite
       ? "fanout_detected_file_tracks_to_users"
       : "fanout_file_tracks_to_users";
     const { data, error } = await db.rpc(fanoutRpc, canonicalArgs);
     const persisted = !error && Number(data) > 0;
-    if (persisted && audioDetectionWrite && canonicalArgs.p_has_audio) {
+    if (persisted && itemType === "movie" && audioDetectionWrite && canonicalArgs.p_has_audio) {
       try {
         const { error: provenanceError } = await db.rpc(
           "refresh_catalog_file_audio_detection_provenance",
@@ -3559,6 +3691,7 @@ async function detectUntaggedAudioLanguages(opts: {
   // detect-only evidence exact-file/tenant scoped until calibration promotes the engine;
   // historical transcript results retain the existing global merge.
   if (
+    itemType === "movie" &&
     detectOnlyDetectedCount === 0 &&
     codes.length &&
     tmdbId &&
@@ -3604,7 +3737,7 @@ async function detectUntaggedAudioLanguages(opts: {
           attemptedAt: nowIso,
         },
       });
-      if (error || data !== true) {
+      if ((error || data !== true) && itemType === "movie") {
         await db.from("cloud_title_variants")
           .update(completed
             ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: null }
@@ -3680,7 +3813,7 @@ async function verifyTaggedAudioLanguages(opts: {
         // Rolling-migration/cache-miss fallback remains exact-tenant scoped
         // and only advances the basic-detector cursor. In particular it must
         // never null audio_lang_verified_at from a stronger historical proof.
-        if (error || data !== true) {
+        if ((error || data !== true) && itemType === "movie") {
           await db.from("cloud_title_variants")
             .update(completed
               ? { audio_whisper_attempted_at: nowIso, audio_whisper_retry_at: retryAt }
@@ -3818,7 +3951,7 @@ async function verifyTaggedAudioLanguages(opts: {
     }
     // NOTE: the global mirror is a race-safe UNION — it gains the corrected lang but cannot
     // unlearn the wrong one (union semantics protect other panels' genuinely-foreign files).
-    if (changed && codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+    if (itemType === "movie" && changed && codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
       try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort */ }
     }
     if (!fileScoped) {
@@ -5064,7 +5197,10 @@ function sweepDimKey(body: JsonRecord): string | null {
   const mode = stringOr(body.mode, "");
   const subtitleTarget = stringOr(body.target, "") === "subtitle";
   if (!subtitleTarget && !["", "vod", "probe", "whisper"].includes(mode)) return null;
-  const itemType = stringOr(body.type, "movie") === "series" ? "series" : "movie";
+  const requestedType = stringOr(body.type, "movie");
+  const itemType = requestedType === "series" || requestedType === "episode"
+    ? requestedType
+    : "movie";
   const dim = subtitleTarget ? "subtitle" : (mode || "vod");
   return `${stringOr(body.userId, "")}:${stringOr(body.sourceId, "") || "*"}:${itemType}:${dim}`;
 }
@@ -5566,9 +5702,404 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   return withAuditMeta({ mode: "fallthrough", exhausted: true, tried });
 }
 
+async function claimProviderFileProbeStrict(
+  db: SupabaseClient,
+  identityKey: string,
+  owner: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  if (!identityKey || !owner) return false;
+  try {
+    const { data, error } = await db.rpc("claim_provider_file_probe", {
+      p_identity_key: identityKey,
+      p_lease_owner: owner,
+      p_ttl_seconds: Math.max(30, Math.min(900, Math.round(ttlSeconds))),
+    });
+    return !error && data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function episodeBackgroundBlockReason(
+  db: SupabaseClient,
+  userId: string,
+  targetUrl = "",
+): Promise<string | null> {
+  try {
+    const sinceIso = new Date(
+      Date.now() - Math.max(4 * 60 * 1000, CRAWL_VIEWER_GRACE_MS),
+    ).toISOString();
+    const { data: events, error: eventsError } = await db.from("cloud_playback_events")
+      .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
+    if (eventsError) return "viewer-guard-unavailable";
+    if (events?.length) return "live-session";
+
+    const { data: history, error: historyError } = await db.from("cloud_watch_history")
+      .select("id").eq("user_id", userId).gt("updated_at", sinceIso).limit(1);
+    if (historyError) return "viewer-guard-unavailable";
+    if (history?.length) return "live-session";
+
+    const { data: sessions, error: sessionsError } = await db.from("cloud_playback_sessions")
+      .select("id").eq("user_id", userId).eq("status", "ready")
+      .gt("expires_at", new Date().toISOString()).limit(1);
+    if (sessionsError) return "viewer-guard-unavailable";
+    if (sessions?.length) return "live-session";
+
+    const pregenSince = new Date(Date.now() - PREGEN_ACTIVE_TTL_MS).toISOString();
+    const { data: pregen, error: pregenError } = await db.from("catalog_generated_subtitles")
+      .select("job_id").eq("claimed_by", userId).eq("status", "processing")
+      .gt("updated_at", pregenSince).limit(1);
+    if (pregenError) return "pregen-guard-unavailable";
+    if (pregen?.length) return "pregen-active";
+
+    if (targetUrl) {
+      const accountKey = providerAccountKeyFromUrl(targetUrl);
+      if (!accountKey) return "provider-account-unresolved";
+      const { data: busy, error: busyError } = await db.rpc("provider_account_busy", {
+        p_key: accountKey,
+      });
+      if (busyError) return "provider-guard-unavailable";
+      if (busy === true) return "provider-account-busy";
+    }
+    return null;
+  } catch (_) {
+    return "background-guard-unavailable";
+  }
+}
+
+function episodeAudioTracks(value: unknown): Array<{
+  index: number;
+  lang: string | null;
+  lidAttemptedAt?: string | null;
+  lidVerdict?: string | null;
+  lidMethod?: string | null;
+  lidConfidence?: number | null;
+  speechVerifiedAt?: string | null;
+  speechVerdict?: string | null;
+}> {
+  return (Array.isArray(value) ? value as JsonRecord[] : [])
+    .map((track) => ({
+      index: Number(track?.index),
+      lang: normalizeIsoLang(stringOrNull(track?.lang ?? track?.language)),
+      lidAttemptedAt: stringOrNull(track?.lidAttemptedAt ?? track?.lid_attempted_at),
+      lidVerdict: stringOrNull(track?.lidVerdict ?? track?.lid_verdict),
+      lidMethod: stringOrNull(track?.lidMethod ?? track?.lid_method),
+      lidConfidence: (track?.lidConfidence ?? track?.lid_confidence) != null
+          && Number.isFinite(Number(track?.lidConfidence ?? track?.lid_confidence))
+        ? Number(track?.lidConfidence ?? track?.lid_confidence)
+        : null,
+      speechVerifiedAt: stringOrNull(track?.speechVerifiedAt ?? track?.speech_verified_at),
+      speechVerdict: stringOrNull(track?.speechVerdict ?? track?.speech_verdict),
+    }))
+    .filter((track) => Number.isInteger(track.index));
+}
+
+async function runEpisodeAudioBackfill(
+  db: SupabaseClient,
+  body: JsonRecord,
+): Promise<JsonRecord> {
+  const userId = stringOr(body.userId, "");
+  const sourceId = stringOr(body.sourceId, "");
+  const mode = stringOr(body.mode, "probe") === "whisper" ? "whisper" : "probe";
+  const limit = Math.max(1, Math.min(4, Number(body.limit) || 1));
+  if (!userId || !sourceId) {
+    throw new HttpError(400, "Episode audio backfill requires userId and sourceId");
+  }
+
+  try {
+    const { data: enabled, error } = await db.rpc("feature_flag", {
+      p_key: "episode_audio_scan_enabled",
+    });
+    if (error || enabled !== true) {
+      return { mode, itemType: "episode", processed: 0, skipped: "episode-audio-scan-disabled" };
+    }
+  } catch (_) {
+    return { mode, itemType: "episode", processed: 0, skipped: "episode-audio-scan-disabled" };
+  }
+
+  const { data: source, error: sourceError } = await db.from("cloud_sources")
+    .select("source_type")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (sourceError) throwDb(sourceError, "Unable to verify episode audio source");
+  if (!source) {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      skipped: "source-unavailable",
+      hasMore: false,
+      exhausted: true,
+    };
+  }
+  if (stringOr((source as JsonRecord).source_type, "") !== "xtream") {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      skipped: "unsupported-source",
+      hasMore: false,
+      exhausted: true,
+    };
+  }
+
+  const initialBlock = await episodeBackgroundBlockReason(db, userId);
+  if (initialBlock) {
+    return { mode, itemType: "episode", processed: 0, skipped: initialBlock };
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Media gateway is not configured");
+  }
+  if (mode === "whisper") {
+    const policy = await getLidDetectionPolicy(db);
+    if (!policy.enabled) {
+      return { mode, itemType: "episode", processed: 0, skipped: "audio-lid-disabled" };
+    }
+  }
+
+  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  const serverUrl = stringOr(sourceConfig.serverUrl, "");
+  const username = stringOr(sourceConfig.username, "");
+  const password = stringOr(sourceConfig.password, "");
+  if (!serverUrl || !username || !password) {
+    throw new HttpError(400, "Xtream source credentials are incomplete");
+  }
+  const sourceIdentity = await resolveSourceIdentity(sourceId, userId, db);
+  if (!sourceIdentity.key || sourceIdentity.key.startsWith("source:")) {
+    return { mode, itemType: "episode", processed: 0, skipped: "provider-identity-pending" };
+  }
+
+  const candidateRpc = mode === "whisper"
+    ? "catalog_episode_lid_candidates"
+    : "catalog_episode_probe_candidates";
+  const { data, error } = await db.rpc(candidateRpc, {
+    p_user: userId,
+    p_source: sourceId,
+    p_limit: limit,
+  });
+  if (error) throwDb(error, "Unable to load exact episode audio candidates");
+  const candidates = (Array.isArray(data) ? data : [])
+    .map((row) => row as JsonRecord)
+    .filter((row) =>
+      stringOr(row.user_id, "") === userId
+      && stringOr(row.source_id, "") === sourceId
+      && stringOr(row.server_host, "") === sourceIdentity.key
+      && stringOr(row.episode_id, "")
+      && stringOr(row.parent_series_id, "")
+      && stringOr(row.title_id, "")
+      && stringOr(row.variant_id, "")
+    );
+  if (!candidates.length) {
+    return { mode, itemType: "episode", processed: 0, candidates: 0, hasMore: false };
+  }
+
+  const footprint = await getFootprint(db, sourceId, userId);
+  if (footprint?.lowFootprint && !footprint.allowed) {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      skipped: "footprint-budget",
+      hitsLastHour: footprint.hits,
+      maxPerHour: footprint.maxPerHour,
+    };
+  }
+
+  await bumpEnrichmentHeartbeat(db, userId);
+  let attempted = 0;
+  let processed = 0;
+  let persisted = 0;
+  let resolved = 0;
+  let deferred = 0;
+  let backpressured = 0;
+  let failed = 0;
+  let skipped: string | null = null;
+  for (const candidate of candidates) {
+    const episodeId = stringOr(candidate.episode_id, "");
+    const targetUrl = xtreamStreamUrl({
+      serverUrl,
+      username,
+      password,
+      streamType: "series",
+      streamId: episodeId,
+      container: stringOr(candidate.container_extension, "mp4"),
+    });
+    const beforeClaimBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+    if (beforeClaimBlock) {
+      skipped = beforeClaimBlock;
+      break;
+    }
+    const leaseOwner = `episode-${mode}:${crypto.randomUUID()}`;
+    if (!await claimProviderFileProbeStrict(
+      db,
+      sourceIdentity.key,
+      leaseOwner,
+      mode === "whisper" ? 900 : 180,
+    )) {
+      skipped = "provider-lease-busy";
+      break;
+    }
+    try {
+      const raceBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+      if (raceBlock) {
+        skipped = `${raceBlock}-race`;
+        break;
+      }
+      attempted += 1;
+      if (mode === "probe") {
+        const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+          },
+          body: JSON.stringify({
+            url: targetUrl,
+            userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (response.status === 409 || response.status === 429) {
+          backpressured += 1;
+          skipped = response.status === 409 ? "viewer-preempted" : "provider-backpressure";
+          break;
+        }
+        if (!response.ok) {
+          failed += 1;
+          continue;
+        }
+        const info = recordOrEmpty(await response.json().catch(() => ({})));
+        const audioTracks = episodeAudioTracks(info.audioTracks);
+        if (!audioTracks.length) {
+          failed += 1;
+          continue;
+        }
+        const subtitles = (Array.isArray(info.subtitles) ? info.subtitles as JsonRecord[] : [])
+          .map((track) => ({
+            index: Number(track?.index),
+            lang: normalizeIsoLang(stringOrNull(track?.lang ?? track?.language)),
+            codec: stringOrNull(track?.codec),
+            subtitleType: stringOrNull(track?.subtitleType)
+              || (track?.extractable ? "text" : "image"),
+            extractable: track?.extractable === true,
+            forced: track?.forced === true,
+          }))
+          .filter((track) => Number.isInteger(track.index));
+        const stored = await shareFileTracks(
+          db,
+          sourceIdentity.key,
+          "episode",
+          episodeId,
+          audioTracks,
+          subtitles,
+          true,
+          true,
+        );
+        processed += 1;
+        if (stored) {
+          persisted += 1;
+          resolved += audioTracks.filter((track) => Boolean(track.lang)).length;
+        }
+        else failed += 1;
+      } else {
+        const audioTracks = episodeAudioTracks(candidate.audio_tracks);
+        if (!audioTracks.some((track) => !track.lang)) {
+          continue;
+        }
+        const beforeUnknown = audioTracks.filter((track) => !track.lang).length;
+        const beforeAttemptedAt = stringOrNull(candidate.audio_whisper_attempted_at);
+        const beforeRetryAt = stringOrNull(candidate.audio_whisper_retry_at);
+        await detectUntaggedAudioLanguages({
+          db,
+          runtimeConfig,
+          userId,
+          targetUrl,
+          userAgent: null,
+          audioTracks,
+          titleId: stringOr(candidate.title_id, ""),
+          tmdbId: null,
+          serverHost: sourceIdentity.key,
+          itemType: "episode",
+          fileExternalId: episodeId,
+          sessionId: `episode-lid:${crypto.randomUUID()}`,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          variantId: stringOr(candidate.variant_id, ""),
+          fileScoped: true,
+        });
+        const { data: refreshed, error: refreshError } = await db.from("catalog_file_tracks")
+          .select("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at")
+          .eq("server_host", sourceIdentity.key)
+          .eq("item_type", "episode")
+          .eq("external_id", episodeId)
+          .maybeSingle();
+        if (refreshError || !refreshed) {
+          failed += 1;
+          continue;
+        }
+        const refreshedRow = refreshed as JsonRecord;
+        const afterTracks = episodeAudioTracks(refreshedRow.audio_tracks);
+        const afterUnknown = afterTracks.filter((track) => !track.lang).length;
+        const cacheAdvanced = afterUnknown < beforeUnknown
+          || afterTracks.some((track) => {
+            const before = audioTracks.find((candidateTrack) => candidateTrack.index === track.index);
+            return Boolean(
+              before
+              && !before.lidAttemptedAt
+              && track.lidAttemptedAt,
+            );
+          })
+          || stringOrNull(refreshedRow.audio_whisper_attempted_at) !== beforeAttemptedAt
+          || stringOrNull(refreshedRow.audio_whisper_retry_at) !== beforeRetryAt;
+        if (cacheAdvanced) {
+          processed += 1;
+          persisted += 1;
+          resolved += Math.max(0, beforeUnknown - afterUnknown);
+        } else {
+          deferred += 1;
+        }
+      }
+      if (footprint?.lowFootprint) {
+        try {
+          await db.rpc("provider_footprint_record_hit", {
+            p_identity_key: footprint.identityKey,
+          });
+        } catch (_) { /* best-effort budget accounting */ }
+      }
+    } catch (_) {
+      failed += 1;
+    } finally {
+      await releaseProviderFileProbe(db, sourceIdentity.key, leaseOwner);
+    }
+  }
+  return {
+    mode,
+    itemType: "episode",
+    candidates: candidates.length,
+    attempted,
+    processed,
+    persisted,
+    resolved,
+    deferred,
+    failed,
+    backpressured,
+    skipped,
+    hasMore: candidates.length >= limit,
+  };
+}
+
 async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const userId = stringOr(body.userId, "");
-  const itemType = stringOr(body.type, "movie") === "series" ? "series" : "movie";
+  if (stringOr(body.type, "") === "episode") {
+    return await runEpisodeAudioBackfill(db, body);
+  }
+  const requestedType = stringOr(body.type, "movie");
+  const itemType = requestedType === "series" || requestedType === "episode"
+    ? requestedType
+    : "movie";
   const limit = Math.max(1, Math.min(300, Number(body.limit) || 100));
   const concurrency = Math.max(1, Math.min(12, Number(body.concurrency) || 6));
   const afterId = stringOr(body.afterId, "");

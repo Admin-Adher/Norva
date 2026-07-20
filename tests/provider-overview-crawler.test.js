@@ -14,6 +14,19 @@ const between = (source, start, end) => {
   assert.notStrictEqual(to, -1, `missing end anchor: ${end}`);
   return source.slice(from, to);
 };
+const latestMigrationContaining = (marker) => {
+  const directory = path.join(ROOT, 'supabase/migrations');
+  const candidates = fs.readdirSync(directory)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => ({
+      name,
+      source: fs.readFileSync(path.join(directory, name), 'utf8'),
+    }))
+    .filter(({ source }) => source.includes(marker));
+  assert.ok(candidates.length > 0, `no migration contains: ${marker}`);
+  return candidates.at(-1);
+};
 
 test('overview candidates are exact-file, bounded, resumable, and identity verified', () => {
   const migration = read('supabase/migrations/20260719190000_provider_overview_crawler.sql');
@@ -86,33 +99,41 @@ test('worker parses only known vod-info synopsis fields and uses conservative re
   assert.match(backfill, /claim_provider_overview_candidates/);
 });
 
-test('dynamic fleet has a sixth provider-overview lane for current and future sources', () => {
+test('dynamic fleet keeps provider overview as the final twelfth lane', () => {
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   const migration = read('supabase/migrations/20260719190000_provider_overview_crawler.sql');
+  const latestFinish = latestMigrationContaining(
+    'create or replace function public.finish_catalog_enrichment_source(',
+  );
   const activation = read('ops/hetzner/scripts/16-activate-dynamic-enrichment-fleet.sh');
-  const route = between(
+  const overviewLane = between(
     sourceSync,
     'async function runProviderOverviewFleetLane(',
+    '\nasync function recordSeriesInventoryOutcome(',
+  );
+  const dispatcher = between(
+    sourceSync,
+    'async function runEnrichmentFleetClaim(',
     '\n// Claim a bounded, fair batch',
   );
   const finish = between(
-    migration,
+    latestFinish.source,
     'create or replace function public.finish_catalog_enrichment_source(',
     '\nrevoke all on function public.finish_catalog_enrichment_source(',
   );
 
-  assert.match(route, /dispatch_count\) \|\| 0\) % 6/);
-  assert.match(route, /providerOverview = lane === 5/);
-  assert.match(route, /backfillProviderOverviews/);
-  assert.match(route, /action: "get_vod_info"/);
-  assert.match(route, /params: \{ vod_id: externalId \}/);
-  assert.match(route, /limit: 4/);
-  assert.match(route, /concurrency: 2/);
-  assert.match(route, /catalog_source_provider_identities/);
-  assert.doesNotMatch(route, /config_hint|providerKey|serverHost/);
-  assert.match(finish, /mod\(schedule\.dispatch_count, 6\)/);
-  assert.match(finish, /current_lane = 5 and prior_cycle_had_work/);
-  assert.match(finish, /when current_lane = 5 then false/);
+  assert.match(dispatcher, /dispatch_count\) \|\| 0\) % 12/);
+  assert.match(dispatcher, /providerOverview = lane === 11/);
+  assert.match(overviewLane, /backfillProviderOverviews/);
+  assert.match(overviewLane, /action: "get_vod_info"/);
+  assert.match(overviewLane, /params: \{ vod_id: externalId \}/);
+  assert.match(overviewLane, /limit: 4/);
+  assert.match(overviewLane, /concurrency: 2/);
+  assert.match(overviewLane, /catalog_source_provider_identities/);
+  assert.doesNotMatch(overviewLane, /config_hint|providerKey|serverHost/);
+  assert.match(finish, /mod\(schedule\.dispatch_count, 12\)/);
+  assert.match(finish, /current_lane = 11 and prior_cycle_had_work/);
+  assert.match(finish, /when current_lane = 11 then false/);
   assert.match(migration, /'schemaVersion', 3/);
   assert.match(migration, /'providerOverviewReady'/);
   assert.match(activation, /"schemaVersion":3/);

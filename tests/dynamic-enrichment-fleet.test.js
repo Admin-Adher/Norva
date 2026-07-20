@@ -14,6 +14,19 @@ const between = (source, start, end) => {
   assert.notStrictEqual(to, -1, `missing end anchor: ${end}`);
   return source.slice(from, to);
 };
+const latestMigrationContaining = (marker) => {
+  const directory = path.join(ROOT, 'supabase/migrations');
+  const candidates = fs.readdirSync(directory)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => ({
+      name,
+      source: fs.readFileSync(path.join(directory, name), 'utf8'),
+    }))
+    .filter(({ source }) => source.includes(marker));
+  assert.ok(candidates.length > 0, `no migration contains: ${marker}`);
+  return candidates.at(-1);
+};
 
 test('enrichment queue reconciles active current and future provider sources', () => {
   const migration = read('supabase/migrations/20260719180000_dynamic_enrichment_fleet.sql');
@@ -73,10 +86,14 @@ test('source-sync dispatcher forwards claimed ownership, never static ids', () =
   assert.match(route, /userId: claim\.user_id/);
   assert.match(route, /sourceId: claim\.source_id/);
   assert.match(route, /dispatch_count/);
-  assert.match(route, /mode: speechVerification \? "whisper" : "probe"/);
+  assert.match(route, /type: episodeProbe \|\| episodeSpeech \? "episode" : "movie"/);
+  assert.match(route, /mode: speechVerification \|\| episodeSpeech \? "whisper" : "probe"/);
   assert.match(route, /target: subtitleProbe \? "subtitle" : undefined/);
   assert.match(route, /fallthrough: false/);
-  assert.match(route, /limit: speechVerification \? 2 : 4/);
+  assert.match(
+    route,
+    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+  );
   assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
   assert.match(route, /fileScope: true/);
   assert.match(route, /concurrency: 1/);
@@ -145,19 +162,39 @@ test('stale completion tokens cannot release a newer lease', () => {
   assert.deepStrictEqual(state, { claimToken: 'new', leaseUntil: 900, dispatchCount: 5 });
 });
 
-test('speech-heavy lanes keep language detection from falling behind raw probes', () => {
-  const isSpeech = (dispatchCount) => [1, 2, 4].includes(dispatchCount % 6);
-  const isOverview = (dispatchCount) => dispatchCount % 6 === 5;
-  assert.deepStrictEqual(
-    Array.from({ length: 6 }, (_, lane) => isSpeech(lane)),
-    [false, true, true, false, true, false],
+test('twelve-lane cycle preserves the fifty-percent movie Whisper share', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const dispatcher = between(
+    sourceSync,
+    'async function runEnrichmentFleetClaim(',
+    '\n// Claim a bounded, fair batch',
   );
-  assert.strictEqual(isSpeech(4), true);
+  const isMovieSpeech = (dispatchCount) => [1, 2, 4, 6, 8, 10].includes(dispatchCount % 12);
+  const isSeriesInventory = (dispatchCount) => dispatchCount % 12 === 5;
+  const isEpisodeProbe = (dispatchCount) => dispatchCount % 12 === 7;
+  const isEpisodeSpeech = (dispatchCount) => dispatchCount % 12 === 9;
+  const isOverview = (dispatchCount) => dispatchCount % 12 === 11;
+  assert.deepStrictEqual(
+    Array.from({ length: 12 }, (_, lane) => isMovieSpeech(lane)),
+    [false, true, true, false, true, false, true, false, true, false, true, false],
+  );
+  assert.strictEqual(
+    Array.from({ length: 12 }, (_, lane) => isMovieSpeech(lane)).filter(Boolean).length,
+    6,
+    'movie Whisper must retain the previous 3/6 = 50% share',
+  );
+  assert.strictEqual(isSeriesInventory(5), true);
+  assert.strictEqual(isEpisodeProbe(7), true);
+  assert.strictEqual(isEpisodeSpeech(9), true);
+  assert.match(dispatcher, /dispatch_count\) \|\| 0\) % 12/);
+  assert.match(
+    dispatcher,
+    /const speechVerification =\s*lane === 1 \|\| lane === 2 \|\| lane === 4 \|\| lane === 6 \|\| lane === 8 \|\| lane === 10/,
+  );
   // finish_catalog_enrichment_source increments on every valid completion,
   // including an error with leases retained.
-  assert.strictEqual(isSpeech(5), false);
-  assert.strictEqual(isOverview(5), true);
-  assert.strictEqual(isOverview(6), false);
+  assert.strictEqual(isOverview(11), true);
+  assert.strictEqual(isOverview(12), false);
 
   const migration = read('supabase/migrations/20260719190000_provider_overview_crawler.sql');
   const finish = between(
@@ -170,29 +207,37 @@ test('speech-heavy lanes keep language detection from falling behind raw probes'
 
 test('drained audio lanes rotate promptly to subtitles before the full sweep rests', () => {
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
-  const migration = read('supabase/migrations/20260719190000_provider_overview_crawler.sql');
+  const latestFinish = latestMigrationContaining(
+    'create or replace function public.finish_catalog_enrichment_source(',
+  );
   const delay = between(
     sourceSync,
     'function enrichmentFleetNextDelay(',
     '\nasync function finishEnrichmentFleetClaim(',
   );
-  assert.match(delay, /summary\.exhausted === true\) && lane < 5\) return 30/);
+  const finish = between(
+    latestFinish.source,
+    'create or replace function public.finish_catalog_enrichment_source(',
+    '\nrevoke all on function public.finish_catalog_enrichment_source(',
+  );
+  assert.match(delay, /summary\.exhausted === true\) && lane < 11\) return 30/);
   assert.match(delay, /Number\(summary\.processed\) > 0\) return 30/);
 
-  const nextDelay = (exhausted, lane) => exhausted && lane < 5 ? 30 : 6 * 60 * 60;
+  const nextDelay = (exhausted, lane) => exhausted && lane < 11 ? 30 : 6 * 60 * 60;
   assert.deepStrictEqual([0, 1, 2].map((lane) => nextDelay(true, lane)), [30, 30, 30]);
-  assert.strictEqual(nextDelay(true, 4), 30);
-  assert.strictEqual(nextDelay(true, 5), 6 * 60 * 60);
+  assert.strictEqual(nextDelay(true, 10), 30);
+  assert.strictEqual(nextDelay(true, 11), 6 * 60 * 60);
 
-  // The database remembers that any of lanes 0-4 worked. Therefore an empty
-  // synopsis lane 5 advances promptly instead of collapsing active throughput to one
-  // bounded batch per six hours.
-  assert.match(migration, /result_had_work := .*p_result->>'processed'/s);
-  assert.match(migration, /current_lane = 5 and prior_cycle_had_work/);
-  assert.match(migration, /delay_seconds := least\(delay_seconds, 30\)/);
+  // The database remembers that any of lanes 0-10 worked. Therefore an empty
+  // synopsis lane 11 advances promptly instead of collapsing active throughput.
+  assert.match(finish, /mod\(schedule\.dispatch_count, 12\)/);
+  assert.match(finish, /result_had_work := .*p_result->>'processed'/s);
+  assert.match(finish, /current_lane = 11 and prior_cycle_had_work/);
+  assert.match(finish, /delay_seconds := least\(delay_seconds, 30\)/);
+  assert.match(finish, /when current_lane = 11 then false/);
   const finalLaneDelay = (priorLanesWorked) => priorLanesWorked ? 30 : 6 * 60 * 60;
-  assert.strictEqual(finalLaneDelay([4, 4, 4, 4].some((processed) => processed > 0)), 30);
-  assert.strictEqual(finalLaneDelay([0, 0, 0, 0].some((processed) => processed > 0)), 6 * 60 * 60);
+  assert.strictEqual(finalLaneDelay(Array(11).fill(4).some((processed) => processed > 0)), 30);
+  assert.strictEqual(finalLaneDelay(Array(11).fill(0).some((processed) => processed > 0)), 6 * 60 * 60);
 });
 
 test('throughput tuning raises the fleet ceiling and speech batch without intra-provider concurrency', () => {
@@ -209,11 +254,174 @@ test('throughput tuning raises the fleet ceiling and speech batch without intra-
   // independent claims and twice as many bounded files per speech claim.
   assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
   assert.match(activation, /enrichment-fleet\?limit=8/);
-  assert.match(route, /limit: speechVerification \? 2 : 4/);
+  assert.match(
+    route,
+    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+  );
   assert.match(route, /concurrency: 1/);
-  assert.match(route, /speechVerification \? 540_000 : 105_000/);
+  assert.match(
+    route,
+    /\(speechVerification \|\| episodeSpeech\) \? 540_000 : 105_000/,
+  );
   assert.match(route, /p_lease_seconds: 1200/);
   assert.doesNotMatch(activation, /delete from public\.catalog_enrichment_dispatch_leases/);
+});
+
+test('episode lanes are exact, individually bounded, flag-gated, and fail closed', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const dispatcher = between(
+    sourceSync,
+    'async function runEnrichmentFleetClaim(',
+    '\n// Claim a bounded, fair batch',
+  );
+  const exactWorker = between(
+    playback,
+    'async function claimProviderFileProbeStrict(',
+    '\nasync function runOneDimension(',
+  );
+
+  assert.match(dispatcher, /const episodeProbe = lane === 7/);
+  assert.match(dispatcher, /const episodeSpeech = lane === 9/);
+  assert.match(dispatcher, /type: episodeProbe \|\| episodeSpeech \? "episode" : "movie"/);
+  assert.match(dispatcher, /mode: speechVerification \|\| episodeSpeech \? "whisper" : "probe"/);
+  assert.match(
+    dispatcher,
+    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+  );
+
+  const laneContract = (lane) => ({
+    type: lane === 7 || lane === 9 ? 'episode' : 'movie',
+    mode: [1, 2, 4, 6, 8, 9, 10].includes(lane) ? 'whisper' : 'probe',
+    limit: lane === 7 || lane === 9 ? 1 : [1, 2, 4, 6, 8, 10].includes(lane) ? 2 : 4,
+  });
+  assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 1 });
+  assert.deepStrictEqual(laneContract(9), { type: 'episode', mode: 'whisper', limit: 1 });
+
+  assert.match(exactWorker, /p_key: "episode_audio_scan_enabled"/);
+  assert.match(exactWorker, /if \(error \|\| enabled !== true\)/);
+  assert.match(
+    exactWorker,
+    /catch \(_\) \{\s*return \{ mode, itemType: "episode", processed: 0, skipped: "episode-audio-scan-disabled" \}/,
+  );
+  assert.match(exactWorker, /return !error && data === true/);
+  assert.match(exactWorker, /catch \(_\) \{\s*return false/);
+  assert.match(exactWorker, /if \(eventsError\) return "viewer-guard-unavailable"/);
+  assert.match(exactWorker, /if \(historyError\) return "viewer-guard-unavailable"/);
+  assert.match(exactWorker, /if \(sessionsError\) return "viewer-guard-unavailable"/);
+  assert.match(exactWorker, /if \(pregenError\) return "pregen-guard-unavailable"/);
+  assert.match(exactWorker, /if \(busyError\) return "provider-guard-unavailable"/);
+  assert.match(exactWorker, /return "background-guard-unavailable"/);
+  assert.match(exactWorker, /\.select\("source_type"\)/);
+  assert.match(exactWorker, /source_type, ""\) !== "xtream"/);
+  assert.match(exactWorker, /skipped: "unsupported-source"/);
+  assert.match(exactWorker, /sourceIdentity\.key\.startsWith\("source:"\)/);
+  assert.match(exactWorker, /stringOr\(row\.user_id, ""\) === userId/);
+  assert.match(exactWorker, /stringOr\(row\.source_id, ""\) === sourceId/);
+  assert.match(exactWorker, /stringOr\(row\.server_host, ""\) === sourceIdentity\.key/);
+  assert.match(exactWorker, /const beforeClaimBlock = await episodeBackgroundBlockReason/);
+  assert.match(exactWorker, /const raceBlock = await episodeBackgroundBlockReason/);
+  assert.match(exactWorker, /streamType: "series"/);
+  assert.match(exactWorker, /sourceIdentity\.key,\s*"episode",\s*episodeId/);
+  assert.match(exactWorker, /itemType: "episode"/);
+  assert.match(exactWorker, /response\.status === 409 \|\| response\.status === 429/);
+  assert.match(exactWorker, /\.select\("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at"\)/);
+  assert.match(exactWorker, /if \(cacheAdvanced\) \{\s*processed \+= 1;\s*persisted \+= 1/);
+  assert.match(exactWorker, /deferred \+= 1/);
+  assert.match(
+    exactWorker,
+    /finally \{\s*await releaseProviderFileProbe\(db, sourceIdentity\.key, leaseOwner\)/,
+  );
+});
+
+test('series inventory lane is local, metadata-only, bounded, and fail closed', () => {
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const foundation = read('supabase/migrations/20260720180000_series_episode_audio_foundation.sql');
+  const inventory = between(
+    sourceSync,
+    'async function recordSeriesInventoryOutcome(',
+    '\nasync function runEnrichmentFleetClaim(',
+  );
+  const dispatcher = between(
+    sourceSync,
+    'async function runEnrichmentFleetClaim(',
+    '\n// Claim a bounded, fair batch',
+  );
+  const candidates = between(
+    foundation,
+    'create or replace function public.catalog_series_inventory_candidates(',
+    '\nrevoke all on function public.catalog_series_inventory_candidates(',
+  );
+  const outcome = between(
+    foundation,
+    'create or replace function public.record_catalog_series_inventory_outcome(',
+    '\nrevoke all on function public.record_catalog_series_inventory_outcome(',
+  );
+  const transport = between(
+    sourceSync,
+    'async function fetchSeriesInventoryMetadata(',
+    '\nasync function signSeriesInventoryRelayToken(',
+  );
+
+  assert.match(dispatcher, /const seriesInventory = lane === 5/);
+  assert.match(
+    dispatcher,
+    /if \(seriesInventory\) \{\s*localLane = true;\s*const result = await runSeriesInventoryFleetLane/,
+  );
+  assert.match(foundation, /'episode_audio_scan_enabled',\s*false/);
+  assert.match(inventory, /p_key: "episode_audio_scan_enabled"/);
+  assert.match(inventory, /if \(error \|\| enabled !== true\)/);
+  assert.match(
+    inventory,
+    /catch \(_\) \{\s*return \{\s*mode: "series-inventory",[\s\S]*skipped: "episode-audio-scan-disabled"/,
+  );
+
+  assert.match(inventory, /const limit = 2/);
+  assert.match(inventory, /"catalog_series_inventory_candidates"/);
+  assert.match(inventory, /p_user: claim\.user_id/);
+  assert.match(inventory, /p_source: claim\.source_id/);
+  assert.match(inventory, /p_limit: limit/);
+  assert.match(inventory, /"record_catalog_series_inventory_outcome"/);
+  assert.match(inventory, /"register_catalog_series_episodes"/);
+  assert.match(inventory, /fetchSeriesInventoryMetadata\(/);
+  assert.match(inventory, /parentSeriesId/);
+  assert.match(inventory, /stripSeriesInventoryCredentials\(/);
+  assert.doesNotMatch(inventory, /fetchProviderMetadata\(|fetchJson\(|xtreamApiUrl\(/);
+  assert.ok(transport.indexOf('runtimeConfig.relayBaseUrl') < transport.indexOf('requestGatewayMetadata('));
+  assert.match(transport, /action: "get_series_info"/);
+  assert.match(transport, /params: \{ series_id: args\.parentSeriesId \}/);
+  assert.match(sourceSync, /key\.toLowerCase\(\) === "direct_source"/);
+
+  assert.match(inventory, /if \(error\) return "unavailable"/);
+  assert.match(inventory, /catch \(_\) \{\s*return "unavailable"/);
+  assert.match(inventory, /if \(initialAvailability !== "idle"\)/);
+  assert.match(inventory, /const availability = await providerBusy\(\)/);
+  assert.match(inventory, /if \(availability !== "idle"\)/);
+  assert.match(
+    inventory,
+    /status === 401 \|\| status === 403 \|\| status === 429 \|\| status >= 500/,
+  );
+
+  assert.match(candidates, /variant\.user_id = p_user/);
+  assert.match(candidates, /variant\.source_id = p_source/);
+  assert.match(candidates, /variant\.item_type = 'series'/);
+  assert.match(candidates, /source\.sync_status = 'ready'/);
+  assert.match(candidates, /source\.source_type = 'xtream'/);
+  assert.match(candidates, /catalog_source_provider_identities identity/);
+  assert.match(candidates, /inventory\.next_retry_at <= now\(\)/);
+  assert.doesNotMatch(candidates, /config_hint|providerKey|serverHost/);
+
+  assert.match(outcome, /p_success and \(p_episode_count is null or p_episode_count <= 0\)/);
+  assert.match(outcome, /v_registered_episode_count <> p_episode_count/);
+  assert.match(outcome, /variant\.user_id = p_user/);
+  assert.match(outcome, /variant\.source_id = p_source/);
+  assert.match(outcome, /variant\.item_type = 'series'/);
+  assert.match(outcome, /variant\.external_id = btrim\(p_parent_series_id\)/);
+  assert.match(outcome, /catalog_source_provider_identities identity/);
+  assert.match(outcome, /if not found then\s*return false/);
+  assert.match(outcome, /pg_advisory_xact_lock/);
+  assert.match(outcome, /on conflict \(source_id, parent_series_id\) do update/);
+  assert.doesNotMatch(outcome, /config_hint|providerKey|serverHost/);
 });
 
 test('fleet audit metrics describe only the explicit row set actually attempted', () => {
@@ -224,6 +432,9 @@ test('fleet audit metrics describe only the explicit row set actually attempted'
     '\nfunction enrichmentFleetNextDelay(',
   );
   assert.match(summary, /const processed = Math\.max\(0, Number\(body\.processed\) \|\| 0\)/);
+  assert.match(summary, /attempted: Math\.max\(0, Number\(body\.attempted\) \|\| 0\)/);
+  assert.match(summary, /resolved: Math\.max\(0, Number\(body\.resolved\) \|\| 0\)/);
+  assert.match(summary, /deferred: Math\.max\(0, Number\(body\.deferred\) \|\| 0\)/);
   assert.match(summary, /lastId: processed > 0 \? stringOrNull\(body\.lastId\) : null/);
   assert.doesNotMatch(summary, /processedFromTried|body\.tried|nested\.processed|nested\.lastId/);
 });
