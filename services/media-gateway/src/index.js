@@ -476,6 +476,16 @@ const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_D
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
 const VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.VOD_INPUT_PROBE_SIZE_BYTES, 8_000_000, 64_000, 30_000_000);
+// Once an exact Matroska profile is already known (from the catalogue or the
+// gateway's own ffprobe just above session startup), asking FFmpeg to analyse
+// another 8 seconds / 8 MB delays the first segment without discovering
+// anything useful. Keep the conservative budget for unknown files and use the
+// same bounded footprint that successfully produced the exact profile for the
+// known-file fast path.
+const KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED =
+    (process.env.KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED || 'true') !== 'false';
+const KNOWN_VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.KNOWN_VOD_INPUT_ANALYZE_DURATION_US, 2_000_000, 250_000, 8_000_000);
+const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 8_000_000);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
@@ -504,7 +514,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 76;
+const GATEWAY_VERSION = 77;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -560,6 +570,17 @@ const probeStats = {
     last: null,
     lastFailure: null
 };
+const sessionStartupStats = {
+    attempts: 0,
+    successes: 0,
+    totalMs: 0,
+    liveInputProbeAttempts: 0,
+    fastInputProbeAttempts: 0,
+    fullInputProbeAttempts: 0,
+    fastInputProbeSuccesses: 0,
+    fastInputProbeFallbacks: 0,
+    last: null
+};
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -576,8 +597,17 @@ app.get('/health', (req, res) => {
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
         codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
         codecProbeSizeBytes: CODEC_PROBE_SIZE_BYTES,
+        knownVodInputProbeFastPathEnabled: KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED,
+        knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
+        knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
+        sessionStartupStats: {
+            ...sessionStartupStats,
+            averageMs: sessionStartupStats.successes > 0
+                ? Math.round(sessionStartupStats.totalMs / sessionStartupStats.successes)
+                : null
+        },
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
         languageDetectEngine: WHISPER_BIN && WHISPER_MODEL ? {
@@ -3659,6 +3689,8 @@ function detectLanguageFromText(raw) {
 }
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
+    const sessionCreateStartedAt = Date.now();
+    sessionStartupStats.attempts += 1;
     try {
         const {
             sourceUrl,
@@ -3686,6 +3718,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+        const cleanupStartedAt = Date.now();
         let stoppedConflictingSessions = 0;
         if (STOP_CONFLICTING_OWNER_SESSIONS && normalizedOwnerKey) {
             stoppedConflictingSessions += await stopConflictingOwnerSessions(normalizedOwnerKey);
@@ -3709,10 +3742,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // slot-release delay below.
         preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
 
+        let slotReleaseWaitMs = 0;
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
             console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
+            slotReleaseWaitMs = PROVIDER_SLOT_RELEASE_DELAY_MS;
             await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
         }
+        const cleanupMs = Math.max(0, Date.now() - cleanupStartedAt);
 
         const id = crypto.randomUUID();
         const accessToken = randomToken();
@@ -3737,7 +3773,10 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
         const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
+        const codecProfileStartedAt = Date.now();
+        let codecProfileProbeRan = false;
         if ((!codecProfileSource || shouldCompleteProfile) && shouldProbe) {
+            codecProfileProbeRan = true;
             try {
                 const probedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
                 if (hasUsefulCodecProfile(probedCodecProfile)) {
@@ -3749,6 +3788,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
             }
         }
+        const codecProfileMs = Math.max(0, Date.now() - codecProfileStartedAt);
         const session = {
             id,
             playbackSessionId: playbackSessionId || null,
@@ -3776,13 +3816,25 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             expiresAt: expiresAtDate,
             ffmpeg: null,
             lastError: null,
-            logTail: ''
+            logTail: '',
+            startupTimings: {
+                cleanupMs,
+                slotReleaseWaitMs,
+                stoppedConflictingSessions,
+                codecProfileMs,
+                codecProfileProbeRan,
+                ffmpegReadyMs: null,
+                startOffsetProbeMs: null,
+                totalMs: null
+            }
         };
 
         sessions.set(id, session);
 
         const hlsUrl = publicUrl(req, `/sessions/${id}/playlist.m3u8?token=${encodeURIComponent(accessToken)}`);
+        const ffmpegStartedAt = Date.now();
         const started = await startSessionWithProviderRetry(session);
+        session.startupTimings.ffmpegReadyMs = Math.max(0, Date.now() - ffmpegStartedAt);
         if (!started) {
             const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
@@ -3805,7 +3857,22 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 details: detail
             });
         }
+        const startOffsetProbeStartedAt = Date.now();
         await observeSessionStartOffset(session);
+        session.startupTimings.startOffsetProbeMs = Math.max(0, Date.now() - startOffsetProbeStartedAt);
+        session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
+        session.startupTimings.inputProbeMode = session.fastInputProbe === true ? 'known-fast' : 'full';
+        session.startupTimings.fastInputProbeFallbacks = Number(session.fastInputProbeFallbacks || 0);
+        sessionStartupStats.successes += 1;
+        sessionStartupStats.totalMs += session.startupTimings.totalMs;
+        if (session.fastInputProbe === true) sessionStartupStats.fastInputProbeSuccesses += 1;
+        sessionStartupStats.last = {
+            ...session.startupTimings,
+            codecProfileSource: session.codecProfileSource || null,
+            seek: Number(session.seekOffset) > 0,
+            at: new Date().toISOString()
+        };
+        console.log(`[media-gateway] session ${id} ready`, JSON.stringify(sessionStartupStats.last));
 
         res.status(201).json({
             id,
@@ -3820,6 +3887,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceTimestamps: session.sourceTimestamps === true,
             codecProfile: session.codecProfile,
             codecProfileSource: session.codecProfileSource || null,
+            startupTimings: session.startupTimings,
             hlsUrl,
             expiresAt: session.expiresAt.toISOString()
         });
@@ -3958,9 +4026,14 @@ async function startSessionWithProviderRetry(session) {
     // after the previous consumer drops, so 2s/6s/9s spans the release window.
     // Plain auth failures keep the single fast retry (fast-fail on dead channels).
     const SLOT_BUSY_RETRY_DELAYS_MS = [2000, 6000, 9000];
-    const maxAttempts = 1 + Math.max(PROVIDER_AUTH_RETRY_LIMIT, SLOT_BUSY_RETRY_DELAYS_MS.length);
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        if (attempt > 1) {
+    const maxProviderAttempts = 1 + Math.max(PROVIDER_AUTH_RETRY_LIMIT, SLOT_BUSY_RETRY_DELAYS_MS.length);
+    // A known-profile probe fallback is a local demux retry, not a provider
+    // concurrency failure. Give it one separate attempt so it cannot consume
+    // one rung of the provider's 458/auth retry ladder.
+    const maxTotalAttempts = maxProviderAttempts + 1;
+    let providerAttempts = 0;
+    for (let totalAttempt = 1; totalAttempt <= maxTotalAttempts; totalAttempt += 1) {
+        if (totalAttempt > 1) {
             await stopChildProcess(session.ffmpeg).catch(() => {});
             await removeSessionDir(session.outputDir).catch(() => {});
             await fsp.mkdir(session.outputDir, { recursive: true }).catch(() => {});
@@ -3975,14 +4048,26 @@ async function startSessionWithProviderRetry(session) {
             return true;
         } catch (err) {
             const slotBusy = isProviderSlotBusyFailure(session);
+            if (
+                session.fastInputProbe === true
+                && session.forceFullInputProbe !== true
+                && isInsufficientInputProbeFailure(session)
+            ) {
+                session.forceFullInputProbe = true;
+                session.fastInputProbeFallbacks = Number(session.fastInputProbeFallbacks || 0) + 1;
+                sessionStartupStats.fastInputProbeFallbacks += 1;
+                console.warn(`[media-gateway] known-profile input probe was insufficient for ${session.id}; retrying once with the full VOD probe budget`);
+                continue;
+            }
+            providerAttempts += 1;
             const authRetryBudget = 1 + PROVIDER_AUTH_RETRY_LIMIT;
-            if (attempt >= maxAttempts
+            if (providerAttempts >= maxProviderAttempts
                 || !isProviderConcurrencyFailure(session)
-                || (!slotBusy && attempt >= authRetryBudget)) return false;
+                || (!slotBusy && providerAttempts >= authRetryBudget)) return false;
             const waitMs = slotBusy
-                ? SLOT_BUSY_RETRY_DELAYS_MS[Math.min(attempt - 1, SLOT_BUSY_RETRY_DELAYS_MS.length - 1)]
+                ? SLOT_BUSY_RETRY_DELAYS_MS[Math.min(providerAttempts - 1, SLOT_BUSY_RETRY_DELAYS_MS.length - 1)]
                 : PROVIDER_AUTH_RETRY_DELAY_MS;
-            console.warn(`[media-gateway] provider ${slotBusy ? 'slot busy (458)' : 'auth failure'} for ${session.id} (attempt ${attempt}/${maxAttempts}); waiting ${waitMs}ms before retry`);
+            console.warn(`[media-gateway] provider ${slotBusy ? 'slot busy (458)' : 'auth failure'} for ${session.id} (attempt ${providerAttempts}/${maxProviderAttempts}); waiting ${waitMs}ms before retry`);
             await sleep(waitMs);
         }
     }
@@ -3991,9 +4076,18 @@ async function startSessionWithProviderRetry(session) {
 
 function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
-    const audioArgs = audioArgsForSession(session);
-    const audioMap = audioMapForSession(session);
     const inputProbeArgs = inputProbeArgsForSession(session);
+    // During the bounded fast path, require the already-known video/audio maps.
+    // Otherwise FFmpeg's optional `?` can silently emit a video-only playlist
+    // when the reduced probe misses a stream, making the fallback unreachable.
+    // Keep the maps strict on the full-budget fallback too. That retry only
+    // exists for a session previously judged exact; making its maps optional
+    // could turn a stale track index into a silently video-only playlist.
+    const requireKnownStreams =
+        session.fastInputProbe === true ||
+        session.forceFullInputProbe === true;
+    const audioArgs = audioArgsForSession(session);
+    const audioMap = audioMapForSession(session, requireKnownStreams);
     const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
     const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
@@ -4023,7 +4117,7 @@ function startFfmpeg(session) {
         ...preInputSeek,
         '-i', session.sourceUrl,
         ...postInputSeek,
-        '-map', '0:v:0?',
+        '-map', requireKnownStreams ? '0:v:0' : '0:v:0?',
         '-map', audioMap,
         '-max_muxing_queue_size', '1024'
     ];
@@ -4179,10 +4273,96 @@ async function observeSessionStartOffset(session) {
 
 function inputProbeArgsForSession(session) {
     const live = isLiveSession(session);
+    const knownFast = !live && knownVodInputProbeEligible(session);
+    session.fastInputProbe = knownFast;
+    if (live) sessionStartupStats.liveInputProbeAttempts += 1;
+    else if (knownFast) sessionStartupStats.fastInputProbeAttempts += 1;
+    else sessionStartupStats.fullInputProbeAttempts += 1;
     return [
-        '-analyzeduration', String(live ? LIVE_INPUT_ANALYZE_DURATION_US : VOD_INPUT_ANALYZE_DURATION_US),
-        '-probesize', String(live ? LIVE_INPUT_PROBE_SIZE_BYTES : VOD_INPUT_PROBE_SIZE_BYTES)
+        '-analyzeduration', String(
+            live
+                ? LIVE_INPUT_ANALYZE_DURATION_US
+                : knownFast
+                    ? KNOWN_VOD_INPUT_ANALYZE_DURATION_US
+                    : VOD_INPUT_ANALYZE_DURATION_US
+        ),
+        '-probesize', String(
+            live
+                ? LIVE_INPUT_PROBE_SIZE_BYTES
+                : knownFast
+                    ? KNOWN_VOD_INPUT_PROBE_SIZE_BYTES
+                    : VOD_INPUT_PROBE_SIZE_BYTES
+        )
     ];
+}
+
+function knownVodInputProbeEligible(session) {
+    if (
+        !KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED ||
+        !session ||
+        session.forceFullInputProbe === true
+    ) return false;
+    const hint = asRecord(session.playbackHint);
+    const profile = asRecord(session.codecProfile);
+    const profileSource = String(session.codecProfileSource || '').toLowerCase();
+    // Flattened transport hints are useful routing evidence but are not a full
+    // demux map. Only a detailed catalogue profile or a completed gateway probe
+    // may unlock the reduced FFmpeg discovery budget.
+    const detailedProfileSource = profileSource === 'request'
+        || profileSource.includes('gateway_probe');
+    if (!detailedProfileSource) return false;
+    const container = normalizeCodecToken(hint.container || profile.container).split(',')[0];
+    if (!['mkv', 'matroska', 'webm'].includes(container)) return false;
+
+    // First rollout is deliberately scoped to the dense exact-file route that
+    // motivated it. These compact counts only exist when MediaUtils proved
+    // file-level track scope; title-level language unions never populate them.
+    const audioTrackCount = nullableInt(
+        hint.audioTrackCount ?? hint.audio_track_count
+    );
+    const subtitleTrackCount = nullableInt(
+        hint.subtitleTrackCount ?? hint.subtitle_track_count
+    );
+    if (
+        !Number.isInteger(audioTrackCount) ||
+        audioTrackCount < 20 ||
+        !Number.isInteger(subtitleTrackCount) ||
+        subtitleTrackCount < 30
+    ) return false;
+
+    const videoCodec = stringOrNull(
+        session.videoCodec ||
+        profile.videoCodec ||
+        profile.video_codec ||
+        profile.video
+    );
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+    if (!audioTracks.length) return false;
+    const selectedAudio = selectedAudioTrackForSession(session);
+    const selectedAudioIndex = nullableInt(
+        selectedAudio?.index ?? session.audioStreamIndex
+    );
+    const audioCodec = stringOrNull(
+        selectedAudio?.codec ||
+        session.audioCodec ||
+        profile.audioCodec ||
+        profile.audio_codec ||
+        profile.audio
+    );
+    return Boolean(videoCodec && audioCodec && Number.isInteger(selectedAudioIndex));
+}
+
+function isInsufficientInputProbeFailure(session) {
+    // FFmpeg's exit callback can reduce lastError to the terminal
+    // "Conversion failed!" line while the actionable map/codec diagnostic is
+    // still present a few lines earlier in logTail.
+    const text = `${String(session?.lastError || '')}\n${String(session?.logTail || '')}`.toLowerCase();
+    return text.includes('matches no streams')
+        || text.includes('could not find codec parameters')
+        || text.includes('does not contain any stream')
+        || text.includes('invalid data found when processing input');
 }
 
 function isLiveSession(session) {
@@ -4296,12 +4476,13 @@ function isKnownBrowserSafeVideo(codec) {
     return normalized.includes('h264') || normalized.includes('avc');
 }
 
-function audioMapForSession(session) {
+function audioMapForSession(session, required = false) {
+    const optionalSuffix = required ? '' : '?';
     const selectedTrack = selectedAudioTrackForSession(session);
     const selectedIndex = nullableInt(selectedTrack?.index);
-    if (Number.isInteger(selectedIndex)) return `0:${selectedIndex}?`;
-    if (Number.isInteger(session.audioStreamIndex)) return `0:${session.audioStreamIndex}?`;
-    return '0:a:0?';
+    if (Number.isInteger(selectedIndex)) return `0:${selectedIndex}${optionalSuffix}`;
+    if (Number.isInteger(session.audioStreamIndex)) return `0:${session.audioStreamIndex}${optionalSuffix}`;
+    return `0:a:0${optionalSuffix}`;
 }
 
 function selectedAudioTrackForSession(session) {
@@ -4700,6 +4881,17 @@ function shouldProbeMissingSubtitleTracks(profile, playbackHint, sourceUrl) {
     ) return false;
 
     const hint = asRecord(playbackHint);
+    // An exact zero is authoritative: there are no subtitle indexes to discover.
+    // A positive count is NOT sufficient here because the session needs every
+    // absolute stream index to produce the selectable WebVTT files. Keep the
+    // probe when the compact hint says subtitles exist but does not enumerate
+    // them, otherwise the speed-up would silently remove captions.
+    const exactSubtitleTrackCount = nullableInt(
+        hint.subtitleTrackCount ?? hint.subtitle_track_count
+    );
+    if (exactSubtitleTrackCount === 0) {
+        return false;
+    }
     const streamType = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
     if (streamType === 'live' || streamType === 'channel') return false;
 
@@ -4905,6 +5097,7 @@ function serializeSession(req, session) {
         sourceTimestamps: session.sourceTimestamps === true,
         codecProfile: session.codecProfile,
         codecProfileSource: session.codecProfileSource || null,
+        startupTimings: session.startupTimings || null,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),
@@ -4940,6 +5133,9 @@ function debugSession(session) {
             }
             : null,
         codecProfileSource: session.codecProfileSource || null,
+        startupTimings: session.startupTimings || null,
+        inputProbeMode: session.fastInputProbe === true ? 'known-fast' : 'full',
+        fastInputProbeFallbacks: Number(session.fastInputProbeFallbacks || 0),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),
         lastError: session.lastError,

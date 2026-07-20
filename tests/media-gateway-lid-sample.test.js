@@ -15,8 +15,8 @@ const routeStart = gateway.indexOf("app.post('/extract-language-wav'");
 const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
 const route = gateway.slice(routeStart, routeEnd);
 
-test('language WAV extraction is a v76 service-only scoped contract', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 76/);
+test('language WAV extraction is a v77 service-only scoped contract', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 77/);
   assert.notEqual(routeStart, -1);
   assert.notEqual(routeEnd, -1);
   assert.match(
