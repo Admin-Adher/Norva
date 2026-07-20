@@ -653,6 +653,63 @@ test('engine retry budget cannot re-arm inside the historical ~50 second crash l
     'runtime retry budget must require two healthy minutes before re-arming');
 });
 
+test('an ended Gateway EVENT session is restarted instead of trusting stale seekable ranges', async () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.currentPlaybackMode = 'gateway-session';
+  page.streamStartOffset = 0;
+  page.durationHint = 6019;
+  page.contentType = 'movie';
+  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie' };
+  page.video = {
+    duration: 6019,
+    ended: true,
+    seekable: {
+      length: 1,
+      start: () => 0,
+      end: () => 6019,
+    },
+  };
+
+  assert.strictEqual(page.isLocalSeekTargetAvailable(0), false);
+  assert.strictEqual(page.canRestartForSeek(0), true);
+
+  const restartedAt = [];
+  page.restartProcessedStreamAt = async target => restartedAt.push(target);
+  await page.seekToTime(0, { immediate: true });
+  assert.deepStrictEqual(restartedAt, [0]);
+
+  page.video.ended = false;
+  page._playbackEnded = true;
+  assert.strictEqual(page.isLocalSeekTargetAvailable(0), false);
+
+  page._playbackEnded = false;
+  assert.strictEqual(page.isLocalSeekTargetAvailable(0), true);
+});
+
+test('restart waits for a replacement Gateway session before asking the video to play', async () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  const order = [];
+  page.video = {
+    play: async () => {
+      order.push('play');
+    },
+  };
+  page.seekToTime = async () => {
+    order.push('seek:start');
+    await Promise.resolve();
+    order.push('seek:done');
+  };
+  page.showOverlay = () => order.push('overlay');
+
+  await page.restartFromStart();
+
+  assert.deepStrictEqual(order, ['seek:start', 'seek:done', 'play', 'overlay']);
+});
+
 // ── 7) exact-file track isolation ──────────────────────────────────────────────
 test('playback reads the exact file cache before any single-title fallback', () => {
   const src = read('supabase/functions/norva-playback/index.ts');

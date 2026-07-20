@@ -5121,6 +5121,14 @@ class WatchPage {
         const localTarget = target - (this.streamStartOffset || 0);
         if (localTarget < -0.5) return false;
 
+        // An ended Gateway HLS session may still advertise the full EVENT
+        // playlist as seekable even though its MediaSource only retains the
+        // final buffered window. Treat it as stale so a seek creates a fresh
+        // Gateway session instead of getting stuck at readyState=1.
+        if (this.currentPlaybackMode === 'gateway-session' && (this.video.ended || this._playbackEnded)) {
+            return false;
+        }
+
         const nativeDuration = this.getValidDuration();
         if (nativeDuration && localTarget > nativeDuration + 0.75) return false;
 
@@ -10022,9 +10030,9 @@ class WatchPage {
     }
 
     // Restart the current movie/episode from 0 (works for all VOD).
-    restartFromStart() {
-        try { Promise.resolve(this.seekToTime(0, { immediate: true })).catch(() => {}); } catch (_) {}
-        try { this.video?.play?.().catch(() => {}); } catch (_) {}
+    async restartFromStart() {
+        try { await this.seekToTime(0, { immediate: true }); } catch (_) {}
+        try { await this.video?.play?.(); } catch (_) {}
         this.showOverlay();
     }
 
