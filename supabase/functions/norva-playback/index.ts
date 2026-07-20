@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 32,
+        version: 33,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -2736,6 +2736,46 @@ async function runLidCascadeAttempt(opts: {
     if (
       (selection.mode === "shadow" && priorAttemptCount > 0) ||
       priorAttemptCount >= LID_CASCADE_SAMPLE_OFFSETS.length
+    ) {
+      return false;
+    }
+
+    // Re-read the global cap immediately before touching the provider. The
+    // normal policy cache keeps fleet traffic cheap, but it must not allow a
+    // sequential extraction to start after another request has just filled the
+    // daily ledger. The SQL RPC remains the final atomic authority.
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    const [
+      { data: freshPolicy, error: freshPolicyError },
+      { count: freshAttempts, error: freshAttemptsError },
+    ] = await Promise.all([
+      db.from("audio_lid_cascade_policy")
+        .select("policy_version,daily_cap,expires_at")
+        .eq("singleton", true)
+        .maybeSingle(),
+      db.from("catalog_audio_lid_attempts")
+        .select("attempt_id", { count: "exact", head: true })
+        .eq("policy_version", selection.policyVersion)
+        .gte("created_at", todayUtc.toISOString()),
+    ]);
+    const freshCap = boundedInt(
+      (freshPolicy as JsonRecord | null)?.daily_cap,
+      0,
+      0,
+      1_000_000,
+    );
+    const freshExpiryMs = new Date(
+      stringOrNull((freshPolicy as JsonRecord | null)?.expires_at) ?? "",
+    ).getTime();
+    if (
+      freshPolicyError ||
+      freshAttemptsError ||
+      (freshPolicy as JsonRecord | null)?.policy_version !== selection.policyVersion ||
+      freshCap <= 0 ||
+      !Number.isFinite(freshExpiryMs) ||
+      freshExpiryMs <= Date.now() ||
+      Math.max(0, freshAttempts ?? 0) >= freshCap
     ) {
       return false;
     }
