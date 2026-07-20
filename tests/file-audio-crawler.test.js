@@ -382,7 +382,7 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 34'));
+  assert.ok(health.includes('version: 35'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
   assert.ok(health.includes('audioLidEnabled: lidPolicy.enabled'));
   assert.ok(health.includes('lidDetectOnlyMode: lidPolicy.mode'));
@@ -391,6 +391,9 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
 test('LID cascade rollout is exact-file, bounded, fail-closed and atomically audited', () => {
   const playback = read('supabase/functions/norva-playback/index.ts');
   const migration = read('supabase/migrations/20260720130000_lid_cascade_rollout.sql');
+  const knownLanguageGuard = read(
+    'supabase/migrations/20260720170000_lid_canary_known_language_guard.sql',
+  );
   const compose = read('ops/hetzner/docker-compose.supabase.yml');
   const envExample = read('ops/hetzner/.env.hetzner.example');
   const policy = between(
@@ -477,6 +480,15 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(cascade.includes('Math.max(0, freshAttempts ?? 0) >= freshCap'));
   assert.ok(cascade.includes('durationSeconds: LID_CASCADE_SAMPLE_SECONDS'));
   assert.ok(cascade.includes('if (extractResponse.status === 429) return true'));
+  assert.ok(cascade.includes('normalizeIsoLang(stringOrNull(canonicalTrack.lang))'));
+  assert.ok(cascade.includes('normalizeIsoLang(stringOrNull(canonicalTrack.language))'));
+  assert.ok(knownLanguageGuard.includes('v_old_known <@ v_new_known'));
+  assert.ok(knownLanguageGuard.includes(
+    'LID cascade cannot replace a known audio language',
+  ));
+  assert.ok(knownLanguageGuard.includes(
+    'before update of audio_tracks, audio_lang_verification',
+  ));
   assert.ok(detector.includes('!normalizeIsoLang(t.lang) && Number.isInteger(t.index)'));
   assert.ok(playback.includes('["un", "und", "mis", "mul", "zxx", "nar"]'));
 
@@ -541,7 +553,7 @@ test('LID cascade rollout is exact-file, bounded, fail-closed and atomically aud
   assert.ok(!rpc.includes('merge_catalog_title_audio'));
   assert.ok(!rpc.includes('audio_lang_verified_at ='));
 
-  assert.ok(health.includes('version: 34'));
+  assert.ok(health.includes('version: 35'));
   assert.ok(health.includes('lidCascadeProtocol: 2'));
   assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));
   assert.ok(health.includes('lidCascadeWorkerConfigured'));

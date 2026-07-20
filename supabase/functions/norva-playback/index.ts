@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 34,
+        version: 35,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -2717,7 +2717,10 @@ async function runLidCascadeAttempt(opts: {
         boundedNullableInt(candidate.index, 0, 1024) === track.index
       ) as JsonRecord | undefined;
     if (!canonicalTrack) return false;
-    if (normalizeIsoLang(stringOrNull(canonicalTrack.lang ?? canonicalTrack.language))) return false;
+    const canonicalTrackLanguage =
+      normalizeIsoLang(stringOrNull(canonicalTrack.lang)) ??
+      normalizeIsoLang(stringOrNull(canonicalTrack.language));
+    if (canonicalTrackLanguage) return false;
 
     // Each retry advances to a different deterministic window. After every bounded
     // window was tried, hand the file back to the unchanged historical detector
