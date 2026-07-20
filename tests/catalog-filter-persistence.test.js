@@ -481,6 +481,27 @@ for (const spec of [
             subtitleSelect: { value: '' },
             yearSelect: { value: '' },
             ratingSelect: { value: '' },
+            addedSelect: { value: '' },
+            sortSelect: { value: 'year' },
+            searchInput: { value: '' },
+            _isTvMode: () => false
+        });
+
+        const params = page.currentLanguageParams();
+
+        assert.equal(params.audio, 'fr');
+        assert.equal(params.sort, 'year');
+    });
+
+    test(`${spec.className} forwards restored Recently Added with a language filter`, () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        Object.assign(page, {
+            sourceSelect: { value: '' },
+            audioSelect: { value: 'fr' },
+            subtitleSelect: { value: '' },
+            yearSelect: { value: '' },
+            ratingSelect: { value: '' },
             addedSelect: { value: '30' },
             sortSelect: { value: 'added' },
             searchInput: { value: '' },
