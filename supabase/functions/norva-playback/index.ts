@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 33,
+        version: 34,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -2820,6 +2820,11 @@ async function runLidCascadeAttempt(opts: {
       signal: AbortSignal.timeout(60_000),
     });
     extractionMs = Math.max(1, Math.round(performance.now() - extractStartedAt));
+    // Gateway capacity rejection happens before provider I/O. It is not a
+    // language attempt, must not consume the rollout cap, and must not fall
+    // through to the legacy writer in this invocation. Gateway health keeps
+    // the aggregate backpressure counter; the exact file remains retryable.
+    if (extractResponse.status === 429) return true;
     if (!extractResponse.ok) {
       throw new Error(`gateway-status-${extractResponse.status}`);
     }
