@@ -1,0 +1,67 @@
+name: norva-lid
+
+services:
+  lid-worker:
+    build:
+      context: ../..
+      dockerfile: services/lid-benchmark-worker/Dockerfile
+      args:
+        WHISPER_MODEL: small
+        WHISPER_CPP_COMMIT: 080bbbe85230f624f0b52127f1ae1218247989f9
+        WHISPER_MODEL_SHA256: 1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
+    image: norva-lid-worker:2
+    restart: unless-stopped
+    init: true
+    environment:
+      LID_WORKER_TOKEN: ${LID_WORKER_TOKEN:?required}
+      LID_CALIBRATION_REVISION: ${LID_CALIBRATION_REVISION:-}
+      LID_ECAPA_MIN_PROBABILITY: ${LID_ECAPA_MIN_PROBABILITY:-0.80}
+      LID_ECAPA_MIN_MARGIN: ${LID_ECAPA_MIN_MARGIN:-0.15}
+      LID_ECAPA_MAX_ENTROPY: ${LID_ECAPA_MAX_ENTROPY:-2.50}
+      LID_WHISPER_TIEBREAK_MIN_PROBABILITY: ${LID_WHISPER_TIEBREAK_MIN_PROBABILITY:-0.95}
+      LID_WHISPER_FULL_MIN_PROBABILITY: ${LID_WHISPER_FULL_MIN_PROBABILITY:-0.75}
+      LID_WHISPER_FULL_MIN_WORDS: ${LID_WHISPER_FULL_MIN_WORDS:-4}
+      LID_WHISPER_FULL_MIN_UNIQUE_WORDS: ${LID_WHISPER_FULL_MIN_UNIQUE_WORDS:-2}
+      LID_MAX_QUEUE: ${LID_MAX_QUEUE:-1}
+      LID_REQUEST_TIMEOUT_MS: ${LID_REQUEST_TIMEOUT_MS:-20000}
+      LID_WHISPER_DETECT_TIMEOUT_MS: ${LID_WHISPER_DETECT_TIMEOUT_MS:-15000}
+      LID_WHISPER_FULL_TIMEOUT_MS: ${LID_WHISPER_FULL_TIMEOUT_MS:-45000}
+      LID_VAD_TIMEOUT_MS: ${LID_VAD_TIMEOUT_MS:-15000}
+      ECAPA_THREADS: ${ECAPA_THREADS:-1}
+      SHERPA_THREADS: ${SHERPA_THREADS:-1}
+      WHISPER_THREADS: ${WHISPER_THREADS:-2}
+    read_only: true
+    tmpfs:
+      - /tmp:nosuid,nodev,noexec,mode=1777,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 3g
+    cpus: 2.0
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8091/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    networks:
+      norva_default:
+        aliases:
+          - lid-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  norva_default:
+    external: true
+    name: norva_default

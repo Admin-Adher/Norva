@@ -9,6 +9,8 @@ type RuntimeConfig = {
   relayTokenSecret: string;
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
+  lidWorkerUrl: string;
+  lidWorkerToken: string;
   sourceConfigKey: string;
   whisperDetect: boolean; // Phase 2: detect untagged audio-track languages via the relay (Workers AI). Off by default.
 };
@@ -18,6 +20,16 @@ type LidDetectionPolicy = {
   mode: "off" | "shadow" | "primary" | "conflict";
   untaggedScope: string | null;
   taggedScope: string | null;
+  cascadeMode: "off" | "shadow" | "canary" | "primary" | "conflict";
+  cascadeScope: string | null;
+  cascadePolicyVersion: string | null;
+  cascadeSeed: string | null;
+  cascadeShadowBps: number;
+  cascadeCanaryBps: number;
+  cascadeDailyCap: number;
+  cascadeAttemptsToday: number;
+  cascadeExpiresAt: string | null;
+  cascadeTaggedWritesEnabled: boolean;
 };
 
 class HttpError extends Error {
@@ -45,6 +57,8 @@ const RUNTIME_CONFIG_KEYS = [
   "RELAY_TOKEN_SECRET",
   "NORVA_MEDIA_GATEWAY_URL",
   "NORVA_MEDIA_GATEWAY_TOKEN",
+  "NORVA_LID_WORKER_URL",
+  "NORVA_LID_WORKER_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
   "NORVA_WHISPER_DETECT",
 ];
@@ -83,6 +97,8 @@ const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL"
 const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_LID_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_LID_WORKER_URL") ?? "");
+const ENV_LID_WORKER_TOKEN = Deno.env.get("NORVA_LID_WORKER_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const ENV_WHISPER_DETECT = Deno.env.get("NORVA_WHISPER_DETECT") ?? "";
 
@@ -112,11 +128,20 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 31,
+        version: 32,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
+        lidCascadeProtocol: 2,
         audioLidEnabled: lidPolicy.enabled,
         lidDetectOnlyMode: lidPolicy.mode,
+        lidCascadeMode: lidPolicy.cascadeMode,
+        lidCascadePolicyVersion: lidPolicy.cascadePolicyVersion,
+        lidCascadeShadowBps: lidPolicy.cascadeShadowBps,
+        lidCascadeCanaryBps: lidPolicy.cascadeCanaryBps,
+        lidCascadeDailyCap: lidPolicy.cascadeDailyCap,
+        lidCascadeAttemptsToday: lidPolicy.cascadeAttemptsToday,
+        lidCascadeExpiresAt: lidPolicy.cascadeExpiresAt,
+        lidCascadeWorkerConfigured: Boolean(config.lidWorkerUrl && config.lidWorkerToken),
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2206,6 +2231,8 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_RELAY_TOKEN_SECRET ||
     !ENV_MEDIA_GATEWAY_URL ||
     !ENV_MEDIA_GATEWAY_TOKEN ||
+    !ENV_LID_WORKER_URL ||
+    !ENV_LID_WORKER_TOKEN ||
     !ENV_SOURCE_CONFIG_KEY;
 
   if (needsDb) {
@@ -2226,6 +2253,8 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
     mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
     mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
+    lidWorkerUrl: trimTrailingSlash(ENV_LID_WORKER_URL || fromDb.get("NORVA_LID_WORKER_URL") || ""),
+    lidWorkerToken: ENV_LID_WORKER_TOKEN || fromDb.get("NORVA_LID_WORKER_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
     whisperDetect: (ENV_WHISPER_DETECT || fromDb.get("NORVA_WHISPER_DETECT") || "") === "true",
   };
@@ -2247,6 +2276,16 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
     mode: "off",
     untaggedScope: null,
     taggedScope: null,
+    cascadeMode: "off",
+    cascadeScope: null,
+    cascadePolicyVersion: null,
+    cascadeSeed: null,
+    cascadeShadowBps: 0,
+    cascadeCanaryBps: 0,
+    cascadeDailyCap: 0,
+    cascadeAttemptsToday: 0,
+    cascadeExpiresAt: null,
+    cascadeTaggedWritesEnabled: false,
   };
   try {
     const { data, error } = await db
@@ -2256,6 +2295,10 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
         "audio_lid_enabled",
         "lid_detect_only_shadow_enabled",
         "lid_detect_only_production_enabled",
+        "lid_cascade_shadow_enabled",
+        "lid_cascade_canary_enabled",
+        "lid_cascade_primary_enabled",
+        "lid_cascade_tagged_writes_enabled",
       ]);
     if (error) throw error;
     const flags = new Map<string, boolean>();
@@ -2266,6 +2309,11 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
     const primary = flags.get("lid_detect_only_production_enabled") === true;
     const shadow = flags.get("lid_detect_only_shadow_enabled") === true;
     const conflict = primary && shadow;
+    const cascadeShadow = flags.get("lid_cascade_shadow_enabled") === true;
+    const cascadeCanary = flags.get("lid_cascade_canary_enabled") === true;
+    const cascadePrimary = flags.get("lid_cascade_primary_enabled") === true;
+    const cascadeTaggedWritesEnabled = flags.get("lid_cascade_tagged_writes_enabled") === true;
+    const cascadeStageCount = [cascadeShadow, cascadeCanary, cascadePrimary].filter(Boolean).length;
     value = {
       enabled,
       mode: !enabled ? "off" : (conflict ? "conflict" : (primary ? "primary" : (shadow ? "shadow" : "off"))),
@@ -2277,9 +2325,102 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
       // Shadow always returns the historical full-transcript verdict. Primary mode keeps
       // tagged verification entirely on that historical path.
       taggedScope: enabled && shadow && !conflict ? "lid-shadow" : null,
+      cascadeMode: !enabled
+        ? "off"
+        : (
+          cascadeStageCount > 1 || cascadeTaggedWritesEnabled || conflict ||
+            (cascadeStageCount === 1 && (primary || shadow))
+            ? "conflict"
+            : (cascadePrimary ? "primary" : (cascadeCanary ? "canary" : (cascadeShadow ? "shadow" : "off")))
+        ),
+      cascadeScope: null,
+      cascadePolicyVersion: null,
+      cascadeSeed: null,
+      cascadeShadowBps: 0,
+      cascadeCanaryBps: 0,
+      cascadeDailyCap: 0,
+      cascadeAttemptsToday: 0,
+      cascadeExpiresAt: null,
+      cascadeTaggedWritesEnabled,
     };
+    if (
+      enabled &&
+      value.cascadeMode !== "off" &&
+      value.cascadeMode !== "conflict"
+    ) {
+      const { data: policyRow, error: policyError } = await db
+        .from("audio_lid_cascade_policy")
+        .select(
+          "policy_version,rollout_seed,shadow_bps,canary_bps,daily_cap,expires_at",
+        )
+        .eq("singleton", true)
+        .maybeSingle();
+      if (policyError || !policyRow) throw policyError ?? new Error("Missing cascade policy");
+      const policy = policyRow as JsonRecord;
+      const policyVersion = stringOrNull(policy.policy_version);
+      const rolloutSeed = stringOrNull(policy.rollout_seed);
+      const shadowBps = boundedInt(policy.shadow_bps, 0, 0, 10_000);
+      const canaryBps = boundedInt(policy.canary_bps, 0, 0, 10_000);
+      const dailyCap = boundedInt(policy.daily_cap, 0, 0, 1_000_000);
+      const expiresAt = stringOrNull(policy.expires_at);
+      const expiryMs = expiresAt ? new Date(expiresAt).getTime() : Number.NaN;
+      const activePolicy = (
+        policyVersion === "lid-cascade-v1" &&
+        Boolean(rolloutSeed) &&
+        dailyCap > 0 &&
+        Number.isFinite(expiryMs) &&
+        expiryMs > Date.now() &&
+        (value.cascadeMode !== "shadow" || shadowBps > 0) &&
+        (value.cascadeMode !== "canary" || canaryBps > 0)
+      );
+      if (!activePolicy) {
+        value = {
+          ...value,
+          cascadeMode: "conflict",
+          cascadeScope: null,
+          cascadePolicyVersion: policyVersion,
+          cascadeSeed: null,
+          cascadeShadowBps: shadowBps,
+          cascadeCanaryBps: canaryBps,
+          cascadeDailyCap: dailyCap,
+          cascadeExpiresAt: expiresAt,
+        };
+      } else {
+        const todayUtc = new Date();
+        todayUtc.setUTCHours(0, 0, 0, 0);
+        const { count, error: countError } = await db
+          .from("catalog_audio_lid_attempts")
+          .select("attempt_id", { count: "exact", head: true })
+          .eq("policy_version", policyVersion)
+          .gte("created_at", todayUtc.toISOString());
+        if (countError) throw countError;
+        value = {
+          ...value,
+          cascadeScope: value.cascadeMode === "shadow"
+            ? "lid-cascade-shadow-v1"
+            : (
+              value.cascadeMode === "canary"
+                ? "lid-cascade-untagged-canary-v1"
+                : "lid-cascade-untagged-primary-v1"
+            ),
+          cascadePolicyVersion: policyVersion,
+          cascadeSeed: rolloutSeed,
+          cascadeShadowBps: shadowBps,
+          cascadeCanaryBps: canaryBps,
+          cascadeDailyCap: dailyCap,
+          cascadeAttemptsToday: Math.max(0, count ?? 0),
+          cascadeExpiresAt: expiresAt,
+        };
+      }
+    }
   } catch (_) {
-    // Historical behaviour remains available; no unsigned/implicit fast mode is ever selected.
+    // Historical behaviour remains available; no unsigned/implicit cascade mode is ever selected.
+    value = {
+      ...value,
+      cascadeMode: value.cascadeMode === "off" ? "off" : "conflict",
+      cascadeScope: null,
+      cascadeSeed: null,
+    };
   }
   lidDetectionPolicyCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
@@ -2332,7 +2473,7 @@ function choosePlaybackMode(requestedMode: string, body: JsonRecord) {
 // ISO-639-2/local -> ISO-639-1 for the audio_languages column.
 function normalizeIsoLang(value: string | null): string | null {
   const v = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
-  if (!v || ["und", "mis", "mul", "zxx", "nar"].includes(v)) return null;
+  if (!v || ["un", "und", "mis", "mul", "zxx", "nar"].includes(v)) return null;
   const map: Record<string, string> = {
     alb: "sq", sqi: "sq", ara: "ar", arm: "hy", hye: "hy", baq: "eu", eus: "eu",
     ben: "bn", bos: "bs", bul: "bg", bur: "my", mya: "my", cat: "ca",
@@ -2358,6 +2499,528 @@ type BasicLidEvidence = {
   fastPath: boolean;
   confidence: number;
 };
+
+type LidCascadeSelection = {
+  mode: "shadow" | "canary" | "primary";
+  scope:
+    | "lid-cascade-shadow-v1"
+    | "lid-cascade-untagged-canary-v1"
+    | "lid-cascade-untagged-primary-v1";
+  policyVersion: "lid-cascade-v1";
+  cohortBucket: number;
+};
+
+const LID_CASCADE_PROTOCOL_VERSION = 2;
+const LID_CASCADE_POLICY_VERSION = "lid-cascade-v1";
+const LID_CASCADE_METHOD = "lid-cascade-v1";
+const LID_CASCADE_MAX_WAV_BYTES = 1_572_864; // 1.5 MiB
+const LID_CASCADE_SAMPLE_SECONDS = 20;
+const LID_CASCADE_SAMPLE_OFFSETS = [60, 300, 900] as const;
+const LID_CASCADE_DETECTED_ROUTES = new Set([
+  "fast-consensus",
+  "whisper-tiebreak",
+  "full-transcript-fallback",
+]);
+const LID_CASCADE_PENDING_ROUTES = new Set([
+  "pending-no-speech",
+  "pending-disagreement",
+]);
+const LID_CASCADE_ROUTES = new Set([
+  ...LID_CASCADE_DETECTED_ROUTES,
+  ...LID_CASCADE_PENDING_ROUTES,
+]);
+
+async function selectLidCascadeCohort(
+  policy: LidDetectionPolicy,
+  serverHost: string,
+  itemType: string,
+  fileExternalId: string,
+): Promise<LidCascadeSelection | null> {
+  if (
+    policy.cascadeMode === "off" ||
+    policy.cascadeMode === "conflict" ||
+    !policy.cascadeScope ||
+    policy.cascadePolicyVersion !== LID_CASCADE_POLICY_VERSION ||
+    !policy.cascadeSeed ||
+    !serverHost ||
+    itemType !== "movie" ||
+    !fileExternalId ||
+    policy.cascadeDailyCap <= 0 ||
+    policy.cascadeAttemptsToday >= policy.cascadeDailyCap
+  ) {
+    return null;
+  }
+  const digest = await sha256Hex(
+    `${policy.cascadeSeed}|${serverHost}|${itemType}|${fileExternalId}`,
+  );
+  const cohortBucket = Number.parseInt(digest.slice(0, 8), 16) % 10_000;
+  const eligible = policy.cascadeMode === "primary" ||
+    (policy.cascadeMode === "shadow" && cohortBucket < policy.cascadeShadowBps) ||
+    (policy.cascadeMode === "canary" && cohortBucket < policy.cascadeCanaryBps);
+  if (!eligible) return null;
+  return {
+    mode: policy.cascadeMode,
+    scope: policy.cascadeScope as LidCascadeSelection["scope"],
+    policyVersion: LID_CASCADE_POLICY_VERSION,
+    cohortBucket,
+  };
+}
+
+function lidCascadeResponseContainsMedia(value: unknown, depth = 0): boolean {
+  if (depth > 8 || !value || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((entry) => lidCascadeResponseContainsMedia(entry, depth + 1));
+  }
+  for (const [key, entry] of Object.entries(value as JsonRecord)) {
+    if (/^(audio|wav|transcript|transcription|text|samples?|pcm|payload)$/i.test(key)) {
+      return true;
+    }
+    if (lidCascadeResponseContainsMedia(entry, depth + 1)) return true;
+  }
+  return false;
+}
+
+async function readBoundedResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        value.fill(0);
+        await reader.cancel("bounded-body-limit").catch(() => {});
+        throw new Error("response-body-too-large");
+      }
+      chunks.push(value);
+    }
+    const result = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.byteLength;
+      chunk.fill(0);
+    }
+    return result;
+  } catch (error) {
+    for (const chunk of chunks) chunk.fill(0);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function persistLidCascadeOutcome(
+  db: SupabaseClient,
+  values: {
+    attemptId: string;
+    serverHost: string;
+    itemType: string;
+    fileExternalId: string;
+    streamIndex: number;
+    expectedAudioProbedAt: string;
+    selection: LidCascadeSelection;
+    route: string | null;
+    status: "detected" | "pending" | "error";
+    language: string | null;
+    confidence: number | null;
+    sampleSha256: string | null;
+    sampleBytes: number | null;
+    extractionMs: number | null;
+    inferenceMs: number | null;
+    evidence: JsonRecord;
+  },
+): Promise<JsonRecord | null> {
+  const retryAt = values.status === "detected"
+    ? null
+    : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const { data, error } = await db.rpc("persist_catalog_audio_lid_outcome", {
+    p_attempt_id: values.attemptId,
+    p_server_host: values.serverHost,
+    p_item_type: values.itemType,
+    p_external_id: values.fileExternalId,
+    p_stream_index: values.streamIndex,
+    p_expected_audio_probed_at: values.expectedAudioProbedAt,
+    p_policy_version: values.selection.policyVersion,
+    p_rollout_mode: values.selection.mode,
+    p_cohort_bucket: values.selection.cohortBucket,
+    p_route: values.route,
+    p_status: values.status,
+    p_language: values.language,
+    p_confidence: values.confidence,
+    p_sample_sha256: values.sampleSha256,
+    p_sample_bytes: values.sampleBytes,
+    p_extraction_ms: values.extractionMs,
+    p_inference_ms: values.inferenceMs,
+    p_evidence: values.evidence,
+    p_retry_at: retryAt,
+  });
+  if (error) throw error;
+  return isRecord(data) ? data : null;
+}
+
+async function runLidCascadeAttempt(opts: {
+  db: SupabaseClient;
+  runtimeConfig: RuntimeConfig;
+  userId: string;
+  targetUrl: string;
+  userAgent: string | null;
+  track: {
+    index: number;
+    lang: string | null;
+    lidAttemptedAt?: string | null;
+    lidVerdict?: string | null;
+    lidMethod?: string | null;
+    lidConfidence?: number | null;
+  };
+  serverHost: string;
+  itemType: string;
+  fileExternalId: string;
+  sessionId: string;
+  expiresAt: string;
+  selection: LidCascadeSelection;
+}): Promise<boolean> {
+  const {
+    db, runtimeConfig, userId, targetUrl, userAgent, track, serverHost,
+    itemType, fileExternalId, sessionId, expiresAt, selection,
+  } = opts;
+  const attemptId = crypto.randomUUID();
+  let expectedAudioProbedAt = "";
+  let wavBytes: Uint8Array | null = null;
+  let sampleSha256: string | null = null;
+  let extractionMs: number | null = null;
+  let cascadeClaimed = false;
+  let priorAttemptCount = 0;
+  let phase: "preflight" | "extract" | "worker" | "validate" | "persist" = "preflight";
+  try {
+    const { data: canonicalData, error: canonicalError } = await db
+      .from("catalog_file_tracks")
+      .select("audio_tracks,audio_probed_at,audio_lang_verified_at")
+      .eq("server_host", serverHost)
+      .eq("item_type", itemType)
+      .eq("external_id", fileExternalId)
+      .maybeSingle();
+    if (canonicalError || !canonicalData) return false;
+    const canonical = canonicalData as JsonRecord;
+    // Strict proof always wins. A stale caller must also never overwrite a language
+    // that another worker filled after the candidate was read.
+    if (canonical.audio_lang_verified_at) return false;
+    expectedAudioProbedAt = stringOrNull(canonical.audio_probed_at) ?? "";
+    if (!expectedAudioProbedAt) return false;
+    const canonicalTrack = (Array.isArray(canonical.audio_tracks) ? canonical.audio_tracks : [])
+      .find((candidate) =>
+        isRecord(candidate) &&
+        boundedNullableInt(candidate.index, 0, 1024) === track.index
+      ) as JsonRecord | undefined;
+    if (!canonicalTrack) return false;
+    if (normalizeIsoLang(stringOrNull(canonicalTrack.lang ?? canonicalTrack.language))) return false;
+
+    // Each retry advances to a different deterministic window. After every bounded
+    // window was tried, hand the file back to the unchanged historical detector
+    // instead of consuming the daily cascade budget forever on the same silence.
+    const { count: priorAttempts, error: priorError } = await db
+      .from("catalog_audio_lid_attempts")
+      .select("attempt_id", { count: "exact", head: true })
+      .eq("server_host", serverHost)
+      .eq("item_type", itemType)
+      .eq("external_id", fileExternalId)
+      .eq("stream_index", track.index)
+      .eq("policy_version", selection.policyVersion)
+      .eq("rollout_mode", selection.mode);
+    if (priorError) return false;
+    priorAttemptCount = Math.max(0, priorAttempts ?? 0);
+    if (
+      (selection.mode === "shadow" && priorAttemptCount > 0) ||
+      priorAttemptCount >= LID_CASCADE_SAMPLE_OFFSETS.length
+    ) {
+      return false;
+    }
+
+    phase = "extract";
+    cascadeClaimed = true;
+    const pipe = await createBytePipeAccess(
+      sessionId,
+      userId,
+      targetUrl,
+      expiresAt,
+      db,
+      userAgent,
+      selection.scope,
+    );
+    const rawMarker = "/raw/";
+    const rawMarkerAt = pipe.url.indexOf(rawMarker);
+    if (rawMarkerAt < 0) throw new Error("gateway-assertion");
+    const lidAssertion = pipe.url.slice(rawMarkerAt + rawMarker.length);
+    if (!lidAssertion) throw new Error("gateway-assertion");
+    // Provider credentials remain inside the HMAC assertion header. They never
+    // enter a request path, reverse-proxy access log or worker payload.
+    const extractUrl = `${runtimeConfig.mediaGatewayUrl}/extract-language-wav`;
+    const start = LID_CASCADE_SAMPLE_OFFSETS[
+      (selection.cohortBucket + track.index + priorAttemptCount) %
+        LID_CASCADE_SAMPLE_OFFSETS.length
+    ];
+    const extractStartedAt = performance.now();
+    const extractResponse = await fetch(extractUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+        "X-Norva-LID-Assertion": lidAssertion,
+        "Content-Type": "application/json",
+        Accept: "audio/wav",
+      },
+      body: JSON.stringify({
+        index: track.index,
+        start,
+        durationSeconds: LID_CASCADE_SAMPLE_SECONDS,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    extractionMs = Math.max(1, Math.round(performance.now() - extractStartedAt));
+    if (!extractResponse.ok) {
+      throw new Error(`gateway-status-${extractResponse.status}`);
+    }
+    const contentType = (extractResponse.headers.get("content-type") ?? "")
+      .split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "audio/wav" && contentType !== "audio/x-wav") {
+      throw new Error("gateway-content-type");
+    }
+    const rawDeclaredLength = extractResponse.headers.get("content-length");
+    const declaredLength = rawDeclaredLength === null ? null : Number(rawDeclaredLength);
+    if (
+      declaredLength !== null &&
+      (!Number.isInteger(declaredLength) || declaredLength <= 0 ||
+        declaredLength > LID_CASCADE_MAX_WAV_BYTES)
+    ) {
+      throw new Error("gateway-wav-too-large");
+    }
+    wavBytes = await readBoundedResponseBytes(extractResponse, LID_CASCADE_MAX_WAV_BYTES);
+    if (!wavBytes.byteLength || wavBytes.byteLength > LID_CASCADE_MAX_WAV_BYTES) {
+      throw new Error("gateway-wav-size");
+    }
+    const declaredBytes = Number(extractResponse.headers.get("x-norva-sample-bytes"));
+    if (!Number.isInteger(declaredBytes) || declaredBytes !== wavBytes.byteLength) {
+      throw new Error("gateway-byte-count");
+    }
+    const sampleSeconds = Number(extractResponse.headers.get("x-norva-audio-seconds"));
+    if (
+      !Number.isFinite(sampleSeconds) ||
+      sampleSeconds <= 0 ||
+      sampleSeconds > LID_CASCADE_SAMPLE_SECONDS + 0.5
+    ) {
+      throw new Error("gateway-audio-duration");
+    }
+    sampleSha256 = await sha256BytesHex(wavBytes);
+    const declaredSha256 = (
+      extractResponse.headers.get("x-norva-sample-sha256") ??
+      extractResponse.headers.get("x-norva-audio-sha256") ??
+      extractResponse.headers.get("x-content-sha256") ??
+      ""
+    ).trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(declaredSha256) || declaredSha256 !== sampleSha256) {
+      throw new Error("gateway-sha256");
+    }
+    const gatewayExtractMs = boundedNullableInt(
+      extractResponse.headers.get("x-norva-extract-ms"),
+      1,
+      60_000,
+    );
+    if (gatewayExtractMs !== null) extractionMs = gatewayExtractMs;
+
+    phase = "worker";
+    const workerStartedAt = performance.now();
+    const workerResponse = await fetch(`${runtimeConfig.lidWorkerUrl}/v1/classify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${runtimeConfig.lidWorkerToken}`,
+        "Content-Type": "audio/wav",
+        Accept: "application/json",
+        "X-Norva-Sample-Sha256": sampleSha256,
+        "X-Norva-Lid-Attempt": attemptId,
+        "X-Norva-Lid-Policy": selection.policyVersion,
+        "X-Norva-Lid-Mode": selection.mode,
+        "X-Norva-Lid-Protocol": String(LID_CASCADE_PROTOCOL_VERSION),
+      },
+      body: wavBytes,
+      signal: AbortSignal.timeout(105_000),
+    });
+    const measuredInferenceMs = Math.max(1, Math.round(performance.now() - workerStartedAt));
+    const workerContentType = (workerResponse.headers.get("content-type") ?? "")
+      .split(";", 1)[0].trim().toLowerCase();
+    if (workerContentType !== "application/json") {
+      throw new Error("worker-content-type");
+    }
+    const rawResponseLength = workerResponse.headers.get("content-length");
+    const responseLength = rawResponseLength === null ? null : Number(rawResponseLength);
+    if (
+      responseLength !== null &&
+      (!Number.isInteger(responseLength) || responseLength < 0 || responseLength > 65_536)
+    ) {
+      throw new Error("worker-response-too-large");
+    }
+    const workerResponseBytes = await readBoundedResponseBytes(workerResponse, 65_536);
+    const workerText = new TextDecoder().decode(workerResponseBytes);
+    workerResponseBytes.fill(0);
+    if (!workerResponse.ok) {
+      throw new Error(`worker-status-${workerResponse.status}`);
+    }
+    phase = "validate";
+    const workerBody = JSON.parse(workerText) as unknown;
+    const workerResponseFields = new Set([
+      "ok",
+      "protocolVersion",
+      "attemptId",
+      "policyVersion",
+      "mode",
+      "method",
+      "route",
+      "language",
+      "verified",
+      "persisted",
+      "sampleSha256",
+      "sampleBytes",
+      "timings",
+      "evidence",
+    ]);
+    if (
+      !isRecord(workerBody) ||
+      Object.keys(workerBody).some((key) => !workerResponseFields.has(key)) ||
+      workerBody.ok !== true ||
+      workerBody.protocolVersion !== LID_CASCADE_PROTOCOL_VERSION ||
+      workerBody.attemptId !== attemptId ||
+      workerBody.policyVersion !== selection.policyVersion ||
+      workerBody.mode !== selection.mode ||
+      workerBody.method !== LID_CASCADE_METHOD ||
+      workerBody.verified !== false ||
+      workerBody.persisted !== false ||
+      workerBody.sampleSha256 !== sampleSha256 ||
+      workerBody.sampleBytes !== wavBytes.byteLength ||
+      !isRecord(workerBody.timings) ||
+      !isRecord(workerBody.evidence) ||
+      lidCascadeResponseContainsMedia(workerBody)
+    ) {
+      throw new Error("worker-contract");
+    }
+    const route = stringOrNull(workerBody.route);
+    if (!route || !LID_CASCADE_ROUTES.has(route)) {
+      throw new Error("worker-route");
+    }
+    const rawLanguage = stringOrNull(workerBody.language);
+    const language = normalizeIsoLang(rawLanguage);
+    const detected = LID_CASCADE_DETECTED_ROUTES.has(route);
+    if (
+      (
+        detected &&
+        (!rawLanguage || rawLanguage !== rawLanguage.toLowerCase() || rawLanguage !== language)
+      ) ||
+      (!detected && rawLanguage !== null)
+    ) {
+      throw new Error("worker-language");
+    }
+    const timings = recordOrEmpty(workerBody.timings);
+    const evidence = recordOrEmpty(workerBody.evidence);
+    const serializedEvidence = JSON.stringify(evidence);
+    if (serializedEvidence.length > 16_384) {
+      throw new Error("worker-evidence-too-large");
+    }
+    const inferenceMs = boundedNullableInt(
+      timings.inferenceMs ?? timings.totalMs ?? measuredInferenceMs,
+      1,
+      105_000,
+    ) ?? measuredInferenceMs;
+    const rawConfidence = evidence.confidence;
+    if (
+      (
+        detected &&
+        (
+          typeof rawConfidence !== "number" ||
+          !Number.isFinite(rawConfidence) ||
+          rawConfidence < 0 ||
+          rawConfidence > 1
+        )
+      ) ||
+      (!detected && rawConfidence !== null)
+    ) {
+      throw new Error("worker-confidence");
+    }
+    const confidence = detected ? rawConfidence as number : null;
+    const status = detected ? "detected" : "pending";
+    phase = "persist";
+    const persisted = await persistLidCascadeOutcome(db, {
+      attemptId,
+      serverHost,
+      itemType,
+      fileExternalId,
+      streamIndex: track.index,
+      expectedAudioProbedAt,
+      selection,
+      route,
+      status,
+      language: detected ? language : null,
+      confidence,
+      sampleSha256,
+      sampleBytes: wavBytes.byteLength,
+      extractionMs,
+      inferenceMs,
+      evidence: {
+        protocolVersion: LID_CASCADE_PROTOCOL_VERSION,
+        method: LID_CASCADE_METHOD,
+        sampleSeconds,
+        start,
+        timings,
+        classifier: evidence,
+      },
+    });
+    if (
+      selection.mode !== "shadow" &&
+      detected &&
+      language &&
+      persisted?.persisted === true
+    ) {
+      track.lang = language;
+      track.lidAttemptedAt = new Date().toISOString();
+      track.lidVerdict = "detected";
+      track.lidMethod = LID_CASCADE_METHOD;
+      track.lidConfidence = confidence;
+    }
+  } catch (error) {
+    if (!expectedAudioProbedAt) return cascadeClaimed;
+    try {
+      await persistLidCascadeOutcome(db, {
+        attemptId,
+        serverHost,
+        itemType,
+        fileExternalId,
+        streamIndex: track.index,
+        expectedAudioProbedAt,
+        selection,
+        route: null,
+        status: "error",
+        language: null,
+        confidence: null,
+        sampleSha256,
+        sampleBytes: wavBytes?.byteLength ?? null,
+        extractionMs,
+        inferenceMs: null,
+        evidence: {
+          protocolVersion: LID_CASCADE_PROTOCOL_VERSION,
+          phase,
+          error: error instanceof Error ? error.message.slice(0, 160) : "unknown",
+        },
+      });
+    } catch (_) {
+      // The attempt RPC is idempotent. A transient database failure remains retryable.
+    }
+  } finally {
+    // The Edge never retains, logs, serializes or returns provider audio.
+    wavBytes?.fill(0);
+    wavBytes = null;
+  }
+  return cascadeClaimed;
+}
 
 // Keep the old >=4-word contract and add a distinct detect-only contract. In particular,
 // wordCount=0 is correct for -dl and can never be confused with a transcript. The Edge
@@ -2688,8 +3351,43 @@ async function detectUntaggedAudioLanguages(opts: {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
   const lidPolicy = await getLidDetectionPolicy(db);
   if (!lidPolicy.enabled) return;
-  const unknownTracks = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index));
+  const unknownTracks = audioTracks.filter((t) =>
+    !normalizeIsoLang(t.lang) && Number.isInteger(t.index)
+  );
   if (!unknownTracks.length) return;
+  // Cascade rollout is exact-file only. Once its signed WAV extraction is claimed,
+  // this invocation never falls through to the legacy detector: doing so would turn
+  // a shadow/pending/error result into an accidental production write.
+  if (
+    fileScoped &&
+    runtimeConfig.lidWorkerUrl &&
+    runtimeConfig.lidWorkerToken
+  ) {
+    const cascadeTrack = unknownTracks.find((track) => !track.lidAttemptedAt) ?? unknownTracks[0];
+    const cascadeSelection = await selectLidCascadeCohort(
+      lidPolicy,
+      serverHost,
+      itemType,
+      fileExternalId,
+    );
+    if (cascadeTrack && cascadeSelection) {
+      const cascadeHandled = await runLidCascadeAttempt({
+        db,
+        runtimeConfig,
+        userId,
+        targetUrl,
+        userAgent,
+        track: cascadeTrack,
+        serverHost,
+        itemType,
+        fileExternalId,
+        sessionId,
+        expiresAt,
+        selection: cascadeSelection,
+      });
+      if (cascadeHandled) return;
+    }
+  }
   // The proven basic detector sweeps bounded offsets inside the gateway and stops on the first
   // clear 20s speech window. Two tracks per file keep a two-file fleet claim inside its 540s
   // request budget even when every gateway call reaches the 120s shadow-safe timeout. Per-track
@@ -2749,7 +3447,9 @@ async function detectUntaggedAudioLanguages(opts: {
     }
   }
 
-  const complete = unknownTracks.every((t) => Boolean(t.lang || t.lidAttemptedAt));
+  const complete = unknownTracks.every((t) =>
+    Boolean(normalizeIsoLang(t.lang) || t.lidAttemptedAt)
+  );
   const enriched = audioTracks.map((t) => ({
     index: t.index,
     lang: t.lang ?? null,
@@ -2800,7 +3500,9 @@ async function detectUntaggedAudioLanguages(opts: {
         audio_tracks: enriched,
         audio_languages: codes,
         audio_probed_at: nowIso,
-        ...(complete && !enriched.some((t) => !t.lang) ? { whisper_attempted_at: nowIso } : {}),
+        ...(complete && !enriched.some((t) => !normalizeIsoLang(t.lang))
+          ? { whisper_attempted_at: nowIso }
+          : {}),
       })
         .eq("user_id", userId).eq("id", titleId);
     } catch (_) { /* best-effort legacy title persist */ }
@@ -2826,7 +3528,7 @@ async function detectUntaggedAudioLanguages(opts: {
   }
   if (!complete) return;
 
-  const pendingCount = enriched.filter((t) => !t.lang).length;
+  const pendingCount = enriched.filter((t) => !normalizeIsoLang(t.lang)).length;
   const completed = pendingCount === 0;
   const retryAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   if (fileScoped && variantId) {
@@ -5225,7 +5927,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     const whisperRows = wrows as JsonRecord[];
     const candidates = whisperRows.filter((t: JsonRecord) => {
       const arr = Array.isArray(t.audio_tracks) ? t.audio_tracks as JsonRecord[] : [];
-      return arr.some((x) => !stringOrNull(x?.lang));
+      return arr.some((x) =>
+        !normalizeIsoLang(stringOrNull(x?.lang ?? x?.language))
+      );
     }).slice(0, Math.max(1, Math.min(limit, 4)));
     const wvIds = candidates.map((t: JsonRecord) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();
@@ -6355,6 +7059,11 @@ function base64UrlToBytes(value: string) {
 
 async function sha256Hex(value: string) {
   const hash = await crypto.subtle.digest("SHA-256", encoder.encode(value));
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256BytesHex(value: Uint8Array) {
+  const hash = await crypto.subtle.digest("SHA-256", value);
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

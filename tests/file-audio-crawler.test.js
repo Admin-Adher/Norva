@@ -382,10 +382,172 @@ test('Edge rollout is signed, dynamically reversible and keeps fast evidence sco
   assert.ok(migration.includes('observation.audio_verified_at is null'));
   assert.ok(detector.includes(': "whisper-basic-v1"'));
 
-  assert.ok(health.includes('version: 31'));
+  assert.ok(health.includes('version: 32'));
   assert.ok(health.includes('lidDetectOnlyProtocol: 1'));
   assert.ok(health.includes('audioLidEnabled: lidPolicy.enabled'));
   assert.ok(health.includes('lidDetectOnlyMode: lidPolicy.mode'));
+});
+
+test('LID cascade rollout is exact-file, bounded, fail-closed and atomically audited', () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const migration = read('supabase/migrations/20260720130000_lid_cascade_rollout.sql');
+  const compose = read('ops/hetzner/docker-compose.supabase.yml');
+  const envExample = read('ops/hetzner/.env.hetzner.example');
+  const policy = between(
+    playback,
+    'async function getLidDetectionPolicy(',
+    '\nasync function decryptSourceConfig(',
+  );
+  const cohort = between(
+    playback,
+    'async function selectLidCascadeCohort(',
+    '\nfunction lidCascadeResponseContainsMedia(',
+  );
+  const cascade = between(
+    playback,
+    'async function runLidCascadeAttempt(',
+    '\n// Keep the old >=4-word contract',
+  );
+  const detector = between(
+    playback,
+    'async function detectUntaggedAudioLanguages(',
+    '\n// Verify TAGGED-but-contradictory tracks',
+  );
+  const rpc = between(
+    migration,
+    'create or replace function public.persist_catalog_audio_lid_outcome(',
+    '\nrevoke all on function public.persist_catalog_audio_lid_outcome(',
+  );
+  const health = between(
+    playback,
+    'if (req.method === "GET" && segments[0] === "health")',
+    '\n    if (req.method === "GET" && segments[0] === "telemetry"',
+  );
+
+  for (const flag of [
+    'lid_cascade_shadow_enabled',
+    'lid_cascade_canary_enabled',
+    'lid_cascade_primary_enabled',
+    'lid_cascade_tagged_writes_enabled',
+  ]) {
+    assert.ok(policy.includes(`"${flag}"`));
+    assert.match(
+      migration,
+      new RegExp(`'${flag}',\\s*\\n\\s*false`),
+    );
+  }
+  assert.ok(migration.includes('create table if not exists public.audio_lid_cascade_policy'));
+  for (const field of [
+    'policy_version',
+    'rollout_seed',
+    'shadow_bps',
+    'canary_bps',
+    'daily_cap',
+    'expires_at',
+  ]) assert.ok(migration.includes(field));
+  assert.ok(policy.includes('.from("audio_lid_cascade_policy")'));
+  assert.ok(policy.includes('.from("catalog_audio_lid_attempts")'));
+  assert.ok(policy.includes('cascadeStageCount > 1'));
+  assert.ok(policy.includes('(cascadeStageCount === 1 && (primary || shadow))'));
+  assert.ok(policy.includes('cascadeMode: "conflict"'));
+  assert.ok(policy.includes('expiryMs > Date.now()'));
+
+  // The cohort identity is the canonical provider file, never the user/account.
+  assert.ok(cohort.includes('`${policy.cascadeSeed}|${serverHost}|${itemType}|${fileExternalId}`'));
+  assert.ok(cohort.includes('await sha256Hex('));
+  assert.ok(cohort.includes('digest.slice(0, 8)'));
+  assert.ok(cohort.includes('% 10_000'));
+  assert.ok(playback.includes('"lid-cascade-shadow-v1"'));
+  assert.ok(playback.includes('"lid-cascade-untagged-canary-v1"'));
+  assert.ok(playback.includes('"lid-cascade-untagged-primary-v1"'));
+  assert.ok(cohort.includes('policy.cascadeAttemptsToday >= policy.cascadeDailyCap'));
+
+  // Exactly one untagged stream is claimed. Once extraction starts there is no
+  // same-invocation fallback to the legacy detector.
+  assert.ok(detector.includes('const cascadeTrack = unknownTracks.find('));
+  assert.ok(detector.includes('unknownTracks[0]'));
+  assert.ok(detector.includes('await runLidCascadeAttempt({'));
+  assert.ok(detector.includes('if (cascadeHandled) return'));
+  assert.ok(cascade.includes('cascadeClaimed = true'));
+  assert.ok(cascade.includes('LID_CASCADE_SAMPLE_OFFSETS'));
+  assert.ok(cascade.includes('count: "exact", head: true'));
+  assert.ok(cascade.includes('priorAttemptCount >= LID_CASCADE_SAMPLE_OFFSETS.length'));
+  assert.ok(cascade.includes('selection.cohortBucket + track.index + priorAttemptCount'));
+  assert.ok(cascade.includes('durationSeconds: LID_CASCADE_SAMPLE_SECONDS'));
+  assert.ok(detector.includes('!normalizeIsoLang(t.lang) && Number.isInteger(t.index)'));
+  assert.ok(playback.includes('["un", "und", "mis", "mul", "zxx", "nar"]'));
+
+  // Gateway output and worker output are both independently authenticated and
+  // constrained before any database call.
+  assert.ok(cascade.includes('const lidAssertion = pipe.url.slice('));
+  assert.ok(cascade.includes('`${runtimeConfig.mediaGatewayUrl}/extract-language-wav`'));
+  assert.ok(cascade.includes('"X-Norva-LID-Assertion": lidAssertion'));
+  assert.ok(cascade.includes('method: "POST"'));
+  assert.ok(cascade.includes('Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`'));
+  assert.ok(cascade.includes('"Content-Type": "application/json"'));
+  assert.ok(playback.includes('LID_CASCADE_MAX_WAV_BYTES = 1_572_864'));
+  assert.ok(cascade.includes('x-norva-sample-sha256'));
+  assert.ok(cascade.includes('await sha256BytesHex(wavBytes)'));
+  assert.ok(cascade.includes('/v1/classify'));
+  assert.ok(cascade.includes('Authorization: `Bearer ${runtimeConfig.lidWorkerToken}`'));
+  assert.ok(cascade.includes('"X-Norva-Lid-Attempt": attemptId'));
+  assert.ok(cascade.includes('"X-Norva-Lid-Policy": selection.policyVersion'));
+  assert.ok(cascade.includes('"X-Norva-Lid-Mode": selection.mode'));
+  assert.ok(cascade.includes('workerBody.protocolVersion !== LID_CASCADE_PROTOCOL_VERSION'));
+  assert.ok(cascade.includes('workerBody.attemptId !== attemptId'));
+  assert.ok(cascade.includes('workerBody.policyVersion !== selection.policyVersion'));
+  assert.ok(cascade.includes('workerBody.method !== LID_CASCADE_METHOD'));
+  assert.ok(cascade.includes('workerBody.verified !== false'));
+  assert.ok(cascade.includes('workerBody.persisted !== false'));
+  assert.ok(cascade.includes('throw new Error("worker-confidence")'));
+  for (const route of [
+    'fast-consensus',
+    'whisper-tiebreak',
+    'full-transcript-fallback',
+    'pending-no-speech',
+    'pending-disagreement',
+  ]) assert.ok(playback.includes(`"${route}"`));
+  assert.ok(cascade.includes('lidCascadeResponseContainsMedia(workerBody)'));
+  assert.ok(cascade.includes('wavBytes?.fill(0)'));
+
+  // The append-only ledger and the exact-track update live in one SECURITY
+  // DEFINER transaction. Shadow never reaches either mutation branch.
+  assert.ok(migration.includes('create table if not exists public.catalog_audio_lid_attempts'));
+  assert.ok(migration.includes('before update or delete on public.catalog_audio_lid_attempts'));
+  assert.ok(migration.includes("raise exception 'catalog_audio_lid_attempts is append-only'"));
+  assert.ok(migration.includes('grant select on table public.catalog_audio_lid_attempts to service_role'));
+  assert.ok(migration.includes('revoke all on function public.reject_catalog_audio_lid_attempt_mutation()'));
+  assert.ok(rpc.includes('where attempt.attempt_id = p_attempt_id'));
+  assert.ok(rpc.includes("'inserted', false"));
+  assert.ok(rpc.includes('for update'));
+  assert.ok(rpc.includes('v_cache.audio_lang_verified_at is not null'));
+  assert.ok(rpc.includes("v_failure := 'strict-proof-wins'"));
+  assert.ok(rpc.includes("v_failure := 'stream-index-duplicated'"));
+  assert.ok(rpc.includes("v_failure := 'track-language-already-known'"));
+  assert.ok(rpc.includes('v_effective_confidence := null'));
+  assert.ok(rpc.includes('p_status = \'detected\' and p_confidence is null'));
+  assert.ok(rpc.includes("p_rollout_mode <> 'shadow' and p_status = 'detected'"));
+  assert.ok(rpc.includes("'lidMethod', 'lid-cascade-v1'"));
+  assert.ok(rpc.includes('perform public.fanout_detected_file_tracks_to_users('));
+  assert.ok(rpc.includes('observation.audio_verified_at is null'));
+  assert.ok(rpc.includes('insert into public.catalog_audio_lid_attempts('));
+  assert.ok(
+    rpc.indexOf('update public.catalog_file_tracks cache') <
+      rpc.indexOf('insert into public.catalog_audio_lid_attempts('),
+  );
+  assert.ok(!rpc.includes('merge_catalog_title_audio'));
+  assert.ok(!rpc.includes('audio_lang_verified_at ='));
+
+  assert.ok(health.includes('version: 32'));
+  assert.ok(health.includes('lidCascadeProtocol: 2'));
+  assert.ok(health.includes('lidCascadeMode: lidPolicy.cascadeMode'));
+  assert.ok(health.includes('lidCascadeWorkerConfigured'));
+  for (const config of [playback, compose, envExample]) {
+    assert.ok(config.includes('NORVA_LID_WORKER_URL'));
+    assert.ok(config.includes('NORVA_LID_WORKER_TOKEN'));
+  }
+  assert.ok(envExample.includes('LID_WORKER_TOKEN='));
+  assert.ok(envExample.includes('Set both token variables to the exact same value'));
 });
 
 test('database language parser collapses terminology and bibliographic aliases', () => {

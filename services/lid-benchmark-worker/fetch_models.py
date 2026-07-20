@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 
 ECAPA_REVISION = "0253049ae131d6a4be1c4f0d8b0ff483a0f8c8e9"
 SHERPA_REVISION = "65176e2deb88badc814a94058666cadccc29b61c"
+VAD_REVISION = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
 
 ASSETS = (
     {
@@ -109,6 +110,17 @@ ASSETS = (
             f"resolve/{SHERPA_REVISION}/tiny-decoder.int8.onnx"
         ),
     },
+    {
+        "family": "vad",
+        "revision": VAD_REVISION,
+        "name": "silero_vad.onnx",
+        "sha256": VAD_REVISION,
+        "bytes": 643_854,
+        "url": (
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+            "asr-models/silero_vad.onnx"
+        ),
+    },
 )
 
 
@@ -155,6 +167,7 @@ def main() -> int:
         "schemaVersion": 1,
         "ecapa": {"revision": ECAPA_REVISION, "files": []},
         "sherpa": {"revision": SHERPA_REVISION, "files": []},
+        "vad": {"revision": VAD_REVISION, "files": []},
     }
     for asset in ASSETS:
         family = str(asset["family"])

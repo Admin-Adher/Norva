@@ -26,7 +26,12 @@ test('isolated LID worker pins engines and model bytes', () => {
   assert.match(fetcher, /ab750d5c06d713477045fa798fab5d33e959dbc0dfe4de510a9a47844c79a19a/);
   assert.match(fetcher, /d24fb083ae3b1041fc24e97971d60e280c9342201fbb67b0ab428a8b4a51a434/);
   assert.match(fetcher, /d2fece8dd42771f1df975c6c0445770d0c292bf7547c2cae04a6c0cc57540925/);
+  assert.match(fetcher, /9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6/);
+  assert.match(fetcher, /"bytes": 643_854/);
   assert.match(fetcher, /actual_hash != asset\["sha256"\]/);
+  assert.match(dockerfile, /WHISPER_MODEL=small/);
+  assert.match(dockerfile, /080bbbe85230f624f0b52127f1ae1218247989f9/);
+  assert.match(dockerfile, /1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b/);
   assert.match(dockerfile, /TORCH_VERSION=2\.6\.0/);
   assert.match(dockerfile, /SPEECHBRAIN_VERSION=1\.1\.0/);
   assert.match(dockerfile, /npm ci --omit=dev/);
@@ -45,14 +50,17 @@ test('worker is authenticated, loopback-only and destroys every WAV', () => {
   assert.match(server, /express\.raw\(\{[\s\S]*limit: MAX_WAV_BYTES/);
   assert.match(server, /expectedDigest !== digest/);
   assert.match(server, /req\.body\.fill\(0\)/);
-  assert.match(server, /await fsp\.unlink\(wavPath\)\.catch/);
+  assert.match(server, /await wipeAndUnlink\(wavPath\)/);
   assert.match(server, /persisted: false/);
   assert.match(server, /ecapa\.classify\(wavPath\)/);
   assert.match(server, /sherpa\.detect\(wavPath\)/);
-  assert.match(server, /Promise\.all\(\[ecapa\.start\(\), sherpa\.start\(\)\]\)/);
   assert.match(
     server,
-    /startupError === null && ecapaHealth\.ready === true && sherpaHealth\.ready === true/,
+    /Promise\.all\(\[\s*ecapa\.start\(\),\s*sherpa\.start\(\),\s*vad\.start\(\),\s*\]\)/,
+  );
+  assert.match(
+    server,
+    /startupError === null[\s\S]*ecapa\.health\(\)\.ready === true[\s\S]*sherpa\.status\(\)\.ready === true[\s\S]*vad\.status\(\)\.ready === true/,
   );
   assert.match(compose, /127\.0\.0\.1:8091:8091/);
   assert.match(compose, /read_only: true/);

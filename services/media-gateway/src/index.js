@@ -235,15 +235,37 @@ const WHISPER_DETECT_ONLY_MIN_PROBABILITY = Math.min(
 );
 const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only';
 const LID_SHADOW_SCOPE = 'lid-shadow';
+const LID_CASCADE_WAV_SCOPES = new Set([
+    'lid-cascade-shadow-v1',
+    'lid-cascade-untagged-canary-v1',
+    'lid-cascade-untagged-primary-v1',
+]);
 const LID_BENCHMARK_INSTANCE = process.env.RAILWAY_REPLICA_ID || crypto.randomUUID();
 // Operator-only capture ceiling. A 30s 16 kHz mono PCM WAV is ~0.92 MiB raw
 // and ~1.22 MiB in base64, so one 1.5 MiB ceiling safely fits the expected
 // sample while failing closed on a format/configuration regression.
 const LID_BENCHMARK_WAV_MAX_BYTES = 1536 * 1024;
 const LID_BENCHMARK_WAV_BASE64_MAX_CHARS = 1536 * 1024;
+const LID_LANGUAGE_WAV_MAX_BYTES = 1536 * 1024;
 let lidBenchmarkBusy = false;
+let lidLanguageWavActive = 0;
 let whisperInferenceActive = 0;
 let argosInferenceActive = 0;
+const lidLanguageWavStats = {
+    requests: 0,
+    attempts: 0,
+    successes: 0,
+    invalidTokens: 0,
+    invalidRequests: 0,
+    busyRejections: 0,
+    extractionFailures: 0,
+    validationFailures: 0,
+    oversized: 0,
+    responseAborts: 0,
+    bytesServed: 0,
+    totalExtractMs: 0,
+    last: null,
+};
 const lidDetectOnlyStats = {
     primaryAttempts: 0,
     primaryAccepted: 0,
@@ -406,7 +428,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 74;
+const GATEWAY_VERSION = 75;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -525,6 +547,31 @@ app.get('/health', (req, res) => {
                 ? Number((
                     lidDetectOnlyStats.primaryAccepted / lidDetectOnlyStats.primaryAttempts
                 ).toFixed(4))
+                : null,
+        },
+        languageWavExtraction: {
+            available: true,
+            scopes: [...LID_CASCADE_WAV_SCOPES],
+            maxBytes: LID_LANGUAGE_WAV_MAX_BYTES,
+            format: {
+                container: 'RIFF/WAVE',
+                codec: 'pcm_s16le',
+                sampleRate: 16000,
+                channels: 1,
+                bitsPerSample: 16,
+            },
+            limits: {
+                maxTrackIndex: 1024,
+                maxStartSeconds: 21600,
+                minDurationSeconds: 8,
+                maxDurationSeconds: 30,
+            },
+            active: lidLanguageWavActive,
+        },
+        languageWavExtractionStats: {
+            ...lidLanguageWavStats,
+            averageExtractMs: lidLanguageWavStats.attempts > 0
+                ? Math.round((lidLanguageWavStats.totalExtractMs / lidLanguageWavStats.attempts) * 100) / 100
                 : null,
         },
         translate: ARGOS_ENABLED,
@@ -1371,6 +1418,256 @@ app.get('/detect-language/:token', async (req, res) => {
     }
 });
 
+// Service-only production handoff for the isolated LID cascade. The gateway is responsible
+// only for the provider-connected phase: extract one exact audio track/window and return a
+// bounded canonical WAV. ECAPA, sherpa, VAD and Whisper cascade decisions happen outside this
+// streaming process. Both gateway Bearer auth and a narrowly scoped HMAC assertion are
+// required. Keep the assertion out of the URL: its signed (but not encrypted) payload contains
+// the provider URL and must not be copied into proxy/access-log paths.
+app.post('/extract-language-wav', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    lidLanguageWavStats.requests++;
+
+    const assertion = String(req.get('x-norva-lid-assertion') || '');
+    if (!assertion || assertion.length > 8192) {
+        lidLanguageWavStats.invalidTokens++;
+        return res.status(401).json({ error: 'Invalid language WAV assertion' });
+    }
+    const claims = verifyRawToken(assertion, GATEWAY_TOKEN);
+    if (!claims || !LID_CASCADE_WAV_SCOPES.has(String(claims.scope || ''))) {
+        lidLanguageWavStats.invalidTokens++;
+        lidLanguageWavStats.last = {
+            at: new Date().toISOString(),
+            outcome: 'invalid-token',
+        };
+        return res.status(401).json({ error: 'Invalid language WAV token' });
+    }
+    const expiresAtSeconds = Number(claims.exp);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (
+        !Number.isSafeInteger(expiresAtSeconds) ||
+        expiresAtSeconds <= nowSeconds ||
+        expiresAtSeconds > nowSeconds + 15 * 60
+    ) {
+        lidLanguageWavStats.invalidTokens++;
+        lidLanguageWavStats.last = {
+            at: new Date().toISOString(),
+            outcome: 'expired-token',
+        };
+        return res.status(401).json({ error: 'Language WAV token expired' });
+    }
+
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body
+        : {};
+    const trackIndex = body.index;
+    const startOffset = body.start;
+    const hasDurationSeconds = Object.prototype.hasOwnProperty.call(body, 'durationSeconds');
+    const hasLegacyDuration = Object.prototype.hasOwnProperty.call(body, 'dur');
+    if (
+        hasDurationSeconds &&
+        hasLegacyDuration &&
+        body.durationSeconds !== body.dur
+    ) {
+        lidLanguageWavStats.invalidRequests++;
+        return res.status(400).json({ error: 'Conflicting duration fields' });
+    }
+    const duration = hasDurationSeconds ? body.durationSeconds : body.dur;
+    if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex > 1024) {
+        lidLanguageWavStats.invalidRequests++;
+        return res.status(400).json({ error: 'Invalid audio index' });
+    }
+    if (typeof startOffset !== 'number' || !Number.isFinite(startOffset) || startOffset < 0 || startOffset > 21600) {
+        lidLanguageWavStats.invalidRequests++;
+        return res.status(400).json({ error: 'Invalid language WAV offset' });
+    }
+    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 8 || duration > 30) {
+        lidLanguageWavStats.invalidRequests++;
+        return res.status(400).json({ error: 'Language WAV duration must be between 8 and 30 seconds' });
+    }
+
+    if (
+        lidLanguageWavActive > 0 ||
+        lidBenchmarkBusy ||
+        lidProductionCpuBusy()
+    ) {
+        lidLanguageWavStats.busyRejections++;
+        lidLanguageWavStats.last = {
+            at: new Date().toISOString(),
+            outcome: 'gateway-busy',
+            scope: claims.scope,
+        };
+        res.setHeader('Retry-After', '30');
+        return res.status(429).json({ error: 'Language WAV extraction requires an idle gateway' });
+    }
+
+    const lockKey = accountJobKey(claims.uid, claims.url);
+    if (isAccountJobBusy(lockKey) || accountSlotBusyLocally(claims.url)) {
+        lidLanguageWavStats.busyRejections++;
+        lidLanguageWavStats.last = {
+            at: new Date().toISOString(),
+            outcome: 'provider-busy',
+            scope: claims.scope,
+        };
+        res.setHeader('Retry-After', '30');
+        return res.status(429).json({ error: 'Provider account is busy' });
+    }
+
+    lidLanguageWavActive++;
+    lidLanguageWavStats.attempts++;
+    let wavPath = null;
+    let wavBuffer = null;
+    let extractMs = 0;
+    const clientAbort = new AbortController();
+    const abortExtraction = () => {
+        if (!res.writableFinished) clientAbort.abort();
+    };
+    req.once('aborted', abortExtraction);
+    res.once('close', abortExtraction);
+    try {
+        const extractStartedAt = performance.now();
+        const ex = await withAccountJobLock(lockKey, () =>
+            extractAudioWav(
+                claims.url,
+                sanitizeUserAgent(claims.ua) || FFMPEG_USER_AGENT,
+                trackIndex,
+                startOffset,
+                duration,
+                45_000,
+                claims.uid,
+                true,
+                clientAbort.signal,
+            ));
+        extractMs = Math.round((performance.now() - extractStartedAt) * 100) / 100;
+        lidLanguageWavStats.totalExtractMs += extractMs;
+        if (!ex.ok) {
+            if (ex.aborted) {
+                lidLanguageWavStats.responseAborts++;
+                lidLanguageWavStats.last = {
+                    at: new Date().toISOString(),
+                    outcome: 'client-aborted',
+                    scope: claims.scope,
+                    extractMs,
+                };
+                if (!res.headersSent && !res.destroyed) {
+                    return res.status(499).json({ error: 'Language WAV request was aborted' });
+                }
+                return undefined;
+            }
+            if (ex.preempted) {
+                lidLanguageWavStats.busyRejections++;
+                lidLanguageWavStats.last = {
+                    at: new Date().toISOString(),
+                    outcome: 'provider-preempted',
+                    scope: claims.scope,
+                    extractMs,
+                };
+                res.setHeader('Retry-After', '30');
+                return res.status(409).json({ error: 'Provider became busy during extraction' });
+            }
+            lidLanguageWavStats.extractionFailures++;
+            const detail = sanitizeLanguageWavError(ex.error, claims.url);
+            lidLanguageWavStats.last = {
+                at: new Date().toISOString(),
+                outcome: 'extract-failed',
+                scope: claims.scope,
+                extractMs,
+                detail,
+            };
+            return res.status(502).json({ error: 'Audio extraction failed', details: detail });
+        }
+        wavPath = ex.path;
+
+        const stat = await fsp.stat(wavPath);
+        const wavBytes = stat.size;
+        if (!Number.isSafeInteger(wavBytes) || wavBytes < 44) {
+            lidLanguageWavStats.validationFailures++;
+            return res.status(502).json({ error: 'Extracted WAV is invalid' });
+        }
+        if (wavBytes > LID_LANGUAGE_WAV_MAX_BYTES) {
+            lidLanguageWavStats.oversized++;
+            return res.status(413).json({ error: 'Extracted WAV exceeds the language sample limit' });
+        }
+
+        wavBuffer = await fsp.readFile(wavPath);
+        if (wavBuffer.length !== wavBytes) {
+            lidLanguageWavStats.validationFailures++;
+            return res.status(502).json({ error: 'Extracted WAV changed during validation' });
+        }
+        let wavInfo;
+        try {
+            wavInfo = inspectLanguageWavBuffer(wavBuffer);
+        } catch (error) {
+            lidLanguageWavStats.validationFailures++;
+            const detail = sanitizeLanguageWavError(error, claims.url);
+            lidLanguageWavStats.last = {
+                at: new Date().toISOString(),
+                outcome: 'invalid-wav',
+                scope: claims.scope,
+                extractMs,
+                detail,
+            };
+            return res.status(502).json({ error: 'Extracted WAV format is invalid', details: detail });
+        }
+
+        const digest = crypto.createHash('sha256').update(wavBuffer).digest('hex');
+        const audioSeconds = Math.round(wavInfo.audioSeconds * 1000) / 1000;
+        res.status(200);
+        res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Content-Length', String(wavBytes));
+        res.setHeader('X-Norva-Sample-Sha256', digest);
+        res.setHeader('X-Norva-Audio-Sha256', digest);
+        res.setHeader('X-Content-Sha256', digest);
+        res.setHeader('X-Norva-Sample-Bytes', String(wavBytes));
+        res.setHeader('X-Norva-Audio-Seconds', String(audioSeconds));
+        res.setHeader('X-Norva-Extract-Ms', String(extractMs));
+        const completed = await endLanguageWavResponse(res, wavBuffer);
+        if (completed) {
+            lidLanguageWavStats.successes++;
+            lidLanguageWavStats.bytesServed += wavBytes;
+            lidLanguageWavStats.last = {
+                at: new Date().toISOString(),
+                outcome: 'served',
+                scope: claims.scope,
+                wavBytes,
+                audioSeconds,
+                extractMs,
+            };
+        } else {
+            lidLanguageWavStats.responseAborts++;
+            lidLanguageWavStats.last = {
+                at: new Date().toISOString(),
+                outcome: 'response-aborted',
+                scope: claims.scope,
+                wavBytes,
+                extractMs,
+            };
+        }
+        return undefined;
+    } catch (error) {
+        lidLanguageWavStats.extractionFailures++;
+        const detail = sanitizeLanguageWavError(error, claims.url);
+        lidLanguageWavStats.last = {
+            at: new Date().toISOString(),
+            outcome: 'failed',
+            scope: claims.scope,
+            extractMs,
+            detail,
+        };
+        if (!res.headersSent) {
+            return res.status(502).json({ error: 'Language WAV extraction failed', details: detail });
+        }
+        return undefined;
+    } finally {
+        req.off('aborted', abortExtraction);
+        res.off('close', abortExtraction);
+        if (wavBuffer) wavBuffer.fill(0);
+        if (wavPath) await fsp.unlink(wavPath).catch(() => {});
+        lidLanguageWavActive = Math.max(0, lidLanguageWavActive - 1);
+    }
+});
+
 // Service-only A/B benchmark. A signed scope keeps browser-visible byte-pipe tokens from
 // enabling the double CPU work, while gateway Bearer auth keeps the route off the public path.
 // The provider is touched exactly once: both Whisper modes consume the same temporary WAV and
@@ -1802,6 +2099,111 @@ app.post('/translate', requireGatewayAuth, async (req, res) => {
     return res.json({ vtt: r.vtt, segments: (r.vtt.match(/-->/g) || []).length, ms: Date.now() - t0 });
 });
 
+// Validate the exact wire contract consumed by the isolated production LID worker.
+// Do not assume a 44-byte WAV header: ffmpeg may add harmless metadata chunks, so
+// walk RIFF chunks while still failing closed on truncation, overflow or format drift.
+function inspectLanguageWavBuffer(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 44 || buffer.length > LID_LANGUAGE_WAV_MAX_BYTES) {
+        throw new Error('WAV byte length is outside the allowed bounds');
+    }
+    if (
+        buffer.subarray(0, 4).toString('ascii') !== 'RIFF' ||
+        buffer.subarray(8, 12).toString('ascii') !== 'WAVE'
+    ) {
+        throw new Error('WAV must use the RIFF/WAVE container');
+    }
+    const riffBytes = buffer.readUInt32LE(4) + 8;
+    if (!Number.isSafeInteger(riffBytes) || riffBytes !== buffer.length || riffBytes < 44) {
+        throw new Error('WAV RIFF size is invalid');
+    }
+
+    let format = null;
+    let dataBytes = null;
+    for (let offset = 12; offset + 8 <= riffBytes;) {
+        const chunkId = buffer.subarray(offset, offset + 4).toString('ascii');
+        const chunkBytes = buffer.readUInt32LE(offset + 4);
+        const bodyOffset = offset + 8;
+        const bodyEnd = bodyOffset + chunkBytes;
+        if (!Number.isSafeInteger(bodyEnd) || bodyEnd > riffBytes || bodyEnd < bodyOffset) {
+            throw new Error('WAV chunk exceeds the RIFF boundary');
+        }
+        if (chunkId === 'fmt ') {
+            if (chunkBytes < 16) throw new Error('WAV fmt chunk is too short');
+            format = {
+                audioFormat: buffer.readUInt16LE(bodyOffset),
+                channels: buffer.readUInt16LE(bodyOffset + 2),
+                sampleRate: buffer.readUInt32LE(bodyOffset + 4),
+                byteRate: buffer.readUInt32LE(bodyOffset + 8),
+                blockAlign: buffer.readUInt16LE(bodyOffset + 12),
+                bitsPerSample: buffer.readUInt16LE(bodyOffset + 14),
+            };
+        } else if (chunkId === 'data') {
+            dataBytes = chunkBytes;
+        }
+        const next = bodyEnd + (chunkBytes % 2);
+        if (next <= offset || next > riffBytes) throw new Error('WAV chunk size is invalid');
+        offset = next;
+    }
+    if (!format || dataBytes === null || dataBytes <= 0) {
+        throw new Error('WAV is missing a valid fmt or data chunk');
+    }
+    if (
+        format.audioFormat !== 1 ||
+        format.channels !== 1 ||
+        format.sampleRate !== 16000 ||
+        format.byteRate !== 32000 ||
+        format.blockAlign !== 2 ||
+        format.bitsPerSample !== 16
+    ) {
+        throw new Error('WAV must be mono 16 kHz PCM signed 16-bit');
+    }
+    const audioSeconds = dataBytes / format.byteRate;
+    if (!Number.isFinite(audioSeconds) || audioSeconds <= 0 || audioSeconds > 30.1) {
+        throw new Error('WAV audio duration is invalid');
+    }
+    return {
+        audioSeconds,
+        dataBytes,
+        ...format,
+    };
+}
+
+// Keep the response buffer alive until Node has flushed or abandoned the response. The route's
+// finally block can then wipe it without racing the socket write.
+function endLanguageWavResponse(res, buffer) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (completed, error = null) => {
+            if (settled) return;
+            settled = true;
+            res.off('finish', onFinish);
+            res.off('close', onClose);
+            if (error) reject(error);
+            else resolve(completed);
+        };
+        const onFinish = () => finish(true);
+        const onClose = () => finish(res.writableFinished === true);
+        res.once('finish', onFinish);
+        res.once('close', onClose);
+        try {
+            res.end(buffer);
+        } catch (error) {
+            finish(false, error);
+        }
+    });
+}
+
+function sanitizeLanguageWavError(error, sourceUrl) {
+    return sanitizeLog(
+        redactCreds(String(error?.message || error || 'language WAV operation failed')),
+        sourceUrl,
+    )
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 320) || 'language WAV operation failed';
+}
+
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves
 // { ok:true, path } or { ok:false, error } — the error carries the REAL cause (ffmpeg stderr
 // tail / timeout kill / tiny output), creds-redacted, mirroring extractSubtitleSup: the opaque
@@ -1817,6 +2219,7 @@ function extractAudioWav(
     timeoutMs = 30_000,
     proxyKey = '',
     reportActivity = true,
+    abortSignal = null,
 ) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
@@ -1846,13 +2249,38 @@ function extractAudioWav(
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, reportActivity);
         let stderr = '';
         let timedOut = false;
+        let aborted = false;
+        const abort = () => {
+            aborted = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+        };
+        const removeAbortListener = () => abortSignal?.removeEventListener?.('abort', abort);
+        if (abortSignal?.aborted) abort();
+        else abortSignal?.addEventListener?.('abort', abort, { once: true });
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            removeAbortListener();
+            reg.release?.();
+            fsp.unlink(outputPath).catch(() => {});
+            resolve({
+                ok: false,
+                aborted,
+                error: aborted
+                    ? 'extraction request aborted'
+                    : 'ffmpeg error: ' + String((e && e.message) || e),
+            });
+        });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            removeAbortListener();
             reg.release?.();
             const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            if (aborted) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, aborted: true, error: 'extraction request aborted' });
+            }
             if (reg.preempted) {
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
