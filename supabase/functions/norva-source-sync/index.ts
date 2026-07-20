@@ -1402,7 +1402,8 @@ async function runEnrichmentFleetClaim(
   // Six of every twelve claims preserve the historical 50% movie speech share.
   // Three individually bounded lanes extend the exact-file pipeline to series:
   // exact episode inventory, header probe, then speech LID. Episode work is
-  // feature-flagged and starts at one audio file/claim.
+  // feature-flagged; cheap probes use a four-file sequential batch while the
+  // expensive speech fallback remains one file per claim.
   const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 12;
   const subtitleProbe = lane === 3;
   const seriesInventory = lane === 5;
@@ -1473,10 +1474,11 @@ async function runEnrichmentFleetClaim(
           speechTarget,
           target: subtitleProbe ? "subtitle" : undefined,
           fileScope: true,
-          // Both paths stay sequential inside a provider account. Speech uses
-          // a two-file batch; fleet-wide scaling happens across independently
-          // leased users/providers, never via intra-provider concurrency.
-          limit: episodeProbe || episodeSpeech ? 1 : speechVerification ? 2 : 4,
+          // Every path stays sequential inside a provider account. The real
+          // episode canary completed 14 probes / 72 tracks without one unknown
+          // or provider failure, so cheap exact probes use the existing
+          // four-file safety budget. Episode speech stays one-at-a-time.
+          limit: episodeProbe ? 4 : episodeSpeech ? 1 : speechVerification ? 2 : 4,
           concurrency: 1,
           // Lanes are explicit and individually bounded. fallthrough would
           // append a 15-series + 10-subtitle + Whisper chain after an empty

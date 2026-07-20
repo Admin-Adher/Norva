@@ -92,7 +92,7 @@ test('source-sync dispatcher forwards claimed ownership, never static ids', () =
   assert.match(route, /fallthrough: false/);
   assert.match(
     route,
-    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
   assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
   assert.match(route, /fileScope: true/);
@@ -256,7 +256,7 @@ test('throughput tuning raises the fleet ceiling and speech batch without intra-
   assert.match(activation, /enrichment-fleet\?limit=8/);
   assert.match(
     route,
-    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
   assert.match(route, /concurrency: 1/);
   assert.match(
@@ -287,15 +287,15 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(dispatcher, /mode: speechVerification \|\| episodeSpeech \? "whisper" : "probe"/);
   assert.match(
     dispatcher,
-    /limit: episodeProbe \|\| episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
 
   const laneContract = (lane) => ({
     type: lane === 7 || lane === 9 ? 'episode' : 'movie',
     mode: [1, 2, 4, 6, 8, 9, 10].includes(lane) ? 'whisper' : 'probe',
-    limit: lane === 7 || lane === 9 ? 1 : [1, 2, 4, 6, 8, 10].includes(lane) ? 2 : 4,
+    limit: lane === 7 ? 4 : lane === 9 ? 1 : [1, 2, 4, 6, 8, 10].includes(lane) ? 2 : 4,
   });
-  assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 1 });
+  assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 4 });
   assert.deepStrictEqual(laneContract(9), { type: 'episode', mode: 'whisper', limit: 1 });
 
   assert.match(exactWorker, /p_key: "episode_audio_scan_enabled"/);
