@@ -1100,6 +1100,9 @@ const CloudAdapter = (() => {
             audioProfile: query.get('audioProfile'),
             audioChannels: query.get('audioChannels'),
             audioStreamIndex: numericPlaybackHint(query.get('audioStreamIndex') ?? query.get('audio_stream_index')),
+            audioTrackCount: numericPlaybackHint(query.get('audioTrackCount') ?? query.get('audio_track_count')),
+            subtitleTrackCount: numericPlaybackHint(query.get('subtitleTrackCount') ?? query.get('subtitle_track_count')),
+            durationSeconds: numericPlaybackHint(query.get('durationSeconds') ?? query.get('duration_seconds')),
             audioMode: query.get('audioMode'),
             videoCodec: query.get('videoCodec'),
             clientAudioPassthrough: query.get('clientAudioPassthrough') === '1' ? true : undefined
@@ -1190,6 +1193,27 @@ const CloudAdapter = (() => {
             playbackHint.audioChannels
         );
         return unsafeContainer || unsafeVideo || unsafeAudio;
+    }
+
+    // Exceptionally track-dense Matroska files are pathological for the browser
+    // engine: parsing dozens of streams needs several range windows and the MSE
+    // audio-transcode path can starve before it has built a useful buffer. Route
+    // only the extreme case through the Gateway. Both thresholds must be met so
+    // a normal multi-audio film or a subtitle-heavy release stays on the engine.
+    // Counts originate exclusively from exact-file catalog track maps.
+    function shouldDenseVodUseGateway(container, playbackHint = {}) {
+        const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        if (normalizedContainer !== 'mkv') return false;
+        const audioTrackCount = numericPlaybackHint(
+            playbackHint.audioTrackCount ?? playbackHint.audio_track_count
+        );
+        const subtitleTrackCount = numericPlaybackHint(
+            playbackHint.subtitleTrackCount ?? playbackHint.subtitle_track_count
+        );
+        return Number.isInteger(audioTrackCount)
+            && Number.isInteger(subtitleTrackCount)
+            && audioTrackCount >= 20
+            && subtitleTrackCount >= 30;
     }
 
     async function sourcePayloadFromLocal(data) {
@@ -1563,6 +1587,9 @@ const CloudAdapter = (() => {
                 // makes the TV behave like TiviMate.
                 const nativePlayer = typeof window !== 'undefined'
                     && (window.NodeCastNative || window.NorvaTVCloud);
+                const denseTrackVod = isVodPlayback
+                    && !nativePlayer
+                    && shouldDenseVodUseGateway(container, playbackHint);
                 // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
                 // directly, so serve it through the RELAY (pass-through, no transcode
                 // server) rather than the cloud gateway. The browser then seeks
@@ -1591,6 +1618,7 @@ const CloudAdapter = (() => {
                 // browser-safe keep their existing paths.
                 const engineVod = isVodPlayback
                     && !nativePlayer
+                    && !denseTrackVod
                     && !browserSafeVod
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
@@ -1603,7 +1631,15 @@ const CloudAdapter = (() => {
                             : engineVod
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
+                if (denseTrackVod) {
+                    // Keep the video stream copied whenever it is browser-safe,
+                    // but always encode the selected audio to AAC. The Gateway's
+                    // codec probe still upgrades video to a full transcode when
+                    // the source is not H.264. audioStreamIndex is intentionally
+                    // left untouched so an explicit user selection survives.
+                    playbackHint.gatewayMode = 'remux';
+                    playbackHint.audioMode = 'transcode';
+                } else if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
                     // VOD only uses remux when the container, video and audio
                     // are browser-safe. MKV + AC3/5.1 can decode poorly after

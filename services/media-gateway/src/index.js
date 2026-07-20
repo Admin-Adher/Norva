@@ -133,6 +133,70 @@ function preemptAccountExtractions(proxyKey, reason) {
     if (n) console.log(`[media-gateway] preempted ${n} background extraction(s) — ${reason}`);
     return n;
 }
+
+// Provider extraction and Whisper inference are two distinct resource holders: once ffmpeg has
+// produced a WAV chunk it may exit (or be killed by playback), while whisper.cpp keeps consuming
+// the shared CPU for up to several minutes. Track ONLY catalogue LID and service/pregen subtitle
+// inference here. A viewer-origin subtitle request is deliberately absent from this ledger, so
+// opening /raw cannot kill the subtitle generation the viewer explicitly requested.
+const accountBackgroundWhispers = new Map(); // proxyKey -> Set<{ child, preempted }>
+let backgroundWhisperPreemptions = 0;
+function registerAccountBackgroundWhisper(proxyKey, child) {
+    const entry = { child, preempted: false };
+    if (!proxyKey || !child) return entry;
+    let set = accountBackgroundWhispers.get(proxyKey);
+    if (!set) { set = new Set(); accountBackgroundWhispers.set(proxyKey, set); }
+    set.add(entry);
+    entry.release = () => {
+        set.delete(entry);
+        if (!set.size) accountBackgroundWhispers.delete(proxyKey);
+    };
+    return entry;
+}
+function preemptAccountBackgroundWhispers(proxyKey, reason) {
+    const set = accountBackgroundWhispers.get(proxyKey);
+    if (!set || !set.size) return 0;
+    let n = 0;
+    for (const entry of [...set]) {
+        if (entry.preempted) continue;
+        entry.preempted = true;
+        try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+        n += 1;
+    }
+    if (n) {
+        backgroundWhisperPreemptions += n;
+        console.log(`[media-gateway] preempted ${n} background whisper inference(s) — ${reason}`);
+    }
+    return n;
+}
+function backgroundWhisperCount() {
+    let count = 0;
+    for (const set of accountBackgroundWhispers.values()) count += set.size;
+    return count;
+}
+function lowerBackgroundProcessPriority(child) {
+    if (!child || !Number.isInteger(child.pid) || child.pid <= 0) return false;
+    try {
+        os.setPriority(child.pid, os.constants?.priority?.PRIORITY_LOW ?? 19);
+        return true;
+    } catch (_) {
+        // Railway/container kernels may deny setpriority. QoS remains correct because viewer
+        // playback still preempts same-account background inference; niceness is an extra guard.
+        return false;
+    }
+}
+function registerPreemptibleBackgroundWhisper(proxyKey, child) {
+    const registration = registerAccountBackgroundWhisper(proxyKey, child);
+    // Register first, then re-check synchronously. This closes both orderings around spawn:
+    // playback may already have preempted before it could see this child, or it may start later
+    // and find the child in the registry during its normal preemption pass.
+    if (proxyKey && accountKeyBusyLocally(proxyKey)) {
+        preemptAccountBackgroundWhispers(proxyKey, 'viewer playback won whisper spawn race');
+        return registration;
+    }
+    lowerBackgroundProcessPriority(child);
+    return registration;
+}
 // True while THIS box holds the account's provider slot for a viewer: a live transcode session
 // or an engine /raw byte-pump. Checked before the edge pregen-gate — it is instant, and it sees
 // what the edge can't (a paused viewer whose ffmpeg is still transcoding, a mid-film raw pump).
@@ -440,7 +504,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 75;
+const GATEWAY_VERSION = 76;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -600,6 +664,8 @@ app.get('/health', (req, res) => {
         translateBusy,
         rawPumpCount: rawPumps.size,
         whisperInferenceActive,
+        backgroundWhisperInferenceActive: backgroundWhisperCount(),
+        backgroundWhisperPreemptions,
         argosInferenceActive,
         lidBenchmarkBusy,
         inbandHeaderParse: INBAND_HEADER_PARSE,
@@ -861,8 +927,11 @@ app.get('/raw/:token', async (req, res) => {
     abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
         `superseded by playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
     // Same rule as the transcode lane: a viewer's byte-pump outranks any background extraction
-    // holding this account's slot (the job re-queues as deferred and resumes after the viewing).
-    preemptAccountExtractions(pumpProxyKey, `raw playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
+    // or CPU inference for this account (the job re-queues as deferred and resumes after the
+    // viewing). Viewer-origin subtitle inference is intentionally not in the background ledger.
+    const rawPlaybackReason = `raw playback ${String(claims.sid || 'unknown').slice(0, 8)}`;
+    preemptAccountExtractions(pumpProxyKey, rawPlaybackReason);
+    preemptAccountBackgroundWhispers(pumpProxyKey, rawPlaybackReason);
     res.on('close', () => { ac.abort(); releaseRawPump(pump); });
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
@@ -1179,7 +1248,14 @@ app.get('/detect-language/:token', async (req, res) => {
         const strictSamples = [];
         let bestStrictAccepted = null;
         let strictRejectedSpeechSamples = 0;
+        let inferencePreempted = false;
         const lockKey = accountJobKey(claims.uid, claims.url);
+        // This endpoint is the catalogue/background LID route. Viewer-requested subtitle jobs
+        // use /transcribe-async?origin=viewer and never receive these preemptible options.
+        const lidBackgroundOptions = {
+            backgroundKey: proxyKeyFromUrl(claims.url),
+            preemptibleBackground: true,
+        };
         for (const off of offsets) {
             let wavPath = null;
             try {
@@ -1198,7 +1274,15 @@ app.get('/detect-language/:token', async (req, res) => {
                 let fastEligible = false;
                 let result = null;
                 if (detectOnlyMode !== 'off') {
-                    fast = await runProductionWhisperDetectOnly(wavPath, detectOnlyMode);
+                    fast = await runProductionWhisperDetectOnly(
+                        wavPath,
+                        detectOnlyMode,
+                        lidBackgroundOptions,
+                    );
+                    if (fast.preempted) {
+                        inferencePreempted = true;
+                        break;
+                    }
                     fastEligible = fast.ok === true
                         && /^[a-z]{2,3}$/.test(String(fast.lang || ''))
                         && Number(fast.prob || 0) >= WHISPER_DETECT_ONLY_MIN_PROBABILITY;
@@ -1240,8 +1324,12 @@ app.get('/detect-language/:token', async (req, res) => {
                 if (!result) {
                     if (detectOnlyMode === 'primary') lidDetectOnlyStats.primaryFallbacks++;
                     const fullStartedAt = Date.now();
-                    const whisper = await runWhisperDetect(wavPath);
+                    const whisper = await runWhisperDetect(wavPath, lidBackgroundOptions);
                     const fullElapsedMs = Date.now() - fullStartedAt;
+                    if (whisper.preempted) {
+                        inferencePreempted = true;
+                        break;
+                    }
                     if (detectOnlyMode === 'shadow') {
                         lidDetectOnlyStats.shadowFullRuns++;
                         lidDetectOnlyStats.shadowFullMs += fullElapsedMs;
@@ -1393,6 +1481,18 @@ app.get('/detect-language/:token', async (req, res) => {
                 if (!best || result.wordCount > best.wordCount) best = result;
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
+        }
+        if (inferencePreempted) {
+            // A transport-shaped non-2xx response is essential: both Edge callers already leave
+            // their exact-file cursor untouched on !res.ok, so the cron retries later and cannot
+            // persist an empty/pending sample as if Whisper had actually analysed it.
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Retry-After', '30');
+            return res.status(409).json({
+                error: 'Language detection preempted by viewer playback',
+                code: 'viewer_preempted',
+                retryable: true,
+            });
         }
         if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
         if (
@@ -2416,11 +2516,25 @@ function shiftVttBlocks(vtt, offsetSec) {
 // Run whisper.cpp's language-only mode under the same CPU activity guard as full
 // transcription. The helper always settles after the child is closed, so a timeout cannot
 // overlap the fallback process on the same replica.
-async function runProductionWhisperDetectOnly(wavPath, mode) {
+async function runProductionWhisperDetectOnly(wavPath, mode, options = {}) {
     if (mode === 'primary') lidDetectOnlyStats.primaryAttempts++;
     else lidDetectOnlyStats.shadowAttempts++;
+    const backgroundKey = String(options.backgroundKey || '');
+    const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
+    if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+        return {
+            ok: false,
+            lang: null,
+            prob: 0,
+            timedOut: false,
+            preempted: true,
+            error: 'whisper preempted by viewer playback on this account',
+            elapsedMs: 0,
+        };
+    }
     whisperInferenceActive += 1;
     const startedAt = Date.now();
+    let backgroundRegistration = null;
     try {
         const value = await runWhisperDetectOnly({
             bin: WHISPER_BIN,
@@ -2428,9 +2542,24 @@ async function runProductionWhisperDetectOnly(wavPath, mode) {
             wavPath,
             threads: WHISPER_THREADS,
             timeoutMs: WHISPER_DETECT_ONLY_TIMEOUT_MS,
+            onSpawn: (child) => {
+                if (!preemptibleBackground) return;
+                backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
+            },
         });
         const elapsedMs = Date.now() - startedAt;
         lidDetectOnlyStats.totalFastMs += elapsedMs;
+        if (backgroundRegistration?.preempted === true) {
+            return {
+                ...value,
+                ok: false,
+                lang: null,
+                prob: 0,
+                preempted: true,
+                error: 'whisper preempted by viewer playback on this account',
+                elapsedMs,
+            };
+        }
         if (value.ok !== true) lidDetectOnlyStats.failures++;
         if (value.timedOut === true) lidDetectOnlyStats.timeouts++;
         return { ...value, elapsedMs };
@@ -2447,20 +2576,38 @@ async function runProductionWhisperDetectOnly(wavPath, mode) {
             elapsedMs,
         };
     } finally {
+        backgroundRegistration?.release?.();
         whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
     }
 }
 
 // Run whisper.cpp on a WAV: auto-detect language + transcribe. Resolves { text, lang, prob };
 // best-effort (empties on failure). `lang`/`prob` are parsed from whisper's own LID line.
-function runWhisperDetect(wavPath) {
+function runWhisperDetect(wavPath, options = {}) {
     return new Promise((resolve) => {
+        const backgroundKey = String(options.backgroundKey || '');
+        const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
+        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+            return resolve({
+                text: '', lang: null, prob: 0, preempted: true,
+                error: 'whisper preempted by viewer playback on this account',
+            });
+        }
         whisperInferenceActive += 1;
         let inferenceReleased = false;
+        let backgroundRegistration = null;
         const releaseInference = () => {
             if (inferenceReleased) return;
             inferenceReleased = true;
+            backgroundRegistration?.release?.();
             whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+        };
+        let settled = false;
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            releaseInference();
+            resolve(value);
         };
         const outPrefix = wavPath.replace(/\.wav$/i, '');
         const args = [
@@ -2474,28 +2621,44 @@ function runWhisperDetect(wavPath) {
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
         catch (_) {
-            releaseInference();
-            return resolve({ text: '', lang: null, prob: 0 });
+            return finish({ text: '', lang: null, prob: 0 });
+        }
+        if (preemptibleBackground) {
+            backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
         }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TIMEOUT_MS);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', () => {
             clearTimeout(timer);
-            releaseInference();
-            resolve({ text: '', lang: null, prob: 0 });
+            const preempted = backgroundRegistration?.preempted === true;
+            finish({
+                text: '', lang: null, prob: 0,
+                ...(preempted
+                    ? {
+                        preempted: true,
+                        error: 'whisper preempted by viewer playback on this account',
+                    }
+                    : {}),
+            });
         });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            if (settled) return;
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
             const lang = m ? m[1].toLowerCase() : null;
             const prob = m ? (Number(m[2]) || 0) : 0;
             let text = '';
             try { text = await fsp.readFile(outPrefix + '.txt', 'utf8'); } catch (_) { text = ''; }
             fsp.unlink(outPrefix + '.txt').catch(() => {});
+            if (backgroundRegistration?.preempted === true) {
+                return finish({
+                    text: '', lang: null, prob: 0, preempted: true,
+                    error: 'whisper preempted by viewer playback on this account',
+                });
+            }
             if (code !== 0 && !text && !lang) console.warn(`[media-gateway] whisper exit ${code}: ${stderr.slice(-300)}`);
-            releaseInference();
-            resolve({ text: String(text || '').trim(), lang, prob });
+            finish({ text: String(text || '').trim(), lang, prob });
         });
     });
 }
@@ -2560,13 +2723,25 @@ function cleanVtt(vtt) {
 // WHY (timeout SIGKILL vs crash vs spawn): whisper.cpp only writes the -ovtt file at completion,
 // so a timeout kill leaves no partial VTT and used to surface as an opaque "no output".
 // forceLang pins the source language. `timeoutMs` = the adaptive budget (whisperBudgetMs).
-function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOUT_MS) {
+function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOUT_MS, options = {}) {
     return new Promise((resolve) => {
+        const backgroundKey = String(options.backgroundKey || '');
+        const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
+        // Close the extraction→inference race: playback may have started after the job's WAV was
+        // produced but before whisper.cpp was spawned.
+        if (preemptibleBackground && accountKeyBusyLocally(backgroundKey)) {
+            return resolve({
+                vtt: '', lang: null, prob: 0, ms: 0, preempted: true,
+                failReason: 'whisper preempted by viewer playback on this account',
+            });
+        }
         whisperInferenceActive += 1;
         let inferenceReleased = false;
+        let backgroundRegistration = null;
         const releaseInference = () => {
             if (inferenceReleased) return;
             inferenceReleased = true;
+            backgroundRegistration?.release?.();
             whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
         };
         const t0 = Date.now();
@@ -2585,29 +2760,51 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
             releaseInference();
             return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) });
         }
+        if (preemptibleBackground) {
+            backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
+        }
+        let settled = false;
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            releaseInference();
+            resolve(value);
+        };
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', (e) => {
             clearTimeout(timer);
-            releaseInference();
-            resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) });
+            const preempted = backgroundRegistration?.preempted === true;
+            finish({
+                vtt: '', lang: null, prob: 0, ms: Date.now() - t0,
+                ...(preempted ? { preempted: true } : {}),
+                failReason: preempted
+                    ? 'whisper preempted by viewer playback on this account'
+                    : 'whisper error: ' + String((e && e.message) || e),
+            });
         });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            if (settled) return;
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
             const lang = m ? m[1].toLowerCase() : (forceLang || null);
             const prob = m ? (Number(m[2]) || 0) : 0;
             let vtt = '';
             try { vtt = await fsp.readFile(outPrefix + '.vtt', 'utf8'); } catch (_) { vtt = ''; }
             fsp.unlink(outPrefix + '.vtt').catch(() => {});
+            if (backgroundRegistration?.preempted === true) {
+                return finish({
+                    vtt: '', lang: null, prob: 0, ms: Date.now() - t0, preempted: true,
+                    failReason: 'whisper preempted by viewer playback on this account',
+                });
+            }
             if (code !== 0 && !vtt) console.warn(`[media-gateway] whisper-vtt exit ${code}: ${stderr.slice(-300)}`);
             const failReason = vtt ? null
                 : timedOut ? `whisper killed by timeout after ${Math.round((Date.now() - t0) / 1000)}s (no partial VTT is written)`
                 : `whisper exit ${code} wrote no VTT: ${stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr'}`;
-            releaseInference();
-            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0, failReason });
+            finish({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0, failReason });
         });
     });
 }
@@ -2671,6 +2868,13 @@ async function shouldDeferJob(job) {
 // WITHIN a class (append after the last same-class job), so same-priority jobs stay FIFO.
 const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
 function jobPrio(job) { return Number.isInteger(job?.prio) ? job.prio : 1; }
+function whisperOptionsForJob(job) {
+    if (jobPrio(job) === JOB_PRIORITY.viewer) return {};
+    return {
+        backgroundKey: proxyKeyFromUrl(job?.url || ''),
+        preemptibleBackground: true,
+    };
+}
 function insertByPriority(queue, job) {
     const p = jobPrio(job);
     let i = queue.length;
@@ -2822,11 +3026,20 @@ async function runTranscribeJob(job) {
                 postJobHeartbeat(job, 'transcribing');
                 let audioSec = 0;
                 try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
-                const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
-                const segments = (w.vtt.match(/-->/g) || []).length;
-                payload = w.vtt
-                    ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
-                    : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
+                const w = await runWhisperVtt(
+                    wavPath,
+                    '',
+                    whisperBudgetMs(audioSec),
+                    whisperOptionsForJob(job),
+                );
+                if (w.preempted) {
+                    payload = { requeue: true };
+                } else {
+                    const segments = (w.vtt.match(/-->/g) || []).length;
+                    payload = w.vtt
+                        ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
+                        : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
+                }
             }
         }
     } catch (e) {
@@ -3017,10 +3230,31 @@ async function runChunkedTranscription(job) {
             }
             const exists = (await fsp.readdir(dir).catch(() => [])).includes(name);
             if (!exists) break; // no more chunks
+            // The extraction ledger is preempted first. Do not spend another CPU-heavy Whisper
+            // pass on an already-produced chunk while that viewer is now reading the same VOD.
+            if (
+                jobPrio(job) !== JOB_PRIORITY.viewer &&
+                extractionSettled &&
+                extractionResult.preempted
+            ) {
+                await extractionDone;
+                return { jobId, requeue: true };
+            }
             if (!announcedTranscribing) { announcedTranscribing = true; postJobHeartbeat(job, 'transcribing'); }
             try { totalAudioSec += (await fsp.stat(p)).size / (16000 * 2); } catch (_) { /* best-effort */ }
-            const w = await runWhisperVtt(p, lang, CHUNK_WHISPER_TIMEOUT_MS);
+            const w = await runWhisperVtt(
+                p,
+                lang,
+                CHUNK_WHISPER_TIMEOUT_MS,
+                whisperOptionsForJob(job),
+            );
             fsp.unlink(p).catch(() => {});
+            if (w.preempted) {
+                // /raw also kills the provider extraction for this account, so this settles
+                // promptly. Re-queue without a failure callback; the gate resumes it later.
+                await extractionDone;
+                return { jobId, requeue: true };
+            }
             if (w.vtt) {
                 if (!lang && w.lang) lang = w.lang; // chunk 0 detects, the rest are forced
                 blocks.push(...shiftVttBlocks(w.vtt, idx * TRANSCRIBE_CHUNK_SEC));
@@ -3467,8 +3701,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         stoppedConflictingSessions += abortRawPumps(
             (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl), null, 'transcode session start');
         // A background extraction (whisper/storyboard) mid-film on this account would fight the
-        // viewer for the single slot for MINUTES — the viewer wins, the job re-queues as deferred.
-        stoppedConflictingSessions += preemptAccountExtractions(proxyKeyFromUrl(sourceUrl), 'transcode session start');
+        // viewer for the single slot for MINUTES. Its already-produced WAV must not leave a
+        // service/pregen Whisper process fighting the viewer for CPU either.
+        const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
+        stoppedConflictingSessions += preemptAccountExtractions(playbackProxyKey, 'transcode session start');
+        // CPU preemption does not hold a provider connection and must not trigger the provider
+        // slot-release delay below.
+        preemptAccountBackgroundWhispers(playbackProxyKey, 'transcode session start');
 
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
             console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);

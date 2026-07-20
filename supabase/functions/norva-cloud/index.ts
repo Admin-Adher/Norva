@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { vodTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import {
   buildLiveMaterializationPlan,
   clearLiveMaterialization,
@@ -3244,6 +3245,13 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const mode = choosePlaybackMode(requestedMode, body);
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  const gatewayTransportExpiresAt = mode === "transcode"
+    ? vodTransportExpiresAt({
+      itemType,
+      playbackHint: requestedPlaybackHint,
+      sessionTtlSeconds: ttlSeconds,
+    })
+    : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
   const edgeCoordination = mode === "transcode"
     ? await prepareEdgeSessionCoordinator({
@@ -3253,7 +3261,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       itemType,
       itemId,
       targetUrlHash,
-      expiresAt,
+      expiresAt: gatewayTransportExpiresAt,
     }, db)
     : null;
   if (edgeCoordination?.waitMs) await sleep(edgeCoordination.waitMs);
@@ -3308,14 +3316,14 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
 
   let gateway;
   try {
-    gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, requestedPlaybackHint);
+    gateway = await createGatewaySession(session.id, userId, targetUrl, gatewayTransportExpiresAt, db, requestedPlaybackHint);
     await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
       itemType,
       itemId,
       targetUrlHash,
-      expiresAt,
+      expiresAt: gatewayTransportExpiresAt,
     });
   } catch (error) {
     await abortEdgeSessionCoordinator(edgeCoordination);

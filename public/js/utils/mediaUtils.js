@@ -1286,6 +1286,58 @@ const MediaUtils = (() => {
         return /^https?:\/\//i.test(raw) ? raw : '';
     }
 
+    // Only an exact-file track map is safe for playback routing. Title-level
+    // unions deliberately contain tracks from sibling versions and would make
+    // an ordinary file look artificially dense. Count unique, valid stream
+    // indexes so duplicate/partial catalog rows cannot force the costly path.
+    function exactFileTrackCount(item, variant, data, kind) {
+        const isAudio = kind === 'audio';
+        const arrayKeys = isAudio
+            ? ['audioTracks', 'audio_tracks']
+            : ['subtitleTracks', 'subtitle_tracks', 'subtitles'];
+        const scopeKeys = isAudio
+            ? ['audioTracksScope', 'audio_tracks_scope']
+            : ['subtitleTracksScope', 'subtitle_tracks_scope'];
+
+        for (const record of [item, variant, data]) {
+            if (!record || typeof record !== 'object') continue;
+            const scope = String(firstValue(...scopeKeys.map(key => record[key])) || '').toLowerCase();
+            if (scope !== 'file') continue;
+            const tracks = arrayKeys
+                .map(key => record[key])
+                .find(value => Array.isArray(value));
+            if (!tracks) continue;
+            const indexes = new Set(
+                tracks
+                    .map(track => Number(track?.index ?? track?.streamIndex ?? track?.stream_index))
+                    .filter(index => Number.isInteger(index) && index >= 0)
+            );
+            return indexes.size;
+        }
+        return undefined;
+    }
+
+    function playbackDurationSeconds(item, variant, data, codec, base) {
+        const secondValues = [
+            base.durationSeconds, base.duration_seconds, base.durationHint, base.duration_hint,
+            item.durationSeconds, item.duration_seconds, item.durationHint, item.duration_hint, item.duration,
+            variant.durationSeconds, variant.duration_seconds, variant.durationHint, variant.duration_hint, variant.duration,
+            data.durationSeconds, data.duration_seconds, data.durationHint, data.duration_hint, data.duration,
+            codec.durationSeconds, codec.duration_seconds, codec.duration
+        ];
+        for (const value of secondValues) {
+            const seconds = parseDurationToSeconds(value);
+            if (Number.isFinite(seconds) && seconds > 0) return Math.floor(seconds);
+        }
+
+        // TMDB runtime is expressed in minutes, unlike catalog/codec durations.
+        const tmdb = firstRecord(item.tmdb, variant.tmdb, data.tmdb);
+        const runtimeMinutes = Number.parseFloat(String(tmdb.runtime ?? ''));
+        return Number.isFinite(runtimeMinutes) && runtimeMinutes > 0
+            ? Math.floor(runtimeMinutes * 60)
+            : undefined;
+    }
+
     function playbackHintFromItem(item = {}, base = {}) {
         const variant = item.defaultVariant || item.default_variant || item.variant || {};
         const data = item.data || {};
@@ -1323,7 +1375,10 @@ const MediaUtils = (() => {
             audioProfile: firstValue(item.audioProfile, item.audio_profile, codec.audioProfile, codec.audio_profile),
             audioChannels: firstValue(item.audioChannels, item.audio_channels, codec.audioChannels, codec.audio_channels, codec.channels),
             audioMode: firstValue(item.audioMode, item.audio_mode, codec.audioMode, codec.audio_mode),
-            videoCodec: firstValue(item.videoCodec, item.video_codec, codec.videoCodec, codec.video_codec, codec.video)
+            videoCodec: firstValue(item.videoCodec, item.video_codec, codec.videoCodec, codec.video_codec, codec.video),
+            audioTrackCount: exactFileTrackCount(item, variant, data, 'audio'),
+            subtitleTrackCount: exactFileTrackCount(item, variant, data, 'subtitle'),
+            durationSeconds: playbackDurationSeconds(item, variant, data, codec, base)
         });
 
         if (isSafeBrowserAudio(hint.audioCodec, hint.audioProfile, hint.audioChannels)) {

@@ -46,6 +46,7 @@ function runWhisperDetectOnly({
     spawnImpl = spawn,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
+    onSpawn = null,
 }) {
     return new Promise((resolve) => {
         const args = buildWhisperDetectOnlyArgs({ model, wavPath, threads });
@@ -60,6 +61,21 @@ function runWhisperDetectOnly({
                 code: null,
                 timedOut: false,
                 error: `spawn failed: ${String(error?.message || error)}`,
+            });
+            return;
+        }
+        try {
+            if (typeof onSpawn === 'function') onSpawn(child);
+        } catch (error) {
+            child.on?.('error', () => {});
+            try { child.kill('SIGKILL'); } catch (_) {}
+            resolve({
+                ok: false,
+                lang: null,
+                prob: 0,
+                code: null,
+                timedOut: false,
+                error: `spawn hook failed: ${String(error?.message || error)}`,
             });
             return;
         }

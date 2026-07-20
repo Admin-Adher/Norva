@@ -1681,7 +1681,11 @@
       // Why the read loop ended. A clean AVERROR_EOF is normal end-of-file; anything
       // else means the byte source stopped early (single-slot 458 / dropped provider
       // connection), which is the real cause when a title "ends" after a few seconds.
-      const isEof = (typeof lib.AVERROR_EOF === 'number') ? res === lib.AVERROR_EOF : res < 0;
+      // AVERROR_EOF is stable across FFmpeg builds. Do not treat every negative
+      // result as EOF when an older libav.js glue does not export the constant:
+      // EIO/ETIMEDOUT/custom range-reader failures are negative too.
+      const eofCode = (typeof lib.AVERROR_EOF === 'number') ? lib.AVERROR_EOF : -541478725;
+      const isEof = res === eofCode;
       // "No packets after seek": the timestamp seek resolved but mispositioned the
       // demuxer at EOF (cue-less MKV) — no video keyframe was ever anchored, so ending
       // the stream here would make the film "finish" at the seek point. Retry ONCE via
@@ -1701,7 +1705,27 @@
       this._diag.lastReadError = this._lastReadError ? errStr(this._lastReadError).slice(0, 200) : null;
       this._diag.exitFetches = this._fetchCount;
       this._diag.exitFetchMB = Math.round((this._fetchBytes / 1048576) * 10) / 10;
-      if (!isEof) this.log('pump exit (read stopped early) res=' + res + ' fetched=' + this._diag.exitFetchMB + 'MB lastReadErr=' + (this._diag.lastReadError || '-'));
+      if (!isEof) {
+        this.log('pump exit (read stopped early) res=' + res + ' fetched=' + this._diag.exitFetchMB + 'MB lastReadErr=' + (this._diag.lastReadError || '-'));
+        // A short/failed range read is not a media EOF. Finalising MediaSource here
+        // makes Chromium fire `ended`, and WatchPage then records the whole title as
+        // completed. Keep the stream non-ended and hand the exact failure to the
+        // existing bounded engine retry -> Gateway recovery ladder instead.
+        const detail = this._diag.lastReadError || `ff_read_frame_multi=${String(res)}`;
+        const error = new Error(`ENGINE_READ_FAILED:${String(res)}:${detail}`);
+        this._stopRequested = true;
+        if (this._gate) { this._gate(); this._gate = null; }
+        if (!this._fatalSignaled) {
+          this._fatalSignaled = true;
+          try { this.report({ stage: 'pump:read', message: error.message }); } catch (_) {}
+          queueMicrotask(() => {
+            if (!this.destroyed) {
+              try { this.onFatal(error); } catch (_) {}
+            }
+          });
+        }
+        return;
+      }
       // EOF: flush audio + trailer + endOfStream
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);

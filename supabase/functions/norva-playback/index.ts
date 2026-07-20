@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import { engineRawTokenExpiresAt, vodTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -371,6 +372,16 @@ async function createPlaybackSession(
   const mode = choosePlaybackMode(requestedMode, body);
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  // Entitlement/concurrency stays short-lived, but a VOD gateway transport must
+  // survive the whole movie/episode. Explicit teardown and the cross-device
+  // coordinator still stop it immediately when playback ends or is replaced.
+  const gatewayTransportExpiresAt = mode === "transcode"
+    ? vodTransportExpiresAt({
+      itemType,
+      playbackHint: requestedPlaybackHint,
+      sessionTtlSeconds: ttlSeconds,
+    })
+    : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
 
   const closedGatewaySessions = await closeOpenGatewaySessionsForUser(userId, db);
@@ -382,7 +393,7 @@ async function createPlaybackSession(
       itemType,
       itemId,
       targetUrlHash,
-      expiresAt,
+      expiresAt: gatewayTransportExpiresAt,
     }, db)
     : null;
   // Only the cloud-gateway transcode path shares the provider's single slot, so
@@ -444,21 +455,43 @@ async function createPlaybackSession(
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
     if (body.enginePipe === true || body.engine_pipe === true) {
+      // The cloud session remains short-lived so a vanished client cannot hold
+      // an entitlement slot for hours. The stateless /raw token is different:
+      // every Range request is authenticated again, so a 15-minute token cuts a
+      // healthy long VOD at the first later range. Cover the known media
+      // duration (+ bounded pause margin), or a bounded unknown-duration
+      // fallback, without extending direct/relay/LID credentials.
+      const rawTokenExpiresAt = engineRawTokenExpiresAt({
+        itemType,
+        playbackHint: requestedPlaybackHint,
+        sessionTtlSeconds: ttlSeconds,
+      });
       // Register the raw byte-pipe in the SAME cross-device ledger as transcode:
       // starting it evicts a lingering gateway transcode (real DELETE → frees the
       // provider slot) or another device's pipe (raw-pump abort at the gateway),
       // instead of the two lanes silently fighting a single-slot provider (458).
       // Coordinator unavailable → null → plays exactly as before (best-effort).
       const rawCoordination = await prepareEdgeSessionCoordinator({
-        userId, sourceId, deviceId, itemType, itemId, targetUrlHash, expiresAt,
+        userId, sourceId, deviceId, itemType, itemId, targetUrlHash,
+        // The cloud playback session still expires after 15 minutes, but the
+        // coordinator must not abort a legitimate later Range request. A new
+        // playback start evicts this source-scoped record immediately.
+        expiresAt: rawTokenExpiresAt,
       }, db);
       if (rawCoordination?.waitMs) await sleep(rawCoordination.waitMs);
-      const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
+      const pipe = await createBytePipeAccess(
+        session.id,
+        userId,
+        targetUrl,
+        rawTokenExpiresAt,
+        db,
+        userAgent,
+      );
       await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
         gatewaySessionId: null,
         lane: "raw",
-        itemType, itemId, targetUrlHash, expiresAt,
+        itemType, itemId, targetUrlHash, expiresAt: rawTokenExpiresAt,
       });
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
@@ -657,7 +690,8 @@ async function createPlaybackSession(
         playback: {
           mode: "relay",
           url: pipe.url,
-          tokenExpiresAt: expiresAt,
+          tokenExpiresAt: rawTokenExpiresAt,
+          sessionExpiresAt: expiresAt,
           ...(audioTracks.length ? {
             audioTracks,
             audioLanguageValidationStatus: audioLanguageVerified
@@ -678,14 +712,14 @@ async function createPlaybackSession(
 
   let gateway;
   try {
-    gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent, requestedPlaybackHint);
+    gateway = await createGatewaySession(session.id, userId, targetUrl, gatewayTransportExpiresAt, db, mode, userAgent, requestedPlaybackHint);
     await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
       itemType,
       itemId,
       targetUrlHash,
-      expiresAt,
+      expiresAt: gatewayTransportExpiresAt,
     });
   } catch (error) {
     await abortEdgeSessionCoordinator(edgeCoordination);
@@ -762,6 +796,8 @@ async function createPlaybackSession(
       sourceTimestamps: gateway.sourceTimestamps === true,
       source_timestamps: gateway.sourceTimestamps === true,
       codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
+      transportExpiresAt: gatewayTransportExpiresAt,
+      sessionExpiresAt: expiresAt,
     },
   };
 }

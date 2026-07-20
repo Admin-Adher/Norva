@@ -68,6 +68,7 @@ function fakeChild() {
 test('runWhisperDetectOnly parses chunked stderr and exposes the exact CLI args', async () => {
   const child = fakeChild();
   let spawnCall = null;
+  let spawnedChild = null;
   const resultPromise = runWhisperDetectOnly({
     bin: '/bin/whisper-cli',
     model: '/models/small.bin',
@@ -83,8 +84,12 @@ test('runWhisperDetectOnly parses chunked stderr and exposes the exact CLI args'
       });
       return child;
     },
+    onSpawn: (value) => {
+      spawnedChild = value;
+    },
   });
   const result = await resultPromise;
+  assert.equal(spawnedChild, child);
   assert.equal(spawnCall[0], '/bin/whisper-cli');
   assert.deepEqual(spawnCall[1], [
     '-m', '/models/small.bin',
@@ -191,7 +196,7 @@ test('production detect-only is signed-scope only, non-strict and falls back on 
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 75/);
+  assert.match(gateway, /const GATEWAY_VERSION = 76/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
@@ -205,10 +210,10 @@ test('production detect-only is signed-scope only, non-strict and falls back on 
   // Only primary may short-circuit. Shadow always proceeds to the historical
   // transcription result and merely appends diagnostics.
   assert.match(route, /if \(detectOnlyMode === 'primary' && fastEligible\) \{/);
-  assert.match(route, /if \(!result\) \{[\s\S]*runWhisperDetect\(wavPath\)/);
+  assert.match(route, /if \(!result\) \{[\s\S]*runWhisperDetect\(wavPath,\s*lidBackgroundOptions\)/);
   assert.match(
     route,
-    /runProductionWhisperDetectOnly\(wavPath, detectOnlyMode\)[\s\S]*runWhisperDetect\(wavPath\)/,
+    /runProductionWhisperDetectOnly\([\s\S]*wavPath,[\s\S]*detectOnlyMode,[\s\S]*lidBackgroundOptions[\s\S]*runWhisperDetect\(wavPath,\s*lidBackgroundOptions\)/,
   );
   assert.match(route, /if \(detectOnlyMode === 'shadow' && fast\) \{/);
   assert.match(
