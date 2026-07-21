@@ -34,7 +34,7 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 </style>
 </head>
 <body>
-<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Norva Email &amp; Resend Audit — 21 July 2026</h1><p class="portable-description">Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.</p></div><div class="portable-page-meta"><time datetime="2026-07-21T22:00:00Z">Jul 21, 2026, 10:00 PM UTC</time></div></header><div class="portable-block-stack">
+<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Norva Email &amp; Resend Audit — 21 July 2026</h1><p class="portable-description">Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.</p></div><div class="portable-page-meta"><time datetime="2026-07-21T23:49:33Z">Jul 21, 2026, 11:49 PM UTC</time></div></header><div class="portable-block-stack">
 <div class="portable-block portable-layout-full" data-artifact-block-id="executive_summary" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Executive Summary</h2>
 <p>Norva’s current email population is entirely internal/test: there are no real customer accounts yet. That makes the historical bounce and complaint percentages useful as engineering signals, but invalid as a customer-quality benchmark. The main problems were architectural: a shared Resend team mixed Norva with BuildTrack, a deprecated all-users audience provided no useful lifecycle targeting, delivery webhooks were absent, and several critical messages could be lost or duplicated around network/database failures.</p>
 <p>The remediation replaces direct fire-and-forget paths with immutable, leased outboxes; adds signed, app-scoped delivery telemetry; defines consent-safe lifecycle cohorts; minimizes and expires stored recipient data; and separates a domain-scoped send credential from host-only Resend administration. Contact projection remains intentionally off until Norva is moved to a dedicated Resend team. This is the only safe interpretation of “premium data”: no cross-product contacts, no guessed segments and no false claim that the current five pilot accounts represent customers.</p></section></div>
@@ -140,7 +140,7 @@ from (values
   (8, &#39;Win-back&#39;, &#39;Marketing&#39;),
   (9, &#39;Operations alerts&#39;, &#39;Operational&#39;),
   (10, &#39;Account deletion&#39;, &#39;Transactional auth&#39;)
-) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Residual controls and external blockers</caption><thead><tr><th scope="col" class="portable-table-number">Rank</th><th scope="col">Control</th><th scope="col">Required action</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-29"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-29" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Dedicated Resend team</td><td>Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-30"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-30" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>DMARC reporting</td><td>Create dedicated report mailbox/aggregator and publish p=none with strict alignment</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-31"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-31" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Domain-scoped sending key</td><td>Run least-privilege split and retire DB Vault copy after deployment proof</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-32"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-32" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Signed delivery webhooks</td><td>Register app-scoped events and inject webhook signing secret after Edge deployment</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-33"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-33" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Real-customer baselines</td><td>Start deliverability and lifecycle KPI baselines only after non-internal customers exist</td></tr></tbody></table></div></div></section></div>
+) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Residual controls and external blockers</caption><thead><tr><th scope="col" class="portable-table-number">Rank</th><th scope="col">Control</th><th scope="col">Required action</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-29"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-29" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Dedicated Resend team</td><td>Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-30"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-30" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>DMARC reporting</td><td>Create dedicated report mailbox/aggregator and publish p=none with strict alignment</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-31"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-31" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Domain-scoped sending key</td><td>Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-32"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-32" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Signed delivery webhooks</td><td>Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-33"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-33" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Real-customer baselines</td><td>Start deliverability and lifecycle KPI baselines only after non-internal customers exist</td></tr></tbody></table></div></div></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="methodology" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Methodology and interpretation limits</h2>
 <p>This audit combines a production Postgres snapshot, the complete Resend message history available to the account, live Resend API contract probes, public DNS and repository-level sender/trigger tracing. No recipient address, provider credential, API key, stream credential or payment identifier is included in this artifact.</p>
 <p>The historical cohort is five internal/pilot accounts and therefore cannot establish customer engagement, inbox placement or conversion baselines. The report treats delivery events as operational evidence only. The code-level target state is validated by automated tests and production checks; external controls requiring a dedicated Resend team or DNS authority remain explicitly open rather than being simulated.</p></section></div></div><section class="portable-sources" aria-labelledby="portable-sources-heading"><h2 id="portable-sources-heading">Sources</h2><ol><li><strong>Resend Email API — Norva historical messages</strong><span class="portable-source-meta">docs/audits/email-resend-2026-07-21/resend-history-summary.json · PostgreSQL-compatible reproducible snapshot · 2026-07-21T18:00:00Z</span><p>Reproducible transformation of the reviewed Resend API capture stored at the source path; no recipient-level rows are embedded.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>with outcomes(outcome, count) as (
@@ -174,7 +174,7 @@ from (values
   (8, &#39;Win-back&#39;, &#39;Marketing&#39;),
   (9, &#39;Operations alerts&#39;, &#39;Operational&#39;),
   (10, &#39;Account deletion&#39;, &#39;Transactional auth&#39;)
-) as flows(priority, journey, category);</code></pre></details></li><li><strong>Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">docs/audits/email-resend-2026-07-21/resend-configuration-summary.json · PostgreSQL-compatible reproducible snapshot · 2026-07-21T19:00:00Z</span><p>Reproducible index of the canonical segment definitions reviewed in the source capture and repository migration.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>select *
+) as flows(priority, journey, category);</code></pre></details></li><li><strong>Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">docs/audits/email-resend-2026-07-21/resend-configuration-summary.json · PostgreSQL-compatible reproducible snapshot · 2026-07-21T23:49:33Z</span><p>Reproducible index of the canonical segment definitions reviewed in the source capture and repository migration.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>select *
 from (values
   (1, &#39;internal-pilots&#39;),
   (2, &#39;onboarding&#39;),
@@ -526,121 +526,121 @@ from (values
 })();</script>
 <div id="data-analytics-portable-reader" aria-hidden="true" inert></div>
 <template id="data-analytics-portable-artifact-payload-source" data-compression="gzip-base64">
-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
+H4sIAAAAAAACCu1c647cuJV+FUIBYjtR9dVue6oRLNptT6Yz48u6PTtA1kaBJZ2q4jRFyiTV1ZXA
+wDzE/lkgebl5kt1zeBFVVX1x4s3+6T+NLkmkDg/P9TuH+muhL4qxMx2UxVLUc3ATt2qhGBfcODHj
+lSvKwnZmxiu8aKDVBi81XIkZWFeM/1pcgrFCq2K8v/VRJ5zEC6+1ueTsZcOFZL9l78CCqtlJVwvH
+fv3lv9jBPvtTJ1fsYO/gqCiLGmxlROto4uKt0XVX4Y/R3OhO1VAzTkP1jPmJgSb+WXdGwcqWrAYp
+LsGsmAEp+FRI4VZlfG3NHWc1WDFXjKua6RYMx+m5ZJVWzmhpd4qymIPCG1CfuGJcIGmjvaejg/33
+B4fjx9+MDw//jOzRnanAFuP//Gshalo6vmSyENZpsyrKQvIpyGJchLd7Hpy8PaOFe/L9w6LikjVg
+LZ+DLcqi5W5RjItaV3aX1mt3aZ0j/4pRT9FuuBJeOrJd03Cz2vnZalWUxcLArBgXC+daO94ND+9U
+utn1c7diZGAGBlQF/hV2VwrrRv7/oiw+dWBWuN2g5kLhhr7V1s0NnP/7D6NKNy13YiqBGWhps+iH
+Vby1C01C9Ak5sBRuwXTnKt2AfRj+KVmlO+UeMW7Zww+KsUsuO7D4H2MPH7zwOwn1g5Lt7x89KuON
+57pTlb+8118979rWgLV040l//VQ3reRC+QH99TctbFw7laK6CBc/qEcflAUJlWNDgsPjjPmf47Hq
+GjCiYrts//AxrgZlp38qXHTacflBzYxuEiuON0T+Xc5HZ7iyM20aElIUerdAVl8KWEKdlOntGat4
+6zoDDKUAlcTRk15EGYrTMVOaGahEK0C5kYRLkMzopWXcAINmCnUNNQo/XEHVOagnfE3495+N9/bG
+e3t/JtFW847PUR5wh8tiJqQDg9pQnIOqwbBaN1woBp86Li1TKO477rIoi3eRCsbrmrbMMriqZFdD
+XXwsiwacEdWkhplQAhdOs77xLCPesj9EDvotYLW4FGgcpividqZVXs2Sbn38/LkM6tom4zKpp5m2
++hH9XRYE3pLa8sq/Ec2H0k7MROU3J5P5m3SG7T9NWuGlC+XkYRA0mvvh7x4xkhLeucVOZ8FY0hH8
+OaGf5fVj2m4qRbXD60aoiVAOjOJyEqj282xcvX26SuqungSLR5OE/+86tOHmApxQ8wlZlkmbzI7X
+9+UCDDDduolQNH8/wF+885tEgw5oku+NfeR1Ede+5e6mEp7M5wbmKGiZGMQNZp2FmjnNwDo+lcIu
+WKvbTtJkZRKQSnJry6iCBngtFOCVSisLQYI8Od7askstuwb+cRVEasCihNSoML30oEe5USz6BwYb
+vX75hk1cf3Qbn1G3MzPRO3fyy1NugWkl0XH2/Pf00XWyYLUwuP+iBoUzg0HTga+6yXS8A/TvnXW6
+ARM3yLI/kEYxYhHqMmvJPzomFLueUa8iE1BaR0LhPBkjBpLMhGUYZOVmBwMkK9BZT4S6BLUWK3jr
+0z9ERsfLh/V2FeXGGTGfg2H5DHnQ8PLVydkPo29/fP365Q87Tf3V/HhQv98FN/aw99gP90v24AT5
+yWlP7YOSPXiP/sv/5pK4/cA724cHJXtwDlVnhFsxwEVsGWDDA3HQYckevOWrBveo0momgmPcMnQq
+pBRqHkc+LtmDU+641POgc5tDgqrHIU9wPWfMdlOKZO2tA45wSV2LkzOHccSWd1h/Pw55WrIHP4gZ
+VKtKwubTMt0Kzz8r2YOfhBpNeXWBjydZjA98UzIMbHxQaxmXYDxj3/SRbnx2fw9XGKxVDRLw9nW7
+9sFb5ZnUS/uwNUIbiqtD3F2yijuYa7N6dEtEI1QNVzGQ8QK9uyHMGPdUUKMeZlFMrasOt/64j/FR
+FQw4tAUaI3qlXVy5yeKkTJsacBytzY1W9uDgboHOSdvK6P69ila6BqKqEfOwCUVZnENlwNlAbgx+
+hjYshj+5oaB0ggR93vnZNpOKwW0MBX2YcqqV45WzJTuHOXLNluy9bkVlS/bWYN7jBHiKfoLpQuuL
+fyzvGLz+C7OPmtvFVHNT79pA425gm5qP0L6MkAayqiOnR/Ghf5Uxi8Z/1Aqpnc0tl1ZEd6Z4aJqc
+EXzd6KAaXcLIdlNUiSkYm9uXiqsK5MhWC6g7CXVuSlpv6EYGKo3CntuMaoFqV+dmYSo1pi4j26dB
+mU2ovO0bYRiyStocOfrwQ6FNDeZDUcZrX6THFVdaUbQdRrPMAfdqOFTnmLF4pegVNCrOzRqa5eE3
+aaj3po5faaWbVQwv3hr9M4TIQ1iMmmq2XAgJMaNywBv03XbBzVApa2UnmSBFZXxLsQ978fq8DxNn
+2qSsJ5gHtKWo9FVU5i9QuFrZUZx7x1254vPHsqi4qTMEoo4p8wRvbOzgq5AFseVCW2BVZwxuVlg0
+eWFcdZoFg1mjrfWbjHk0ONhMrizHO4xfciGRmZh9epTGCR/PosW1gHu4AF5LVNmIn5xtRU58HOdX
+Fnmc8ADaYpCDBeM1ypOLcaG6ZgqmwD2LY7/racY32WyKfjmTdGt9po9p/6eEPWxnb/YS/xjlqjvs
+/QKYAxUuWrbEADFBTJiz4jKm9FOu0A1yKVAIrQtJtC0pPk0hLIrIVF+B/WrMfd4TnPEmrDZejWxp
+wVSg3IDDfgK7Mbi+mZ9VQGfcrSxNT3oEwMMoCrLrGLYzJ9SqTCnuCDWeVXqhjTtmnbKdcF5ELeM9
+P6egqgVmN1+Nn6cDajOu9Au+C1fTNHbLFLfyNixvO2tfUgQVbUCI3H0wKCipkqISDrmHiSzGKTVx
+TSXmlow8Y8lmvBFyxbRhdmUdNHGiu3BzHYXZxsxB/pZzwgCXk8GNG2xAvsR8kh5W2c5ONLMLbtym
+nV1NIo6X4d2ZyAbDmj0Uswnc2sB5yRFuJdtrHXedjUYXgawhenXM4IpH9CPGuI4kYc25kpAj+3Gv
+lAtCw43wgdmnDmzUML2kiTasukeA0UE6I6bohSNha8v6t6IsYm6BCzthU24YsYw1/AK8+6h1IxT3
+mYY32QHv8PnsAljTVQtmGy4lGDbjQnYGdkHN+RwopojvCxgA6TWuKS41FDCm3AzEzkMV+R7coMqg
+Ko1hncXg8gr/RCkJE/TvUbQgmQUBAaEsPpfFKh9K29UP/NRx5QQmKpewReL6+aK7xgmd1tKJlkTw
+K87bTxas0S1zRRvVT3aOIdJgphaM0HU/l4OrfMBPQtV6SXaquDq5EvZ9UIg3icOr/PKrvixCAfq3
+W9a10h1emXVSUpHq6p1e2mK8v4fK62GxXnkxhx1AL1EjX+alpLx+NIBZMhX2JjSvQ3lLWDLhLGs7
+02KYFeXbcTMH1yevVHBCdeYzB4YZaKAWKfRdF2DKvNeldyuSVMOMd9KdYxkuk8KYtOMTpEBe/7mt
+UL5qUBZvjuk/2MLVCrVV2YEEZnMmJcBEItOS3g7HQYHB2Zg/pSu5yORjIryQDTrtL103KrI6G/V+
+uAnrg3vnGTKZrYJymvKdvIAYRsTQPpOTV53ruJQrhhVMYx1XNQUhCd8JEYo9JqFAmWj7FMUAhYBs
+TtFip5yIJlovEelgNdSYUfQFIUxfhjKU5c6b5m8dYbhGgHTY2a8mPXHCu4tOWEZuftKV64UgpqLZ
+sJdSzIVX7huGUvK+jruc5BevER4j7MXEwFxY51cUBOEdWFF3WbGZjANc+XiK+RzerAUKZw4a9KHc
+YaKNecAUK4OdWyBvV75SUvf52XTFeAZMeUhKarWWiSGN/5RBMVxd3CYOtuWV0J29o0SEKVPc539e
+Lw+BjblVSFeu21S9VGAmHt4cwGmfOkGl02r73n4sC9qfzJP4HUpP4kbUeoljp7rG5f+GfVn3w5BH
+SZw8DCIuYRIAthvf+Rv2Mj7Pzv3zH9QHRZT8+st/2xTze5fV164o7ldOGJ+FeqHcxTR0jA4MsRoD
+voy8tZ6yAofJLs/DvsVGTsxVneVsIaAgVKKzMOskJhke1gODVRZs1uDSlmzauZQbD9K3EVaY0U33
+aRzl3FR+bo2eSlSgpV9AtRAOKtcZLseMB4RngPs04grqsHHUt/C8E7J+b3h1UZK1bQ14c8ulHPnq
+UQQq8XW+Eq10XE9v5X0EINQ8a1NZBvQ10DfFAlRJTLJwCQYZbYQbNIhg/C9rtAJSW4dpV915fUea
+qE+GKXBLbS52U2UtBNR2B2XhPXURpHgD8TfJqxRas5kwMOKqHs00uUuEqaxnhmiajiKqkkngWAnV
+nSMs4hjL+Zb2i6Cjth3ZSrdQ94t1IAETvNWxRwhpLVQNHVk+2+oQG6FEI/4C0VS2Aivxoc2hB9Nx
+nceBbZgTOCDPSOhJJMPj5QYId+fSQwgLbZ1HCYIMUOUPkx4fikUkfZtH9skVeX9Mf2ezgXcWljX6
+0peKr3PS7P1CWKoSLnzxkxEfSPlazO1i38evv/ytNdCIrqGl/vrL38coYpSQjUIOHYMHQovYvCMU
+OIG8oWOBzbhE7E9y0XinQuBeMAkzNBqU1fdqjSC6r4umTHvnelsVs/xJTOR7U0UXRphOtoWHLs8I
+vNyELYco2wZGNAQ2Pl5LS0rTLawZ9a1m86fIjcxoJdGl1jFehUDO8pVFRXqRblM26ILVi0BKSCy9
+7cIbQQsHZk9qfeGVHdgUKt5Z8Bkz+BTTaYMSQtKBmEAyAzGxGFrwAZZoV8otwIlqh51IOUAhK94E
+FG0b4LjD3gywNSKrxmqohU8dgRWh0IAYPwJuWMBCez3EuEcGJEm9M3w2E1WJQHu1iOXbGNek9yy4
+QvGZ0+LyMAZ1GK83naUASE8t/K9DoyoPR++EMylmhQSF2IBBaYN6h2Gfl+dVhd1dNjgxFxI8CSzD
+GL7H+hm6ujFrjbjk1YrNgGOdwqYFY9CPS6YyHxrgtCFkwt2geqpNniPcoDdJVgk4mVCo0csrXSwC
+EHV2HQR1zdQh4bqjFryNZmYjT52uYnKMon/CokEK3QkR+rtQeimhRoZMO0tNL4RsBQPns12SW+8r
+KYKA1nnV8QhX8jLMAIFVZdhQ6/mLNn+XN1Mx73Rne2iI3iCUFXWs5VDEI2poWu1AVSu2JPyhZJ86
+bhDkQCeEGmEQSKNc3zrgNRpdDJFR5pJ7DbtuK9NNLSqx9Y0AfCU1r21YW4jEyXsMa+lJUsRcaQN9
+kxP1kujOHWeX0sPGh6YJk+07iIJRESrUNUi5ax4q4xU3BmteMCLJJ/g7lCFZKzsbjId1WOX3nXg3
+CCjBJrQn68JJF2P/0dlWiOWaOfOU+Y7ieZ4NGbMZLInhFCyUzDqjFbYSZPXHGO9ImKM6//rL37x7
+/hEDt19/+Xsfu5H7RL9uxVXmS3vThuUG5BbsUrsERluebWXgN2VnXFkkqo9lItpqfVgagi2yN42u
+QWKgaJkSCvz+wbAxuS/g4/uTEPSCQnV97w1WLYZeMWaqU/DSl/x3GCWwECmuQMpQvI9VaBbEpO1b
+KQZOBSFhoSoMU/3d0GzDYqm6ZFSgpleEuvRuX5feYedirrrWm3gkBmN37gWcOrmCocDgkBubBYPe
+OGBV0TretN6s++3EOJz9+OPZCxvCs2gG6PbOrTJ4V9HehgtdM/McmaGQxXeU7T+mASlBiAgkj93r
+IddBqT5/+23JXnx/9ipFAj4wYtj8xb599+ZV7MFF5oYgboe9eHXy7pSiU2EtJSNWx250bpkCQe6U
+KwZqpk0FvmCmnBjZVusZ7nSrpahWWN5mPPXq+dZ/u8OoGm4XjIdL2M9BW+pfHQbPhEG77h05ULnc
+LTVGyzPdGbYEuLAlLouSuDm5Xqczu71r4Gfqzsapl/ichLlwokFiQgsj41LM1Q77HqDttSrEA6mc
+SpaWks2QPIwHGujbqJhdUN6FOi7UDMOaTMn7IMIbgz5p9CFLR0iwJtbm2eYUZugJPP/7rp251FMu
+c5Md+3cwpGizDh50Ix261/oGISdA6o4Svg5eXTNlA26hay31/DY44lX/pG96HWY3UjTCBTMtbOgc
+qHQzJde8vRM7NkKUw9aEwNjgOWP4nXUmOJ3H5yVDHRu00cdYB2EDdPdt39gxbFQJHfRrLWw4WKj5
+DnudNdv3XiJFPH0WWtJ7L7CHzjqDEpFlqLjVod+x7xZD1fU+KZb9kGvh2E5K7xd55RzNJw6j9C4h
+O2t5XjAixgtkcGZ9j3PSllzShZrqK9b7M43OWIWTQQyBB8wFe8dHvZEGuLN9fOm7P9Hc5zoHyCj0
+yqjdfjwimYHtoZbiw0phGSUwsZuCd043PukAGxaWCVG1gOqCnEmAXRMY6wMtyj625+u4PhKFzi2o
+8BF9TVYux+xgkJJMwcNYTSev0VIshaWmorWTVXc7ikSFY18Qr1c9zEtlzFR3R9xyo9tlvH/4uMz6
+aMb7+0dl6t0Y7++Vgy6Q8d7O3tPHRwdHz46ePC3zVgQkdq25AR+OTx+VeaF9/MSXpofN1Xh1raQ/
+3iuzMgUZx2J8RCuWkF3aL4uNEwPFmOp/awVg5EIs5g6binw91TMg0v/s6MnR0/2jx/vPsAbruAwM
+C0XOuCOPR3vP0LjE/dlHNJcaJ/IyFNrO/tXPU39MfPFe/96cyf/oewPYsPba/pxU/+Yn2YsPnx7u
+Hz4+PHj2tV98mretxCVnL84k5eu+2J/0+j97aW8P1xfsT5P9S16c5NzXiVHIU3EW3xuLrqkNJvYm
+p8rquNjs+y7KXnjHxTkhuwzh6hiKh8z3mFmfreeJ9gVVdFN7tj/O6d1f7ML2DZnItZ7Yg5zYtSMC
+N9EbDwsMaT5LQMIArT5mB1dX7Pe9Qz57gcjFOr1+dT7fn2K6R/k9WqM1og9zorceUWC/TenRTasI
+qdRwET8gmmJGUqiLbAU9/NGHxMdpRR5Qj6DJw5D9RptLjfzMym4+jhHGxEAFonWP1pjwzR4h547t
+ssM9xPJ5PZLgHJgs0Vxjx+OcHcNzFzctPjjp4eJfiDniknHVmAPH+K6lzXAOc1b0K7sXQtUMTwq3
+t+2kVsyBaTxyglHE2gqeDFQmOwbCoov9slW8jGm7PzR0vC6Owz48Hy8iOvsXUAjzkMgNl/Q8QAW4
+N7vZrvQHItaWdDRQrMFBlRv1yj+5timd8dApQX9+ER5Teg8S5gbD2AVXCmQOCIZK/WBjzs78pkRc
+8KZNeZqv4CeQ/kwutd1TkJeysZvWkz+03VCknC5uToIxKcQwgdT+FMqG4Yh7Q5Gnha7WarVNT54N
+FhQO9rDfMj7lqtZobClYxVhxsKJ07me4hm9FCGdJXzEnP94O/x1H2G+mtU/ycupPwwS0Zya1GB4n
+vUubNt1Y0Tf5ijZOIg1XkZ1JukZZQp/zbhIqfw4wGlLkfEygfSoQjzGtrSidJ6xZLfhcaevoJAxW
+0GJaUwsbzPNwRRiVZaZg7bzUl3nQtwZGHjrMEO4Y+ftNifeDTlHNNZYiiOdrS3uto+8lBCxLE5OU
+ekIxREhtQBQEU7sNfb0hNNGMi7UzL775I7bPZBtDRdK+y3pw5jUd+KQzodQDR0MpY6WUbNe3ye0O
+u4Wtr0alDaFaDBVZMmnPWnLGxR9xR33Q5ddykK+lP6SzvozYeuuZ5fzJ0ghUEnS5m0SM5OoY3UzX
+YtodoIbB2r4D2YZjpAZ4tfDQlvcULBy9uZX2w5z2eJRog/LUeUaUS591pzQ4G9ZT957sI9RdqKSF
+dNhHCZU2VPHHUg41p91K5+Oczs3jTV9IsZ9gQO9JmBPMpahgYK9vpuxJTtn60aotdCXom476JPSb
+U1eK0DXDtN+fC8IKlbWp8L+F6nfZMUR0ykT8CK6E+4IVHOUrWD8AtqGMGT+FZXM8M+kRI+smdTck
+7/kaRE+GRXcOu10I8KAVeeGPePut5D4dMNyfSbuFSt/AUQ9oO81bQJbRC3LF5cqK26l4llOxeQzu
+FoLCAOqiiQ49K237GnQ43x4J/hZPaFVSYwBHJzdt3PesqeZWur8Zimt2QG+d5BNH4aKj4NdbFQ9v
+HycTlmD7dKANsfmwuAHx4dj9KH2RoK/DRPtwI+M/lqF1EH0INex55Mf33SGisgU4CxhVzMY3Wh6L
+ctiXNy5e6cuIivMlX3nfkIHqwe2TIUP2oxBH+Hw3lsx2PWROXPekHgxIpXJEqlF8OZGnCGVChhUG
+iDPGLbE2ov2p/TbURdo/KNxJ8u3YDoM94FimSBiCp/VwQOtGKxOu2OfYkerTiIP7vrcAeG7jrUIM
+G0f3re3H7GWNmDmdC6XZfc0mmL5YYgqJ5Ivn7D+wKZRVul2hHhlwpNg9+Y9z8gN2sNH29k9QL9Tc
+11WZ5PNj7OVD+xG/9BRfREB+mA8Z5+lIH+DoT6MEhKGn/0lOPx5BGvXnxSKwnZH/WmMnCLchM1pR
+VrVG+rnDQzFbSnt9zvH927N++rxjQmk1Sul7AkgZXAnre48Lv1Nn1nYEcxKqfP+NqvtvVN1/o+r+
+G1X336i6/0bV/Teq7r9Rdf+NqvtvVN1/o+r+G1X336i6/0bV/Teq7r9R9S/4RlXLqws+h4lQM436
+EFsV3+FhOWqUQXeDKxzFWyQDYHYWrslLg690nT8+CbfxCB/U74DXb5B34bPmzfaH4+/v8Gd41KwN
+jQ2BSC3iWyf2rKHNo7NzRA+WgNJPw+fpB9TC9T8o7Fv7+R2R+4NAjCncwDZAWxkAlS4tNp/C8ybY
+lKuq/t0GZgbsIvsd0OXwm6Qj/Pr8OW3G2f1e/H/vxef/Af7JLdmEXwAA
 </template>
 <template id="data-analytics-portable-reader-runtime-source" data-compression="gzip-base64">
 H4sIAAAAAAACCuy9a3fjNrYg+v38CilTV0MeQ4pk15MyyqfiR6e665VyVdLVjseESUhCTIEKCNnl

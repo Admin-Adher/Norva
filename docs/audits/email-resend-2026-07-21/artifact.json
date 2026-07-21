@@ -5,7 +5,7 @@
     "surface": "report",
     "title": "Norva Email & Resend Audit — 21 July 2026",
     "description": "Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.",
-    "generatedAt": "2026-07-21T22:00:00Z",
+    "generatedAt": "2026-07-21T23:49:33Z",
     "sources": [
       {
         "id": "resend_history",
@@ -70,7 +70,7 @@
           "engine": "PostgreSQL-compatible reproducible snapshot",
           "sql": "select *\nfrom (values\n  (1, 'internal-pilots'),\n  (2, 'onboarding'),\n  (3, 'trialing'),\n  (4, 'active-subscribers'),\n  (5, 'cancel-scheduled'),\n  (6, 'payment-recovery'),\n  (7, 'churned'),\n  (8, 'blocked-suppressed'),\n  (9, 'catalog-ready')\n) as segments(\"order\", segment);",
           "description": "Reproducible index of the canonical segment definitions reviewed in the source capture and repository migration.",
-          "executed_at": "2026-07-21T19:00:00Z",
+          "executed_at": "2026-07-21T23:49:33Z",
           "language": "sql",
           "filters": ["Norva taxonomy only", "Projection disabled while Resend team is shared"]
         }
@@ -276,7 +276,7 @@
   },
   "snapshot": {
     "version": 1,
-    "generatedAt": "2026-07-21T22:00:00Z",
+    "generatedAt": "2026-07-21T23:49:33Z",
     "status": "ready",
     "datasets": {
       "headline": [
@@ -329,8 +329,8 @@
       "risks": [
         { "rank": 1, "control": "Dedicated Resend team", "state": "Open external blocker", "owner_action": "Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics" },
         { "rank": 2, "control": "DMARC reporting", "state": "Open external blocker", "owner_action": "Create dedicated report mailbox/aggregator and publish p=none with strict alignment" },
-        { "rank": 3, "control": "Domain-scoped sending key", "state": "Implemented in code; production rotation required", "owner_action": "Run least-privilege split and retire DB Vault copy after deployment proof" },
-        { "rank": 4, "control": "Signed delivery webhooks", "state": "Implemented in code; registration required", "owner_action": "Register app-scoped events and inject webhook signing secret after Edge deployment" },
+        { "rank": 3, "control": "Domain-scoped sending key", "state": "Complete in production", "owner_action": "Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired" },
+        { "rank": 4, "control": "Signed delivery webhooks", "state": "Complete in production", "owner_action": "Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events" },
         { "rank": 5, "control": "Real-customer baselines", "state": "Not measurable yet", "owner_action": "Start deliverability and lifecycle KPI baselines only after non-internal customers exist" }
       ]
     },
@@ -388,7 +388,7 @@
         "engine": "PostgreSQL-compatible reproducible snapshot",
         "sql": "select *\nfrom (values\n  (1, 'internal-pilots'),\n  (2, 'onboarding'),\n  (3, 'trialing'),\n  (4, 'active-subscribers'),\n  (5, 'cancel-scheduled'),\n  (6, 'payment-recovery'),\n  (7, 'churned'),\n  (8, 'blocked-suppressed'),\n  (9, 'catalog-ready')\n) as segments(\"order\", segment);",
         "description": "Reproducible index of the canonical segment definitions.",
-        "executed_at": "2026-07-21T19:00:00Z",
+        "executed_at": "2026-07-21T23:49:33Z",
         "language": "sql",
         "filters": ["Norva taxonomy only", "Projection disabled while Resend team is shared"]
       }

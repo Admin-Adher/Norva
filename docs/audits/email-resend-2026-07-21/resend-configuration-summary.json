@@ -1,6 +1,6 @@
 {
   "source": "Resend configuration APIs",
-  "captured_at": "2026-07-21T19:00:00Z",
+  "captured_at": "2026-07-21T23:49:33Z",
   "privacy": "Counts and object metadata only; API keys and contact addresses excluded",
   "current": {
     "contacts": 6,
@@ -9,11 +9,15 @@
     "legacy_segments": ["Norva Users"],
     "topics": 0,
     "contact_properties": 0,
-    "webhooks": 0,
+    "webhooks": 1,
     "broadcasts": 0,
     "templates": 0,
     "automations": 0,
-    "all_contacts_globally_unsubscribed": true
+    "all_contacts_globally_unsubscribed": true,
+    "domain_scoped_sending_key": true,
+    "host_only_management_key": true,
+    "legacy_database_resend_secret_retired": true,
+    "signed_webhook_delivery_probe": "email.sent,email.delivered"
   },
   "constraints": [
     "Norva currently shares the Resend team with BuildTrack.",
