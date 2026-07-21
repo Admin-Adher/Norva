@@ -379,6 +379,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       NORVA_REVENUECAT_WEBHOOK_AUTH: ${NORVA_REVENUECAT_WEBHOOK_AUTH:-}
+      NORVA_RC_ACCEPT_SANDBOX: ${NORVA_RC_ACCEPT_SANDBOX:-false}
+      NORVA_RC_UNKNOWN_PRODUCT_POLICY: ${NORVA_RC_UNKNOWN_PRODUCT_POLICY:-error}
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
       # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
       # WITHOUT these the edge silently falls back to enforce+legacy — a migrated
@@ -392,8 +394,8 @@ services:
       # Enable a flow only when ready: dunning is Revolut-scoped and safe; NEVER enable
       # EXPIRE without DUNNING (you'd cut users off with no prior warning email); trial's
       # live path is the DB crons (norva-trial-ending-3d/-1d) so leave LC_TRIAL off to avoid
-      # double-sends; winback/abandoned need marketing consent + one-click unsubscribe first,
-      # and abandoned must be repointed off the retired Stancer table. Changing any of these
+      # double-sends; winback/abandoned require explicit consent, a postal address and
+      # the signed one-click unsubscribe secret below. Changing any of these
       # requires RECREATING the container (docker compose up -d functions), not just restart.
       NORVA_LIFECYCLE_BILLING_LIVE: ${NORVA_LIFECYCLE_BILLING_LIVE:-false}
       NORVA_LC_TRIAL: ${NORVA_LC_TRIAL:-false}
@@ -404,6 +406,10 @@ services:
       # Physical postal address shown in the email footer (CAN-SPAM). Required before any
       # marketing email (win-back / abandoned) may be enabled; shown only when set.
       NORVA_POSTAL_ADDRESS: ${NORVA_POSTAL_ADDRESS:-}
+      # Stable HMAC key for RFC8058 one-click unsubscribe links. Missing = every
+      # marketing flow fails closed, while transactional account/billing mail works.
+      NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET: ${NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET:-}
+      RESEND_AUDIENCE_ID: ${RESEND_AUDIENCE_ID:-}
       # FCM push — Firebase service-account JSON on ONE line (read by _shared/fcm.ts).
       FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
       # Revolut Merchant billing (sandbox during dev, production at cutover). The

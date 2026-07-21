@@ -155,7 +155,35 @@
         .setup-message.show {
             display: block;
         }
+
+        .cloud-account {
+            margin: var(--space-lg) 0 0;
+            color: var(--color-text-secondary);
+            font-size: 13px;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .cloud-account a {
+            color: var(--color-accent);
+            font-weight: 600;
+        }
     </style>
+  <script src="/js/navigation-safety.js?v=1"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get('returnTo') || params.get('redirect');
+      window.__norvaCloudLoginRedirect = /^(?:www\.)?norva\.tv$/i.test(window.location.hostname || '');
+      window.__norvaLoginReturnTo = window.NorvaNavigation.safeLocalPath(
+        requested,
+        window.__norvaCloudLoginRedirect ? '/app#home' : '/',
+      );
+      if (window.__norvaCloudLoginRedirect) {
+        window.location.replace('/account.html?returnTo=' + encodeURIComponent(window.__norvaLoginReturnTo));
+      }
+    })();
+  </script>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=1"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
@@ -166,8 +194,8 @@
         <div class="login-box">
             <div class="login-logo">
                 <img class="logo-icon" src="/img/norva-app-icon.png" alt="Norva">
-                <h1>Norva Account</h1>
-                <p id="login-subtitle">Sign in to your Norva ecosystem</p>
+                <h1>Norva Hub</h1>
+                <p id="login-subtitle">Sign in to this Norva hub</p>
             </div>
 
             <div class="error-message" id="error-message"></div>
@@ -209,6 +237,10 @@
                 Continue with SSO
             </button>
 
+            <p class="cloud-account">Looking for your Norva Cloud account?
+                <a id="cloud-account-link" href="/account.html">Sign in on Norva Cloud</a>
+            </p>
+
             <style>
                 #btn-sso-login:hover {
                     background: var(--color-bg-tertiary) !important;
@@ -221,6 +253,10 @@
     </div>
 
     <script>
+      if (!window.__norvaCloudLoginRedirect) {
+        document.getElementById('cloud-account-link').href = '/account.html?returnTo='
+          + encodeURIComponent(window.__norvaLoginReturnTo || '/');
+
         // Start SSO Login
         document.getElementById('btn-sso-login').addEventListener('click', () => {
             window.location.href = '/api/auth/oidc/login';
@@ -296,8 +332,9 @@
                 // Store token
                 localStorage.setItem('authToken', data.token);
 
-                // Redirect to main app (replace history to prevent back button issues)
-                window.location.replace('/');
+                // Honor only the already-sanitized local destination. This keeps
+                // deep links working without allowing login to become an open redirect.
+                window.location.replace(window.__norvaLoginReturnTo || '/');
 
             } catch (err) {
                 errorMessage.textContent = err.message;
@@ -309,6 +346,7 @@
 
         // Check setup status on load
         checkSetupRequired();
+      }
     </script>
 </body>
 

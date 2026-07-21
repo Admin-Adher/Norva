@@ -45,7 +45,6 @@ const TRIAL_DAYS = boundedInt(Deno.env.get("NORVA_TRIAL_DAYS"), 7, 0, 90);
 const FAIL_OPEN_HOURS = boundedInt(Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"), 72, 1, 24 * 14);
 const TOLERANCE_MS = 5 * 60 * 1000;
 
-const VALID_PLAN_CODES = new Set(["trial", "plus", "family", "premium", "manual", "none"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const encoder = new TextEncoder();
 
@@ -82,6 +81,16 @@ Deno.serve(async (req) => {
     // Authoritative order from Revolut — the body carries no metadata/state.
     // TODO(subscriptions): fetch the subscription object for SUBSCRIPTION_* events.
     const order = orderId ? await fetchOrder(orderId) : {};
+    const remoteState = String(order.state ?? "").toUpperCase();
+    if (orderId) {
+      const reconciledAt = new Date().toISOString();
+      const { error: journalError } = await admin.from("cloud_revolut_orders").update({
+        ...(remoteState ? { state: remoteState } : {}),
+        last_reconciled_at: reconciledAt,
+        updated_at: reconciledAt,
+      }).eq("order_id", orderId);
+      if (journalError) throw new Error(`order journal reconcile failed: ${journalError.message}`);
+    }
     const meta = recordOrEmpty(order.metadata);
     const userId = resolveUserId(meta);
     if (!userId) {
@@ -89,23 +98,112 @@ Deno.serve(async (req) => {
       return json({ ok: true, skipped: "no_user_metadata" });
     }
 
-    const patch = projectionPatch(userId, eventType, order, meta);
-    if (patch) {
+    const kind = String(meta.kind ?? "").toLowerCase();
+    const checkoutKind = ["trial_setup", "plan_change", "resubscribe", "card_update"].includes(kind);
+    const checkoutEvent = ["ORDER_AUTHORISED", "ORDER_COMPLETED"].includes(eventType) && checkoutKind;
+    const remoteCheckoutSuccess = ["AUTHORISED", "COMPLETED"].includes(remoteState);
+    const { data: journalRow, error: journalReadError } = orderId
+      ? await admin.from("cloud_revolut_orders")
+        .select("order_id,user_id,kind,plan,period,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result")
+        .eq("order_id", orderId).maybeSingle()
+      : { data: null, error: null };
+    if (journalReadError) throw new Error(`order journal read failed: ${journalReadError.message}`);
+    const journal = journalRow as {
+      user_id?: string;
+      kind?: string | null;
+      plan?: string | null;
+      period?: string | null;
+      requested_amount_cents?: number | null;
+      merchant_ext_ref?: string | null;
+      intent_key?: string | null;
+      finalized_at?: string | null;
+      expired_at?: string | null;
+      superseded_at?: string | null;
+      finalization_result?: JsonRecord | null;
+    } | null;
+    if (checkoutEvent && (!journal || journal.user_id !== userId)) {
+      throw new Error("checkout order journal missing or ownership mismatch");
+    }
+    if (checkoutEvent && journal) {
+      const remoteExtRef = stringOrNull(order.merchant_order_ext_ref) ?? stringOrNull(order.merchant_ext_ref);
+      const remoteAmount = Number(meta.amount_cents);
+      const immutableMismatch =
+        (journal.kind != null && journal.kind !== kind) ||
+        (journal.plan != null && journal.plan !== planForMeta(meta)) ||
+        (journal.period != null && journal.period !== (String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly")) ||
+        (journal.requested_amount_cents != null && remoteAmount !== journal.requested_amount_cents) ||
+        (journal.merchant_ext_ref != null && remoteExtRef !== journal.merchant_ext_ref) ||
+        (journal.intent_key != null && stringOrNull(meta.intent_key) !== journal.intent_key);
+      if (immutableMismatch) throw new Error("checkout order metadata does not match immutable journal");
+    }
+    if (checkoutEvent && journal?.finalized_at) {
+      await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, already_finalized: true });
+      return json({ ok: true, duplicate_finalization: true, state: remoteState });
+    }
+    if (checkoutEvent && (journal?.expired_at || journal?.superseded_at)) {
+      const holdReleased = remoteState === "AUTHORISED" ? await cancelValidationHold(String(orderId)) : true;
+      await recordProcessedEvent(admin, userId, eventId, eventType, {
+        event: body, order, skipped_checkout: journal.superseded_at ? "superseded" : "expired", hold_released: holdReleased,
+      });
+      return json({ ok: true, skipped: journal.superseded_at ? "superseded_checkout" : "expired_checkout" });
+    }
+    if (checkoutEvent && !remoteCheckoutSuccess) {
+      if (["CANCELLED", "FAILED", "DECLINED", "REVERSED", "VOIDED", "EXPIRED"].includes(remoteState)) {
+        await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, skipped_state: remoteState });
+        return json({ ok: true, skipped: "authoritative_state_not_successful", state: remoteState });
+      }
+      // An AUTHORISED event can beat the read replica/API state transition. A 5xx
+      // makes Revolut retry rather than permanently acknowledging an unsettled order.
+      throw new Error(`authoritative checkout state not settled: ${remoteState || "missing"}`);
+    }
+
+    const checkoutSuccess = checkoutEvent && remoteCheckoutSuccess;
+    // Checkout/card-validation orders are account mutations, not recurring
+    // charges.  Their failure events must never put an existing subscription in
+    // past_due; only an authoritative successful state enters finalization.
+    const patch = checkoutSuccess || checkoutKind ? null : projectionPatch(userId, eventType, order, meta);
+    let checkoutResult: string | null = null;
+    if (checkoutSuccess) checkoutResult = await finalizeCheckoutEntitlement(admin, userId, order, meta);
+    else if (patch) {
       const { error } = await admin
         .from("cloud_entitlement_projection")
         .upsert(patch, { onConflict: "user_id" });
       if (error) throw new Error(`projection upsert failed: ${error.message}`);
     }
 
-    // Belt & braces for checkouts finalized WITHOUT /confirm (hosted page, customer
-    // never returns): a COMPLETED checkout order commits the recurring plan it was
-    // opened for onto the billing mapping — the renewal engine charges from that row.
-    // /checkout deliberately does NOT pre-write it for plan_change (an abandoned
-    // checkout must never reprice a renewal), so a paid order is the only committer.
-    await commitOrderPlan(admin, userId, eventType, meta);
-
+    let effectiveAt: string | null = null;
+    if (checkoutSuccess && ["trial_started", "already_confirmed", "resubscribed", "plan_change_scheduled"].includes(String(checkoutResult))) {
+      effectiveAt = await commitOrderPlan(admin, userId, eventType, meta, orderId);
+    }
+    if (checkoutSuccess && orderId) {
+      let holdReleased = remoteState !== "AUTHORISED";
+      let finalState = remoteState || "AUTHORISED";
+      if (remoteState === "AUTHORISED") {
+        holdReleased = await cancelValidationHold(orderId);
+        if (holdReleased) finalState = "CANCELLED";
+      }
+      const finalizationResult = {
+          result: checkoutResult, kind, remote_state: remoteState,
+          hold_released: holdReleased, source: "webhook", effective_at: effectiveAt,
+        };
+      const { data: finalizationOutcome, error: finalizedError } = await admin.rpc(
+        "finalize_revolut_checkout_order",
+        {
+          p_order_id: orderId,
+          p_user_id: userId,
+          p_state: finalState,
+          p_finalization_result: finalizationResult,
+        },
+      );
+      if (finalizedError) throw new Error(`order finalization journal failed: ${finalizedError.message}`);
+      if (finalizationOutcome !== "finalized" && finalizationOutcome !== "already_finalized") {
+        throw new Error(`order finalization journal rejected: ${String(finalizationOutcome)}`);
+      }
+    }
+    // The processed marker is deliberately last: a 5xx from any mandatory write
+    // above must leave the event replayable.
     await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order });
-    return json({ ok: true, type: eventType, plan: patch?.plan_code ?? null });
+    return json({ ok: true, type: eventType, plan: checkoutSuccess ? planForMeta(meta) : patch?.plan_code ?? null });
   } catch (error) {
     // 5xx → Revolut retries with backoff (3× / 10 min).
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -118,8 +216,7 @@ Deno.serve(async (req) => {
 
 async function fetchOrder(orderId: string): Promise<JsonRecord> {
   if (!REVOLUT_SECRET_KEY) {
-    console.error("[norva-revolut-webhook] REVOLUT_SECRET_KEY not set — cannot fetch order");
-    return {};
+    throw new Error("REVOLUT_SECRET_KEY not set — cannot fetch order");
   }
   try {
     const resp = await fetch(`${REVOLUT_API_BASE}/api/1.0/orders/${encodeURIComponent(orderId)}`, {
@@ -127,13 +224,33 @@ async function fetchOrder(orderId: string): Promise<JsonRecord> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!resp.ok) {
-      console.warn(`[norva-revolut-webhook] fetchOrder ${orderId} → ${resp.status}`);
-      return {};
+      throw new Error(`fetchOrder ${orderId} returned ${resp.status}`);
     }
     return recordOrEmpty(await resp.json());
   } catch (e) {
-    console.warn("[norva-revolut-webhook] fetchOrder failed", orderId, String((e as Error)?.message || e));
-    return {};
+    const message = String((e as Error)?.message || e);
+    console.warn("[norva-revolut-webhook] fetchOrder failed", orderId, message);
+    throw new Error(`provider order unavailable: ${message}`);
+  }
+}
+
+async function cancelValidationHold(orderId: string): Promise<boolean> {
+  if (!REVOLUT_SECRET_KEY) return false;
+  try {
+    const resp = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/cancel`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Revolut-Api-Version": "2024-09-01",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return resp.ok;
+  } catch (error) {
+    console.warn("[norva-revolut-webhook] validation hold cancel failed", orderId, String((error as Error)?.message ?? error));
+    return false;
   }
 }
 
@@ -192,6 +309,125 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   return patch;
 }
 
+// AUTHORISED is the successful final state of Norva's MANUAL card-check order.
+// It is not a captured subscription charge: apply the requested account mutation
+// once, then the caller releases the tiny validation hold. This mirrors /confirm
+// so a hosted checkout remains correct even when the browser never returns.
+async function finalizeCheckoutEntitlement(
+  db: SupabaseClient,
+  userId: string,
+  order: JsonRecord,
+  meta: JsonRecord,
+): Promise<string> {
+  const kind = String(meta.kind ?? "trial_setup").toLowerCase();
+  const plan = planForMeta(meta);
+  const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
+  const nowIso = new Date().toISOString();
+  const customerId = stringOrNull(order.customer_id) ?? stringOrNull(meta.customer_id);
+  const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
+    .select("status,provider,trial_ends_at,trial_consumed_at,current_period_end,fail_open_until")
+    .eq("user_id", userId).maybeSingle();
+  if (currentError) throw new Error(`projection read failed: ${currentError.message}`);
+  const cur = current as {
+    status?: string;
+    provider?: string;
+    trial_ends_at?: string;
+    trial_consumed_at?: string;
+    current_period_end?: string;
+    fail_open_until?: string;
+  } | null;
+  const curStatus = String(cur?.status ?? "");
+  const curProvider = String(cur?.provider ?? "").toLowerCase();
+  const currentEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
+  const trialEndMs = cur?.trial_ends_at ? new Date(cur.trial_ends_at).getTime() : 0;
+  const failOpenMs = cur?.fail_open_until ? new Date(cur.fail_open_until).getTime() : 0;
+  const isLive = ["trialing", "active", "past_due", "grace", "cancelled_at_period_end"].includes(curStatus) &&
+    Math.max(currentEndMs, trialEndMs, failOpenMs) > Date.now();
+  const terminalStatus = new Set(["expired", "revoked", "refunded", "fraud"]).has(curStatus);
+  const foreignRailBlocked = Boolean(cur && curProvider && curProvider !== "revolut" && !terminalStatus);
+  const planEffectiveAt = curStatus === "trialing"
+    ? (cur?.trial_ends_at ?? cur?.current_period_end)
+    : cur?.current_period_end;
+  const cardCountry = cardCountryFromOrder(order);
+  const replaceProjectionWithRailCas = async (patch: JsonRecord): Promise<void> => {
+    if (!cur) {
+      const { error } = await db.from("cloud_entitlement_projection").insert(patch);
+      if (error) throw new Error(`projection insert failed: ${error.message}`);
+      return;
+    }
+    const { data: changed, error } = await db.from("cloud_entitlement_projection")
+      .update(patch)
+      .eq("user_id", userId)
+      .eq("provider", curProvider)
+      .eq("status", curStatus)
+      .select("user_id");
+    if (error) throw new Error(`projection replacement failed: ${error.message}`);
+    if (!Array.isArray(changed) || changed.length !== 1) throw new Error("projection rail changed concurrently");
+  };
+
+  if (kind === "card_update") {
+    if (curProvider !== "revolut") return "rejected_cross_rail";
+    if (curStatus === "past_due" || curStatus === "grace") {
+      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
+        status: "active", provider: "revolut", current_period_end: nowIso,
+        last_event_at: nowIso, last_verified_at: nowIso,
+        ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+      }).eq("user_id", userId).eq("provider", "revolut").in("status", ["past_due", "grace"]).select("user_id");
+      if (error) throw new Error(`card recovery failed: ${error.message}`);
+      if (!Array.isArray(changed) || changed.length !== 1) return "card_already_recovered";
+      return "card_updated_retrying";
+    }
+    return "card_updated";
+  }
+
+  const metaAmount = Number(meta.amount_cents);
+  const amount = Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999
+    ? Math.round(metaAmount)
+    : (await getPrices(db))[plan]?.[period];
+
+  if (kind === "plan_change") {
+    if (curProvider !== "revolut") return "rejected_cross_rail";
+    if (!isLive || !planEffectiveAt || new Date(planEffectiveAt).getTime() <= Date.now()) return "rejected_plan_not_live";
+    const change: JsonRecord = {
+      provider: "revolut", provider_customer_id: customerId,
+      last_event_at: nowIso, last_verified_at: nowIso,
+      ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+    };
+    if (curStatus === "cancelled_at_period_end") {
+      change.status = cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now() ? "trialing" : "active";
+    }
+    const { data: changed, error } = await db.from("cloud_entitlement_projection")
+      .update(change).eq("user_id", userId).eq("provider", "revolut").eq("status", curStatus).select("user_id");
+    if (error) throw new Error(`plan change failed: ${error.message}`);
+    if (!Array.isArray(changed) || changed.length !== 1) throw new Error("plan change projection missing");
+    return "plan_change_scheduled";
+  }
+
+  if (kind === "resubscribe") {
+    if (foreignRailBlocked) return "rejected_cross_rail";
+    await replaceProjectionWithRailCas({
+      user_id: userId, status: "active", provider: "revolut", provider_customer_id: customerId,
+      plan_code: plan, current_period_end: nowIso, last_event_at: nowIso, last_verified_at: nowIso,
+      ...(amount ? { mrr_cents: amount, bill_period: period } : {}),
+      ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+    });
+    return "resubscribed";
+  }
+
+  if (foreignRailBlocked) return "rejected_cross_rail";
+  if (cur?.trial_consumed_at) return "already_confirmed";
+  if (isLive) return "already_active";
+  const trialEnd = new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
+  await replaceProjectionWithRailCas({
+    user_id: userId, status: "trialing", provider: "revolut", provider_customer_id: customerId,
+    plan_code: plan, trial_ends_at: trialEnd, trial_consumed_at: nowIso,
+    current_period_end: trialEnd, last_event_at: nowIso, last_verified_at: nowIso,
+    ...(amount ? { mrr_cents: amount, bill_period: period } : {}),
+    ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+  });
+  return "trial_started";
+}
+
 // Card issuing country (ISO alpha-2) from the order's payment details. CONFIRMED on
 // live events (étape 0, 2026-07-17): payments[].payment_method.card.card_country.
 // Older candidates kept as fallback for other API generations.
@@ -229,7 +465,7 @@ function statusForEvent(type: string, meta: JsonRecord): string | null {
 
 function planForMeta(meta: JsonRecord): string {
   const plan = String(meta.plan ?? "").toLowerCase();
-  if (VALID_PLAN_CODES.has(plan)) return plan;
+  if (plan === "plus" || plan === "family") return plan;
   if (plan === "norva") return "plus";
   if (plan.includes("family")) return "family";
   return "plus";
@@ -242,32 +478,67 @@ function planForMeta(meta: JsonRecord): string {
 // Amount: the metadata's amount_cents (stamped server-side at checkout OPEN, so a
 // promo ending mid-checkout still honors what the customer saw), else the current
 // catalog from billing_prices (single source, _shared/prices.ts).
-async function commitOrderPlan(db: SupabaseClient, userId: string, eventType: string, meta: JsonRecord): Promise<void> {
-  if (eventType !== "ORDER_COMPLETED") return;
+async function commitOrderPlan(
+  db: SupabaseClient,
+  userId: string,
+  eventType: string,
+  meta: JsonRecord,
+  orderId: string | null,
+): Promise<string | null> {
+  if (eventType !== "ORDER_COMPLETED" && eventType !== "ORDER_AUTHORISED") return null;
   const kind = String(meta.kind ?? "").toLowerCase();
-  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") return;
+  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") return null;
   const plan = planForMeta(meta);
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
   const metaAmount = Number(meta.amount_cents);
   const amount = (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
     ? Math.round(metaAmount)
     : (await getPrices(db))[plan]?.[period];
-  if (!amount) return; // only plus/family carry a web price — anything else is not committable
+  if (!amount) throw new Error("checkout plan amount is not committable");
   // Conditions promo « N périodes » stampées à l'ouverture du checkout —
   // absentes (vieil ordre) = réduction à vie, comportement historique.
   const metaBase = Number(meta.base_amount_cents);
   const metaCycles = Number(meta.promo_cycles);
   const promoCycles = (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24) ? Math.round(metaCycles) : null;
   const promoBase = (promoCycles && Number.isFinite(metaBase) && metaBase > amount && metaBase <= 99999) ? Math.round(metaBase) : null;
-  try {
-    await db.from("cloud_revolut_customers").upsert({
-      user_id: userId, plan, period, amount_cents: amount,
-      base_amount_cents: promoBase, promo_cycles_left: promoBase ? promoCycles : null,
-      updated_at: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.warn("[norva-revolut-webhook] plan commit failed", String((e as Error)?.message ?? e));
+  const nowIso = new Date().toISOString();
+  if (kind === "plan_change") {
+    const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,current_period_end")
+      .eq("user_id", userId).maybeSingle();
+    if (currentError) throw new Error(`plan change projection read failed: ${currentError.message}`);
+    const provider = String((current as { provider?: string } | null)?.provider ?? "").toLowerCase();
+    const currentProjection = current as { status?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    const effectiveAt = stringOrNull(currentProjection?.status === "trialing"
+      ? (currentProjection?.trial_ends_at ?? currentProjection?.current_period_end)
+      : currentProjection?.current_period_end);
+    if (provider !== "revolut" || !effectiveAt || new Date(effectiveAt).getTime() <= Date.now()) {
+      throw new Error("plan change is not eligible for the next Revolut cycle");
+    }
+    const { error } = await db.from("cloud_revolut_customers").upsert({
+      user_id: userId,
+      pending_plan: plan,
+      pending_period: period,
+      pending_amount_cents: amount,
+      pending_base_amount_cents: promoBase,
+      pending_promo_cycles: promoBase ? promoCycles : null,
+      pending_effective_at: effectiveAt,
+      pending_order_id: orderId,
+      updated_at: nowIso,
+    }, { onConflict: "user_id" });
+    if (error) throw new Error(`pending plan commit failed: ${error.message}`);
+    return effectiveAt;
   }
+  const { error } = await db.from("cloud_revolut_customers").upsert({
+    user_id: userId, plan, period, amount_cents: amount,
+    base_amount_cents: promoBase, promo_cycles_left: promoBase ? promoCycles : null,
+    pending_plan: null, pending_period: null, pending_amount_cents: null,
+    pending_base_amount_cents: null, pending_promo_cycles: null,
+    pending_effective_at: null, pending_order_id: null,
+    updated_at: nowIso,
+  }, { onConflict: "user_id" });
+  if (error) throw new Error(`plan commit failed: ${error.message}`);
+  return null;
 }
 
 // --- signature verification -------------------------------------------------

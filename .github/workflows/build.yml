@@ -18,6 +18,12 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run regression suite
+        run: npm test
+
       - name: Verify region model
         run: npm run verify:region
 
@@ -29,6 +35,7 @@ jobs:
 
   build-windows:
     name: Build Windows Portable
+    needs: verify-cloud-contracts
     runs-on: windows-latest
 
     steps:
@@ -58,6 +65,7 @@ jobs:
 
   build-android:
     name: Build Android TV APK
+    needs: verify-cloud-contracts
     runs-on: ubuntu-latest
 
     steps:
@@ -92,6 +100,7 @@ jobs:
 
   build-android-phone:
     name: Build Android Phone APK
+    needs: verify-cloud-contracts
     runs-on: ubuntu-latest
 
     steps:

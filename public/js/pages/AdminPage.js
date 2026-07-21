@@ -1757,8 +1757,11 @@ class AdminPage {
             }).join('')}</div>`;
         };
 
-        const FUNNEL_ORDER = ['signup', 'source_added', 'first_play', 'checkout_open', 'trial_start', 'trial_convert', 'renewal', 'cancel', 'save', 'winback_return'];
-        const FUNNEL_LABELS = { signup: 'Inscriptions', source_added: '1ʳᵉ source ajoutée', first_play: '1ʳᵉ lecture', checkout_open: 'Checkout ouvert', trial_start: 'Essai démarré', trial_convert: 'Essai → payant', renewal: 'Renouvellements', cancel: 'Annulations', save: 'Clients sauvés', winback_return: 'Retours win-back' };
+        // Conversion steps are ordered as a journey, not by implementation
+        // date. Landing/page-view remains in the consent-gated marketing stack;
+        // these stages are backed by authoritative first-party server records.
+        const FUNNEL_ORDER = ['account_created', 'source_added', 'checkout_open', 'order_authorized', 'entitlement_active', 'first_play', 'trial_start', 'trial_convert', 'renewal', 'cancel', 'winback_return'];
+        const FUNNEL_LABELS = { account_created: 'Compte créé', source_added: '1ʳᵉ source ajoutée', checkout_open: 'Checkout ouvert', order_authorized: 'Paiement autorisé', entitlement_active: 'Accès activé', first_play: '1ʳᵉ lecture', trial_start: 'Essai démarré', trial_convert: 'Essai → payant', renewal: 'Renouvellements', cancel: 'Annulations', winback_return: 'Retours win-back' };
         const funnelMap = {};
         (Array.isArray(f.funnel_30d) ? f.funnel_30d : []).forEach(r => { funnelMap[r.stage] = r.users; });
         const funnelData = FUNNEL_ORDER.filter(s => funnelMap[s] != null).map(s => ({ label: FUNNEL_LABELS[s] || s, v: funnelMap[s] }));

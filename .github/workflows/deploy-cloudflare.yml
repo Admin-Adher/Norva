@@ -17,6 +17,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install test dependencies
+        run: npm ci --ignore-scripts
+
+      # This workflow deploys independently from Build, so it must enforce the
+      # regression suite itself rather than assume another workflow will block it.
+      - name: Run regression suite
+        run: npm test
+
       - name: Verify region model
         run: npm run verify:region
 

@@ -28,16 +28,32 @@
 // Optional:
 //   * NORVA_RC_PRODUCT_MAP — JSON object mapping store product ids -> plan code,
 //     e.g. {"norva_family_monthly":"family","norva_family_annual":"family"}.
-//     Set this once the Play / Web products exist. Until then a best-effort
-//     name heuristic is used.
+//     Unknown products are journaled as UNKNOWN_PRODUCT_ID. Only an explicit
+//     Plus/Family product token or entitlement is accepted as a safe fallback.
 //   * NORVA_BILLING_FAIL_OPEN_HOURS — grace window applied on billing issues
 //     (default 72).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { getPrices } from "../_shared/prices.ts";
+import {
+  canGrantRevenueCatAccess,
+  isKnownStorePlan,
+  isRevenueCatProvider,
+  parseRevenueCatProductMap,
+  resolveRevenueCatPlan,
+  shouldRejectUnmappedRevenueCatEvent,
+} from "../_shared/billing-policy.mjs";
 
 type JsonRecord = Record<string, unknown>;
+type ProjectionSnapshot = {
+  plan_code?: string;
+  provider?: string;
+  status?: string;
+  current_period_end?: string | null;
+  trial_ends_at?: string | null;
+  fail_open_until?: string | null;
+  last_event_at?: string | null;
+};
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -46,9 +62,17 @@ const SUPABASE_SERVICE_KEY =
   "";
 const WEBHOOK_AUTH = Deno.env.get("NORVA_REVENUECAT_WEBHOOK_AUTH") ?? "";
 const FAIL_OPEN_HOURS = boundedInt(Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"), 72, 1, 24 * 14);
-const PRODUCT_MAP = parseProductMap(Deno.env.get("NORVA_RC_PRODUCT_MAP"));
-
-const VALID_PLAN_CODES = new Set(["trial", "plus", "family", "premium", "manual", "none"]);
+const DEFAULT_PRODUCT_MAP = {
+  norva_plus_monthly: "plus", norva_plus_annual: "plus",
+  norva_family_monthly: "family", norva_family_annual: "family",
+  "norva_plus:monthly": "plus", "norva_plus:annual": "plus",
+  "norva_family:monthly": "family", "norva_family:annual": "family",
+};
+const PRODUCT_MAP = parseRevenueCatProductMap(Deno.env.get("NORVA_RC_PRODUCT_MAP"), DEFAULT_PRODUCT_MAP);
+const UNKNOWN_PRODUCT_POLICY = (Deno.env.get("NORVA_RC_UNKNOWN_PRODUCT_POLICY") ?? "error").toLowerCase() === "error"
+  ? "error"
+  : "warn";
+const ACCEPT_SANDBOX = (Deno.env.get("NORVA_RC_ACCEPT_SANDBOX") ?? "false").toLowerCase() === "true";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -77,10 +101,17 @@ Deno.serve(async (req) => {
   const event = (body?.event ?? {}) as JsonRecord;
   const eventType = String(event.type ?? "").toUpperCase();
   const eventId = stringOrNull(event.id);
+  const causalEventId = eventId ?? `${eventType}:${String(event.event_timestamp_ms ?? "missing")}:${String(event.transaction_id ?? "none")}`;
 
   // RevenueCat "Send test event" — acknowledge so the dashboard goes green.
   if (eventType === "TEST") {
     return json({ ok: true, test: true });
+  }
+
+  const purchaseEnvironment = String(event.environment ?? event.purchase_environment ?? "PRODUCTION").toUpperCase();
+  if (purchaseEnvironment === "SANDBOX" && !ACCEPT_SANDBOX) {
+    console.warn("[norva-billing-webhook] sandbox event ignored", { type: eventType, id: eventId });
+    return json({ ok: true, skipped: "sandbox" });
   }
 
   // App User ID is our Supabase user id. Anything that isn't a known user
@@ -104,14 +135,65 @@ Deno.serve(async (req) => {
     // Reconcile the projection first (idempotent upsert keyed by user_id), then
     // record the event as processed. Recording last means a transient failure
     // leaves no event row, so RevenueCat's retry safely reprocesses.
-    // The catalog table is only needed for the price-less PRODUCT_CHANGE fallback.
-    const priceTable = eventType === "PRODUCT_CHANGE" ? await getPrices(admin) : null;
-    const patch = projectionPatch(userId, eventType, event, priceTable);
+    const effective = effectiveEvent(eventType, event);
+    const periodType = String(effective.period_type ?? "").toUpperCase();
+    const reconcilesProjection = statusForEvent(eventType, periodType === "TRIAL" || periodType === "INTRO") !== null;
+    let existingProjection: ProjectionSnapshot | null = null;
+    if (reconcilesProjection) {
+      const { data: existing, error: existingError } = await admin.from("cloud_entitlement_projection")
+        .select("plan_code,provider,status,current_period_end,trial_ends_at,fail_open_until,last_event_at")
+        .eq("user_id", userId).maybeSingle();
+      if (existingError) throw new Error(`existing projection read failed: ${existingError.message}`);
+      existingProjection = existing as ProjectionSnapshot | null;
+    }
+    const resolution = resolveRevenueCatPlan(effective, PRODUCT_MAP);
+    let resolvedPlan: string | null = resolution.planCode;
+    if (reconcilesProjection && resolution.mapping === "unknown") {
+      const currentPlan = String(existingProjection?.plan_code ?? "").toLowerCase();
+      const sameRail = isRevenueCatProvider(existingProjection?.provider);
+      if (sameRail && isKnownStorePlan(currentPlan)) resolvedPlan = currentPlan;
+      const signalId = `${eventId ?? `${eventType}:${userId}:${String(event.event_timestamp_ms ?? "unknown")}`}:unknown_product`;
+      await recordProcessedEvent(admin, userId, signalId, "UNKNOWN_PRODUCT_ID", {
+        product_id: effective.product_id ?? null,
+        new_product_id: event.new_product_id ?? null,
+        entitlement_ids: effective.entitlement_ids ?? [],
+        preserved_plan: resolvedPlan,
+        preserved_existing_plan: sameRail && isKnownStorePlan(currentPlan),
+        existing_provider: existingProjection?.provider ?? null,
+        source_event_id: eventId,
+      });
+      console.error("[norva-billing-webhook] UNKNOWN_PRODUCT_ID", {
+        product_id: effective.product_id, user_id: userId, preserved_plan: resolvedPlan,
+      });
+      // Never acknowledge a purchase/grant that cannot be mapped to a safe tier.
+      // Throwing before both the payment ledger and the source event marker keeps
+      // the original RevenueCat delivery retryable after the product map is fixed.
+      // A known projection from this same rail is safe to preserve and may proceed.
+      if (shouldRejectUnmappedRevenueCatEvent(eventType, resolvedPlan, UNKNOWN_PRODUCT_POLICY)) {
+        throw new Error(`unmapped RevenueCat product: ${resolution.productId || "(missing)"}`);
+      }
+    }
+    const patch = projectionPatch(userId, eventType, event, resolvedPlan);
+    let projectionApplied = false;
     if (patch) {
-      const { error } = await admin
-        .from("cloud_entitlement_projection")
-        .upsert(patch, { onConflict: "user_id" });
-      if (error) throw new Error(`projection upsert failed: ${error.message}`);
+      const { data, error } = await admin.rpc("apply_revenuecat_entitlement_event", {
+        p_user_id: userId,
+        p_event_at: String(patch.last_event_at),
+        p_event_id: causalEventId,
+        p_patch: patch,
+      });
+      if (error) throw new Error(`projection monotonic apply failed: ${error.message}`);
+      projectionApplied = Boolean((data as { applied?: boolean }[] | null)?.[0]?.applied);
+      if (!projectionApplied && existingProjection && !isRevenueCatProvider(existingProjection.provider)) {
+        const signalId = `${eventId ?? `${eventType}:${userId}:${String(event.event_timestamp_ms ?? "unknown")}`}:cross_rail`;
+        await recordProcessedEvent(admin, userId, signalId, "CROSS_RAIL_EVENT_IGNORED", {
+          source_event_id: eventId,
+          event_type: eventType,
+          incoming_provider: patch.provider,
+          existing_provider: existingProjection.provider ?? null,
+          existing_status: existingProjection.status ?? null,
+        });
+      }
     }
 
     // Journal the mobile charge into the shared payments ledger (cloud_billing_ledger,
@@ -119,8 +201,17 @@ Deno.serve(async (req) => {
     // Play & Apple revenue alongside the web rail's own order journal.
     await journalRcPayment(admin, userId, eventType, event);
 
-    await recordProcessedEvent(admin, userId, eventId, eventType, event);
-    return json({ ok: true, type: eventType, plan: patch?.plan_code ?? null });
+    await recordProcessedEvent(admin, userId, eventId, eventType, {
+      ...event,
+      _norva: { projection_applied: projectionApplied, plan_mapping: resolution.mapping },
+    });
+    return json({
+      ok: true,
+      type: eventType,
+      plan: patch?.plan_code ?? null,
+      plan_mapping: resolution.mapping,
+      projection_applied: projectionApplied,
+    });
   } catch (error) {
     // 5xx so RevenueCat retries with backoff.
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -131,18 +222,26 @@ Deno.serve(async (req) => {
 
 // --- event -> projection mapping -------------------------------------------
 
-function projectionPatch(userId: string, type: string, rawEvent: JsonRecord, priceTable: Record<string, Record<string, number>> | null = null): JsonRecord | null {
-  // PRODUCT_CHANGE carries the OLD product in `product_id` and the NEW one in
-  // `new_product_id` — the projection must describe what the subscriber switched
-  // TO, so plan/cadence derive from the new product from here on.
+function projectionPatch(
+  userId: string,
+  type: string,
+  rawEvent: JsonRecord,
+  resolvedPlan?: string | null,
+): JsonRecord | null {
+  // PRODUCT_CHANGE is informational: a downgrade can be deferred. The later
+  // RENEWAL/INITIAL_PURCHASE is the authoritative event that changes access.
   const event = effectiveEvent(type, rawEvent);
   const periodType = String(event.period_type ?? "").toUpperCase();
   const isTrial = periodType === "TRIAL" || periodType === "INTRO";
   const status = statusForEvent(type, isTrial);
   if (!status) return null; // nothing to reconcile (e.g. TRANSFER — TODO below)
 
-  const planCode = planForEvent(event);
+  const planCode = isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null;
+  if (!planCode) return null;
+  if (!canGrantRevenueCatAccess(type, event)) return null;
   const periodEnd = msToIso(event.expiration_at_ms);
+  const eventAt = msToIso(event.event_timestamp_ms);
+  if (!eventAt) return null;
   const nowIso = new Date().toISOString();
 
   const patch: JsonRecord = {
@@ -155,22 +254,20 @@ function projectionPatch(userId: string, type: string, rawEvent: JsonRecord, pri
     // normalizeLimits) always layers the CURRENT plan-catalog limits over this,
     // so catalog changes apply immediately and the webhook keeps no copy of it.
     limits: {},
-    current_period_end: periodEnd,
     last_verified_at: nowIso,
-    last_event_at: msToIso(event.event_timestamp_ms) ?? nowIso,
+    last_event_at: eventAt,
+    fail_open_until: type === "BILLING_ISSUE"
+      ? new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString()
+      : null,
   };
+
+  if (periodEnd) patch.current_period_end = periodEnd;
 
   // Only stamp the trial fields while actually in a trial period; once the
   // subscription converts we leave the historical trial_ends_at untouched.
   if (isTrial) {
     patch.trial_ends_at = periodEnd;
     patch.trial_consumed_at = msToIso(event.purchased_at_ms) ?? nowIso;
-  }
-
-  // A billing issue keeps access open for a grace window instead of cutting it
-  // off immediately (matches the fail-open behaviour in entitlements.ts).
-  if (type === "BILLING_ISSUE") {
-    patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
   }
 
   // Storefront country (RC top-level `country_code`) — high-trust source for the
@@ -186,20 +283,10 @@ function projectionPatch(userId: string, type: string, rawEvent: JsonRecord, pri
   // own price/cadence separately; this gives the mobile rails
   // (Play/Apple) the equivalent so admin_finance can compute their MRR. Only stamp
   // when a price is present, so price-less events (cancel/expire) never null it.
-  // Exception — a price-less PRODUCT_CHANGE would otherwise leave the OLD price and
-  // cadence in place until the next RENEWAL (up to a year for a monthly→annual
-  // switch): fall back to the catalog price of the NEW product instead.
   const baseCents = basePriceCents(event);
   if (baseCents != null) {
     patch.mrr_cents = baseCents;
     patch.bill_period = billPeriodForEvent(event);
-  } else if (type === "PRODUCT_CHANGE") {
-    const period = billPeriodForEvent(event);
-    const catalogCents = priceTable?.[planCode]?.[period];
-    if (catalogCents) {
-      patch.mrr_cents = catalogCents;
-      patch.bill_period = period;
-    }
   }
 
   // TODO(transfer): handle the TRANSFER event by moving the entitlement from
@@ -214,49 +301,26 @@ function statusForEvent(type: string, isTrial: boolean): string | null {
     case "INITIAL_PURCHASE":
     case "RENEWAL":
     case "UNCANCELLATION":
-    case "PRODUCT_CHANGE":
     case "NON_RENEWING_PURCHASE":
+    case "SUBSCRIPTION_EXTENDED":
+    case "REFUND_REVERSED":
       return isTrial ? "trialing" : "active";
+    case "PRODUCT_CHANGE":
+      return null;
     case "CANCELLATION":
       // Still entitled until current_period_end; just won't auto-renew.
       return "cancelled_at_period_end";
     case "BILLING_ISSUE":
       return "past_due";
     case "SUBSCRIPTION_PAUSED":
-      return "grace";
+      // Access remains valid until EXPIRATION. Do not label a scheduled pause
+      // as a failed-payment grace state.
+      return "cancelled_at_period_end";
     case "EXPIRATION":
       return "expired";
     default:
       return null;
   }
-}
-
-// Map a RevenueCat event to a Norva plan code.
-//   1. Exact product id match from NORVA_RC_PRODUCT_MAP (set this in prod).
-//   2. Entitlement id (if you name entitlements "plus"/"family").
-//   3. Best-effort substring heuristic on the product id.
-// Falls back to "plus" (entry plan) rather than blocking a paying customer.
-function planForEvent(event: JsonRecord): string {
-  const productId = stringOrNull(event.product_id)?.toLowerCase() ?? "";
-  const mapped = productId ? PRODUCT_MAP[productId] : undefined;
-  if (mapped && VALID_PLAN_CODES.has(mapped)) {
-    return mapped;
-  }
-
-  const entitlements = Array.isArray(event.entitlement_ids)
-    ? (event.entitlement_ids as unknown[]).map((e) => String(e).toLowerCase())
-    : [];
-  if (entitlements.includes("family")) return "family";
-  if (entitlements.includes("plus")) return "plus";
-
-  if (productId.includes("family")) return "family";
-  if (productId.includes("plus")) return "plus";
-
-  console.warn("[norva-billing-webhook] unmapped product, defaulting to plus", {
-    product_id: event.product_id,
-    entitlement_ids: event.entitlement_ids,
-  });
-  return "plus";
 }
 
 function providerForStore(store: string | null): string {
@@ -303,11 +367,6 @@ function countryOf(event: JsonRecord): string | null {
   return c && /^[A-Za-z]{2}$/.test(c) ? c.toUpperCase() : null;
 }
 
-// NB: the catalog price used as MRR fallback for a price-less PRODUCT_CHANGE comes
-// from billing_prices (single source, _shared/prices.ts) — the mobile products
-// mirror the web plans. Never journaled as cash (the ledger only records amounts
-// the event itself carries).
-
 // A PRODUCT_CHANGE event's `product_id` is the product being LEFT; the product the
 // subscriber switched to arrives in `new_product_id`. Return a view of the event
 // where product_id describes the NEW product, so every derivation downstream
@@ -315,7 +374,9 @@ function countryOf(event: JsonRecord): string | null {
 function effectiveEvent(type: string, event: JsonRecord): JsonRecord {
   if (type !== "PRODUCT_CHANGE") return event;
   const next = stringOrNull(event.new_product_id);
-  return next ? { ...event, product_id: next } : event;
+  return next
+    ? { ...event, product_id: next }
+    : { ...event, product_id: null, entitlement_ids: [] };
 }
 
 // monthly | annual, from the product id, else the purchased→expiration span.
@@ -334,21 +395,17 @@ function billPeriodForEvent(event: JsonRecord): string {
 // Insert a rail-tagged payment row for a real (non-trial) mobile charge, mirroring
 // the web-rail journal. Idempotent on pi_id (`rc_<transaction_id>`), so RC retries
 // and the whole-event idempotency guard both no-op safely.
-// PRODUCT_CHANGE is journaled as kind='plan_change': the event's price is the NEW
-// product's full catalog price, NOT what Google actually charged (Google prorates
-// the switch itself and never tells RC the prorated cash amount) — so the row is
-// audit context, deliberately EXCLUDED from every revenue/conversion aggregate
-// (they all filter kind in ('first_charge','renewal')). The real annual cash shows
-// up as a normal 'renewal' row at the next RENEWAL event.
+// PRODUCT_CHANGE is deliberately not journaled as cash: it can be deferred and
+// RevenueCat does not report the eventual prorated store transaction here.
 async function journalRcPayment(
   db: SupabaseClient,
   userId: string,
   type: string,
   rawEvent: JsonRecord,
 ): Promise<void> {
-  const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE", "PRODUCT_CHANGE"]);
+  const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
   if (!MONEY.has(type)) return;
-  const event = effectiveEvent(type, rawEvent); // PRODUCT_CHANGE → describe the NEW product
+  const event = effectiveEvent(type, rawEvent);
   const periodType = String(event.period_type ?? "").toUpperCase();
   if (periodType === "TRIAL" || periodType === "INTRO") return; // no cash during a trial/intro
   const cents = paidCents(event);
@@ -359,7 +416,7 @@ async function journalRcPayment(
   const { error } = await db.from("cloud_billing_ledger").upsert({
     pi_id: `rc_${txId}`,
     user_id: userId,
-    kind: type === "RENEWAL" ? "renewal" : (type === "PRODUCT_CHANGE" ? "plan_change" : "first_charge"),
+    kind: type === "RENEWAL" ? "renewal" : "first_charge",
     amount: cents,
     currency: currencyOf(event),
     status: "captured",
@@ -437,21 +494,6 @@ function timingSafeEqual(a: string, b: string): boolean {
     mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return mismatch === 0;
-}
-
-function parseProductMap(raw: string | undefined): Record<string, string> {
-  if (!raw) return {};
-  try {
-    const obj = JSON.parse(raw);
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[String(k).toLowerCase()] = String(v);
-    }
-    return out;
-  } catch (_) {
-    console.error("[norva-billing-webhook] NORVA_RC_PRODUCT_MAP is not valid JSON");
-    return {};
-  }
 }
 
 function msToIso(value: unknown): string | null {

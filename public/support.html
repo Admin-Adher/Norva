@@ -173,7 +173,10 @@
       // Same-site guard: only a path starting with a single "/" is trusted, so returnTo can never
       // become an open redirect or bounce to the marketing site. Default back to Settings (the entry
       // point for "Contact support").
-      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#settings'; }
+      function safeLocalPath(v) {
+        return (typeof v === 'string' && /^\/(?!\/)/.test(v) && !/[\\\u0000-\u001f\u007f]/.test(v))
+          ? v : '/app#settings';
+      }
       const params = new URLSearchParams(location.search);
       const returnTo = safeLocalPath(params.get('returnTo'));
       document.getElementById('back-link').setAttribute('href', returnTo);

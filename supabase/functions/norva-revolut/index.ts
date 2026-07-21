@@ -34,6 +34,7 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("S
 const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 // Sandbox during dev; set to https://merchant.revolut.com at production cutover.
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
+const PUBLIC_SITE_ORIGIN = (Deno.env.get("NORVA_PUBLIC_SITE_ORIGIN") ?? "https://norva.tv").replace(/\/+$/, "");
 const TRIAL_DAYS = 7;
 // Card-validation hold (capture_mode:MANUAL → authorised, never captured, voided on
 // confirm). $0.50 keeps the card-validation footprint tiny; bump via env if the sandbox rejects it.
@@ -56,27 +57,106 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 function isTestKey(): boolean { return REVOLUT_SECRET_KEY.startsWith("sk_") && /sandbox/i.test(REVOLUT_API_BASE); }
-// A short, unique-per-order external reference (Revolut rejects duplicate ext_refs).
-function extRef(userId: string): string { return `${userId.replace(/-/g, "").slice(0, 24)}-${Date.now().toString(36)}`; }
+const CHECKOUT_TTL_SECONDS = boundedInt(Deno.env.get("NORVA_REVOLUT_CHECKOUT_TTL_SECONDS"), 1800, 300, 3600);
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function checkoutIntentKey(
+  userId: string,
+  kind: string,
+  plan: string,
+  period: string,
+  amount: number,
+  promoBase: number | null,
+  promoCycles: number | null,
+  returnTo: string,
+): Promise<string> {
+  const fingerprint = ["v2", userId, kind, plan, period, amount, promoBase ?? "", promoCycles ?? "", returnTo].join("|");
+  return `rvi_${userId.replace(/-/g, "").slice(0, 16)}_${(await sha256Hex(fingerprint)).slice(0, 24)}`;
+}
+
+async function checkoutExtRef(userId: string, intentKey: string, generation: number): Promise<string> {
+  const suffix = (await sha256Hex(`${intentKey}|${generation}`)).slice(0, 14);
+  return `nrv-${userId.replace(/-/g, "").slice(0, 16)}-${suffix}`;
+}
 
 type JsonRecord = Record<string, unknown>;
 
 async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, extraHeaders?: Record<string, string>) {
-  const res = await fetch(`${REVOLUT_API_BASE}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      ...(extraHeaders ?? {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(12_000),
-  });
-  const text = await res.text();
-  let parsed: unknown = text;
-  try { parsed = JSON.parse(text); } catch (_) { /* keep raw */ }
-  return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
+  try {
+    const res = await fetch(`${REVOLUT_API_BASE}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        ...(extraHeaders ?? {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(12_000),
+    });
+    const text = await res.text();
+    let parsed: unknown = text;
+    try { parsed = JSON.parse(text); } catch (_) { /* keep raw */ }
+    return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: "network_error", message: error instanceof Error ? error.message : String(error) } as JsonRecord,
+    };
+  }
+}
+
+type ExpectedCheckoutOrder = {
+  extRef: string;
+  userId: string;
+  intentKey: string;
+  kind: string;
+  plan: string;
+  period: string;
+  amountCents: number;
+};
+
+function checkoutOrderMatches(order: JsonRecord, expected: ExpectedCheckoutOrder): boolean {
+  if (String(order.merchant_order_ext_ref ?? "") !== expected.extRef) return false;
+  const meta = (order.metadata && typeof order.metadata === "object") ? order.metadata as JsonRecord : {};
+  return String(meta.user_id ?? "") === expected.userId
+    && String(meta.intent_key ?? "") === expected.intentKey
+    && String(meta.kind ?? "") === expected.kind
+    && String(meta.plan ?? "") === expected.plan
+    && String(meta.period ?? "") === expected.period
+    && Number(meta.amount_cents) === expected.amountCents;
+}
+
+async function findOrderByExtRef(expected: ExpectedCheckoutOrder): Promise<JsonRecord | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const found = await revolut("GET", `/api/1.0/orders?merchant_order_ext_ref=${encodeURIComponent(expected.extRef)}`);
+    if (found.ok) {
+      const list = Array.isArray(found.body)
+        ? found.body as JsonRecord[]
+        : Array.isArray(found.body.orders) ? found.body.orders as JsonRecord[] : [];
+      const match = list.find((o) => String(o.merchant_order_ext_ref ?? "") === expected.extRef);
+      if (match?.id) {
+        let candidate = match;
+        // Some list API generations omit metadata. Re-fetch the exact id before
+        // deciding; never fall back to an arbitrary first result.
+        if (!candidate.metadata) {
+          const full = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(String(match.id))}`);
+          if (full.ok) candidate = full.body;
+        }
+        if (checkoutOrderMatches(candidate, expected)) return candidate;
+        console.error("[norva-revolut] ext-ref order failed ownership validation", expected.extRef, String(match.id));
+        return null;
+      }
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+  }
+  return null;
 }
 
 // The widget token is the order's public_id (legacy) / token (new) — accept either.
@@ -223,10 +303,11 @@ Deno.serve(async (req) => {
     // (kind decided server-side): trial_setup grants trial days ONCE;
     // plan_change swaps plan without a new trial; resubscribe reactivates; card_update
     // only swaps the card.
-    const { data: projRow } = await db.from("cloud_entitlement_projection")
-      .select("status,trial_consumed_at,trial_ends_at,current_period_end")
+    const { data: projRow, error: projectionReadError } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_consumed_at,trial_ends_at,current_period_end")
       .eq("user_id", user.id).maybeSingle();
-    const proj = projRow as { status?: string; trial_consumed_at?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    if (projectionReadError) return json({ error: "Could not verify current subscription" }, 503);
+    const proj = projRow as { status?: string; provider?: string; trial_consumed_at?: string; trial_ends_at?: string; current_period_end?: string } | null;
     const nowMs = Date.now();
     const trialEndMs = proj?.trial_ends_at ? new Date(proj.trial_ends_at).getTime() : 0;
     const periodEndMs = proj?.current_period_end ? new Date(proj.current_period_end).getTime() : 0;
@@ -241,10 +322,116 @@ Deno.serve(async (req) => {
     // classed trial_setup, and paying the card check would have OVERWRITTEN the
     // grant with a 7-day trial in /confirm. plan_change preserves the existing
     // status/period fields by design.
+    const currentProvider = String(proj?.provider ?? "");
+    const terminalStatus = new Set(["expired", "revoked", "refunded", "fraud"]).has(projStatus);
+    const foreignRailBlocked = Boolean(proj && currentProvider && currentProvider !== "revolut" && !terminalStatus);
     let kind = "trial_setup";
-    if (payload.intent === "update_card") kind = "card_update";
-    else if (liveEntitlement) kind = "plan_change";
+    if (payload.intent === "update_card") {
+      if (!proj || currentProvider !== "revolut") {
+        return json({ error: "This payment method is managed by another billing provider", code: "billing_rail_mismatch" }, 409);
+      }
+      kind = "card_update";
+    } else if (foreignRailBlocked) {
+      return json({ error: "This subscription must be managed through its current billing provider", code: "billing_rail_mismatch" }, 409);
+    } else if (liveEntitlement) {
+      if (currentProvider !== "revolut") {
+        return json({ error: "This subscription must be managed through its current billing provider", code: "billing_rail_mismatch" }, 409);
+      }
+      kind = "plan_change";
+    }
     else if (proj?.trial_consumed_at) kind = "resubscribe";
+
+    const returnTo = (
+      typeof payload.returnTo === "string" && /^\/(?!\/)/.test(payload.returnTo) && !payload.returnTo.includes("\\")
+    ) ? payload.returnTo : "";
+    const intentKey = await checkoutIntentKey(user.id, kind, plan, period, amount, promoBase, promoCycles, returnTo);
+    const leaseToken = crypto.randomUUID();
+    type CheckoutClaim = {
+      action: "create" | "recover" | "reuse" | "wait";
+      order_id: string | null;
+      public_id: string | null;
+      checkout_url: string | null;
+      expires_at: string;
+      previous_order_id: string | null;
+      generation: number;
+    };
+    const claimIntent = async (): Promise<CheckoutClaim> => {
+      const { data, error } = await db.rpc("claim_revolut_checkout_intent", {
+        p_intent_key: intentKey,
+        p_user_id: user.id,
+        p_kind: kind,
+        p_plan: plan,
+        p_period: period,
+        p_amount_cents: amount,
+        p_lease_token: leaseToken,
+        p_ttl_seconds: CHECKOUT_TTL_SECONDS,
+        p_lease_seconds: 180,
+      });
+      if (error) throw new Error(`checkout intent claim failed: ${error.message}`);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.action) throw new Error("checkout intent claim returned no decision");
+      return row as CheckoutClaim;
+    };
+
+    let intent: CheckoutClaim;
+    try { intent = await claimIntent(); }
+    catch (error) {
+      console.error("[norva-revolut] intent claim failed", error instanceof Error ? error.message : error);
+      return json({ error: "Could not reserve checkout" }, 503);
+    }
+
+    if (intent.action === "wait") {
+      // A different tab/worker owns the short creation lease. Returning 409 makes
+      // the page retry the same deterministic intent; it must never POST a second
+      // remote order while the winner is still in flight.
+      return json({
+        error: "checkout_in_progress",
+        retryable: true,
+        retry_after_ms: 1200,
+        expires_at: intent.expires_at,
+      }, 409);
+    }
+
+    if (intent.action === "reuse" && intent.order_id && intent.public_id) {
+      const remote = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(intent.order_id)}`);
+      if (remote.ok) {
+        const remoteState = String(remote.body.state ?? "PENDING").toUpperCase();
+        const nowIso = new Date().toISOString();
+        await db.from("cloud_revolut_orders").update({
+          state: remoteState,
+          last_reconciled_at: nowIso,
+          updated_at: nowIso,
+        }).eq("order_id", intent.order_id);
+        if (["PENDING", "PROCESSING", "AUTHORISED", "COMPLETED"].includes(remoteState)) {
+          return json({
+            ok: true,
+            order_id: intent.order_id,
+            public_id: intent.public_id,
+            kind,
+            checkout_url: intent.checkout_url,
+            sandbox: isTestKey(),
+            reused: true,
+            already_authorized: remoteState === "AUTHORISED" || remoteState === "COMPLETED",
+            expires_at: intent.expires_at,
+          });
+        }
+        // The cached order reached a terminal state without a Norva finalization.
+        // Expire this intent, then reclaim the same fingerprint as a new generation.
+        await db.from("cloud_revolut_checkout_intents")
+          .update({ status: "expired", updated_at: nowIso })
+          .eq("intent_key", intentKey).eq("order_id", intent.order_id);
+        await db.from("cloud_revolut_orders").update({
+          expired_at: nowIso, last_reconciled_at: nowIso, updated_at: nowIso,
+        }).eq("order_id", intent.order_id).is("finalized_at", null);
+        intent = await claimIntent();
+        if (intent.action !== "create") {
+          return json({ error: "checkout_in_progress", retryable: true, retry_after_ms: 1200 }, 409);
+        }
+      } else {
+        // A transient provider read must not turn a refresh into a duplicate order.
+        return json({ error: "checkout_state_unavailable", retryable: true, retry_after_ms: 1500 }, 503);
+      }
+    }
 
     // A Revolut customer is needed for the card to be saved (see helper). Create it
     // up front so the order can carry customer_id. Degrade gracefully: if creation
@@ -272,8 +459,18 @@ Deno.serve(async (req) => {
       // Les nulls explicites effacent un éventuel état promo d'un checkout précédent.
       custRow.base_amount_cents = promoBase;
       custRow.promo_cycles_left = promoCycles;
+      custRow.pending_plan = null; custRow.pending_period = null;
+      custRow.pending_amount_cents = null; custRow.pending_base_amount_cents = null;
+      custRow.pending_promo_cycles = null; custRow.pending_effective_at = null;
+      custRow.pending_order_id = null;
     }
-    await db.from("cloud_revolut_customers").upsert(custRow);
+    const { error: customerStageError } = await db.from("cloud_revolut_customers").upsert(custRow);
+    if (customerStageError) {
+      await db.rpc("fail_revolut_checkout_intent", {
+        p_intent_key: intentKey, p_lease_token: leaseToken, p_error: customerStageError.message,
+      });
+      return json({ error: "Could not stage billing profile", retryable: true }, 503);
+    }
 
     const DESCRIPTIONS: Record<string, string> = {
       trial_setup: `Norva ${plan} ${period} — card check for 7-day free trial`,
@@ -288,9 +485,13 @@ Deno.serve(async (req) => {
     // must send the customer back here to finalize (capture card, void hold, start the
     // trial) — else they land on Revolut's own "payment complete" page and never return.
     // The embedded card field returns inline via onSuccess and doesn't use this.
-    const returnTo = (typeof payload.returnTo === "string" && payload.returnTo.startsWith("/")) ? payload.returnTo : "";
-    const frontOrigin = (req.headers.get("origin") || "https://norva.tv").replace(/\/+$/, "");
-    const redirectUrl = `${frontOrigin}/checkout-revolut.html?revolut_return=1${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""}`;
+    // Never reflect an arbitrary Origin into Revolut's post-payment redirect.
+    const frontOrigin = PUBLIC_SITE_ORIGIN;
+    const redirectParams = new URLSearchParams({ revolut_return: "1", plan, period });
+    if (payload.intent === "update_card") redirectParams.set("intent", "update_card");
+    if (returnTo) redirectParams.set("returnTo", returnTo);
+    const redirectUrl = `${frontOrigin}/checkout-revolut.html?${redirectParams.toString()}`;
+    const merchantExtRef = await checkoutExtRef(user.id, intentKey, Number(intent.generation || 1));
     const orderBody: JsonRecord = {
       amount: VALIDATION_CENTS,
       currency: "USD",
@@ -302,50 +503,126 @@ Deno.serve(async (req) => {
       // leave no saved card and the renewal cron could not charge.
       save_payment_method_for: "merchant",
       redirect_url: redirectUrl,
-      merchant_order_ext_ref: extRef(user.id),
+      merchant_order_ext_ref: merchantExtRef,
       description: DESCRIPTIONS[kind],
       // amount_cents = the catalog price at checkout OPEN — /confirm commits THIS
       // amount, so a promo ending mid-checkout still honors what the page showed.
       // base_amount_cents/promo_cycles carry the « N first periods » promo terms.
-      metadata: { user_id: user.id, plan, period, kind, amount_cents: amount, base_amount_cents: promoBase, promo_cycles: promoCycles },
+      metadata: {
+        user_id: user.id, plan, period, kind, amount_cents: amount,
+        base_amount_cents: promoBase, promo_cycles: promoCycles,
+        intent_key: intentKey, intent_generation: Number(intent.generation || 1),
+      },
     };
     // customer_id links the order → customer so the saved card attaches; fall back to
     // customer_email if the customer couldn't be created.
     if (custId) orderBody.customer_id = custId; else orderBody.customer_email = user.email;
-    let created = await revolut("POST", "/api/1.0/orders", orderBody);
+    const expectedOrder: ExpectedCheckoutOrder = {
+      extRef: merchantExtRef, userId: user.id, intentKey, kind, plan, period, amountCents: amount,
+    };
+    // The deprecated /api/1.0 order-create contract does not document an
+    // Idempotency-Key header. Its supported correlation primitive is
+    // merchant_order_ext_ref, so a lease takeover must recover by that exact
+    // reference before any second POST.
+    let created = intent.action === "recover"
+      ? { ok: false, status: 0, body: { error: "recovery_lookup_miss" } as JsonRecord }
+      : await revolut("POST", "/api/1.0/orders", orderBody);
+    if (intent.action === "recover") {
+      const recovered = await findOrderByExtRef(expectedOrder);
+      if (recovered) created = { ok: true, status: 200, body: recovered };
+      else created = await revolut("POST", "/api/1.0/orders", orderBody);
+    }
+    if (!created.ok) {
+      const recovered = await findOrderByExtRef(expectedOrder);
+      if (recovered) created = { ok: true, status: 200, body: recovered };
+    }
     // Safety net 1: if this API rejects customer_id on the order, retry with
     // customer_email so the trial still starts (card just won't attach here).
-    if (!created.ok && orderBody.customer_id) {
+    if (!created.ok && created.status !== 0 && orderBody.customer_id) {
       console.warn("[norva-revolut] order w/ customer_id failed, retrying w/ email", created.status);
       delete orderBody.customer_id;
       orderBody.customer_email = user.email;
       created = await revolut("POST", "/api/1.0/orders", orderBody);
+      if (!created.ok) {
+        const recovered = await findOrderByExtRef(expectedOrder);
+        if (recovered) created = { ok: true, status: 200, body: recovered };
+      }
     }
     // Safety net 2: if the order-level save_payment_method_for is rejected, drop it and
     // retry — the widget submit still requests the save, so the card-field path keeps
     // working (only the hosted fallback loses the save). Checkout must never break here.
-    if (!created.ok && orderBody.save_payment_method_for) {
+    if (!created.ok && created.status !== 0 && orderBody.save_payment_method_for) {
       console.warn("[norva-revolut] order w/ save_payment_method_for failed, retrying without", created.status);
       delete orderBody.save_payment_method_for;
       created = await revolut("POST", "/api/1.0/orders", orderBody);
+      if (!created.ok) {
+        const recovered = await findOrderByExtRef(expectedOrder);
+        if (recovered) created = { ok: true, status: 200, body: recovered };
+      }
     }
     const orderId = String(created.body.id ?? "");
     const token = widgetToken(created.body);
     if (!created.ok || !orderId || !token) {
       console.error("[norva-revolut] create order failed", created.status, JSON.stringify(created.body).slice(0, 400));
-      return json({ error: "Could not start checkout", detail: created.body }, 502);
+      if (created.status !== 0) {
+        await db.rpc("fail_revolut_checkout_intent", {
+          p_intent_key: intentKey, p_lease_token: leaseToken,
+          p_error: JSON.stringify(created.body).slice(0, 500),
+        });
+      }
+      return json({
+        error: created.status === 0 ? "checkout_creation_uncertain" : "Could not start checkout",
+        retryable: created.status === 0,
+        retry_after_ms: created.status === 0 ? 1500 : undefined,
+        detail: created.body,
+      }, created.status === 0 ? 503 : 502);
     }
 
-    await db.from("cloud_revolut_orders").upsert({
+    const expiresAt = intent.expires_at || new Date(Date.now() + CHECKOUT_TTL_SECONDS * 1000).toISOString();
+    const checkoutUrl = created.body.checkout_url ? String(created.body.checkout_url) : null;
+    const { error: orderWriteError } = await db.from("cloud_revolut_orders").upsert({
       order_id: orderId, public_id: token, user_id: user.id, kind,
-      amount: VALIDATION_CENTS, currency: "usd",
-      state: String(created.body.state ?? "pending"), updated_at: new Date().toISOString(),
+      plan, period, requested_amount_cents: amount,
+      amount: VALIDATION_CENTS, currency: "USD",
+      merchant_ext_ref: String(orderBody.merchant_order_ext_ref),
+      intent_key: intentKey, checkout_url: checkoutUrl, expires_at: expiresAt,
+      state: String(created.body.state ?? "PENDING").toUpperCase(), updated_at: new Date().toISOString(),
     });
+    if (orderWriteError) {
+      console.error("[norva-revolut] order journal failed", orderWriteError.message);
+      return json({ error: "Could not persist checkout", retryable: true }, 503);
+    }
+    const { data: completedIntent, error: completeError } = await db.rpc("complete_revolut_checkout_intent", {
+      p_intent_key: intentKey, p_lease_token: leaseToken, p_order_id: orderId,
+    });
+    if (completeError || completedIntent !== true) {
+      console.error("[norva-revolut] intent completion failed", completeError?.message ?? completedIntent);
+      return json({ error: "Could not finalize checkout reservation", retryable: true }, 503);
+    }
+
+    if (intent.previous_order_id && intent.previous_order_id !== orderId) {
+      const supersededAt = new Date().toISOString();
+      await db.from("cloud_revolut_orders").update({
+        superseded_at: supersededAt, updated_at: supersededAt,
+      }).eq("order_id", intent.previous_order_id).is("finalized_at", null);
+      // Best-effort remote cleanup. The journal is retained for audit.
+      const previous = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(intent.previous_order_id)}`);
+      const previousState = String(previous.body.state ?? "").toUpperCase();
+      if (previous.ok && ["PENDING", "PROCESSING"].includes(previousState)) {
+        const cancelled = await revolut("POST", `/api/orders/${encodeURIComponent(intent.previous_order_id)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" });
+        await db.from("cloud_revolut_orders").update({
+          state: cancelled.ok ? "CANCELLED" : previousState,
+          expired_at: cancelled.ok ? supersededAt : null,
+          last_reconciled_at: supersededAt,
+          updated_at: supersededAt,
+        }).eq("order_id", intent.previous_order_id);
+      }
+    }
 
     return json({
       ok: true, order_id: orderId, public_id: token, kind,
-      checkout_url: created.body.checkout_url ? String(created.body.checkout_url) : null,
-      sandbox: isTestKey(),
+      checkout_url: checkoutUrl,
+      sandbox: isTestKey(), reused: false, expires_at: expiresAt,
     });
   }
 
@@ -361,13 +638,60 @@ Deno.serve(async (req) => {
     try { payload = await req.json(); } catch (_) { /* optional */ }
     let orderId = String(payload.order_id ?? "");
     if (!orderId) {
-      const { data: last } = await db.from("cloud_revolut_orders")
-        .select("order_id").eq("user_id", user.id)
-        .in("kind", ["trial_setup", "plan_change", "resubscribe", "card_update"])
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
-      orderId = String((last as { order_id?: string } | null)?.order_id ?? "");
+      // Hosted-checkout fallback: resolve only the user's single CURRENT intent.
+      // Never pick the latest historical order — duplicate legacy rows made that
+      // capable of finalizing a different plan than the one the user just paid.
+      const { data: currentIntent } = await db.from("cloud_revolut_checkout_intents")
+        .select("order_id").eq("user_id", user.id).eq("status", "ready")
+        .gt("expires_at", new Date().toISOString()).maybeSingle();
+      orderId = String((currentIntent as { order_id?: string } | null)?.order_id ?? "");
     }
     if (!orderId) return json({ ok: false, status: "no_order" });
+
+    type CheckoutJournal = {
+      order_id: string;
+      kind: string;
+      plan?: string | null;
+      period?: string | null;
+      requested_amount_cents?: number | null;
+      merchant_ext_ref?: string | null;
+      intent_key?: string | null;
+      finalized_at?: string | null;
+      expired_at?: string | null;
+      superseded_at?: string | null;
+      finalization_result?: JsonRecord | null;
+    };
+    const { data: journalRow, error: journalReadError } = await db.from("cloud_revolut_orders")
+      .select("order_id,kind,plan,period,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result")
+      .eq("order_id", orderId).eq("user_id", user.id).maybeSingle();
+    if (journalReadError) return json({ error: "Could not read checkout journal" }, 503);
+    const journal = journalRow as CheckoutJournal | null;
+    if (!journal) return json({ error: "Checkout order is not owned by this account" }, 403);
+    if (journal.finalized_at) {
+      const finalized = (journal.finalization_result && typeof journal.finalization_result === "object")
+        ? journal.finalization_result as JsonRecord : {};
+      const result = String(finalized.result ?? "already_finalized");
+      const statusByResult: Record<string, string> = {
+        trial_started: "trialing", already_confirmed: "trialing", already_active: "active",
+        resubscribed: "active", plan_change_scheduled: "plan_change_scheduled",
+        card_updated: "updated", card_updated_retrying: "retrying",
+      };
+      if (result.startsWith("rejected_")) {
+        return json({ error: "Checkout can no longer be applied to this billing account", code: result }, 409);
+      }
+      return json({
+        ok: true, status: statusByResult[result] ?? "updated",
+        kind: String(finalized.kind ?? journal.kind),
+        effective_at: finalized.effective_at ?? null,
+        idempotent: true,
+      });
+    }
+    if (journal.expired_at || journal.superseded_at) {
+      return json({
+        error: "This checkout is no longer current",
+        code: journal.superseded_at ? "checkout_superseded" : "checkout_expired",
+      }, 409);
+    }
 
     const fetched = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(orderId)}`);
     if (!fetched.ok) return json({ ok: false, status: "not_found" });
@@ -375,7 +699,28 @@ Deno.serve(async (req) => {
     const meta = (order.metadata && typeof order.metadata === "object") ? order.metadata as JsonRecord : {};
     if (String(meta.user_id ?? "") !== user.id) return json({ error: "Forbidden" }, 403);
 
+    const remoteKind = String(meta.kind ?? "");
+    const remotePlan = String(meta.plan ?? "") === "family" ? "family" : "plus";
+    const remotePeriod = String(meta.period ?? "") === "annual" ? "annual" : "monthly";
+    const remoteAmount = Number(meta.amount_cents);
+    const remoteIntent = String(meta.intent_key ?? "");
+    const remoteExtRef = String(order.merchant_order_ext_ref ?? "");
+    if (journal.kind !== remoteKind
+      || (journal.plan && journal.plan !== remotePlan)
+      || (journal.period && journal.period !== remotePeriod)
+      || (journal.requested_amount_cents != null && journal.requested_amount_cents !== remoteAmount)
+      || (journal.intent_key && journal.intent_key !== remoteIntent)
+      || (journal.merchant_ext_ref && journal.merchant_ext_ref !== remoteExtRef)) {
+      console.error("[norva-revolut] checkout journal/provider mismatch", orderId);
+      return json({ error: "Checkout order failed integrity validation" }, 409);
+    }
+
     const state = String(order.state ?? "").toUpperCase();
+    const observedIso = new Date().toISOString();
+    const { error: observedError } = await db.from("cloud_revolut_orders").update({
+      state, last_reconciled_at: observedIso, updated_at: observedIso,
+    }).eq("order_id", orderId).eq("user_id", user.id);
+    if (observedError) return json({ error: "Could not reconcile order" }, 503);
     const paid = state === "AUTHORISED" || state === "COMPLETED";
     if (!paid) return json({ ok: true, status: order.state, pending: true });
 
@@ -397,6 +742,30 @@ Deno.serve(async (req) => {
     const metaCycles = Number(meta.promo_cycles);
     const promoCycles = (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24) ? Math.round(metaCycles) : null;
     const promoBase = (promoCycles && Number.isFinite(metaBase) && metaBase >= 100 && metaBase <= 99999) ? Math.round(metaBase) : null;
+    const allowedKinds = new Set(["trial_setup", "plan_change", "resubscribe", "card_update"]);
+    if (!allowedKinds.has(kind)) return json({ error: "Unsupported checkout kind" }, 409);
+
+    const { data: curRow, error: currentProjectionError } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,trial_consumed_at,current_period_end")
+      .eq("user_id", user.id).maybeSingle();
+    if (currentProjectionError) return json({ error: "Could not verify current subscription" }, 503);
+    const cur = curRow as {
+      status?: string; provider?: string; trial_ends_at?: string;
+      trial_consumed_at?: string; current_period_end?: string;
+    } | null;
+    const curStatus = String(cur?.status ?? "");
+    const curProvider = String(cur?.provider ?? "");
+    const curEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
+    const curTrialEndMs = cur?.trial_ends_at ? new Date(cur.trial_ends_at).getTime() : 0;
+    const curLive = (curStatus === "trialing" && curTrialEndMs > Date.now())
+      || (curStatus === "active" && (!curEndMs || curEndMs > Date.now()))
+      || (curStatus === "cancelled_at_period_end" && curEndMs > Date.now());
+    const curTerminal = new Set(["expired", "revoked", "refunded", "fraud"]).has(curStatus);
+    const foreignRailBlocked = Boolean(cur && curProvider && curProvider !== "revolut" && !curTerminal);
+    const planEffectiveAt = curStatus === "trialing"
+      ? (cur?.trial_ends_at ?? cur?.current_period_end)
+      : cur?.current_period_end;
+    const planEffectiveMs = planEffectiveAt ? new Date(planEffectiveAt).getTime() : 0;
     // Prefer the order's customer_id; fall back to the one /checkout stored (the
     // legacy order object doesn't always echo customer_id back).
     let customerId = orderCustomerId(order);
@@ -415,100 +784,165 @@ Deno.serve(async (req) => {
     // Country = card issuing country, read on the order we already fetched. Stamped on
     // the mapping (renewal cron copies it onto ledger rows) AND on the projection.
     const cardCountry = cardCountryFromOrder(order);
-    const custPatch: JsonRecord = {
-      user_id: user.id, revolut_customer_id: customerId ?? undefined, payment_method_id: pmId ?? undefined,
-      card_last4: last4 ?? undefined, card_brand: brand ?? undefined, card_exp: cardExp ?? undefined,
-      card_country: cardCountry ?? undefined,
-      updated_at: nowIso,
-    };
-    // Paid state confirmed above → commit the recurring plan this order was opened
-    // for. For plan_change this is the ONLY committer (/checkout only stages it in
-    // the order metadata, so an abandoned checkout can never reprice a renewal);
-    // for trial_setup/resubscribe it re-asserts what /checkout staged, healing any
-    // divergence when several checkouts were opened before one was paid.
-    if (kind !== "card_update" && amount) {
-      custPatch.plan = plan; custPatch.period = period; custPatch.amount_cents = amount;
-      // Nulls explicites : un engagement SANS promo limitée efface l'état promo
-      // d'un engagement précédent (le prix courant devient définitif).
-      custPatch.base_amount_cents = promoBase && promoBase > amount ? promoBase : null;
-      custPatch.promo_cycles_left = promoBase && promoBase > amount ? promoCycles : null;
-    }
-    await db.from("cloud_revolut_customers").upsert(custPatch);
-    if (cardCountry) {
-      // Best-effort: no-op for a first trial_setup (row created below, which carries
-      // the country itself); updates the existing row for every other kind — including
-      // card_update, where a NEW card legitimately moves the country.
-      try {
-        await db.from("cloud_entitlement_projection")
-          .update({ country_code: cardCountry, country_source: "card" }).eq("user_id", user.id);
-      } catch (_) { /* analytics must never block checkout */ }
-    }
-    try { await db.from("cloud_revolut_orders").update({ state: order.state }).eq("order_id", orderId); } catch (_) { /* noop */ }
-
     // Void the validation hold now that the card is saved — nothing should stay held.
     // The cancel endpoint is on the NEW Merchant API (/api/orders/…), like payments;
     // the legacy /api/1.0 path 404s. Best-effort: a lingering auth auto-expires anyway.
+    let holdReleased = state !== "AUTHORISED";
+    let journalState = state;
     if (state === "AUTHORISED") {
-      try { await revolut("POST", `/api/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" }); } catch (_) { /* noop */ }
+      const cancelled = await revolut("POST", `/api/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" });
+      holdReleased = cancelled.ok;
+      if (cancelled.ok) journalState = "CANCELLED";
     }
 
-    const { data: curRow } = await db.from("cloud_entitlement_projection")
-      .select("status,trial_ends_at,trial_consumed_at,current_period_end").eq("user_id", user.id).maybeSingle();
-    const cur = curRow as { status?: string; trial_ends_at?: string; trial_consumed_at?: string; current_period_end?: string } | null;
-    const curStatus = String(cur?.status ?? "");
+    const stampFinalized = async (result: string, extra: JsonRecord = {}): Promise<string | null> => {
+      const finalization = { result, kind, remote_state: state, hold_released: holdReleased, ...extra };
+      const { data: outcome, error } = await db.rpc("finalize_revolut_checkout_order", {
+        p_order_id: orderId,
+        p_user_id: user.id,
+        p_state: journalState,
+        p_finalization_result: finalization,
+      });
+      if (error) return error.message;
+      if (outcome !== "finalized" && outcome !== "already_finalized") {
+        return `order journal ${String(outcome || "finalization failed")}`;
+      }
+      return null;
+    };
+    const replaceProjectionWithRailCas = async (patch: JsonRecord): Promise<string | null> => {
+      if (!cur) {
+        const { error } = await db.from("cloud_entitlement_projection").insert(patch);
+        return error?.message ?? null;
+      }
+      const { data: changed, error } = await db.from("cloud_entitlement_projection")
+        .update(patch)
+        .eq("user_id", user.id)
+        .eq("provider", curProvider)
+        .eq("status", curStatus)
+        .select("user_id");
+      if (error) return error.message;
+      return Array.isArray(changed) && changed.length === 1 ? null : "projection rail changed concurrently";
+    };
+
+    const crossRail = (kind === "plan_change" || kind === "card_update")
+      ? curProvider !== "revolut"
+      : foreignRailBlocked;
+    if (crossRail) {
+      const stampError = await stampFinalized("rejected_cross_rail", { existing_provider: curProvider || null });
+      if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
+      return json({ error: "This subscription is managed by another billing provider", code: "billing_rail_mismatch" }, 409);
+    }
+    if (kind === "plan_change" && (!planEffectiveAt || planEffectiveMs <= Date.now())) {
+      const stampError = await stampFinalized("rejected_plan_not_live");
+      if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
+      return json({ error: "The current billing period has ended; resubscribe instead", code: "plan_not_live" }, 409);
+    }
+
+    const willStartTrial = kind === "trial_setup" && !cur?.trial_consumed_at && !curLive;
+    const willCommitRecurring = kind === "resubscribe" || willStartTrial;
+    const custPatch: JsonRecord = {
+      user_id: user.id, revolut_customer_id: customerId ?? undefined, payment_method_id: pmId ?? undefined,
+      card_last4: last4 ?? undefined, card_brand: brand ?? undefined, card_exp: cardExp ?? undefined,
+      card_country: cardCountry ?? undefined, updated_at: nowIso,
+    };
+    if (willCommitRecurring && amount) {
+      custPatch.plan = plan; custPatch.period = period; custPatch.amount_cents = amount;
+      custPatch.base_amount_cents = promoBase && promoBase > amount ? promoBase : null;
+      custPatch.promo_cycles_left = promoBase && promoBase > amount ? promoCycles : null;
+      // A fresh subscription supersedes any previously scheduled plan change.
+      custPatch.pending_plan = null; custPatch.pending_period = null;
+      custPatch.pending_amount_cents = null; custPatch.pending_base_amount_cents = null;
+      custPatch.pending_promo_cycles = null; custPatch.pending_effective_at = null;
+      custPatch.pending_order_id = null;
+    } else if (kind === "plan_change" && amount) {
+      custPatch.pending_plan = plan; custPatch.pending_period = period;
+      custPatch.pending_amount_cents = amount;
+      custPatch.pending_base_amount_cents = promoBase && promoBase > amount ? promoBase : null;
+      custPatch.pending_promo_cycles = promoBase && promoBase > amount ? promoCycles : null;
+      custPatch.pending_effective_at = planEffectiveAt;
+      custPatch.pending_order_id = orderId;
+    }
+    const { error: customerCommitError } = await db.from("cloud_revolut_customers").upsert(custPatch);
+    if (customerCommitError) return json({ error: "Could not save billing profile" }, 503);
+    if (cardCountry) {
+      const { error: countryError } = await db.from("cloud_entitlement_projection")
+        .update({ country_code: cardCountry, country_source: "card" }).eq("user_id", user.id);
+      if (countryError) return json({ error: "Could not save billing country" }, 503);
+    }
 
     if (kind === "card_update") {
       if (curStatus === "past_due" || curStatus === "grace") {
-        await db.from("cloud_entitlement_projection").update({
+        const { error } = await db.from("cloud_entitlement_projection").update({
           status: "active", provider: "revolut", current_period_end: nowIso, last_event_at: nowIso,
-        }).eq("user_id", user.id);
+        }).eq("user_id", user.id).eq("provider", "revolut");
+        if (error) return json({ error: "Could not update entitlement" }, 503);
+        const stampError = await stampFinalized("card_updated_retrying");
+        if (stampError) return json({ error: "Could not finalize order journal" }, 503);
         return json({ ok: true, status: "retrying", kind });
       }
+      const stampError = await stampFinalized("card_updated");
+      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
       return json({ ok: true, status: "updated", kind });
     }
 
     if (kind === "plan_change") {
       const patch: JsonRecord = {
-        provider: "revolut", provider_customer_id: customerId, plan_code: plan, last_event_at: nowIso,
+        provider_customer_id: customerId, last_event_at: nowIso, last_verified_at: nowIso,
       };
-      // Price of record going forward (the MRR read-side divides an 'annual'
-      // bill_period by 12). Nothing is captured here — the actual charge happens
-      // at the current period end, via the renewal cron.
-      if (amount) { patch.mrr_cents = amount; patch.bill_period = period; }
+      // Keep the already-paid plan and its profile limits until the end of the
+      // current cycle. The customer mapping carries the pending plan; the billing
+      // claim atomically selects it at current_period_end and promotes it only
+      // after a COMPLETED charge.
       if (curStatus === "cancelled_at_period_end") {
         patch.status = (cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
       }
-      await db.from("cloud_entitlement_projection").update(patch).eq("user_id", user.id);
-      return json({ ok: true, status: "plan_changed", kind });
+      const { data: changed, error } = await db.from("cloud_entitlement_projection")
+        .update(patch).eq("user_id", user.id).eq("provider", "revolut").eq("status", curStatus).select("user_id");
+      if (error) return json({ error: "Could not change plan" }, 503);
+      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Entitlement changed concurrently" }, 409);
+      const stampError = await stampFinalized("plan_change_scheduled", {
+        effective_at: planEffectiveAt, pending_plan: plan, pending_period: period,
+      });
+      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
+      return json({ ok: true, status: "plan_change_scheduled", kind, effective_at: planEffectiveAt });
     }
 
     if (kind === "resubscribe") {
-      await db.from("cloud_entitlement_projection").upsert({
+      const projectionError = await replaceProjectionWithRailCas({
         user_id: user.id, status: "active", provider: "revolut", provider_customer_id: customerId,
         plan_code: plan, current_period_end: nowIso, last_event_at: nowIso,
       });
+      if (projectionError) return json({ error: "Could not reactivate subscription" }, 503);
+      const stampError = await stampFinalized("resubscribed");
+      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
       return json({ ok: true, status: "active", kind });
     }
 
     // trial_setup — the ONLY path that grants trial days. Replay-guarded: re-confirming
     // an old setup order after the trial was consumed must not mint fresh days.
     if (cur?.trial_consumed_at) {
+      const stampError = await stampFinalized("already_confirmed");
+      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
       return json({ ok: true, status: curStatus || "trialing", kind, note: "already_confirmed" });
     }
     // Belt & braces: a live 'active' entitlement (e.g. a manual grant, or a stale
     // trial_setup order minted before /checkout learned to refuse them) must never
     // be downgraded to a 7-day trial. The card was still saved above — harmless.
-    const curEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
     if (curStatus === "active" && curEndMs > Date.now()) {
+      const stampError = await stampFinalized("already_active");
+      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
       return json({ ok: true, status: "active", kind, note: "already_active" });
     }
-    await db.from("cloud_entitlement_projection").upsert({
+    const trialError = await replaceProjectionWithRailCas({
       user_id: user.id, status: "trialing", provider: "revolut", provider_customer_id: customerId,
       plan_code: plan, trial_ends_at: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
       trial_consumed_at: nowIso, current_period_end: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
       last_event_at: nowIso,
       ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
     });
+    if (trialError) return json({ error: "Could not start trial" }, 503);
+    const stampError = await stampFinalized("trial_started");
+    if (stampError) return json({ error: "Could not finalize order journal" }, 503);
     return json({ ok: true, status: "trialing", kind });
   }
 
@@ -520,7 +954,7 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
     const { data: row } = await db.from("cloud_revolut_customers")
-      .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct")
+      .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct,pending_plan,pending_period,pending_amount_cents,pending_effective_at")
       .eq("user_id", user.id).maybeSingle();
     let profile = row as JsonRecord | null;
     // Lazy card capture: /confirm may have run before Revolut attached the saved
@@ -572,23 +1006,29 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     if (st === "trialing") {
       const accessUntil = p.trial_ends_at ?? nowIso;
-      await db.from("cloud_entitlement_projection").update({
+      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
         status: "cancelled_at_period_end", current_period_end: accessUntil, last_event_at: nowIso,
-      }).eq("user_id", user.id);
+      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
+      if (error) return json({ error: "Could not cancel the plan" }, 503);
+      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
       await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "cancelled_at_period_end", access_until: accessUntil });
     }
     if (st === "active") {
-      await db.from("cloud_entitlement_projection").update({
+      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
         status: "cancelled_at_period_end", last_event_at: nowIso,
-      }).eq("user_id", user.id);
+      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
+      if (error) return json({ error: "Could not cancel the plan" }, 503);
+      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
       await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "cancelled_at_period_end", access_until: p.current_period_end ?? null });
     }
     if (st === "past_due" || st === "grace") {
-      await db.from("cloud_entitlement_projection").update({
+      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
         status: "expired", last_event_at: nowIso,
-      }).eq("user_id", user.id);
+      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
+      if (error) return json({ error: "Could not cancel the plan" }, 503);
+      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
       await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "expired" });
     }
@@ -618,9 +1058,13 @@ Deno.serve(async (req) => {
     }
     const nowIso = new Date().toISOString();
     const backTo = (p.trial_ends_at && new Date(p.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
-    await db.from("cloud_entitlement_projection").update({
+    const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
       status: backTo, last_event_at: nowIso,
-    }).eq("user_id", user.id);
+    }).eq("user_id", user.id).eq("provider", "revolut")
+      .eq("status", "cancelled_at_period_end").eq("current_period_end", p.current_period_end)
+      .select("user_id");
+    if (error) return json({ error: "Could not resume the plan" }, 503);
+    if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
     return json({ ok: true, status: backTo });
   }
 

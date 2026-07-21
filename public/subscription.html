@@ -41,6 +41,16 @@
     .btn.warn { background: linear-gradient(135deg, var(--coral), var(--pink)); color: #0b1220; }
     .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
     .note { color: var(--quiet); font-size: 12px; line-height: 1.5; margin-top: 16px; }
+    .note.action-error { color: #fecdd3; }
+    .preference-card { margin-top: 18px; border: 1px solid var(--line); border-radius: 14px;
+      padding: 18px 20px; background: rgba(17,21,29,.72); display: flex; gap: 18px;
+      align-items: center; justify-content: space-between; }
+    .preference-copy strong { display: block; font-size: 15px; margin-bottom: 5px; }
+    .preference-copy p { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .preference-copy small { display: block; color: var(--quiet); margin-top: 6px; line-height: 1.4; }
+    .preference-check { display: inline-flex; align-items: center; gap: 9px; color: var(--text);
+      font-size: 13px; font-weight: 700; cursor: pointer; flex: 0 0 auto; }
+    .preference-check input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
     .loading { color: var(--muted); padding: 24px 4px; }
     /* Cancel flow modal (reason → contextual counter-offer → confirm). */
     .modal-back { position: fixed; inset: 0; background: rgba(4,6,10,.72); display: grid;
@@ -49,6 +59,9 @@
       border-radius: 14px; padding: 22px; max-height: 90vh; overflow-y: auto; }
     .modal h2 { font-size: 19px; margin-bottom: 4px; }
     .modal p { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 8px 0 0; }
+    .modal .modal-error { color: #fecdd3; border: 1px solid rgba(251,113,133,.45);
+      background: rgba(80,24,36,.3); border-radius: 9px; padding: 10px 12px; }
+    .modal .modal-error[hidden] { display: none; }
     .reasons { display: grid; gap: 8px; margin: 16px 0 2px; }
     .reasons label { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line);
       border-radius: 10px; padding: 12px 14px; cursor: pointer; font-size: 14px; color: var(--text); }
@@ -79,6 +92,7 @@
     /* Mobile: the cancel modal becomes a bottom sheet — larger reason rows and a
        sticky action bar so "Keep / Cancel" is always reachable without scrolling. */
     @media (max-width: 560px) {
+      .preference-card { align-items: flex-start; flex-direction: column; }
       .modal-back { align-items: end; padding: 0; }
       .modal { width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0;
         padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); animation: sheet-up .22s ease; }
@@ -103,8 +117,20 @@
     <h1>Your subscription</h1>
     <div id="content"><div class="loading">Loading your subscription…</div></div>
     <p class="note" id="store-note"></p>
+    <section class="preference-card" id="marketing-preference" aria-labelledby="marketing-preference-title" hidden>
+      <div class="preference-copy">
+        <strong id="marketing-preference-title">Product and offer emails</strong>
+        <p>Occasional Norva tips, trial follow-ups and relevant subscription offers.</p>
+        <small id="marketing-preference-status" aria-live="polite">Loading your preference…</small>
+      </div>
+      <label class="preference-check">
+        <input id="marketing-email-opt-in" type="checkbox">
+        <span>Email me</span>
+      </label>
+    </section>
   </main>
 
+  <script src="/js/navigation-safety.js?v=1"></script>
   <script src="/js/cloudApi.js?v=50"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/billing-config.js?v=7"></script>
@@ -115,7 +141,9 @@
       // Only trust a same-site path for the "Back" button (guards against an open
       // redirect if returnTo were ever tampered with, and against landing on the
       // marketing site instead of the app).
-      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
+      function safeLocalPath(v) {
+        return window.NorvaNavigation.safeLocalPath(v, '/app#home');
+      }
       const returnTo = safeLocalPath(params.get('returnTo'));
       const content = document.getElementById('content');
       const storeNote = document.getElementById('store-note');
@@ -158,6 +186,66 @@
         catch (_) { return null; }
       }
       function subscribeHref() { return '/subscribe.html?returnTo=' + encodeURIComponent(returnTo); }
+
+      async function marketingPreferenceRequest(method, body) {
+        if (!(window.NorvaAuth && NorvaAuth.getAccessToken)) throw new Error('Sign in required');
+        const token = await NorvaAuth.getAccessToken();
+        if (!token) throw new Error('Sign in required');
+        const base = String(NorvaAuth.supabaseUrl || 'https://api.norva.tv').replace(/\/+$/, '');
+        const key = String(NorvaAuth.publishableKey || '');
+        const response = await fetch(base + '/functions/v1/norva-lifecycle/preferences', {
+          method: method,
+          headers: {
+            Authorization: 'Bearer ' + token,
+            ...(key ? { apikey: key } : {}),
+            ...(body ? { 'Content-Type': 'application/json' } : {})
+          },
+          body: body ? JSON.stringify(body) : undefined
+        });
+        const payload = await response.json().catch(function () { return {}; });
+        if (!response.ok) throw new Error(payload.error || 'Could not update email preference');
+        return payload;
+      }
+
+      async function initMarketingPreference() {
+        const box = document.getElementById('marketing-preference');
+        const input = document.getElementById('marketing-email-opt-in');
+        const status = document.getElementById('marketing-preference-status');
+        if (!box || !input || !status || !hasUserSession() || isTvShell()) return;
+        box.hidden = false;
+        input.disabled = true;
+        try {
+          const preference = await marketingPreferenceRequest('GET');
+          input.checked = preference.marketing_email === true;
+          status.textContent = input.checked
+            ? 'Subscribed. You can opt out here or from any marketing email.'
+            : 'Off by default. Billing and account emails are still sent when needed.';
+          input.disabled = false;
+        } catch (_) {
+          status.textContent = 'Email preference is temporarily unavailable.';
+          return;
+        }
+        input.addEventListener('change', async function () {
+          const requested = input.checked;
+          input.disabled = true;
+          status.textContent = 'Saving…';
+          try {
+            const saved = await marketingPreferenceRequest('POST', {
+              marketing_email: requested,
+              source: 'account_settings'
+            });
+            input.checked = saved.marketing_email === true;
+            status.textContent = input.checked
+              ? 'Subscribed. You can opt out here or from any marketing email.'
+              : 'Unsubscribed. Billing and account emails are still sent when needed.';
+          } catch (_) {
+            input.checked = !requested;
+            status.textContent = 'Could not save this preference. Please try again.';
+          } finally {
+            input.disabled = false;
+          }
+        });
+      }
 
       async function getDecision() {
         const ent = window.NorvaCloud && window.NorvaCloud.entitlements;
@@ -333,12 +421,27 @@
         }
         return 'You can manage or cancel your subscription anytime.';
       }
-      // Cancel via the API (cancels at period end; the reason is analytics only).
-      async function doCancel(reason) {
-        try { await window.NorvaBilling.revolutCancel(reason || 'skipped'); location.reload(); }
-        catch (e) {
-          if (storeNote) storeNote.textContent = 'Could not cancel' + (e && e.message ? ': ' + e.message : '') + ' — please retry or contact support@norva.tv.';
+      function clearActionError() {
+        if (!storeNote) return;
+        storeNote.textContent = '';
+        storeNote.classList.remove('action-error');
+        storeNote.removeAttribute('role');
+      }
+      function showActionError(action, error) {
+        const detail = error && error.message ? ': ' + error.message : '';
+        const message = 'Could not ' + action + detail + ' — please retry or contact support@norva.tv.';
+        if (storeNote) {
+          storeNote.textContent = message;
+          storeNote.classList.add('action-error');
+          storeNote.setAttribute('role', 'alert');
         }
+        return message;
+      }
+      // Cancel via the API (cancels at period end; the reason is analytics only).
+      // Errors bubble to the modal so all controls can be restored for a retry.
+      async function doCancel(reason) {
+        clearActionError();
+        await window.NorvaBilling.revolutCancel(reason || 'skipped');
       }
 
       // Accessible modal scaffolding shared by the cancel flow and the past-due
@@ -406,13 +509,32 @@
                 : 'You keep full access until the end of the current period, and nothing further will be charged.')));
           const row = el('div', 'actions');
           const cancelNow = el('button', 'btn danger', 'Cancel plan');
-          cancelNow.addEventListener('click', function () {
+          const modalError = el('p', 'modal-error');
+          modalError.setAttribute('role', 'alert');
+          modalError.hidden = true;
+          cancelNow.addEventListener('click', async function () {
+            modalError.hidden = true;
+            modalError.textContent = '';
             cancelNow.disabled = true; cancelNow.textContent = 'Cancelling…';
             b.disabled = true; b.textContent = 'Cancelling…';
-            doCancel('skipped');
+            keep.disabled = true;
+            try {
+              await doCancel('skipped');
+              cm.close();
+              location.reload();
+            } catch (e) {
+              const message = showActionError('cancel', e);
+              modalError.textContent = message;
+              modalError.hidden = false;
+              cancelNow.disabled = false; cancelNow.textContent = 'Cancel plan';
+              b.disabled = false; b.textContent = 'Cancel plan';
+              keep.disabled = false;
+              cancelNow.focus();
+            }
           });
           const keep = el('button', 'btn ghost', 'Keep my plan');
           keep.addEventListener('click', cm.close);
+          cm.modal.appendChild(modalError);
           row.appendChild(cancelNow);
           row.appendChild(keep);
           cm.modal.appendChild(row);
@@ -438,11 +560,12 @@
         if (isRevolutWeb(decision) && window.NorvaBilling && window.NorvaBilling.revolutResume) {
           const b = el('button', 'btn', 'Resume plan');
           b.addEventListener('click', async function () {
+            clearActionError();
             b.disabled = true; b.textContent = 'Resuming…';
             try { await window.NorvaBilling.revolutResume(); location.reload(); }
             catch (e) {
               b.disabled = false; b.textContent = 'Resume plan';
-              if (storeNote) storeNote.textContent = 'Could not resume' + (e && e.message ? ': ' + e.message : '') + '.';
+              showActionError('resume', e);
             }
           });
           return b;
@@ -515,6 +638,28 @@
 
         const status = decision.status || (decision.projection && decision.projection.status) || 'none';
         const card = el('div', 'card');
+
+        // Keep the raw provider status for support, but do not present a row as
+        // active/trialing when the entitlement evaluator could not verify dates.
+        const needsVerification = decision.planCode === 'free'
+          && String(decision.reason || '').replace(/^gate0_(?:observe|bypass)_/, '').replace(/^free_/, '') === 'billing_unverified';
+        if (needsVerification) {
+          card.appendChild(el('span', 'pill warn', 'Verification needed'));
+          card.appendChild(el('div', 'plan-name', 'Norva access'));
+          card.appendChild(el('p', 'msg warn', "We couldn't verify the dates on this subscription, so Norva won't label it active yet. Retry now; if this persists, contact support and we will verify the billing record."));
+          content.appendChild(card);
+          const row = el('div', 'actions');
+          const retry = el('button', 'btn', 'Retry verification');
+          retry.addEventListener('click', function () { location.reload(); });
+          row.appendChild(retry);
+          const support = el('a', 'btn ghost', 'Contact support');
+          support.setAttribute('href', 'mailto:support@norva.tv?subject=Subscription%20verification');
+          row.appendChild(support);
+          row.appendChild(backBtn('Back'));
+          content.appendChild(row);
+          storeNote.textContent = 'No renewal or charge promise is shown until the billing dates are verified.';
+          return;
+        }
 
         // Payment issue / grace — most urgent, takes precedence.
         if (status === 'past_due' || status === 'grace' || decision.reason === 'billing_grace') {
@@ -611,7 +756,10 @@
         content.appendChild(row);
       }
 
-      getDecision().then(render).catch(function () { render(null); });
+      getDecision().then(function (decision) {
+        render(decision);
+        initMarketingPreference();
+      }).catch(function () { render(null); });
     })();
   </script>
 </body>

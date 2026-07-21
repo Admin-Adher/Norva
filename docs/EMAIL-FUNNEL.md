@@ -9,13 +9,25 @@ credentials it needs. Produced from the 2026-07-07 signup-email audit.
 |---|---|---|---|
 | Confirm your email / recovery / magic link / invite / email-change | edge `norva-auth-email` (Supabase **Send Email Hook**) | GoTrue auth action | env `RESEND_API_KEY` + `SEND_EMAIL_HOOK_SECRET` |
 | **Welcome / onboarding** | edge `norva-lifecycle` cron `runWelcome()` | `cloud_entitlement_projection` row with `welcome_email_at IS NULL` created < 72 h ago (the row is created when the user first reaches the app) | env `RESEND_API_KEY` |
-| Trial-ending / dunning / win-back / abandoned-checkout | edge `norva-lifecycle` cron (gated by `NORVA_LIFECYCLE_BILLING_LIVE`) | projection status/markers | env `RESEND_API_KEY` |
+| Trial-ending / dunning | edge `norva-lifecycle` cron (master + per-flow flags) | projection status/markers | env `RESEND_API_KEY` |
+| Win-back / abandoned-checkout (marketing) | edge `norva-lifecycle`, explicit user opt-in checked again immediately before send | projection/order claim + `cloud_marketing_email_preferences` | `RESEND_API_KEY` + `NORVA_POSTAL_ADDRESS` + `NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET` |
 | **Password changed** (security) | DB trigger `norva_password_changed_trg` → `norva_notify_password_changed()` → `norva_send_branded_email()` | `AFTER UPDATE OF encrypted_password` — **guarded** (see below) | Vault secret `resend_api_key` |
 | Email changed (security) | DB trigger `norva_email_changed_trg` | `AFTER UPDATE OF email` | Vault secret `resend_api_key` |
 | New device connected (security) | DB trigger `norva_new_device_trg` on `cloud_devices` | `AFTER INSERT` | Vault secret `resend_api_key` |
-| Marketing audience sync (not an email) | DB trigger `norva_sync_signup_to_resend_trg` | `AFTER INSERT ON auth.users` | Vault secret `resend_api_key` |
+| Marketing audience sync (not an email) | DB triggers enqueue desired state; edge `norva-lifecycle` drains a durable outbox | signup, consent update, email update or account deletion | edge `RESEND_API_KEY` + `RESEND_AUDIENCE_ID` |
 
 All user-facing templates are branded dark-theme HTML.
+
+Marketing consent is **off by default**. Authenticated users can change it on
+`subscription.html`; the page calls `norva-lifecycle/preferences`. Win-back and
+abandoned checkout remain disabled unless both the master flag and their own flag
+are true. Every marketing message carries a signed HTTPS RFC8058 one-click link;
+transactional account/security/billing messages are unaffected by an opt-out.
+
+Audience synchronization never performs network I/O inside a database transaction.
+Triggers write the latest desired state into `cloud_resend_audience_outbox`; the
+lifecycle cron leases rows with `SKIP LOCKED`, retries transient failures with
+backoff, and acknowledges a revision only after a Resend 2xx response.
 
 ## ⚠️ Two Resend credentials must be provisioned together
 The **DB security triggers** read the **Vault** secret `resend_api_key`, while the
@@ -24,7 +36,8 @@ They are independent switches. If only the Vault secret is set, security emails
 send while the welcome/confirmation stay silent — i.e. a user can get a security
 notice with no welcome. **Go-live checklist:** set BOTH
 - Vault `resend_api_key` (Supabase → Project Settings → Vault), and
-- edge env `RESEND_API_KEY` (+ `SEND_EMAIL_HOOK_SECRET` for the auth hook),
+- edge env `RESEND_API_KEY` (+ `SEND_EMAIL_HOOK_SECRET` for the auth hook and
+  `RESEND_AUDIENCE_ID` for marketing-audience synchronization),
 
 or leave both unset. Never one without the other.
 

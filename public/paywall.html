@@ -135,8 +135,9 @@
     </div>
     <h1>Norva Access</h1>
     <p class="lead">
-      Norva powers your private streaming ecosystem: apps, cloud sync, up to 5 profiles, trusted screens and reliable
-      playback across every screen. Start with a 7-day free trial, then keep everything on a single plan.
+      Norva powers your private streaming ecosystem: apps, cloud sync, trusted screens and reliable
+      playback across every screen. Norva includes 2 profiles; Norva Family includes 5. Start with a 7-day free trial,
+      then keep everything on a single plan.
       Your TV content remains provided by your own TV service.
     </p>
     <div class="status" id="paywall-status">Checking Norva access...</div>
@@ -153,10 +154,14 @@
 
   <script src="/js/cloudApi.js?v=50"></script>
   <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/navigation-safety.js?v=1"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
-      const returnTo = params.get('returnTo') || '/';
+      function safeLocalPath(value) {
+        return window.NorvaNavigation.safeLocalPath(value, '/app#home');
+      }
+      const returnTo = safeLocalPath(params.get('returnTo'));
       const statusEl = document.getElementById('paywall-status');
       const primaryBtn = document.getElementById('paywall-primary');
       const retryBtn = document.getElementById('paywall-retry');

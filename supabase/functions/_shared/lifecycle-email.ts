@@ -13,7 +13,6 @@ const OPEN_URL = `${SITE_URL}/app.html`;
 const SUBSCRIBE_URL = `${SITE_URL}/subscribe.html`;
 const MANAGE_URL = `${SITE_URL}/subscription.html`;
 const SUPPORT_URL = "mailto:support@norva.tv";
-const UNSUBSCRIBE_URL = "mailto:unsubscribe@norva.tv?subject=unsubscribe";
 // CAN-SPAM requires a physical postal address in commercial mail. Set the env var to
 // your registered business address; the footer shows it only when present (never a
 // fabricated one). Required before the marketing flows (win-back / abandoned) send.
@@ -34,7 +33,18 @@ function greet(firstName?: string | null): string {
 }
 
 // Generic branded shell: heading + HTML body (already-escaped/safe) + optional CTA + footer note.
-function shell(opts: { heading: string; bodyHtml: string; cta?: { label: string; url: string }; note?: string }): string {
+function shell(opts: {
+  heading: string;
+  bodyHtml: string;
+  cta?: { label: string; url: string };
+  note?: string;
+  unsubscribeUrl?: string;
+}): string {
+  // Only marketing templates receive an unsubscribe control. Transactional
+  // account/security/billing messages cannot be disabled by this preference.
+  const unsubscribe = opts.unsubscribeUrl
+    ? `<a href="${esc(opts.unsubscribeUrl)}" style="color:#4a5470">Unsubscribe</a>${POSTAL_ADDRESS ? ` &middot; ${esc(POSTAL_ADDRESS)}` : ""}<br>`
+    : "";
   const button = opts.cta
     ? `<tr><td align="center" style="padding:8px 0 26px">
          <a href="${opts.cta.url}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${esc(opts.cta.label)}</a>
@@ -60,7 +70,7 @@ function shell(opts: { heading: string; bodyHtml: string; cta?: { label: string;
         </td></tr>
       </table>
       <div style="color:#3b4254;font-family:Arial,sans-serif;font-size:11px;margin-top:16px;line-height:1.7">
-        <a href="${UNSUBSCRIBE_URL}" style="color:#4a5470">Unsubscribe</a>${POSTAL_ADDRESS ? ` &middot; ${esc(POSTAL_ADDRESS)}` : ""}<br>© Norva
+        ${unsubscribe}© Norva
       </div>
     </td></tr>
   </table>
@@ -139,7 +149,7 @@ export function renderPaymentFailed(firstName: string | null, stage: number): Re
   };
 }
 
-export function renderWinback(firstName: string | null): Rendered {
+export function renderWinback(firstName: string | null, opts: { unsubscribeUrl?: string } = {}): Rendered {
   return {
     subject: "Your Norva catalog is waiting",
     html: shell({
@@ -148,6 +158,7 @@ export function renderWinback(firstName: string | null): Rendered {
         Your Norva account, sources and preferences are still here. Reactivate anytime and pick up your catalog on every screen, right where you left off.`,
       cta: { label: "Reactivate Norva", url: SUBSCRIBE_URL },
       note: `No longer need Norva? You can ignore this — we won't email you about this again.`,
+      unsubscribeUrl: opts.unsubscribeUrl,
     }),
   };
 }
@@ -155,11 +166,18 @@ export function renderWinback(firstName: string | null): Rendered {
 // Checkout-abandonment reminder: the user opened a checkout (card check) but never
 // completed it. One email, sent 1–48h later (recovery peaks within the hour);
 // deep-links back into the checkout with the plan/period they had picked.
-export function renderAbandonedCheckout(firstName: string | null, opts: { plan?: string; period?: string }): Rendered {
+export function renderAbandonedCheckout(
+  firstName: string | null,
+  opts: { plan?: string; period?: string; validationAmount?: string; returnTo?: string; unsubscribeUrl?: string },
+): Rendered {
   const plan = opts.plan === "family" ? "family" : "plus";
   const period = opts.period === "annual" ? "annual" : "monthly";
   const planName = plan === "family" ? "Norva Family" : "Norva";
-  const url = `${SITE_URL}/checkout.html?plan=${plan}&period=${period}`;
+  const returnTo = typeof opts.returnTo === "string" && /^\/(?!\/)/.test(opts.returnTo) ? opts.returnTo : "/app#home";
+  const url = `${SITE_URL}/checkout-revolut.html?plan=${plan}&period=${period}&returnTo=${encodeURIComponent(returnTo)}`;
+  const validationAmount = /^\$\d+(?:\.\d{2})?$/.test(opts.validationAmount ?? "")
+    ? opts.validationAmount
+    : "$0.50";
   return {
     subject: "Your Norva free trial is one step away",
     html: shell({
@@ -167,10 +185,11 @@ export function renderAbandonedCheckout(firstName: string | null, opts: { plan?:
       bodyHtml: `${greet(firstName)}<br><br>
         You were one step away from starting your <b style="color:#cdd6e6">${planName}</b> free trial —
         the quick card check wasn't completed. There is <b style="color:#cdd6e6">no charge today</b>:
-        we only place a temporary €0.50 authorization that is released right away and never debited.
+        we only place a temporary ${esc(validationAmount)} authorization that is released right away and never debited.
         Your 7 days of full access start the moment the check completes.`,
       cta: { label: "Finish setup", url },
       note: `Changed your mind? Just ignore this — nothing was charged and nothing will be.`,
+      unsubscribeUrl: opts.unsubscribeUrl,
     }),
   };
 }

@@ -85,19 +85,28 @@
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
-    const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-revolut/checkout'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({
-        plan: opts.plan === 'family' ? 'family' : 'plus',
-        period: opts.period === 'annual' ? 'annual' : 'monthly',
-        returnTo: opts.returnTo || '',
-        intent: opts.intent || undefined, // 'update_card' → token swap flow
-      }),
+    const body = JSON.stringify({
+      plan: opts.plan === 'family' ? 'family' : 'plus',
+      period: opts.period === 'annual' ? 'annual' : 'monthly',
+      returnTo: opts.returnTo || '',
+      intent: opts.intent || undefined, // 'update_card' → token swap flow
     });
-    const data = await res.json().catch(function () { return {}; });
-    if (!res.ok || !data.public_id) throw err(data.error || 'Could not start checkout', 'revolut_error', data);
-    return data; // { order_id, public_id, kind, checkout_url, sandbox }
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-revolut/checkout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+        body: body,
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (res.ok && data.public_id) return data;
+      if (data.retryable && attempt < 5) {
+        const delay = Math.max(250, Math.min(2500, Number(data.retry_after_ms) || 1000));
+        await new Promise(function (resolve) { setTimeout(resolve, delay); });
+        continue;
+      }
+      throw err(data.error || 'Could not start checkout', 'revolut_error', data);
+    }
+    throw err('Could not start checkout', 'revolut_error');
   }
 
   // Finalize a Revolut checkout on return (no webhook needed): the edge function

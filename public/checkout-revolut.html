@@ -165,8 +165,8 @@
             <div class="bd-row"><span class="bd-k">Cancel anytime before then</span><span class="bd-v">Nothing charged</span></div>
           </div>
           <ul class="features" id="sum-features">
-            <li>2 simultaneous streams</li>
-            <li>Up to 5 profiles</li>
+            <li>Up to 2 profiles</li>
+            <li>Personalized watchlists and progress</li>
             <li>Sync across Web, phone, tablet &amp; TV</li>
             <li>Offline mode on compatible devices</li>
             <li>Every Norva feature included</li>
@@ -249,7 +249,9 @@
   <script type="module">
     (async function () {
       const params = new URLSearchParams(location.search);
-      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
+      function safeLocalPath(v) {
+        return (typeof v === 'string' && /^\/(?!\/)/.test(v) && v.indexOf('\\') === -1) ? v : '/app#home';
+      }
       const plan = params.get('plan') === 'family' ? 'family' : 'plus';
       const period = params.get('period') === 'annual' ? 'annual' : 'monthly';
       const intent = params.get('intent') === 'update_card' ? 'update_card' : '';
@@ -355,7 +357,7 @@
       if (plan === 'family') {
         document.getElementById('sum-plan').textContent = 'Norva Family';
         document.getElementById('sum-tag').textContent = 'The full Norva experience for the whole home.';
-        document.getElementById('sum-features').firstElementChild.textContent = '5 simultaneous streams';
+        document.getElementById('sum-features').firstElementChild.textContent = 'Up to 5 profiles';
       }
       if (displayPrice) document.getElementById('sum-amount').textContent = displayPrice;
       document.getElementById('sum-per').textContent =
@@ -454,12 +456,12 @@
       }
 
       // ── Completion ────────────────────────────────────────────────────────
-      const DONE_STATUSES = ['trialing', 'active', 'plan_changed', 'updated', 'retrying'];
+      const DONE_STATUSES = ['trialing', 'active', 'plan_change_scheduled', 'plan_changed', 'updated', 'retrying'];
       const SUCCESS_COPY = {
         trial_setup: ['Your free trial has started',
           "You have full access to Norva on every screen. You won't be charged until your 7-day trial ends — cancel anytime before then."],
         plan_change: ['Plan change confirmed',
-          'Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing is charged today.'],
+          'Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.'],
         resubscribe: ['Welcome back — your plan is active',
           'Your first payment is being processed and your receipt is on its way by email.'],
         card_update: ['Payment method updated',
@@ -474,35 +476,55 @@
         loading.firstElementChild.innerHTML = '<div class="spinner"></div>Finalizing…';
         // /confirm re-fetches the order server-side; retry briefly while Revolut settles.
         let done = false;
+        let confirmed = null;
         for (let i = 0; i < 6; i++) {
           try {
             const r = await window.NorvaBilling.confirmRevolut(orderId || currentOrderId);
-            if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) { done = true; break; }
+            if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) {
+              confirmed = r;
+              applyKindCopy(r.kind);
+              done = true;
+              break;
+            }
           } catch (_) { /* retry */ }
           await new Promise(function (res) { setTimeout(res, 1400); });
         }
+        if (!done) {
+          finishing = false;
+          loading.classList.add('hide');
+          setStatus("We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.", true);
+          const retryFinalize = document.createElement('button');
+          retryFinalize.className = 'btn ghost';
+          retryFinalize.style.marginTop = '10px';
+          retryFinalize.textContent = 'Retry finalization';
+          retryFinalize.addEventListener('click', function () {
+            retryFinalize.remove();
+            finish(orderId || currentOrderId);
+          });
+          statusEl.appendChild(document.createElement('br'));
+          statusEl.appendChild(retryFinalize);
+          return;
+        }
+        try { sessionStorage.removeItem('norva-revolut-current-order'); } catch (_) {}
         document.getElementById('checkout-view').style.display = 'none';
         const success = document.getElementById('success-view');
         const copy = SUCCESS_COPY[checkoutKind] || SUCCESS_COPY.trial_setup;
         success.querySelector('h2').textContent = copy[0];
-        success.querySelector('p').textContent = copy[1];
-        if (!done) {
-          success.querySelector('p').textContent =
-            "Payment received — we're finalizing your account. It will be reflected within a minute.";
+        let successMessage = copy[1];
+        if (checkoutKind === 'plan_change' && confirmed && confirmed.effective_at) {
+          const effectiveDate = new Date(confirmed.effective_at);
+          if (!Number.isNaN(effectiveDate.getTime())) {
+            successMessage += ' Effective ' + effectiveDate.toLocaleDateString(undefined, {
+              year: 'numeric', month: 'long', day: 'numeric'
+            }) + '.';
+          }
         }
+        success.querySelector('p').textContent = successMessage;
         success.classList.add('show');
         if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
           const amount = Number(displayPrice || 0);
           if (checkoutKind === 'trial_setup') {
             window.NorvaMarketing.track('start_trial', {
-              currency: 'USD',
-              value: amount,
-              plan: plan,
-              period: period,
-              transaction_id: orderId || currentOrderId || undefined
-            });
-          } else if (checkoutKind === 'resubscribe') {
-            window.NorvaMarketing.track('purchase', {
               currency: 'USD',
               value: amount,
               plan: plan,
@@ -517,7 +539,8 @@
       // ── Open the order + mount the RevolutCheckout card field ─────────────
       let currentOrderId = '';
       let cardField = null;
-      async function boot() {
+      let bootPromise = null;
+      async function bootInner() {
         statusEl.classList.remove('show');
         loading.classList.remove('hide');
         let data;
@@ -543,7 +566,16 @@
           return;
         }
         currentOrderId = data.order_id || '';
+        try {
+          sessionStorage.setItem('norva-revolut-current-order', JSON.stringify({
+            orderId: currentOrderId, plan: plan, period: period, savedAt: Date.now()
+          }));
+        } catch (_) {}
         applyKindCopy(data.kind);
+        if (data.already_authorized === true) {
+          await finish(currentOrderId);
+          return;
+        }
         // Keep the hosted-page link HIDDEN on the happy path — the embedded card field is
         // the only normal flow (our Norva branding + clear "card check" copy + inline
         // return). Set its href so the catch block below can reveal it ONLY if the widget
@@ -588,6 +620,13 @@
         }
       }
 
+      function boot() {
+        if (!bootPromise) {
+          bootPromise = bootInner().finally(function () { bootPromise = null; });
+        }
+        return bootPromise;
+      }
+
       let submitting = false;
       form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -622,11 +661,17 @@
       }
 
       // Returning from the HOSTED checkout page (the fallback link)? Revolut redirected
-      // back here with ?revolut_return=1 after the payment. Finalize instead of opening a
-      // new order — finish() → /confirm resolves the user's latest order server-side, so
-      // no order_id is needed. The embedded card field path calls finish() from onSuccess.
+      // back here with ?revolut_return=1 after the payment. Finalize the exact order
+      // saved before leaving Norva. The backend fallback also resolves only the single
+      // current intent — never an arbitrary "latest" historical order.
       if (params.get('revolut_return') === '1') {
-        finish();
+        let storedOrderId = '';
+        try {
+          const saved = JSON.parse(sessionStorage.getItem('norva-revolut-current-order') || 'null');
+          if (saved && saved.plan === plan && saved.period === period) storedOrderId = String(saved.orderId || '');
+        } catch (_) {}
+        currentOrderId = storedOrderId;
+        finish(storedOrderId);
       } else {
         boot();
       }

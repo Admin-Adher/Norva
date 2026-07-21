@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { shouldAdminBypass } from "./billing-policy.mjs";
+import { evaluateEntitlementProjection } from "./entitlement-evaluator.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -134,10 +136,11 @@ export async function getEntitlementDecision(
   // Admin safety net: an account with app_metadata.role='admin' (the owner/staff) is
   // never soft-walled — full access, no subscription required. Hard blocks
   // (revoked/refunded/fraud) still apply. Only meaningful under enforce; in observe
-  // the decision is already allowed, so this never triggers. Checked ONLY on the deny
-  // path, and — unless the caller passed options.isAdmin — with a single getUserById
-  // there, so the allowed hot path costs nothing extra.
-  if (!decision.allowed && !HARD_BLOCK_STATUSES.has(decision.reason)) {
+  // the decision is already allowed, so this never triggers. RevenueCat's browse-only
+  // soft wall is technically allowed with zero streams; treat that as a deny for the
+  // admin safety net too. Unless the caller passed options.isAdmin, this costs one
+  // getUserById only on a deny/soft-wall path — never on a paying hot path.
+  if (shouldAdminBypass(decision) && !HARD_BLOCK_STATUSES.has(decision.reason)) {
     const admin = options.isAdmin === true ||
       (options.isAdmin === undefined && await isUserAdmin(db, userId));
     if (admin) return adminDecision(decision.projection);
@@ -202,64 +205,20 @@ async function computeDecision(
     projection = await startTrialProjection(db, userId);
   }
 
-  if (!projection) return applyEntitlementMode(softDeny("subscription_required", null));
-
-  const now = Date.now();
-  const status = String(projection.status || "unknown");
-  const planCode = String(projection.plan_code || "none");
-  const limits = normalizeLimits(planCode, projection.limits);
-  const periodEnd = timeMs(projection.current_period_end);
-  const trialEnd = timeMs(projection.trial_ends_at);
-  const failOpenUntil = timeMs(projection.fail_open_until);
-  const lastVerifiedAt = timeMs(projection.last_verified_at);
-
-  if (HARD_BLOCK_STATUSES.has(status)) {
-    return applyEntitlementMode(blockedDecision(status, projection, limits));
+  const planCode = String(projection?.plan_code || "none");
+  const limits = normalizeLimits(planCode, projection?.limits);
+  const verdict = evaluateEntitlementProjection(projection, {
+    now: Date.now(),
+    billingMode: BILLING_MODE,
+    failOpenHours: DEFAULT_FAIL_OPEN_HOURS,
+  });
+  if (verdict.kind === "allow") {
+    return applyEntitlementMode(allowedDecision(verdict.reason, projection as JsonRecord, limits, verdict.failOpen));
   }
-
-  if (status === "trialing") {
-    const effectiveEnd = trialEnd || periodEnd;
-    if (!effectiveEnd || effectiveEnd > now) {
-      return applyEntitlementMode(allowedDecision("trialing", projection, limits, false));
-    }
-    return applyEntitlementMode(softDeny("trial_expired", projection, limits));
+  if (verdict.kind === "soft") {
+    return applyEntitlementMode(freeBrowseDecision(verdict.reason, projection));
   }
-
-  if (status === "active") {
-    if (!periodEnd || periodEnd > now) {
-      return applyEntitlementMode(allowedDecision("active", projection, limits, false));
-    }
-    if (failOpenUntil && failOpenUntil > now) {
-      return applyEntitlementMode(allowedDecision("billing_grace", projection, limits, true));
-    }
-    if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
-      return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
-    }
-    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
-  }
-
-  if (status === "cancelled_at_period_end") {
-    if (!periodEnd || periodEnd > now) {
-      return applyEntitlementMode(allowedDecision("cancelled_at_period_end", projection, limits, false));
-    }
-    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
-  }
-
-  if (status === "grace" || status === "past_due" || status === "unknown") {
-    if ((periodEnd && periodEnd > now) || (failOpenUntil && failOpenUntil > now)) {
-      return applyEntitlementMode(allowedDecision("billing_grace", projection, limits, true));
-    }
-    if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
-      return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
-    }
-    return applyEntitlementMode(blockedDecision("billing_unverified", projection, limits));
-  }
-
-  if (status === "expired") {
-    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
-  }
-
-  return applyEntitlementMode(softDeny("subscription_required", projection, limits));
+  return applyEntitlementMode(blockedDecision(verdict.reason, projection, limits));
 }
 
 export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
@@ -321,16 +280,6 @@ function freeBrowseDecision(reason: string, projection: JsonRecord | null): Enti
     projection: projection ? sanitizeProjection(projection) : null,
     message: billingMessage(reason),
   };
-}
-
-// In RevenueCat billing mode, "soft" denials (no subscription / trial ended /
-// subscription expired) degrade to free browse instead of a hard block — the
-// user is walled only at playback (the soft-wall model). Legacy mode keeps the
-// historical hard block, and observe mode overrides everything anyway, so this
-// is dormant until billing_mode=revenuecat AND entitlements_mode=enforce.
-function softDeny(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {
-  if (BILLING_MODE === "revenuecat") return freeBrowseDecision(reason, projection);
-  return blockedDecision(reason, projection, limits);
 }
 
 function blockedDecision(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {
@@ -419,7 +368,9 @@ async function startTrialProjection(db: SupabaseClient, userId: string): Promise
 function normalizeLimits(planCode: string, value: unknown): JsonRecord {
   const planDefaults = PLAN_LIMITS[planCode] || PLAN_LIMITS.none;
   const record = isRecord(value) ? value : {};
-  return { ...planDefaults, ...record };
+  // Preserve unknown forward-compatible keys, but canonical catalogue limits win
+  // over stale JSON snapshots written by older webhook/function versions.
+  return { ...record, ...planDefaults };
 }
 
 function sanitizeProjection(projection: JsonRecord): JsonRecord {
@@ -447,12 +398,6 @@ function billingMessage(reason: string) {
   return "Norva access is required.";
 }
 
-function timeMs(value: unknown) {
-  if (!value) return 0;
-  const ms = new Date(String(value)).getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -476,7 +421,10 @@ const DENIED_REASONS = new Set([
   "billing_unverified", "revoked", "refunded", "fraud", "none",
 ]);
 export function realPlanCode(decision: EntitlementDecision): string {
-  const reason = decision.reason.replace(/^gate0_(observe|bypass)_/, "");
+  if (decision.planCode === "free") return "free";
+  const reason = decision.reason
+    .replace(/^gate0_(observe|bypass)_/, "")
+    .replace(/^free_/, "");
   if (DENIED_REASONS.has(reason)) return "free";
   const projection = decision.projection as JsonRecord | null;
   return String(projection?.plan_code || "free");
