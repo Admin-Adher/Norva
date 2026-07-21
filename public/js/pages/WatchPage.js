@@ -1697,8 +1697,10 @@ class WatchPage {
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
-        // Show Now Playing indicator in navbar
-        this.showNowPlaying(content.title);
+        // Keep lock-screen artwork/title and hardware media controls current.
+        // The redundant navbar "Now Playing" CTA was removed: Watch is already
+        // the active route and leaving it deliberately tears playback down.
+        this.updateMediaSessionMetadata();
 
         // Populate details section
         this.renderDetails();
@@ -1727,19 +1729,6 @@ class WatchPage {
 
         // Start watch history tracking
         this.startHistoryTracking();
-    }
-
-    /**
-     * Show Now Playing indicator in navbar
-     */
-    showNowPlaying(title) {
-        const indicator = document.getElementById('now-playing-indicator');
-        const textEl = document.getElementById('now-playing-text');
-        if (indicator && textEl) {
-            textEl.textContent = title || 'Now Playing';
-            indicator.classList.remove('hidden');
-        }
-        this.updateMediaSessionMetadata();
     }
 
     // ==================== Media Session (lock screen / hardware keys) ====
@@ -2287,16 +2276,6 @@ class WatchPage {
 
     hideSeekThumb() {
         document.getElementById('watch-seek-thumb')?.classList.add('hidden');
-    }
-
-    /**
-     * Hide Now Playing indicator in navbar
-     */
-    hideNowPlaying() {
-        const indicator = document.getElementById('now-playing-indicator');
-        if (indicator) {
-            indicator.classList.add('hidden');
-        }
     }
 
     beginPlaybackAttempt() {
@@ -4511,8 +4490,6 @@ class WatchPage {
         this.selectedSubtitleStreamIndex = null;
         this.selectedSubtitleTrackUserChoice = false;
         this.updateDurationState();
-
-        this.hideNowPlaying();
 
         // Resolves once the previous transcode session has fully torn down.
         return sessionTeardown;

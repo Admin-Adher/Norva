@@ -293,15 +293,6 @@ class App {
             }
         });
 
-        // Now Playing indicator
-        const nowPlayingBtn = document.getElementById('now-playing-indicator');
-        if (nowPlayingBtn) {
-            nowPlayingBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.navigateTo('watch');
-            });
-        }
-
         this.initMobileCatalogControls();
 
         // Toggle groups button

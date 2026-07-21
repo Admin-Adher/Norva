@@ -9795,74 +9795,6 @@ kbd {
 }
 
 /* =====================================================
-   Now Playing Indicator (Header)
-   ===================================================== */
-
-.now-playing-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  margin-right: var(--space-md);
-  background: linear-gradient(135deg, var(--color-accent) 0%, #8b5cf6 100%);
-  border-radius: var(--radius-full);
-  color: white;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-  animation: now-playing-pulse 2s ease-in-out infinite;
-}
-
-.now-playing-indicator:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
-}
-
-.now-playing-indicator.hidden {
-  display: none;
-}
-
-.now-playing-icon {
-  font-size: 10px;
-}
-
-.now-playing-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-@keyframes now-playing-pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.85;
-  }
-}
-
-/* Mobile responsive - show in dropdown menu */
-@media (max-width: 768px) {
-  .now-playing-indicator {
-    width: calc(100% - 32px);
-    max-width: none;
-    margin: 0 16px var(--space-sm) 16px;
-    padding: 10px 16px;
-    font-size: 13px;
-    border-radius: var(--radius-md);
-    justify-content: center;
-  }
-}
-
-/* =====================================================
    Home Dashboard Styles
    ===================================================== */
 
@@ -12277,7 +12209,6 @@ mark.search-highlight {
 .tv-mode .nav-search-btn,
 .tv-mode .nav-bell-btn,
 .tv-mode .nav-profile,
-.tv-mode .now-playing-indicator,
 .tv-mode .navbar-menu .nav-link span:not(.nav-icon) {
   white-space: nowrap;
 }
@@ -12295,8 +12226,7 @@ mark.search-highlight {
 /* Focus on a rail item → full-width high-luminance fill with an inverted
    (dark) icon + label. Crisp from the couch, exempt from the blanket white
    *:focus ring. No scale — the rail clips overflow, so the fill IS the row. */
-.tv-mode .navbar-menu .nav-link:focus,
-.tv-mode .now-playing-indicator:focus {
+.tv-mode .navbar-menu .nav-link:focus {
   outline: none !important;
   box-shadow: none !important;
   background: #ffffff;
@@ -12312,11 +12242,6 @@ mark.search-highlight {
   opacity: 1;
   transform: none;
 }
-.tv-mode .navbar-menu .nav-link:focus .now-playing-icon,
-.tv-mode .now-playing-indicator:focus .now-playing-icon {
-  color: #0b0e14;
-}
-
 /* Icon-only utility buttons (search / bell / profile) and the brand are
    square-ish, so a snug high-luminance ring that hugs them reads cleaner
    than a filled pill — and keeps the avatar image intact. Drop the big
