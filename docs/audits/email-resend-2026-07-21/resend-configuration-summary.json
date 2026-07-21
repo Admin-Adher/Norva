@@ -1,0 +1,45 @@
+{
+  "source": "Resend configuration APIs",
+  "captured_at": "2026-07-21T19:00:00Z",
+  "privacy": "Counts and object metadata only; API keys and contact addresses excluded",
+  "current": {
+    "contacts": 6,
+    "active_norva_accounts": 5,
+    "stale_or_deleted_contacts": 1,
+    "legacy_segments": ["Norva Users"],
+    "topics": 0,
+    "contact_properties": 0,
+    "webhooks": 0,
+    "broadcasts": 0,
+    "templates": 0,
+    "automations": 0,
+    "all_contacts_globally_unsubscribed": true
+  },
+  "constraints": [
+    "Norva currently shares the Resend team with BuildTrack.",
+    "Contacts, global unsubscribe, Segments, Topics and Contact Properties are team-wide.",
+    "Production projection is intentionally fail-closed until Norva has a dedicated team."
+  ],
+  "target": {
+    "segments": [
+      "internal-pilots",
+      "onboarding",
+      "trialing",
+      "active-subscribers",
+      "cancel-scheduled",
+      "payment-recovery",
+      "churned",
+      "blocked-suppressed",
+      "catalog-ready"
+    ],
+    "marketing_topics": ["product-news-offers"],
+    "exact_activity_timestamps_exported": false,
+    "norva_user_ids_exported": false
+  },
+  "contract_probe": {
+    "topics": "create/delete passed",
+    "contacts": "create/delete passed",
+    "contact_topic_update": "top-level array payload passed",
+    "temporary_objects_removed": true
+  }
+}

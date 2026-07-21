@@ -39,10 +39,14 @@ const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 // Each user does 2-3 Revolut round-trips (create + pay [+ refetch]); keep the batch
 // small so a run stays well within the edge wall-clock limit. The cron runs hourly.
 const BATCH = 25;
 const CHECKOUT_RECONCILE_BATCH = 10;
+// Keep receipt delivery bounded: payment reconciliation remains the cron's
+// priority and any unsent receipt stays durable for the next hourly run.
+const RECEIPT_DELIVERY_BATCH = 5;
 
 // NB: pas de table de prix ici, et c'est voulu — ce cron débite EXCLUSIVEMENT
 // cloud_revolut_customers.amount_cents, le prix verrouillé à la souscription.
@@ -157,23 +161,293 @@ function addPeriod(fromIso: string | null, period: string): string {
   return d.toISOString();
 }
 
-// Best-effort payment receipt after a successful charge.
-async function sendReceipt(db: SupabaseClient, userId: string, planLabel: string, amountCents: number, periodEnd: string): Promise<void> {
-  if (!RESEND_API_KEY) return;
+interface ReceiptDeliveryClaim {
+  delivery_key: string;
+  lease_token: string;
+  recipient_email: string;
+  first_name: string | null;
+  plan_label: string;
+  amount_cents: number;
+  currency: string;
+  billing_period: "monthly" | "annual" | null;
+  confirmed_at: string;
+  period_end: string | null;
+  attempt_count: number;
+}
+
+interface ReceiptSendResult {
+  accepted: boolean;
+  status: number | null;
+  emailId: string | null;
+  response: JsonRecord;
+  error: string | null;
+  retryAfterSeconds: number | null;
+  retryable: boolean;
+  ambiguous: boolean;
+}
+
+interface PreparedReceiptDelivery {
+  recipient_email: string;
+  request_from: string;
+  request_subject: string;
+  request_html: string;
+  // NULL only for a payload frozen by the short-lived v1 outbox worker. Such a
+  // row must replay its original body unchanged under the same idempotency key.
+  request_text: string | null;
+  request_reply_to: string | null;
+  request_tags: Array<{ name: string; value: string }> | null;
+}
+
+function retryableResendStatus(status: number | null): boolean {
+  return status === null || status === 401 || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function redactEmailProviderText(value: unknown): string | null {
+  const text = stringOrNull(value);
+  if (!text) return null;
+  return text
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/\b(?:re_|whsec_)[A-Za-z0-9_-]{12,}\b/g, "[credential]")
+    .slice(0, 500);
+}
+
+function safeEmailProviderResponse(value: unknown): JsonRecord {
+  const payload = value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+  const safe: JsonRecord = {};
+  const id = stringOrNull(payload.id);
+  const name = redactEmailProviderText(payload.name ?? payload.type ?? payload.code);
+  const message = redactEmailProviderText(payload.message ?? payload.error ?? payload.response);
+  const statusCode = typeof payload.statusCode === "number" ? payload.statusCode : null;
+  if (id) safe.id = id;
+  if (name) safe.name = name;
+  if (message) safe.message = message;
+  if (statusCode !== null) safe.status_code = statusCode;
+  return safe;
+}
+
+function resendErrorName(payload: JsonRecord): string {
+  return String(payload.name ?? "").trim().toLowerCase();
+}
+
+function classifyReceiptFailure(status: number | null, payload: JsonRecord, successWithoutId: boolean): {
+  retryable: boolean;
+  ambiguous: boolean;
+} {
+  const name = resendErrorName(payload);
+  if (status === 409) {
+    const concurrent = name === "concurrent_idempotent_requests";
+    return { retryable: concurrent, ambiguous: concurrent };
+  }
+  const ambiguous = status === null || successWithoutId || status === 408 || status === 425 || (status ?? 0) >= 500;
+  return { retryable: successWithoutId || retryableResendStatus(status), ambiguous };
+}
+
+function retryAfterSeconds(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Math.max(0, Math.min(21600, Number(value.trim())));
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, Math.min(21600, Math.ceil((at - Date.now()) / 1000)));
+}
+
+function formatReceiptAmount(amountCents: number, currency: string): string {
   try {
-    const { data: u } = await db.auth.admin.getUserById(userId);
-    const email = u?.user?.email;
-    if (!email) return;
-    const m = (u?.user?.user_metadata ?? {}) as Record<string, unknown>;
-    const full = String(m.display_name ?? m.name ?? "").trim();
-    const first = full ? full.split(/\s+/)[0] : null;
-    const r = renderReceipt(first, { planLabel, amount: `$${(amountCents / 100).toFixed(2)}`, periodEnd });
-    await fetch("https://api.resend.com/emails", {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      minimumFractionDigits: 2,
+    }).format(amountCents / 100);
+  } catch (_) {
+    return `${currency.toUpperCase()} ${(amountCents / 100).toFixed(2)}`;
+  }
+}
+
+async function sendReceiptDelivery(
+  deliveryKey: string,
+  request: PreparedReceiptDelivery,
+): Promise<ReceiptSendResult> {
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to: [email], subject: r.subject, html: r.html }),
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Norva-Billing-Email/2.0",
+        "Idempotency-Key": deliveryKey,
+      },
+      body: JSON.stringify({
+        from: request.request_from,
+        to: [request.recipient_email],
+        subject: request.request_subject,
+        html: request.request_html,
+        ...(request.request_text ? { text: request.request_text } : {}),
+        ...(request.request_reply_to ? { reply_to: request.request_reply_to } : {}),
+        ...(Array.isArray(request.request_tags) ? { tags: request.request_tags } : {}),
+      }),
+      signal: AbortSignal.timeout(8_000),
     });
-  } catch (_) { /* best-effort */ }
+    const raw = (await res.text()).slice(0, 16_384);
+    let parsedPayload: unknown = {};
+    try {
+      parsedPayload = raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      parsedPayload = raw ? { response: raw } : {};
+    }
+    const payload = safeEmailProviderResponse(parsedPayload);
+    const emailId = stringOrNull(payload.id);
+    const accepted = res.ok && Boolean(emailId);
+    const classification = classifyReceiptFailure(res.status, payload, res.ok && !emailId);
+    return {
+      accepted,
+      status: res.status,
+      emailId,
+      response: payload,
+      error: accepted ? null : (redactEmailProviderText(payload.message) ?? `resend_http_${res.status}`),
+      retryAfterSeconds: retryAfterSeconds(res.headers.get("retry-after")),
+      retryable: classification.retryable,
+      ambiguous: classification.ambiguous,
+    };
+  } catch (error) {
+    return {
+      accepted: false,
+      status: null,
+      emailId: null,
+      response: {},
+      error: redactEmailProviderText(error instanceof Error ? error.message : String(error)) ?? "network_error",
+      retryAfterSeconds: null,
+      retryable: true,
+      ambiguous: true,
+    };
+  }
+}
+
+async function drainBillingReceiptOutbox(
+  db: SupabaseClient,
+  errors: unknown[],
+): Promise<Record<string, number | boolean>> {
+  if (!RESEND_API_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, lease_lost: 0 };
+
+  const { data, error } = await db.rpc("claim_billing_receipt_deliveries", {
+    p_batch: RECEIPT_DELIVERY_BATCH,
+    p_lease_seconds: 90,
+    p_max_attempts: 12,
+  });
+  if (error) throw new Error(`billing_receipt_claim_failed:${error.message}`);
+  const claims = (Array.isArray(data) ? data : []) as ReceiptDeliveryClaim[];
+  const result = {
+    configured: true,
+    claimed: claims.length,
+    sent: 0,
+    retry_scheduled: 0,
+    dead_letter: 0,
+    lease_lost: 0,
+    accepted_unacknowledged: 0,
+  };
+
+  let networkCalls = 0;
+  for (const claim of claims) {
+    const rendered = renderReceipt(claim.first_name, {
+      planLabel: claim.plan_label,
+      amount: formatReceiptAmount(claim.amount_cents, claim.currency),
+      currency: claim.currency,
+      billingPeriod: claim.billing_period ?? undefined,
+      confirmedAt: claim.confirmed_at,
+      periodEnd: claim.period_end ?? undefined,
+      reference: `NV-${claim.delivery_key.replace(/^norva-receipt-/, "").slice(0, 12).toUpperCase()}`,
+    });
+    const { data: preparedRows, error: prepareError } = await db.rpc("prepare_billing_receipt_delivery", {
+      p_delivery_key: claim.delivery_key,
+      p_lease_token: claim.lease_token,
+      p_request_from: FROM,
+      p_request_subject: rendered.subject,
+      p_request_html: rendered.html,
+      p_request_text: rendered.text,
+      p_request_reply_to: REPLY_TO,
+      p_request_tags: rendered.tags,
+    });
+    const prepared = (Array.isArray(preparedRows) ? preparedRows[0] : preparedRows) as PreparedReceiptDelivery | null;
+    if (prepareError || !prepared?.recipient_email || !prepared.request_from || !prepared.request_subject || !prepared.request_html) {
+      // Preparation is a DB-side CAS. Do not perform network I/O unless the
+      // exact immutable payload is durably frozen under our lease.
+      result.lease_lost++;
+      reportBillingError(errors, "receipt_delivery", claim.delivery_key,
+        `billing_receipt_prepare_failed:${prepareError?.message ?? "lease_lost"}`);
+      continue;
+    }
+    const richFieldCount = [
+      prepared.request_text,
+      prepared.request_reply_to,
+      Array.isArray(prepared.request_tags) ? prepared.request_tags : null,
+    ].filter((value) => value !== null).length;
+    if (richFieldCount !== 0 && richFieldCount !== 3) {
+      result.lease_lost++;
+      reportBillingError(errors, "receipt_delivery", claim.delivery_key,
+        "billing_receipt_prepare_failed:partial_rich_payload");
+      continue;
+    }
+
+    // Record the beginning of the provider idempotency window immediately before
+    // transport. If this CAS is lost, no request is sent.
+    if (networkCalls > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const { data: networkStartedAt, error: networkStartError } = await db.rpc(
+      "mark_billing_receipt_delivery_network_started",
+      { p_delivery_key: claim.delivery_key, p_lease_token: claim.lease_token },
+    );
+    if (networkStartError || typeof networkStartedAt !== "string" || !networkStartedAt) {
+      result.lease_lost++;
+      reportBillingError(errors, "receipt_delivery", claim.delivery_key,
+        `billing_receipt_network_mark_failed:${networkStartError?.message ?? "lease_lost_or_window_expired"}`);
+      continue;
+    }
+    networkCalls++;
+
+    const sent = await sendReceiptDelivery(claim.delivery_key, prepared);
+    if (sent.accepted && sent.emailId) {
+      const { data: completed, error: completeError } = await db.rpc("complete_billing_receipt_delivery", {
+        p_delivery_key: claim.delivery_key,
+        p_lease_token: claim.lease_token,
+        p_resend_email_id: sent.emailId,
+        p_http_status: sent.status,
+        p_response: sent.response,
+      });
+      if (completeError || completed !== true) {
+        // Resend already accepted this immutable Idempotency-Key. Keep the lease
+        // intact; its expiry allows a safe replay rather than misclassifying an
+        // accepted email as a provider failure.
+        result.accepted_unacknowledged++;
+        reportBillingError(errors, "receipt_delivery", claim.delivery_key,
+          completeError?.message ?? "billing_receipt_ack_lease_lost");
+        continue;
+      }
+      result.sent++;
+      continue;
+    }
+
+    const { data: failed, error: failError } = await db.rpc("fail_billing_receipt_delivery_v2", {
+      p_delivery_key: claim.delivery_key,
+      p_lease_token: claim.lease_token,
+      p_http_status: sent.status,
+      p_error: sent.error ?? "resend_delivery_failed",
+      p_response: sent.response,
+      p_retryable: sent.retryable,
+      p_retry_after_seconds: sent.retryAfterSeconds,
+      p_max_attempts: 12,
+      p_ambiguous: sent.ambiguous,
+    });
+    if (failError) {
+      result.lease_lost++;
+      reportBillingError(errors, "receipt_delivery", claim.delivery_key,
+        `billing_receipt_failure_record_failed:${failError.message}`);
+    } else if (failed === "dead_letter") result.dead_letter++;
+    else if (failed === "retry_scheduled") result.retry_scheduled++;
+    else result.lease_lost++;
+  }
+
+  return result;
 }
 
 // Is this the owner's own test account? This check is also the service-level
@@ -228,6 +502,45 @@ async function retrieveRemoteOrder(orderId: string): Promise<{ order?: RemoteOrd
     response,
     order: { order: response.body, orderId: resolvedId, state: remoteStateOf(response.body) },
   };
+}
+
+async function recordBillingLifecycleEvent(
+  db: SupabaseClient,
+  userId: string,
+  providerEventId: string,
+  eventType: string,
+  payload: JsonRecord = {},
+): Promise<void> {
+  const { error } = await db.from("cloud_entitlement_events").upsert({
+    user_id: userId, provider: "revolut", provider_event_id: providerEventId,
+    event_type: eventType, payload, processed_at: new Date().toISOString(),
+  }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+  if (error) throw new Error(`billing_lifecycle_event_failed:${error.message}`);
+}
+
+async function ensureAppliedBillingLifecycleEvents(
+  db: SupabaseClient,
+  userId: string,
+  cycleKey: string,
+  nextPeriodEnd: string,
+): Promise<void> {
+  const { data, error } = await db.from("cloud_revolut_billing_attempts")
+    .select("retry_attempt,scheduled_plan_change,plan_code,applied_at,status")
+    .eq("cycle_key", cycleKey).eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(`billing_lifecycle_attempt_read_failed:${error.message}`);
+  const attempt = data as {
+    retry_attempt?: number; scheduled_plan_change?: boolean; plan_code?: string;
+    applied_at?: string | null; status?: string;
+  } | null;
+  if (!attempt?.applied_at || attempt.status !== "completed") return;
+  if ((attempt.retry_attempt ?? 0) > 0) {
+    await recordBillingLifecycleEvent(db, userId, `billing:${cycleKey}:payment-recovered`,
+      "PAYMENT_RECOVERED", { next_billing_at: nextPeriodEnd });
+  }
+  if (attempt.scheduled_plan_change === true) {
+    await recordBillingLifecycleEvent(db, userId, `billing:${cycleKey}:plan-change-applied`,
+      "PLAN_CHANGE_APPLIED", { plan_label: attempt.plan_code ?? "plus" });
+  }
 }
 
 async function findRemoteOrderByExtRef(extRef: string): Promise<{ order?: RemoteOrder; response: RevolutResponse }> {
@@ -735,7 +1048,17 @@ async function chargeUser(
   if (claim.action === "internal") return "skipped";
   if (await isInternal(db, row.user_id)) return "skipped";
   if (claim.action === "blocked" || claim.action === "wait") return "pending";
-  if (claim.action === "done") return "charged";
+  if (claim.action === "done") {
+    try {
+      await ensureAppliedBillingLifecycleEvents(
+        db, row.user_id, identity.cycleKey, addPeriod(identity.canonicalAnchor, claim.bill_period),
+      );
+      return "charged";
+    } catch (error) {
+      reportBillingError(errors, row.user_id, identity.cycleKey, error);
+      return "unknown";
+    }
+  }
   if (claim.action === "failed") return "failed";
 
   const journal = async (result: ChargeResult): Promise<void> => await journalBillingOrder(db, {
@@ -756,6 +1079,7 @@ async function chargeUser(
   const finalizeCaptured = async (result: ChargeResult): Promise<ChargeUserResult> => {
     try {
       await journal(result);
+      const nextEnd = addPeriod(identity.canonicalAnchor, cadence);
       const { error: ledgerError } = await db.from("cloud_billing_ledger").upsert({
         pi_id: `rvl_${result.orderId ?? claim.merchant_ext_ref}`,
         user_id: row.user_id,
@@ -767,12 +1091,15 @@ async function chargeUser(
         order_id: result.orderId,
         provider_payment_id: result.paymentId,
         country_code: typeof c?.card_country === "string" && /^[A-Z]{2}$/.test(c.card_country) ? c.card_country : null,
+        plan_code: plan,
+        bill_period: cadence,
+        billing_period_end: nextEnd,
       }, { onConflict: "pi_id", ignoreDuplicates: true });
       if (ledgerError) throw new Error(`billing_ledger_write_failed:${ledgerError.message}`);
-      const nextEnd = addPeriod(identity.canonicalAnchor, cadence);
       const applied = await applyBillingSuccess(db, identity.cycleKey, leaseToken, nextEnd);
       if (!applied.applied && !applied.alreadyApplied) throw new Error("billing_success_not_applied");
       if (applied.warning) reportBillingError(errors, row.user_id, identity.cycleKey, applied.warning);
+      await ensureAppliedBillingLifecycleEvents(db, row.user_id, identity.cycleKey, nextEnd);
       if (applied.applied) {
         if (retryAttempt) {
           try {
@@ -782,7 +1109,6 @@ async function chargeUser(
             }
           } catch (_) { /* best-effort */ }
         }
-        await sendReceipt(db, row.user_id, claim.discount_pct ? `${label} (${claim.discount_pct}% off applied)` : label, billedAmount, nextEnd);
         if (kind === "first_charge") await pingConversion(db, row.user_id, label, billedAmount, cadence);
       }
       return "charged";
@@ -1104,15 +1430,32 @@ async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
 
   // 3) Cancelled plans whose paid/trial period is over → expired (never charged).
   const { data: ended } = await db.from("cloud_entitlement_projection")
-    .select("user_id")
+    .select("user_id,current_period_end")
     .eq("provider", "revolut").eq("status", "cancelled_at_period_end").lte("current_period_end", nowIso).limit(BATCH);
-  for (const row of (ended ?? []) as { user_id: string }[]) {
+  for (const row of (ended ?? []) as { user_id: string; current_period_end: string | null }[]) {
     const { data, error } = await db.from("cloud_entitlement_projection")
       .update({ status: "expired", last_event_at: nowIso })
       .eq("user_id", row.user_id).eq("provider", "revolut").eq("status", "cancelled_at_period_end")
       .lte("current_period_end", nowIso).select("user_id");
     if (error) throw new Error(`billing_expiry_cas_failed:${error.message}`);
-    if (Array.isArray(data) && data.length === 1) out.ended++;
+    if (Array.isArray(data) && data.length === 1) {
+      out.ended++;
+      await recordBillingLifecycleEvent(db, row.user_id,
+        `billing:expiry:${row.user_id}:${row.current_period_end ?? nowIso}`,
+        "ACCESS_EXPIRED", {});
+    }
+  }
+
+  // Crash-recovery/backfill for the narrow window between the projection CAS
+  // and event journaling above (also covers lifecycle dunning expiry).
+  const recentExpiry = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const { data: expiredRows } = await db.from("cloud_entitlement_projection")
+    .select("user_id,current_period_end,last_event_at")
+    .eq("provider", "revolut").eq("status", "expired").gte("last_event_at", recentExpiry).limit(BATCH);
+  for (const row of (expiredRows ?? []) as { user_id: string; current_period_end: string | null; last_event_at: string | null }[]) {
+    await recordBillingLifecycleEvent(db, row.user_id,
+      `billing:expiry:${row.user_id}:${row.current_period_end ?? row.last_event_at ?? "unknown"}`,
+      "ACCESS_EXPIRED", {});
   }
 
   // Checkout cleanup is deliberately last: a slow legacy provider order must
@@ -1130,7 +1473,20 @@ async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
   } catch (error) {
     if (errors.length < 5) errors.push({ phase: "checkout_reconciliation", detail: errorText(error).slice(0, 400) });
   }
-  const summary = { ...out, ...checkoutReconciliation };
+  let receiptDelivery: Record<string, number | boolean> = {
+    configured: Boolean(RESEND_API_KEY),
+    claimed: 0,
+    sent: 0,
+    retry_scheduled: 0,
+    dead_letter: 0,
+    lease_lost: 0,
+  };
+  try {
+    receiptDelivery = await drainBillingReceiptOutbox(db, errors);
+  } catch (error) {
+    if (errors.length < 5) errors.push({ phase: "receipt_delivery", detail: errorText(error).slice(0, 400) });
+  }
+  const summary = { ...out, ...checkoutReconciliation, receipt_delivery: receiptDelivery };
   return errors.length ? { ...summary, errors } : summary;
 }
 

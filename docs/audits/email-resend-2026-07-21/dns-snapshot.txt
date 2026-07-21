@@ -1,0 +1,13 @@
+Public DNS snapshot captured 2026-07-21.
+
+- norva.tv SPF: present (Cloudflare Email Routing include).
+- send.norva.tv custom MAIL FROM: SES MX and SPF present.
+- resend._domainkey.norva.tv DKIM: present.
+- _dmarc.norva.tv: NXDOMAIN (no DMARC policy or reporting address).
+
+Recommended first record, only after a dedicated aggregate-report mailbox or
+processor exists:
+v=DMARC1; p=none; rua=mailto:dmarc@norva.tv; adkim=s; aspf=s; pct=100
+
+Observe aggregate reports for two to four weeks before progressing to quarantine
+or reject. Do not route machine DMARC reports to the human support inbox.

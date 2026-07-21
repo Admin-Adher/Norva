@@ -7,10 +7,9 @@
 --     -v FUNCTIONS_BASE_URL="https://api.norva.example/functions/v1" \
 --     -v NORVA_BACKFILL_TOKEN="..." \
 --     -v NORVA_CRON_SHARED_SECRET="..." \
---     -v RESEND_API_KEY="..." \
 --     -f scripts/03-recreate-cron-guc.sql
 --
--- These 3 secret values live in your secret store, NEVER in git. The placeholders
+-- These 2 secret values live in your secret store, NEVER in git. The placeholders
 -- below abort the run if you forget to pass them.
 -- =============================================================================
 \set ON_ERROR_STOP on
@@ -35,11 +34,11 @@ alter role authenticated set statement_timeout = '8s';
 alter database postgres set app.norva_catalog_dual_write = '0';
 
 -- ---------------------------------------------------------------------------
--- 3. Re-inject the 3 vault secrets (encrypted at rest; cannot be dumped)
+-- 3. Re-inject the 2 DB vault secrets (encrypted at rest; cannot be dumped).
+-- Resend is intentionally Edge/ops-only; never put either Resend key in DB Vault.
 -- ---------------------------------------------------------------------------
 select vault.create_secret(:'NORVA_BACKFILL_TOKEN',     'norva_backfill_token',     'Norva backfill/service token');
 select vault.create_secret(:'NORVA_CRON_SHARED_SECRET', 'norva_cron_shared_secret', 'Shared secret cron jobs send to edge functions');
-select vault.create_secret(:'RESEND_API_KEY',           'resend_api_key',           'Resend transactional email API key');
 
 -- ---------------------------------------------------------------------------
 -- 4. Recreate the pg_cron jobs, rewriting the managed functions URL to the

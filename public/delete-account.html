@@ -56,14 +56,14 @@
   <main class="panel">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Delete your account</h1>
-    <p>This permanently deletes your Norva account and the data attached to it:</p>
+    <p>This permanently closes access to your Norva account. Norva removes or de-identifies data directly attached to it, including:</p>
     <ul>
       <li>Your profile and sign-in credentials</li>
       <li>Watch history, progress, favorites and preferences</li>
       <li>Connected media sources and trusted devices</li>
-      <li>Subscription/entitlement records held by Norva</li>
+      <li>Active service access and entitlement state held by Norva</li>
     </ul>
-    <p><strong>This cannot be undone.</strong> Downloads saved on your devices are removed when you
+    <p><strong>This cannot be undone.</strong> Limited records may be retained where required by law or for security, fraud prevention and billing, as explained in our <a href="/privacy.html">Privacy Policy</a>. Downloads saved on your devices are removed when you
       delete them or uninstall the app. Subscriptions purchased through an app store must also be
       cancelled in that store.</p>
 
@@ -140,6 +140,20 @@
           try { localStorage.clear(); } catch (_) {}
           setTimeout(() => { window.location.replace('/'); }, 3500);
         } catch (err) {
+          const code = err && err.payload && err.payload.code;
+          if (code === 'reauthentication_required') {
+            setStatus('For your security, sign in again before deleting your account. Redirecting to sign inâ€¦', 'err');
+            try { await window.NorvaAuth.signOut(); } catch (_) { window.NorvaAuth.clearSession(); }
+            setTimeout(() => {
+              window.location.replace('/account.html?returnTo=' + encodeURIComponent('/delete-account.html'));
+            }, 900);
+            return;
+          }
+          if (code === 'mfa_verification_required') {
+            deleteBtn.disabled = false;
+            setStatus('Complete your second-factor verification, then return here to delete your account.', 'err');
+            return;
+          }
           deleteBtn.disabled = false;
           setStatus((err && err.message) ? err.message : 'Deletion failed. Please try again.', 'err');
         }

@@ -143,6 +143,9 @@ where not exists (select 1 from cron.job j where j.jobname = x.jobname);
 select 'E3 crons stancer résiduels (0 ligne = parfait)' as check, jobname
 from cron.job where jobname like 'norva-stancer%';
 
+select 'E3b ancien cron public Resend Contacts (0 ligne = parfait)' as check, jobname
+from cron.job where jobname = 'norva-resend-contact-projection';
+
 select 'E4 crons pointant encore vers supabase.co (0 ligne = parfait)' as check,
        jobname, left(command, 80) as cmd
 from cron.job where command like '%supabase.co%';
@@ -171,10 +174,12 @@ from pg_db_role_setting s join pg_roles r on r.oid = s.setrole
 order by r.rolname;
 -- attendu : anon statement_timeout=3s ; authenticated statement_timeout=8s
 
-select 'F3 vault (3 secrets, tous déchiffrables)' as check,
+select 'F3 vault (2 required DB secrets, both decryptable)' as check,
        name, (decrypted_secret is not null and decrypted_secret <> '') as decryptable
-from vault.decrypted_secrets order by name;
--- attendus : norva_backfill_token, norva_cron_shared_secret, resend_api_key
+from vault.decrypted_secrets
+where name in ('norva_backfill_token', 'norva_cron_shared_secret')
+order by name;
+-- expected: norva_backfill_token, norva_cron_shared_secret. Resend must not be in Vault.
 
 \echo ''
 \echo '================ [G] TABLES PRODUIT lues par le CRM ================'
@@ -216,6 +221,9 @@ select 'G7 support' as check,
   (select count(*) from cloud_support_messages)         as messages,
   (select max(last_message_at) from cloud_support_tickets) as last_message,
   (select count(*) from cloud_support_tickets where status = 'open') as open;
+
+select 'G8 Resend Contacts worker/outbox' as check,
+       public.resend_contact_projection_health() as health;
 
 \echo ''
 \echo '================ [H] SMOKE COMPLÉMENTAIRE (hors SQL — à lancer ensuite) ================'

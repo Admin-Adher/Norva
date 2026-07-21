@@ -7,6 +7,7 @@ import {
   nativeFallbackTokenExpiresAt,
   playbackTransportExpiresAt,
 } from "../_shared/playback-expiry.mjs";
+import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -106,6 +107,14 @@ const ENV_LID_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_LID_WORKER_URL"
 const ENV_LID_WORKER_TOKEN = Deno.env.get("NORVA_LID_WORKER_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const ENV_WHISPER_DETECT = Deno.env.get("NORVA_WHISPER_DETECT") ?? "";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const SUBTITLE_EMAIL_FROM = Deno.env.get("NORVA_SUBTITLE_EMAIL_FROM") ?? "Norva Updates <updates@norva.tv>";
+const EMAIL_REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
+const PUBLIC_SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
+const SUBTITLE_EMAIL_BATCH = 4;
+const SUBTITLE_EMAIL_LEASE_SECONDS = 180;
+const SUBTITLE_EMAIL_MAX_ATTEMPTS = 12;
+const RESEND_TIMEOUT_MS = 10_000;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -196,6 +205,9 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "transcribe-callback") {
       return json(req, await runTranscribeCallback(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "subtitle-email-delivery") {
+      return json(req, await runSubtitleEmailDelivery(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "pregen-gate") {
       return json(req, await runPregenGate(req, supabase));
@@ -4776,7 +4788,7 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
 // lives in its own per-(user, file) table. Deliberately cheap: it resolves the provider key from
 // the stored source row (a cached DB lookup — NO provider round-trip), so toggling this while a
 // stream is live can never open a 2nd provider connection (the user_multi_ip trap). Reversible:
-// enabled=false deletes the subscription. transcribe-callback fans these out when the job lands.
+// enabled=false deletes the subscription. A transactional outbox queues delivery when the job lands.
 async function setGeneratedSubtitleNotify(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const body = recordOrEmpty(await req.json().catch(() => ({})));
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
@@ -4811,17 +4823,15 @@ async function setGeneratedSubtitleNotify(req: Request, userId: string, db: Supa
   const titleLabel = stringOr(body.titleLabel, "").slice(0, 300) || null;
   const seriesId = stringOr(body.seriesId, "").slice(0, 100) || null;
   const subRow = {
-    user_id: userId, email, provider_key: pkey, item_type: itemType, external_id: externalId,
+    // The legacy column remains NOT NULL, but the worker resolves the current Auth
+    // identity at send time. Never persist a redundant recipient snapshot here.
+    user_id: userId, email: "", provider_key: pkey, item_type: itemType, external_id: externalId,
     kind, lang, title_label: titleLabel, source_id: sourceId || null, series_id: seriesId,
   };
 
-  // Late-opt-in race + orphan rescue (audit 2026-07-17): the client polls every 20-60 s, so a
-  // viewer can flip the chip AFTER the callback already fan-outed — the pending row would then
-  // never resolve (the dispatch only fires once, at the terminal callback). If the cache row is
-  // ALREADY terminal, answer NOW instead of registering a promise nobody will keep: ready with
-  // speech → send the email immediately (+ bell); no speech / failed → refuse honestly so the
-  // client reverts the chip. Only reachable in that race window (the chip renders only while the
-  // client believes 'processing'), so the immediate send can't be farmed for email spam.
+  // Reject an opt-in whose work already ended without usable subtitles. Ready work is handled by
+  // the durable outbox trigger below: the subscription and delivery are committed together, so a
+  // late opt-in cannot be orphaned and this request never performs provider/network email I/O.
   const { data: cacheRow } = await db.from("catalog_generated_subtitles")
     .select("status, segments")
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
@@ -4832,20 +4842,30 @@ async function setGeneratedSubtitleNotify(req: Request, userId: string, db: Supa
     if (!hasSpeech) {
       return { ok: false, enabled: false, reason: cacheStatus === "ready" ? "finished — no speech detected" : "generation already failed" };
     }
-    const sent = await sendSubtitleReadyEmail(email, titleLabel ?? "", subtitleWatchRoute(subRow as unknown as JsonRecord) || undefined);
-    try { await insertSubtitleBellEvents(db, [subRow as unknown as JsonRecord], "ready"); } catch (_) { /* best-effort */ }
-    const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
-      ...subRow, status: sent ? "sent" : "failed", created_at: nowIso, sent_at: nowIso,
-    }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" });
-    if (error) throwDb(error, "notify registration failed");
-    return { ok: true, enabled: true, already: "ready", emailed: sent };
   }
 
-  const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
+  const { data: notification, error } = await db.from("catalog_generated_subtitle_notifications").upsert({
     ...subRow, status: "pending", created_at: nowIso, sent_at: null,
-  }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" });
+  }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" }).select("id").maybeSingle();
   if (error) throwDb(error, "notify registration failed");
-  return { ok: true, enabled: true };
+  const notificationId = stringOr((notification as JsonRecord | null)?.id, "");
+  if (!notificationId) throw new HttpError(500, "notify registration returned no id");
+
+  if (cacheStatus === "ready") {
+    // The AFTER trigger normally queues this during the upsert transaction. This explicit call is
+    // an idempotent reconciliation path for rolling deploys and makes a queue failure observable.
+    const { error: queueError } = await db.rpc("queue_subtitle_ready_email_deliveries", {
+      p_notification_id: notificationId,
+      p_provider_key: null,
+      p_item_type: null,
+      p_external_id: null,
+      p_kind: null,
+      p_lang: null,
+    });
+    if (queueError) throwDb(queueError, "subtitle email queue failed");
+    return { ok: true, enabled: true, already: "ready", email_queued: true };
+  }
+  return { ok: true, enabled: true, email_queued: false };
 }
 
 // Deep-link route to a title's fiche (no origin, no leading slash): the app resolves
@@ -4899,67 +4919,336 @@ async function insertSubtitleBellEvents(db: SupabaseClient, subs: JsonRecord[], 
   if (error) console.error("[norva-playback] subtitle bell event insert failed", error.message);
 }
 
-// Branded, email-client-safe "your subtitles are ready" HTML (tables + inline styles, dark theme),
-// mirroring norva-auth-email so the two transactional senders look like one product. `ctaUrl` deep
-// links straight to the title's fiche when the subscription carries enough identity for one.
-function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string, ctaUrl?: string): string {
-  const title = (titleLabel || "your film").replace(/[<>]/g, "");
-  return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#0a0c11">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c11">
-    <tr><td align="center" style="padding:32px 16px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#11151d;border:1px solid #1f2733;border-radius:16px;overflow:hidden">
-        <tr><td style="padding:32px 32px 8px;text-align:center">
-          <img src="https://norva.tv/img/norva-app-icon.png" width="48" height="48" alt="Norva" style="border-radius:12px">
-          <div style="color:#ffffff;font-family:'Century Gothic',Arial,sans-serif;font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:10px">Norva</div>
-        </td></tr>
-        <tr><td style="padding:18px 32px 6px;text-align:center">
-          <h1 style="margin:0;color:#f8fafc;font-family:Arial,sans-serif;font-size:21px;font-weight:800">✨ Your AI subtitles are ready</h1>
-        </td></tr>
-        <tr><td style="padding:10px 32px 22px;text-align:center;color:#9aa6bd;font-family:Arial,sans-serif;font-size:15px;line-height:1.6">
-          We finished transcribing <strong style="color:#dbe3f4">${title}</strong>. Re-open the film on Norva and pick <strong style="color:#dbe3f4">✨ AI subtitles</strong> in the captions menu to watch with them.
-        </td></tr>
-        <tr><td align="center" style="padding:8px 0 28px">
-          <a href="${ctaUrl || siteUrl}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${ctaUrl ? "Watch with AI subtitles" : "Open Norva"}</a>
-        </td></tr>
-        <tr><td style="padding:18px 32px 28px;border-top:1px solid #1f2733;color:#5f6b85;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;text-align:center">
-          You're getting this because you asked to be notified when these subtitles finished. They're cached, so they'll load instantly next time.
-        </td></tr>
-      </table>
-      <div style="color:#3b4254;font-family:Arial,sans-serif;font-size:11px;margin-top:16px">© Norva</div>
-    </td></tr>
-  </table>
-</body></html>`;
+interface SubtitleEmailClaim {
+  delivery_id: string;
+  notification_id: string;
+  delivery_key: string;
+  lease_token: string;
+  user_id: string;
+  title_label: string | null;
+  source_id: string | null;
+  series_id: string | null;
+  item_type: string;
+  external_id: string;
+  kind: string;
+  lang: string;
+  attempt_count: number;
 }
 
-// Send one "subtitles ready" email through Resend (same key/sender as norva-auth-email; secrets are
-// project-wide). Returns true on a 2xx; never throws (a send failure must not break the callback).
-// `watchRoute` (from subtitleWatchRoute) turns the CTA into a deep link to the title's fiche —
-// without it the button lands on the site root and the viewer has to find the film by hand.
-async function sendSubtitleReadyEmail(to: string, titleLabel: string, watchRoute?: string): Promise<boolean> {
-  const key = Deno.env.get("RESEND_API_KEY") ?? "";
-  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
-  const site = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
-  if (!key || !to) return false;
-  const ctaUrl = watchRoute ? `${site}/app.html#${watchRoute}` : "";
-  const subject = `Your AI subtitles for “${titleLabel || "your film"}” are ready — Norva`;
+interface PreparedSubtitleEmail {
+  recipient_email: string;
+  request_from: string;
+  request_reply_to: string;
+  request_subject: string;
+  request_html: string;
+  request_text: string;
+  request_tags: Array<{ name: string; value: string }>;
+}
+
+interface SubtitleEmailTransportResult {
+  ok: boolean;
+  retryable: boolean;
+  ambiguous: boolean;
+  httpStatus: number | null;
+  emailId: string | null;
+  response: JsonRecord | null;
+  error: string | null;
+  retryAfterSeconds: number | null;
+}
+
+function subtitleEmailSafeError(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
+    .replace(/(?:bearer\s+)?[A-Za-z0-9_-]{40,}/gi, "[redacted-token]")
+    .slice(0, 2_000);
+}
+
+async function subtitleEmailResponsePayload(response: Response): Promise<JsonRecord | null> {
+  const raw = (await response.text().catch(() => "")).slice(0, 16_384);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { message: subtitleEmailSafeError(raw) };
+    }
+    // Resend responses need only these fields for acknowledgement/diagnostics.
+    // Do not persist arbitrary echoed request data or recipient addresses.
+    const source = parsed as JsonRecord;
+    const safe: JsonRecord = {};
+    if (typeof source.id === "string") safe.id = source.id.slice(0, 300);
+    for (const key of ["name", "message", "error"]) {
+      if (typeof source[key] === "string") safe[key] = subtitleEmailSafeError(source[key]);
+    }
+    return Object.keys(safe).length ? safe : { message: `Resend HTTP ${response.status}` };
+  } catch (_) {
+    return { message: subtitleEmailSafeError(raw) };
+  }
+}
+
+function subtitleEmailPayloadMessage(payload: JsonRecord | null): string {
+  for (const key of ["message", "error", "name"]) {
+    const value = payload?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function subtitleEmailRetryableStatus(status: number | null, payload: JsonRecord | null): boolean {
+  if (status === 409) {
+    const type = String(payload?.name ?? payload?.error ?? "").trim().toLowerCase();
+    if (type === "concurrent_idempotent_requests") return true;
+    if (type === "invalid_idempotent_request") return false;
+    const detail = [type, subtitleEmailPayloadMessage(payload)].join(" ").toLowerCase();
+    return /concurrent|in[_ -]?progress|already processing/.test(detail)
+      && !/invalid|mismatch|different payload|expired/.test(detail);
+  }
+  return status === null || status === 401 || status === 403 || status === 408
+    || status === 425 || status === 429 || (status !== null && status >= 500);
+}
+
+function subtitleEmailAmbiguousStatus(status: number | null, retryable: boolean): boolean {
+  return status === null || status === 408 || status === 425 || status === 429
+    || (status !== null && status >= 500) || (status === 409 && retryable);
+}
+
+function subtitleEmailRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.min(86_400, Math.ceil(seconds)));
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, Math.min(86_400, Math.ceil((at - Date.now()) / 1000)));
+}
+
+async function sendPreparedSubtitleEmail(
+  claim: SubtitleEmailClaim,
+  prepared: PreparedSubtitleEmail,
+): Promise<SubtitleEmailTransportResult> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject, html: subtitleReadyEmailHtml(titleLabel, site, ctaUrl || undefined) }),
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Norva-Subtitle-Email/2.0",
+        "Idempotency-Key": claim.delivery_key,
+      },
+      body: JSON.stringify({
+        from: prepared.request_from,
+        reply_to: prepared.request_reply_to,
+        to: [prepared.recipient_email],
+        subject: prepared.request_subject,
+        html: prepared.request_html,
+        text: prepared.request_text,
+        tags: prepared.request_tags,
+      }),
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
     });
-    if (!res.ok) { console.error("[norva-playback] subtitle-ready email failed", res.status, await res.text().catch(() => "")); return false; }
-    return true;
-  } catch (e) { console.error("[norva-playback] subtitle-ready email error", String(e)); return false; }
+    const response = await subtitleEmailResponsePayload(res);
+    const emailId = typeof response?.id === "string" && response.id.trim() ? response.id.trim() : null;
+    if (res.ok && emailId) {
+      return {
+        ok: true, retryable: false, ambiguous: false,
+        httpStatus: res.status, emailId, response,
+        error: null, retryAfterSeconds: null,
+      };
+    }
+    const retryable = res.ok || subtitleEmailRetryableStatus(res.status, response);
+    return {
+      ok: false,
+      retryable,
+      ambiguous: res.ok || subtitleEmailAmbiguousStatus(res.status, retryable),
+      httpStatus: res.status,
+      emailId: null,
+      response,
+      error: res.ok
+        ? "Resend returned success without an email id"
+        : (subtitleEmailPayloadMessage(response) || `Resend HTTP ${res.status}`),
+      retryAfterSeconds: subtitleEmailRetryAfter(res.headers.get("retry-after")),
+    };
+  } catch (error) {
+    return {
+      ok: false, retryable: true, ambiguous: true,
+      httpStatus: null, emailId: null, response: null,
+      error: error instanceof Error ? error.message : String(error), retryAfterSeconds: null,
+    };
+  }
 }
 
-// Fan out pending "email me" subscriptions for a transcript that just finished. Ready WITH speech
-// → email each subscriber (deep-linked to the fiche) and mark 'sent'. Ready but EMPTY (no
-// dialogue) → mark 'skipped' (nothing to show, so no email). Failed → mark 'failed'. Every
-// outcome ALSO rings the in-app bell — email stops being the only channel, and a subscriber whose
-// generation ended without speech/failed finally learns the result somewhere.
+async function runSubtitleEmailDelivery(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const { data: authorized, error: authError } = await db.rpc("norva_verify_cron_secret", { presented: token });
+  if (authError || authorized !== true) throw new HttpError(403, "Unauthorized");
+  if (!RESEND_API_KEY) throw new HttpError(503, "Resend transport is not configured");
+  return { ok: true, ...(await drainSubtitleEmailDeliveries(db)) };
+}
+
+async function drainSubtitleEmailDeliveries(db: SupabaseClient): Promise<JsonRecord> {
+  const { data, error } = await db.rpc("claim_subtitle_email_deliveries", {
+    p_limit: SUBTITLE_EMAIL_BATCH,
+    p_lease_seconds: SUBTITLE_EMAIL_LEASE_SECONDS,
+    p_max_attempts: SUBTITLE_EMAIL_MAX_ATTEMPTS,
+  });
+  if (error) throw new Error(`subtitle email claim failed: ${error.message}`);
+  const claims = (data ?? []) as SubtitleEmailClaim[];
+  let sent = 0, skipped = 0, retryScheduled = 0, deadLetter = 0, persistenceFailed = 0;
+
+  const fail = async (
+    claim: SubtitleEmailClaim,
+    retryable: boolean,
+    message: string,
+    httpStatus: number | null = null,
+    response: JsonRecord | null = null,
+    retryAfterSeconds: number | null = null,
+    ambiguous = false,
+  ) => {
+    const { data: disposition, error: failError } = await db.rpc("fail_subtitle_email_delivery", {
+      p_delivery_id: claim.delivery_id,
+      p_lease_token: claim.lease_token,
+      p_retryable: retryable,
+      p_http_status: httpStatus,
+      p_response: response,
+      p_error: subtitleEmailSafeError(message),
+      p_retry_after_seconds: retryAfterSeconds,
+      p_max_attempts: SUBTITLE_EMAIL_MAX_ATTEMPTS,
+      p_base_backoff_seconds: 60,
+      p_max_backoff_seconds: 21_600,
+      p_ambiguous: ambiguous,
+    });
+    if (failError || !["retry_scheduled", "dead_letter"].includes(String(disposition))) {
+      persistenceFailed++;
+      console.error("[norva-playback] subtitle email failure persistence failed", claim.delivery_key, failError?.message ?? String(disposition));
+      return;
+    }
+    if (disposition === "dead_letter") deadLetter++;
+    else retryScheduled++;
+  };
+
+  const skip = async (claim: SubtitleEmailClaim, reason: string) => {
+    const { data: applied, error: skipError } = await db.rpc("skip_subtitle_email_delivery", {
+      p_delivery_id: claim.delivery_id,
+      p_lease_token: claim.lease_token,
+      p_reason: reason,
+    });
+    if (skipError || applied !== true) {
+      persistenceFailed++;
+      console.error("[norva-playback] subtitle email skip persistence failed", claim.delivery_key, skipError?.message ?? "stale lease");
+      return;
+    }
+    skipped++;
+  };
+
+  // Sequential sends respect Resend's team-wide request rate. SKIP LOCKED leases
+  // still allow overlapping cron invocations without duplicate ownership.
+  for (const claim of claims) {
+    let transportAccepted = false;
+    try {
+      const { data: account, error: userError } = await db.auth.admin.getUserById(claim.user_id);
+      const userStatus = Number((userError as { status?: number } | null)?.status ?? 0);
+      if (userError) {
+        if (userStatus === 404) await skip(claim, "auth user no longer exists");
+        else await fail(claim, true, `auth user lookup failed: ${userError.message}`);
+        continue;
+      }
+      const email = stringOr(account?.user?.email, "").trim().toLowerCase();
+      if (!email) {
+        await skip(claim, "auth user has no current email");
+        continue;
+      }
+
+      const watchRoute = subtitleWatchRoute(claim as unknown as JsonRecord);
+      const rendered = renderSubtitleReadyEmail({
+        titleLabel: claim.title_label,
+        siteUrl: PUBLIC_SITE_URL,
+        ctaUrl: watchRoute ? `${PUBLIC_SITE_URL}/app#${watchRoute}` : PUBLIC_SITE_URL,
+      });
+
+      // Freeze the complete multipart request before external I/O. Retries use the
+      // same bytes and recipient for the stable Resend Idempotency-Key.
+      const { data: preparedRows, error: prepareError } = await db.rpc("prepare_subtitle_email_delivery", {
+        p_delivery_id: claim.delivery_id,
+        p_lease_token: claim.lease_token,
+        p_recipient_email: email,
+        p_request_from: SUBTITLE_EMAIL_FROM,
+        p_request_reply_to: EMAIL_REPLY_TO,
+        p_request_subject: rendered.subject,
+        p_request_html: rendered.html,
+        p_request_text: rendered.text,
+        p_request_tags: rendered.tags,
+      });
+      const prepared = (Array.isArray(preparedRows) ? preparedRows[0] : null) as PreparedSubtitleEmail | null;
+      if (prepareError || !prepared?.recipient_email || !prepared.request_subject || !prepared.request_html
+          || !prepared.request_text || !Array.isArray(prepared.request_tags)) {
+        // No transport call occurred. Leave an ambiguous/stale CAS to lease expiry.
+        persistenceFailed++;
+        console.error("[norva-playback] subtitle email preparation failed", claim.delivery_key, prepareError?.message ?? "stale lease");
+        continue;
+      }
+
+      const { data: transportAuthorized, error: authorizeError } = await db.rpc(
+        "authorize_subtitle_email_delivery",
+        { p_delivery_id: claim.delivery_id, p_lease_token: claim.lease_token },
+      );
+      if (authorizeError || transportAuthorized !== true) {
+        // No provider request occurred. A stale/expired lease is intentionally
+        // left to SQL reconciliation rather than risking an unowned send.
+        persistenceFailed++;
+        console.error("[norva-playback] subtitle email authorization failed", claim.delivery_key, authorizeError?.message ?? "stale lease");
+        continue;
+      }
+
+      const result = await sendPreparedSubtitleEmail(claim, prepared);
+      if (!result.ok) {
+        console.error("[norva-playback] subtitle email transport failed", claim.delivery_key, result.httpStatus ?? "network");
+        await fail(
+          claim, result.retryable, result.error ?? "Resend delivery failed",
+          result.httpStatus, result.response, result.retryAfterSeconds, result.ambiguous,
+        );
+        continue;
+      }
+      transportAccepted = true;
+
+      const { data: completed, error: completeError } = await db.rpc("complete_subtitle_email_delivery", {
+        p_delivery_id: claim.delivery_id,
+        p_lease_token: claim.lease_token,
+        p_http_status: result.httpStatus,
+        p_resend_email_id: result.emailId,
+        p_response: result.response,
+      });
+      if (completeError || completed !== true) {
+        // Resend accepted the immutable key. Do not transition to failed: lease
+        // expiry safely reconciles the same request without producing a second email.
+        persistenceFailed++;
+        console.error("[norva-playback] accepted subtitle email acknowledgement failed", claim.delivery_key, result.emailId, completeError?.message ?? "stale lease");
+        continue;
+      }
+      sent++;
+    } catch (error) {
+      const message = subtitleEmailSafeError(error instanceof Error ? error.message : String(error));
+      console.error("[norva-playback] subtitle email delivery failed", claim.delivery_key, message);
+      if (transportAccepted) {
+        // An accepted transport must never be overwritten by a failure mutation.
+        // Lease expiry retries the same immutable Idempotency-Key.
+        persistenceFailed++;
+      } else {
+        await fail(claim, true, message);
+      }
+    }
+  }
+
+  return {
+    claimed: claims.length,
+    sent,
+    skipped,
+    retry_scheduled: retryScheduled,
+    dead_letter: deadLetter,
+    persistence_failed: persistenceFailed,
+  };
+}
+
+// Reconcile notifications for a completed transcript. Ready-with-speech is atomically queued in
+// SQL and delivered by the leased retry worker; this explicit RPC is an idempotent backstop for
+// callback paths that predate the trigger. Empty/failed work has no email and closes immediately.
 async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord | null): Promise<void> {
   if (!row) return;
   const status = stringOr(row.status, "");
@@ -4967,28 +5256,38 @@ async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord
   const providerKey = stringOr(row.provider_key, ""), itemType = stringOr(row.item_type, "");
   const externalId = stringOr(row.external_id, ""), kind = stringOr(row.kind, "transcript"), lang = stringOr(row.lang, "src");
   if (!providerKey || !externalId) return;
+  const hasSpeech = status === "ready" && Number(row.segments ?? 0) > 0;
+  if (hasSpeech) {
+    const { error } = await db.rpc("queue_subtitle_ready_email_deliveries", {
+      p_notification_id: null,
+      p_provider_key: providerKey,
+      p_item_type: itemType,
+      p_external_id: externalId,
+      p_kind: kind,
+      p_lang: lang,
+    });
+    if (error) throwDb(error, "subtitle email queue failed");
+    return;
+  }
+
   const { data: subs } = await db.from("catalog_generated_subtitle_notifications")
-    .select("id, user_id, email, title_label, source_id, series_id, item_type, external_id, kind, lang")
+    .select("id, user_id, title_label, source_id, series_id, item_type, external_id, kind, lang")
     .eq("provider_key", providerKey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", kind).eq("lang", lang).eq("status", "pending");
   const rows = (subs ?? []) as JsonRecord[];
   if (!rows.length) return;
   const nowIso = new Date().toISOString();
-  const hasSpeech = status === "ready" && Number(row.segments ?? 0) > 0;
-  if (!hasSpeech) {
-    await db.from("catalog_generated_subtitle_notifications")
-      .update({ status: status === "ready" ? "skipped" : "failed", sent_at: nowIso })
-      .in("id", rows.map((s) => String(s.id)));
-    try { await insertSubtitleBellEvents(db, rows, status === "ready" ? "empty" : "failed"); }
-    catch (e) { console.error("[norva-playback] bell fan-out failed", String(e)); }
-    return;
-  }
-  for (const s of rows) {
-    const ok = await sendSubtitleReadyEmail(stringOr(s.email, ""), stringOr(s.title_label, ""), subtitleWatchRoute(s) || undefined);
-    await db.from("catalog_generated_subtitle_notifications")
-      .update({ status: ok ? "sent" : "failed", sent_at: nowIso }).eq("id", String(s.id));
-  }
-  try { await insertSubtitleBellEvents(db, rows, "ready"); }
+  await db.from("catalog_generated_subtitle_notifications")
+    .update({
+      status: status === "ready" ? "skipped" : "failed",
+      sent_at: nowIso,
+      email: "",
+      title_label: null,
+      source_id: null,
+      series_id: null,
+    })
+    .in("id", rows.map((s) => String(s.id)));
+  try { await insertSubtitleBellEvents(db, rows, status === "ready" ? "empty" : "failed"); }
   catch (e) { console.error("[norva-playback] bell fan-out failed", String(e)); }
 }
 
@@ -5044,8 +5343,8 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
     try { await resolvePendingTranslations(db, runtimeConfig, updRec); }
     catch (e) { console.error("[norva-playback] pending-translation chain failed", String(e)); }
   }
-  // Email anyone who opted in for this transcript (best-effort: a send/dispatch failure here must
-  // not fail the callback, or the gateway will think the result was lost and the row stays stuck).
+  // The cache-row trigger already committed ready emails to the durable outbox. This idempotent
+  // reconciliation also closes empty/failed opt-ins; it never sends email inline with the callback.
   try { await dispatchSubtitleNotifications(db, updated as JsonRecord | null); }
   catch (e) { console.error("[norva-playback] notify dispatch failed", String(e)); }
   return { ok: true, jobId, status: patch.status };

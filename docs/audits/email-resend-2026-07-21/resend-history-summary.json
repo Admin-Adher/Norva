@@ -1,0 +1,23 @@
+{
+  "source": "Resend Email API",
+  "captured_at": "2026-07-21T18:00:00Z",
+  "scope": "All 134 historical messages available for senders on norva.tv; recipient addresses excluded",
+  "period": {
+    "from": "2026-04-08",
+    "to": "2026-07-16"
+  },
+  "total": 134,
+  "outcomes": [
+    { "outcome": "delivered", "count": 116 },
+    { "outcome": "bounced", "count": 10 },
+    { "outcome": "suppressed", "count": 5 },
+    { "outcome": "complained", "count": 1 },
+    { "outcome": "opened", "count": 1 },
+    { "outcome": "clicked", "count": 1 }
+  ],
+  "notes": [
+    "All ten bounces used deliberately invalid test domains.",
+    "The current cohort is internal/test only and must not be treated as a customer deliverability baseline.",
+    "Outcome rate equals outcome count divided by 134."
+  ]
+}

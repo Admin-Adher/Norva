@@ -35,7 +35,8 @@ Le moteur **n'envoie jamais d'email inline** — il **insère un event** dans un
 
 **Table `cloud_import_notifications`** (migration `20260630210000`, **appliquée + commitée**) :
 `id, user_id, source_id, kind ('import_started'|'import_completed'|'import_failed'), payload jsonb, status
-('pending'|'sent'|'skipped'), created_at, sent_at`, **`unique(source_id, kind)`**.
+('pending'|'processing'|'sent'|'skipped'|'dead_letter'), created_at, sent_at`, plus les colonnes de livraison
+decrites ci-dessous, **`unique(source_id, kind)`**.
 - L'`unique(source_id, kind)` = **garde d'idempotence** : le moteur tourne en dizaines d'isolates → insert
   `ON CONFLICT DO NOTHING` → un event ne part **qu'une fois** par source par kind.
 - Service-only (RLS, `service_role` seul).
@@ -43,6 +44,45 @@ Le moteur **n'envoie jamais d'email inline** — il **insère un event** dans un
 **Cron digest** (~2 min) → route edge : balaie les `pending`, **groupe par `(user_id, kind)`** dans une
 fenêtre, résout l'email depuis `auth.users`, **rend via `_shared/import-email.ts`**, envoie via **Resend**,
 passe les lignes en `sent`. 1 provider → email simple ; N dans la fenêtre → **digest**.
+
+### Fiabilite de livraison (21/07/2026)
+
+La file est maintenant un outbox de livraison durable, via la migration
+`20260721230000_import_notification_delivery_outbox.sql` :
+
+- le claim SQL atomique attribue un `delivery_key` stable a chaque digest fige, puis loue tout le groupe avec
+  `lease_token`/`lease_expires_at` ; deux crons ne peuvent pas envoyer le meme groupe en parallele ;
+- `Idempotency-Key: norva-import-<delivery_key>` est transmis a Resend a chaque tentative. Si Resend accepte
+  l'email mais que l'ack SQL echoue, le retry reconcilie la meme livraison au lieu de creer un second email ;
+- un succes n'est valide qu'apres un HTTP 2xx **et** un `id` Resend non vide. Seuls l'id et le statut utiles a
+  l'exploitation restent; les reponses provider sont allowlistees/redactees. Adresse, sujet et corps sont
+  effaces des que la livraison atteint un etat terminal ;
+- l'adresse est relue dans `auth.users` apres le claim : un changement d'email entre l'import et l'envoi cible
+  donc l'identite courante, jamais une adresse historique stockee dans l'evenement. Juste avant l'appel reseau,
+  le payload Resend complet est fige ensemble (`from`, destinataire, sujet, HTML, texte, `reply_to`, tags); les
+  retries reutilisent exactement ce payload et la meme cle ;
+- `409 concurrent_idempotent_requests` est retente; `409 invalid_idempotent_request` et les autres 409 sont
+  terminaux. Les erreurs temporaires utilisent un backoff exponentiel avec jitter et respectent `Retry-After` ;
+- un echec explicitement enregistre atteint la dead letter apres huit tentatives. Un worker interrompu ou un
+  resultat reseau ambigu est au contraire repris apres expiration du lease avec la meme `Idempotency-Key`, meme
+  si le compteur nominal a ete atteint: il ne faut jamais transformer une acceptation possible en perte ;
+- les evenements `sent`/`skipped` sont purges apres 90 jours et les dead letters apres 30 jours par
+  `prune_import_notification_deliveries()` (cron quotidien 03:35).
+
+Controle operateur (aucune donnee sensible dans les logs) :
+
+```sql
+select status, count(*)
+from public.cloud_import_notifications
+group by status
+order by status;
+
+select delivery_key, user_id, kind, attempt_count, last_http_status,
+       left(last_error, 200) as last_error, dead_lettered_at
+from public.cloud_import_notifications
+where status = 'dead_letter'
+order by dead_lettered_at desc;
+```
 
 ## 4. Les emails (anglais, brandés, `_shared/import-email.ts` — **livré**)
 Render functions pures, sans effet de bord, chacune prend un **tableau** de providers (1 = simple, N = digest) :

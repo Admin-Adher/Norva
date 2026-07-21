@@ -203,7 +203,16 @@ Deno.serve(async (req) => {
 
     await recordProcessedEvent(admin, userId, eventId, eventType, {
       ...event,
-      _norva: { projection_applied: projectionApplied, plan_mapping: resolution.mapping },
+      _norva: {
+        projection_applied: projectionApplied,
+        plan_mapping: resolution.mapping,
+        previous_status: existingProjection?.status ?? null,
+        previous_plan: existingProjection?.plan_code ?? null,
+        previous_provider: existingProjection?.provider ?? null,
+        next_status: patch?.status ?? existingProjection?.status ?? null,
+        next_plan: patch?.plan_code ?? existingProjection?.plan_code ?? resolvedPlan ?? null,
+        current_period_end: patch?.current_period_end ?? existingProjection?.current_period_end ?? null,
+      },
     });
     return json({
       ok: true,

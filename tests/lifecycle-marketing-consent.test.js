@@ -13,6 +13,14 @@ const lifecycle = fs.readFileSync(
   path.join(root, 'supabase/functions/norva-lifecycle/index.ts'),
   'utf8',
 );
+const deliveryMigration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20260722003000_lifecycle_email_delivery_outbox.sql'),
+  'utf8',
+);
+const emailWorker = fs.readFileSync(
+  path.join(root, 'supabase/functions/norva-branded-email-worker/index.ts'),
+  'utf8',
+);
 const templates = fs.readFileSync(
   path.join(root, 'supabase/functions/_shared/lifecycle-email.ts'),
   'utf8',
@@ -21,6 +29,16 @@ const audienceHelperPath = path.join(root, 'supabase/functions/_shared/resend-au
 const audienceHelper = fs.readFileSync(audienceHelperPath, 'utf8');
 const compose = fs.readFileSync(path.join(root, 'ops/hetzner/docker-compose.supabase.yml'), 'utf8');
 const envExample = fs.readFileSync(path.join(root, 'ops/hetzner/.env.hetzner.example'), 'utf8');
+
+test('lifecycle transport is bounded, provider-acknowledged and idempotent for transactional flows', () => {
+  assert.match(lifecycle, /norva_enqueue_lifecycle_email/);
+  assert.match(lifecycle, /dedupeKey: `lifecycle:welcome:\$\{row\.user_id\}`/);
+  assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{stage\}`/);
+  assert.doesNotMatch(lifecycle, /api\.resend\.com\/emails/);
+  assert.match(emailWorker, /signal: AbortSignal\.timeout\(8_000\)/);
+  assert.match(emailWorker, /accepted: res\.ok && Boolean\(emailId\)/);
+  assert.match(deliveryMigration, /set state='sent'/);
+});
 
 test('marketing email consent is explicit and defaults off', () => {
   assert.match(migration, /create table if not exists public\.cloud_marketing_email_preferences/i);
@@ -122,7 +140,7 @@ test('Resend transport PATCHes, creates on 404, and PATCHes after a create confl
   const calls = [];
   const responses = [
     new Response('{"message":"missing"}', { status: 404 }),
-    new Response('{"message":"already exists"}', { status: 409 }),
+    new Response('{"name":"duplicate_contact","message":"contact already exists"}', { status: 409 }),
     new Response('{"id":"contact-1"}', { status: 200 }),
   ];
   const result = await syncResendAudienceContact({
@@ -183,28 +201,28 @@ test('lifecycle exposes signed idempotent RFC8058 unsubscribe and authenticated 
   assert.match(lifecycle, /Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info"/);
 });
 
-test('lifecycle processes the audience outbox independently from marketing flags', () => {
-  assert.match(lifecycle, /claim_resend_audience_outbox/);
-  assert.match(lifecycle, /complete_resend_audience_outbox/);
-  assert.match(lifecycle, /fail_resend_audience_outbox/);
-  assert.match(lifecycle, /syncResendAudienceContact/);
-  assert.match(lifecycle, /const RESEND_OUTBOX_BATCH = 10/);
-  assert.match(lifecycle, /p_lease_seconds: 180/);
-  assert.match(lifecycle, /await Promise\.all\(claims\.map\(async \(claim\)/);
-  const call = lifecycle.indexOf('out.resend_audience = await runResendAudienceOutbox(db)');
-  const firstFlaggedFlow = lifecycle.indexOf('if (BILLING_LIVE && LC_TRIAL)', call);
-  assert.ok(call > 0 && firstFlaggedFlow > call);
+test('contact projection is retired from public lifecycle and owned by the private ops worker', () => {
+  const worker = fs.readFileSync(path.join(root, 'ops/hetzner/scripts/resend-contact-worker.mjs'), 'utf8');
+  assert.doesNotMatch(lifecycle, /claim_resend_audience_outbox|syncResendContactProjection|RESEND_MANAGEMENT_API_KEY/);
+  assert.match(lifecycle, /url\.pathname\.endsWith\("\/cron\/resend-contacts"\)/);
+  assert.match(lifecycle, /return json\(\{ error: "Not found" \}, 404\)/);
+  assert.match(worker, /norva_reconcile_resend_contacts/);
+  assert.match(worker, /claim_resend_audience_outbox/);
+  assert.match(worker, /complete_resend_audience_outbox/);
+  assert.match(worker, /fail_resend_audience_outbox/);
+  assert.match(lifecycle, /trial_reminder: "db_cron_canonical"/);
+  assert.doesNotMatch(lifecycle, /runTrialReminder|LC_TRIAL/);
 });
 
 test('winback and abandoned sends are gated before email and before push', () => {
   const winback = lifecycle.slice(lifecycle.indexOf('async function runWinback'), lifecycle.indexOf('async function runAbandoned'));
   assert.match(winback, /select\("user_id,last_event_at,status"\)/);
   assert.match(winback, /gte\("last_event_at", lo\)\.lte\("last_event_at", hi\)/);
-  assert.ok((winback.match(/marketingEmailAllowed/g) || []).length >= 2);
+  assert.ok((winback.match(/marketingEmailAllowed/g) || []).length >= 1);
   assert.match(winback, /marketing: true/);
 
   const abandoned = lifecycle.slice(lifecycle.indexOf('async function runAbandoned'), lifecycle.indexOf('async function runExpirePastDue'));
-  assert.ok((abandoned.match(/marketingEmailAllowed/g) || []).length >= 2);
+  assert.ok((abandoned.match(/marketingEmailAllowed/g) || []).length >= 1);
   assert.match(abandoned, /marketing: true/);
   assert.match(abandoned, /unsubscribeUrl: context\.unsubscribeUrl/);
 });
@@ -216,16 +234,17 @@ test('only marketing templates override the transactional unsubscribe fallback',
   assert.match(templates, /unsubscribeUrl: opts\.unsubscribeUrl/);
   assert.match(templates, /renderTrialEnding/);
   assert.match(templates, /renderPaymentFailed/);
-  assert.match(lifecycle, /unsubscribeHeaders \? \{ headers: unsubscribeHeaders \} : \{\}/);
+  assert.match(lifecycle, /p_request_headers: unsubscribeHeaders/);
+  assert.match(deliveryMigration, /List-Unsubscribe-Post/);
   assert.match(lifecycle, /BILLING_LIVE && LC_DUNNING && LC_EXPIRE/);
 });
 
 test('self-host passes every fail-closed marketing prerequisite to Edge Runtime', () => {
   assert.match(compose, /NORVA_POSTAL_ADDRESS:\s*\$\{NORVA_POSTAL_ADDRESS:-\}/);
   assert.match(compose, /NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET:\s*\$\{NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET:-\}/);
-  assert.match(compose, /RESEND_AUDIENCE_ID:\s*\$\{RESEND_AUDIENCE_ID:-\}/);
+  assert.match(compose, /RESEND_WEBHOOK_SECRET:\s*\$\{RESEND_WEBHOOK_SECRET:-\}/);
   assert.match(envExample, /NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET=/);
-  assert.match(envExample, /RESEND_AUDIENCE_ID=/);
+  assert.match(envExample, /RESEND_WEBHOOK_SECRET=/);
   assert.match(envExample, /NORVA_LC_WINBACK=false/);
   assert.match(envExample, /NORVA_LC_ABANDONED=false/);
 });

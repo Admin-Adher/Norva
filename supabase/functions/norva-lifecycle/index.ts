@@ -1,13 +1,13 @@
 // Lifecycle / billing email cron. A pg_cron job POSTs here every ~15 min; this scans the
-// cloud_entitlement_projection and sends, once each, the right lifecycle email via Resend, then
-// stamps the send marker (see migration 20260703160000). English-only. Auth mirrors the other
+// cloud_entitlement_projection and freezes each eligible request in the durable branded outbox.
+// Its minutely worker sends and stamps business markers only after Resend accepts the email.
+// English-only. Auth mirrors the other
 // crons (norva_verify_cron_secret).
 //
 //   - WELCOME            → always active (independent of billing). New projections (proxy for a
 //                          new signup that reached the app) created in the last 72h.
-//   - TRIAL J-2 REMINDER → GATED behind NORVA_LIFECYCLE_BILLING_LIVE=true. Only meaningful once the
-//                          trial is CARD-backed and auto-converts; sending "we'll charge you in 2
-//                          days" in the legacy no-card mode would be false, so it stays off.
+//   - TRIAL REMINDERS    → owned exclusively by the provider-correct DB J-3/J-1 jobs.
+//                          Edge never sends one, so an old env flag cannot duplicate them.
 //   - DUNNING (1..3)     → GATED. Escalating reminders while status='past_due'.
 //   - WIN-BACK           → GATED. Once, a few days after expiry/cancel.
 //
@@ -23,19 +23,17 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
-  renderWelcome, renderTrialEnding, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
+  renderWelcome, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
+  renderCancellationConfirmed, renderSubscriptionResumed,
+  renderPlanChangeScheduled, renderPlanChangeApplied, renderPaymentRecovered,
+  renderAccessExpired, renderRefundConfirmed,
 } from "../_shared/lifecycle-email.ts";
-import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
-import { syncResendAudienceContact } from "../_shared/resend-audience.mjs";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const PUBLIC_FUNCTIONS_URL = (Deno.env.get("SUPABASE_PUBLIC_URL") ?? SUPABASE_URL).replace(/\/+$/, "");
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-// Environment-specific by design: staging must never fall back to the production
-// audience. Missing ID leaves the durable queue untouched and fails closed.
-const RESEND_AUDIENCE_ID = (Deno.env.get("RESEND_AUDIENCE_ID") ?? "").trim();
-const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const FROM = Deno.env.get("NORVA_LIFECYCLE_EMAIL_FROM") ?? "Norva <updates@norva.tv>";
+const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const UNSUBSCRIBE_SECRET = Deno.env.get("NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET") ?? "";
 const POSTAL_ADDRESS = (Deno.env.get("NORVA_POSTAL_ADDRESS") ?? "").trim();
 const flag = (name: string) => (Deno.env.get(name) ?? "false").toLowerCase() === "true";
@@ -46,16 +44,14 @@ const flag = (name: string) => (Deno.env.get(name) ?? "false").toLowerCase() ===
 // in place, abandoned repointed off the retired Stancer table). Setting only the
 // master now does NOTHING, which is the safe default.
 const BILLING_LIVE = flag("NORVA_LIFECYCLE_BILLING_LIVE");
-const LC_TRIAL = flag("NORVA_LC_TRIAL");         // edge trial reminder (see runTrialReminder note — DB crons already do this)
 const LC_DUNNING = flag("NORVA_LC_DUNNING");     // failed-payment escalation (Revolut/web only)
 const LC_EXPIRE = flag("NORVA_LC_EXPIRE");       // past_due → expired state transition
 const LC_WINBACK = flag("NORVA_LC_WINBACK");     // MARKETING; remains false unless explicitly enabled
 const LC_ABANDONED = flag("NORVA_LC_ABANDONED"); // MARKETING; remains false unless explicitly enabled
 const WELCOME_WINDOW_H = 72;   // don't email the historical base — only recent signups
 const BATCH = 100;
-// Start every claimed contact immediately. Ten concurrent contacts cap Resend
-// pressure while keeping PATCH→POST→PATCH (3 × 12s) well inside the 180s lease.
-const RESEND_OUTBOX_BATCH = 10;
+// Resend's default team rate limit is five requests/second. A contact projection
+// can need multiple contact/segment/topic calls, so claims are processed serially.
 // Transactional sends retain the mailto fallback. Marketing sends add a signed
 // HTTPS endpoint plus List-Unsubscribe-Post for RFC8058 one-click handling.
 const UNSUB_MAILTO = "mailto:unsubscribe@norva.tv?subject=unsubscribe";
@@ -142,100 +138,6 @@ async function internalAccountOrUnknown(db: SupabaseClient, userId: string): Pro
   return Boolean(data);
 }
 
-type ResendAudienceClaim = {
-  email: string;
-  user_id: string | null;
-  desired_unsubscribed: boolean;
-  first_name: string | null;
-  revision: number;
-  attempt_count: number;
-  lease_token: string;
-};
-
-// Durable audience reconciliation is operational, not a marketing send. It runs
-// on every authenticated lifecycle cron invocation even while every marketing flow
-// flag is OFF, and acknowledges a revision only after Resend confirms HTTP success.
-async function runResendAudienceOutbox(db: SupabaseClient) {
-  if (!RESEND_API_KEY || !RESEND_AUDIENCE_ID) {
-    return { configured: false, claimed: 0, synced: 0, failed: 0, persistence_failed: 0 };
-  }
-
-  const { data, error } = await db.rpc("claim_resend_audience_outbox", {
-    p_limit: RESEND_OUTBOX_BATCH,
-    p_lease_seconds: 180,
-  });
-  if (error) {
-    console.error("[norva-lifecycle] Resend audience outbox claim failed", error.message);
-    return { configured: true, claimed: 0, synced: 0, failed: 0, persistence_failed: 1 };
-  }
-
-  const claims = (data ?? []) as ResendAudienceClaim[];
-  let synced = 0;
-  let failed = 0;
-  let persistenceFailed = 0;
-
-  await Promise.all(claims.map(async (claim) => {
-    const result = await syncResendAudienceContact({
-      apiKey: RESEND_API_KEY,
-      audienceId: RESEND_AUDIENCE_ID,
-      email: claim.email,
-      unsubscribed: claim.desired_unsubscribed,
-      firstName: claim.first_name,
-    });
-
-    if (result.ok) {
-      const { data: applied, error: completeError } = await db.rpc("complete_resend_audience_outbox", {
-        p_email: claim.email,
-        p_revision: claim.revision,
-        p_lease_token: claim.lease_token,
-        p_http_status: result.httpStatus,
-        p_result: result.result,
-      });
-      if (completeError || applied !== true) {
-        // A false CAS means a newer preference/email revision now owns this row.
-        // It is intentionally not called synced; the newer desired state will run.
-        persistenceFailed++;
-        console.error(
-          "[norva-lifecycle] Resend audience completion CAS failed",
-          completeError?.message ?? `stale revision ${claim.revision}`,
-        );
-      } else synced++;
-      return;
-    }
-
-    const { data: recorded, error: failError } = await db.rpc("fail_resend_audience_outbox", {
-      p_email: claim.email,
-      p_revision: claim.revision,
-      p_lease_token: claim.lease_token,
-      p_http_status: result.httpStatus,
-      p_result: result.result,
-      p_error: result.error,
-    });
-    if (failError || recorded !== true) {
-      persistenceFailed++;
-      console.error(
-        "[norva-lifecycle] Resend audience failure CAS failed",
-        failError?.message ?? `stale revision ${claim.revision}`,
-      );
-    } else {
-      failed++;
-      console.error(
-        "[norva-lifecycle] Resend audience request failed",
-        result.httpStatus ?? "network",
-        result.error ?? "unknown error",
-      );
-    }
-  }));
-
-  return {
-    configured: true,
-    claimed: claims.length,
-    synced,
-    failed,
-    persistence_failed: persistenceFailed,
-  };
-}
-
 function unsubscribeHtml(token: string, completed: boolean): Response {
   const body = completed
     ? `<h1>You are unsubscribed</h1><p>Norva will no longer send you marketing emails. Transactional account and billing messages are unaffected.</p>`
@@ -271,21 +173,28 @@ function planLabel(code: string | null): string {
   return "your Norva plan";
 }
 
-// Resolve a user's email + first name, then send one rendered email. Returns true on success.
-async function emailUser(
+interface LifecycleQueueResult { durable: boolean; created: boolean; outboxId: string | null }
+
+// Resolve the current Auth recipient and freeze the exact multipart Resend request.
+// The outbox acknowledgement, never this producer, advances lifecycle markers.
+async function queueUserEmail(
   db: SupabaseClient,
   userId: string,
   make: (firstName: string | null, context: { unsubscribeUrl?: string }) => Rendered,
-  opts: { idempotencyKey?: string; marketing?: boolean } = {},
-): Promise<boolean> {
-  if (!RESEND_API_KEY) return false;
-  // This is the final, race-aware gate immediately before the external send.
-  // Missing consent, an unsubscribe, an internal account, or incomplete RFC8058
-  // configuration all fail closed without affecting transactional email.
-  if (opts.marketing && !await marketingEmailAllowed(db, userId)) return false;
+  opts: {
+    dedupeKey: string;
+    marketing?: boolean;
+    markerKind: "welcome" | "dunning" | "winback" | "abandoned" | "billing_event";
+    markerReference?: string;
+    markerStage?: number;
+  },
+): Promise<LifecycleQueueResult> {
+  if (opts.marketing && !await marketingEmailAllowed(db, userId)) {
+    return { durable: false, created: false, outboxId: null };
+  }
   const { data: u } = await db.auth.admin.getUserById(userId);
   const email = u?.user?.email ?? null;
-  if (!email) return false;
+  if (!email) return { durable: false, created: false, outboxId: null };
   const unsubscribeUrl = opts.marketing
     ? `${UNSUBSCRIBE_URL}?token=${encodeURIComponent(await makeUnsubscribeToken(userId))}`
     : undefined;
@@ -295,48 +204,154 @@ async function emailUser(
       "List-Unsubscribe": `<${UNSUB_MAILTO}>, <${unsubscribeUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     }
-    : null;
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-      ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
-    },
-    body: JSON.stringify({
-      from: FROM, to: [email], subject: rendered.subject, html: rendered.html,
-      ...(unsubscribeHeaders ? { headers: unsubscribeHeaders } : {}),
-    }),
+    : {};
+  const flow = String(rendered.tags.find((tag) => tag.name === "flow")?.value ?? "");
+  const { data, error } = await db.rpc("norva_enqueue_lifecycle_email", {
+    p_user_id: userId,
+    p_flow: flow,
+    p_dedupe_key: opts.dedupeKey,
+    p_recipient_email: email,
+    p_request_from: FROM,
+    p_request_reply_to: REPLY_TO,
+    p_request_subject: rendered.subject,
+    p_request_html: rendered.html,
+    p_request_text: rendered.text,
+    p_request_tags: rendered.tags,
+    p_request_headers: unsubscribeHeaders,
+    p_marketing: opts.marketing === true,
+    p_marker_kind: opts.markerKind,
+    p_marker_reference: opts.markerReference ?? null,
+    p_marker_stage: opts.markerStage ?? null,
   });
-  if (!res.ok) { console.error("[norva-lifecycle] Resend failed", res.status, await res.text().catch(() => "")); return false; }
-  return true;
+  if (error || !data) {
+    console.error("[norva-lifecycle] durable enqueue failed", error?.code ?? "missing_result");
+    return { durable: false, created: false, outboxId: null };
+  }
+  const result = data as { id?: string; deduped?: boolean };
+  return {
+    durable: typeof result.id === "string" && Boolean(result.id),
+    created: result.deduped !== true,
+    outboxId: typeof result.id === "string" ? result.id : null,
+  };
 }
 
-// Best-effort billing push on the existing FCM rail (same pattern as import-notify):
-// rides along the emails so the reminder reaches the phone even with mail unread.
-async function pushUser(db: SupabaseClient, userId: string, title: string, body: string, kind: string): Promise<void> {
-  if (!fcmConfigured()) return;
+type BillingIntent = {
+  id: string;
+  lease_token: string;
+  user_id: string;
+  source_provider: string;
+  source_event_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  attempt_count: number;
+};
+
+function intentIso(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(ms).toISOString();
+  }
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  if (/^\d{10,16}$/.test(raw)) {
+    const n = Number(raw);
+    const ms = n > 10_000_000_000 ? n : n * 1000;
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+}
+
+function intentPlanLabel(value: unknown): string {
+  const raw = String(value ?? "").toLowerCase();
+  if (raw.includes("family")) return "Norva Family";
+  return "Norva";
+}
+
+function intentAmount(payload: Record<string, unknown>): string | undefined {
+  const cents = Number(payload.amount_cents);
+  if (!Number.isFinite(cents) || cents <= 0) return undefined;
+  const currency = String(payload.currency ?? "USD").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3) || "USD";
   try {
-    const { data: toks } = await db.from("cloud_push_tokens").select("token").eq("user_id", userId);
-    for (const t of (toks ?? []) as { token: string }[]) {
-      const r = await sendFcmPush(t.token, { title, body, data: { kind } });
-      if (r.unregistered) { try { await db.from("cloud_push_tokens").delete().eq("token", t.token); } catch (_) { /* noop */ } }
-    }
-  } catch (_) { /* push is best-effort — never block the email path */ }
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
+  } catch (_) {
+    return `${currency} ${(cents / 100).toFixed(2)}`;
+  }
 }
 
-// Atomically CLAIM a per-user send marker before sending, so two overlapping cron
-// runs can't both send the same email. The UPDATE is a compare-and-swap: it only
-// flips the column when it is still NULL, and .select() returns the row only to the
-// run that won. Send AFTER claiming; on failure, release() so a later run retries.
-async function claimMarker(db: SupabaseClient, userId: string, column: string): Promise<boolean> {
-  const { data } = await db.from("cloud_entitlement_projection")
-    .update({ [column]: new Date().toISOString() })
-    .eq("user_id", userId).is(column, null).select("user_id");
-  return Array.isArray(data) && data.length > 0;
+async function billingIntentDedupe(intent: BillingIntent): Promise<string> {
+  const value = `${intent.source_provider}|${intent.source_event_id}|${intent.event_type}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `lifecycle:billing:${intent.event_type}:${hex}`;
 }
-async function releaseMarker(db: SupabaseClient, userId: string, column: string): Promise<void> {
-  try { await db.from("cloud_entitlement_projection").update({ [column]: null }).eq("user_id", userId); } catch (_) { /* noop */ }
+
+// Transactional billing confirmations are always active. Source functions write
+// immutable entitlement events; SQL captures them atomically as leased intents.
+// This producer only renders and freezes the request, so retrying it can never
+// replay a payment, cancellation, refund or entitlement transition.
+async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string, number>> {
+  const { data, error } = await db.rpc("claim_lifecycle_billing_intents", {
+    p_batch: 25, p_lease_seconds: 90, p_max_attempts: 12,
+  });
+  if (error) throw new Error(`billing intent claim failed: ${error.message}`);
+  const result = { claimed: 0, queued: 0, deduped: 0, retry_scheduled: 0, dead_letter: 0, lease_lost: 0 };
+  const intents = (Array.isArray(data) ? data : []) as BillingIntent[];
+  result.claimed = intents.length;
+  for (const intent of intents) {
+    try {
+      const p = intent.payload ?? {};
+      const make = (firstName: string | null): Rendered => {
+        switch (intent.event_type) {
+          case "cancellation_confirmed":
+            return renderCancellationConfirmed(firstName, { effectiveAt: intentIso(p.effective_at) });
+          case "subscription_resumed":
+            return renderSubscriptionResumed(firstName, { renewsAt: intentIso(p.renews_at) });
+          case "plan_change_scheduled":
+            return renderPlanChangeScheduled(firstName, {
+              planLabel: intentPlanLabel(p.plan_label), effectiveAt: intentIso(p.effective_at),
+            });
+          case "plan_change_applied":
+            return renderPlanChangeApplied(firstName, { planLabel: intentPlanLabel(p.plan_label) });
+          case "payment_recovered":
+            return renderPaymentRecovered(firstName, { nextBillingAt: intentIso(p.next_billing_at) });
+          case "access_expired":
+            return renderAccessExpired(firstName);
+          case "refund_confirmed":
+            return renderRefundConfirmed(firstName, {
+              amount: intentAmount(p), reference: String(p.reference ?? ""),
+            });
+          default:
+            throw new Error("unsupported_billing_intent");
+        }
+      };
+      const queued = await queueUserEmail(db, intent.user_id, (fn) => make(fn), {
+        dedupeKey: await billingIntentDedupe(intent),
+        markerKind: "billing_event",
+        markerReference: `${intent.source_provider}:${intent.source_event_id}`.slice(0, 500),
+      });
+      if (!queued.durable || !queued.outboxId) throw new Error("billing_intent_outbox_unavailable");
+      const { data: completed, error: completeError } = await db.rpc("complete_lifecycle_billing_intent", {
+        p_id: intent.id, p_lease_token: intent.lease_token, p_outbox_id: queued.outboxId,
+      });
+      if (completeError || completed !== true) {
+        result.lease_lost++;
+        continue;
+      }
+      if (queued.created) result.queued++;
+      else result.deduped++;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "billing_intent_enqueue_failed";
+      const { data: failed, error: failError } = await db.rpc("fail_lifecycle_billing_intent", {
+        p_id: intent.id, p_lease_token: intent.lease_token,
+        p_error: message.slice(0, 500), p_retryable: message !== "unsupported_billing_intent", p_max_attempts: 12,
+      });
+      if (failError || failed === "lease_lost") result.lease_lost++;
+      else if (failed === "dead_letter") result.dead_letter++;
+      else result.retry_scheduled++;
+    }
+  }
+  return result;
 }
 
 async function runWelcome(db: SupabaseClient): Promise<number> {
@@ -356,47 +371,16 @@ async function runWelcome(db: SupabaseClient): Promise<number> {
   let sent = 0;
   for (const row of (data ?? []) as { user_id: string }[]) {
     if (internalIds.has(row.user_id)) continue;
-    if (!await claimMarker(db, row.user_id, "welcome_email_at")) continue; // another run got it
     try {
-      if (await emailUser(db, row.user_id, (fn) => renderWelcome(fn))) sent++;
-      else await releaseMarker(db, row.user_id, "welcome_email_at");
+      const queued = await queueUserEmail(
+        db,
+        row.user_id,
+        (fn) => renderWelcome(fn),
+        { dedupeKey: `lifecycle:welcome:${row.user_id}`, markerKind: "welcome" },
+      );
+      if (queued.created) sent++;
     } catch (e) {
-      await releaseMarker(db, row.user_id, "welcome_email_at");
       console.error("[norva-lifecycle] welcome failed", row.user_id, e instanceof Error ? e.message : e);
-    }
-  }
-  return sent;
-}
-
-// NOTE: the LIVE trial-ending reminders are the DB pg_cron jobs norva-trial-ending-3d
-// / -1d (migration 20260708120000), which fire regardless of this flag. This edge flow
-// is an alternative and stays OFF (LC_TRIAL default false) to avoid DOUBLE-SENDING —
-// only enable NORVA_LC_TRIAL if you first unschedule those DB crons. It is also
-// provider-scoped to Revolut (web): Play/Apple trials are the store's to remind.
-async function runTrialReminder(db: SupabaseClient): Promise<number> {
-  // Trials ending in ~36–60h (a "2 days out" window) not yet reminded.
-  const lo = new Date(Date.now() + 36 * 3600_000).toISOString();
-  const hi = new Date(Date.now() + 60 * 3600_000).toISOString();
-  const { data } = await db.from("cloud_entitlement_projection")
-    .select("user_id,trial_ends_at,plan_code")
-    .eq("provider", "revolut")
-    .eq("status", "trialing")
-    .is("trial_reminder_email_at", null)
-    .gte("trial_ends_at", lo).lte("trial_ends_at", hi)
-    .limit(BATCH);
-  let sent = 0;
-  for (const row of (data ?? []) as Proj[]) {
-    if (await internalAccountOrUnknown(db, row.user_id)) continue;
-    if (!await claimMarker(db, row.user_id, "trial_reminder_email_at")) continue;
-    try {
-      if (await emailUser(db, row.user_id, (fn) => renderTrialEnding(fn, { endsAt: row.trial_ends_at ?? "", planLabel: planLabel(row.plan_code) }))) {
-        await pushUser(db, row.user_id, "Your free trial ends soon",
-          "Your Norva plan starts then — cancel anytime before if you change your mind.", "trial_ending");
-        sent++;
-      } else { await releaseMarker(db, row.user_id, "trial_reminder_email_at"); }
-    } catch (e) {
-      await releaseMarker(db, row.user_id, "trial_reminder_email_at");
-      console.error("[norva-lifecycle] trial reminder failed", row.user_id, e instanceof Error ? e.message : e);
     }
   }
   return sent;
@@ -418,32 +402,21 @@ async function runDunning(db: SupabaseClient): Promise<number> {
   for (const row of (data ?? []) as (Proj & { dunning_last_at: string | null })[]) {
     if (await internalAccountOrUnknown(db, row.user_id)) continue;
     const stage = (row.dunning_stage ?? 0) + 1;
-    const nowIso = new Date().toISOString();
-    // CAS-claim dunning_last_at (its throttle marker) BEFORE sending, so two overlapping
-    // runs can't both send this stage: only the run whose observed last_at still matches
-    // flips it; the loser matches 0 rows and skips. Guarded on status past_due too.
-    let claim = db.from("cloud_entitlement_projection")
-      .update({ dunning_last_at: nowIso })
-      .eq("user_id", row.user_id).eq("status", "past_due");
-    claim = row.dunning_last_at == null
-      ? claim.is("dunning_last_at", null)
-      : claim.eq("dunning_last_at", row.dunning_last_at);
-    const { data: claimed } = await claim.select("user_id");
-    if (!Array.isArray(claimed) || !claimed.length) continue;   // another run claimed it (or user recovered)
     try {
-      if (await emailUser(db, row.user_id, (fn) => renderPaymentFailed(fn, stage))) {
-        await db.from("cloud_entitlement_projection")
-          .update({ dunning_stage: stage })
-          .eq("user_id", row.user_id).eq("status", "past_due");
-        await pushUser(db, row.user_id, "Payment issue on your Norva plan",
-          "We couldn't process your payment — update your card to keep watching.", "payment_failed");
+      const queued = await queueUserEmail(
+        db,
+        row.user_id,
+        (fn) => renderPaymentFailed(fn, stage),
+        {
+          dedupeKey: `lifecycle:dunning:${row.user_id}:${stage}`,
+          markerKind: "dunning",
+          markerStage: stage,
+        },
+      );
+      if (queued.created) {
         sent++;
-      } else {
-        // send failed → roll the throttle marker back so a later run retries this stage
-        await db.from("cloud_entitlement_projection").update({ dunning_last_at: row.dunning_last_at }).eq("user_id", row.user_id);
       }
     } catch (e) {
-      try { await db.from("cloud_entitlement_projection").update({ dunning_last_at: row.dunning_last_at }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
       console.error("[norva-lifecycle] dunning failed", row.user_id, e instanceof Error ? e.message : e);
     }
   }
@@ -466,24 +439,19 @@ async function runWinback(db: SupabaseClient): Promise<number> {
   let sent = 0;
   for (const row of (data ?? []) as (Proj & { last_event_at: string })[]) {
     if (!await marketingEmailAllowed(db, row.user_id)) continue;
-    if (!await claimMarker(db, row.user_id, "winback_email_at")) continue;
     try {
-      if (await emailUser(
+      const queued = await queueUserEmail(
         db,
         row.user_id,
         (fn, context) => renderWinback(fn, { unsubscribeUrl: context.unsubscribeUrl }),
-        { idempotencyKey: `norva-winback-${row.user_id}`, marketing: true },
-      )) {
-        // Push is marketing too: re-check after the email in case the user opted
-        // out in the small interval between the two external deliveries.
-        if (await marketingEmailAllowed(db, row.user_id)) {
-          await pushUser(db, row.user_id, "Your Norva catalog is waiting",
-            "Pick up right where you left off — reactivate anytime.", "winback");
-        }
-        sent++;
-      } else { await releaseMarker(db, row.user_id, "winback_email_at"); }
+        {
+          dedupeKey: `lifecycle:winback:${row.user_id}`,
+          marketing: true,
+          markerKind: "winback",
+        },
+      );
+      if (queued.created) sent++;
     } catch (e) {
-      await releaseMarker(db, row.user_id, "winback_email_at");
       console.error("[norva-lifecycle] winback failed", row.user_id, e instanceof Error ? e.message : e);
     }
   }
@@ -517,17 +485,6 @@ async function runAbandoned(db: SupabaseClient): Promise<number> {
         .is("reminder_sent_at", null);
       if (releaseError) console.error("[norva-lifecycle] abandoned release failed", row.order_id, releaseError.message);
     };
-    const finish = async () => {
-      const nowIso = new Date().toISOString();
-      const { data: updated, error: updateError } = await db.from("cloud_revolut_orders")
-        .update({ reminder_sent_at: nowIso, reminder_claimed_at: null, updated_at: nowIso })
-        .eq("order_id", row.order_id)
-        .eq("reminder_claimed_at", row.claimed_at)
-        .is("reminder_sent_at", null)
-        .select("order_id");
-      if (updateError) throw new Error(`abandoned finalize failed: ${updateError.message}`);
-      if (!Array.isArray(updated) || updated.length !== 1) throw new Error("abandoned claim was lost before finalize");
-    };
     try {
       if (!await marketingEmailAllowed(db, row.user_id)) { await release(); continue; }
       // Last-moment race guard: the user may have paid after the SQL claim.
@@ -541,7 +498,7 @@ async function runAbandoned(db: SupabaseClient): Promise<number> {
         (status === "trialing" && new Date(p?.trial_ends_at ?? 0).getTime() > nowMs) ||
         (["active", "cancelled_at_period_end"].includes(status) &&
           (!p?.current_period_end || new Date(p.current_period_end).getTime() > nowMs));
-      if (live) { await finish(); continue; }
+      if (live) { await release(); continue; }
 
       // New orders carry immutable plan/period. Only legacy rows need the mutable
       // customer fallback; those rows are all internal in today's production data.
@@ -559,21 +516,23 @@ async function runAbandoned(db: SupabaseClient): Promise<number> {
       const validationAmount = currency === "USD" && Number.isFinite(amount)
         ? `$${(amount / 100).toFixed(2)}`
         : "$0.50";
-      if (await emailUser(
+      const queued = await queueUserEmail(
         db,
         row.user_id,
         (fn, context) => renderAbandonedCheckout(fn, {
           plan, period, validationAmount, unsubscribeUrl: context.unsubscribeUrl,
         }),
-        { idempotencyKey: `norva-abandoned-${row.order_id}`, marketing: true },
-      )) {
-        await finish();
-        if (await marketingEmailAllowed(db, row.user_id)) {
-          await pushUser(db, row.user_id, "Your free trial is one step away",
-            "Finish the quick card check — no charge today.", "abandoned_checkout");
-        }
-        sent++;
-      } else await release();
+        {
+          dedupeKey: `lifecycle:abandoned:${row.order_id.toLowerCase()}`,
+          marketing: true,
+          markerKind: "abandoned",
+          markerReference: row.order_id,
+        },
+      );
+      // Keep the SQL claim attached to a durable row. Only provider acknowledgement
+      // turns reminder_claimed_at into reminder_sent_at; enqueue failure releases it.
+      if (queued.created) sent++;
+      if (!queued.durable) await release();
     } catch (e) {
       await release();
       console.error("[norva-lifecycle] abandoned failed", row.user_id, e instanceof Error ? e.message : e);
@@ -609,7 +568,15 @@ async function runExpirePastDue(db: SupabaseClient): Promise<number> {
     const { data: upd } = await db.from("cloud_entitlement_projection")
       .update({ status: "expired", last_event_at: nowIso })
       .eq("user_id", userId).eq("status", "past_due").select("user_id");
-    if (Array.isArray(upd) && upd.length) expired++;
+    if (Array.isArray(upd) && upd.length) {
+      const { error: eventError } = await db.from("cloud_entitlement_events").upsert({
+        user_id: userId, provider: "revolut",
+        provider_event_id: `lifecycle:expiry:${userId}:${nowIso}`,
+        event_type: "ACCESS_EXPIRED", payload: {}, processed_at: nowIso,
+      }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+      if (eventError) throw new Error(`expiry lifecycle event failed: ${eventError.message}`);
+      expired++;
+    }
   }
   return expired;
 }
@@ -757,25 +724,30 @@ Deno.serve(async (req) => {
   if (authErr || ok !== true) return json({ error: "Unauthorized" }, 403);
 
   try {
+    if (url.pathname.endsWith("/cron/resend-contacts")) {
+      // Contact/Segment reconciliation owns a full-access Resend credential and
+      // therefore runs only in the private host-side ops worker. Never proxy it
+      // through a public Edge route, even with cron authentication.
+      return json({ error: "Not found" }, 404);
+    }
     // Each billing flow needs the MASTER switch AND its own per-flow flag. Setting only
     // NORVA_LIFECYCLE_BILLING_LIVE now enables nothing — that's the safe default. Enable
     // a flow only when it is ready (see each runX note for its preconditions).
     const out: Record<string, unknown> = {
       billing_live: BILLING_LIVE,
       marketing_ready: MARKETING_READY,
-      enabled: { trial: LC_TRIAL, dunning: LC_DUNNING, expire: LC_EXPIRE && LC_DUNNING, winback: LC_WINBACK, abandoned: LC_ABANDONED },
+      enabled: { trial: false, dunning: LC_DUNNING, expire: LC_EXPIRE && LC_DUNNING, winback: LC_WINBACK, abandoned: LC_ABANDONED },
+      trial_reminder: "db_cron_canonical",
     };
-    // Audience state is reconciled regardless of marketing feature flags. Those
-    // flags control sends; they must never prevent unsubscribe propagation/retries.
-    out.resend_audience = await runResendAudienceOutbox(db);
     out.welcome = await runWelcome(db);              // always active (transactional)
-    if (BILLING_LIVE && LC_TRIAL) out.trial_reminder = await runTrialReminder(db);
+    out.billing_events = await runBillingEventIntents(db); // always active (transactional)
     if (BILLING_LIVE && LC_DUNNING) out.dunning = await runDunning(db);
     // Expiry is never allowed to run without the warning/dunning flow, even if
     // an environment variable is accidentally toggled in isolation.
     if (BILLING_LIVE && LC_DUNNING && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
     if (BILLING_LIVE && LC_WINBACK) out.winback = await runWinback(db);
     if (BILLING_LIVE && LC_ABANDONED) out.abandoned = await runAbandoned(db);
+    await db.rpc("prune_lifecycle_billing_intents");
     return json({ ok: true, ...out });
   } catch (e) {
     console.error("[norva-lifecycle] run failed", e instanceof Error ? e.message : e);

@@ -249,6 +249,24 @@ async function logCancelFeedback(db: SupabaseClient, userId: string, reason: str
   } catch (_) { /* analytics must never block a cancellation */ }
 }
 
+async function recordLifecycleBillingEvent(
+  db: SupabaseClient,
+  userId: string,
+  providerEventId: string,
+  eventType: string,
+  payload: JsonRecord = {},
+): Promise<string | null> {
+  const { error } = await db.from("cloud_entitlement_events").upsert({
+    user_id: userId,
+    provider: "revolut",
+    provider_event_id: providerEventId,
+    event_type: eventType,
+    payload,
+    processed_at: new Date().toISOString(),
+  }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+  return error?.message ?? null;
+}
+
 // Internal/pilot accounts have included system access and must never enter a
 // payment flow.  Fail closed on a registry read error: opening a remote checkout
 // while account classification is unknown is strictly worse than asking the user
@@ -752,6 +770,16 @@ Deno.serve(async (req) => {
         resubscribed: "active", plan_change_scheduled: "plan_change_scheduled",
         card_updated: "updated", card_updated_retrying: "retrying",
       };
+      if (result === "plan_change_scheduled") {
+        const eventError = await recordLifecycleBillingEvent(
+          db, user.id, `checkout:${orderId}:plan-change-scheduled`, "PLAN_CHANGE_SCHEDULED",
+          {
+            plan_label: String(journal.plan ?? finalized.pending_plan ?? "plus"),
+            effective_at: finalized.effective_at ?? null,
+          },
+        );
+        if (eventError) return json({ error: "Could not queue plan-change confirmation" }, 503);
+      }
       if (result.startsWith("rejected_")) {
         return json({ error: "Checkout can no longer be applied to this billing account", code: result }, 409);
       }
@@ -999,6 +1027,11 @@ Deno.serve(async (req) => {
         effective_at: planEffectiveAt, pending_plan: plan, pending_period: period,
       });
       if (stampError) return json({ error: "Could not finalize order journal" }, 503);
+      const eventError = await recordLifecycleBillingEvent(
+        db, user.id, `checkout:${orderId}:plan-change-scheduled`, "PLAN_CHANGE_SCHEDULED",
+        { plan_label: plan, effective_at: planEffectiveAt },
+      );
+      if (eventError) return json({ error: "Could not queue plan-change confirmation" }, 503);
       return json({ ok: true, status: "plan_change_scheduled", kind, effective_at: planEffectiveAt });
     }
 
@@ -1095,46 +1128,23 @@ Deno.serve(async (req) => {
     try { payload = await req.json(); } catch (_) { /* reason optional */ }
     const reason = String(payload.reason ?? "skipped");
 
-    const { data: row } = await db.from("cloud_entitlement_projection")
-      .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
-    const p = row as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string } | null;
-    if (!p || String(p.provider ?? "") !== "revolut") {
-      return json({ error: "No cancellable Norva plan on this account" }, 400);
-    }
-    const st = String(p.status ?? "");
     const nowIso = new Date().toISOString();
-    if (st === "trialing") {
-      const accessUntil = p.trial_ends_at ?? nowIso;
-      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
-        status: "cancelled_at_period_end", current_period_end: accessUntil, last_event_at: nowIso,
-      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
-      if (error) return json({ error: "Could not cancel the plan" }, 503);
-      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
-      await logCancelFeedback(db, user.id, reason, "cancelled", st);
-      return json({ ok: true, status: "cancelled_at_period_end", access_until: accessUntil });
+    const { data: actionRows, error: actionError } = await db.rpc("norva_apply_revolut_account_action", {
+      p_user_id: user.id, p_action: "cancel",
+      p_event_id: `account:cancel:${user.id}:${nowIso}`, p_event_at: nowIso,
+    });
+    if (actionError) {
+      if (/no_revolut_subscription|nothing_to_cancel/.test(actionError.message ?? "")) {
+        return json({ error: "No cancellable Norva plan on this account" }, 400);
+      }
+      return json({ error: "Could not cancel the plan" }, 503);
     }
-    if (st === "active") {
-      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
-        status: "cancelled_at_period_end", last_event_at: nowIso,
-      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
-      if (error) return json({ error: "Could not cancel the plan" }, 503);
-      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
-      await logCancelFeedback(db, user.id, reason, "cancelled", st);
-      return json({ ok: true, status: "cancelled_at_period_end", access_until: p.current_period_end ?? null });
-    }
-    if (st === "past_due" || st === "grace") {
-      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
-        status: "expired", last_event_at: nowIso,
-      }).eq("user_id", user.id).eq("provider", "revolut").eq("status", st).select("user_id");
-      if (error) return json({ error: "Could not cancel the plan" }, 503);
-      if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
-      await logCancelFeedback(db, user.id, reason, "cancelled", st);
-      return json({ ok: true, status: "expired" });
-    }
-    if (st === "cancelled_at_period_end") {
-      return json({ ok: true, status: st, access_until: p.current_period_end ?? null });
-    }
-    return json({ error: "Nothing to cancel" }, 400);
+    const action = (Array.isArray(actionRows) ? actionRows[0] : actionRows) as {
+      status?: string; access_until?: string | null; applied?: boolean;
+    } | null;
+    if (!action?.status) return json({ error: "Could not cancel the plan" }, 503);
+    if (action.applied) await logCancelFeedback(db, user.id, reason, "cancelled", action.status);
+    return json({ ok: true, status: action.status, access_until: action.access_until ?? null });
   }
 
   // ── /resume — user-authed: undo a pending cancellation before it takes effect ──
@@ -1147,26 +1157,22 @@ Deno.serve(async (req) => {
     const billingGuard = await guardInternalBilling(db, user.id);
     if (billingGuard) return billingGuard;
 
-    const { data: row } = await db.from("cloud_entitlement_projection")
-      .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
-    const p = row as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string } | null;
-    if (!p || String(p.provider ?? "") !== "revolut" || String(p.status ?? "") !== "cancelled_at_period_end") {
-      return json({ error: "No pending cancellation to resume" }, 400);
-    }
-    const periodEndMs = p.current_period_end ? new Date(p.current_period_end).getTime() : 0;
-    if (!periodEndMs || periodEndMs <= Date.now()) {
-      return json({ error: "The plan has already ended — resubscribe instead" }, 400);
-    }
     const nowIso = new Date().toISOString();
-    const backTo = (p.trial_ends_at && new Date(p.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
-    const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
-      status: backTo, last_event_at: nowIso,
-    }).eq("user_id", user.id).eq("provider", "revolut")
-      .eq("status", "cancelled_at_period_end").eq("current_period_end", p.current_period_end)
-      .select("user_id");
-    if (error) return json({ error: "Could not resume the plan" }, 503);
-    if (!Array.isArray(changed) || changed.length !== 1) return json({ error: "Subscription changed concurrently; refresh and retry" }, 409);
-    return json({ ok: true, status: backTo });
+    const { data: actionRows, error: actionError } = await db.rpc("norva_apply_revolut_account_action", {
+      p_user_id: user.id, p_action: "resume",
+      p_event_id: `account:resume:${user.id}:${nowIso}`, p_event_at: nowIso,
+    });
+    if (actionError) {
+      const detail = actionError.message ?? "";
+      if (/no_pending_cancellation/.test(detail)) return json({ error: "No pending cancellation to resume" }, 400);
+      if (/subscription_already_ended/.test(detail)) {
+        return json({ error: "The plan has already ended — resubscribe instead" }, 400);
+      }
+      return json({ error: "Could not resume the plan" }, 503);
+    }
+    const action = (Array.isArray(actionRows) ? actionRows[0] : actionRows) as { status?: string } | null;
+    if (!action?.status) return json({ error: "Could not resume the plan" }, 503);
+    return json({ ok: true, status: action.status });
   }
 
   return json({ error: "Not found" }, 404);

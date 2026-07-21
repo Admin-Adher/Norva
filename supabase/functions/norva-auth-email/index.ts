@@ -21,6 +21,7 @@
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const HOOK_SECRET_RAW = Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const REPLY_TO = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
 // Public site base for action links — keeps the email link on norva.tv instead of the
 // raw supabase.co verify URL. Override with PUBLIC_SITE_URL if the domain changes.
@@ -71,7 +72,7 @@ async function verifySignature(headers: Headers, body: string): Promise<boolean>
     .some((sig) => timingSafeEqual(sig, expected));
 }
 
-interface EmailData {
+export interface EmailData {
   token: string;
   token_hash: string;
   redirect_to: string;
@@ -81,14 +82,141 @@ interface EmailData {
   token_hash_new?: string;
 }
 
+export interface AuthEmailHookPayload {
+  user: {
+    email?: string | null;
+    new_email?: string | null;
+  };
+  email_data: EmailData;
+}
+
+export interface OutboundEmail {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  flow: string;
+}
+
+interface ResendEmailRequest {
+  from: string;
+  to: string[];
+  reply_to: string;
+  subject: string;
+  html: string;
+  text: string;
+  tags: Array<{ name: "app" | "category" | "flow"; value: string }>;
+}
+
+export interface ResendAuthRequest {
+  endpoint: "https://api.resend.com/emails" | "https://api.resend.com/emails/batch";
+  idempotencyKey: string;
+  body: ResendEmailRequest | ResendEmailRequest[];
+  expectedIds: number;
+  batch: boolean;
+}
+
+function resendPayload(email: OutboundEmail): ResendEmailRequest {
+  return {
+    from: FROM,
+    to: [email.to],
+    reply_to: REPLY_TO,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+    tags: [
+      { name: "app", value: "norva" },
+      { name: "category", value: "transactional_auth" },
+      { name: "flow", value: email.flow },
+    ],
+  };
+}
+
+/**
+ * Secure Email Change needs two mandatory confirmations. Resend's strict batch
+ * endpoint accepts or rejects the pair as one request, avoiding the partial
+ * delivery state created by two sequential HTTP calls. The endpoint currently
+ * supports at most 100 messages; Norva deliberately caps this hook at two.
+ */
+export function buildResendAuthRequest(emails: OutboundEmail[], deliveryId: string): ResendAuthRequest {
+  if (emails.length < 1 || emails.length > 2) throw new Error("Invalid authentication email batch size");
+  const stableId = String(deliveryId ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 120);
+  if (!stableId) throw new Error("Missing authentication delivery id");
+  const payloads = emails.map(resendPayload);
+  const batch = payloads.length > 1;
+  return {
+    endpoint: batch ? "https://api.resend.com/emails/batch" : "https://api.resend.com/emails",
+    idempotencyKey: `norva-auth-${stableId}-${batch ? "batch" : "single"}`,
+    body: batch ? payloads : payloads[0],
+    expectedIds: payloads.length,
+    batch,
+  };
+}
+
+/** Return every provider acknowledgement or null for a partial/malformed 2xx. */
+export function acknowledgedResendIds(payload: unknown, batch: boolean, expectedIds: number): string[] | null {
+  const value = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const rawIds = batch
+    ? (Array.isArray(value.data) ? value.data.map((entry) =>
+      entry && typeof entry === "object" ? (entry as Record<string, unknown>).id : null) : [])
+    : [value.id];
+  if (rawIds.length !== expectedIds) return null;
+  const ids = rawIds.map((id) => typeof id === "string" ? id.trim() : "");
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
+function resendErrorCode(payload: unknown): string {
+  const value = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const nested = value.error && typeof value.error === "object" ? value.error as Record<string, unknown> : {};
+  return String(value.name ?? value.code ?? nested.name ?? nested.code ?? "unknown_error")
+    .replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100) || "unknown_error";
+}
+
+function retryableResendFailure(status: number, code: string): boolean {
+  if (status === 409) return code === "concurrent_idempotent_requests";
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+type EmailChangeRecipient = "current" | "new";
+
+function redirectTarget(redirectTo: string | undefined): string | null {
+  const raw = String(redirectTo ?? "").trim();
+  if (!raw) return null;
+
+  try {
+    const site = new URL(`${SITE_URL}/`);
+    const target = new URL(raw, site);
+    // account.html only accepts same-origin relative return targets. Supabase has
+    // already allow-listed redirect_to, but this also prevents an open redirect.
+    if (target.origin !== site.origin) return null;
+
+    // The web auth clients use account.html as the verification landing page.
+    // Returning there after verification would loop. If that landing URL carries
+    // a real nested returnTo, preserve the nested destination instead.
+    if (target.pathname === "/account.html") {
+      const nested = target.searchParams.get("returnTo") ?? "";
+      if (!nested.startsWith("/") || nested.startsWith("//")) return null;
+      const nestedTarget = new URL(nested, site);
+      if (nestedTarget.origin !== site.origin || nestedTarget.pathname === "/account.html") return null;
+      return `${nestedTarget.pathname}${nestedTarget.search}${nestedTarget.hash}`;
+    }
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 // Point the action link at norva.tv carrying the one-time token_hash, NOT the raw
 // {SUPABASE_URL}/auth/v1/verify URL — account.html verifies it client-side (verifyOtp),
 // so the recipient only ever sees a norva.tv address (no "oupsceccx…supabase.co").
-function verifyUrl(d: EmailData): string {
+export function verifyUrl(d: EmailData, tokenHash = d.token_hash): string {
   const params = new URLSearchParams({
-    token_hash: d.token_hash,
+    token_hash: tokenHash,
     type: d.email_action_type,
   });
+  const returnTo = redirectTarget(d.redirect_to);
+  if (returnTo) params.set("returnTo", returnTo);
   return `${SITE_URL}/account.html?${params.toString()}`;
 }
 
@@ -111,8 +239,9 @@ function shell(opts: { heading: string; intro: string; cta?: { label: string; ur
        </td></tr>`
     : "";
   return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head>
 <body style="margin:0;padding:0;background:#0a0c11">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${opts.heading} · Norva</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c11">
     <tr><td align="center" style="padding:32px 16px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#11151d;border:1px solid #1f2733;border-radius:16px;overflow:hidden">
@@ -135,8 +264,11 @@ function shell(opts: { heading: string; intro: string; cta?: { label: string; ur
 </body></html>`;
 }
 
-function render(d: EmailData): { subject: string; html: string } {
-  const url = verifyUrl(d);
+function renderHtml(
+  d: EmailData,
+  opts: { tokenHash?: string; emailChangeRecipient?: EmailChangeRecipient } = {},
+): { subject: string; html: string } {
+  const url = verifyUrl(d, opts.tokenHash ?? d.token_hash);
   switch (d.email_action_type) {
     case "signup":
       return {
@@ -155,6 +287,17 @@ function render(d: EmailData): { subject: string; html: string } {
         html: shell({ heading: "Sign in to Norva", intro: "Click the button below to sign in. This link expires shortly and can be used once.", cta: { label: "Sign in", url } }),
       };
     case "email_change":
+      if (opts.emailChangeRecipient === "current") {
+        return {
+          subject: "Confirm your email change — Norva",
+          html: shell({
+            heading: "Confirm your email change",
+            intro: "Approve the request to change the email address on your Norva account.",
+            cta: { label: "Approve email change", url },
+            note: "If you didn't request this change, do not approve it and secure your account.",
+          }),
+        };
+      }
       return {
         subject: "Confirm your new email — Norva",
         html: shell({ heading: "Confirm your new email", intro: "Confirm this address to finish updating the email on your Norva account.", cta: { label: "Confirm new email", url } }),
@@ -177,6 +320,82 @@ function render(d: EmailData): { subject: string; html: string } {
   }
 }
 
+function textFromHtml(html: string): string {
+  return html
+    .replace(/<(style|script)[^>]*>[\s\S]*?<\/\1>/gi, "")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/(?:h[1-6]|p|div|td|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function render(
+  d: EmailData,
+  opts: { tokenHash?: string; emailChangeRecipient?: EmailChangeRecipient } = {},
+): { subject: string; html: string; text: string; flow: string } {
+  const rendered = renderHtml(d, opts);
+  const flow = d.email_action_type === "email_change"
+    ? `email_change_${opts.emailChangeRecipient ?? "new"}`
+    : d.email_action_type === "magiclink" ? "magic_link" : d.email_action_type;
+  return { ...rendered, text: textFromHtml(rendered.html), flow };
+}
+
+/**
+ * Resolve the delivery set required by the Supabase Send Email Hook.
+ *
+ * Supabase's email-change hash names are counterintuitive for backwards
+ * compatibility: token_hash_new belongs to the current address, while
+ * token_hash belongs to the new address. Without token_hash_new, Secure Email
+ * Change is disabled and only the new address receives token_hash.
+ */
+export function buildOutboundEmails(payload: AuthEmailHookPayload): OutboundEmail[] {
+  const d = payload?.email_data;
+  if (!d?.email_action_type) throw new Error("Missing email data");
+
+  const currentEmail = String(payload?.user?.email ?? "").trim();
+  if (d.email_action_type !== "email_change") {
+    if (!currentEmail) throw new Error("Missing recipient");
+    const rendered = render(d);
+    return [{ to: currentEmail, ...rendered }];
+  }
+
+  const newEmail = String(payload?.user?.new_email ?? "").trim();
+  if (!newEmail) throw new Error("Missing new email recipient");
+  if (!d.token_hash) throw new Error("Missing new email token hash");
+
+  // token_hash_new is present when Secure Email Change is enabled. Reject an
+  // incomplete secure payload before sending either mandatory confirmation.
+  if (d.token_hash_new) {
+    if (!currentEmail) throw new Error("Missing current email recipient");
+    const current = render(d, {
+      tokenHash: d.token_hash_new,
+      emailChangeRecipient: "current",
+    });
+    const next = render(d, {
+      tokenHash: d.token_hash,
+      emailChangeRecipient: "new",
+    });
+    return [
+      { to: currentEmail, ...current },
+      { to: newEmail, ...next },
+    ];
+  }
+
+  const rendered = render(d, {
+    tokenHash: d.token_hash,
+    emailChangeRecipient: "new",
+  });
+  return [{ to: newEmail, ...rendered }];
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!RESEND_API_KEY) return json({ error: "RESEND_API_KEY not configured" }, 500);
@@ -186,29 +405,67 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid signature" }, 401);
   }
 
-  let payload: { user: { email: string }; email_data: EmailData };
+  let payload: AuthEmailHookPayload;
   try {
     payload = JSON.parse(body);
   } catch {
     return json({ error: "Invalid payload" }, 400);
   }
 
-  const to = payload?.user?.email;
-  if (!to) return json({ error: "Missing recipient" }, 400);
+  let emails: OutboundEmail[];
+  try {
+    emails = buildOutboundEmails(payload);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Invalid payload";
+    return json({ error: detail }, 400);
+  }
 
-  const { subject, html } = render(payload.email_data);
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to: [to], subject, html }),
-  });
-
-  if (!res.ok) {
-    const detail = await res.text();
-    console.error("[norva-auth-email] Resend send failed", res.status, detail);
-    // Non-2xx tells Supabase the email failed so it can surface the error.
-    return json({ error: "Email send failed" }, 502);
+  const upstreamDeliveryId = String(req.headers.get("webhook-id") ?? req.headers.get("svix-id") ?? "")
+    .replace(/[^A-Za-z0-9_-]/g, "").slice(0, 120);
+  // Supabase normally supplies a stable webhook id. Hash the signed body as a
+  // deterministic fallback so a retry after an ambiguous network response cannot
+  // create a duplicate authentication email.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const bodyDeliveryId = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 48);
+  const deliveryId = upstreamDeliveryId || bodyDeliveryId;
+  const request = buildResendAuthRequest(emails, deliveryId);
+  try {
+    const res = await fetch(request.endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Norva-Auth-Email/2.0",
+        "Idempotency-Key": request.idempotencyKey,
+      },
+      body: JSON.stringify(request.body),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const response = await res.json().catch(() => ({})) as unknown;
+    const acknowledgedIds = res.ok
+      ? acknowledgedResendIds(response, request.batch, request.expectedIds)
+      : null;
+    if (!res.ok || !acknowledgedIds) {
+      const code = res.ok ? "incomplete_provider_ack" : resendErrorCode(response);
+      const retryable = res.ok || retryableResendFailure(res.status, code);
+      // Provider payloads can contain recipient/content details. Log only the
+      // bounded machine code and transport status, never the raw message.
+      console.error("[norva-auth-email] Resend send failed", {
+        status: res.status,
+        code,
+        retryable,
+        expected_ids: request.expectedIds,
+        acknowledged_ids: acknowledgedIds?.length ?? 0,
+      });
+      return json({ error: "Email send failed", retryable }, retryable ? 503 : 502);
+    }
+  } catch (error) {
+    console.error("[norva-auth-email] Resend transport failed", {
+      code: error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "transport_error",
+      retryable: true,
+    });
+    return json({ error: "Email send failed", retryable: true }, 503);
   }
 
   return json({});

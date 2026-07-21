@@ -18,7 +18,7 @@
 | DB size | **5,15 Go** |
 | Extensions | `pg_cron 1.6.4`, `pg_net 0.20.3`, `supabase_vault 0.3.1`, `pg_trgm 1.6`, `pgcrypto 1.3`, `http 1.6`, `unaccent 1.1`, `uuid-ossp 1.1`, `pgstattuple 1.5`, `pg_stat_statements 1.11`, `plpgsql` |
 | pg_cron | **47 jobs (46 actifs)** — appellent les edge functions via `pg_net` (URLs à réécrire) |
-| Vault | **3 secrets** : `norva_backfill_token`, `norva_cron_shared_secret`, `resend_api_key` |
+| Vault | Historical capture: **3 secrets**. Current target: only `norva_backfill_token` and `norva_cron_shared_secret`; the legacy `resend_api_key` is retired after the email-outbox migration. |
 | Role GUCs | `anon: statement_timeout=3s`, `authenticated: statement_timeout=8s` |
 | Edge functions | **19** `norva-*` (voir `supabase/config.toml` pour `verify_jwt`) |
 
@@ -97,6 +97,10 @@ Sur un box type 2×NVMe (SSD) + éventuellement 2×HDD (ex. le box i7-7700 / 64 
 
 ### Phase 3 — App + edge + storage
 12. `scripts/04-deploy-edge-functions.sh` — déployer les 19 fonctions sur l'edge-runtime self-host.
+    La projection Resend Contacts/Segments n'est **pas** une Edge Function : après
+    isolation de l'équipe Resend, appliquer la migration `20260722004000`, lancer
+    `scripts/provision-resend-contact-data.sh`, puis activer uniquement le service
+    privé `resend-contact-worker`. Voir `docs/RESEND-CONTACT-OPS.md`.
 13. Migrer les buckets Storage (rsync/`supabase storage` ou re-générables).
 14. **Repointer l'app** : base URL + clés dans `public/js/cloudApi.js` (et webhooks Stancer/billing).
     Le **gateway média (Railway)** et le **relay (Cloudflare)** restent externes → juste repointer URLs/secrets.

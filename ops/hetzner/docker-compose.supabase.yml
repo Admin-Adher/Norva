@@ -365,7 +365,14 @@ services:
       # --- App-level function secrets (mirror the managed project's secrets) ---
       NORVA_BACKFILL_TOKEN: ${NORVA_BACKFILL_TOKEN:-}
       NORVA_CRON_SHARED_SECRET: ${NORVA_CRON_SHARED_SECRET:-}
+      # Domain-scoped sending_access key only. Never expose the host-side
+      # RESEND_MANAGEMENT_API_KEY to this shared public Edge runtime.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Signing secret returned by Resend when the delivery webhook is created.
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      # Optional ops mailbox. Empty is intentional: norva-admin then sends ops
+      # alerts to Telegram only and never discovers recipients from Auth/Admin.
+      NORVA_OPS_EMAIL: ${NORVA_OPS_EMAIL:-}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       NORVA_MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:-}
       NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}
@@ -392,13 +399,12 @@ services:
       # Lifecycle billing emails (read by norva-lifecycle). MASTER kill-switch + per-flow
       # flags — ALL default OFF, so nothing billing-related sends until deliberately enabled.
       # Enable a flow only when ready: dunning is Revolut-scoped and safe; NEVER enable
-      # EXPIRE without DUNNING (you'd cut users off with no prior warning email); trial's
-      # live path is the DB crons (norva-trial-ending-3d/-1d) so leave LC_TRIAL off to avoid
-      # double-sends; winback/abandoned require explicit consent, a postal address and
+      # EXPIRE without DUNNING (you'd cut users off with no prior warning email); trial
+      # reminders are exclusively owned by the provider-correct DB J-3/J-1 jobs;
+      # winback/abandoned require explicit consent, a postal address and
       # the signed one-click unsubscribe secret below. Changing any of these
       # requires RECREATING the container (docker compose up -d functions), not just restart.
       NORVA_LIFECYCLE_BILLING_LIVE: ${NORVA_LIFECYCLE_BILLING_LIVE:-false}
-      NORVA_LC_TRIAL: ${NORVA_LC_TRIAL:-false}
       NORVA_LC_DUNNING: ${NORVA_LC_DUNNING:-false}
       NORVA_LC_EXPIRE: ${NORVA_LC_EXPIRE:-false}
       NORVA_LC_WINBACK: ${NORVA_LC_WINBACK:-false}
@@ -409,7 +415,6 @@ services:
       # Stable HMAC key for RFC8058 one-click unsubscribe links. Missing = every
       # marketing flow fails closed, while transactional account/billing mail works.
       NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET: ${NORVA_LIFECYCLE_UNSUBSCRIBE_SECRET:-}
-      RESEND_AUDIENCE_ID: ${RESEND_AUDIENCE_ID:-}
       # FCM push — Firebase service-account JSON on ONE line (read by _shared/fcm.ts).
       FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
       # Revolut Merchant billing (sandbox during dev, production at cutover). The
@@ -461,6 +466,49 @@ services:
       - start
       - --main-service
       - /home/deno/functions/main
+
+  # --- Private Resend Contacts / Segments projection -------------------------
+  # No HTTP listener and no published port. This is the sole runtime allowed to
+  # receive the full-access management key; public Edge functions only receive
+  # the domain-scoped sending key above.
+  resend-contact-worker:
+    container_name: norva-resend-contact-worker
+    image: node:22-alpine
+    restart: unless-stopped
+    init: true
+    user: node
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      rest:
+        condition: service_healthy
+    working_dir: /app/ops/hetzner/scripts
+    tmpfs:
+      - /tmp:size=16m,mode=1700,uid=1000,gid=1000
+    volumes:
+      - ./scripts:/app/ops/hetzner/scripts:ro
+      - ../../supabase/functions/_shared:/app/supabase/functions/_shared:ro
+    environment:
+      POSTGREST_URL: http://rest:3000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      RESEND_MANAGEMENT_API_KEY: ${RESEND_MANAGEMENT_API_KEY:-}
+      RESEND_CONTACT_PROJECTION_ENABLED: ${RESEND_CONTACT_PROJECTION_ENABLED:-false}
+      RESEND_DEDICATED_TEAM_CONFIRMED: ${RESEND_DEDICATED_TEAM_CONFIRMED:-false}
+      RESEND_CONTACT_BATCH_SIZE: ${RESEND_CONTACT_BATCH_SIZE:-12}
+      RESEND_CONTACT_RECONCILE_BATCH_SIZE: ${RESEND_CONTACT_RECONCILE_BATCH_SIZE:-25}
+      RESEND_CONTACT_POLL_SECONDS: ${RESEND_CONTACT_POLL_SECONDS:-60}
+      RESEND_CONTACT_PACING_MS: ${RESEND_CONTACT_PACING_MS:-300}
+      RESEND_CONTACT_API_INTERVAL_MS: ${RESEND_CONTACT_API_INTERVAL_MS:-300}
+    command: ["node", "/app/ops/hetzner/scripts/resend-contact-worker.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "/app/ops/hetzner/scripts/resend-contact-worker.mjs", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # --- Postgres (PG17 — MUST match managed prod's major for the dump) ---------
   db:

@@ -10,7 +10,8 @@ test('abandoned checkout lifecycle uses Revolut claim and no retired Stancer tab
   const abandoned = source.slice(source.indexOf('async function runAbandoned'), source.indexOf('async function runExpirePastDue'));
   assert.match(abandoned, /claim_revolut_abandoned_orders/);
   assert.match(abandoned, /reminder_claimed_at/);
-  assert.match(abandoned, /idempotencyKey/);
+  assert.match(abandoned, /dedupeKey/);
+  assert.match(abandoned, /markerKind: "abandoned"/);
   assert.match(abandoned, /await release\(\)/);
   assert.doesNotMatch(abandoned, /stancer/i);
 });

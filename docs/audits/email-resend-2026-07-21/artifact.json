@@ -1,0 +1,402 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Norva Email & Resend Audit — 21 July 2026",
+    "description": "Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.",
+    "generatedAt": "2026-07-21T22:00:00Z",
+    "sources": [
+      {
+        "id": "resend_history",
+        "label": "Resend Email API — Norva historical messages",
+        "path": "docs/audits/email-resend-2026-07-21/resend-history-summary.json",
+        "href": "https://resend.com/docs/api-reference/emails/list-emails",
+        "query": {
+          "engine": "PostgreSQL-compatible reproducible snapshot",
+          "sql": "with outcomes(outcome, count) as (\n  values\n    ('Delivered', 116),\n    ('Bounced', 10),\n    ('Suppressed', 5),\n    ('Complained', 1),\n    ('Opened', 1),\n    ('Clicked', 1)\n)\nselect outcome, count,\n       count::numeric / 134 as rate,\n       134 as total\nfrom outcomes;",
+          "description": "Reproducible transformation of the reviewed Resend API capture stored at the source path; no recipient-level rows are embedded.",
+          "executed_at": "2026-07-21T18:00:00Z",
+          "language": "sql",
+          "filters": ["Sender domain equals norva.tv", "Recipient addresses excluded"],
+          "metric_definitions": ["Outcome rate = outcome count divided by 134 historical Norva messages"]
+        }
+      },
+      {
+        "id": "production_db",
+        "label": "Norva production Postgres — account and notification snapshot",
+        "query": {
+          "engine": "PostgreSQL 17",
+          "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where opt_in) as marketing_opt_ins,\n  (select count(*) from public.cloud_import_notifications)\n    as import_notifications;",
+          "description": "Aggregate production snapshot used to establish population, account class, source readiness, consent and import-email volume.",
+          "executed_at": "2026-07-21T18:00:00Z",
+          "language": "sql",
+          "tables_used": [
+            "auth.users",
+            "public.admin_internal_accounts",
+            "public.cloud_sources",
+            "public.cloud_marketing_email_preferences",
+            "public.cloud_import_notifications"
+          ],
+          "filters": [
+            "Production database only",
+            "Aggregate counts only; no direct identifiers exported"
+          ],
+          "metric_definitions": [
+            "Real customer accounts = auth users not present in admin_internal_accounts",
+            "Marketing opt-ins = preferences where opt_in is true"
+          ]
+        }
+      },
+      {
+        "id": "repository_inventory",
+        "label": "Norva repository — email sender and trigger inventory",
+        "path": "docs/EMAIL-FUNNEL.md",
+        "query": {
+          "engine": "PostgreSQL-compatible reproducible snapshot",
+          "sql": "select *\nfrom (values\n  (1, 'Auth actions', 'Transactional auth'),\n  (2, 'Security events', 'Transactional security'),\n  (3, 'Payment confirmations', 'Transactional billing'),\n  (4, 'Catalog import', 'Transactional product'),\n  (5, 'AI subtitles', 'Transactional product'),\n  (6, 'Support ticket', 'Transactional support'),\n  (7, 'Lifecycle', 'Transactional lifecycle'),\n  (8, 'Win-back', 'Marketing'),\n  (9, 'Operations alerts', 'Operational'),\n  (10, 'Account deletion', 'Transactional auth')\n) as flows(priority, journey, category);",
+          "description": "Reproducible index of the sender/trigger inventory traced in the source document; delivery and retention annotations are reviewed repository metadata.",
+          "executed_at": "2026-07-21T22:00:00Z",
+          "language": "sql",
+          "filters": ["Application email code and migrations", "Secrets and recipient identifiers excluded"]
+        }
+      },
+      {
+        "id": "resend_configuration",
+        "label": "Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks",
+        "path": "docs/audits/email-resend-2026-07-21/resend-configuration-summary.json",
+        "href": "https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments",
+        "query": {
+          "engine": "PostgreSQL-compatible reproducible snapshot",
+          "sql": "select *\nfrom (values\n  (1, 'internal-pilots'),\n  (2, 'onboarding'),\n  (3, 'trialing'),\n  (4, 'active-subscribers'),\n  (5, 'cancel-scheduled'),\n  (6, 'payment-recovery'),\n  (7, 'churned'),\n  (8, 'blocked-suppressed'),\n  (9, 'catalog-ready')\n) as segments(\"order\", segment);",
+          "description": "Reproducible index of the canonical segment definitions reviewed in the source capture and repository migration.",
+          "executed_at": "2026-07-21T19:00:00Z",
+          "language": "sql",
+          "filters": ["Norva taxonomy only", "Projection disabled while Resend team is shared"]
+        }
+      },
+      {
+        "id": "dns_snapshot",
+        "label": "Public DNS snapshot for norva.tv email authentication",
+        "path": "docs/audits/email-resend-2026-07-21/dns-snapshot.txt"
+      }
+    ],
+    "cards": [
+      {
+        "id": "delivered_card",
+        "description": "Messages whose current Resend event is delivered, across the complete historical Norva sample available at audit time.",
+        "dataset": "headline",
+        "sourceId": "resend_history",
+        "metrics": [
+          { "label": "Delivered", "field": "delivered", "format": "number" },
+          { "label": "Historical sends", "field": "historical_sends", "format": "number" }
+        ]
+      },
+      {
+        "id": "bounce_card",
+        "description": "Historical bounce rate. The ten bounces were generated by deliberately invalid test domains, not customer mailboxes.",
+        "dataset": "headline",
+        "sourceId": "resend_history",
+        "metrics": [
+          { "label": "Bounce rate", "field": "bounce_rate", "format": "percent" },
+          { "label": "Bounces", "field": "bounced", "format": "number" }
+        ]
+      },
+      {
+        "id": "complaint_card",
+        "description": "Historical complaint rate from one complaint in a tiny, internal-only cohort; unsuitable as a customer benchmark.",
+        "dataset": "headline",
+        "sourceId": "resend_history",
+        "metrics": [
+          { "label": "Complaint rate", "field": "complaint_rate", "format": "percent" },
+          { "label": "Complaints", "field": "complained", "format": "number" }
+        ]
+      },
+      {
+        "id": "customer_card",
+        "description": "Every current Auth account is explicitly classified as an internal, pilot, family or system account.",
+        "dataset": "headline",
+        "sourceId": "production_db",
+        "metrics": [
+          { "label": "Real customers", "field": "real_customers", "format": "number" },
+          { "label": "Auth accounts", "field": "auth_users", "format": "number" }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "delivery_outcomes",
+        "title": "Historical Resend outcomes",
+        "subtitle": "Current last-event status across 134 Norva messages; exact counts are retained in the source table.",
+        "intent": "comparison",
+        "question": "How are historical Norva emails distributed across Resend outcomes?",
+        "rationale": "A bar chart makes the dominant delivered volume and the much smaller failure/engagement outcomes directly comparable.",
+        "type": "bar",
+        "dataset": "email_outcomes",
+        "sourceId": "resend_history",
+        "encodings": {
+          "x": { "field": "outcome", "type": "nominal", "label": "Outcome" },
+          "y": { "field": "count", "type": "quantitative", "format": "number", "label": "Messages" },
+          "tooltip": [
+            { "field": "count", "type": "quantitative", "format": "number", "label": "Messages" },
+            { "field": "rate", "type": "quantitative", "format": "percent", "label": "Share" },
+            { "field": "period", "type": "text", "label": "Window" }
+          ]
+        },
+        "xAxisTitle": "Outcome",
+        "yAxisTitle": "Messages",
+        "valueFormat": "number",
+        "layout": "full",
+        "maxRows": 10
+      }
+    ],
+    "tables": [
+      {
+        "id": "flow_inventory",
+        "title": "Email journey reliability inventory",
+        "subtitle": "Every Norva email family, its purpose and the target delivery contract after remediation.",
+        "dataset": "email_flows",
+        "sourceId": "repository_inventory",
+        "defaultSort": { "field": "priority", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "priority", "label": "Order", "type": "number" },
+          { "field": "journey", "label": "Journey", "type": "text" },
+          { "field": "category", "label": "Category", "type": "text" },
+          { "field": "delivery", "label": "Target delivery", "type": "text" }
+        ]
+      },
+      {
+        "id": "segment_inventory",
+        "title": "Canonical operational segmentation",
+        "subtitle": "Mutually understandable lifecycle cohorts; contact projection remains gated until Norva owns a dedicated Resend team.",
+        "dataset": "segments",
+        "sourceId": "resend_configuration",
+        "defaultSort": { "field": "order", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "Order", "type": "number" },
+          { "field": "segment", "label": "Segment", "type": "text" },
+          { "field": "definition", "label": "Eligibility", "type": "text" },
+          { "field": "activation", "label": "Activation", "type": "text" }
+        ]
+      },
+      {
+        "id": "risk_register",
+        "title": "Residual controls and external blockers",
+        "subtitle": "Items that cannot be truthfully marked complete by application code alone.",
+        "dataset": "risks",
+        "sourceId": "repository_inventory",
+        "defaultSort": { "field": "rank", "direction": "asc" },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          { "field": "rank", "label": "Rank", "type": "number" },
+          { "field": "control", "label": "Control", "type": "text" },
+          { "field": "owner_action", "label": "Required action", "type": "text" }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Norva Email & Resend Audit — 21 July 2026",
+        "layout": "full"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\nNorva’s current email population is entirely internal/test: there are no real customer accounts yet. That makes the historical bounce and complaint percentages useful as engineering signals, but invalid as a customer-quality benchmark. The main problems were architectural: a shared Resend team mixed Norva with BuildTrack, a deprecated all-users audience provided no useful lifecycle targeting, delivery webhooks were absent, and several critical messages could be lost or duplicated around network/database failures.\n\nThe remediation replaces direct fire-and-forget paths with immutable, leased outboxes; adds signed, app-scoped delivery telemetry; defines consent-safe lifecycle cohorts; minimizes and expires stored recipient data; and separates a domain-scoped send credential from host-only Resend administration. Contact projection remains intentionally off until Norva is moved to a dedicated Resend team. This is the only safe interpretation of “premium data”: no cross-product contacts, no guessed segments and no false claim that the current five pilot accounts represent customers.",
+        "layout": "full"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": ["delivered_card", "bounce_card", "complaint_card", "customer_card"],
+        "layout": "full"
+      },
+      {
+        "id": "delivery_section",
+        "type": "markdown",
+        "body": "## What the historical delivery data actually says\n\nDelivery dominates the account history, but the failure percentages look severe because the denominator is only 134 messages and the population is deliberately synthetic. All ten bounces came from invalid test domains. One complaint caused subsequent suppressions, including authentication-related traffic, which confirms that complaint handling and application scoping must be observable rather than silently retried. Opens and clicks are not reliable engagement KPIs here: privacy features suppress opens, and most messages were transactional or operational.",
+        "layout": "full"
+      },
+      {
+        "id": "delivery_chart_block",
+        "type": "chart",
+        "chartId": "delivery_outcomes",
+        "layout": "full"
+      },
+      {
+        "id": "journey_section",
+        "type": "markdown",
+        "body": "## Premium delivery contract by journey\n\nA premium email system acknowledges business state only after the provider accepts the exact immutable request, retries transient/ambiguous outcomes only inside Resend’s idempotency window, quarantines uncertainty instead of risking duplicates, and scrubs personal payloads after completion. Transactional messages ignore marketing opt-out; marketing messages require explicit consent at the final send boundary and carry one-click unsubscribe plus the postal address.",
+        "layout": "full"
+      },
+      {
+        "id": "flow_table_block",
+        "type": "table",
+        "tableId": "flow_inventory",
+        "layout": "full"
+      },
+      {
+        "id": "segmentation_section",
+        "type": "markdown",
+        "body": "## Segmentation: fewer cohorts, stronger definitions\n\nThe legacy “Norva Users” audience contains six contacts, including one stale/deleted address, and cannot answer lifecycle questions. The replacement model uses nine bounded operational Segments, one explicit marketing Topic and typed, minimized Contact Properties. Active and cancellation-scheduled subscriptions are deliberately distinct, as are billing recovery, churn and blocked/suppressed. Signup and activity are exported only as coarse cohorts; exact timestamps and Norva user UUIDs remain inside Norva.",
+        "layout": "full"
+      },
+      {
+        "id": "segment_table_block",
+        "type": "table",
+        "tableId": "segment_inventory",
+        "layout": "full"
+      },
+      {
+        "id": "governance_section",
+        "type": "markdown",
+        "body": "## Governance, deliverability and data quality\n\nSPF, DKIM and the custom MAIL FROM domain are present. DMARC is missing, so Norva has neither an enforceable anti-spoofing policy nor aggregate reports. Publish a reporting-only DMARC policy first, observe for two to four weeks, then progress to quarantine/reject only when legitimate sources align. Keep operations and customer messaging separate: operational alerts should not inflate lifecycle engagement, and BuildTrack must use another Resend team before Norva Contacts, global unsubscribe, Topics or properties are mutated.",
+        "layout": "full"
+      },
+      {
+        "id": "risk_table_block",
+        "type": "table",
+        "tableId": "risk_register",
+        "layout": "full"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "body": "## Methodology and interpretation limits\n\nThis audit combines a production Postgres snapshot, the complete Resend message history available to the account, live Resend API contract probes, public DNS and repository-level sender/trigger tracing. No recipient address, provider credential, API key, stream credential or payment identifier is included in this artifact.\n\nThe historical cohort is five internal/pilot accounts and therefore cannot establish customer engagement, inbox placement or conversion baselines. The report treats delivery events as operational evidence only. The code-level target state is validated by automated tests and production checks; external controls requiring a dedicated Resend team or DNS authority remain explicitly open rather than being simulated.",
+        "layout": "full"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-21T22:00:00Z",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "historical_sends": 134,
+          "delivered": 116,
+          "bounced": 10,
+          "bounce_rate": 0.0746268657,
+          "complained": 1,
+          "complaint_rate": 0.0074626866,
+          "auth_users": 5,
+          "internal_accounts": 5,
+          "real_customers": 0,
+          "resend_contacts": 6,
+          "stale_contacts": 1,
+          "marketing_opt_ins": 0
+        }
+      ],
+      "email_outcomes": [
+        { "outcome": "Delivered", "count": 116, "rate": 0.8656716418, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "delivery" },
+        { "outcome": "Bounced", "count": 10, "rate": 0.0746268657, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "failure" },
+        { "outcome": "Suppressed", "count": 5, "rate": 0.0373134328, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "failure" },
+        { "outcome": "Complained", "count": 1, "rate": 0.0074626866, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "failure" },
+        { "outcome": "Opened", "count": 1, "rate": 0.0074626866, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "engagement" },
+        { "outcome": "Clicked", "count": 1, "rate": 0.0074626866, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "engagement" }
+      ],
+      "email_flows": [
+        { "priority": 1, "journey": "Auth actions", "category": "Transactional auth", "delivery": "Signed hook; exact payload; stable idempotency key", "retention": "Provider metadata only" },
+        { "priority": 2, "journey": "Security events", "category": "Transactional security", "delivery": "Immutable leased outbox; 2xx + provider ID ack", "retention": "Payload scrubbed after send" },
+        { "priority": 3, "journey": "Payment confirmations & recovery", "category": "Transactional billing", "delivery": "Ledger-linked outbox; ambiguous quarantine; provider-safe retries (legacy internal flow slug: payment_receipt)", "retention": "90d sent / 30d dead-letter, minimized" },
+        { "priority": 4, "journey": "Catalog import", "category": "Transactional product", "delivery": "Digest outbox; one message per settled user/kind group", "retention": "Payload scrubbed on terminal state" },
+        { "priority": 5, "journey": "AI subtitles ready", "category": "Transactional product", "delivery": "Explicit opt-in; leased outbox; current Auth address frozen at send", "retention": "Bounded sent/dead-letter retention" },
+        { "priority": 6, "journey": "Support ticket", "category": "Transactional support", "delivery": "Durable email outbox plus Telegram channel acknowledgement", "retention": "PII scrub after terminal state" },
+        { "priority": 7, "journey": "Welcome, trial and lifecycle", "category": "Transactional lifecycle", "delivery": "Immutable lifecycle outbox; business marker after delivery ack", "retention": "Bounded and pseudonymized" },
+        { "priority": 8, "journey": "Win-back & abandoned checkout", "category": "Marketing", "delivery": "Final consent gate; one-click unsubscribe; postal footer", "retention": "Consent ledger retained; message PII scrubbed" },
+        { "priority": 9, "journey": "Operations alerts", "category": "Operational", "delivery": "Explicit mailbox/Telegram only; recovery ack before state deletion", "retention": "Aggregated diagnostics, no customer discovery" },
+        { "priority": 10, "journey": "Account deletion", "category": "Transactional auth", "delivery": "Pre-delete immutable snapshot; post-delete outbox with privacy scrub", "retention": "No stable user identifier after deletion" }
+      ],
+      "segments": [
+        { "order": 1, "segment": "internal-pilots", "definition": "Explicit admin internal-account classification", "purpose": "Exclude test/family/system accounts from customer KPIs and marketing", "activation": "Gated" },
+        { "order": 2, "segment": "onboarding", "definition": "Current identity; no blocked/churn/recovery state; setup incomplete", "purpose": "Help users reach first ready catalog", "activation": "Gated" },
+        { "order": 3, "segment": "trialing", "definition": "Canonical entitlement state is trialing", "purpose": "Trial education and provider-correct reminders", "activation": "Gated" },
+        { "order": 4, "segment": "active-subscribers", "definition": "Canonical entitlement state is active", "purpose": "Active-service lifecycle", "activation": "Gated" },
+        { "order": 5, "segment": "cancel-scheduled", "definition": "Cancellation is scheduled at period end while access remains active", "purpose": "Retention and service-exit lifecycle", "activation": "Gated" },
+        { "order": 6, "segment": "payment-recovery", "definition": "Entitlement is grace or past_due", "purpose": "Billing recovery without mixing active/churn cohorts", "activation": "Gated" },
+        { "order": 7, "segment": "churned", "definition": "Entitlement is expired", "purpose": "Consent-safe win-back analysis", "activation": "Gated" },
+        { "order": 8, "segment": "blocked-suppressed", "definition": "Entitlement is blocked or delivery suppression applies", "purpose": "Fail-closed exclusion and remediation", "activation": "Gated" },
+        { "order": 9, "segment": "catalog-ready", "definition": "At least one ready source; identity neither disabled nor blocked", "purpose": "Product-readiness and activation analysis", "activation": "Gated" }
+      ],
+      "risks": [
+        { "rank": 1, "control": "Dedicated Resend team", "state": "Open external blocker", "owner_action": "Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics" },
+        { "rank": 2, "control": "DMARC reporting", "state": "Open external blocker", "owner_action": "Create dedicated report mailbox/aggregator and publish p=none with strict alignment" },
+        { "rank": 3, "control": "Domain-scoped sending key", "state": "Implemented in code; production rotation required", "owner_action": "Run least-privilege split and retire DB Vault copy after deployment proof" },
+        { "rank": 4, "control": "Signed delivery webhooks", "state": "Implemented in code; registration required", "owner_action": "Register app-scoped events and inject webhook signing secret after Edge deployment" },
+        { "rank": 5, "control": "Real-customer baselines", "state": "Not measurable yet", "owner_action": "Start deliverability and lifecycle KPI baselines only after non-internal customers exist" }
+      ]
+    },
+    "accessIssues": []
+  },
+  "sources": [
+    {
+      "id": "resend_history",
+      "label": "Resend Email API — Norva historical messages",
+      "path": "docs/audits/email-resend-2026-07-21/resend-history-summary.json",
+      "href": "https://resend.com/docs/api-reference/emails/list-emails",
+      "query": {
+        "engine": "PostgreSQL-compatible reproducible snapshot",
+        "sql": "with outcomes(outcome, count) as (\n  values\n    ('Delivered', 116),\n    ('Bounced', 10),\n    ('Suppressed', 5),\n    ('Complained', 1),\n    ('Opened', 1),\n    ('Clicked', 1)\n)\nselect outcome, count,\n       count::numeric / 134 as rate,\n       134 as total\nfrom outcomes;",
+        "description": "Reproducible transformation of the reviewed Resend API capture stored at the source path.",
+        "executed_at": "2026-07-21T18:00:00Z",
+        "language": "sql",
+        "filters": ["Sender domain equals norva.tv", "Recipient addresses excluded"],
+        "metric_definitions": ["Outcome rate = outcome count divided by 134 historical Norva messages"]
+      }
+    },
+    {
+      "id": "production_db",
+      "label": "Norva production Postgres — aggregate account snapshot",
+      "query": {
+        "engine": "PostgreSQL 17",
+        "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where opt_in) as marketing_opt_ins;",
+        "description": "Aggregate production snapshot with no direct identifiers.",
+        "executed_at": "2026-07-21T18:00:00Z",
+        "language": "sql",
+        "tables_used": ["auth.users", "public.admin_internal_accounts", "public.cloud_sources", "public.cloud_marketing_email_preferences"],
+        "filters": ["Production only", "Aggregate counts only"],
+        "metric_definitions": ["Real customer accounts = auth users not classified as internal"]
+      }
+    },
+    {
+      "id": "repository_inventory",
+      "label": "Norva repository — email sender and trigger inventory",
+      "path": "docs/EMAIL-FUNNEL.md",
+      "query": {
+        "engine": "PostgreSQL-compatible reproducible snapshot",
+        "sql": "select *\nfrom (values\n  (1, 'Auth actions', 'Transactional auth'),\n  (2, 'Security events', 'Transactional security'),\n  (3, 'Payment confirmations', 'Transactional billing'),\n  (4, 'Catalog import', 'Transactional product'),\n  (5, 'AI subtitles', 'Transactional product'),\n  (6, 'Support ticket', 'Transactional support'),\n  (7, 'Lifecycle', 'Transactional lifecycle'),\n  (8, 'Win-back', 'Marketing'),\n  (9, 'Operations alerts', 'Operational'),\n  (10, 'Account deletion', 'Transactional auth')\n) as flows(priority, journey, category);",
+        "description": "Reproducible index of the sender/trigger inventory traced in the source document.",
+        "executed_at": "2026-07-21T22:00:00Z",
+        "language": "sql",
+        "filters": ["Application email code and migrations", "Secrets and recipient identifiers excluded"]
+      }
+    },
+    {
+      "id": "resend_configuration",
+      "label": "Resend configuration APIs",
+      "path": "docs/audits/email-resend-2026-07-21/resend-configuration-summary.json",
+      "href": "https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments",
+      "query": {
+        "engine": "PostgreSQL-compatible reproducible snapshot",
+        "sql": "select *\nfrom (values\n  (1, 'internal-pilots'),\n  (2, 'onboarding'),\n  (3, 'trialing'),\n  (4, 'active-subscribers'),\n  (5, 'cancel-scheduled'),\n  (6, 'payment-recovery'),\n  (7, 'churned'),\n  (8, 'blocked-suppressed'),\n  (9, 'catalog-ready')\n) as segments(\"order\", segment);",
+        "description": "Reproducible index of the canonical segment definitions.",
+        "executed_at": "2026-07-21T19:00:00Z",
+        "language": "sql",
+        "filters": ["Norva taxonomy only", "Projection disabled while Resend team is shared"]
+      }
+    },
+    {
+      "id": "dns_snapshot",
+      "label": "Public DNS snapshot for norva.tv email authentication",
+      "path": "docs/audits/email-resend-2026-07-21/dns-snapshot.txt"
+    }
+  ]
+}

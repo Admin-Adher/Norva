@@ -10,9 +10,14 @@
 //   POST /admin/status {ticket_id, status} → open | pending | closed
 //
 // Tables are RLS-on with no policies: this function (service role) and the admin RPCs are the only
-// doors. Notification emails are best-effort — the ticket is stored first, mail failures never 500.
-// The support@ notification sets reply_to to the client so a quick answer from the mailbox is
-// possible, but tracked replies happen through the CRM (they land in the thread + email the client).
+// doors. Each message and its exact outbound Resend request commit atomically. The API returns the
+// durable delivery state; a cron-authenticated worker later leases, sends and CAS-acknowledges the
+// request. A provider outage can therefore delay an email but cannot lose the support message.
+//
+// Mail routing is intentionally explicit. User messages go only to NORVA_SUPPORT_EMAIL (or the
+// fixed support@norva.tv default), with Reply-To set to the authenticated user's address. Admin
+// replies go only to that ticket owner's current Auth address, with Reply-To set to the same support
+// inbox. We never discover recipients from admins/internal accounts.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
@@ -22,9 +27,11 @@ type JsonRecord = Record<string, unknown>;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
-const SUPPORT_INBOX = "support@norva.tv";
+const SUPPORT_FROM = Deno.env.get("SUPPORT_EMAIL_FROM")?.trim() || "Norva Support <support@norva.tv>";
+const SUPPORT_INBOX = Deno.env.get("NORVA_SUPPORT_EMAIL")?.trim().toLowerCase() || "support@norva.tv";
 const SITE_URL = "https://norva.tv";
+const SUPPORT_DELIVERY_BATCH = 4;
+const SUPPORT_DELIVERY_SPACING_MS = 300;
 
 // Anti-abuse: every user message emails support@ (Resend cost + inbox flood). Cap concurrent open
 // tickets and hourly message volume per user, and drop identical consecutive bodies.
@@ -35,7 +42,7 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: fal
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-request-id",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 const json = (body: unknown, status = 200) =>
@@ -46,12 +53,32 @@ function esc(s: unknown): string {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
 
+function cleanEmail(value: unknown): string | null {
+  const email = String(value ?? "").trim().toLowerCase();
+  if (!email || email.length > 320 || /[\r\n<>]/.test(email)) return null;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function cleanSubject(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
 // Minimal branded shell (same look as the lifecycle emails).
-function shell(heading: string, bodyHtml: string, cta?: { label: string; url: string }): string {
+function shell(
+  heading: string,
+  bodyHtml: string,
+  cta?: { label: string; url: string },
+  lang: "en" | "fr" = "en",
+): string {
   const button = cta
-    ? `<tr><td align="center" style="padding:8px 0 26px"><a href="${cta.url}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${esc(cta.label)}</a></td></tr>`
+    ? `<tr><td align="center" style="padding:8px 0 26px"><a href="${esc(cta.url)}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${esc(cta.label)}</a></td></tr>`
     : "";
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#0a0c11">
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(heading)}</title></head><body style="margin:0;padding:0;background:#0a0c11">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(heading)}</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c11"><tr><td align="center" style="padding:32px 16px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#11151d;border:1px solid #1f2733;border-radius:16px;overflow:hidden">
       <tr><td style="padding:28px 32px 6px;text-align:center">
@@ -63,31 +90,297 @@ function shell(heading: string, bodyHtml: string, cta?: { label: string; url: st
   </td></tr></table></body></html>`;
 }
 
-async function sendMail(to: string[], subject: string, html: string, replyTo?: string): Promise<void> {
-  if (!RESEND_API_KEY || !to.length) return;
-  try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to, subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
-    });
-  } catch (_) { /* best-effort */ }
+type SupportMailDirection = "user_to_support" | "support_to_user";
+type FrozenSupportEmail = {
+  recipientEmail: string;
+  from: string;
+  replyTo: string;
+  subject: string;
+  html: string;
+  text: string;
+  tags: Array<{ name: "app" | "category" | "flow"; value: string }>;
+};
+type SupportMutationResult = {
+  ticket_id: string;
+  message_id: string;
+  request_id: string;
+  deduped: boolean;
+  delivery_state: string;
+};
+type SupportDeliveryClaim = {
+  delivery_key: string;
+  request_id: string;
+  lease_token: string;
+  direction: SupportMailDirection;
+  recipient_email: string;
+  request_from: string;
+  request_reply_to: string;
+  request_subject: string;
+  request_html: string;
+  request_text: string;
+  request_tags: Array<{ name: string; value: string }>;
+  attempt_count: number;
+};
+type MailDeliveryResult = {
+  accepted: boolean;
+  status: number | null;
+  emailId: string | null;
+  response: JsonRecord;
+  errorCode: string;
+  retryable: boolean;
+  retryAfterSeconds: number | null;
+};
+
+function supportTags(direction: SupportMailDirection): FrozenSupportEmail["tags"] {
+  return [
+    { name: "app", value: "norva" },
+    { name: "category", value: "transactional" },
+    { name: "flow", value: direction === "user_to_support"
+      ? "support_customer_message" : "support_agent_reply" },
+  ];
 }
 
-// Notify the support inbox about a new user message (creation or reply).
-// Email (Resend) + Telegram, both best-effort AFTER the ticket/message is stored —
-// notification loss must never lose the ticket itself.
-async function notifySupport(kind: "new" | "reply", ticketId: string, userEmail: string, subject: string, body: string): Promise<void> {
+function supportInboxEmail(kind: "new" | "reply", userEmail: string, subject: string, body: string): FrozenSupportEmail {
   const heading = kind === "new" ? "Nouveau ticket support" : "Réponse client sur un ticket";
+  const safeEmail = cleanEmail(userEmail) ?? "Adresse client indisponible";
+  const safeSubject = cleanSubject(subject);
   const html = shell(heading,
-    `<b style="color:#cdd6e6">${esc(userEmail)}</b> — « ${esc(subject)} »<br><br>
-     <div style="background:#0d1117;border:1px solid #1f2733;border-radius:10px;padding:12px 14px;color:#e8e8ee;white-space:pre-wrap">${esc(body).slice(0, 4000)}</div><br>
+    `<b style="color:#cdd6e6">Ticket #{{ticket_ref}}</b><br><b style="color:#cdd6e6">${esc(safeEmail)}</b> — « ${esc(safeSubject)} »<br><br>
+     <div style="background:#0d1117;border:1px solid #1f2733;border-radius:10px;padding:12px 14px;color:#e8e8ee;white-space:pre-wrap">${esc(body.slice(0, 4000))}</div><br>
      Répondre depuis le CRM (fiche client + page Support) pour garder le fil tracé.`,
-    { label: "Ouvrir le CRM", url: `${SITE_URL}/app#admin` });
-  await sendMail([SUPPORT_INBOX], `[Support] ${subject}`, html, userEmail);
+    { label: "Ouvrir le CRM", url: `${SITE_URL}/app#admin` },
+    "fr");
+  return {
+    recipientEmail: SUPPORT_INBOX,
+    from: SUPPORT_FROM,
+    replyTo: safeEmail,
+    subject: `[Norva Support #{{ticket_ref}}] ${safeSubject}`,
+    html,
+    text: `${heading}\n\nTicket #{{ticket_ref}}\nClient: ${safeEmail}\nSujet: ${safeSubject}\n\n${body.slice(0, 4000)}\n\nRépondre depuis le CRM pour garder le fil tracé.`,
+    tags: supportTags("user_to_support"),
+  };
+}
+
+function supportClientEmail(subject: string, body: string): FrozenSupportEmail {
+  const safeSubject = cleanSubject(subject);
+  const html = shell("We replied to your support request",
+    `Ticket #{{ticket_ref}} — « <b style="color:#cdd6e6">${esc(safeSubject)}</b> » has a new reply:<br><br>
+     <div style="background:#0d1117;border:1px solid #1f2733;border-radius:10px;padding:12px 14px;color:#e8e8ee;white-space:pre-wrap">${esc(body.slice(0, 4000))}</div><br>
+     Reply to this email or use your support page. Replies from the support page stay attached to your ticket.`,
+    { label: "Open my support page", url: `${SITE_URL}/support.html?ticket={{ticket_id}}` });
+  return {
+    // The append RPC resolves the ticket owner's current Auth address inside the
+    // same transaction. This placeholder is ignored for support_to_user.
+    recipientEmail: "recipient-resolved-by-database@norva.tv",
+    from: SUPPORT_FROM,
+    replyTo: SUPPORT_INBOX,
+    subject: `Re: [Norva Support #{{ticket_ref}}] ${safeSubject}`,
+    html,
+    text: `We replied to your support request\n\nTicket #{{ticket_ref}}: ${safeSubject}\n\n${body.slice(0, 4000)}\n\nReply to this email or use your support page: ${SITE_URL}/support.html?ticket={{ticket_id}}`,
+    tags: supportTags("support_to_user"),
+  };
+}
+
+function redactDiagnostic(value: unknown): string {
+  let text = "";
+  if (value instanceof Error) text = value.message;
+  else if (typeof value === "string") text = value;
+  else {
+    try { text = JSON.stringify(value); } catch (_) { text = "unknown_error"; }
+  }
+  return text
+    .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu, "[redacted-email]")
+    .replace(/https?:\/\/\S+/giu, "[redacted-url]")
+    .replace(/\b(?:Bearer\s+|re_|whsec_)[A-Za-z0-9._~+\/-]+/giu, "[redacted-secret]")
+    .slice(0, 1000) || "unknown_error";
+}
+
+function retryAfterSeconds(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value.trim())) return Math.max(0, Math.min(21600, Number(value.trim())));
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, Math.min(21600, Math.ceil((at - Date.now()) / 1000))) : null;
+}
+
+function safeProviderResponse(payload: JsonRecord, emailId: string | null): JsonRecord {
+  if (emailId) return { id: emailId };
+  const nested = payload.error && typeof payload.error === "object" && !Array.isArray(payload.error)
+    ? payload.error as JsonRecord : null;
+  const result: JsonRecord = {};
+  for (const key of ["name", "type", "code", "statusCode"] as const) {
+    const value = payload[key] ?? nested?.[key];
+    if (typeof value === "string" || typeof value === "number") result[key] = redactDiagnostic(value).slice(0, 200);
+  }
+  const message = payload.message ?? nested?.message ?? payload.error;
+  if (message !== undefined && message !== null) result.message = redactDiagnostic(message);
+  return result;
+}
+
+function classifyRetry(status: number | null, providerCode: string, acceptedWithoutId = false): boolean {
+  if (acceptedWithoutId || status === null) return true;
+  if (status === 409) {
+    // Resend uses 409 both for an in-flight request (safe to retry) and for an
+    // idempotency key reused with different parameters (invalid, never retry).
+    return /concurrent|in[_ -]?progress|already[_ -]?processing/i.test(providerCode);
+  }
+  return status === 401 || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function sendMail(claim: SupportDeliveryClaim): Promise<MailDeliveryResult> {
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Norva-Support-Email/2.0",
+        "Idempotency-Key": claim.delivery_key,
+      },
+      body: JSON.stringify({
+        from: claim.request_from,
+        to: [claim.recipient_email],
+        reply_to: claim.request_reply_to,
+        subject: claim.request_subject,
+        html: claim.request_html,
+        text: claim.request_text,
+        tags: claim.request_tags,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const raw = await res.text();
+    let payload: JsonRecord = {};
+    try {
+      const parsed = raw ? JSON.parse(raw) : {};
+      payload = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as JsonRecord : {};
+    } catch (_) { payload = {}; }
+    const emailId = typeof payload.id === "string" && payload.id.trim()
+      ? payload.id.trim().slice(0, 200) : null;
+    const safeResponse = safeProviderResponse(payload, emailId);
+    const providerCode = redactDiagnostic(
+      safeResponse.code ?? safeResponse.name ?? safeResponse.type ?? safeResponse.message ?? `resend_http_${res.status}`,
+    );
+    const accepted = res.ok && Boolean(emailId);
+    return {
+      accepted,
+      status: res.status,
+      emailId,
+      response: safeResponse,
+      errorCode: accepted ? "" : (res.ok ? "resend_missing_id" : providerCode),
+      retryable: classifyRetry(res.status, providerCode, res.ok && !emailId),
+      retryAfterSeconds: retryAfterSeconds(res.headers.get("retry-after")),
+    };
+  } catch (error) {
+    const code = error instanceof DOMException && error.name === "TimeoutError"
+      ? "transport_timeout"
+      : "transport_error";
+    return {
+      accepted: false,
+      status: null,
+      emailId: null,
+      response: {},
+      errorCode: code,
+      retryable: true,
+      retryAfterSeconds: null,
+    };
+  }
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function drainSupportEmailOutbox(): Promise<Record<string, number | boolean>> {
+  if (!RESEND_API_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, deferred: 0, lease_lost: 0 };
+  const { data, error } = await db.rpc("claim_support_email_deliveries", {
+    p_batch: SUPPORT_DELIVERY_BATCH,
+    p_lease_seconds: 90,
+    p_max_attempts: 12,
+  });
+  if (error) throw new Error(`support_email_claim_failed:${redactDiagnostic(error.message)}`);
+  const claims = (Array.isArray(data) ? data : []) as SupportDeliveryClaim[];
+  const result = { configured: true, claimed: claims.length, sent: 0, retry_scheduled: 0, dead_letter: 0, deferred: 0, lease_lost: 0, accepted_unacknowledged: 0 };
+  let networkAttempts = 0;
+  let sharedRetryAfter: number | null = null;
+  for (const claim of claims) {
+    if (sharedRetryAfter !== null) {
+      const { data: deferred, error: deferError } = await db.rpc("defer_support_email_delivery", {
+        p_delivery_key: claim.delivery_key,
+        p_lease_token: claim.lease_token,
+        p_retry_after_seconds: sharedRetryAfter,
+      });
+      if (deferError || deferred !== true) result.lease_lost++;
+      else result.deferred++;
+      continue;
+    }
+    if (networkAttempts > 0) await sleep(SUPPORT_DELIVERY_SPACING_MS);
+    const sent = await sendMail(claim);
+    networkAttempts++;
+    if (sent.status === 429) sharedRetryAfter = Math.max(1, sent.retryAfterSeconds ?? 60);
+    if (sent.accepted && sent.emailId) {
+      const { data: completed, error: completeError } = await db.rpc("complete_support_email_delivery", {
+        p_delivery_key: claim.delivery_key,
+        p_lease_token: claim.lease_token,
+        p_resend_email_id: sent.emailId,
+        p_http_status: sent.status,
+        p_response: sent.response,
+      });
+      if (completeError || completed !== true) {
+        result.accepted_unacknowledged++;
+        console.error(`[norva-support] accepted delivery acknowledgement failed key=${claim.delivery_key.slice(0, 32)}`);
+      } else result.sent++;
+      continue;
+    }
+    const { data: failed, error: failError } = await db.rpc("fail_support_email_delivery", {
+      p_delivery_key: claim.delivery_key,
+      p_lease_token: claim.lease_token,
+      p_http_status: sent.status,
+      p_error: sent.errorCode,
+      p_response: sent.response,
+      p_retryable: sent.retryable,
+      p_retry_after_seconds: sent.retryAfterSeconds,
+      p_max_attempts: 12,
+    });
+    if (failError) result.lease_lost++;
+    else if (failed === "dead_letter") result.dead_letter++;
+    else if (failed === "retry_scheduled") result.retry_scheduled++;
+    else result.lease_lost++;
+  }
+  return result;
+}
+
+async function cronAuthorized(req: Request): Promise<boolean> {
+  const token = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!token) return false;
+  const { data, error } = await db.rpc("norva_verify_cron_secret", { presented: token });
+  return !error && data === true;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function requestId(req: Request, bodyValue: unknown): string | null {
+  const supplied = String(bodyValue ?? req.headers.get("x-request-id") ?? "").trim();
+  if (!supplied) return crypto.randomUUID();
+  return UUID_RE.test(supplied) ? supplied.toLowerCase() : null;
+}
+
+function emailDeliveryView(result: SupportMutationResult) {
+  return { state: result.delivery_state, request_id: result.request_id };
+}
+
+function supportRpcError(error: { message?: string } | null): Response {
+  const message = String(error?.message ?? "");
+  if (message.includes("support_request_id_conflict")) return json({ error: "Request id already belongs to another support message" }, 409);
+  if (message.includes("support_ticket_not_found")) return json({ error: "Ticket not found" }, 404);
+  if (message.includes("support_recipient_unavailable")) return json({ error: "The account has no deliverable email address" }, 409);
+  console.error(`[norva-support] atomic support write failed code=${redactDiagnostic(message).slice(0, 160)}`);
+  return json({ error: "Could not store the support message" }, 500);
+}
+
+async function notifySupportTelegram(kind: "new" | "reply", userEmail: string, subject: string, body: string): Promise<void> {
+  const safeEmail = cleanEmail(userEmail) ?? "Adresse client indisponible";
+  const safeSubject = cleanSubject(subject);
   await sendTelegram(
     `${kind === "new" ? "🎫 <b>Nouveau ticket support</b>" : "💬 <b>Réponse client — ticket</b>"}\n` +
-    `<b>${tgEscape(userEmail)}</b> — « ${tgEscape(subject.slice(0, 180))} »\n` +
+    `<b>${tgEscape(safeEmail)}</b> — « ${tgEscape(safeSubject)} »\n` +
     `${tgEscape(body.slice(0, 500))}${body.length > 500 ? "…" : ""}`,
   );
 }
@@ -115,15 +408,25 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^.*\/norva-support/, "") || "/";
 
+  if (req.method === "POST" && path === "/cron/run") {
+    if (!await cronAuthorized(req)) return json({ error: "Unauthorized" }, 403);
+    try {
+      return json({ ok: true, ...(await drainSupportEmailOutbox()) });
+    } catch (error) {
+      console.error(`[norva-support] delivery worker failed code=${redactDiagnostic(error).slice(0, 180)}`);
+      return json({ error: "Delivery worker failed" }, 500);
+    }
+  }
+
   const user = await getUser(req);
   if (!user?.id) return json({ error: "Not signed in" }, 401);
   const isAdmin = (user.app_metadata as JsonRecord | undefined)?.role === "admin";
 
   // ── USER: create a ticket ──────────────────────────────────────────────────
   if (req.method === "POST" && path === "/create") {
-    let payload: { subject?: string; body?: string } = {};
+    let payload: { subject?: string; body?: string; request_id?: string } = {};
     try { payload = await req.json(); } catch (_) { /* validated below */ }
-    const subject = String(payload.subject ?? "").trim().slice(0, 180);
+    const subject = cleanSubject(payload.subject);
     const body = String(payload.body ?? "").trim().slice(0, 8000);
     if (subject.length < 3 || body.length < 5) return json({ error: "Please describe your issue (subject and message)." }, 400);
 
@@ -136,25 +439,40 @@ Deno.serve(async (req) => {
     if (await userMsgCountLastHour(user.email ?? "") >= MAX_MSGS_PER_HOUR)
       return json({ error: "Too many messages in a short time. Please wait a little and try again." }, 429);
 
-    // Dedupe double-submit: an identical subject from the same user within 10 min returns the
-    // existing ticket instead of opening a duplicate (each dup emails support + eats the cap).
-    const since10 = new Date(Date.now() - 10 * 60_000).toISOString();
-    const { data: dup } = await db.from("cloud_support_tickets")
-      .select("id").eq("user_id", user.id).eq("subject", subject).gte("created_at", since10)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (dup) return json({ ok: true, ticket_id: dup.id, deduped: true });
-
-    const { data: t, error } = await db.from("cloud_support_tickets")
-      .insert({ user_id: user.id, subject }).select("id").single();
-    if (error || !t) return json({ error: "Could not open the ticket" }, 500);
-    await db.from("cloud_support_messages").insert({ ticket_id: t.id, from_admin: false, author_email: user.email, body });
-    await notifySupport("new", String(t.id), user.email ?? "", subject, body);
-    return json({ ok: true, ticket_id: t.id });
+    const rid = requestId(req, payload.request_id);
+    if (!rid) return json({ error: "request_id must be a UUID" }, 400);
+    const email = supportInboxEmail("new", user.email ?? "", subject, body);
+    const { data, error } = await db.rpc("norva_create_support_message_with_email", {
+      p_user_id: user.id,
+      p_author_email: cleanEmail(user.email),
+      p_subject: subject,
+      p_body: body,
+      p_request_id: rid,
+      p_ticket_id: crypto.randomUUID(),
+      p_message_id: crypto.randomUUID(),
+      p_recipient_email: email.recipientEmail,
+      p_request_from: email.from,
+      p_request_reply_to: email.replyTo,
+      p_request_subject: email.subject,
+      p_request_html: email.html,
+      p_request_text: email.text,
+      p_request_tags: email.tags,
+    });
+    if (error || !data) return supportRpcError(error);
+    const result = data as SupportMutationResult;
+    if (!result.deduped) await notifySupportTelegram("new", user.email ?? "", subject, body);
+    return json({
+      ok: true,
+      ticket_id: result.ticket_id,
+      message_id: result.message_id,
+      deduped: result.deduped,
+      email: emailDeliveryView(result),
+    });
   }
 
   // ── USER: reply on own ticket ──────────────────────────────────────────────
   if (req.method === "POST" && path === "/reply") {
-    let payload: { ticket_id?: string; body?: string } = {};
+    let payload: { ticket_id?: string; body?: string; request_id?: string } = {};
     try { payload = await req.json(); } catch (_) { /* validated below */ }
     const ticketId = String(payload.ticket_id ?? "");
     const body = String(payload.body ?? "").trim().slice(0, 8000);
@@ -167,17 +485,35 @@ Deno.serve(async (req) => {
     if (await userMsgCountLastHour(user.email ?? "") >= MAX_MSGS_PER_HOUR)
       return json({ error: "Too many messages in a short time. Please wait a little and try again." }, 429);
 
-    // Dedupe: an identical consecutive user body (double-submit / retry) is a no-op — no re-email.
-    const { data: lastMsg } = await db.from("cloud_support_messages")
-      .select("body,from_admin").eq("ticket_id", t.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (lastMsg && lastMsg.from_admin === false && String(lastMsg.body) === body) return json({ ok: true, deduped: true });
-
-    await db.from("cloud_support_messages").insert({ ticket_id: t.id, from_admin: false, author_email: user.email, body });
-    await db.from("cloud_support_tickets").update({
-      status: "open", last_from: "user", last_message_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).eq("id", t.id);
-    await notifySupport("reply", String(t.id), user.email ?? "", String(t.subject), body);
-    return json({ ok: true });
+    const rid = requestId(req, payload.request_id);
+    if (!rid) return json({ error: "request_id must be a UUID" }, 400);
+    const email = supportInboxEmail("reply", user.email ?? "", String(t.subject), body);
+    const { data, error } = await db.rpc("norva_append_support_message_with_email", {
+      p_actor_user_id: user.id,
+      p_ticket_id: String(t.id),
+      p_from_admin: false,
+      p_author_email: cleanEmail(user.email),
+      p_body: body,
+      p_request_id: rid,
+      p_message_id: crypto.randomUUID(),
+      p_recipient_email: email.recipientEmail,
+      p_request_from: email.from,
+      p_request_reply_to: email.replyTo,
+      p_request_subject: email.subject,
+      p_request_html: email.html,
+      p_request_text: email.text,
+      p_request_tags: email.tags,
+    });
+    if (error || !data) return supportRpcError(error);
+    const result = data as SupportMutationResult;
+    if (!result.deduped) await notifySupportTelegram("reply", user.email ?? "", String(t.subject), body);
+    return json({
+      ok: true,
+      ticket_id: result.ticket_id,
+      message_id: result.message_id,
+      deduped: result.deduped,
+      email: emailDeliveryView(result),
+    });
   }
 
   // ── USER: mark own ticket resolved ─────────────────────────────────────────
@@ -221,7 +557,7 @@ Deno.serve(async (req) => {
   if (!isAdmin && path.startsWith("/admin/")) return json({ error: "not authorized" }, 403);
 
   if (req.method === "POST" && path === "/admin/reply") {
-    let payload: { ticket_id?: string; body?: string } = {};
+    let payload: { ticket_id?: string; body?: string; request_id?: string } = {};
     try { payload = await req.json(); } catch (_) { /* validated below */ }
     const ticketId = String(payload.ticket_id ?? "");
     const body = String(payload.body ?? "").trim().slice(0, 8000);
@@ -231,27 +567,45 @@ Deno.serve(async (req) => {
       .select("id,user_id,subject").eq("id", ticketId).maybeSingle();
     if (!t) return json({ error: "Ticket not found" }, 404);
 
-    await db.from("cloud_support_messages").insert({ ticket_id: t.id, from_admin: true, author_email: user.email, body });
-    await db.from("cloud_support_tickets").update({
-      status: "pending", last_from: "admin", last_message_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).eq("id", t.id);
+    const rid = requestId(req, payload.request_id);
+    if (!rid) return json({ error: "request_id must be a UUID" }, 400);
+    const email = supportClientEmail(String(t.subject), body);
+    const { data, error } = await db.rpc("norva_append_support_message_with_email", {
+      p_actor_user_id: user.id,
+      p_ticket_id: String(t.id),
+      p_from_admin: true,
+      p_author_email: cleanEmail(user.email),
+      p_body: body,
+      p_request_id: rid,
+      p_message_id: crypto.randomUUID(),
+      p_recipient_email: email.recipientEmail,
+      p_request_from: email.from,
+      p_request_reply_to: email.replyTo,
+      p_request_subject: email.subject,
+      p_request_html: email.html,
+      p_request_text: email.text,
+      p_request_tags: email.tags,
+    });
+    if (error || !data) return supportRpcError(error);
+    const result = data as SupportMutationResult;
     try {
-      await db.from("admin_events").insert({ user_id: t.user_id, kind: "admin_action", summary: "Réponse support envoyée", actor: user.email });
+      if (!result.deduped) {
+        await db.from("admin_events").insert({
+          user_id: t.user_id,
+          kind: "admin_action",
+          summary: "Réponse support enregistrée",
+          actor: cleanEmail(user.email),
+        });
+      }
     } catch (_) { /* best-effort */ }
 
-    // Email the client (English — viewer-facing).
-    const { data: target } = await db.auth.admin.getUserById(String(t.user_id));
-    const clientEmail = target?.user?.email;
-    if (clientEmail) {
-      const html = shell("We replied to your support request",
-        `Your ticket « <b style="color:#cdd6e6">${esc(t.subject)}</b> » has a new reply:<br><br>
-         <div style="background:#0d1117;border:1px solid #1f2733;border-radius:10px;padding:12px 14px;color:#e8e8ee;white-space:pre-wrap">${esc(body).slice(0, 4000)}</div><br>
-         You can reply from your support page — we'll get it right away.`,
-        // Deep-link straight to THIS ticket (support.html auto-expands + scrolls ?ticket=).
-        { label: "Open my support page", url: `${SITE_URL}/support.html?ticket=${encodeURIComponent(String(t.id))}` });
-      await sendMail([clientEmail], `Re: ${t.subject} — Norva support`, html);
-    }
-    return json({ ok: true });
+    return json({
+      ok: true,
+      ticket_id: result.ticket_id,
+      message_id: result.message_id,
+      deduped: result.deduped,
+      email: emailDeliveryView(result),
+    });
   }
 
   if (req.method === "POST" && path === "/admin/status") {

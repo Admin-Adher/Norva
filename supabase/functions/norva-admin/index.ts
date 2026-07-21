@@ -25,6 +25,21 @@ if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Missing SUPABASE_URL or SUPA
 const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 
+// Ops email is deliberately explicit and singular. Never infer operational
+// recipients from auth.users, admin roles, or a currently signed-in account:
+// those are product identities, not an incident-notification configuration.
+const OPS_EMAIL = (() => {
+  const candidate = (Deno.env.get("NORVA_OPS_EMAIL") ?? "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate : "";
+})();
+
+const htmlEscape = (value: unknown) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
+
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
 // Constant-time string compare for shared-secret checks (avoids a timing side-channel on the
@@ -66,6 +81,27 @@ function json(req: Request, data: unknown, status = 200) {
 async function logEvent(userId: string, kind: string, summary: string, actor: string | null, meta: JsonRecord = {}) {
   try { await admin.from("admin_events").insert({ user_id: userId, kind, summary, actor, meta }); }
   catch (_) { /* best-effort audit */ }
+}
+
+async function recordRefundLifecycleEvent(
+  userId: string,
+  refundPi: string,
+  amountCents: number,
+  currency: string,
+): Promise<string | null> {
+  const { error } = await admin.from("cloud_entitlement_events").upsert({
+    user_id: userId,
+    provider: "revolut",
+    provider_event_id: `admin:${refundPi}:refund-confirmed`,
+    event_type: "REFUND_CONFIRMED",
+    payload: {
+      amount_cents: amountCents,
+      currency: currency.toUpperCase(),
+      reference: refundPi.replace(/^rfnd_/, "NV-").slice(0, 32),
+    },
+    processed_at: new Date().toISOString(),
+  }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+  return error?.message ?? null;
 }
 
 // Merchant-initiated refund of a Revolut order. Mirrors norva-revolut-billing's charge call
@@ -201,7 +237,9 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     problems.push({ key: "vat_fx_pending", detail: `TVA — trimestre ${ov.vat_fx_pending} clos avec des ventes UE : figez le taux BCE dans l'onglet TVA pour finaliser la déclaration OSS (2 min).${fxSugg}` });
   }
 
-  // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
+  // 4) Cooldown state: alert only keys not alerted within the window. Resolved
+  // keys remain durable until at least one recovery channel acknowledges them;
+  // otherwise a transient Telegram/Resend outage would erase the only retry state.
   // `details` is read too so the recovery notice can say WHAT was resolved.
   const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at, details");
   const state = new Map<string, number>();
@@ -212,22 +250,15 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
   const activeKeys = new Set(problems.map((p) => p.key));
   const healed = [...state.keys()].filter((k) => !activeKeys.has(k));
-  if (healed.length) await admin.from("admin_alert_state").delete().in("key", healed);
   const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
 
-  // 5) Notify — Telegram (instant, founder's phone) + email every admin. The cooldown state
-  // is updated when EITHER channel delivered, so a Resend outage can't turn Telegram into a
-  // 15-min spam loop (and vice versa).
+  // 5) Notify — one digest per sweep, Telegram first, plus the one explicitly
+  // configured ops mailbox. Product/admin Auth addresses are never recipients.
+  // The 6h per-key cooldown is updated when EITHER channel delivered, so a
+  // Resend outage cannot turn Telegram into a 15-minute spam loop (and vice versa).
   const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
   const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
-  let recipients: string[] = [];
-  if (toAlert.length || healed.length) {
-    const { data: admins } = await admin.rpc("admin_alert_recipients").then(
-      (r) => r,
-      () => ({ data: null }),
-    );
-    recipients = Array.isArray(admins) ? (admins as string[]) : [];
-  }
+  const recipients = OPS_EMAIL ? [OPS_EMAIL] : [];
 
   let emailed: string[] = [];
   if (toAlert.length) {
@@ -238,7 +269,11 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     );
     if (tgOk) delivered = true;
     if (resendKey && recipients.length) {
-      const items = toAlert.map((p) => `<li style="margin:6px 0;color:#e8e8ee">${p.detail}</li>`).join("");
+      const items = toAlert.map((p) => `<li style="margin:6px 0;color:#e8e8ee">${htmlEscape(p.detail)}</li>`).join("");
+      const text = `Norva Ops — ${toAlert.length} active alert${toAlert.length > 1 ? "s" : ""}\n\n` +
+        toAlert.map((p) => `- ${p.detail}`).join("\n") +
+        "\n\nOpen the operations console: https://norva.tv/app.html";
+      const alertBucket = Math.floor(Date.now() / ALERT_COOLDOWN_MS);
       const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
         <div style="max-width:520px;margin:0 auto;background:#11151d;border:1px solid #1f2733;border-radius:14px;padding:22px 26px">
           <h2 style="margin:0 0 6px;color:#ff6b6b;font-size:18px">⚠️ Norva Ops — ${toAlert.length} alerte${toAlert.length > 1 ? "s" : ""}</h2>
@@ -249,10 +284,32 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
-          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to: recipients, subject: `⚠️ Norva Ops — ${toAlert.map((p) => p.key).join(", ")}`, html }),
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            "Content-Type": "application/json",
+            "User-Agent": "Norva-Ops-Email/2.0",
+            "Idempotency-Key": `norva-ops-alert-${alertBucket}-${toAlert.map((p) => p.key).sort().join("-")}`.slice(0, 240),
+          },
+          body: JSON.stringify({
+            from,
+            to: recipients,
+            reply_to: OPS_EMAIL,
+            subject: `⚠️ Norva Ops — ${toAlert.map((p) => p.key).join(", ")}`,
+            html,
+            text,
+            tags: [
+              { name: "app", value: "norva" },
+              { name: "category", value: "operational" },
+              { name: "flow", value: "ops_health_alert" },
+            ],
+          }),
+          signal: AbortSignal.timeout(8_000),
         });
-        if (res.ok) { emailed = recipients; delivered = true; }
+        const payload = await res.json().catch(() => ({})) as JsonRecord;
+        if (res.ok && typeof payload.id === "string" && payload.id) {
+          emailed = recipients;
+          delivered = true;
+        }
       } catch (_) { /* email failure → maybe telegram delivered; state update decided below */ }
     }
     if (delivered) {
@@ -264,14 +321,23 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     }
   }
 
-  // 6) Recovery notice — heal fires exactly once per incident (its state row was deleted
-  // above), so this can never spam. Tells the founder the incident is over instead of
-  // leaving the last ⚠️ as the final word.
+  // 6) Recovery notice. Keep the incident rows until Telegram or Resend confirms
+  // acceptance. If both fail, the next sweep retries instead of losing recovery.
+  let recoveryDelivered = false;
+  let recoveryStateCleared = false;
+  const recoveryChannels: string[] = [];
   if (healed.length) {
     const lines = healed.map((k) => `• ${tgEscape(stateDetails.get(k) ?? k)}`).join("\n");
-    await sendTelegram(`✅ <b>Norva Ops — résolu</b>\n${lines}`);
+    const recoveryTelegramOk = await sendTelegram(`✅ <b>Norva Ops — résolu</b>\n${lines}`);
+    if (recoveryTelegramOk) {
+      recoveryDelivered = true;
+      recoveryChannels.push("telegram");
+    }
     if (resendKey && recipients.length) {
-      const items = healed.map((k) => `<li style="margin:6px 0;color:#d9f2e3">${stateDetails.get(k) ?? k}</li>`).join("");
+      const items = healed.map((k) => `<li style="margin:6px 0;color:#d9f2e3">${htmlEscape(stateDetails.get(k) ?? k)}</li>`).join("");
+      const text = "Norva Ops — incident resolved\n\n" +
+        healed.map((k) => `- ${stateDetails.get(k) ?? k}`).join("\n");
+      const recoveryBucket = Math.floor(Date.now() / ALERT_COOLDOWN_MS);
       const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
         <div style="max-width:520px;margin:0 auto;background:#101913;border:1px solid #1f3327;border-radius:14px;padding:22px 26px">
           <h2 style="margin:0 0 6px;color:#4ade80;font-size:18px">✅ Norva Ops — résolu</h2>
@@ -279,18 +345,55 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
           <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${items}</ul>
         </div></body>`;
       try {
-        await fetch("https://api.resend.com/emails", {
+        const recoveryResponse = await fetch("https://api.resend.com/emails", {
           method: "POST",
-          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to: recipients, subject: `✅ Norva Ops — résolu: ${healed.join(", ")}`, html }),
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            "Content-Type": "application/json",
+            "User-Agent": "Norva-Ops-Email/2.0",
+            "Idempotency-Key": `norva-ops-recovery-${recoveryBucket}-${healed.slice().sort().join("-")}`.slice(0, 240),
+          },
+          body: JSON.stringify({
+            from,
+            to: recipients,
+            reply_to: OPS_EMAIL,
+            subject: `✅ Norva Ops — résolu: ${healed.join(", ")}`,
+            html,
+            text,
+            tags: [
+              { name: "app", value: "norva" },
+              { name: "category", value: "operational" },
+              { name: "flow", value: "ops_health_recovery" },
+            ],
+          }),
+          signal: AbortSignal.timeout(8_000),
         });
+        const recoveryPayload = await recoveryResponse.json().catch(() => ({})) as JsonRecord;
+        if (recoveryResponse.ok && typeof recoveryPayload.id === "string" && recoveryPayload.id) {
+          recoveryDelivered = true;
+          recoveryChannels.push("email");
+        }
       } catch (_) { /* best-effort */ }
+    }
+    if (recoveryDelivered) {
+      const { error: clearError } = await admin.from("admin_alert_state").delete().in("key", healed);
+      if (clearError) {
+        // Preserve the rows when acknowledgement persistence fails. The next
+        // sweep retries with the same six-hour Resend idempotency bucket.
+        console.error("[norva-admin] recovery state clear failed", clearError.message);
+      } else {
+        recoveryStateCleared = true;
+      }
     }
   }
 
   return {
     checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "vat_threshold", "vat_fx_pending"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
+    recovery_delivered: recoveryDelivered,
+    recovery_channels: recoveryChannels,
+    recovery_pending: healed.length > 0 && !recoveryStateCleared,
+    email_configured: Boolean(OPS_EMAIL),
     snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
   };
 }
@@ -525,8 +628,14 @@ Deno.serve(async (req) => {
       // Idempotency: one refund ledger row per order → refuse a re-refund (guards double money-out).
       const refundPi = `rfnd_${orderId}`;
       const { data: existing } = await admin
-        .from("cloud_billing_ledger").select("pi_id").eq("pi_id", refundPi).maybeSingle();
-      if (existing) return json(req, { error: "Ce paiement a déjà été remboursé." }, 409);
+        .from("cloud_billing_ledger").select("pi_id,amount,currency").eq("pi_id", refundPi).maybeSingle();
+      if (existing) {
+        const eventError = await recordRefundLifecycleEvent(
+          userId, refundPi, Number(existing.amount ?? amountCents), String(existing.currency ?? pay.currency ?? "usd"),
+        );
+        if (eventError) return json(req, { error: "Refund completed; confirmation is pending." }, 503);
+        return json(req, { error: "Ce paiement a déjà été remboursé." }, 409);
+      }
 
       const r = await revolutRefund(orderId, amountCents);
       if (!r.ok) {
@@ -556,6 +665,11 @@ Deno.serve(async (req) => {
       if (insErr) console.error("[norva-admin] refund ledger insert failed", insErr.message);
 
       const cur = String(pay.currency ?? "usd").toUpperCase();
+      const lifecycleError = await recordRefundLifecycleEvent(userId, refundPi, amountCents, cur);
+      if (lifecycleError) {
+        console.error("[norva-admin] refund lifecycle event failed", lifecycleError);
+        return json(req, { error: "Refund completed; confirmation is pending." }, 503);
+      }
       await logEvent(userId, "refund", `Remboursement Revolut ${(amountCents / 100).toFixed(2)} ${cur}`, actorEmail,
         { order_id: orderId, pi_id: piId, amount_cents: amountCents });
       return json(req, { ok: true, refunded_cents: amountCents, order_id: orderId,

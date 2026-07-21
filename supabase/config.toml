@@ -36,11 +36,23 @@ verify_jwt = false
 [functions.norva-auth-email]
 verify_jwt = false
 
+# Resend delivery events (at-least-once, out of order). The function verifies
+# the Svix HMAC signature itself with RESEND_WEBHOOK_SECRET and writes an
+# idempotent service-only delivery ledger.
+[functions.norva-resend-webhook]
+verify_jwt = false
+
 # Import-lifecycle digest sender, driven by pg_cron with our shared cron secret
 # in the Authorization header (not a Supabase JWT). The gateway JWT check is
 # disabled so the request reaches the function, which verifies the secret itself
 # via norva_verify_cron_secret (same pattern as the source-sync crons).
 [functions.norva-import-notify]
+verify_jwt = false
+
+# Durable DB-originated security/trial email sender. The minutely pg_cron call
+# carries NORVA_CRON_SHARED_SECRET and the function verifies it itself before
+# leasing any immutable outbox row.
+[functions.norva-branded-email-worker]
 verify_jwt = false
 
 # Privileged admin actions on users (resend confirmation / change role / suspend).
@@ -72,4 +84,16 @@ verify_jwt = false
 # (MIT). INERT until REVOLUT_SECRET_KEY is set. Cron-authenticated via
 # norva_verify_cron_secret. Register the pg_cron job (see the file header).
 [functions.norva-revolut-billing]
+verify_jwt = false
+
+# Self-service account deletion validates the user JWT in-function. Its durable
+# confirmation outbox is also drained by a cron bearer that is verified through
+# norva_verify_cron_secret, so requests must reach the function first.
+[functions.norva-account-delete]
+verify_jwt = false
+
+# User/admin support routes validate their Supabase JWT in-function. The same
+# endpoint also hosts a durable email worker authenticated by the shared cron
+# secret, so the platform JWT gate must let both request classes reach it.
+[functions.norva-support]
 verify_jwt = false

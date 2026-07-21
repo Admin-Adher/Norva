@@ -181,7 +181,8 @@ test('mutating Revolut routes reject internal billing and profile returns neutra
   assert.match(revolut, /json\(\{ ok: true, profile: null, included_access: true \}\)/);
   for (const [route, next] of [['cancel', 'resume'], ['resume', null]]) {
     const block = routeSlice(revolut, route, next);
-    assert.ok(block.indexOf('guardInternalBilling') < block.indexOf('cloud_entitlement_projection'));
+    assert.ok(block.indexOf('guardInternalBilling') < block.indexOf('norva_apply_revolut_account_action'));
+    assert.doesNotMatch(block, /from\("cloud_entitlement_projection"\).*update/s);
   }
 });
 
@@ -197,20 +198,21 @@ test('recurring worker checks internal status before claim and again before remo
   assert.match(billing, /internal_account_check_failed/);
 });
 
-test('trial, dunning and past-due expiry lifecycle paths exclude internal accounts', () => {
+test('dunning and past-due expiry lifecycle paths exclude internal accounts; Edge trial is retired', () => {
   assert.match(lifecycle, /async function internalAccountOrUnknown/);
   assert.match(lifecycle, /internal account check failed[\s\S]*return true/);
   for (const [start, end] of [
-    ['async function runTrialReminder', 'async function runDunning'],
     ['async function runDunning', 'async function runWinback'],
     ['async function runExpirePastDue', 'async function authenticatedUserId'],
   ]) {
     const block = lifecycle.slice(lifecycle.indexOf(start), lifecycle.indexOf(end));
     assert.match(block, /internalAccountOrUnknown/);
   }
+  assert.doesNotMatch(lifecycle, /runTrialReminder|LC_TRIAL/);
+  assert.match(lifecycle, /trial_reminder: "db_cron_canonical"/);
   const welcome = lifecycle.slice(
     lifecycle.indexOf('async function runWelcome'),
-    lifecycle.indexOf('async function runTrialReminder'),
+    lifecycle.indexOf('async function runDunning'),
   );
   assert.match(welcome, /internalError/);
   assert.match(welcome, /throw new Error\(`internal_account_check_failed:/);
