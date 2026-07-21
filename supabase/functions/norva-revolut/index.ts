@@ -249,6 +249,70 @@ async function logCancelFeedback(db: SupabaseClient, userId: string, reason: str
   } catch (_) { /* analytics must never block a cancellation */ }
 }
 
+// Internal/pilot accounts have included system access and must never enter a
+// payment flow.  Fail closed on a registry read error: opening a remote checkout
+// while account classification is unknown is strictly worse than asking the user
+// to retry.  The database claim/trigger is the final guard; this one prevents even
+// card-validation orders and profile enrichment from reaching Revolut.  The
+// read-only profile endpoint returns a neutral success for included access so a
+// Settings screen never turns this intentional state into a cosmetic error.
+async function guardInternalBilling(
+  db: SupabaseClient,
+  userId: string,
+  neutralIncludedProfile = false,
+): Promise<Response | null> {
+  const { data, error } = await db.from("admin_internal_accounts")
+    .select("user_id").eq("user_id", userId).maybeSingle();
+  if (error) {
+    console.error("[norva-revolut] internal account check failed", userId, error.message);
+    return json({ error: "Could not verify billing eligibility", code: "billing_eligibility_unavailable" }, 503);
+  }
+  if (data) {
+    if (neutralIncludedProfile) {
+      return json({ ok: true, profile: null, included_access: true });
+    }
+    return json({
+      error: "Billing is not applicable to this included-access account",
+      code: "internal_account_not_billable",
+    }, 409);
+  }
+  return null;
+}
+
+type RevolutMappingRejection = {
+  error: string;
+  code: string;
+  finalization: string;
+};
+
+// The database mapping trigger is the race-safe guard. Route-level checks keep
+// the normal path fast and friendly; this decoder turns the trigger's late-race
+// decision into the same deterministic 409 instead of a misleading 503.
+function revolutMappingRejection(message: string): RevolutMappingRejection | null {
+  if (message.includes("internal_account_not_billable")) {
+    return {
+      error: "Billing is not applicable to this included-access account",
+      code: "internal_account_not_billable",
+      finalization: "rejected_internal_account",
+    };
+  }
+  if (message.includes("revolut_customer_account_blocked")) {
+    return {
+      error: "Billing is unavailable while this account is blocked. Contact support.",
+      code: "account_billing_blocked",
+      finalization: "rejected_account_blocked",
+    };
+  }
+  if (message.includes("revolut_customer_rail_mismatch")) {
+    return {
+      error: "This subscription is managed by another billing provider",
+      code: "billing_rail_mismatch",
+      finalization: "rejected_cross_rail",
+    };
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const url = new URL(req.url);
@@ -284,6 +348,8 @@ Deno.serve(async (req) => {
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id || !user.email) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, user.id);
+    if (billingGuard) return billingGuard;
 
     let payload: { plan?: string; period?: string; returnTo?: string; intent?: string } = {};
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
@@ -312,6 +378,12 @@ Deno.serve(async (req) => {
     const trialEndMs = proj?.trial_ends_at ? new Date(proj.trial_ends_at).getTime() : 0;
     const periodEndMs = proj?.current_period_end ? new Date(proj.current_period_end).getTime() : 0;
     const projStatus = String(proj?.status ?? "");
+    if (new Set(["revoked", "refunded", "fraud"]).has(projStatus)) {
+      return json({
+        error: "Billing is unavailable while this account is blocked. Contact support.",
+        code: "account_billing_blocked",
+      }, 409);
+    }
     const liveEntitlement =
       (projStatus === "trialing" && trialEndMs > nowMs) ||
       (projStatus === "active" && (periodEndMs === 0 || periodEndMs > nowMs)) ||
@@ -323,7 +395,7 @@ Deno.serve(async (req) => {
     // grant with a 7-day trial in /confirm. plan_change preserves the existing
     // status/period fields by design.
     const currentProvider = String(proj?.provider ?? "");
-    const terminalStatus = new Set(["expired", "revoked", "refunded", "fraud"]).has(projStatus);
+    const terminalStatus = projStatus === "expired";
     const foreignRailBlocked = Boolean(proj && currentProvider && currentProvider !== "revolut" && !terminalStatus);
     let kind = "trial_setup";
     if (payload.intent === "update_card") {
@@ -469,6 +541,8 @@ Deno.serve(async (req) => {
       await db.rpc("fail_revolut_checkout_intent", {
         p_intent_key: intentKey, p_lease_token: leaseToken, p_error: customerStageError.message,
       });
+      const rejection = revolutMappingRejection(customerStageError.message);
+      if (rejection) return json({ error: rejection.error, code: rejection.code }, 409);
       return json({ error: "Could not stage billing profile", retryable: true }, 503);
     }
 
@@ -633,6 +707,8 @@ Deno.serve(async (req) => {
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, user.id);
+    if (billingGuard) return billingGuard;
 
     let payload: { order_id?: string } = {};
     try { payload = await req.json(); } catch (_) { /* optional */ }
@@ -760,7 +836,8 @@ Deno.serve(async (req) => {
     const curLive = (curStatus === "trialing" && curTrialEndMs > Date.now())
       || (curStatus === "active" && (!curEndMs || curEndMs > Date.now()))
       || (curStatus === "cancelled_at_period_end" && curEndMs > Date.now());
-    const curTerminal = new Set(["expired", "revoked", "refunded", "fraud"]).has(curStatus);
+    const curHardBlocked = new Set(["revoked", "refunded", "fraud"]).has(curStatus);
+    const curTerminal = curStatus === "expired";
     const foreignRailBlocked = Boolean(cur && curProvider && curProvider !== "revolut" && !curTerminal);
     const planEffectiveAt = curStatus === "trialing"
       ? (cur?.trial_ends_at ?? cur?.current_period_end)
@@ -827,6 +904,14 @@ Deno.serve(async (req) => {
     const crossRail = (kind === "plan_change" || kind === "card_update")
       ? curProvider !== "revolut"
       : foreignRailBlocked;
+    if (curHardBlocked) {
+      const stampError = await stampFinalized("rejected_account_blocked", { existing_status: curStatus });
+      if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
+      return json({
+        error: "Billing is unavailable while this account is blocked. Contact support.",
+        code: "account_billing_blocked",
+      }, 409);
+    }
     if (crossRail) {
       const stampError = await stampFinalized("rejected_cross_rail", { existing_provider: curProvider || null });
       if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
@@ -863,7 +948,17 @@ Deno.serve(async (req) => {
       custPatch.pending_order_id = orderId;
     }
     const { error: customerCommitError } = await db.from("cloud_revolut_customers").upsert(custPatch);
-    if (customerCommitError) return json({ error: "Could not save billing profile" }, 503);
+    if (customerCommitError) {
+      const rejection = revolutMappingRejection(customerCommitError.message);
+      if (rejection) {
+        const stampError = await stampFinalized(rejection.finalization, {
+          mapping_guard: rejection.code,
+        });
+        if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
+        return json({ error: rejection.error, code: rejection.code }, 409);
+      }
+      return json({ error: "Could not save billing profile" }, 503);
+    }
     if (cardCountry) {
       const { error: countryError } = await db.from("cloud_entitlement_projection")
         .update({ country_code: cardCountry, country_source: "card" }).eq("user_id", user.id);
@@ -953,6 +1048,8 @@ Deno.serve(async (req) => {
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, user.id, true);
+    if (billingGuard) return billingGuard;
     const { data: row } = await db.from("cloud_revolut_customers")
       .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct,pending_plan,pending_period,pending_amount_cents,pending_effective_at")
       .eq("user_id", user.id).maybeSingle();
@@ -991,6 +1088,8 @@ Deno.serve(async (req) => {
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, user.id);
+    if (billingGuard) return billingGuard;
 
     let payload: { reason?: string } = {};
     try { payload = await req.json(); } catch (_) { /* reason optional */ }
@@ -1045,6 +1144,8 @@ Deno.serve(async (req) => {
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, user.id);
+    if (billingGuard) return billingGuard;
 
     const { data: row } = await db.from("cloud_entitlement_projection")
       .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();

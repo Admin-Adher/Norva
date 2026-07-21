@@ -11,8 +11,8 @@ const revolutSource = fs.readFileSync(
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-function extractRoute(methodPath) {
-  const marker = `if (req.method === "POST" && path === "/${methodPath}") {`;
+function extractRoute(methodPath, method = 'POST') {
+  const marker = `if (req.method === "${method}" && path === "/${methodPath}") {`;
   const markerAt = revolutSource.indexOf(marker);
   assert.ok(markerAt >= 0, `/${methodPath} route not found`);
   const open = revolutSource.indexOf('{', markerAt);
@@ -31,12 +31,15 @@ function extractRoute(methodPath) {
   // run unchanged in Node's test VM. No business expression is rewritten.
   const body = revolutSource.slice(open + 1, close)
     .replace('let payload: { reason?: string } = {};', 'let payload = {};')
-    .replace(/const p = row as \{[^}]+\} \| null;/, 'const p = row;');
-  return new AsyncFunction('req', 'path', 'db', 'json', 'logCancelFeedback', body);
+    .replace(/const p = row as \{[^}]+\} \| null;/, 'const p = row;')
+    .replace('let profile = row as JsonRecord | null;', 'let profile = row;')
+    .replace('const patch: JsonRecord = {', 'const patch = {');
+  return new AsyncFunction('req', 'path', 'db', 'json', 'logCancelFeedback', 'guardInternalBilling', body);
 }
 
 const cancelRoute = extractRoute('cancel');
 const resumeRoute = extractRoute('resume');
+const profileRoute = extractRoute('profile', 'GET');
 
 function harness(options = {}) {
   const userId = options.userId || 'user-1';
@@ -81,8 +84,23 @@ function harness(options = {}) {
   };
   const json = (body, status = 200) => ({ body, status });
   const logCancelFeedback = async (...args) => { calls.feedback.push(args); };
+  const guardInternalBilling = async (_db, _userId, neutralIncludedProfile = false) => {
+    if (options.internalLookupError) {
+      return json({ error: 'Could not verify billing eligibility', code: 'billing_eligibility_unavailable' }, 503);
+    }
+    if (options.internal) {
+      if (neutralIncludedProfile) {
+        return json({ ok: true, profile: null, included_access: true });
+      }
+      return json({
+        error: 'Billing is not applicable to this included-access account',
+        code: 'internal_account_not_billable',
+      }, 409);
+    }
+    return null;
+  };
 
-  return { db, req, json, logCancelFeedback, calls };
+  return { db, req, json, logCancelFeedback, guardInternalBilling, calls };
 }
 
 function updateCas(calls) {
@@ -95,9 +113,45 @@ function updateCas(calls) {
 
 async function run(route, routePath, options) {
   const h = harness(options);
-  const result = await route(h.req, routePath, h.db, h.json, h.logCancelFeedback);
+  const result = await route(
+    h.req, routePath, h.db, h.json, h.logCancelFeedback, h.guardInternalBilling,
+  );
   return { ...h, result };
 }
+
+test('/cancel and /resume fail closed for internal accounts before any projection write', async () => {
+  for (const route of [cancelRoute, resumeRoute]) {
+    const internal = await run(route, 'ignored', {
+      internal: true,
+      row: { status: 'active', provider: 'revolut' },
+    });
+    assert.equal(internal.result.status, 409);
+    assert.equal(internal.result.body.code, 'internal_account_not_billable');
+    assert.equal(internal.calls.updates.length, 0);
+
+    const unknown = await run(route, 'ignored', {
+      internalLookupError: true,
+      row: { status: 'active', provider: 'revolut' },
+    });
+    assert.equal(unknown.result.status, 503);
+    assert.equal(unknown.result.body.code, 'billing_eligibility_unavailable');
+    assert.equal(unknown.calls.updates.length, 0);
+  }
+});
+
+test('/profile returns neutral included access for internal accounts and fails closed on lookup error', async () => {
+  const internal = await run(profileRoute, '/profile', { internal: true });
+  assert.deepEqual(internal.result, {
+    status: 200,
+    body: { ok: true, profile: null, included_access: true },
+  });
+  assert.equal(internal.calls.updates.length, 0);
+
+  const unknown = await run(profileRoute, '/profile', { internalLookupError: true });
+  assert.equal(unknown.result.status, 503);
+  assert.equal(unknown.result.body.code, 'billing_eligibility_unavailable');
+  assert.equal(unknown.calls.updates.length, 0);
+});
 
 test('/cancel rejects a missing or non-Revolut projection without writing', async () => {
   for (const row of [null, { status: 'active', provider: 'google_play' }]) {

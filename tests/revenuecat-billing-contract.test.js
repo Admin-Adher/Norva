@@ -134,6 +134,24 @@ test('RevenueCat takes over only after a system or manual entitlement has actual
   assert.doesNotMatch(migration, /current_projection\.provider[\s\S]{0,160}not in \('system', 'manual'\)/);
 });
 
+test('newer store events stay journal-only for internal and hard-blocked accounts', () => {
+  const migration = fs.readFileSync(path.join(
+    root,
+    'supabase/migrations/20260721120000_internal_account_billing_invariant.sql'
+  ), 'utf8');
+  const start = migration.indexOf('create or replace function public.apply_revenuecat_entitlement_event(');
+  const end = migration.indexOf('revoke all on function public.norva_is_internal_account', start);
+  const wrapper = migration.slice(start, end);
+  assert.match(wrapper, /pg_advisory_xact_lock/);
+  assert.match(wrapper, /for update/);
+  assert.match(wrapper, /v_internal or v_current_status in \('revoked', 'refunded', 'fraud'\)/);
+  assert.match(wrapper, /last_projection_applied = false/);
+  assert.match(wrapper, /return query select false, v_projection_last_event_at/);
+  assert.ok(wrapper.indexOf('v_internal or v_current_status') <
+    wrapper.indexOf('apply_revenuecat_entitlement_event_nonblocked('));
+  assert.match(migration, /revoke all on function public.apply_revenuecat_entitlement_event_nonblocked/);
+});
+
 test('PRODUCT_CHANGE is journal-only until the store reports the effective renewal or purchase', () => {
   const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-billing-webhook/index.ts'), 'utf8');
   assert.match(source, /new_product_id/);

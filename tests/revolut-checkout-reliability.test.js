@@ -84,9 +84,45 @@ test('webhook retries provider read failures and marks events only after mandato
   assert.match(source, /checkoutSuccess \|\| checkoutKind \? null : projectionPatch/);
   const finalMarker = source.lastIndexOf('await recordProcessedEvent');
   const journalFinalization = source.indexOf('order finalization journal failed');
-  const planCommit = source.indexOf('effectiveAt = await commitOrderPlan');
+  const planCommit = source.indexOf('const planCommit = await commitOrderPlan');
   assert.ok(finalMarker > journalFinalization && finalMarker > planCommit);
-  assert.match(source, /if \(error\) throw new Error\(`pending plan commit failed:/);
+  assert.match(source, /mappingGuardFinalization\(error\.message\)/);
+  assert.match(source, /throw new Error\(`pending plan commit failed:/);
+});
+
+test('Revolut webhook journals but never applies a checkout over a hard block', () => {
+  const source = read('supabase/functions/norva-revolut-webhook/index.ts');
+  const start = source.indexOf('async function finalizeCheckoutEntitlement');
+  const end = source.indexOf('// Card issuing country', start);
+  const finalize = source.slice(start, end);
+  const guard = finalize.indexOf('if (hardBlocked) return "rejected_account_blocked"');
+  assert.ok(guard >= 0);
+  assert.ok(guard < finalize.indexOf('if (kind === "card_update")'));
+  assert.ok(guard < finalize.indexOf('replaceProjectionWithRailCas({'));
+  assert.match(source, /checkoutSuccess && \["trial_started", "already_confirmed", "resubscribed", "plan_change_scheduled"\]/);
+  assert.doesNotMatch(source, /checkoutSuccess && \[[^\]]*rejected_account_blocked/);
+});
+
+test('Revolut webhook preserves internal and terminal accounts for every event kind', () => {
+  const source = read('supabase/functions/norva-revolut-webhook/index.ts');
+  assert.match(source, /if \(internalAccount\) return "rejected_internal_account"/);
+  assert.match(source, /applyNonCheckoutProjectionPatch\(admin, userId, eventId, patch\)/);
+  assert.match(source, /\.rpc\("apply_revolut_entitlement_event"/);
+  assert.match(source, /skipped_projection_result: projectionResult/);
+  assert.doesNotMatch(source, /\.upsert\(patch, \{ onConflict: "user_id" \}\)/);
+  assert.doesNotMatch(source, /checkoutSuccess && \[[^\]]*rejected_internal_account/);
+});
+
+test('Revolut mapping races become explicit rejected checkout finalizations', () => {
+  const webhook = read('supabase/functions/norva-revolut-webhook/index.ts');
+  const endpoint = read('supabase/functions/norva-revolut/index.ts');
+  assert.match(webhook, /planCommit\.rejectedAs/);
+  assert.match(webhook, /rejected_internal_account/);
+  assert.match(webhook, /rejected_account_blocked/);
+  assert.match(webhook, /rejected_cross_rail/);
+  assert.match(endpoint, /revolutMappingRejection\(customerStageError\.message\)/);
+  assert.match(endpoint, /revolutMappingRejection\(customerCommitError\.message\)/);
+  assert.match(endpoint, /stampFinalized\(rejection\.finalization/);
 });
 
 test('web checkout never displays success after all confirm attempts fail', () => {

@@ -375,7 +375,9 @@ class App {
         // Once health resolves we show them only when a source is connected.
         healthReady.then(() => {
             this.maybeShowTrialBanner();
-            this.maybeShowBillingIssueBanner();
+            // Render one billing warning only, after onboarding/source health has
+            // settled. checkCloudAccess used to create another warning earlier.
+            this._maybeShowBillingAlert(this.entitlement || window.NorvaEntitlement);
             this.maybeShowRegionPrompt();
         });
         // New content and support replies can land mid-session — refresh the bell inbox
@@ -1105,10 +1107,6 @@ class App {
                 this.redirectToPaywall(decision);
                 return false;
             }
-            // Paiement en échec mais accès encore ouvert (fenêtre de grâce) :
-            // alerte visible NON bloquante — le mur souple n'arrive qu'à la fin
-            // de la grâce, ici on prévient pendant qu'il est simple d'agir.
-            this._maybeShowBillingAlert(decision);
         } catch (err) {
             if (err?.status === 401) {
                 // A 401 here can be a momentarily-stale token, not a dead session.
@@ -1155,7 +1153,12 @@ class App {
     _maybeShowBillingAlert(decision) {
         try {
             const status = String(decision?.status || decision?.projection?.status || '').toLowerCase();
-            const inGrace = decision?.reason === 'billing_grace' || status === 'past_due' || status === 'grace';
+            const provider = String(decision?.projection?.provider || '').toLowerCase();
+            // Included access never belongs to a billable rail. Keep this guard in
+            // addition to the database invariant so stale cached state cannot show
+            // a payment action to a system/manual account.
+            const includedProvider = provider === 'system' || provider === 'manual';
+            const inGrace = !includedProvider && (decision?.reason === 'billing_grace' || status === 'past_due' || status === 'grace');
             const existing = document.getElementById('norva-billing-alert');
             if (!inGrace) { if (existing) existing.remove(); return; }
             if (existing || sessionStorage.getItem('norva-billing-alert-dismissed') === '1') return;
@@ -1173,7 +1176,6 @@ class App {
             const msg = document.createElement('span');
             msg.textContent = "⚠️ Your last payment didn't go through — your access stays on for a few days while it's sorted out.";
             bar.appendChild(msg);
-            const provider = String(decision?.projection?.provider || '').toLowerCase();
             const isTv = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
             if (isTv) {
                 const hint = document.createElement('span');
@@ -1181,10 +1183,14 @@ class App {
                 bar.appendChild(hint);
             } else {
                 const a = document.createElement('a');
-                if (provider === 'google_play' || provider === 'apple_app_store') {
+                if (provider === 'google_play') {
                     a.href = 'https://play.google.com/store/account/subscriptions';
                     a.target = '_blank'; a.rel = 'noopener';
                     a.textContent = 'Fix it on Google Play →';
+                } else if (provider === 'apple_app_store') {
+                    a.href = 'https://apps.apple.com/account/subscriptions';
+                    a.target = '_blank'; a.rel = 'noopener';
+                    a.textContent = 'Fix it on the App Store';
                 } else {
                     a.href = '/subscription.html?returnTo=' + encodeURIComponent('/app#home');
                     a.textContent = 'Update payment →';
@@ -1344,51 +1350,6 @@ class App {
                 try { card.querySelector('[data-recap-primary]')?.focus(); } catch (_) { /* noop */ }
             }, 0);
         } catch (_) { /* never break the app over a recap */ }
-    }
-
-    // Payment-issue banner: a failed renewal puts the account in a short grace
-    // window. Nudge the user to fix billing before access is cut, linking to the
-    // subscription manager. Keyed on the REAL status (true even in observe mode).
-    maybeShowBillingIssueBanner() {
-        try {
-            // Not on the empty onboarding screen: a source-less brand-new account has
-            // nothing to fix yet, and the banner would collide with the region prompt.
-            if (this.sourceHealthSummary && ['not_configured', 'unknown'].includes(this.sourceHealthSummary.state)) return;
-            const ent = this.entitlement || window.NorvaEntitlement;
-            if (!ent) return;
-            const status = ent.status || (ent.projection && ent.projection.status) || '';
-            if (!(status === 'past_due' || status === 'grace' || ent.reason === 'billing_grace')) return;
-            if (sessionStorage.getItem('norva-billing-banner-dismissed') === '1') return;
-            if (document.getElementById('norva-billing-banner')) return;
-
-            const here = location.pathname + location.search + location.hash;
-            const bar = document.createElement('div');
-            bar.id = 'norva-billing-banner';
-            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#2a1d12;border:1px solid #7a5326;color:#fde8b0;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
-
-            const span = document.createElement('span');
-            span.textContent = 'Payment issue — update your payment method to keep watching';
-
-            const link = document.createElement('a');
-            link.href = '/subscription.html?returnTo=' + encodeURIComponent(here);
-            link.textContent = 'Fix billing';
-            link.style.cssText = 'color:#ffd479;text-decoration:none;font-weight:700';
-
-            const close = document.createElement('button');
-            close.type = 'button';
-            close.setAttribute('aria-label', 'Dismiss');
-            close.textContent = '✕';
-            close.style.cssText = 'background:transparent;border:0;color:#d9c08a;font-size:16px;cursor:pointer;line-height:1';
-            close.addEventListener('click', () => {
-                try { sessionStorage.setItem('norva-billing-banner-dismissed', '1'); } catch (_) { }
-                bar.remove();
-            });
-
-            bar.appendChild(span);
-            bar.appendChild(link);
-            bar.appendChild(close);
-            document.body.appendChild(bar);
-        } catch (_) { /* never break the app over a banner */ }
     }
 
     addLogoutButton() {

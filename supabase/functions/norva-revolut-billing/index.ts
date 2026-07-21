@@ -176,13 +176,15 @@ async function sendReceipt(db: SupabaseClient, userId: string, planLabel: string
   } catch (_) { /* best-effort */ }
 }
 
-// Is this the owner's own test account? Internal accounts must NEVER trigger a founder
-// Telegram ping (a test conversion/failure is not business signal).
+// Is this the owner's own test account? This check is also the service-level
+// billing kill-switch, so database errors must fail closed (throw) rather than
+// silently treating an unknown account as billable.  Callers used only for
+// notifications already wrap it in best-effort try/catch.
 async function isInternal(db: SupabaseClient, userId: string): Promise<boolean> {
-  try {
-    const { data } = await db.from("admin_internal_accounts").select("user_id").eq("user_id", userId).maybeSingle();
-    return Boolean(data);
-  } catch (_) { return false; }
+  const { data, error } = await db.from("admin_internal_accounts")
+    .select("user_id").eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(`internal_account_check_failed:${error.message}`);
+  return Boolean(data);
 }
 async function userEmail(db: SupabaseClient, userId: string): Promise<string> {
   try { const { data } = await db.auth.admin.getUserById(userId); return data?.user?.email ?? userId; }
@@ -463,7 +465,7 @@ interface BillingCustomer {
 }
 
 interface BillingClaim {
-  action: "blocked" | "done" | "failed" | "wait" | "apply" | "apply_failed" | "resume" | "create";
+  action: "internal" | "blocked" | "done" | "failed" | "wait" | "apply" | "apply_failed" | "resume" | "create";
   status: string;
   order_id: string | null;
   payment_id: string | null;
@@ -679,6 +681,9 @@ async function chargeUser(
   opts: { retryAttempt?: number } = {},
 ): Promise<ChargeUserResult> {
   const retryAttempt = opts.retryAttempt ?? 0;
+  // First guard is deliberately before customer/card lookup and, critically,
+  // before the immutable-cycle claim that leads to a remote POST /orders.
+  if (await isInternal(db, row.user_id)) return "skipped";
   const identity = billingCycleIdentity(row.user_id, kind, cycleAnchor, retryAttempt);
   const { data: cust, error: customerError } = await db.from("cloud_revolut_customers")
     .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct,card_country,base_amount_cents,promo_cycles_left")
@@ -724,6 +729,11 @@ async function chargeUser(
   const label = plan === "family" ? "Norva Family" : "Norva";
   const desc = `${label} ${cadence} — ${kind}${retryAttempt ? ` (auto-retry ${retryAttempt})` : ""}${claim.discount_pct ? ` (${claim.discount_pct}% off)` : ""}`;
 
+  // The SQL wrapper returns `internal` without inserting a billing attempt.  A
+  // second registry read closes the race where an admin tags the account after
+  // the first service check but before/while the claim transaction completes.
+  if (claim.action === "internal") return "skipped";
+  if (await isInternal(db, row.user_id)) return "skipped";
   if (claim.action === "blocked" || claim.action === "wait") return "pending";
   if (claim.action === "done") return "charged";
   if (claim.action === "failed") return "failed";

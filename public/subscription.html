@@ -322,6 +322,7 @@
       // "Payment method — •••• 1234" row into the card's details (web rail only).
       function appendPaymentMethod(card, decision) {
         try {
+          if (isIncludedAccess(decision)) return;
           const provider = String((decision.projection || {}).provider || '');
           if (provider !== 'revolut' || isNative()) return;
           if (!(window.NorvaBilling && window.NorvaBilling.revolutProfile)) return;
@@ -395,6 +396,15 @@
       function entProvider(decision) {
         return String((((decision || {}).projection) || {}).provider || '').toLowerCase();
       }
+      function isIncludedAccess(decision) {
+        const provider = entProvider(decision);
+        const status = String((decision || {}).status || (((decision || {}).projection || {}).status) || '').toLowerCase();
+        return status === 'active' && (provider === 'system' || provider === 'manual');
+      }
+      function isHardBlocked(decision) {
+        const status = String((decision || {}).status || (((decision || {}).projection || {}).status) || '').toLowerCase();
+        return status === 'revoked' || status === 'refunded' || status === 'fraud';
+      }
       // TRUE when the sub lives on a store that ISN'T manageable from here: on
       // Android, a web (Revolut) or Apple sub; on the web, a Play or Apple sub.
       // Play policy forbids managing/paying for non-Play subs inside the Android
@@ -414,6 +424,7 @@
         return '';
       }
       function storeNoteText(decision) {
+        if (isIncludedAccess(decision)) return 'Your Norva access is included with this account. There is nothing to pay or manage.';
         if (isTvShell()) return 'Subscribe or manage your plan on the web at norva.tv, or in the Norva phone app — it unlocks here automatically.';
         if (managedElsewhere(decision)) return managedElsewhereNote(decision);
         if (entProvider(decision) === 'google_play' && isNative()) {
@@ -661,7 +672,37 @@
           return;
         }
 
+        // Security/reversal states cannot be repaired by starting another
+        // checkout. Keep the account on a support-only path with no billing CTA.
+        if (isHardBlocked(decision)) {
+          card.appendChild(el('span', 'pill warn', 'Access unavailable'));
+          card.appendChild(el('div', 'plan-name', 'Norva account'));
+          card.appendChild(el('p', 'msg warn', 'This account cannot start or manage a payment. Contact Norva support so we can review it safely.'));
+          content.appendChild(card);
+          const row = el('div', 'actions');
+          const support = el('a', 'btn', 'Contact support');
+          support.setAttribute('href', 'mailto:support@norva.tv?subject=Account%20access%20review');
+          row.appendChild(support);
+          row.appendChild(backBtn('Back'));
+          content.appendChild(row);
+          return;
+        }
+
         // Payment issue / grace — most urgent, takes precedence.
+        // System/manual access is granted with the account, not bought on a
+        // billing rail. Never show a renewal date, saved card, checkout, update,
+        // cancel or resume action for it, even if historical payment data exists.
+        if (isIncludedAccess(decision)) {
+          card.appendChild(el('span', 'pill ok', 'Included'));
+          card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
+          card.appendChild(el('p', 'msg', 'Your Norva access is included with this account. Nothing renews and there is nothing to pay.'));
+          content.appendChild(card);
+          const row = el('div', 'actions');
+          row.appendChild(backBtn('Back'));
+          content.appendChild(row);
+          return;
+        }
+
         if (status === 'past_due' || status === 'grace' || decision.reason === 'billing_grace') {
           card.appendChild(el('span', 'pill warn', 'Payment issue'));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));

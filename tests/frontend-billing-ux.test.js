@@ -134,6 +134,43 @@ test('an unverified billing record is never presented as an active plan or trial
   assert.ok(source.indexOf('if (needsVerification)') < source.indexOf("if (status === 'trialing')"));
 });
 
+test('included system access never exposes payment state or billing controls', () => {
+  const subscription = read('public/subscription.html');
+  const settings = read('public/js/pages/Settings.js');
+  const app = read('public/js/app.js');
+  const entitlements = read('supabase/functions/_shared/entitlements.ts');
+
+  assert.match(subscription, /function isIncludedAccess\(decision\)/);
+  assert.match(subscription, /if \(isIncludedAccess\(decision\)\) return;/);
+  assert.ok(subscription.indexOf('if (isIncludedAccess(decision)) {') <
+    subscription.indexOf("if (status === 'past_due'"),
+  'included access must be rendered before any payment-issue branch');
+  assert.match(subscription, /Nothing renews and there is nothing to pay/);
+
+  assert.match(settings, /provider === 'system' \|\| provider === 'manual'/);
+  assert.match(settings, /button\.style\.display = 'none'/);
+  assert.match(settings, /Included access/);
+
+  assert.equal((app.match(/this\._maybeShowBillingAlert\(/g) || []).length, 1,
+    'the app must render only one global billing warning');
+  assert.doesNotMatch(app, /this\.maybeShowBillingIssueBanner\(\)/);
+  assert.match(app, /const includedProvider = provider === 'system' \|\| provider === 'manual'/);
+  assert.match(app, /https:\/\/apps\.apple\.com\/account\/subscriptions/);
+
+  assert.match(entitlements, /reason: includedAccess \? "included_access" : reason/);
+});
+
+test('hard-blocked accounts get support guidance without a billing CTA', () => {
+  const subscription = read('public/subscription.html');
+  const settings = read('public/js/pages/Settings.js');
+  assert.match(subscription, /function isHardBlocked\(decision\)/);
+  assert.match(subscription, /This account cannot start or manage a payment/);
+  assert.ok(subscription.indexOf('if (isHardBlocked(decision))') <
+    subscription.indexOf("if (status === 'past_due'"));
+  assert.match(settings, /includedAccess \|\| hardBlocked/);
+  assert.match(settings, /Access under review/);
+});
+
 test('login separates cloud and local-hub authentication without open redirects', () => {
   const source = read('public/login.html');
   assert.match(source, /navigation-safety\.js/);

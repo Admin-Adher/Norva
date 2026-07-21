@@ -436,11 +436,21 @@ class SettingsPage {
             const REAL_STATUSES = ['trialing', 'active', 'cancelled_at_period_end', 'past_due', 'grace', 'expired'];
             const hasRealSub = REAL_STATUSES.indexOf(String(decision.status || '').toLowerCase()) !== -1;
             const observing = decision.enforced === false || decision.mode === 'observe';
+            const provider = String(decision.projection?.provider || '').toLowerCase();
+            const hardBlocked = ['revoked', 'refunded', 'fraud']
+                .includes(String(decision.status || '').toLowerCase());
+            const includedAccess = String(decision.status || '').toLowerCase() === 'active'
+                && (provider === 'system' || provider === 'manual');
 
             plan.textContent = this.accessLabel(decision);
             hint.textContent = this.accessHint(decision);
 
-            if (observing && !hasRealSub) {
+            if (includedAccess || hardBlocked) {
+                // Pilot/VIP/manual grants have no billing relationship. Hiding the
+                // control also prevents stale saved-card data from exposing a
+                // misleading manage-payment route.
+                if (button) button.style.display = 'none';
+            } else if (observing && !hasRealSub) {
                 // No subscription yet → access is open in observe mode.
                 plan.textContent = 'Full access';
                 hint.textContent = 'You have full access to Norva.';
@@ -476,6 +486,13 @@ class SettingsPage {
     accessLabel(decision = {}) {
         const status = String(decision.status || '').toLowerCase();
         const name = this.planName(decision);
+        const provider = String(decision.projection?.provider || '').toLowerCase();
+        if (status === 'revoked') return 'Access revoked';
+        if (status === 'refunded') return 'Payment refunded';
+        if (status === 'fraud') return 'Access under review';
+        if (status === 'active' && (provider === 'system' || provider === 'manual')) {
+            return name ? `${name} · Included` : 'Included access';
+        }
         const withPlan = (suffix) => name ? `${name} · ${suffix}` : suffix;
         switch (status) {
             case 'trialing': return withPlan('Free trial');
@@ -495,6 +512,10 @@ class SettingsPage {
         const fmt = (iso) => { try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); } catch (_) { return null; } };
         const daysLeft = (iso) => { const t = new Date(iso).getTime(); return Number.isFinite(t) ? Math.max(0, Math.ceil((t - Date.now()) / 86400000)) : null; };
         switch (status) {
+            case 'revoked':
+            case 'refunded':
+            case 'fraud':
+                return 'This account cannot start or manage a payment. Contact Norva support for help.';
             case 'trialing': {
                 const endIso = p.trial_ends_at || p.current_period_end;
                 const d = endIso ? daysLeft(endIso) : null;

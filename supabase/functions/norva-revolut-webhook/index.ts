@@ -165,15 +165,24 @@ Deno.serve(async (req) => {
     let checkoutResult: string | null = null;
     if (checkoutSuccess) checkoutResult = await finalizeCheckoutEntitlement(admin, userId, order, meta);
     else if (patch) {
-      const { error } = await admin
-        .from("cloud_entitlement_projection")
-        .upsert(patch, { onConflict: "user_id" });
-      if (error) throw new Error(`projection upsert failed: ${error.message}`);
+      const projectionResult = await applyNonCheckoutProjectionPatch(admin, userId, eventId, patch);
+      if (projectionResult) {
+        await recordProcessedEvent(admin, userId, eventId, eventType, {
+          event: body, order, skipped_projection_result: projectionResult,
+        });
+        return json({ ok: true, skipped: "projection_not_applied", result: projectionResult });
+      }
     }
 
     let effectiveAt: string | null = null;
     if (checkoutSuccess && ["trial_started", "already_confirmed", "resubscribed", "plan_change_scheduled"].includes(String(checkoutResult))) {
-      effectiveAt = await commitOrderPlan(admin, userId, eventType, meta, orderId);
+      const planCommit = await commitOrderPlan(admin, userId, eventType, meta, orderId);
+      effectiveAt = planCommit.effectiveAt;
+      // A tag/hard-block/rail move can win after entitlement finalization but
+      // before the recurring mapping write. The DB trigger makes that race
+      // authoritative; still release the validation hold and journal the
+      // rejected checkout instead of relying on a later webhook retry.
+      if (planCommit.rejectedAs) checkoutResult = planCommit.rejectedAs;
     }
     if (checkoutSuccess && orderId) {
       let holdReleased = remoteState !== "AUTHORISED";
@@ -257,12 +266,14 @@ async function cancelValidationHold(orderId: string): Promise<boolean> {
 // --- event -> projection mapping --------------------------------------------
 
 function projectionPatch(userId: string, type: string, order: JsonRecord, meta: JsonRecord): JsonRecord | null {
-  const status = statusForEvent(type, meta);
+  const status = statusForEvent(type, meta, String(order.state ?? "").toUpperCase());
   if (!status) return null;
 
   const planCode = planForMeta(meta);
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
-  const nowIso = new Date().toISOString();
+  const eventAt = authoritativeOrderEventAt(order);
+  const eventMs = new Date(eventAt).getTime();
+  const verifiedAt = new Date().toISOString();
 
   const patch: JsonRecord = {
     user_id: userId,
@@ -273,28 +284,28 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
     // No per-user limit overrides — entitlements.ts layers the current plan-catalog
     // limits on read, so catalog changes apply without the webhook keeping a copy.
     limits: {},
-    last_verified_at: nowIso,
-    last_event_at: nowIso,
+    last_verified_at: verifiedAt,
+    last_event_at: eventAt,
     bill_period: period,
   };
 
   if (status === "trialing") {
     // TODO(subscriptions): prefer the subscription's real trial-phase end once we
     // fetch it; TRIAL_DAYS is the interim source of truth.
-    patch.trial_ends_at = new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
-    patch.trial_consumed_at = nowIso;
+    patch.trial_ends_at = new Date(eventMs + TRIAL_DAYS * 86_400_000).toISOString();
+    patch.trial_consumed_at = eventAt;
     patch.current_period_end = patch.trial_ends_at;
   } else if (status === "active") {
     // TODO(subscriptions): prefer the subscription's real next_billing/period end.
     const days = period === "annual" ? 365 : 30;
-    patch.current_period_end = new Date(Date.now() + days * 86_400_000).toISOString();
+    patch.current_period_end = new Date(eventMs + days * 86_400_000).toISOString();
     const cents = Number(recordOrEmpty(order.order_amount).value);
     if (Number.isFinite(cents) && cents > 0) patch.mrr_cents = Math.round(cents);
   }
 
   if (status === "past_due") {
     // Keep access open for a grace window (matches entitlements.ts fail-open).
-    patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
+    patch.fail_open_until = new Date(eventMs + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
   }
 
   // Customer-country proxy for the web rail: the card's ISSUING country, read on the
@@ -307,6 +318,16 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   }
 
   return patch;
+}
+
+// The fetched Order is authoritative and exposes the instant of its latest
+// state transition.  Webhook delivery time is not a causal clock: delayed
+// deliveries would otherwise be able to overwrite a newer entitlement.
+function authoritativeOrderEventAt(order: JsonRecord): string {
+  const raw = stringOrNull(order.updated_at);
+  const ms = raw ? new Date(raw).getTime() : Number.NaN;
+  if (!Number.isFinite(ms)) throw new Error("authoritative order updated_at is missing or invalid");
+  return new Date(ms).toISOString();
 }
 
 // AUTHORISED is the successful final state of Norva's MANUAL card-check order.
@@ -324,6 +345,13 @@ async function finalizeCheckoutEntitlement(
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
   const nowIso = new Date().toISOString();
   const customerId = stringOrNull(order.customer_id) ?? stringOrNull(meta.customer_id);
+  const { data: internalAccount, error: internalError } = await db.from("admin_internal_accounts")
+    .select("user_id").eq("user_id", userId).maybeSingle();
+  if (internalError) throw new Error(`internal account lookup failed: ${internalError.message}`);
+  // A checkout may complete after an administrator converted an account to an
+  // included pilot.  The order is still finalized/released by the caller, but it
+  // cannot create a paid plan or a recurring-customer mapping.
+  if (internalAccount) return "rejected_internal_account";
   const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
     .select("status,provider,trial_ends_at,trial_consumed_at,current_period_end,fail_open_until")
     .eq("user_id", userId).maybeSingle();
@@ -338,12 +366,17 @@ async function finalizeCheckoutEntitlement(
   } | null;
   const curStatus = String(cur?.status ?? "");
   const curProvider = String(cur?.provider ?? "").toLowerCase();
+  const hardBlocked = new Set(["revoked", "refunded", "fraud"]).has(curStatus);
+  // A checkout opened before a security/refund decision may return through the
+  // webhook after that decision. Journal it and release its validation hold, but
+  // never replace the authoritative hard block or commit a recurring plan.
+  if (hardBlocked) return "rejected_account_blocked";
   const currentEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
   const trialEndMs = cur?.trial_ends_at ? new Date(cur.trial_ends_at).getTime() : 0;
   const failOpenMs = cur?.fail_open_until ? new Date(cur.fail_open_until).getTime() : 0;
   const isLive = ["trialing", "active", "past_due", "grace", "cancelled_at_period_end"].includes(curStatus) &&
     Math.max(currentEndMs, trialEndMs, failOpenMs) > Date.now();
-  const terminalStatus = new Set(["expired", "revoked", "refunded", "fraud"]).has(curStatus);
+  const terminalStatus = curStatus === "expired";
   const foreignRailBlocked = Boolean(cur && curProvider && curProvider !== "revolut" && !terminalStatus);
   const planEffectiveAt = curStatus === "trialing"
     ? (cur?.trial_ends_at ?? cur?.current_period_end)
@@ -442,22 +475,29 @@ function cardCountryFromOrder(order: JsonRecord): string | null {
   return null;
 }
 
-function statusForEvent(type: string, meta: JsonRecord): string | null {
+function statusForEvent(type: string, meta: JsonRecord, authoritativeOrderState: string): string | null {
   const kind = String(meta.kind ?? "").toLowerCase();
   switch (type) {
-    case "SUBSCRIPTION_INITIATED":
-      return "trialing"; // trial phase starts
     case "ORDER_COMPLETED":
+      // A delayed failure delivery may be fetched after the same Order recovered
+      // to COMPLETED. Conversely, a completion notification can beat the Order
+      // read. Only the current authoritative state is allowed to mutate access.
+      if (authoritativeOrderState !== "COMPLETED") return null;
       // trial-setup order (card saved) keeps us trialing; a real charge → active.
       return kind === "trial_setup" ? "trialing" : "active";
     case "ORDER_PAYMENT_DECLINED":
     case "ORDER_PAYMENT_FAILED":
+      return ["FAILED", "DECLINED", "CANCELLED"].includes(authoritativeOrderState)
+        ? "past_due"
+        : null;
+    // Subscription notifications need the authoritative Subscription object,
+    // which this legacy endpoint does not fetch yet. They remain journalled but
+    // cannot project a status from an unrelated/stale Order snapshot.
+    case "SUBSCRIPTION_INITIATED":
     case "SUBSCRIPTION_OVERDUE":
-      return "past_due";
     case "SUBSCRIPTION_CANCELLED":
-      return "cancelled_at_period_end"; // entitled until period end, no auto-renew
     case "SUBSCRIPTION_FINISHED":
-      return "expired";
+      return null;
     default:
       return null;
   }
@@ -478,16 +518,32 @@ function planForMeta(meta: JsonRecord): string {
 // Amount: the metadata's amount_cents (stamped server-side at checkout OPEN, so a
 // promo ending mid-checkout still honors what the customer saw), else the current
 // catalog from billing_prices (single source, _shared/prices.ts).
+type OrderPlanCommitResult = {
+  effectiveAt: string | null;
+  rejectedAs: string | null;
+};
+
+function mappingGuardFinalization(message: string): string | null {
+  if (message.includes("internal_account_not_billable")) return "rejected_internal_account";
+  if (message.includes("revolut_customer_account_blocked")) return "rejected_account_blocked";
+  if (message.includes("revolut_customer_rail_mismatch")) return "rejected_cross_rail";
+  return null;
+}
+
 async function commitOrderPlan(
   db: SupabaseClient,
   userId: string,
   eventType: string,
   meta: JsonRecord,
   orderId: string | null,
-): Promise<string | null> {
-  if (eventType !== "ORDER_COMPLETED" && eventType !== "ORDER_AUTHORISED") return null;
+): Promise<OrderPlanCommitResult> {
+  if (eventType !== "ORDER_COMPLETED" && eventType !== "ORDER_AUTHORISED") {
+    return { effectiveAt: null, rejectedAs: null };
+  }
   const kind = String(meta.kind ?? "").toLowerCase();
-  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") return null;
+  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") {
+    return { effectiveAt: null, rejectedAs: null };
+  }
   const plan = planForMeta(meta);
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
   const metaAmount = Number(meta.amount_cents);
@@ -526,8 +582,12 @@ async function commitOrderPlan(
       pending_order_id: orderId,
       updated_at: nowIso,
     }, { onConflict: "user_id" });
-    if (error) throw new Error(`pending plan commit failed: ${error.message}`);
-    return effectiveAt;
+    if (error) {
+      const rejectedAs = mappingGuardFinalization(error.message);
+      if (rejectedAs) return { effectiveAt: null, rejectedAs };
+      throw new Error(`pending plan commit failed: ${error.message}`);
+    }
+    return { effectiveAt, rejectedAs: null };
   }
   const { error } = await db.from("cloud_revolut_customers").upsert({
     user_id: userId, plan, period, amount_cents: amount,
@@ -537,8 +597,12 @@ async function commitOrderPlan(
     pending_effective_at: null, pending_order_id: null,
     updated_at: nowIso,
   }, { onConflict: "user_id" });
-  if (error) throw new Error(`plan commit failed: ${error.message}`);
-  return null;
+  if (error) {
+    const rejectedAs = mappingGuardFinalization(error.message);
+    if (rejectedAs) return { effectiveAt: null, rejectedAs };
+    throw new Error(`plan commit failed: ${error.message}`);
+  }
+  return { effectiveAt: null, rejectedAs: null };
 }
 
 // --- signature verification -------------------------------------------------
@@ -577,6 +641,29 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 // --- persistence helpers ----------------------------------------------------
+
+async function applyNonCheckoutProjectionPatch(
+  db: SupabaseClient,
+  userId: string,
+  eventId: string,
+  patch: JsonRecord,
+): Promise<string | null> {
+  const eventAt = stringOrNull(patch.last_event_at);
+  if (!eventAt) throw new Error("non-checkout projection has no authoritative event time");
+  const { data, error } = await db.rpc("apply_revolut_entitlement_event", {
+    p_user_id: userId,
+    p_event_at: eventAt,
+    p_event_id: eventId,
+    p_patch: patch,
+  });
+  if (error) throw new Error(`projection causal apply failed: ${error.message}`);
+  const outcome = (Array.isArray(data) ? data[0] : data) as {
+    applied?: boolean;
+    result?: string;
+  } | null;
+  if (outcome?.applied) return null;
+  return stringOrNull(outcome?.result) ?? "not_applied";
+}
 
 async function alreadyProcessed(db: SupabaseClient, eventId: string): Promise<boolean> {
   const { data, error } = await db

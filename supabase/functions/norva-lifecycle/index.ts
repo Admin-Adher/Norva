@@ -129,6 +129,19 @@ async function marketingEmailAllowed(db: SupabaseClient, userId: string): Promis
   return data === true;
 }
 
+// Lifecycle billing messages must never target pilot/system accounts. Return
+// true on a registry error so dunning fails closed and retries on the next cron
+// instead of sending a false payment warning or expiring included access.
+async function internalAccountOrUnknown(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await db.from("admin_internal_accounts")
+    .select("user_id").eq("user_id", userId).maybeSingle();
+  if (error) {
+    console.error("[norva-lifecycle] internal account check failed", userId, error.message);
+    return true;
+  }
+  return Boolean(data);
+}
+
 type ResendAudienceClaim = {
   email: string;
   user_id: string | null;
@@ -335,7 +348,10 @@ async function runWelcome(db: SupabaseClient): Promise<number> {
     .limit(BATCH);
   // Never welcome internal/test accounts (owner, family, internal test) — mirrors
   // the admin_internal_accounts exclusion the finance/funnel views already apply.
-  const { data: internal } = await db.from("admin_internal_accounts").select("user_id");
+  const { data: internal, error: internalError } = await db.from("admin_internal_accounts").select("user_id");
+  if (internalError) {
+    throw new Error(`internal_account_check_failed:${internalError.message}`);
+  }
   const internalIds = new Set((internal ?? []).map((r: { user_id: string }) => r.user_id));
   let sent = 0;
   for (const row of (data ?? []) as { user_id: string }[]) {
@@ -370,6 +386,7 @@ async function runTrialReminder(db: SupabaseClient): Promise<number> {
     .limit(BATCH);
   let sent = 0;
   for (const row of (data ?? []) as Proj[]) {
+    if (await internalAccountOrUnknown(db, row.user_id)) continue;
     if (!await claimMarker(db, row.user_id, "trial_reminder_email_at")) continue;
     try {
       if (await emailUser(db, row.user_id, (fn) => renderTrialEnding(fn, { endsAt: row.trial_ends_at ?? "", planLabel: planLabel(row.plan_code) }))) {
@@ -399,6 +416,7 @@ async function runDunning(db: SupabaseClient): Promise<number> {
     .limit(BATCH);
   let sent = 0;
   for (const row of (data ?? []) as (Proj & { dunning_last_at: string | null })[]) {
+    if (await internalAccountOrUnknown(db, row.user_id)) continue;
     const stage = (row.dunning_stage ?? 0) + 1;
     const nowIso = new Date().toISOString();
     // CAS-claim dunning_last_at (its throttle marker) BEFORE sending, so two overlapping
@@ -584,6 +602,7 @@ async function runExpirePastDue(db: SupabaseClient): Promise<number> {
     ...((stuck ?? []) as { user_id: string }[]).map((r) => r.user_id),
   ]);
   for (const userId of ids) {
+    if (await internalAccountOrUnknown(db, userId)) continue;
     // Guard the transition on status STILL past_due — a webhook may have flipped the
     // user back to active (they paid) between the SELECT above and this UPDATE; never
     // expire a now-paying account.

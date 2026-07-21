@@ -249,9 +249,12 @@ export async function hasConsumedTrial(db: SupabaseClient, userId: string): Prom
 }
 
 function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRecord, failOpen: boolean): EntitlementDecision {
+  const provider = String(projection.provider || "").toLowerCase();
+  const includedAccess = String(projection.status || "").toLowerCase() === "active" &&
+    (provider === "system" || provider === "manual");
   return {
     allowed: true,
-    reason,
+    reason: includedAccess ? "included_access" : reason,
     status: String(projection.status || "unknown"),
     planCode: String(projection.plan_code || "none"),
     mode: ENTITLEMENTS_MODE,
@@ -259,7 +262,9 @@ function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRec
     failOpen,
     limits,
     projection: sanitizeProjection(projection),
-    message: failOpen
+    message: includedAccess
+      ? "Norva access is included with this account."
+      : failOpen
       ? "Norva access is temporarily allowed while billing status is being verified."
       : "Norva access is active.",
   };
