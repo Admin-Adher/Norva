@@ -156,6 +156,14 @@ public class PlayerActivity extends Activity {
     private String freshStreamReason;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
+    // A live feed is an open-ended socket: some panels close an otherwise healthy
+    // connection every few minutes. That is not an end-of-program and must never
+    // pop the viewer back to the guide. Keep reconnecting inside this Activity,
+    // with a bounded backoff, until the provider resumes or the viewer presses Back.
+    private static final long[] LIVE_RECONNECT_DELAYS_MS = {
+            1_000L, 2_000L, 3_500L, 5_000L, 8_000L, 12_000L, 15_000L
+    };
+    private int liveReconnectAttempts = 0;
     private final Runnable healthyRecoveryReset = new Runnable() {
         @Override public void run() { playRetries = 0; }
     };
@@ -341,6 +349,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_READY) {
                     everReady = true;
+                    liveReconnectAttempts = 0;
                     errorView.setVisibility(View.GONE);
                     reportPlaybackStatus("ok", null);
                     if (player.getDuration() > 0) {
@@ -409,6 +418,7 @@ public class PlayerActivity extends Activity {
                 spinner.setVisibility(View.GONE);
                 // Friendly line + raw technical detail (code, HTTP status, cause, host)
                 // so the failure can be read/screenshotted for diagnosis.
+                errorView.setTextColor(Color.parseColor("#ef4444"));
                 errorView.setText(friendlyError(code, error.getErrorCodeName()) + "\n\n" + diagnose(error));
                 errorView.setVisibility(View.VISIBLE);
                 reportPlaybackStatus("broken", error.getErrorCodeName());
@@ -686,7 +696,51 @@ public class PlayerActivity extends Activity {
             switchToFallback();
             return;
         }
+        if (isLiveContent()) {
+            scheduleLiveReconnect(reason);
+            return;
+        }
         requestFreshStream(reason);
+    }
+
+    /**
+     * Re-open the residential provider URL without leaving the native player.
+     * Xtream live URLs are stable (credentials + stream id), so asking the
+     * background WebView to mint another cloud bookkeeping session only creates
+     * guide flashes and can exhaust its bounded recovery counter. Re-preparing
+     * here is both faster and keeps the provider to one connection at a time.
+     */
+    private void scheduleLiveReconnect(final String reason) {
+        if (player == null || originalUrl == null || originalUrl.isEmpty()) return;
+        final int scheduledGeneration = ++recoveryGeneration;
+        final int attempt = liveReconnectAttempts++;
+        final long delay = LIVE_RECONNECT_DELAYS_MS[Math.min(
+                attempt, LIVE_RECONNECT_DELAYS_MS.length - 1)];
+
+        handler.removeCallbacks(bufferWatchdog);
+        spinner.setVisibility(View.VISIBLE);
+        errorView.setTextColor(Color.WHITE);
+        errorView.setText(attempt < 2
+                ? "Reconnecting to live TV…"
+                : "The channel is taking longer to reconnect.\nNorva will keep trying automatically.");
+        errorView.setVisibility(View.VISIBLE);
+        reportPlaybackStatus("reconnecting", reason);
+
+        handler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (player == null || freshStreamRequested
+                        || scheduledGeneration != recoveryGeneration) return;
+                // Always return to the residential URL after a fallback failure.
+                // setMediaItem closes the previous DataSource before opening the
+                // replacement, preserving single-slot provider accounts.
+                fallbackTried = false;
+                playRetries = 0;
+                streamHost = hostOf(originalUrl);
+                player.setMediaItem(MediaItem.fromUri(originalUrl));
+                player.prepare();
+                player.setPlayWhenReady(true);
+            }
+        }, delay);
     }
 
     /**

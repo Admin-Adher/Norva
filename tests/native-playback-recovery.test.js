@@ -149,7 +149,7 @@ for (const target of nativeTargets) {
   });
 }
 
-test('standalone native recovery is item-scoped, delayed and bounded', () => {
+test('standalone native recovery is item-scoped, with bounded VOD and persistent live recovery', () => {
   const source = read('public/js/utils/standalone.js');
   const recovery = section(
     source,
@@ -161,8 +161,10 @@ test('standalone native recovery is item-scoped, delayed and bounded', () => {
   assert.match(recovery, /const NATIVE_RECOVERY_WINDOW_MS = 5 \* 60 \* 1000/);
   assert.match(recovery, /const NATIVE_RECOVERY_MAX = 3/);
   assert.match(recovery, /const NATIVE_RECOVERY_DELAYS_MS = \[1200, 3500, 7000\]/);
+  assert.match(recovery, /const NATIVE_LIVE_RECOVERY_DELAYS_MS = \[250, 1000, 2500, 5000, 8000, 12000, 15000\]/);
   assert.match(recovery, /const key = nativeProgressKey\(sourceId, itemType, itemId\)/);
-  assert.match(recovery, /if \(state\.count >= NATIVE_RECOVERY_MAX\)/);
+  assert.match(recovery, /const isLiveRecovery = itemType === 'channel' \|\| itemType === 'live'/);
+  assert.match(recovery, /if \(!isLiveRecovery && state\.count >= NATIVE_RECOVERY_MAX\)/);
   assert.match(recovery, /return 'exhausted'/);
   assert.match(recovery, /state\.count \+= 1/);
   assert.match(recovery, /await entry\.launcher\(resume\)/);
@@ -173,6 +175,26 @@ test('standalone native recovery is item-scoped, delayed and bounded', () => {
     /window\.__norvaNative\.retryPlayback\(sourceId, itemType, itemId, resume, reason \|\| 'resolve_failed'\)/,
   );
   assert.match(recovery, /NATIVE_RECOVERY_DELAYS_MS\[attempt\]/);
+  assert.match(recovery, /NATIVE_LIVE_RECOVERY_DELAYS_MS\[attempt\]/);
+});
+
+test('Android TV keeps a dropped live socket inside the native player', () => {
+  const source = read('clients/android-tv/app/src/main/java/tv/norva/tv/PlayerActivity.java');
+  const recovery = section(
+    source,
+    'private void recoverPlayback(final String reason)',
+    'private void requestFreshStream(String reason)',
+  );
+
+  assert.match(source, /private static final long\[\] LIVE_RECONNECT_DELAYS_MS/);
+  assert.match(source, /private int liveReconnectAttempts = 0/);
+  assert.match(recovery, /if \(isLiveContent\(\)\) \{\s*scheduleLiveReconnect\(reason\);\s*return;/);
+  assert.match(recovery, /private void scheduleLiveReconnect\(final String reason\)/);
+  assert.match(recovery, /player\.setMediaItem\(MediaItem\.fromUri\(originalUrl\)\)/);
+  assert.doesNotMatch(
+    section(source, 'private void scheduleLiveReconnect(final String reason)', 'private void requestFreshStream(String reason)'),
+    /finish\(\)/,
+  );
 });
 
 test('standalone VOD recovery resolves a fresh provider session at the saved timestamp', () => {

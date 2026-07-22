@@ -199,8 +199,13 @@ test('paywall_exposed is recorded only for a visible offer and never blocks the 
   assert.match(subscribe, /if \(nativeOffersRequired && !nativeOffersReady\) return/);
   assert.match(subscribe, /if \(!entitlementResolved \|\| hasLivePlan\) return/);
   assert.match(subscribe, /entitlementResolved = true/);
-  assert.match(subscribe, /Promise\.allSettled\(\[[\s\S]{0,180}checkExisting\(\)[\s\S]{0,220}observePaywallExposure\(\)/,
-    'subscription exposure must wait for authoritative account eligibility');
+  assert.match(subscribe, /async function initializeCommercialPaywall\(\)[\s\S]{0,120}await checkExisting\(\);[\s\S]{0,80}if \(includedAccess\) return;/,
+    'the commercial paywall must resolve included access before loading or exposing offers');
+  const initializer = subscribe.slice(subscribe.indexOf('async function initializeCommercialPaywall()'));
+  assert.ok(initializer.indexOf('await checkExisting();') < initializer.indexOf('loadNativePrices()'),
+    'authoritative account eligibility must resolve before native prices are requested');
+  assert.ok(initializer.indexOf('if (includedAccess) return;') < initializer.indexOf('observePaywallExposure();'),
+    'included accounts must exit before a commercial exposure can be recorded');
   assert.doesNotMatch(subscribe, /nativeOffersReady = true;[\s\S]{0,180}observePaywallExposure\(\)/,
     'native pricing alone is not enough to count an exposure before entitlement resolves');
   assert.match(gate, /showDenied\(decision\);\s*observeDeniedPaywallExposure\(\);/);

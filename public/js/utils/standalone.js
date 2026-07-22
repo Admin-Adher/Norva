@@ -276,6 +276,11 @@
         const NATIVE_RECOVERY_WINDOW_MS = 5 * 60 * 1000;
         const NATIVE_RECOVERY_MAX = 3;
         const NATIVE_RECOVERY_DELAYS_MS = [1200, 3500, 7000];
+        // Older TV APKs still hand an exhausted live socket back to the WebView.
+        // A live channel is open-ended, so three provider-side socket rotations
+        // must not permanently eject the viewer. Keep the VOD cap, but let live
+        // reconnect with a bounded delay until the viewer changes route.
+        const NATIVE_LIVE_RECOVERY_DELAYS_MS = [250, 1000, 2500, 5000, 8000, 12000, 15000];
         let nativeIntentGeneration = 0;
         let activeNativeIntentKey = '';
         let activeNativeIntentRoute = '';
@@ -371,7 +376,8 @@
             if (!state || now - state.lastAttemptAt > NATIVE_RECOVERY_WINDOW_MS) {
                 state = { count: 0, lastAttemptAt: 0 };
             }
-            if (state.count >= NATIVE_RECOVERY_MAX) {
+            const isLiveRecovery = itemType === 'channel' || itemType === 'live';
+            if (!isLiveRecovery && state.count >= NATIVE_RECOVERY_MAX) {
                 surfaceNativeRecoveryFailure(reason || 'retry_limit');
                 return 'exhausted';
             }
@@ -396,8 +402,11 @@
                     console.warn(`[Native] Fresh playback retry ${attempt + 1} failed:`, error?.message || error);
                     window.__norvaNative.retryPlayback(sourceId, itemType, itemId, resume, reason || 'resolve_failed');
                 }
-            }, NATIVE_RECOVERY_DELAYS_MS[attempt]
-                || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]);
+            }, isLiveRecovery
+                ? (NATIVE_LIVE_RECOVERY_DELAYS_MS[attempt]
+                    || NATIVE_LIVE_RECOVERY_DELAYS_MS[NATIVE_LIVE_RECOVERY_DELAYS_MS.length - 1])
+                : (NATIVE_RECOVERY_DELAYS_MS[attempt]
+                    || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]));
             return 'scheduled';
         };
         const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras) => {

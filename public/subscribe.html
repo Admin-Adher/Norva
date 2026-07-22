@@ -31,6 +31,11 @@
     .tv-purchase-path { margin-top: 16px; padding: 18px 20px; border: 1px solid rgba(181,121,255,.5);
       border-radius: 14px; background: rgba(181,121,255,.1); color: var(--muted); font-size: 16px; line-height: 1.55; }
     .tv-purchase-path strong { display: block; color: var(--text); font-size: 19px; margin-bottom: 4px; }
+    /* Resolve the account before painting an acquisition surface. Without this
+       gate, an included internal account briefly saw Google Play cards (and an
+       alarming "price unavailable" error) while its entitlement request was
+       still in flight. Brand-only is a calmer, honest loading state. */
+    html.entitlement-pending .wrap > :not(.brand) { visibility: hidden; }
     html.tv-purchase-only .buy, html.tv-purchase-only .save-hint { display: none !important; }
     /* Dark glass so the toggle stays readable over any campaign artwork; the
        active option carries a bright accent gradient — impossible to miss. */
@@ -238,6 +243,7 @@
 </head>
 <body>
   <script>
+    document.documentElement.classList.add('entitlement-pending');
     // Bigger targets + focus tuning on Android TV (D-pad navigation).
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
       document.documentElement.classList.add('tv', 'tv-purchase-only');
@@ -380,6 +386,7 @@
       const backBtn = document.getElementById('back');
       let period = 'monthly';
       let trialEligible = true;
+      let includedAccess = false;
       // Live-plan state (filled by checkExisting): a subscriber must see their own
       // plan as "Current plan" — not as something to buy — and must never be shown
       // trial wording, whatever the raw trial-eligibility says (manually granted
@@ -1106,6 +1113,22 @@
           if (!dec) return false;
           entitlementResolved = true;
           const st = String(dec.status || '');
+          const provider = String((dec.projection || {}).provider || '').toLowerCase();
+          const isIncluded = dec.reason === 'included_access'
+            || ((provider === 'system' || provider === 'manual') && st === 'active');
+          if (isIncluded) {
+            includedAccess = true;
+            hasLivePlan = true;
+            currentPlan = String(dec.planCode || (dec.projection || {}).plan_code || 'family');
+            // Included/system accounts are deliberately non-billable. Never load
+            // native offers, trial eligibility, web prices or paywall analytics;
+            // return them to the product instead of rendering a plan picker.
+            const destination = /^\/(?:subscribe|paywall|checkout-revolut)\.html(?:[?#]|$)/i.test(returnTo)
+              ? '/app#home'
+              : returnTo;
+            window.location.replace(destination);
+            return true;
+          }
           if (['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) === -1) return true;
           // Live plan → no trial wording anywhere, and the current plan card must
           // read as such instead of inviting a re-purchase.
@@ -1398,27 +1421,32 @@
         if (tvPath) tvPath.hidden = false;
       }
       maybeGateRestore();
-      // Resolve account eligibility and exact native offers before measuring a
-      // visible commercial paywall. Failures keep the UI usable but do not
-      // manufacture an exposure from an unknown entitlement state.
-      Promise.allSettled([
-        loadNativePrices(),
-        loadTrialEligibility(),
-        checkExisting()
-      ]).then(function () {
+      // Entitlement is authoritative and must resolve before any commercial
+      // work starts. This prevents included/system accounts from querying store
+      // prices, flashing a paywall or emitting paywall_exposed.
+      (async function initializeCommercialPaywall() {
+        await checkExisting();
+        if (includedAccess) return;
+        document.documentElement.classList.remove('entitlement-pending');
+
+        const pending = [loadNativePrices(), loadTrialEligibility()];
+        if (!window.NorvaBilling.isNative() && window.NorvaBilling.revolutPrices) {
+          pending.push(window.NorvaBilling.revolutPrices().then(function (catalog) {
+            if (!applyLivePrices(catalog)) markWebPricesUnavailable();
+          }).catch(markWebPricesUnavailable));
+        } else if (webPricesRequired) {
+          markWebPricesUnavailable();
+        }
+
+        await Promise.allSettled(pending);
         if (entitlementResolved && !hasLivePlan
             && (!nativeOffersRequired || nativeOffersReady)
             && (!webPricesRequired || webPricesReady)) {
           observePaywallExposure();
         }
+      })().catch(function () {
+        document.documentElement.classList.remove('entitlement-pending');
       });
-      if (!window.NorvaBilling.isNative() && window.NorvaBilling.revolutPrices) {
-        window.NorvaBilling.revolutPrices().then(function (catalog) {
-          if (!applyLivePrices(catalog)) markWebPricesUnavailable();
-        }).catch(markWebPricesUnavailable);
-      } else if (webPricesRequired) {
-        markWebPricesUnavailable();
-      }
     })();
   </script>
 </body>

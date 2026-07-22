@@ -10,6 +10,7 @@ const migration = read('supabase/migrations/20260721120000_internal_account_bill
 const revolut = read('supabase/functions/norva-revolut/index.ts');
 const billing = read('supabase/functions/norva-revolut-billing/index.ts');
 const lifecycle = read('supabase/functions/norva-lifecycle/index.ts');
+const subscribe = read('public/subscribe.html');
 
 function routeSlice(source, route, nextRoute) {
   const start = source.indexOf(`path === "/${route}"`);
@@ -216,4 +217,21 @@ test('dunning and past-due expiry lifecycle paths exclude internal accounts; Edg
   );
   assert.match(welcome, /internalError/);
   assert.match(welcome, /throw new Error\(`internal_account_check_failed:/);
+});
+
+test('included internal access never enters the commercial paywall pipeline', () => {
+  assert.match(subscribe, /const isIncluded = dec\.reason === 'included_access'/);
+  assert.match(subscribe, /provider === 'system' \|\| provider === 'manual'/);
+  assert.match(subscribe, /window\.location\.replace\(destination\)/);
+  const init = subscribe.slice(
+    subscribe.indexOf('async function initializeCommercialPaywall()'),
+    subscribe.indexOf("})().catch(function ()", subscribe.indexOf('async function initializeCommercialPaywall()')),
+  );
+  const entitlement = init.indexOf('await checkExisting()');
+  const includedGuard = init.indexOf('if (includedAccess) return');
+  const nativePrices = init.indexOf('loadNativePrices()');
+  const exposure = init.indexOf('observePaywallExposure()');
+  assert.ok(entitlement >= 0 && entitlement < includedGuard);
+  assert.ok(includedGuard < nativePrices && nativePrices < exposure);
+  assert.match(subscribe, /document\.documentElement\.classList\.add\('entitlement-pending'\)/);
 });
