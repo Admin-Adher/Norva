@@ -882,10 +882,20 @@ class WatchPage {
     }
 
     trackPlaybackPosition(options = {}) {
-        const rawDuration = this.getDisplayDuration?.() || this.durationHint || this._lastKnownPlaybackDuration || 0;
+        const rawDuration = this.getStablePlaybackDuration?.()
+            || this.getDisplayDuration?.()
+            || this.durationHint
+            || this._lastKnownPlaybackDuration
+            || 0;
         const duration = Number(rawDuration);
         if (Number.isFinite(duration) && duration > 0) {
-            this._lastKnownPlaybackDuration = Math.floor(duration);
+            const normalized = Math.floor(duration);
+            // A MediaSource that is being aborted exposes only the buffered
+            // fragment as video.duration (for example 89s of a 6529s film).
+            // Never let that transient teardown clock shrink a known VOD total.
+            this._lastKnownPlaybackDuration = this.isVodContent?.()
+                ? Math.max(this._lastKnownPlaybackDuration || 0, normalized)
+                : normalized;
         }
 
         const rawPosition = Number.isFinite(Number(options.position))
@@ -5081,6 +5091,49 @@ class WatchPage {
         return this.getValidDuration() || probeDuration;
     }
 
+    getStablePlaybackDuration() {
+        // Exact-file ffprobe metadata is authoritative across player-lane
+        // changes. `video.duration` is not: aborting a short MSE buffer can turn
+        // it into the buffered end and would corrupt cloud history on recovery.
+        const codecDuration = this.durationFromCodecProfile?.(this._diagCodecProfile);
+        if (codecDuration) return codecDuration;
+
+        const probeDuration = this.normalizeDuration(this.probeDuration);
+        if (probeDuration) return probeDuration;
+
+        const hintedDuration = this.normalizeDuration(this.durationHint);
+        if (hintedDuration) return hintedDuration;
+
+        const rememberedDuration = this.normalizeDuration(this._lastKnownPlaybackDuration);
+        const displayDuration = this.normalizeDuration(this.getDisplayDuration?.());
+        if (this.isVodContent()) {
+            return Math.max(rememberedDuration || 0, displayDuration || 0) || null;
+        }
+        return displayDuration || rememberedDuration || null;
+    }
+
+    isPrematurePlaybackEnd() {
+        if (!this.isVodContent()) return false;
+
+        // A live engine object only declares a natural EOF by setting ended=true
+        // in _pump(). Teardown/recovery deliberately leaves it false (or removes
+        // the object entirely), so an `ended` DOM event from that lane is synthetic.
+        if (this.currentPlaybackMode === 'engine' && this.norvaEngine?.ended !== true) {
+            return true;
+        }
+
+        const duration = this.getStablePlaybackDuration();
+        if (!duration) return false;
+        const position = Math.max(
+            Number(this._lastKnownPlaybackPosition) || 0,
+            Number(this.getPlaybackPosition?.()) || 0
+        );
+        // Native clocks can finish a fraction before the advertised duration.
+        // Permit a small tail, but never confuse a short recovery buffer with EOF.
+        const tolerance = Math.min(60, Math.max(10, duration * 0.02));
+        return position + tolerance < duration;
+    }
+
     getCurrentTime() {
         const currentTime = this.video?.currentTime;
         return Number.isFinite(currentTime) && currentTime > 0 ? currentTime : 0;
@@ -5354,6 +5407,16 @@ class WatchPage {
     }
 
     onEnded() {
+        if (this.isPrematurePlaybackEnd()) {
+            // Preserve the exact recovery point and authoritative total. Do not
+            // emit `ended`, clear Resume, or turn the card into completed state;
+            // the engine->Gateway recovery already owns the lane transition.
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+            Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            return;
+        }
+
         if (!this._playbackEnded) {
             this._playbackEnded = true;
             if (this.playbackTelemetry) this.playbackTelemetry.ended = true;
@@ -10181,7 +10244,9 @@ class WatchPage {
         if (!this.content || !this.video) return;
         if (this.video.paused && !options.force) return;
 
-        const validDuration = this.getDisplayDuration() || this._lastKnownPlaybackDuration;
+        const validDuration = this.getStablePlaybackDuration()
+            || this.getDisplayDuration()
+            || this._lastKnownPlaybackDuration;
         const duration = validDuration ? Math.floor(validDuration) : 0;
         const progress = duration > 0
             ? Math.min(Math.floor(this.getResumeSnapshotPosition()), duration)

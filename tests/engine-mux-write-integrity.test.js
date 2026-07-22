@@ -73,14 +73,48 @@ test('every generated wasm helper checks packet-write errors inside the worker',
 
 test('engine cache-busts the loader, worker glue, and wasm binary together', () => {
     const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.ok(src.includes("libav-norva.mjs?v=42"),
+    assert.ok(src.includes("libav-norva.mjs?v=43"),
         'dynamic loader import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=42"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=43"),
         'worker glue import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=42"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=43"),
         'wasm binary fetch must be revisioned');
     assert.ok(src.includes('toImport: LIBAV_RUNTIME'));
     assert.ok(src.includes('wasmurl: LIBAV_WASM'));
+});
+
+test('video DTS reconstruction does not accumulate rounded 23.976 fps packet durations', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    let lastDts = null;
+
+    // Kartavya's millisecond Matroska time base reports duration=43 while the
+    // real 24000/1001 cadence advances PTS by about 41.7 ms. The old cumulative
+    // duration grid exhausted its 16-frame cushion at frame 534 (~22.3 s), then
+    // sent pts<dts to movenc and received EINVAL.
+    for (let i = 0; i < 2000; i++) {
+        // Model a small B-frame reorder too: decode order 0,2,1,3,5,4,...
+        const presentationIndex = Math.floor(i / 3) * 3 + [0, 2, 1][i % 3];
+        const pts = Math.round(presentationIndex * 1001 / 24);
+        const [ptsLo, ptsHi] = split64(pts);
+        const packet = { pts: ptsLo, ptshi: ptsHi, duration: 43, flags: i === 0 ? 1 : 0 };
+        engine._setVideoDts(packet);
+        const dts = join64(packet.dts, packet.dtshi);
+
+        assert.ok(dts <= pts, `frame ${i}: pts ${pts} must not precede dts ${dts}`);
+        if (lastDts !== null) assert.ok(dts > lastDts, `frame ${i}: dts must increase strictly`);
+        lastDts = dts;
+    }
+
+    assert.strictEqual(engine._diag.videoDtsRepairs || 0, 0,
+        'normal fractional cadence must not need one-tick duplicate repair');
 });
 
 test('a successful batch uses one worker RPC and commits staged bytes only afterwards', async () => {

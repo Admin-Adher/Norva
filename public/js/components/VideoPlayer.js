@@ -2471,8 +2471,16 @@ class VideoPlayer {
             const isDecodeErr = data.type === Hls.ErrorTypes.MEDIA_ERROR
                 || /codec|bufferappend|bufferadd|incompatible|parsing|decode|demux/i.test(details);
             // Gateway: only decode failures fall back (it's already transcoding).
-            // Relay-HLS: any fatal failure falls back.
+            // Relay-HLS startup may legitimately reveal that the provider did not
+            // return HLS, so a fatal error before the first usable frame can take
+            // the transcode path. Once playback is healthy, however, a fatal
+            // NETWORK error is just a dropped live connection: marking the channel
+            // transcode-only would replace a working residential stream with a
+            // slower Gateway session. Let the normal HLS reconnect ladder handle
+            // transport errors; only an actual media/decode failure may promote a
+            // proven relay stream to transcode.
             if (onGateway && !isDecodeErr) return false;
+            if (onRelay && this.hasCurrentMedia() && !isDecodeErr) return false;
             if (onRelay && !data.fatal && !isDecodeErr) return false;
             const ch = this.currentChannel;
             const list = window.app?.channelList;

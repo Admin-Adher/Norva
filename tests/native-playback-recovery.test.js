@@ -197,6 +197,27 @@ test('Android TV keeps a dropped live socket inside the native player', () => {
   );
 });
 
+test('Android TV keeps technical playback diagnostics out of the viewer UI', () => {
+  const source = read('clients/android-tv/app/src/main/java/tv/norva/tv/PlayerActivity.java');
+  const errorFlow = section(
+    source,
+    'public void onPlayerError(PlaybackException error)',
+    'public void onVideoSizeChanged(VideoSize videoSize)',
+  );
+  const friendlyCopy = section(source, 'private String friendlyError(int code)', '/** Compact, shareable technical detail');
+  const freshRequest = section(source, 'private void requestFreshStream(String reason)', 'private void switchToFallback()');
+
+  assert.match(errorFlow, /android\.util\.Log\.w\(TAG, diagnostic, error\)/);
+  assert.match(errorFlow, /reportPlaybackStatus\("broken", error\.getErrorCodeName\(\)\)/);
+  assert.match(errorFlow, /errorView\.setText\(friendlyError\(code\)\)/);
+  assert.doesNotMatch(errorFlow, /errorView\.setText\([^;]*diagnos/);
+  assert.doesNotMatch(errorFlow, /errorView\.setText\([^;]*getErrorCodeName/);
+  assert.doesNotMatch(errorFlow, /reportPlaybackStatus\("broken", diagnostic\)/);
+  assert.match(friendlyCopy, /final boolean live = isLiveContent\(\)/);
+  assert.doesNotMatch(friendlyCopy, /Host:|Playback failed \(|getErrorCodeName/);
+  assert.doesNotMatch(freshRequest, /errorView\.setText\([^;]*streamHost/);
+});
+
 test('standalone VOD recovery resolves a fresh provider session at the saved timestamp', () => {
   const source = read('public/js/utils/standalone.js');
   const vodFlow = section(source, 'if (window.WatchPage)', 'if (window.VideoPlayer)');

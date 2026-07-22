@@ -18,10 +18,10 @@
 (function () {
   'use strict';
 
-  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=42';
+  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=43';
   const LIBAV_BASE = '/webengine/vendor/libav';
-  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=42';
-  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=42';
+  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=43';
+  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=43';
   const STREAM_TOP_LEVEL_BOXES = new Set([
     'ftyp', 'free', 'skip', 'wide', 'mdat', 'moov', 'moof', 'mfra', 'mfro',
     'sidx', 'ssix', 'styp', 'prft', 'emsg', 'pdin', 'uuid',
@@ -265,7 +265,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 42;
+  const ENGINE_VERSION = 43;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -346,6 +346,14 @@
       this.fg = null; this.fsrc = null; this.fsink = null;
       this.oc = null; this.pkt = null;
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
+      // H.264/H.265 packets from Matroska often have no usable DTS. Reconstruct it
+      // from a bounded window of the *actual* PTS values instead of accumulating
+      // AVPacket.duration. Container durations can be rounded (for example 43 ms
+      // for 23.976 fps whose real cadence is about 41.7 ms); accumulating that
+      // rounding error eventually makes synthetic DTS overtake PTS and movenc
+      // rejects the packet with EINVAL.
+      this._videoPtsWindow = [];
+      this._lastVideoDts = null;
       this._onSeeking = this._handleSeeking.bind(this);
       this._onTimeUpdate = this._handleTimeUpdate.bind(this);
       // Engine-wide abort: destroy() fires it so EVERY in-flight byte-range fetch is
@@ -587,7 +595,12 @@
       // old SourceBuffer after we've detached (fast media-switch race — the real fix for
       // CHUNK_DEMUXER_ERROR_APPEND_FAILED, together with the destroyed-guard in _drain()).
       this.queue.length = 0;
-      try { if (this.ms && this.ms.readyState === 'open') this.ms.endOfStream(); } catch (_) {}
+      // destroy() is an abort/hand-off primitive, not a natural EOF. Calling
+      // endOfStream() here makes Chromium drain the short buffer produced before
+      // a retry, fire `ended`, and lets WatchPage persist that temporary MSE
+      // duration as if the whole film had completed. A clean EOF is finalised by
+      // _pump()/_drain(); recovery teardown must simply invalidate the old source
+      // and let the next attachment reset the media element.
       try { if (this._objectUrl) URL.revokeObjectURL(this._objectUrl); } catch (_) {}
       // We deliberately do NOT removeAttribute('src')+load() here: the next engine's
       // _attachMediaSource sets a fresh src, which already runs the media element's reset
@@ -1387,6 +1400,8 @@
       if (!this.pkt) this.pkt = await lib.av_packet_alloc();
       // reset video DTS grid for this (re)start
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
+      this._videoPtsWindow = [];
+      this._lastVideoDts = null;
       this.fg = null; this.fsrc = null; this.fsink = null; // filter is lazy per run
       // Drop captured cues: a seek re-demuxes from the new point and re-bases vBase/_tsAnchor,
       // so old-epoch cues would convert to the wrong local time. The player keeps the cues it
@@ -1767,10 +1782,47 @@
         this._tsAnchor = (pts - (this._ptsEpoch || 0)) * this.vS.time_base_num / this.vS.time_base_den;
         this._firstVpktPending = false;
       }
-      if (this.vBase === null) { this.vBase = pts; this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1; this.vOffset = D_REORDER * this.vFd0; this._gopFloorPts = pts; }
-      const [lo, hi] = from64(this.vBase + this.vCum - this.vOffset);
+      if (this.vBase === null) {
+        this.vBase = pts;
+        this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1;
+        this.vOffset = D_REORDER * this.vFd0;
+        this._gopFloorPts = pts;
+        // Seed a reorder-depth window before the first PTS. Thereafter each DTS
+        // is the oldest presentation timestamp released by the window. Unlike
+        // vBase + sum(packet.duration), this follows the source's real cadence and
+        // cannot drift merely because a millisecond time base rounded 41.7 to 43.
+        this._videoPtsWindow = [];
+        for (let i = D_REORDER; i > 0; i--) this._videoPtsWindow.push(pts - i * this.vFd0);
+        this._lastVideoDts = null;
+      }
+      this._videoPtsWindow.push(pts);
+      this._videoPtsWindow.sort((a, b) => a - b);
+      let dts = this._videoPtsWindow.shift();
+      // Strict MP4 muxing requires DTS to increase and PTS >= DTS. A duplicate
+      // timestamp in a coarse container time base can otherwise fail even though
+      // the surrounding media is healthy. Nudge by one source tick only; the
+      // normal path (including 23.976 fps) never enters this repair.
+      if (this._lastVideoDts !== null && dts <= this._lastVideoDts) {
+        const repaired = this._lastVideoDts + 1;
+        if (repaired <= pts) {
+          dts = repaired;
+          if (this._diag) this._diag.videoDtsRepairs = (this._diag.videoDtsRepairs || 0) + 1;
+        }
+      }
+      // If a source contains a timestamp reset larger than the reorder window,
+      // there is no legal DTS greater than the prior one while preserving this
+      // packet's PTS. Record the exact invariant; the checked worker write below
+      // will reject it transactionally and invoke the normal engine recovery.
+      // Do not throw here: an uncaught pump exception would bypass onFatal.
+      if ((this._lastVideoDts !== null && dts <= this._lastVideoDts) || dts > pts) {
+        if (this._diag && !this._diag.firstVideoTimestampError) {
+          this._diag.firstVideoTimestampError = { pts, dts, lastDts: this._lastVideoDts };
+        }
+      }
+      this._lastVideoDts = dts;
+      const [lo, hi] = from64(dts);
       p.dts = lo; p.dtshi = hi;
-      this.vCum += (p.duration || 0) > 0 ? p.duration : 1;
+      this.vCum += 1;
       // Diagnostics: the first video packet of a segment must be a keyframe in
       // presentation order, or Chromium rejects the media fragment append. Record it.
       if (this._diag && this._diag.firstVideoPkt == null) {
@@ -1952,6 +2004,8 @@
         firstWriteDiscontinuity: d.firstWriteDiscontinuity,
         muxPacketWriteErrors: d.muxPacketWriteErrors || 0,
         firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
+        videoDtsRepairs: d.videoDtsRepairs || 0,
+        firstVideoTimestampError: d.firstVideoTimestampError || null,
         muxStructureErrors: d.muxStructureErrors || 0,
         firstMuxStructureError: d.firstMuxStructureError || null,
         muxRejectedBytes: d.muxRejectedBytes || 0,

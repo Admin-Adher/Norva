@@ -181,6 +181,6 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
 
 test('Android TV release version remains explicit after billing removal', () => {
   const gradle = read('clients/android-tv/app/build.gradle');
-  assert.match(gradle, /versionCode\s+22\b/);
-  assert.match(gradle, /versionName\s+"3\.8\.9-hybrid"/);
+  assert.match(gradle, /versionCode\s+23\b/);
+  assert.match(gradle, /versionName\s+"3\.8\.10-hybrid"/);
 });

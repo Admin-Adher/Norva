@@ -65,6 +65,8 @@ import java.util.Locale;
  */
 public class PlayerActivity extends Activity {
 
+    private static final String TAG = "NorvaPlayer";
+
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_SOURCE_ID = "sourceId";
@@ -144,7 +146,7 @@ public class PlayerActivity extends Activity {
     private boolean resumeApplied = false; // seek to the resume offset only once
     private String subKey;                 // SharedPreferences key for the subtitle choice
     private boolean subPrefRestored = false; // apply the saved subtitle pref only once
-    private String streamHost;               // host of the stream URL, shown in errors
+    private String streamHost;               // host of the stream URL, diagnostics only
     private String originalUrl;               // residential/direct URL used again after a healthy mid-stream stall
     private String fallbackUrl;              // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
@@ -400,6 +402,10 @@ public class PlayerActivity extends Activity {
             public void onPlayerError(PlaybackException error) {
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
+                final String diagnostic = diagnose(error);
+                // Keep provider/ExoPlayer internals available to support without
+                // exposing hosts, exception classes or stack details on the TV.
+                android.util.Log.w(TAG, diagnostic, error);
                 // Transient network/HTTP errors (incl. a 504 or a briefly held
                 // single-connection slot) AND container/manifest parsing errors: a
                 // single-slot panel answering "busy" with a non-media body on HTTP 200
@@ -416,11 +422,11 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 spinner.setVisibility(View.GONE);
-                // Friendly line + raw technical detail (code, HTTP status, cause, host)
-                // so the failure can be read/screenshotted for diagnosis.
                 errorView.setTextColor(Color.parseColor("#ef4444"));
-                errorView.setText(friendlyError(code, error.getErrorCodeName()) + "\n\n" + diagnose(error));
+                errorView.setText(friendlyError(code));
                 errorView.setVisibility(View.VISIBLE);
+                // Only the bounded error code leaves this Activity. diagnose(error)
+                // can contain provider URLs/credentials and stays in Logcat.
                 reportPlaybackStatus("broken", error.getErrorCodeName());
             }
 
@@ -491,28 +497,38 @@ public class PlayerActivity extends Activity {
         }, "norva-playback-status").start();
     }
 
-    /** Map ExoPlayer error codes to clear French messages for the viewer. */
-    private String friendlyError(int code, String name) {
+    /** Map ExoPlayer errors to concise, actionable copy; technical details stay in Logcat. */
+    private String friendlyError(int code) {
+        final boolean live = isLiveContent();
         if (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
-            return "Stream refused or the provider's server is unavailable.\n"
-                    + "The channel/title may be offline, or your account is limited to one connection.";
+            return live
+                    ? "This channel is temporarily unavailable.\nNorva will reconnect automatically."
+                    : "This title is temporarily unavailable from the provider.\nTry another version or try again in a moment.";
         }
         if (code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                 || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) {
-            return "Could not connect to the stream (network issue or server too slow).";
+            return live
+                    ? "Live TV was interrupted.\nNorva will reconnect automatically."
+                    : "The connection was interrupted.\nTry again in a moment.";
         }
         if (code == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
                 || code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
-            return "This title is unavailable from the provider\n(the server does not return valid video).";
+            return live
+                    ? "This channel is not sending playable video right now.\nNorva will keep trying automatically."
+                    : "This version is not sending playable video right now.\nTry another available version.";
         }
         if (code == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) {
-            return "Video/audio format not supported by this TV.";
+            return live
+                    ? "This channel uses a format this TV cannot play.\nTry another version of the channel."
+                    : "This version uses a format this TV cannot play.\nTry another available version.";
         }
-        return "Playback failed (" + name + ").";
+        return live
+                ? "This channel cannot be played right now.\nTry another version or try again later."
+                : "Playback was interrupted.\nTry again or choose another version.";
     }
 
     /** Compact, shareable technical detail from a playback failure (code, HTTP status, cause, host). */
@@ -753,8 +769,7 @@ public class PlayerActivity extends Activity {
         recoveryGeneration++;
         if (sourceId == null || sourceId.isEmpty() || itemId == null || itemId.isEmpty()) {
             spinner.setVisibility(View.GONE);
-            errorView.setText("Playback interrupted."
-                    + (streamHost != null ? "\nHost: " + streamHost : ""));
+            errorView.setText("Playback was interrupted.\nTry again in a moment.");
             errorView.setVisibility(View.VISIBLE);
             reportPlaybackStatus("broken", reason);
             return;

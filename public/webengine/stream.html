@@ -178,17 +178,24 @@ async function streamRemux(id) {
     log('en-tête MP4 fragmenté écrit, remux + transcodage en cours…');
     setStatus('<span class="wait">⏳ remux + lecture…</span>');
 
-    // Video DTS reconstruction: matroska stores no DTS, so the demuxer hands us
-    // dts==pts which is non-monotonic for B-frames. Rebuild a strictly-increasing
-    // decode-order grid from the real per-packet durations, offset earlier by a
-    // safe reorder depth so dts<=pts always holds.
+    // Video DTS reconstruction: Matroska stores no DTS, so use a bounded window
+    // of actual PTS values. Do not accumulate packet.duration: a coarse time base
+    // can round 23.976 fps to 43 ms and make synthetic DTS overtake PTS after ~22s.
     const D_REORDER = 16;
-    let vBase = null, vCum = 0, vFd0 = 0, vOffset = 0;
+    let vBase = null, vFd0 = 0, vLastDts = null;
+    const vPtsWindow = [];
     const setVideoDts = (p) => {
       const pts = to64(p.pts, p.ptshi);
-      if (vBase === null) { vBase = pts; vFd0 = (p.duration || 0) > 0 ? p.duration : 1; vOffset = D_REORDER * vFd0; }
-      const [lo, hi] = from64(vBase + vCum - vOffset); p.dts = lo; p.dtshi = hi;
-      vCum += (p.duration || 0) > 0 ? p.duration : 1;
+      if (vBase === null) {
+        vBase = pts; vFd0 = (p.duration || 0) > 0 ? p.duration : 1;
+        for (let i = D_REORDER; i > 0; i--) vPtsWindow.push(pts - i * vFd0);
+      }
+      vPtsWindow.push(pts); vPtsWindow.sort((a, b) => a - b);
+      let dts = vPtsWindow.shift();
+      if (vLastDts !== null && dts <= vLastDts && vLastDts + 1 <= pts) dts = vLastDts + 1;
+      if ((vLastDts !== null && dts <= vLastDts) || dts > pts) throw new Error(`VIDEO_TIMESTAMP_INVALID:${pts}:${dts}:${vLastDts}`);
+      vLastDts = dts;
+      const [lo, hi] = from64(dts); p.dts = lo; p.dtshi = hi;
     };
 
     const initFilter = async (fr) => {

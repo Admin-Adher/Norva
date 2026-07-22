@@ -64,12 +64,20 @@ async function remux(mkv) {
   libav.onwrite = (n, p, d) => { chunks.push(d.slice(0)); };
   await libav.avformat_write_header(oc, 0);
 
-  const D_REORDER = 16; let vBase = null, vCum = 0, vOffset = 0;
+  const D_REORDER = 16; let vBase = null, vFd0 = 0, vLastDts = null;
+  const vPtsWindow = [];
   const setVideoDts = (p) => {
     const pts = to64(p.pts, p.ptshi);
-    if (vBase === null) { vBase = pts; vOffset = D_REORDER * ((p.duration || 0) > 0 ? p.duration : 1); }
-    const [lo, hi] = from64(vBase + vCum - vOffset); p.dts = lo; p.dtshi = hi;
-    vCum += (p.duration || 0) > 0 ? p.duration : 1;
+    if (vBase === null) {
+      vBase = pts; vFd0 = (p.duration || 0) > 0 ? p.duration : 1;
+      for (let i = D_REORDER; i > 0; i--) vPtsWindow.push(pts - i * vFd0);
+    }
+    vPtsWindow.push(pts); vPtsWindow.sort((a, b) => a - b);
+    let dts = vPtsWindow.shift();
+    if (vLastDts !== null && dts <= vLastDts && vLastDts + 1 <= pts) dts = vLastDts + 1;
+    if ((vLastDts !== null && dts <= vLastDts) || dts > pts) throw new Error(`VIDEO_TIMESTAMP_INVALID:${pts}:${dts}:${vLastDts}`);
+    vLastDts = dts;
+    const [lo, hi] = from64(dts); p.dts = lo; p.dtshi = hi;
   };
   const pkt = await libav.av_packet_alloc();
   let res, guard = 0;
