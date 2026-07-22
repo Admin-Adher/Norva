@@ -261,7 +261,9 @@ test('active users with a permanent delivery suppression only enter the remediat
   );
   assert.match(projection, /cloud_email_suppressions[\s\S]*s\.active[\s\S]*into v_delivery_suppressed/);
   assert.match(projection, /v_identity_state = 'disabled' or v_delivery_suppressed or v_entitlement_state = 'blocked'[\s\S]*array_append\(v_segments, 'blocked-suppressed'\)/);
-  const customerCohorts = projection.slice(projection.indexOf('else\n    -- Suppression'));
+  const suppressionBranchStart = projection.search(/else\r?\n    -- Suppression/);
+  assert.notEqual(suppressionBranchStart, -1, 'suppression branch must remain explicit');
+  const customerCohorts = projection.slice(suppressionBranchStart);
   assert.ok(customerCohorts.indexOf("v_delivery_suppressed") < customerCohorts.indexOf("array_append(v_segments, 'active-subscribers')"));
   assert.match(customerCohorts, /else[\s\S]*array_append\(v_segments, 'active-subscribers'\)/);
 });

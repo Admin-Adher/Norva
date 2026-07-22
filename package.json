@@ -46,6 +46,7 @@
         "@electron/rebuild": "^4.0.4",
         "electron": "^39.2.7",
         "electron-builder": "^26.0.12",
+        "esbuild": "^0.28.1",
         "wrangler": "^4.102.0"
     },
     "build": {

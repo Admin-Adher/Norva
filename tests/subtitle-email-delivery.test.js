@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { importTypescriptModule } = require('./helpers/import-typescript-module');
 
 const root = path.resolve(__dirname, '..');
 const templatePath = path.join(root, 'supabase/functions/_shared/subtitle-ready-email.ts');
@@ -10,7 +10,7 @@ const playbackPath = path.join(root, 'supabase/functions/norva-playback/index.ts
 const migrationPath = path.join(root, 'supabase/migrations/20260722001000_subtitle_email_delivery_outbox.sql');
 
 test('subtitle-ready template is premium, client-safe multipart and uses non-PII tags', async () => {
-  const { renderSubtitleReadyEmail } = await import(pathToFileURL(templatePath).href);
+  const { renderSubtitleReadyEmail } = await importTypescriptModule(templatePath);
   const rendered = renderSubtitleReadyEmail({
     titleLabel: 'A <script>alert("x")</script> Story',
     siteUrl: 'https://norva.tv',
@@ -38,7 +38,7 @@ test('subtitle-ready template is premium, client-safe multipart and uses non-PII
 });
 
 test('subtitle-ready template refuses unsafe CTA protocols and uses title-neutral copy', async () => {
-  const { renderSubtitleReadyEmail } = await import(pathToFileURL(templatePath).href);
+  const { renderSubtitleReadyEmail } = await importTypescriptModule(templatePath);
   const rendered = renderSubtitleReadyEmail({ titleLabel: '', ctaUrl: 'javascript:alert(1)' });
   assert.match(rendered.subject, /your title/i);
   assert.match(rendered.html, /href="https:\/\/norva\.tv\/?"/);

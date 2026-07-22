@@ -2,12 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { importTypescriptModule } = require('./helpers/import-typescript-module');
 
 const root = path.resolve(__dirname, '..');
-const functionUrl = pathToFileURL(
-  path.join(root, 'supabase/functions/norva-auth-email/index.ts'),
-).href;
+const functionPath = path.join(root, 'supabase/functions/norva-auth-email/index.ts');
 
 const previousDeno = globalThis.Deno;
 globalThis.Deno = {
@@ -20,7 +18,7 @@ globalThis.Deno = {
   serve() {},
 };
 
-const authEmail = import(functionUrl);
+const authEmail = importTypescriptModule(functionPath);
 
 test('authentication email transport is bounded, deterministic and provider-acknowledged', async () => {
   const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-auth-email/index.ts'), 'utf8');

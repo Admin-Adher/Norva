@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { importTypescriptModule } = require('./helpers/import-typescript-module');
 
 const root = path.resolve(__dirname, '..');
 const importTemplatePath = path.join(root, 'supabase/functions/_shared/import-email.ts');
@@ -33,7 +33,7 @@ function assertPremiumEnvelope(rendered, expectedCategory, expectedFlow) {
 }
 
 test('catalog import emails have client-safe HTML, coherent plain text and stable non-PII tags', async () => {
-  const templates = await import(pathToFileURL(importTemplatePath).href);
+  const templates = await importTypescriptModule(importTemplatePath);
   const providers = [{ name: 'Atlas Pro', movies: 1234, series: 56, channels: 78 }];
   const cases = [
     [templates.renderImportStarted('Adrien', providers), 'import_started'],
@@ -51,7 +51,7 @@ test('catalog import emails have client-safe HTML, coherent plain text and stabl
 });
 
 test('plain-text alternative is derived from the exact frozen import HTML', async () => {
-  const templates = await import(pathToFileURL(importTemplatePath).href);
+  const templates = await importTypescriptModule(importTemplatePath);
   const rendered = templates.renderImportCompleted(null, [{ name: 'Atlas Pro', movies: 42 }]);
   const text = templates.plainTextFromImportHtml(rendered.html);
   assert.match(text, /Your catalog is ready/);
@@ -63,7 +63,7 @@ test('plain-text alternative is derived from the exact frozen import HTML', asyn
 
 test('lifecycle templates expose complete multipart content and correct categories', async () => {
   globalThis.Deno = { env: { get: (key) => key === 'NORVA_POSTAL_ADDRESS' ? '1 Premium Way, Paris' : '' } };
-  const templates = await import(pathToFileURL(lifecycleTemplatePath).href);
+  const templates = await importTypescriptModule(lifecycleTemplatePath);
   const unsubscribeUrl = 'https://norva.tv/functions/v1/norva-lifecycle/unsubscribe?token=test';
   const cases = [
     [templates.renderWelcome('Adrien'), 'transactional', 'welcome'],
@@ -100,7 +100,7 @@ test('lifecycle templates expose complete multipart content and correct categori
 
 test('payment confirmation is precise without pretending to be a legal receipt or invoice', async () => {
   globalThis.Deno = { env: { get: () => '' } };
-  const templates = await import(pathToFileURL(lifecycleTemplatePath).href);
+  const templates = await importTypescriptModule(lifecycleTemplatePath);
   const rendered = templates.renderReceipt('Adrien', {
     planLabel: 'Norva Family',
     amount: '$9.99',
