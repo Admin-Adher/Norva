@@ -15,16 +15,17 @@ test('email audit snapshot uses reproducible production column names', () => {
   assert.doesNotMatch(serialized, /where opt_in/);
 });
 
-test('email audit exposes concrete provider gaps and every template family', () => {
+test('email audit exposes concrete provider boundaries and every template family', () => {
   const rows = artifact.snapshot.datasets.email_matrix;
-  assert.ok(Array.isArray(rows) && rows.length >= 42);
+  assert.ok(Array.isArray(rows) && rows.length >= 43);
   const serialized = JSON.stringify(rows);
   for (const family of ['Auth', 'Security', 'Catalog', 'Product', 'Trial', 'Dunning',
     'Billing', 'Marketing', 'Support', 'Operations']) {
     assert.ok(rows.some(({ area }) => area === family), `${family} must remain inventoried`);
   }
-  assert.match(serialized, /RevenueCat[\s\S]*Gap: outbox rejects non-Revolut ledger rows/);
-  assert.match(serialized, /refund, revocation or fraud state[\s\S]*Gap:/);
+  assert.match(serialized, /RevenueCat \/ store[\s\S]*Covered by the authoritative cross-rail ledger outbox/);
+  assert.match(serialized, /cancel_reason=CUSTOMER_SUPPORT[\s\S]*Covered exactly once/);
+  assert.match(serialized, /store fiscal receipt \/ fraud or dispute notice[\s\S]*Provider-owned/);
 });
 
 test('email audit documents campaign exclusions, PII windows and QA limits', () => {

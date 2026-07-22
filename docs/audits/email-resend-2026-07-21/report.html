@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark" />
 <meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src data: blob:; font-src data:; style-src &#39;unsafe-inline&#39;; script-src &#39;unsafe-inline&#39; blob:; connect-src &#39;none&#39;; media-src data: blob:; worker-src blob:; frame-src &#39;self&#39; data: blob:; object-src &#39;none&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;" />
 <meta name="referrer" content="no-referrer" />
-<title>Norva Email &amp; Resend Audit — 21 July 2026</title>
+<title>Norva Email &amp; Resend Audit — 21–22 July 2026</title>
 <style data-data-analytics-portable-fallback="true">
 :root{color-scheme:light dark;--portable-canvas:#fff;--portable-surface:#fff;--portable-surface-subtle:#f7f7f7;--portable-ink:#0d0d0d;--portable-muted:#5d5d5d;--portable-tertiary:#8f8f8f;--portable-table-text:#5d5d5d;--portable-border:rgba(13,13,13,.1);--portable-accent:#0285ff;--portable-positive:#00692a;--portable-positive-bg:#edfaf2;--portable-negative:#ba2623;--portable-negative-bg:#fff0f0;--portable-warning-bg:#fff8e6;--portable-warning-border:#e7b84b;--portable-radius:16px;--portable-safe-area-top:env(safe-area-inset-top,0px);--portable-safe-area-right:env(safe-area-inset-right,0px);--portable-safe-area-bottom:env(safe-area-inset-bottom,0px);--portable-safe-area-left:env(safe-area-inset-left,0px);font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--portable-canvas);color:var(--portable-ink)}
 @media(prefers-color-scheme:dark){:root{--portable-canvas:#181818;--portable-surface:#212121;--portable-surface-subtle:#2a2a2a;--portable-ink:#dfdfdf;--portable-muted:#cdcdcd;--portable-tertiary:#afafaf;--portable-table-text:#cdcdcd;--portable-border:rgba(255,255,255,.12);--portable-accent:#66b5ff;--portable-positive:#79d996;--portable-positive-bg:rgba(64,180,99,.16);--portable-negative:#ff8583;--portable-negative-bg:rgba(224,74,70,.16);--portable-warning-bg:#302817;--portable-warning-border:#8b6a20}.portable-static-chart-light{display:none!important}.portable-static-chart-dark{display:block!important}}
@@ -34,7 +34,7 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 </style>
 </head>
 <body>
-<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Norva Email &amp; Resend Audit — 21 July 2026</h1><p class="portable-description">Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.</p></div><div class="portable-page-meta"><time datetime="2026-07-22T00:43:21Z">Jul 22, 2026, 12:43 AM UTC</time></div></header><div class="portable-block-stack">
+<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Norva Email &amp; Resend Audit — 21–22 July 2026</h1><p class="portable-description">Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.</p></div><div class="portable-page-meta"><time datetime="2026-07-22T00:43:21Z">Jul 22, 2026, 12:43 AM UTC</time></div></header><div class="portable-block-stack">
 <div class="portable-block portable-layout-full" data-artifact-block-id="executive_summary" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Executive Summary</h2>
 <p>Norva’s current email population is entirely internal/test: there are no real customer accounts yet. That makes the historical bounce and complaint percentages useful as engineering signals, but invalid as a customer-quality benchmark. The main problems were architectural: a shared Resend team mixed Norva with BuildTrack, a deprecated all-users audience provided no useful lifecycle targeting, delivery webhooks were absent, and several critical messages could be lost or duplicated around network/database failures.</p>
 <p>The remediation replaces direct fire-and-forget paths with immutable, leased outboxes; adds signed, app-scoped delivery telemetry; defines consent-safe lifecycle cohorts; minimizes and expires stored recipient data; and separates a domain-scoped send credential from host-only Resend administration. Contact projection remains intentionally off until Norva is moved to a dedicated Resend team. This is the only safe interpretation of “premium data”: no cross-product contacts, no guessed segments and no false claim that the current five pilot accounts represent customers.</p></section></div>
@@ -141,7 +141,7 @@ from (values
   (9, &#39;catalog-ready&#39;)
 ) as segments(&quot;order&quot;, segment);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Campaign inclusion and exclusion guardrails</caption><thead><tr><th scope="col" class="portable-table-number">Order</th><th scope="col">Campaign</th><th scope="col">Required inclusion</th><th scope="col">Mandatory exclusions</th><th scope="col">Final send gate</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-29"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-29" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>All marketing</td><td>Explicit product-news-offers Topic opt-in</td><td>internal-pilots; blocked-suppressed</td><td>Current local consent; no unsubscribe; no active delivery suppression</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-30"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-30" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Onboarding help</td><td>onboarding AND NOT catalog-ready</td><td>internal-pilots; blocked-suppressed; payment-recovery; churned</td><td>Consent for promotional copy; transactional help must be event-triggered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-31"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-31" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Trial education</td><td>trialing</td><td>internal-pilots; blocked-suppressed; payment-recovery; churned</td><td>Product-readiness filter is optional context, never eligibility</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-32"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-32" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Active subscriber campaign</td><td>active-subscribers</td><td>internal-pilots; blocked-suppressed; cancel-scheduled; payment-recovery; churned</td><td>Consent and suppression rechecked immediately before send</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-33"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-33" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Cancellation retention</td><td>cancel-scheduled</td><td>internal-pilots; blocked-suppressed; payment-recovery; churned</td><td>Never include ordinary active-subscriber messaging by overlap</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-34"><span class="portable-source-value-text">6</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-34" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 6</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Win-back</td><td>churned</td><td>internal-pilots; blocked-suppressed; trialing; active-subscribers; cancel-scheduled; payment-recovery</td><td>Explicit consent plus one-click unsubscribe; one bounded send</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-35"><span class="portable-source-value-text">7</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-35" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 7</span><strong>Source: Resend configuration APIs — Contacts, Segments, Topics, Properties and Webhooks</strong><span class="portable-source-meta">File: docs/audits/email-resend-2026-07-21/resend-configuration-summary.json</span></span></span></td><td>Catalog-ready promotion</td><td>catalog-ready AND (trialing OR active-subscribers)</td><td>internal-pilots; blocked-suppressed; cancel-scheduled; payment-recovery; churned</td><td>Catalog readiness cannot override lifecycle, consent or suppression</td></tr></tbody></table></div></div></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="provider_coverage_section" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Provider coverage is not interchangeable</h2>
-<p>Revolut has Norva-owned payment confirmations, J-3/J-1 trial reminders, three dunning stages, recovery and lifecycle-transition emails. RevenueCat/store rails feed the same cancellation, resume, plan-change, recovery and expiry lifecycle intents, but store billing dunning is provider-owned. A material gap remains: a captured RevenueCat initial purchase or renewal is journalled, but the confirmation outbox deliberately ignores non-Revolut ledger rows; RevenueCat refund, fraud and revocation customer emails also lack an authoritative Norva producer. These gaps are shown explicitly below rather than hidden inside the aggregate billing family.</p></section></div>
+<p>Revolut has Norva-owned payment confirmations, J-3/J-1 trial reminders, three dunning stages, recovery and lifecycle-transition emails. RevenueCat/store rails now feed the same durable confirmation outbox for authoritative paid initial purchases, renewals and non-renewing purchases; trial/intro events remain excluded. A documented RevenueCat <code>CANCELLATION</code> with <code>cancel_reason=CUSTOMER_SUPPORT</code> now produces one refund confirmation without falsely marking auto-renewal as cancelled, and a later <code>EXPIRATION</code> remains the access-revocation signal. Store trial reminders, billing dunning, fiscal receipts and fraud/dispute communications remain provider-owned because Norva must not invent causes or direct store customers to a norva.tv card form.</p></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="email_matrix_table_block" data-artifact-block-type="table" data-layout="full"><section class="portable-content-card portable-table-card" data-artifact-id="email_template_matrix" data-artifact-kind="table" data-table-id="email_template_matrix" data-portable-visual-title="Concrete email template, event and provider matrix"><header class="portable-visual-header"><h2>Concrete email template, event and provider matrix</h2></header><div class="portable-inline-source portable-source-summary" data-source-id="repository_inventory"><div class="portable-inline-source-content portable-source-summary-content"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for Concrete email template, event and provider matrix</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span><p class="portable-source-description-data">Reproducible index of the sender/trigger inventory traced in the source document; delivery and retention annotations are reviewed repository metadata.</p><pre class="portable-source-query-data" aria-hidden="true"><code>select *
 from (values
   (1, &#39;Auth actions&#39;, &#39;Transactional auth&#39;),
@@ -154,7 +154,7 @@ from (values
   (8, &#39;Win-back&#39;, &#39;Marketing&#39;),
   (9, &#39;Operations alerts&#39;, &#39;Operational&#39;),
   (10, &#39;Account deletion&#39;, &#39;Transactional auth&#39;)
-) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Concrete email template, event and provider matrix</caption><thead><tr><th scope="col" class="portable-table-number">Order</th><th scope="col">Area</th><th scope="col">Template / flow</th><th scope="col">Authoritative event</th><th scope="col">Provider / rail</th><th scope="col">Coverage</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-36"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-36" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm your email / signup</td><td>GoTrue signup</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-37"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-37" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Reset your password / recovery</td><td>GoTrue recovery</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-38"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-38" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Your sign-in link / magic_link</td><td>GoTrue magiclink or alias</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-39"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-39" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm email change / current address</td><td>Secure email_change token_hash_new</td><td>Supabase Auth hook → Resend batch</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-40"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-40" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm new email / new address</td><td>GoTrue email_change token_hash</td><td>Supabase Auth hook → Resend batch</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-41"><span class="portable-source-value-text">6</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-41" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 6</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Invitation / invite</td><td>GoTrue invite</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-42"><span class="portable-source-value-text">7</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-42" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 7</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Verification code / reauthentication</td><td>GoTrue reauthentication</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-43"><span class="portable-source-value-text">8</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-43" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 8</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm your request / fallback</td><td>Unknown future GoTrue action</td><td>Supabase Auth hook → Resend</td><td>Defensive fallback; monitor unexpected flow</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-44"><span class="portable-source-value-text">9</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-44" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 9</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_password_changed</td><td>Confirmed account password hash changed</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-45"><span class="portable-source-value-text">10</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-45" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 10</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_email_changed</td><td>Auth email changed; old address notified</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-46"><span class="portable-source-value-text">11</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-46" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 11</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_new_device</td><td>New cloud_devices row</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-47"><span class="portable-source-value-text">12</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-47" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 12</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Account</td><td>account_deleted</td><td>Successful permanent self-deletion</td><td>Norva deletion outbox → Resend</td><td>Covered; recipient telemetry redacted immediately</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-48"><span class="portable-source-value-text">13</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-48" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 13</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_started</td><td>First import started</td><td>Norva import digest → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-49"><span class="portable-source-value-text">14</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-49" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 14</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_completed</td><td>First import completed</td><td>Norva import digest → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-50"><span class="portable-source-value-text">15</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-50" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 15</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_failed</td><td>First import failed</td><td>Norva import digest → Resend</td><td>Covered</td></tr></tbody></table></div></div><p class="portable-table-note">42 results · Showing first 15</p></section></div>
+) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Concrete email template, event and provider matrix</caption><thead><tr><th scope="col" class="portable-table-number">Order</th><th scope="col">Area</th><th scope="col">Template / flow</th><th scope="col">Authoritative event</th><th scope="col">Provider / rail</th><th scope="col">Coverage</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-36"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-36" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm your email / signup</td><td>GoTrue signup</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-37"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-37" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Reset your password / recovery</td><td>GoTrue recovery</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-38"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-38" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Your sign-in link / magic_link</td><td>GoTrue magiclink or alias</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-39"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-39" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm email change / current address</td><td>Secure email_change token_hash_new</td><td>Supabase Auth hook → Resend batch</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-40"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-40" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm new email / new address</td><td>GoTrue email_change token_hash</td><td>Supabase Auth hook → Resend batch</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-41"><span class="portable-source-value-text">6</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-41" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 6</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Invitation / invite</td><td>GoTrue invite</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-42"><span class="portable-source-value-text">7</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-42" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 7</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Verification code / reauthentication</td><td>GoTrue reauthentication</td><td>Supabase Auth hook → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-43"><span class="portable-source-value-text">8</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-43" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 8</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Auth</td><td>Confirm your request / fallback</td><td>Unknown future GoTrue action</td><td>Supabase Auth hook → Resend</td><td>Defensive fallback; monitor unexpected flow</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-44"><span class="portable-source-value-text">9</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-44" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 9</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_password_changed</td><td>Confirmed account password hash changed</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-45"><span class="portable-source-value-text">10</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-45" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 10</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_email_changed</td><td>Auth email changed; old address notified</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-46"><span class="portable-source-value-text">11</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-46" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 11</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Security</td><td>security_new_device</td><td>New cloud_devices row</td><td>Norva DB outbox → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-47"><span class="portable-source-value-text">12</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-47" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 12</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Account</td><td>account_deleted</td><td>Successful permanent self-deletion</td><td>Norva deletion outbox → Resend</td><td>Covered; recipient telemetry redacted immediately</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-48"><span class="portable-source-value-text">13</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-48" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 13</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_started</td><td>First import started</td><td>Norva import digest → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-49"><span class="portable-source-value-text">14</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-49" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 14</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_completed</td><td>First import completed</td><td>Norva import digest → Resend</td><td>Covered</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-50"><span class="portable-source-value-text">15</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-50" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 15</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Catalog</td><td>import_failed</td><td>First import failed</td><td>Norva import digest → Resend</td><td>Covered</td></tr></tbody></table></div></div><p class="portable-table-note">43 results · Showing first 15</p></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="governance_section" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Governance, deliverability and data quality</h2>
 <p>SPF, DKIM and the custom MAIL FROM domain are present. DMARC is missing, so Norva has neither an enforceable anti-spoofing policy nor aggregate reports. Publish a reporting-only DMARC policy first, observe for two to four weeks, then progress to quarantine/reject only when legitimate sources align. Keep operations and customer messaging separate: operational alerts should not inflate lifecycle engagement, and BuildTrack must use another Resend team before Norva Contacts, global unsubscribe, Topics or properties are mutated.</p>
 <p>Delivery telemetry contains recipient/from addresses and bounded diagnostic data for incident response. Production scrubs that PII after 90 days, keeps address-free raw event rows for 180 days, and keeps address-free per-message status metrics for 400 days. Active suppression addresses remain only while needed to prevent unsafe delivery; account-deletion confirmation recipients are redacted immediately. False permanent bounces have a service-role-only recovery RPC requiring current confirmed identity, fresh post-bounce mailbox proof and attributable operator evidence. Complaints and provider suppressions remain hard blocks. The append-only recovery audit stores neither address nor raw Auth UUID and expires after 400 days.</p></section></div>
@@ -170,7 +170,7 @@ from (values
   (8, &#39;Win-back&#39;, &#39;Marketing&#39;),
   (9, &#39;Operations alerts&#39;, &#39;Operational&#39;),
   (10, &#39;Account deletion&#39;, &#39;Transactional auth&#39;)
-) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Residual controls and external blockers</caption><thead><tr><th scope="col" class="portable-table-number">Rank</th><th scope="col">Control</th><th scope="col">Required action</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-51"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-51" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Dedicated Resend team</td><td>Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-52"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-52" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>DMARC reporting</td><td>Create dedicated report mailbox/aggregator and publish p=none with strict alignment</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-53"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-53" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Domain-scoped sending key</td><td>Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-54"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-54" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Signed delivery webhooks</td><td>Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-55"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-55" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>False permanent-bounce recovery</td><td>Use the audited service-role RPC only; complaints and provider suppressions remain hard-blocked</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-56"><span class="portable-source-value-text">6</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-56" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 6</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>RevenueCat customer billing emails</td><td>Add authoritative initial/renewal confirmation plus refund/fraud/revocation producers; do not infer from mutable projection state</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-57"><span class="portable-source-value-text">7</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-57" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 7</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Email localization and client QA</td><td>Define locale policy, then certify representative templates in Gmail, Outlook, Apple Mail, mobile, dark/light and accessibility modes</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-58"><span class="portable-source-value-text">8</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-58" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 8</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Real-customer baselines</td><td>Start deliverability and lifecycle KPI baselines only after non-internal customers exist</td></tr></tbody></table></div></div></section></div>
+) as flows(priority, journey, category);</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Residual controls and external blockers</caption><thead><tr><th scope="col" class="portable-table-number">Rank</th><th scope="col">Control</th><th scope="col">Required action</th></tr></thead><tbody><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-51"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-51" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Dedicated Resend team</td><td>Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-52"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-52" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>DMARC reporting</td><td>Create dedicated report mailbox/aggregator and publish p=none with strict alignment</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-53"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-53" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Domain-scoped sending key</td><td>Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-54"><span class="portable-source-value-text">4</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-54" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 4</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Signed delivery webhooks</td><td>Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-55"><span class="portable-source-value-text">5</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-55" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 5</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>False permanent-bounce recovery</td><td>Use the audited service-role RPC only; complaints and provider suppressions remain hard-blocked</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-56"><span class="portable-source-value-text">6</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-56" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 6</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>RevenueCat customer billing emails</td><td>Keep store dunning, fiscal receipts and fraud/dispute notices provider-owned; monitor the RevenueCat webhook contract</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-57"><span class="portable-source-value-text">7</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-57" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 7</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Email localization and client QA</td><td>Define a complete locale policy, then certify representative templates in Gmail, Outlook, Apple Mail, mobile, dark/light and accessibility modes</td></tr><tr><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-58"><span class="portable-source-value-text">8</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-58" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 8</span><strong>Source: Norva repository — email sender and trigger inventory</strong><span class="portable-source-meta">File: docs/EMAIL-FUNNEL.md</span></span></span></td><td>Real-customer baselines</td><td>Start deliverability and lifecycle KPI baselines only after non-internal customers exist</td></tr></tbody></table></div></div></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="methodology" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Methodology and interpretation limits</h2>
 <p>This audit combines a production Postgres snapshot, the complete Resend message history available to the account, live Resend API contract probes, public DNS and repository-level sender/trigger tracing. No recipient address, provider credential, API key, stream credential or payment identifier is included in this artifact.</p>
 <p>The historical cohort is five internal/pilot accounts and therefore cannot establish customer engagement, inbox placement or conversion baselines. The report treats delivery events as operational evidence only. The code-level target state is validated by automated tests and production checks; external controls requiring a dedicated Resend team or DNS authority remain explicitly open rather than being simulated.</p>
@@ -557,199 +557,202 @@ from (values
 })();</script>
 <div id="data-analytics-portable-reader" aria-hidden="true" inert></div>
 <template id="data-analytics-portable-artifact-payload-source" data-compression="gzip-base64">
-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
-lwAA
+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
 </template>
 <template id="data-analytics-portable-reader-runtime-source" data-compression="gzip-base64">
 H4sIAAAAAAACCuy9a3fjNrYg+v38CilTV0MeQ4pk15MyyqfiR6e665VyVdLVjseESUhCTIEKCNnl

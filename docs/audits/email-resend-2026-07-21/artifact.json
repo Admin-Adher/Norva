@@ -3,9 +3,9 @@
   "manifest": {
     "version": 1,
     "surface": "report",
-    "title": "Norva Email & Resend Audit — 21 July 2026",
+    "title": "Norva Email & Resend Audit — 21–22 July 2026",
     "description": "Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.",
-    "generatedAt": "2026-07-22T00:43:21Z",
+    "generatedAt": "2026-07-22T01:23:01Z",
     "sources": [
       {
         "id": "resend_history",
@@ -239,7 +239,7 @@
       {
         "id": "title",
         "type": "markdown",
-        "body": "# Norva Email & Resend Audit — 21 July 2026",
+        "body": "# Norva Email & Resend Audit — 21–22 July 2026",
         "layout": "full"
       },
       {
@@ -305,7 +305,7 @@
       {
         "id": "provider_coverage_section",
         "type": "markdown",
-        "body": "## Provider coverage is not interchangeable\n\nRevolut has Norva-owned payment confirmations, J-3/J-1 trial reminders, three dunning stages, recovery and lifecycle-transition emails. RevenueCat/store rails feed the same cancellation, resume, plan-change, recovery and expiry lifecycle intents, but store billing dunning is provider-owned. A material gap remains: a captured RevenueCat initial purchase or renewal is journalled, but the confirmation outbox deliberately ignores non-Revolut ledger rows; RevenueCat refund, fraud and revocation customer emails also lack an authoritative Norva producer. These gaps are shown explicitly below rather than hidden inside the aggregate billing family.",
+        "body": "## Provider coverage is not interchangeable\n\nRevolut has Norva-owned payment confirmations, J-3/J-1 trial reminders, three dunning stages, recovery and lifecycle-transition emails. RevenueCat/store rails now feed the same durable confirmation outbox for authoritative paid initial purchases, renewals and non-renewing purchases; trial/intro events remain excluded. A documented RevenueCat `CANCELLATION` with `cancel_reason=CUSTOMER_SUPPORT` now produces one refund confirmation without falsely marking auto-renewal as cancelled, and a later `EXPIRATION` remains the access-revocation signal. Store trial reminders, billing dunning, fiscal receipts and fraud/dispute communications remain provider-owned because Norva must not invent causes or direct store customers to a norva.tv card form.",
         "layout": "full"
       },
       {
@@ -422,7 +422,7 @@
         { "order": 24, "area": "Dunning", "template": "payment_failed stage 3", "event": "Past_due ≥24h after stage 2", "provider": "Revolut", "coverage": "Covered; final access-pause notice" },
         { "order": 25, "area": "Dunning", "template": "Store billing issue", "event": "RevenueCat BILLING_ISSUE", "provider": "RevenueCat / store", "coverage": "Provider-owned; no incorrect norva.tv card CTA" },
         { "order": 26, "area": "Billing", "template": "payment_receipt (customer copy: confirmation)", "event": "Captured ledger row", "provider": "Revolut", "coverage": "Covered" },
-        { "order": 27, "area": "Billing", "template": "payment confirmation", "event": "INITIAL_PURCHASE / RENEWAL captured and journalled", "provider": "RevenueCat", "coverage": "Gap: outbox rejects non-Revolut ledger rows" },
+        { "order": 27, "area": "Billing", "template": "payment confirmation", "event": "Paid INITIAL_PURCHASE / RENEWAL / NON_RENEWING_PURCHASE", "provider": "RevenueCat / store", "coverage": "Covered by the authoritative cross-rail ledger outbox; trial and intro events excluded" },
         { "order": 28, "area": "Billing", "template": "cancellation_confirmed", "event": "Cancel / CANCELLATION / SUBSCRIPTION_PAUSED", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
         { "order": 29, "area": "Billing", "template": "subscription_resumed", "event": "Resume / UNCANCELLATION", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
         { "order": 30, "area": "Billing", "template": "plan_change_scheduled", "event": "Scheduled web change / PRODUCT_CHANGE", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
@@ -430,14 +430,15 @@
         { "order": 32, "area": "Billing", "template": "payment_recovered", "event": "Successful retry / renewal after past_due or grace", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
         { "order": 33, "area": "Billing", "template": "access_expired", "event": "Dunning/cancel expiry / EXPIRATION", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
         { "order": 34, "area": "Billing", "template": "refund_confirmed", "event": "Admin-confirmed merchant refund", "provider": "Revolut", "coverage": "Covered" },
-        { "order": 35, "area": "Billing", "template": "refund / fraud / revocation notice", "event": "RevenueCat refund, revocation or fraud state", "provider": "RevenueCat", "coverage": "Gap: no authoritative customer-email producer" },
+        { "order": 35, "area": "Billing", "template": "refund_confirmed", "event": "CANCELLATION + cancel_reason=CUSTOMER_SUPPORT", "provider": "RevenueCat / store", "coverage": "Covered exactly once; does not imply cancellation or revoke access" },
         { "order": 36, "area": "Marketing", "template": "winback", "event": "Expired 3–30 days and never sent", "provider": "Canonical entitlement", "coverage": "Covered but off by default; consent-gated" },
         { "order": 37, "area": "Marketing", "template": "checkout_abandoned", "event": "Incomplete card check 1–48h", "provider": "Revolut checkout", "coverage": "Covered but off by default; consent-gated" },
         { "order": 38, "area": "Support", "template": "support_customer_message (new)", "event": "Customer creates ticket", "provider": "Norva support outbox → support inbox", "coverage": "Covered" },
         { "order": 39, "area": "Support", "template": "support_customer_message (reply)", "event": "Customer replies to ticket", "provider": "Norva support outbox → support inbox", "coverage": "Covered" },
         { "order": 40, "area": "Support", "template": "support_agent_reply", "event": "Agent replies in CRM", "provider": "Norva support outbox → customer", "coverage": "Covered" },
         { "order": 41, "area": "Operations", "template": "ops_health_alert", "event": "New unresolved health condition", "provider": "Norva admin → explicit ops mailbox", "coverage": "Covered; not a customer segment" },
-        { "order": 42, "area": "Operations", "template": "ops_health_recovery", "event": "Previously alerted condition healed", "provider": "Norva admin → explicit ops mailbox", "coverage": "Covered; acknowledgement before state clear" }
+        { "order": 42, "area": "Operations", "template": "ops_health_recovery", "event": "Previously alerted condition healed", "provider": "Norva admin → explicit ops mailbox", "coverage": "Covered; acknowledgement before state clear" },
+        { "order": 43, "area": "Billing", "template": "store fiscal receipt / fraud or dispute notice", "event": "Store tax, fraud, chargeback or dispute state", "provider": "Apple / Google / RevenueCat", "coverage": "Provider-owned; Norva sends no accusatory or invented cause" }
       ],
       "risks": [
         { "rank": 1, "control": "Dedicated Resend team", "state": "Open external blocker", "owner_action": "Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics" },
@@ -445,8 +446,8 @@
         { "rank": 3, "control": "Domain-scoped sending key", "state": "Complete in production", "owner_action": "Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired" },
         { "rank": 4, "control": "Signed delivery webhooks", "state": "Complete in production", "owner_action": "Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events" },
         { "rank": 5, "control": "False permanent-bounce recovery", "state": "Complete in production", "owner_action": "Use the audited service-role RPC only; complaints and provider suppressions remain hard-blocked" },
-        { "rank": 6, "control": "RevenueCat customer billing emails", "state": "Partial coverage", "owner_action": "Add authoritative initial/renewal confirmation plus refund/fraud/revocation producers; do not infer from mutable projection state" },
-        { "rank": 7, "control": "Email localization and client QA", "state": "English-only; structural QA only", "owner_action": "Define locale policy, then certify representative templates in Gmail, Outlook, Apple Mail, mobile, dark/light and accessibility modes" },
+        { "rank": 6, "control": "RevenueCat customer billing emails", "state": "Norva-authoritative events covered", "owner_action": "Keep store dunning, fiscal receipts and fraud/dispute notices provider-owned; monitor the RevenueCat webhook contract" },
+        { "rank": 7, "control": "Email localization and client QA", "state": "Client envelope hardened; English-only; structural QA only", "owner_action": "Define a complete locale policy, then certify representative templates in Gmail, Outlook, Apple Mail, mobile, dark/light and accessibility modes" },
         { "rank": 8, "control": "Real-customer baselines", "state": "Not measurable yet", "owner_action": "Start deliverability and lifecycle KPI baselines only after non-internal customers exist" }
       ]
     },

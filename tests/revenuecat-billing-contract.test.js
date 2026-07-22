@@ -72,7 +72,7 @@ test('an unmapped paid grant stays retryable unless a same-rail plan can be pres
 
   const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-billing-webhook/index.ts'), 'utf8');
   const rejection = source.indexOf('shouldRejectUnmappedRevenueCatEvent(eventType, resolvedPlan');
-  const paymentJournal = source.indexOf('await journalRcPayment(admin, userId, eventType, event)');
+  const paymentJournal = source.indexOf('await journalRcPayment(admin, userId, eventType, event, resolvedPlan)');
   const processedMarker = source.indexOf('await recordProcessedEvent(admin, userId, eventId, eventType');
   assert.ok(rejection > 0 && rejection < paymentJournal && rejection < processedMarker);
 });

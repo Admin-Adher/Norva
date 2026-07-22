@@ -311,6 +311,16 @@ test('team-wide Resend contacts fail closed until Norva has a dedicated team', (
   assert.match(envExample, /RESEND_DEDICATED_TEAM_CONFIRMED=false/);
 });
 
+test('shared-team runbook forbids deleting global orphan contacts or using empty segments as isolation', () => {
+  const runbook = read('docs/RESEND-CONTACT-OPS.md');
+  assert.match(runbook, /Shared-team orphan policy/);
+  assert.match(runbook, /not automatically safe to delete/);
+  assert.match(runbook, /do not patch its global `unsubscribed`/);
+  assert.match(runbook, /BuildTrack's authoritative identity, consent and[\s\S]*suppression stores/);
+  assert.match(runbook, /Creating empty `Norva · \.\.\.` Segment objects[\s\S]*operationally useless/);
+  assert.match(runbook, /use the local `desired_segment_slugs` projection/);
+});
+
 test('full-access Resend management credential is isolated from public Edge runtimes', () => {
   const lifecycle = read('supabase/functions/norva-lifecycle/index.ts');
   const provision = read('ops/hetzner/scripts/provision-resend-contact-data.sh');

@@ -137,7 +137,11 @@ Deno.serve(async (req) => {
     // leaves no event row, so RevenueCat's retry safely reprocesses.
     const effective = effectiveEvent(eventType, event);
     const periodType = String(effective.period_type ?? "").toUpperCase();
-    const reconcilesProjection = statusForEvent(eventType, periodType === "TRIAL" || periodType === "INTRO") !== null;
+    const reconcilesProjection = statusForEvent(
+      eventType,
+      periodType === "TRIAL" || periodType === "INTRO",
+      effective,
+    ) !== null;
     let existingProjection: ProjectionSnapshot | null = null;
     if (reconcilesProjection) {
       const { data: existing, error: existingError } = await admin.from("cloud_entitlement_projection")
@@ -199,7 +203,7 @@ Deno.serve(async (req) => {
     // Journal the mobile charge into the shared payments ledger (cloud_billing_ledger,
     // rail-tagged) so collected / conversions / recent-payments / by-rail KPIs see
     // Play & Apple revenue alongside the web rail's own order journal.
-    await journalRcPayment(admin, userId, eventType, event);
+    await journalRcPayment(admin, userId, eventType, event, resolvedPlan);
 
     await recordProcessedEvent(admin, userId, eventId, eventType, {
       ...event,
@@ -242,7 +246,7 @@ function projectionPatch(
   const event = effectiveEvent(type, rawEvent);
   const periodType = String(event.period_type ?? "").toUpperCase();
   const isTrial = periodType === "TRIAL" || periodType === "INTRO";
-  const status = statusForEvent(type, isTrial);
+  const status = statusForEvent(type, isTrial, event);
   if (!status) return null; // nothing to reconcile (e.g. TRANSFER — TODO below)
 
   const planCode = isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null;
@@ -305,7 +309,7 @@ function projectionPatch(
   return patch;
 }
 
-function statusForEvent(type: string, isTrial: boolean): string | null {
+function statusForEvent(type: string, isTrial: boolean, event: JsonRecord = {}): string | null {
   switch (type) {
     case "INITIAL_PURCHASE":
     case "RENEWAL":
@@ -317,6 +321,11 @@ function statusForEvent(type: string, isTrial: boolean): string | null {
     case "PRODUCT_CHANGE":
       return null;
     case "CANCELLATION":
+      // RevenueCat uses CANCELLATION + CUSTOMER_SUPPORT for an issued refund.
+      // Its own contract says that this does not prove auto-renewal was disabled,
+      // so the refund is journaled and emailed below without mutating access. A
+      // later EXPIRATION remains the authoritative revocation signal.
+      if (isRefundCancellation(event)) return null;
       // Still entitled until current_period_end; just won't auto-renew.
       return "cancelled_at_period_end";
     case "BILLING_ISSUE":
@@ -330,6 +339,10 @@ function statusForEvent(type: string, isTrial: boolean): string | null {
     default:
       return null;
   }
+}
+
+function isRefundCancellation(event: JsonRecord): boolean {
+  return String(event.cancel_reason ?? "").trim().toUpperCase() === "CUSTOMER_SUPPORT";
 }
 
 function providerForStore(store: string | null): string {
@@ -357,17 +370,38 @@ function basePriceCents(event: JsonRecord): number | null {
   return Number.isFinite(p) && p > 0 ? Math.round(p * 100) : null;
 }
 
-// Cash actually collected for this transaction (buyer's currency). NOTE: this is
-// GROSS of the 15–30% store commission; net proceeds = amount × takehome_percentage.
-function paidCents(event: JsonRecord): number | null {
-  const raw = event.price_in_purchased_currency ?? event.price;
-  const p = Number(raw);
-  return Number.isFinite(p) && p > 0 ? Math.round(p * 100) : null;
+type RcMoney = { cents: number; currency: string };
+
+function rcCurrency(event: JsonRecord): string | null {
+  const value = (stringOrNull(event.currency) ?? "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(value) ? value.toLowerCase() : null;
 }
 
-function currencyOf(event: JsonRecord): string {
-  const c = stringOrNull(event.currency);
-  return c ? c.toLowerCase() : "usd";
+// Prefer the buyer-currency amount only when RevenueCat also supplies its ISO
+// currency. Otherwise fall back to RevenueCat's USD `price`; never label an
+// unknown local amount as USD. Values are gross of store commission.
+function paidMoney(event: JsonRecord): RcMoney | null {
+  const local = Number(event.price_in_purchased_currency);
+  const localCurrency = rcCurrency(event);
+  if (Number.isFinite(local) && local > 0 && localCurrency) {
+    return { cents: Math.round(local * 100), currency: localCurrency };
+  }
+  const usd = Number(event.price);
+  return Number.isFinite(usd) && usd > 0
+    ? { cents: Math.round(usd * 100), currency: "usd" }
+    : null;
+}
+
+function refundedMoney(event: JsonRecord): RcMoney | null {
+  const local = Number(event.price_in_purchased_currency);
+  const localCurrency = rcCurrency(event);
+  if (Number.isFinite(local) && local < 0 && localCurrency) {
+    return { cents: Math.round(Math.abs(local) * 100), currency: localCurrency };
+  }
+  const usd = Number(event.price);
+  return Number.isFinite(usd) && usd < 0
+    ? { cents: Math.round(Math.abs(usd) * 100), currency: "usd" }
+    : null;
 }
 
 // ISO 3166-1 alpha-2 storefront country of the subscriber, or null.
@@ -411,14 +445,46 @@ async function journalRcPayment(
   userId: string,
   type: string,
   rawEvent: JsonRecord,
+  resolvedPlan?: string | null,
 ): Promise<void> {
+  const event = effectiveEvent(type, rawEvent);
+  if (type === "CANCELLATION" && isRefundCancellation(event)) {
+    // CUSTOMER_SUPPORT is authoritative for the fact of a refund, but a missing
+    // or zero amount is not enough to create a financial row. The lifecycle
+    // event is still recorded later and can produce a confirmation without an
+    // amount; finance remains fail-closed rather than inventing money.
+    const refund = refundedMoney(event);
+    if (!refund || refund.cents <= 0 || refund.cents > 9_999_999) return;
+    const eventId = stringOrNull(event.id);
+    const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.original_transaction_id);
+    const refundIdentity = eventId ?? txId;
+    if (!refundIdentity) return;
+    const { error } = await db.from("cloud_billing_ledger").upsert({
+      pi_id: `rc_refund_${refundIdentity}`,
+      user_id: userId,
+      kind: "refund",
+      amount: refund.cents,
+      currency: refund.currency,
+      status: "refunded",
+      provider: providerForStore(stringOrNull(event.store)),
+      order_id: txId,
+      country_code: countryOf(event),
+      plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
+      bill_period: billPeriodForEvent(event),
+      billing_period_end: msToIso(event.expiration_at_ms),
+    }, { onConflict: "pi_id", ignoreDuplicates: true });
+    if (error && (error as { code?: string }).code !== "23505") {
+      throw new Error(`rc refund journal failed: ${error.message}`);
+    }
+    return;
+  }
+
   const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
   if (!MONEY.has(type)) return;
-  const event = effectiveEvent(type, rawEvent);
   const periodType = String(event.period_type ?? "").toUpperCase();
   if (periodType === "TRIAL" || periodType === "INTRO") return; // no cash during a trial/intro
-  const cents = paidCents(event);
-  if (cents == null) return;
+  const money = paidMoney(event);
+  if (!money || money.cents > 9_999_999) return;
   const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.id);
   if (!txId) return;
 
@@ -426,14 +492,17 @@ async function journalRcPayment(
     pi_id: `rc_${txId}`,
     user_id: userId,
     kind: type === "RENEWAL" ? "renewal" : "first_charge",
-    amount: cents,
-    currency: currencyOf(event),
+    amount: money.cents,
+    currency: money.currency,
     status: "captured",
     provider: providerForStore(stringOrNull(event.store)),
     order_id: txId,
     // Transaction-time country (VAT/OSS record). NB: for store rails the STORE is the
     // deemed supplier for EU VAT — this is analytics/audit context, not a tax base.
     country_code: countryOf(event),
+    plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
+    bill_period: billPeriodForEvent(event),
+    billing_period_end: msToIso(event.expiration_at_ms),
   }, { onConflict: "pi_id", ignoreDuplicates: true });
   if (error && (error as { code?: string }).code !== "23505") {
     throw new Error(`rc payment journal failed: ${error.message}`);

@@ -19,6 +19,47 @@ signup/activity timestamps.
   until `RESEND_DEDICATED_TEAM_CONFIRMED=true` confirms that BuildTrack is on a
   different team.
 
+## Shared-team orphan policy
+
+A Resend Contact is one global object for the whole team, not one object per
+Segment or per sending domain. Its `unsubscribed` flag is also global for every
+Broadcast sent by that team. Consequently, an address that no longer belongs to
+a Norva Auth user is **not automatically safe to delete** while BuildTrack still
+shares the team: deleting the Contact would also delete any cross-product
+unsubscribe evidence and metadata attached to that same global object.
+
+The read-only production reconciliation on 2026-07-22 found six Resend Contacts,
+five exact current Norva Auth matches and one orphan. The orphan is globally
+unsubscribed, has no custom properties, belongs only to the deprecated
+`Norva Users` Segment and has no non-Norva sender history in the available
+Resend history. This is strong Norva-ownership evidence, but it is not proof that
+the address is absent from BuildTrack's own customer and consent stores.
+
+While the team is shared, the only remotely scoped cleanup that can be considered
+is removing membership from a specifically identified Norva-owned Segment. Do
+not delete the Contact and do not patch its global `unsubscribed`, `first_name`,
+`last_name`, Topic subscriptions or custom properties. Before any orphan Contact
+is deleted, either:
+
+1. reconcile it against BuildTrack's authoritative identity, consent and
+   suppression stores and preserve any required opt-out evidence; or
+2. move Norva to a dedicated Resend team, migrate only current consent-safe Norva
+   Contacts, and let the owner of the old shared team decide its remaining
+   Contact retention.
+
+Creating empty `Norva · ...` Segment objects in the shared team would be
+namespaced but operationally useless. Populating them safely still requires
+mutating global Contacts, and every current Contact is globally unsubscribed.
+Until team isolation, use the local `desired_segment_slugs` projection for
+analysis and let Norva's consent-checked durable email workers perform sends;
+do not use Resend Broadcasts as a workaround.
+
+Resend documents Contacts as global entities and the subscribed/unsubscribed
+status as a global Broadcast gate, even when a Contact opted into a Topic. See
+the official [Contacts documentation](https://resend.com/docs/dashboard/audiences/contacts),
+[Topics documentation](https://resend.com/docs/dashboard/topics/introduction)
+and [Audience-to-Segments migration guide](https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments).
+
 ## Processing contract
 
 Every cycle runs in this order:

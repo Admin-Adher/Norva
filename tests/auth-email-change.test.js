@@ -49,7 +49,7 @@ function emailData(overrides = {}) {
 function actionUrl(message) {
   const match = message.html.match(/<a href="([^"]+)"/);
   assert.ok(match, 'email CTA URL was not rendered');
-  return new URL(match[1]);
+  return new URL(match[1].replace(/&amp;/g, '&'));
 }
 
 test('secure email change sends both confirmations with Supabase hash mapping', async () => {
@@ -195,7 +195,7 @@ test('non-email-change messages retain the current recipient and redirect', asyn
   const url = actionUrl(messages[0]);
   assert.equal(url.searchParams.get('token_hash'), 'recovery-hash');
   assert.equal(url.searchParams.get('returnTo'), '/app#movies');
-  assert.match(messages[0].html, /<html lang="en">/);
+  assert.match(messages[0].html, /<html lang="en" dir="ltr">/);
   assert.match(messages[0].text, /Reset your password/);
   assert.match(messages[0].text, /https:\/\/norva\.tv\/account\.html/);
   assert.equal(messages[0].flow, 'recovery');
@@ -208,6 +208,26 @@ test('auth sender provides plain text, reply-to, stable tags and retry idempoten
   assert.match(source, /reply_to: REPLY_TO/);
   assert.match(source, /text: email\.text/);
   assert.match(source, /transactional_auth/);
+});
+
+test('auth HTML escapes the signed hook token and carries premium client safeguards', async () => {
+  const { buildOutboundEmails } = await authEmail;
+  const [message] = buildOutboundEmails({
+    user: { email: 'member@example.com' },
+    email_data: emailData({
+      email_action_type: 'reauthentication',
+      token: '<img src=x onerror=alert(1)>',
+    }),
+  });
+
+  assert.match(message.html, /<html lang="en" dir="ltr">/);
+  assert.match(message.html, /data-preheader="true"/);
+  assert.match(message.html, /x-apple-disable-message-reformatting/);
+  assert.match(message.html, /format-detection/);
+  assert.doesNotMatch(message.html, /<img src=x onerror=/);
+  assert.match(message.html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(message.text, /<img src=x onerror=alert\(1\)>/);
+  assert.doesNotMatch(message.text, /Verification code · Norva/);
 });
 
 test('incomplete secure email-change payloads fail before a delivery set is built', async () => {

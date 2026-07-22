@@ -75,18 +75,19 @@ function shell(
   lang: "en" | "fr" = "en",
 ): string {
   const button = cta
-    ? `<tr><td align="center" style="padding:8px 0 26px"><a href="${esc(cta.url)}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">${esc(cta.label)}</a></td></tr>`
+    ? `<tr><td align="center" style="padding:8px 0 26px"><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#5b7cfa" style="background:#5b7cfa;border-radius:10px;mso-padding-alt:14px 30px"><a href="${esc(cta.url)}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;line-height:1;text-decoration:none">${esc(cta.label)}</a></td></tr></table></td></tr>`
     : "";
-  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(heading)}</title></head><body style="margin:0;padding:0;background:#0a0c11">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(heading)}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c11"><tr><td align="center" style="padding:32px 16px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#11151d;border:1px solid #1f2733;border-radius:16px;overflow:hidden">
+  return `<!doctype html><html lang="${lang}" dir="ltr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${esc(heading)}</title></head><body style="margin:0;padding:0;background:#0a0c11;color:#f8fafc;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+  <div data-preheader="true" style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;max-height:0;max-width:0;overflow:hidden;mso-hide:all">${esc(heading)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#0a0c11" style="width:100%;background:#0a0c11;border-collapse:collapse"><tr><td align="center" style="padding:32px 16px">
+    <table role="presentation" width="520" border="0" cellpadding="0" cellspacing="0" bgcolor="#11151d" style="width:100%;max-width:520px;background:#11151d;border:1px solid #1f2733;border-radius:16px;border-collapse:separate">
       <tr><td style="padding:28px 32px 6px;text-align:center">
-        <div style="color:#ffffff;font-family:Arial,sans-serif;font-size:20px;font-weight:700">Norva</div></td></tr>
-      <tr><td style="padding:14px 32px 6px"><h1 style="margin:0;color:#f8fafc;font-family:Arial,sans-serif;font-size:18px;font-weight:800">${esc(heading)}</h1></td></tr>
-      <tr><td style="padding:12px 32px 18px;color:#9aa6bd;font-family:Arial,sans-serif;font-size:14px;line-height:1.65">${bodyHtml}</td></tr>
+        <div style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700">Norva</div></td></tr>
+      <tr><td style="padding:14px 32px 6px"><h1 style="margin:0;color:#f8fafc;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:800;line-height:1.35">${esc(heading)}</h1></td></tr>
+      <tr><td style="padding:12px 32px 18px;color:#9aa6bd;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65">${bodyHtml}</td></tr>
       ${button}
     </table>
+    <div style="color:#667085;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;margin-top:16px">&copy; Norva</div>
   </td></tr></table></body></html>`;
 }
 
