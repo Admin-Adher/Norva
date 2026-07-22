@@ -5,7 +5,7 @@
     "surface": "report",
     "title": "Norva Email & Resend Audit — 21 July 2026",
     "description": "Production-grounded audit of Norva email journeys, delivery reliability, Resend data design and operational controls.",
-    "generatedAt": "2026-07-21T23:49:33Z",
+    "generatedAt": "2026-07-22T00:43:21Z",
     "sources": [
       {
         "id": "resend_history",
@@ -27,7 +27,7 @@
         "label": "Norva production Postgres — account and notification snapshot",
         "query": {
           "engine": "PostgreSQL 17",
-          "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where opt_in) as marketing_opt_ins,\n  (select count(*) from public.cloud_import_notifications)\n    as import_notifications;",
+          "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where marketing_email_opt_in is true) as marketing_opt_ins,\n  (select count(*) from public.cloud_import_notifications)\n    as import_notifications;",
           "description": "Aggregate production snapshot used to establish population, account class, source readiness, consent and import-email volume.",
           "executed_at": "2026-07-21T18:00:00Z",
           "language": "sql",
@@ -44,7 +44,7 @@
           ],
           "metric_definitions": [
             "Real customer accounts = auth users not present in admin_internal_accounts",
-            "Marketing opt-ins = preferences where opt_in is true"
+            "Marketing opt-ins = preferences where marketing_email_opt_in is true"
           ]
         }
       },
@@ -164,7 +164,8 @@
           { "field": "priority", "label": "Order", "type": "number" },
           { "field": "journey", "label": "Journey", "type": "text" },
           { "field": "category", "label": "Category", "type": "text" },
-          { "field": "delivery", "label": "Target delivery", "type": "text" }
+          { "field": "delivery", "label": "Target delivery", "type": "text" },
+          { "field": "retention", "label": "Retention / minimization", "type": "text" }
         ]
       },
       {
@@ -181,6 +182,41 @@
           { "field": "segment", "label": "Segment", "type": "text" },
           { "field": "definition", "label": "Eligibility", "type": "text" },
           { "field": "activation", "label": "Activation", "type": "text" }
+        ]
+      },
+      {
+        "id": "campaign_exclusion_matrix",
+        "title": "Campaign inclusion and exclusion guardrails",
+        "subtitle": "Orthogonal product-readiness segments never override lifecycle, consent or delivery-safety exclusions.",
+        "dataset": "campaign_guardrails",
+        "sourceId": "resend_configuration",
+        "defaultSort": { "field": "order", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "Order", "type": "number" },
+          { "field": "campaign", "label": "Campaign", "type": "text" },
+          { "field": "include", "label": "Required inclusion", "type": "text" },
+          { "field": "exclude", "label": "Mandatory exclusions", "type": "text" },
+          { "field": "final_gate", "label": "Final send gate", "type": "text" }
+        ]
+      },
+      {
+        "id": "email_template_matrix",
+        "title": "Concrete email template, event and provider matrix",
+        "subtitle": "Code-traced coverage for every active email family, including all Auth actions, both trial offsets, three dunning stages, billing transitions and support directions.",
+        "dataset": "email_matrix",
+        "sourceId": "repository_inventory",
+        "defaultSort": { "field": "order", "direction": "asc" },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          { "field": "order", "label": "Order", "type": "number" },
+          { "field": "area", "label": "Area", "type": "text" },
+          { "field": "template", "label": "Template / flow", "type": "text" },
+          { "field": "event", "label": "Authoritative event", "type": "text" },
+          { "field": "provider", "label": "Provider / rail", "type": "text" },
+          { "field": "coverage", "label": "Coverage", "type": "text" }
         ]
       },
       {
@@ -255,9 +291,33 @@
         "layout": "full"
       },
       {
+        "id": "campaign_guardrails_section",
+        "type": "markdown",
+        "body": "### Campaigns must combine axes explicitly\n\n`catalog-ready` and `onboarding` describe product readiness; they do not grant marketing eligibility and must never erase lifecycle state. Every campaign starts by excluding `internal-pilots` and `blocked-suppressed`, then applies the relevant lifecycle exclusions. Marketing sends additionally require the Topic opt-in, current local consent and no active suppression at the final send boundary. Transactional dunning is not a campaign and remains provider-scoped.",
+        "layout": "full"
+      },
+      {
+        "id": "campaign_guardrails_table_block",
+        "type": "table",
+        "tableId": "campaign_exclusion_matrix",
+        "layout": "full"
+      },
+      {
+        "id": "provider_coverage_section",
+        "type": "markdown",
+        "body": "## Provider coverage is not interchangeable\n\nRevolut has Norva-owned payment confirmations, J-3/J-1 trial reminders, three dunning stages, recovery and lifecycle-transition emails. RevenueCat/store rails feed the same cancellation, resume, plan-change, recovery and expiry lifecycle intents, but store billing dunning is provider-owned. A material gap remains: a captured RevenueCat initial purchase or renewal is journalled, but the confirmation outbox deliberately ignores non-Revolut ledger rows; RevenueCat refund, fraud and revocation customer emails also lack an authoritative Norva producer. These gaps are shown explicitly below rather than hidden inside the aggregate billing family.",
+        "layout": "full"
+      },
+      {
+        "id": "email_matrix_table_block",
+        "type": "table",
+        "tableId": "email_template_matrix",
+        "layout": "full"
+      },
+      {
         "id": "governance_section",
         "type": "markdown",
-        "body": "## Governance, deliverability and data quality\n\nSPF, DKIM and the custom MAIL FROM domain are present. DMARC is missing, so Norva has neither an enforceable anti-spoofing policy nor aggregate reports. Publish a reporting-only DMARC policy first, observe for two to four weeks, then progress to quarantine/reject only when legitimate sources align. Keep operations and customer messaging separate: operational alerts should not inflate lifecycle engagement, and BuildTrack must use another Resend team before Norva Contacts, global unsubscribe, Topics or properties are mutated.",
+        "body": "## Governance, deliverability and data quality\n\nSPF, DKIM and the custom MAIL FROM domain are present. DMARC is missing, so Norva has neither an enforceable anti-spoofing policy nor aggregate reports. Publish a reporting-only DMARC policy first, observe for two to four weeks, then progress to quarantine/reject only when legitimate sources align. Keep operations and customer messaging separate: operational alerts should not inflate lifecycle engagement, and BuildTrack must use another Resend team before Norva Contacts, global unsubscribe, Topics or properties are mutated.\n\nDelivery telemetry contains recipient/from addresses and bounded diagnostic data for incident response. Production scrubs that PII after 90 days, keeps address-free raw event rows for 180 days, and keeps address-free per-message status metrics for 400 days. Active suppression addresses remain only while needed to prevent unsafe delivery; account-deletion confirmation recipients are redacted immediately. False permanent bounces have a service-role-only recovery RPC requiring current confirmed identity, fresh post-bounce mailbox proof and attributable operator evidence. Complaints and provider suppressions remain hard blocks. The append-only recovery audit stores neither address nor raw Auth UUID and expires after 400 days.",
         "layout": "full"
       },
       {
@@ -269,14 +329,14 @@
       {
         "id": "methodology",
         "type": "markdown",
-        "body": "## Methodology and interpretation limits\n\nThis audit combines a production Postgres snapshot, the complete Resend message history available to the account, live Resend API contract probes, public DNS and repository-level sender/trigger tracing. No recipient address, provider credential, API key, stream credential or payment identifier is included in this artifact.\n\nThe historical cohort is five internal/pilot accounts and therefore cannot establish customer engagement, inbox placement or conversion baselines. The report treats delivery events as operational evidence only. The code-level target state is validated by automated tests and production checks; external controls requiring a dedicated Resend team or DNS authority remain explicitly open rather than being simulated.",
+        "body": "## Methodology and interpretation limits\n\nThis audit combines a production Postgres snapshot, the complete Resend message history available to the account, live Resend API contract probes, public DNS and repository-level sender/trigger tracing. No recipient address, provider credential, API key, stream credential or payment identifier is included in this artifact.\n\nThe historical cohort is five internal/pilot accounts and therefore cannot establish customer engagement, inbox placement or conversion baselines. The report treats delivery events as operational evidence only. The code-level target state is validated by automated tests and production checks; external controls requiring a dedicated Resend team or DNS authority remain explicitly open rather than being simulated.\n\nAll current customer-facing email templates are English-only. Template QA in this audit is structural only: multipart presence, escaping, required links, durable delivery contracts and artifact structure were checked, but no cross-client visual certification was completed for Gmail, Outlook, Apple Mail, dark/light variants or assistive technologies. This is a documented premium-quality gap, not a claim of email-client parity.",
         "layout": "full"
       }
     ]
   },
   "snapshot": {
     "version": 1,
-    "generatedAt": "2026-07-21T23:49:33Z",
+    "generatedAt": "2026-07-22T00:43:21Z",
     "status": "ready",
     "datasets": {
       "headline": [
@@ -304,9 +364,9 @@
         { "outcome": "Clicked", "count": 1, "rate": 0.0074626866, "total": 134, "period": "2026-04-08 to 2026-07-16", "class": "engagement" }
       ],
       "email_flows": [
-        { "priority": 1, "journey": "Auth actions", "category": "Transactional auth", "delivery": "Signed hook; exact payload; stable idempotency key", "retention": "Provider metadata only" },
-        { "priority": 2, "journey": "Security events", "category": "Transactional security", "delivery": "Immutable leased outbox; 2xx + provider ID ack", "retention": "Payload scrubbed after send" },
-        { "priority": 3, "journey": "Payment confirmations & recovery", "category": "Transactional billing", "delivery": "Ledger-linked outbox; ambiguous quarantine; provider-safe retries (legacy internal flow slug: payment_receipt)", "retention": "90d sent / 30d dead-letter, minimized" },
+        { "priority": 1, "journey": "Auth actions", "category": "Transactional auth", "delivery": "Signed hook; exact payload; stable idempotency key", "retention": "No body ledger; central delivery recipient/diagnostic PII <=90d" },
+        { "priority": 2, "journey": "Security events", "category": "Transactional security", "delivery": "Immutable leased outbox; 2xx + provider ID ack", "retention": "Outbox payload scrubbed; central delivery PII <=90d" },
+        { "priority": 3, "journey": "Payment confirmations & recovery", "category": "Transactional billing", "delivery": "Ledger-linked outbox; ambiguous quarantine; provider-safe retries (legacy internal flow slug: payment_receipt)", "retention": "Outbox 90d sent / 30d dead-letter; central delivery PII <=90d" },
         { "priority": 4, "journey": "Catalog import", "category": "Transactional product", "delivery": "Digest outbox; one message per settled user/kind group", "retention": "Payload scrubbed on terminal state" },
         { "priority": 5, "journey": "AI subtitles ready", "category": "Transactional product", "delivery": "Explicit opt-in; leased outbox; current Auth address frozen at send", "retention": "Bounded sent/dead-letter retention" },
         { "priority": 6, "journey": "Support ticket", "category": "Transactional support", "delivery": "Durable email outbox plus Telegram channel acknowledgement", "retention": "PII scrub after terminal state" },
@@ -326,12 +386,68 @@
         { "order": 8, "segment": "blocked-suppressed", "definition": "Entitlement is blocked or delivery suppression applies", "purpose": "Fail-closed exclusion and remediation", "activation": "Gated" },
         { "order": 9, "segment": "catalog-ready", "definition": "At least one ready source; identity neither disabled nor blocked", "purpose": "Product-readiness and activation analysis", "activation": "Gated" }
       ],
+      "campaign_guardrails": [
+        { "order": 1, "campaign": "All marketing", "include": "Explicit product-news-offers Topic opt-in", "exclude": "internal-pilots; blocked-suppressed", "final_gate": "Current local consent; no unsubscribe; no active delivery suppression" },
+        { "order": 2, "campaign": "Onboarding help", "include": "onboarding AND NOT catalog-ready", "exclude": "internal-pilots; blocked-suppressed; payment-recovery; churned", "final_gate": "Consent for promotional copy; transactional help must be event-triggered" },
+        { "order": 3, "campaign": "Trial education", "include": "trialing", "exclude": "internal-pilots; blocked-suppressed; payment-recovery; churned", "final_gate": "Product-readiness filter is optional context, never eligibility" },
+        { "order": 4, "campaign": "Active subscriber campaign", "include": "active-subscribers", "exclude": "internal-pilots; blocked-suppressed; cancel-scheduled; payment-recovery; churned", "final_gate": "Consent and suppression rechecked immediately before send" },
+        { "order": 5, "campaign": "Cancellation retention", "include": "cancel-scheduled", "exclude": "internal-pilots; blocked-suppressed; payment-recovery; churned", "final_gate": "Never include ordinary active-subscriber messaging by overlap" },
+        { "order": 6, "campaign": "Win-back", "include": "churned", "exclude": "internal-pilots; blocked-suppressed; trialing; active-subscribers; cancel-scheduled; payment-recovery", "final_gate": "Explicit consent plus one-click unsubscribe; one bounded send" },
+        { "order": 7, "campaign": "Catalog-ready promotion", "include": "catalog-ready AND (trialing OR active-subscribers)", "exclude": "internal-pilots; blocked-suppressed; cancel-scheduled; payment-recovery; churned", "final_gate": "Catalog readiness cannot override lifecycle, consent or suppression" }
+      ],
+      "email_matrix": [
+        { "order": 1, "area": "Auth", "template": "Confirm your email / signup", "event": "GoTrue signup", "provider": "Supabase Auth hook → Resend", "coverage": "Covered" },
+        { "order": 2, "area": "Auth", "template": "Reset your password / recovery", "event": "GoTrue recovery", "provider": "Supabase Auth hook → Resend", "coverage": "Covered" },
+        { "order": 3, "area": "Auth", "template": "Your sign-in link / magic_link", "event": "GoTrue magiclink or alias", "provider": "Supabase Auth hook → Resend", "coverage": "Covered" },
+        { "order": 4, "area": "Auth", "template": "Confirm email change / current address", "event": "Secure email_change token_hash_new", "provider": "Supabase Auth hook → Resend batch", "coverage": "Covered" },
+        { "order": 5, "area": "Auth", "template": "Confirm new email / new address", "event": "GoTrue email_change token_hash", "provider": "Supabase Auth hook → Resend batch", "coverage": "Covered" },
+        { "order": 6, "area": "Auth", "template": "Invitation / invite", "event": "GoTrue invite", "provider": "Supabase Auth hook → Resend", "coverage": "Covered" },
+        { "order": 7, "area": "Auth", "template": "Verification code / reauthentication", "event": "GoTrue reauthentication", "provider": "Supabase Auth hook → Resend", "coverage": "Covered" },
+        { "order": 8, "area": "Auth", "template": "Confirm your request / fallback", "event": "Unknown future GoTrue action", "provider": "Supabase Auth hook → Resend", "coverage": "Defensive fallback; monitor unexpected flow" },
+        { "order": 9, "area": "Security", "template": "security_password_changed", "event": "Confirmed account password hash changed", "provider": "Norva DB outbox → Resend", "coverage": "Covered" },
+        { "order": 10, "area": "Security", "template": "security_email_changed", "event": "Auth email changed; old address notified", "provider": "Norva DB outbox → Resend", "coverage": "Covered" },
+        { "order": 11, "area": "Security", "template": "security_new_device", "event": "New cloud_devices row", "provider": "Norva DB outbox → Resend", "coverage": "Covered" },
+        { "order": 12, "area": "Account", "template": "account_deleted", "event": "Successful permanent self-deletion", "provider": "Norva deletion outbox → Resend", "coverage": "Covered; recipient telemetry redacted immediately" },
+        { "order": 13, "area": "Catalog", "template": "import_started", "event": "First import started", "provider": "Norva import digest → Resend", "coverage": "Covered" },
+        { "order": 14, "area": "Catalog", "template": "import_completed", "event": "First import completed", "provider": "Norva import digest → Resend", "coverage": "Covered" },
+        { "order": 15, "area": "Catalog", "template": "import_failed", "event": "First import failed", "provider": "Norva import digest → Resend", "coverage": "Covered" },
+        { "order": 16, "area": "Product", "template": "subtitle_ready", "event": "User opt-in plus ready transcript with speech", "provider": "Norva subtitle outbox → Resend", "coverage": "Covered; empty/failed closes without email" },
+        { "order": 17, "area": "Lifecycle", "template": "welcome", "event": "First app reach / projection created", "provider": "Canonical entitlement → Resend", "coverage": "Covered; internal accounts excluded" },
+        { "order": 18, "area": "Trial", "template": "trial_ending J-3", "event": "Trial ends in 3 days", "provider": "Revolut", "coverage": "Covered; auto-renew copy" },
+        { "order": 19, "area": "Trial", "template": "trial_ending J-1", "event": "Trial ends tomorrow", "provider": "Revolut", "coverage": "Covered; auto-renew copy" },
+        { "order": 20, "area": "Trial", "template": "trial access ending J-3/J-1", "event": "Non-renewing trial offset", "provider": "manual/system", "coverage": "Covered; no-charge copy" },
+        { "order": 21, "area": "Trial", "template": "Store trial reminder", "event": "Store-managed trial ending", "provider": "RevenueCat / Play / Apple", "coverage": "Provider-owned; Norva DB reminder excludes these rails" },
+        { "order": 22, "area": "Dunning", "template": "payment_failed stage 1", "event": "First past_due reminder", "provider": "Revolut", "coverage": "Covered; gentle reminder" },
+        { "order": 23, "area": "Dunning", "template": "payment_failed stage 2", "event": "Past_due ≥24h after stage 1", "provider": "Revolut", "coverage": "Covered; firmer reminder" },
+        { "order": 24, "area": "Dunning", "template": "payment_failed stage 3", "event": "Past_due ≥24h after stage 2", "provider": "Revolut", "coverage": "Covered; final access-pause notice" },
+        { "order": 25, "area": "Dunning", "template": "Store billing issue", "event": "RevenueCat BILLING_ISSUE", "provider": "RevenueCat / store", "coverage": "Provider-owned; no incorrect norva.tv card CTA" },
+        { "order": 26, "area": "Billing", "template": "payment_receipt (customer copy: confirmation)", "event": "Captured ledger row", "provider": "Revolut", "coverage": "Covered" },
+        { "order": 27, "area": "Billing", "template": "payment confirmation", "event": "INITIAL_PURCHASE / RENEWAL captured and journalled", "provider": "RevenueCat", "coverage": "Gap: outbox rejects non-Revolut ledger rows" },
+        { "order": 28, "area": "Billing", "template": "cancellation_confirmed", "event": "Cancel / CANCELLATION / SUBSCRIPTION_PAUSED", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 29, "area": "Billing", "template": "subscription_resumed", "event": "Resume / UNCANCELLATION", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 30, "area": "Billing", "template": "plan_change_scheduled", "event": "Scheduled web change / PRODUCT_CHANGE", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 31, "area": "Billing", "template": "plan_change_applied", "event": "Applied renewal change", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 32, "area": "Billing", "template": "payment_recovered", "event": "Successful retry / renewal after past_due or grace", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 33, "area": "Billing", "template": "access_expired", "event": "Dunning/cancel expiry / EXPIRATION", "provider": "Revolut + RevenueCat", "coverage": "Covered" },
+        { "order": 34, "area": "Billing", "template": "refund_confirmed", "event": "Admin-confirmed merchant refund", "provider": "Revolut", "coverage": "Covered" },
+        { "order": 35, "area": "Billing", "template": "refund / fraud / revocation notice", "event": "RevenueCat refund, revocation or fraud state", "provider": "RevenueCat", "coverage": "Gap: no authoritative customer-email producer" },
+        { "order": 36, "area": "Marketing", "template": "winback", "event": "Expired 3–30 days and never sent", "provider": "Canonical entitlement", "coverage": "Covered but off by default; consent-gated" },
+        { "order": 37, "area": "Marketing", "template": "checkout_abandoned", "event": "Incomplete card check 1–48h", "provider": "Revolut checkout", "coverage": "Covered but off by default; consent-gated" },
+        { "order": 38, "area": "Support", "template": "support_customer_message (new)", "event": "Customer creates ticket", "provider": "Norva support outbox → support inbox", "coverage": "Covered" },
+        { "order": 39, "area": "Support", "template": "support_customer_message (reply)", "event": "Customer replies to ticket", "provider": "Norva support outbox → support inbox", "coverage": "Covered" },
+        { "order": 40, "area": "Support", "template": "support_agent_reply", "event": "Agent replies in CRM", "provider": "Norva support outbox → customer", "coverage": "Covered" },
+        { "order": 41, "area": "Operations", "template": "ops_health_alert", "event": "New unresolved health condition", "provider": "Norva admin → explicit ops mailbox", "coverage": "Covered; not a customer segment" },
+        { "order": 42, "area": "Operations", "template": "ops_health_recovery", "event": "Previously alerted condition healed", "provider": "Norva admin → explicit ops mailbox", "coverage": "Covered; acknowledgement before state clear" }
+      ],
       "risks": [
         { "rank": 1, "control": "Dedicated Resend team", "state": "Open external blocker", "owner_action": "Move Norva away from BuildTrack before provisioning Contacts/Segments/Topics" },
         { "rank": 2, "control": "DMARC reporting", "state": "Open external blocker", "owner_action": "Create dedicated report mailbox/aggregator and publish p=none with strict alignment" },
         { "rank": 3, "control": "Domain-scoped sending key", "state": "Complete in production", "owner_action": "Monitor key inventory; Edge has sending-only access and the legacy DB Vault copy is retired" },
         { "rank": 4, "control": "Signed delivery webhooks", "state": "Complete in production", "owner_action": "Monitor ingestion lag; a safe Resend delivery probe produced signed sent and delivered events" },
-        { "rank": 5, "control": "Real-customer baselines", "state": "Not measurable yet", "owner_action": "Start deliverability and lifecycle KPI baselines only after non-internal customers exist" }
+        { "rank": 5, "control": "False permanent-bounce recovery", "state": "Complete in production", "owner_action": "Use the audited service-role RPC only; complaints and provider suppressions remain hard-blocked" },
+        { "rank": 6, "control": "RevenueCat customer billing emails", "state": "Partial coverage", "owner_action": "Add authoritative initial/renewal confirmation plus refund/fraud/revocation producers; do not infer from mutable projection state" },
+        { "rank": 7, "control": "Email localization and client QA", "state": "English-only; structural QA only", "owner_action": "Define locale policy, then certify representative templates in Gmail, Outlook, Apple Mail, mobile, dark/light and accessibility modes" },
+        { "rank": 8, "control": "Real-customer baselines", "state": "Not measurable yet", "owner_action": "Start deliverability and lifecycle KPI baselines only after non-internal customers exist" }
       ]
     },
     "accessIssues": []
@@ -357,7 +473,7 @@
       "label": "Norva production Postgres — aggregate account snapshot",
       "query": {
         "engine": "PostgreSQL 17",
-        "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where opt_in) as marketing_opt_ins;",
+        "sql": "select\n  (select count(*) from auth.users) as auth_users,\n  (select count(*) from public.admin_internal_accounts) as internal_accounts,\n  (select count(*) from public.cloud_sources) as sources,\n  (select count(*) from public.cloud_marketing_email_preferences\n   where marketing_email_opt_in is true) as marketing_opt_ins;",
         "description": "Aggregate production snapshot with no direct identifiers.",
         "executed_at": "2026-07-21T18:00:00Z",
         "language": "sql",

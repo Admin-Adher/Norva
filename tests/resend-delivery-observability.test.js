@@ -101,6 +101,21 @@ test('delivery migration is idempotent, out-of-order safe and fail-closes market
   assert.match(sql, /interval '400 days'/);
 });
 
+test('delivery telemetry keeps annual metrics without retaining recipient PII for a year', () => {
+  const sql = read('supabase/migrations/20260722005100_resend_delivery_pii_scrub.sql');
+  assert.match(sql, /cloud_email_delivery_events[\s\S]*received_at < now\(\) - interval '90 days'/);
+  assert.match(sql, /from_email = null[\s\S]*to_emails = '\{\}'::text\[\][\s\S]*diagnostic_data = '\{\}'::jsonb/);
+  assert.match(sql, /cloud_email_delivery_status[\s\S]*latest_event_at < now\(\) - interval '90 days'/);
+  assert.match(sql, /latest_diagnostic_data = '\{\}'::jsonb/);
+  assert.match(sql, /cloud_email_delivery_events[\s\S]*interval '180 days'/);
+  assert.match(sql, /cloud_email_delivery_status[\s\S]*interval '400 days'/);
+  assert.match(sql, /not active[\s\S]*resolved_at < now\(\) - interval '180 days'/);
+  assert.match(sql, /cloud_email_suppression_resolution_audit[\s\S]*resolved_at < now\(\) - interval '400 days'/);
+  assert.match(sql, /Active suppressions must retain the normalized address/);
+  assert.match(sql, /revoke all on function public\.norva_prune_resend_delivery_events\(\)[\s\S]*authenticated/);
+  assert.match(sql, /grant execute on function public\.norva_prune_resend_delivery_events\(\)[\s\S]*service_role/);
+});
+
 test('Resend webhook is configured as signed non-JWT endpoint on both Edge runtimes', () => {
   const config = read('supabase/config.toml');
   const compose = read('ops/hetzner/docker-compose.supabase.yml');

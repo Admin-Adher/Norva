@@ -64,6 +64,26 @@ Go-live requires edge `RESEND_API_KEY` plus each sender's authentication secret
 `RESEND_WEBHOOK_SECRET` for delivery events). A missing email transport key leaves
 branded-email rows pending without consuming attempts.
 
+## Delivery telemetry retention
+
+The signed webhook never stores message bodies, click URLs, IP addresses or user
+agents. Recipient/from addresses and bounded diagnostic text are available for
+incident investigation for **90 days**, then scrubbed in place. Address-free raw
+events expire after **180 days**; the compact per-message status, timestamps and
+non-PII routing tags remain for **400 days** so annual billing and seasonal
+deliverability can be compared. Active suppressions retain the normalized address
+only while it is required to prevent another unsafe send; resolved suppressions
+expire after 180 days.
+
+False-permanent-bounce resolution evidence contains no address or raw Auth UUID;
+its high-entropy user pseudonym and operator decision metadata expire after
+**400 days**.
+
+`norva-resend-delivery-prune` enforces all four windows daily through
+`norva_prune_resend_delivery_events()`. This is operational retention, not consent:
+marketing eligibility always remains fail-closed against the current consent
+ledger and active suppression list.
+
 ## Guards / fixes applied (2026-07-07)
 
 - **`norva_password_changed_trg`** (migration `20260707190000`): the original guard
