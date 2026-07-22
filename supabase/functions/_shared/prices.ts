@@ -39,7 +39,7 @@ export interface Catalog { prices: PriceTable; promos: PromoTable; campaign: { b
 // « endroit à modifier » : les prix vivent dans billing_prices.
 export const DEFAULT_PRICES: PriceTable = {
   plus:   { monthly: 499, annual: 4199 },
-  family: { monthly: 899, annual: 7599 },
+  family: { monthly: 899, annual: 7499 },
 };
 
 let cache: { at: number; catalog: Catalog } | null = null;

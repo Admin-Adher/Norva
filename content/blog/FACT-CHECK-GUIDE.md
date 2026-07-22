@@ -121,7 +121,7 @@ Tarifs publics constatés le **14 juillet 2026** :
 | Offre | Mensuel | Annuel | Profils |
 |---|---:|---:|---:|
 | Norva | US$4.99/mois | US$41.99/an | Jusqu’à 2 |
-| Norva Family | US$8.99/mois | US$75.99/an | Jusqu’à 5 |
+| Norva Family | US$8.99/mois | US$74.99/an | Jusqu’à 5 |
 
 Conditions affichées :
 

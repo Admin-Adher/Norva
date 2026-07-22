@@ -3,6 +3,7 @@ node_modules/
 **/build/
 **/build-manual/
 **/.buildResult/
+clients/android-tv/app/src/main/assets/www/
 **/local.properties
 data/*.db
 .env

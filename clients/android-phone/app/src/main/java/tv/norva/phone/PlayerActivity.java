@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Rational;
 import android.view.DisplayCutout;
 import android.view.GestureDetector;
@@ -51,6 +52,8 @@ import androidx.media3.session.MediaSession;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
+import com.google.firebase.analytics.FirebaseAnalytics;
+
 /**
  * Norva phone/tablet native player (ExoPlayer / media3).
  *
@@ -82,6 +85,9 @@ public class PlayerActivity extends Activity {
     // in-place source swap).
     public static final String EXTRA_VARIANTS = "variants";
     public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
+    // Ephemeral bearer (user session or paired-device token) used once to post
+    // authoritative first-frame truth. PlayerActivity is non-exported.
+    public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -103,6 +109,8 @@ public class PlayerActivity extends Activity {
     private int recoveryGeneration = 0;   // invalidates delayed reconnects after a newer recovery action
     private boolean everReady = false;    // direct or fallback reached STATE_READY at least once
     private boolean firstFrameRendered = false;
+    private long playbackLaunchElapsedMs;
+    private String playbackAuthToken;
     private boolean freshStreamRequested = false;
     private String freshStreamReason;
     private String sourceId;
@@ -177,6 +185,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        playbackLaunchElapsedMs = SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         String url = getIntent().getStringExtra(EXTRA_URL);
@@ -184,6 +193,8 @@ public class PlayerActivity extends Activity {
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
+        playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
@@ -418,7 +429,10 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onRenderedFirstFrame() {
-                firstFrameRendered = true;
+                if (!firstFrameRendered) {
+                    firstFrameRendered = true;
+                    recordNativeFirstFrame();
+                }
             }
 
             @Override
@@ -440,6 +454,27 @@ public class PlayerActivity extends Activity {
         player.setMediaItem(originalMediaItem);
         player.prepare();
         player.setPlayWhenReady(true);
+    }
+
+    /** Device-side truth that media actually rendered, emitted once per launch. */
+    private void recordNativeFirstFrame() {
+        final String authToken = playbackAuthToken;
+        playbackAuthToken = null;
+        NativePlaybackTelemetry.recordFirstFrame(authToken, sourceId, itemType, itemId,
+                Math.max(1L, SystemClock.elapsedRealtime() - playbackLaunchElapsedMs), isLocal);
+        try {
+            Bundle event = new Bundle();
+            event.putString("content_type",
+                    itemType == null || itemType.isEmpty() ? "unknown" : itemType);
+            if (itemId != null && !itemId.isEmpty()) event.putString("item_id", itemId);
+            if (sourceId != null && !sourceId.isEmpty()) event.putString("source_id", sourceId);
+            event.putLong("ttff_ms", Math.max(0L,
+                    SystemClock.elapsedRealtime() - playbackLaunchElapsedMs));
+            event.putString("playback_mode", isLocal ? "offline" : "stream");
+            FirebaseAnalytics.getInstance(this).logEvent("native_first_frame", event);
+        } catch (Throwable ignored) {
+            // Measurement must never affect playback.
+        }
     }
 
     /** Map a download's container extension to a MIME type for the extractor. */
@@ -1232,6 +1267,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        playbackAuthToken = null;
         errHandler.removeCallbacksAndMessages(null);
         if (pipReceiver != null) { try { unregisterReceiver(pipReceiver); } catch (Exception ignored) { } pipReceiver = null; }
         if (castSupport != null) { castSupport.stop(); castSupport = null; }

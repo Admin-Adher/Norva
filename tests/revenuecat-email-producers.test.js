@@ -10,12 +10,16 @@ const migration = read('supabase/migrations/20260722005200_revenuecat_billing_em
 const lifecycleBase = read('supabase/migrations/20260722003500_lifecycle_billing_event_intents.sql');
 
 test('captured RevenueCat payments carry authoritative confirmation context', () => {
-  assert.match(webhook, /journalRcPayment\(admin, userId, eventType, event, resolvedPlan\)/);
+  assert.match(webhook, /journalRcPayment\(admin, userId, eventType, event, resolvedPlan, attribution\)/);
   assert.match(webhook, /plan_code:\s*isKnownStorePlan\(resolvedPlan\)/);
   assert.match(webhook, /bill_period:\s*billPeriodForEvent\(event\)/);
   assert.match(webhook, /billing_period_end:\s*msToIso\(event\.expiration_at_ms\)/);
-  assert.match(webhook, /periodType === "TRIAL" \|\| periodType === "INTRO"/);
-  assert.match(webhook, /if \(periodType === "TRIAL" \|\| periodType === "INTRO"\) return/);
+  assert.match(webhook, /function isFreeTrialPeriod/);
+  const freeTrial = webhook.slice(webhook.indexOf('function isFreeTrialPeriod'), webhook.indexOf('function refundedMoney'));
+  assert.match(freeTrial, /return periodType === "TRIAL"/);
+  assert.doesNotMatch(freeTrial, /INTRO/);
+  assert.match(webhook, /periodType === "INTRO"[\s\S]*paidMoney\(effective\) == null/);
+  assert.match(webhook, /if \(isFreeTrialPeriod\(event\)\) return/);
 });
 
 test('the ledger trigger produces one confirmation for each captured cross-rail payment', () => {

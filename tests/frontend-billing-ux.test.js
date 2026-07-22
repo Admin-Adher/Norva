@@ -80,13 +80,13 @@ test('plan copy uses exact annual equivalents and an explicit household distinct
   const paywall = read('public/paywall.html');
 
   assert.match(subscribe, /data-annual="41\.99" data-annual-note="That's about \$3\.50\/mo/);
-  assert.match(subscribe, /data-annual="75\.99" data-annual-note="That's about \$6\.33\/mo/);
+  assert.match(subscribe, /data-annual="74\.99" data-annual-note="That's about \$6\.25\/mo/);
   assert.match(subscribe, /pl\.annual \/ 1200/);
   assert.doesNotMatch(subscribe, /Math\.floor\(pl\.annual \/ 12\)/);
   assert.match(subscribe, />Best for households</);
   assert.match(subscribe, /Up to 2 profiles/);
   assert.match(subscribe, /Up to 5 profiles/);
-  assert.match(paywall, /Norva includes 2 profiles; Norva Family includes 5/);
+  assert.match(paywall, /Norva includes 2 profiles;\s*Norva Family includes 5/);
 });
 
 test('failed Revolut cancel restores controls and keeps the confirmation open', () => {
@@ -96,7 +96,12 @@ test('failed Revolut cancel restores controls and keeps the confirmation open', 
   assert.ok(start >= 0 && end > start, 'async cancel handler not found');
   const handler = source.slice(start, end);
 
-  assert.match(handler, /await doCancel\('skipped'\)/);
+  assert.match(source, /let cancelReason = 'skipped'/,
+    'cancellation feedback must remain optional by default');
+  assert.match(source, /Optional — what is the main reason\?/);
+  assert.doesNotMatch(source, /input\.required\s*=\s*true/,
+    'the optional reason must never gate cancellation');
+  assert.match(handler, /await doCancel\(cancelReason\)/);
   assert.ok(handler.indexOf('cm.close();') < handler.indexOf('location.reload();'),
     'the modal must close only after the API succeeds');
   assert.match(handler, /catch \(e\)/);

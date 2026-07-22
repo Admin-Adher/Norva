@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,13 +11,13 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
-      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --coral: #ff8067;
+      --muted: #a8b3c7; --quiet: #8490aa; --accent: #5b7cfa; --coral: #ff8067;
       --pink: #b579ff; --green: #34d399; --danger: #fb7185;
     }
     body {
       min-height: 100vh; background: var(--bg); color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      display: grid; place-items: center; padding: 22px;
+      display: grid; place-items: center; padding: 22px; overflow-wrap: anywhere;
     }
     .wrap { width: min(940px, 100%); }
     .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
@@ -25,6 +25,8 @@
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 6px; }
     .sub { color: var(--muted); font-size: 15px; margin-bottom: 22px; }
+    .platform-value { margin: -10px 0 18px; color: #dbe7ff; font-size: 13.5px; line-height: 1.5; }
+    .platform-value strong { color: var(--text); }
     .grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--panel); }
@@ -55,6 +57,7 @@
       padding: 12px 14px; border: 1px solid rgba(52,211,153,0.35); border-radius: 12px;
       background: rgba(52,211,153,0.08); color: #dbe7ff; font-size: 12.5px; line-height: 1.55; }
     .assurance b { color: #eafff5; }
+    .assurance[hidden] { display: none; }
     .assurance-ico { font-size: 17px; line-height: 1.2; }
 
     /* ── Payment panel ──────────────────────────────────────────────────── */
@@ -65,13 +68,14 @@
     .fld > span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
     .fld input { min-height: 46px; border-radius: 10px; border: 1px solid var(--line);
       background: #0d1118; color: var(--text); font: inherit; padding: 0 13px; }
-    .fld input:focus-visible { outline: none; border-color: var(--accent); }
+    .fld input:focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; border-color: var(--accent); }
     .fld input[readonly] { color: var(--muted); }
     /* Revolut renders its PCI card iframe inside this container. A light field makes
        the widget's default (dark-on-light) text render cleanly on the dark checkout. */
     .frame-shell { position: relative; }
     .card-field { background: #fff; border-radius: 10px; padding: 6px 12px; min-height: 52px;
       border: 1px solid var(--line); display: flex; align-items: center; }
+    .card-field:focus-within { outline: 3px solid var(--pink); outline-offset: 2px; }
     .card-field > * { width: 100%; }
     .frame-loading { position: absolute; inset: 0; display: grid; place-items: center;
       color: #6b7690; font-size: 14px; background: #fff; border-radius: 10px; transition: opacity .25s; }
@@ -88,7 +92,8 @@
       margin-top: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line);
       background: #151b26; color: #dbe7ff; font-size: 13px; font-weight: 700; text-decoration: none; }
     .pay-fallback[hidden] { display: none; }
-    .pay-fallback:hover, .pay-fallback:focus-visible { border-color: var(--accent); outline: none; }
+    .pay-fallback:hover { border-color: var(--accent); }
+    .pay-fallback:focus-visible { border-color: var(--accent); outline: 3px solid var(--pink); outline-offset: 3px; }
     @media (max-width: 900px) { .pay-fallback { width: 100%; } }
     .pay-marks { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;
       color: var(--quiet); font-size: 12px; }
@@ -100,11 +105,20 @@
       background: #151b26; color: #dbe7ff; line-height: 1.5; font-size: 14px; display: none; }
     .status.show { display: block; }
     .status.error { border-color: rgba(251,113,133,0.5); color: #fecdd3; background: rgba(80,24,36,0.3); }
+    .quote-loading { min-height: 180px; display: grid; place-items: center; text-align: center;
+      color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: #0d1118; }
+    .quote-loading[hidden] { display: none; }
+    html.quote-pending #commercial-terms,
+    html.quote-pending #pay-form,
+    html.quote-pending .pay-marks,
+    html.quote-pending .pay-foot { display: none !important; }
     .btn { min-height: 46px; border: 0; border-radius: 10px; padding: 0 18px; color: #fff;
       background: var(--accent); font: inherit; font-weight: 800; cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
     .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
-    .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+    a:focus-visible, button:focus-visible, input:focus-visible, .btn:focus-visible {
+      outline: 3px solid var(--pink); outline-offset: 3px;
+    }
 
     /* ── Android TV (10-foot view) — finish on your phone via QR ─────────── */
     html.tv h1 { font-size: 40px; }
@@ -133,9 +147,20 @@
     .success h2 { font-size: 22px; margin-bottom: 8px; }
     .success p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 20px; }
     .back-row { margin-top: 16px; }
+    @media (max-width: 520px) {
+      body { padding: 14px; }
+      .card { padding: 18px; }
+      .pay-head { align-items: flex-start; flex-direction: column; gap: 6px; }
+      .bd-row { align-items: start; display: grid; gap: 3px; }
+      .bd-row .bd-v { text-align: left; }
+      .back-row .btn { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -146,38 +171,45 @@
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
 
     <div id="checkout-view">
-      <h1>Start your free trial</h1>
-      <p class="sub">7 days free on every screen — cancel anytime before the trial ends.</p>
+      <h1>Preparing your secure checkout</h1>
+      <p class="sub">We are loading the exact offer and billing terms for this account.</p>
+      <p class="platform-value"><strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
+        Your profiles, favorites and playback progress stay in sync on compatible devices.</p>
 
       <div class="grid">
         <!-- Order summary -->
         <section class="card" aria-label="Order summary">
           <div class="plan-name" id="sum-plan">Norva</div>
           <p class="plan-tag" id="sum-tag">Everything Norva does, on your main screens.</p>
-          <div class="price-row">
-            <span class="cur">$</span><span class="amount" id="sum-amount">4.99</span>
-            <span class="per" id="sum-per">/mo after your 7-day free trial</span>
-          </div>
-          <p class="after-trial" id="sum-after" hidden>Today: $0.00 — your plan starts only after the trial.</p>
-          <div class="bill-breakdown" id="bill-breakdown">
-            <div class="bd-row"><span class="bd-k">Today</span><span class="bd-v">$0.00 <em>card check only</em></span></div>
-            <div class="bd-row"><span class="bd-k">After your 7-day trial</span><span class="bd-v" id="bd-then">—</span></div>
-            <div class="bd-row"><span class="bd-k">Cancel anytime before then</span><span class="bd-v">Nothing charged</span></div>
+          <div id="commercial-terms">
+            <div class="price-row">
+              <span class="cur" id="sum-currency"></span><span class="amount" id="sum-amount">—</span>
+              <span class="per" id="sum-per"></span>
+            </div>
+            <p class="after-trial" id="sum-after" hidden></p>
+            <div class="bill-breakdown" id="bill-breakdown">
+              <div class="bd-row"><span class="bd-k" id="bd-today-label">Today</span><span class="bd-v" id="bd-today-value">US$0.00 <em>temporary card check only</em></span></div>
+              <div class="bd-row"><span class="bd-k"><span id="bd-first-label">First payment on</span> <strong id="bd-first-date">—</strong></span><span class="bd-v" id="bd-then">—</span></div>
+              <div class="bd-row"><span class="bd-k" id="bd-final-label">Cancel anytime before then</span><span class="bd-v" id="bd-final-value">Nothing charged</span></div>
+            </div>
+            <div class="assurance" id="card-assurance">
+              <span class="assurance-ico" aria-hidden="true">🔒</span>
+              <div><b>No charge today.</b> We place a tiny temporary authorization to verify your
+                card — it's <b>released right away and never debited</b>. Your first payment happens only
+                after the trial, and only if you don't cancel.
+                <b>We'll email you a reminder before your trial ends.</b></div>
+            </div>
           </div>
           <ul class="features" id="sum-features">
             <li>Up to 2 profiles</li>
             <li>Personalized watchlists and progress</li>
-            <li>Sync across Web, phone, tablet &amp; TV</li>
+            <li>Sync across Web, Android mobile and Android TV</li>
             <li>Offline mode on compatible devices</li>
             <li>Every Norva feature included</li>
           </ul>
-          <div class="assurance">
-            <span class="assurance-ico" aria-hidden="true">🔒</span>
-            <div><b>No charge today.</b> We place a tiny temporary authorization to verify your
-              card — it's <b>released right away and never debited</b>. Your first payment happens only
-              after the 7-day trial, and only if you don't cancel.
-              <b>We'll email you a reminder before your trial ends.</b></div>
-          </div>
+          <p class="after-trial">Norva is a media player. No content or TV subscription is included.<br>
+            <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> ·
+            <a href="/subscription.html">Manage or cancel a subscription</a></p>
         </section>
 
         <!-- Payment -->
@@ -185,6 +217,9 @@
           <div class="pay-head">
             <h2>Payment details</h2>
             <span class="secure" title="PCI-DSS — card data never touches Norva servers">🛡️ Secured &amp; encrypted</span>
+          </div>
+          <div class="quote-loading" id="quote-loading" role="status" aria-live="polite">
+            <div><div class="spinner"></div>Loading your exact plan, price and renewal terms…</div>
           </div>
           <form id="pay-form" autocomplete="on">
             <label class="fld"><span>Cardholder name</span>
@@ -197,7 +232,7 @@
               <div id="card-field" class="card-field"></div>
               <div class="frame-loading" id="frame-loading"><div><div class="spinner"></div>Preparing your secure card form…</div></div>
             </div>
-            <button class="btn pay-btn" id="pay-btn" type="submit" disabled>Start free trial</button>
+            <button class="btn pay-btn" id="pay-btn" type="submit" disabled>Continue securely</button>
           </form>
           <div class="tv-continue" id="tv-continue" hidden>
             <h3>Finish securely on your phone</h3>
@@ -235,17 +270,17 @@
     <div class="success" id="success-view">
       <span class="badge-ok" aria-hidden="true">✓</span>
       <h2>Your free trial has started</h2>
-      <p>You have full access to Norva on every screen. You won't be charged until your
-        7-day trial ends — cancel anytime before then.</p>
+      <p>You have full access to Norva on Web, Android mobile and Android TV. Your selected plan starts automatically
+        after the 7-day trial unless you cancel before then.</p>
       <a class="btn" id="continue-btn" href="/app#home">Continue to Norva</a>
     </div>
   </main>
 
-  <script src="/js/cloudApi.js?v=50"></script>
+  <script src="/js/cloudApi.js?v=52"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/vendor/qrcode.js?v=1"></script>
-  <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=15"></script>
+  <script src="/js/billing-config.js?v=8"></script>
+<script src="/js/billing.js?v=17"></script>
   <script type="module">
     (async function () {
       const params = new URLSearchParams(location.search);
@@ -255,10 +290,22 @@
       const plan = params.get('plan') === 'family' ? 'family' : 'plus';
       const period = params.get('period') === 'annual' ? 'annual' : 'monthly';
       const intent = params.get('intent') === 'update_card' ? 'update_card' : '';
+      const placement = params.get('placement') === 'locked_profile'
+        ? 'locked_profile'
+        : 'subscribe_plans';
       const returnTo = safeLocalPath(params.get('returnTo'));
+
+      // Android TV has one deliberate purchase path: choose the plan on a phone
+      // or computer, then let the account entitlement sync back to the TV. Never
+      // mount a local Revolut card form, including from an old/direct checkout URL.
+      if (window.NorvaBilling && window.NorvaBilling.isTvShell && window.NorvaBilling.isTvShell()) {
+        window.location.replace('/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
+        return;
+      }
 
       const statusEl = document.getElementById('status');
       const loading = document.getElementById('frame-loading');
+      const quoteLoading = document.getElementById('quote-loading');
       const fallback = document.getElementById('fallback-link');
       const payBtn = document.getElementById('pay-btn');
       const form = document.getElementById('pay-form');
@@ -279,22 +326,100 @@
       }
 
       // ── Order summary (display only — amounts are server-side) ──────────────
-      // Static config first for instant paint, then the live catalog (single
-      // source billing_prices) overwrites it — so a promo shows its real price.
+      // The secure form stays disabled until the live billing catalog resolves.
+      // A hard-coded fallback can become stale after an admin price change and
+      // must never be shown as though it were the amount the server will charge.
       const cfg = (window.NORVA_BILLING_CONFIG && NORVA_BILLING_CONFIG.revolut) || {};
-      const prices = (cfg.plans || {})[plan] || {};
-      let displayPrice = period === 'annual' ? (prices.annual || '') : (prices.monthly || '');
+      let displayPrice = '';
+      let displayCurrency = '';
+      let serverTrialDays = null;
+      let serverFirstChargeAt = '';
+      let commercialQuote = null;
+      let publicCatalogAbandoned = false;
+      function currencyLabel(code) { return String(code || '').toUpperCase() === 'USD' ? 'US$' : String(code || '').toUpperCase(); }
+      function displayMoney(value) { return currencyLabel(displayCurrency) + value; }
+      function trialChargeDate() {
+        if (!serverFirstChargeAt) return '—';
+        const date = new Date(serverFirstChargeAt);
+        try { return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+        catch (_) { return date.toISOString().slice(0, 10); }
+      }
+      function applyServerTrialSchedule(payload) {
+        if (!payload || typeof payload !== 'object') return;
+        const exact = payload.first_charge_at || payload.trial_ends_at || '';
+        if (exact && !Number.isNaN(new Date(exact).getTime())) {
+          serverFirstChargeAt = String(exact);
+          const label = document.getElementById('bd-first-label');
+          if (label) label.textContent = 'First payment on';
+        }
+        const days = Number(payload.trial_days);
+        if (Number.isInteger(days) && days > 0 && days <= 90) serverTrialDays = days;
+        document.getElementById('bd-first-date').textContent = trialChargeDate();
+      }
+      function applyServerCommercialTerms(payload) {
+        if (!payload || typeof payload !== 'object') throw new Error('commercial_terms_missing');
+        const frozenPlan = String(payload.plan_code || payload.plan || '').toLowerCase();
+        const frozenCadence = String(payload.billing_cadence || payload.period || '').toLowerCase();
+        const frozenCurrency = String(payload.price_currency || payload.currency || '').toUpperCase();
+        const amountMinor = Number(payload.price_amount_minor ?? payload.requested_amount_cents);
+        const kind = String(payload.kind || '');
+        const chargeMode = String(payload.charge_mode || payload.checkout_charge_mode || '');
+        if (frozenPlan !== plan || frozenCadence !== period || !/^[A-Z]{3}$/.test(frozenCurrency)
+            || !Number.isInteger(amountMinor) || amountMinor <= 0
+            || !['trial_setup', 'plan_change', 'resubscribe', 'card_update'].includes(kind)) {
+          throw new Error('commercial_terms_invalid');
+        }
+        const expectedChargeMode = kind === 'trial_setup'
+          ? 'after_trial'
+          : kind === 'plan_change'
+            ? 'next_cycle'
+            : kind === 'resubscribe'
+              ? 'immediate'
+              : 'card_validation_only';
+        if (chargeMode !== expectedChargeMode) throw new Error('commercial_charge_mode_invalid');
+        applyServerTrialSchedule(payload);
+        if ((kind === 'trial_setup' && (!serverFirstChargeAt || !serverTrialDays))
+            || (kind === 'plan_change' && !serverFirstChargeAt)) {
+          throw new Error('trial_terms_incomplete');
+        }
+        displayCurrency = frozenCurrency;
+        displayPrice = (amountMinor / 100).toFixed(2);
+        document.getElementById('sum-currency').textContent = currencyLabel(displayCurrency);
+        document.getElementById('sum-amount').textContent = displayPrice;
+        document.getElementById('sum-per').textContent = period === 'annual' ? '/yr' : '/mo';
+        document.getElementById('bd-then').textContent = displayMoney(displayPrice) + (period === 'annual' ? '/yr' : '/mo');
+        commercialQuote = Object.freeze({
+          plan: frozenPlan,
+          period: frozenCadence,
+          currency: frozenCurrency,
+          amountMinor,
+          kind,
+          chargeMode
+        });
+        applyKindCopy(kind);
+        if (quoteLoading) quoteLoading.hidden = true;
+        document.documentElement.classList.remove('quote-pending');
+        return commercialQuote;
+      }
+      let pricePromise = Promise.resolve(false);
       if (window.NorvaBilling && window.NorvaBilling.revolutPrices) {
-        window.NorvaBilling.revolutPrices().then(function (catalog) {
+        pricePromise = window.NorvaBilling.revolutPrices().then(function (catalog) {
+          // The public catalog is optional presentation data. Once its short
+          // deadline passes (or the authenticated quote is visible), a late
+          // response must not repaint or delay the server-owned commitment.
+          if (publicCatalogAbandoned || commercialQuote) return false;
           const live = catalog && catalog.prices; // effective cents (promo applied)
           const pl = live && live[plan];
           const cents = pl && (period === 'annual' ? pl.annual : pl.monthly);
-          if (!cents) return;
+          if (!cents) throw new Error('price_unavailable');
+          displayCurrency = String(catalog.currency || 'USD').toUpperCase();
           displayPrice = (cents / 100).toFixed(2);
+          const curEl = document.getElementById('sum-currency');
+          if (curEl) curEl.textContent = currencyLabel(displayCurrency);
           const amtEl = document.getElementById('sum-amount');
           if (amtEl) amtEl.textContent = displayPrice;
           const bdThen = document.getElementById('bd-then');
-          if (bdThen) bdThen.textContent = '$' + displayPrice + (period === 'annual' ? '/yr' : '/mo');
+          if (bdThen) bdThen.textContent = displayMoney(displayPrice) + (period === 'annual' ? '/yr' : '/mo');
           // Active promo → event badge + struck-through base under the price row.
           const PROMO_LABELS = {
             black_friday: 'Black Friday', cyber_monday: 'Cyber Monday',
@@ -335,37 +460,47 @@
             const refCents = promo.ref_cents || promo.base_cents;
             const refMonthly = Boolean(promo.ref_cents);
             const struck = document.createElement('s');
-            struck.textContent = '$' + (refCents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo');
+            struck.textContent = displayMoney((refCents / 100).toFixed(2)) + (period === 'annual' ? '/yr' : '/mo');
             d.appendChild(chip);
             d.appendChild(document.createTextNode(refMonthly ? ' vs ' : ' was '));
             d.appendChild(struck);
             if (refMonthly) d.appendChild(document.createTextNode(' billed monthly'));
             const pctVal = Math.max(1, Math.round(100 - (cents / refCents) * 100));
-            d.appendChild(document.createTextNode(' · −' + pctVal + '% (save $' + ((refCents - cents) / 100).toFixed(2)
+            d.appendChild(document.createTextNode(' · −' + pctVal + '% (save ' + displayMoney(((refCents - cents) / 100).toFixed(2))
               + (refMonthly ? ' vs monthly billing' : '') + ')'));
             if (promo.cycles) {
               const firstTxt = period === 'annual'
                 ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')
                 : (promo.cycles === 1 ? 'your first month' : 'your first ' + promo.cycles + ' months');
-              d.appendChild(document.createTextNode(' · promo price for ' + firstTxt + ', then $'
-                + (promo.base_cents / 100).toFixed(2) + (period === 'annual' ? '/yr' : '/mo')));
+              d.appendChild(document.createTextNode(' · promo price for ' + firstTxt + ', then '
+                + displayMoney((promo.base_cents / 100).toFixed(2)) + (period === 'annual' ? '/yr' : '/mo')));
             }
             row.insertAdjacentElement('afterend', d);
           }
-        }).catch(function () { /* static fallback stays */ });
+          return true;
+        }).catch(function () { return false; });
+      }
+      function waitForOptionalCatalog() {
+        const timeoutMs = 1200;
+        let timer = 0;
+        return Promise.race([
+          pricePromise,
+          new Promise(function (resolve) {
+            timer = window.setTimeout(function () {
+              publicCatalogAbandoned = true;
+              resolve(false);
+            }, timeoutMs);
+          })
+        ]).finally(function () {
+          if (timer) window.clearTimeout(timer);
+        });
       }
       if (plan === 'family') {
         document.getElementById('sum-plan').textContent = 'Norva Family';
         document.getElementById('sum-tag').textContent = 'The full Norva experience for the whole home.';
         document.getElementById('sum-features').firstElementChild.textContent = 'Up to 5 profiles';
       }
-      if (displayPrice) document.getElementById('sum-amount').textContent = displayPrice;
-      document.getElementById('sum-per').textContent =
-        (period === 'annual' ? '/yr' : '/mo') + ' after your 7-day free trial';
-      (function () {
-        const bdThen = document.getElementById('bd-then');
-        if (bdThen) bdThen.textContent = '$' + (displayPrice || '—') + (period === 'annual' ? '/yr' : '/mo');
-      })();
+      document.getElementById('sum-per').textContent = '';
       // Back control: a normal checkout goes to the plan picker; but when we arrived from
       // the subscription-management page (Update payment method), the user didn't come from
       // the plans list — send them back THERE (returnTo = /subscription.html) and relabel.
@@ -396,10 +531,16 @@
         const h1 = document.querySelector('#checkout-view h1');
         const sub = document.querySelector('#checkout-view .sub');
         const after = document.getElementById('sum-after');
-        const special = (checkoutKind === 'card_update' || checkoutKind === 'plan_change' || checkoutKind === 'resubscribe');
+        const special = (checkoutKind === 'card_update' || checkoutKind === 'resubscribe');
         const breakdown = document.getElementById('bill-breakdown');
+        const assurance = document.getElementById('card-assurance');
+        const todayValue = document.getElementById('bd-today-value');
+        const firstLabel = document.getElementById('bd-first-label');
+        const finalLabel = document.getElementById('bd-final-label');
+        const finalValue = document.getElementById('bd-final-value');
         if (breakdown) breakdown.classList.toggle('hidden', special);
-        if (after) after.hidden = !special;
+        if (assurance) assurance.hidden = checkoutKind !== 'trial_setup';
+        if (after) after.hidden = checkoutKind === 'trial_setup' || checkoutKind === 'plan_change';
         // No new trial on these paths — the "after your 7-day free trial" price
         // qualifier only belongs to a first trial_setup.
         const sumPer = document.getElementById('sum-per');
@@ -411,17 +552,30 @@
           payBtn.textContent = 'Save card';
         } else if (checkoutKind === 'plan_change') {
           h1.textContent = 'Change your plan';
-          sub.textContent = 'No charge today — your current period is already paid and runs to its end. The new plan price applies at your next renewal.';
-          after.textContent = 'Today: $0.00 — card check only, your current period is already paid.';
+          sub.textContent = 'No charge today. Your current plan stays active until the exact date below, when the new plan and price begin.';
+          if (todayValue) todayValue.textContent = displayMoney('0.00') + ' — no charge';
+          if (firstLabel) firstLabel.textContent = 'New plan starts on';
+          if (finalLabel) finalLabel.textContent = 'Until then';
+          if (finalValue) finalValue.textContent = 'Current plan stays active';
           payBtn.textContent = 'Confirm plan change';
         } else if (checkoutKind === 'resubscribe') {
           h1.textContent = 'Reactivate your plan';
-          sub.textContent = 'Welcome back — your plan starts as soon as your card is checked.';
-          after.textContent = 'Billed today — your first payment is processed right after the card check.';
+          sub.textContent = 'Welcome back — your plan starts only after today\'s payment is confirmed.';
+          after.textContent = 'Billed today: ' + (displayPrice ? displayMoney(displayPrice) : 'the displayed plan price')
+            + (period === 'annual' ? ' for one year.' : ' for one month.');
           payBtn.textContent = 'Reactivate';
+        } else {
+          const trialDays = serverTrialDays || 7;
+          if (todayValue) todayValue.textContent = displayMoney('0.00') + ' — temporary card check only';
+          if (firstLabel) firstLabel.textContent = 'First payment on';
+          if (finalLabel) finalLabel.textContent = 'Cancel anytime before then';
+          if (finalValue) finalValue.textContent = 'Nothing charged';
+          h1.textContent = 'Start your free trial';
+          sub.textContent = trialDays + ' days free across your compatible devices — cancel anytime before the trial ends.';
+          sumPer.textContent = (period === 'annual' ? '/yr' : '/mo') + ' after your ' + trialDays + '-day free trial';
+          payBtn.textContent = 'Start free trial';
         }
       }
-      if (intent === 'update_card') applyKindCopy('card_update');
 
       // ── Android TV: phone-handoff QR of Revolut's hosted page ─────────────
       function renderQr(url) {
@@ -459,11 +613,12 @@
       const DONE_STATUSES = ['trialing', 'active', 'plan_change_scheduled', 'plan_changed', 'updated', 'retrying'];
       const SUCCESS_COPY = {
         trial_setup: ['Your free trial has started',
-          "You have full access to Norva on every screen. You won't be charged until your 7-day trial ends — cancel anytime before then."],
+          'You have full access to Norva on Web, Android mobile and Android TV. Your first payment is scheduled for ' + trialChargeDate() +
+          ', then your selected plan renews automatically unless you cancel.'],
         plan_change: ['Plan change confirmed',
           'Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.'],
         resubscribe: ['Welcome back — your plan is active',
-          'Your first payment is being processed and your receipt is on its way by email.'],
+          'Today\'s payment was confirmed. Your receipt is on its way by email.'],
         card_update: ['Payment method updated',
           'Your new card is saved and will be used for your Norva payments from now on.'],
       };
@@ -482,6 +637,7 @@
             const r = await window.NorvaBilling.confirmRevolut(orderId || currentOrderId);
             if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) {
               confirmed = r;
+              applyServerTrialSchedule(r);
               applyKindCopy(r.kind);
               done = true;
               break;
@@ -492,7 +648,9 @@
         if (!done) {
           finishing = false;
           loading.classList.add('hide');
-          setStatus("We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.", true);
+          setStatus(checkoutKind === 'resubscribe'
+            ? "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result."
+            : "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.", true);
           const retryFinalize = document.createElement('button');
           retryFinalize.className = 'btn ghost';
           retryFinalize.style.marginTop = '10px';
@@ -511,6 +669,10 @@
         const copy = SUCCESS_COPY[checkoutKind] || SUCCESS_COPY.trial_setup;
         success.querySelector('h2').textContent = copy[0];
         let successMessage = copy[1];
+        if (checkoutKind === 'trial_setup') {
+          successMessage = 'You have full access to Norva on Web, Android mobile and Android TV. Your first payment is scheduled for ' +
+            trialChargeDate() + ', then your selected plan renews automatically unless you cancel.';
+        }
         if (checkoutKind === 'plan_change' && confirmed && confirmed.effective_at) {
           const effectiveDate = new Date(confirmed.effective_at);
           if (!Number.isNaN(effectiveDate.getTime())) {
@@ -522,11 +684,10 @@
         success.querySelector('p').textContent = successMessage;
         success.classList.add('show');
         if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
-          const amount = Number(displayPrice || 0);
           if (checkoutKind === 'trial_setup') {
             window.NorvaMarketing.track('start_trial', {
-              currency: 'USD',
-              value: amount,
+              currency: commercialQuote ? commercialQuote.currency : undefined,
+              value: commercialQuote ? commercialQuote.amountMinor / 100 : undefined,
               plan: plan,
               period: period,
               transaction_id: orderId || currentOrderId || undefined
@@ -540,28 +701,51 @@
       let currentOrderId = '';
       let cardField = null;
       let bootPromise = null;
+      function trackBeginCheckoutOnce(data, quote) {
+        if (!(window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function')) return;
+        const orderId = String((data && data.order_id) || '');
+        if (!orderId) return;
+        const dedupeKey = 'norva-marketing-begin-checkout:' + orderId;
+        try {
+          if (localStorage.getItem(dedupeKey)) return;
+        } catch (_) {
+          try { if (sessionStorage.getItem(dedupeKey)) return; } catch (_) { /* continue */ }
+        }
+        window.NorvaMarketing.track('begin_checkout', {
+          currency: quote.currency,
+          value: quote.amountMinor / 100,
+          plan: quote.plan,
+          period: quote.period,
+          checkout_kind: quote.kind,
+          transaction_id: orderId,
+          price_source: 'revolut_order_snapshot'
+        });
+        try { localStorage.setItem(dedupeKey, String(Date.now())); }
+        catch (_) { try { sessionStorage.setItem(dedupeKey, String(Date.now())); } catch (_) { /* analytics only */ } }
+      }
       async function bootInner() {
         statusEl.classList.remove('show');
         loading.classList.remove('hide');
+        // The public catalog enriches the promo display, but it is never payment
+        // authority. The authenticated order response below is the only quote we
+        // reveal and the only amount used for funnel analytics.
         let data;
         try {
-          data = await window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent });
-          if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
-            window.NorvaMarketing.track('begin_checkout', {
-              currency: 'USD',
-              value: Number(displayPrice || 0),
-              plan: plan,
-              period: period,
-              checkout_kind: data.kind || intent || 'trial_setup'
-            });
-          }
+          // Start the authenticated quote immediately. The optional public
+          // catalog gets at most 1.2 s in parallel; it can enrich a promo but
+          // can never hold the payment flow hostage.
+          const pendingOrder = window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent, placement });
+          const results = await Promise.all([pendingOrder, waitForOptionalCatalog()]);
+          data = results[0];
+          const quote = applyServerCommercialTerms(data);
+          trackBeginCheckoutOnce(data, quote);
         } catch (e) {
           loading.classList.add('hide');
           if (e && e.code === 'not_signed_in') {
             location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
             return;
           }
-          setStatus('Could not start the secure checkout' + (e && e.message ? ': ' + e.message : '') + ' — please retry.', true);
+          setStatus('The exact plan, price and renewal terms could not be verified. No payment can be submitted. Please retry.', true);
           addRetry();
           return;
         }
@@ -571,7 +755,6 @@
             orderId: currentOrderId, plan: plan, period: period, savedAt: Date.now()
           }));
         } catch (_) {}
-        applyKindCopy(data.kind);
         if (data.already_authorized === true) {
           await finish(currentOrderId);
           return;
@@ -639,6 +822,7 @@
           nameInput.focus(); return;
         }
         if (!emailInput.value.trim()) { setStatus('Please enter an email for your receipt.', true); emailInput.focus(); return; }
+        document.getElementById('bd-first-date').textContent = trialChargeDate();
         submitting = true;
         payBtn.disabled = true;
         statusEl.classList.remove('show');
@@ -656,6 +840,18 @@
         retry.style.marginTop = '10px';
         retry.textContent = 'Retry';
         retry.addEventListener('click', function () { retry.remove(); boot(); });
+        statusEl.appendChild(document.createElement('br'));
+        statusEl.appendChild(retry);
+      }
+
+      function addPriceRetry() {
+        if (document.getElementById('price-retry')) return;
+        const retry = document.createElement('button');
+        retry.id = 'price-retry';
+        retry.className = 'btn ghost';
+        retry.style.marginTop = '10px';
+        retry.textContent = 'Reload current price';
+        retry.addEventListener('click', function () { location.reload(); });
         statusEl.appendChild(document.createElement('br'));
         statusEl.appendChild(retry);
       }

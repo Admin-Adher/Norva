@@ -104,7 +104,7 @@ for (const target of nativeTargets) {
     const resultFlow = section(
       source,
       'final String pickedVariant = data.getStringExtra("selectedVariantStreamId")',
-      target.name === 'Android TV' ? '/** Post a billing result' : 'protected void onResume()',
+      'protected void onResume()',
     );
 
     assert.match(resultFlow, /data\.getBooleanExtra\("retryPlayback", false\)/);

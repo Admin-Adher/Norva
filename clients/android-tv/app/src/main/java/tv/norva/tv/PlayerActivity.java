@@ -85,6 +85,7 @@ public class PlayerActivity extends Activity {
     // just swap the source in place).
     public static final String EXTRA_VARIANTS = "variants";
     public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
+    public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -149,6 +150,8 @@ public class PlayerActivity extends Activity {
     private boolean fallbackTried = false;
     private boolean everReady = false;        // direct or fallback reached STATE_READY at least once
     private boolean firstFrameRendered = false;
+    private long playbackLaunchElapsedMs;
+    private String playbackAuthToken;
     private boolean freshStreamRequested = false;
     private String freshStreamReason;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
@@ -239,6 +242,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        playbackLaunchElapsedMs = android.os.SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         String url = getIntent().getStringExtra(EXTRA_URL);
@@ -246,6 +250,8 @@ public class PlayerActivity extends Activity {
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
+        playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
@@ -371,7 +377,14 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onRenderedFirstFrame() {
-                firstFrameRendered = true;
+                if (!firstFrameRendered) {
+                    firstFrameRendered = true;
+                    final String authToken = playbackAuthToken;
+                    playbackAuthToken = null;
+                    NativePlaybackTelemetry.recordFirstFrame(authToken, sourceId, itemType, itemId,
+                            Math.max(1L, android.os.SystemClock.elapsedRealtime()
+                                    - playbackLaunchElapsedMs));
+                }
             }
 
             @Override
@@ -1721,6 +1734,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        playbackAuthToken = null;
         handler.removeCallbacksAndMessages(null);
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }

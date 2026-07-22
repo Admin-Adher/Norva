@@ -7,8 +7,9 @@
  *     configured via window.NORVA_BILLING_CONFIG; a RevenueCat Web Billing path
  *     remains as an inert fallback (only if webBillingEnabled is turned on).
  *
- * Purchases are correlated to the account because the app logs the RevenueCat
- * App User ID in as the Supabase user id (NorvaBilling.login(userId)).
+ * Every native catalog, purchase and restore operation logs RevenueCat into the
+ * exact Supabase user id supplied by that operation and verifies the resulting
+ * App User ID before continuing.
  *
  * Everything here is guarded: with no native bridge and no web key, the calls
  * reject with a clear code instead of throwing at load time.
@@ -19,9 +20,33 @@
   const CONFIG = window.NORVA_BILLING_CONFIG || {};
   const pending = new Map();
   let seq = 0;
+  // A callback from an old document must never settle a request created by a
+  // newly loaded paywall whose numeric sequence happened to restart at 1.
+  const pageNonce = (function () {
+    try {
+      const bytes = new Uint32Array(2);
+      window.crypto.getRandomValues(bytes);
+      return bytes[0].toString(36) + bytes[1].toString(36);
+    } catch (_) {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    }
+  })();
+
+  function nextRequestId() {
+    seq += 1;
+    return pageNonce + ':' + seq;
+  }
+
+  function isCurrentPageRequest(requestId) {
+    return typeof requestId === 'string' && requestId.indexOf(pageNonce + ':') === 0;
+  }
 
   function nativeBridge() {
     return window.NorvaTVCloud || window.NodeCastNative || null;
+  }
+
+  function nativeBillingChannel() {
+    return window.NorvaBillingNative || null;
   }
 
   function isNative() {
@@ -40,8 +65,16 @@
 
   function hasNativeBilling() {
     if (isTvShell()) return false;
-    const bridge = nativeBridge();
-    return !!(bridge && typeof bridge.purchase === 'function');
+    const channel = nativeBillingChannel();
+    return !!(channel && typeof channel.postMessage === 'function');
+  }
+
+  function postNativeBilling(method, args, requestId) {
+    const channel = nativeBillingChannel();
+    if (!channel || typeof channel.postMessage !== 'function') {
+      throw err('Native billing unavailable', 'unavailable');
+    }
+    channel.postMessage(JSON.stringify({ method: method, args: args, requestId: requestId }));
   }
 
   function isWebBillingConfigured() {
@@ -73,6 +106,8 @@
     const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
     const qs = new URLSearchParams({ plan: plan, period: period });
     if (opts.returnTo) qs.set('returnTo', String(opts.returnTo));
+    if (opts.placement === 'locked_profile') qs.set('placement', 'locked_profile');
+    else qs.set('placement', 'subscribe_plans');
     window.location.assign('/checkout-revolut.html?' + qs.toString());
     return { status: 'redirect' };
   }
@@ -90,6 +125,7 @@
       period: opts.period === 'annual' ? 'annual' : 'monthly',
       returnTo: opts.returnTo || '',
       intent: opts.intent || undefined, // 'update_card' → token swap flow
+      placement: opts.placement === 'locked_profile' ? 'locked_profile' : 'subscribe_plans',
     });
     for (let attempt = 0; attempt < 6; attempt++) {
       const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-revolut/checkout'), {
@@ -174,7 +210,12 @@
         } else if (camp && camp.bg_url && /^https:\/\//.test(camp.bg_url)) {
           bgUrl = camp.bg_url; // older edge build — only if publicly resolvable
         }
-        return { prices: d.prices, promos: d.promos || {}, campaign: bgUrl ? { bg_url: bgUrl } : null };
+        return {
+          currency: String(d.currency || 'usd').toUpperCase(),
+          prices: d.prices,
+          promos: d.promos || {},
+          campaign: bgUrl ? { bg_url: bgUrl } : null
+        };
       })
       .catch(function () { return null; });
     return pricesPromise;
@@ -210,6 +251,7 @@
     catch (_) { data = { status: 'error', error: 'bad_payload' }; }
 
     const key = data && data.requestId != null ? String(data.requestId) : null;
+    if (!key || !isCurrentPageRequest(key)) return;
     const entry = key ? pending.get(key) : null;
     if (!entry) return;
     pending.delete(key);
@@ -224,29 +266,141 @@
     }
   };
 
-  function callNative(method, args) {
+  const nativeOfferRequests = new Map();
+  window.__norvaBilling.onOfferings = function (payload) {
+    let data;
+    try { data = typeof payload === 'string' ? JSON.parse(payload) : payload; }
+    catch (_) { data = { status: 'error', error: 'bad_payload' }; }
+    const key = data && data.requestId != null ? String(data.requestId) : null;
+    if (!key || !isCurrentPageRequest(key)) return;
+    const entry = key ? nativeOfferRequests.get(key) : null;
+    if (!entry) return;
+    nativeOfferRequests.delete(key);
+    clearTimeout(entry.timer);
+    if (data.status === 'success') entry.resolve(data);
+    else entry.reject(err(data.error || 'Google Play prices unavailable', data.status || 'error', data));
+  };
+
+  function callNative(method, args, timeoutMs) {
     return new Promise(function (resolve, reject) {
-      const bridge = nativeBridge();
-      if (!bridge || typeof bridge[method] !== 'function') {
+      if (!hasNativeBilling()) {
         reject(err('Native billing unavailable', 'unavailable'));
         return;
       }
-      const requestId = String(++seq);
+      const requestId = nextRequestId();
       const timer = setTimeout(function () {
         if (pending.has(requestId)) {
           pending.delete(requestId);
           reject(err('Billing timed out', 'timeout'));
         }
-      }, 1000 * 60 * 5);
+      }, Number(timeoutMs) > 0 ? Number(timeoutMs) : 1000 * 60 * 5);
       pending.set(requestId, { resolve: resolve, reject: reject, timer: timer });
       try {
-        bridge[method].apply(bridge, args.concat([requestId]));
+        postNativeBilling(method, args, requestId);
       } catch (e) {
         pending.delete(requestId);
         clearTimeout(timer);
         reject(e);
       }
     });
+  }
+
+  // Catalog promises and resolved catalogs are account-scoped. RevenueCat can
+  // target a different current offering (and different trial eligibility) per
+  // App User ID, so a page must never reuse user A's result for user B.
+  const nativeOfferPromisesByUser = new Map();
+  const nativeCatalogsByUser = new Map();
+
+  function normalizedUserId(userId) {
+    const value = String(userId || '');
+    return value.length >= 8 && value.length <= 128 && value === value.trim() ? value : '';
+  }
+
+  function validateNativeCatalog(data, userId) {
+    if (!data || Number(data.nativeBillingContract) < 2) {
+      throw err('Update Norva to load account-bound Google Play prices', 'native_contract_unavailable', data);
+    }
+    if (String(data.appUserId || '') !== userId) {
+      throw err('Google Play returned prices for a different account', 'native_account_mismatch', data);
+    }
+    const currentOfferingId = String(data.currentOfferingId || '');
+    if (!currentOfferingId) {
+      throw err('No current Google Play offering is available', 'native_current_offering_missing', data);
+    }
+    const packages = Array.isArray(data.packages) ? data.packages.slice() : [];
+    if (!packages.length) {
+      throw err('No Google Play subscription prices are available', 'native_catalog_empty', data);
+    }
+    packages.forEach(function (pkg) {
+      if (!pkg || String(pkg.offeringId || '') !== currentOfferingId
+          || !pkg.packageId || !pkg.productId) {
+        throw err('Google Play returned an inconsistent current offering', 'native_catalog_invalid', data);
+      }
+      if (pkg.supported === true && (!pkg.priceString || Number(pkg.priceMicros) <= 0
+          || !pkg.currencyCode || !pkg.periodIso8601)) {
+        throw err('Google Play returned an incomplete subscription price', 'native_catalog_invalid', data);
+      }
+    });
+    return {
+      nativeBillingContract: Number(data.nativeBillingContract),
+      appUserId: userId,
+      currentOfferingId: currentOfferingId,
+      packages: packages
+    };
+  }
+
+  function nativeOfferings(userId, options) {
+    options = options || {};
+    if (isTvShell()) return Promise.resolve(null);
+    if (!isNative()) return Promise.resolve(null);
+    const uid = normalizedUserId(userId);
+    if (!uid) return Promise.reject(err('Please sign in before loading Google Play prices', 'native_user_required'));
+    if (!hasNativeBilling()) {
+      return Promise.reject(err('Update Norva to load current Google Play prices', 'native_contract_unavailable'));
+    }
+    if (options.refresh === true) {
+      nativeOfferPromisesByUser.delete(uid);
+      nativeCatalogsByUser.delete(uid);
+    }
+    if (!nativeOfferPromisesByUser.has(uid)) {
+      const promise = new Promise(function (resolve, reject) {
+        const requestId = nextRequestId();
+        const timer = setTimeout(function () {
+          nativeOfferRequests.delete(requestId);
+          reject(err('Google Play prices timed out', 'timeout'));
+        }, 20000);
+        nativeOfferRequests.set(requestId, {
+          resolve: resolve, reject: reject, timer: timer, appUserId: uid
+        });
+        try { postNativeBilling('getOfferingsForUser', [uid], requestId); }
+        catch (error) {
+          nativeOfferRequests.delete(requestId);
+          clearTimeout(timer);
+          reject(error);
+        }
+      }).then(function (data) {
+        const catalog = validateNativeCatalog(data, uid);
+        nativeCatalogsByUser.set(uid, catalog);
+        return catalog;
+      }).catch(function (error) {
+        nativeOfferPromisesByUser.delete(uid);
+        nativeCatalogsByUser.delete(uid);
+        throw error;
+      });
+      nativeOfferPromisesByUser.set(uid, promise);
+    }
+    return nativeOfferPromisesByUser.get(uid);
+  }
+
+  function exactNativeOffer(catalog, opts) {
+    if (!catalog || catalog.appUserId !== opts.appUserId
+        || catalog.currentOfferingId !== opts.offeringId) return null;
+    const matches = catalog.packages.filter(function (pkg) {
+      return pkg && pkg.offeringId === opts.offeringId
+        && pkg.packageId === opts.packageId
+        && pkg.productId === opts.productId;
+    });
+    return matches.length === 1 && matches[0].supported === true ? matches[0] : null;
   }
 
   // --- web (RevenueCat Web Billing) -----------------------------------------
@@ -278,11 +432,44 @@
 
   // --- public API -----------------------------------------------------------
 
-  // opts: { packageId, productId, planCode, appUserId }
+  // opts: { offeringId, packageId, productId, planCode, appUserId, placement }
   async function purchase(opts) {
     opts = opts || {};
     if (hasNativeBilling()) {
-      return callNative('purchase', [String(opts.packageId || opts.productId || ''), String(opts.planCode || '')]);
+      const uid = normalizedUserId(opts.appUserId);
+      const bound = {
+        appUserId: uid,
+        offeringId: String(opts.offeringId || ''),
+        packageId: String(opts.packageId || ''),
+        productId: String(opts.productId || ''),
+        planCode: String(opts.planCode || ''),
+        placement: opts.placement === 'locked_profile' ? 'locked_profile' : 'subscribe_plans'
+      };
+      const selected = exactNativeOffer(nativeCatalogsByUser.get(uid), bound);
+      if (!uid || !selected) {
+        throw err('Reload current Google Play prices before purchasing', 'native_offer_not_bound');
+      }
+      const data = await callNative('purchaseForUser', [
+        uid, bound.offeringId, bound.packageId, bound.productId, bound.planCode, bound.placement
+      ]);
+      // The purchase has already completed at this point. Never turn a missing
+      // verification field into a retryable error (which could cause a second
+      // charge); instead return a neutral, explicitly unverified result so the UI
+      // can say that access is syncing without promising a trial.
+      data.purchaseVerified = Boolean(
+        Number(data.nativeBillingContract) >= 2
+        && data.appUserId === uid
+        && data.offeringId === bound.offeringId
+        && data.packageId === bound.packageId
+        && data.productId === bound.productId
+        && data.planCode === bound.planCode
+        && data.transactionMatchesProduct === true
+      );
+      data.displayedOfferTrialEligible = String(selected.trialEligibility || '').toLowerCase() === 'eligible';
+      return data;
+    }
+    if (isNative()) {
+      throw err('Update Norva before purchasing with Google Play', 'native_contract_unavailable');
     }
     if (isRevolutEnabled()) {
       return revolutCheckout(opts); // web → Revolut embedded checkout (norva.tv)
@@ -296,8 +483,11 @@
   async function restore(opts) {
     opts = opts || {};
     if (hasNativeBilling()) {
-      return callNative('restore', []);
+      const uid = normalizedUserId(opts.appUserId);
+      if (!uid) throw err('Please sign in before restoring purchases', 'native_user_required');
+      return callNative('restoreForUser', [uid]);
     }
+    if (isNative()) throw err('Update Norva before restoring Google Play purchases', 'native_contract_unavailable');
     const purchases = await ensureWeb(opts.appUserId);
     if (typeof purchases.restorePurchases === 'function') {
       return purchases.restorePurchases();
@@ -305,14 +495,11 @@
     return { status: 'noop' };
   }
 
-  // Tell the native billing SDK which account is active (App User ID = Supabase
-  // user id). Safe no-op on web or when the bridge isn't present.
+  // Kept as a compatibility no-op for callers outside the paywall. Native
+  // account selection is intentionally performed only inside each atomic
+  // getOfferingsForUser / purchaseForUser / restoreForUser operation.
   function login(userId) {
-    if (!userId) return;
-    const bridge = nativeBridge();
-    if (bridge && typeof bridge.billingLogin === 'function') {
-      try { bridge.billingLogin(String(userId)); } catch (_) { /* noop */ }
-    }
+    return Boolean(normalizedUserId(userId));
   }
 
   // Where to send the user to manage / cancel / update their payment method.
@@ -334,6 +521,8 @@
     confirmRevolut: confirmRevolut,
     revolutProfile: revolutProfile,
     revolutPrices: revolutPrices,
+    nativeOfferings: nativeOfferings,
+    loadNativeOffers: nativeOfferings,
     revolutCancel: revolutCancel,
     revolutResume: revolutResume,
     purchase: purchase,

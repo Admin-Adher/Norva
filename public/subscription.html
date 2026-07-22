@@ -10,12 +10,12 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
-      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --coral: #ff8067;
+      --muted: #a8b3c7; --quiet: #8490aa; --accent: #5b7cfa; --coral: #ff8067;
       --pink: #b579ff; --green: #34d399; --amber: #fbbf24; --danger: #fb7185;
     }
     body { min-height: 100vh; background: var(--bg); color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      display: grid; place-items: center; padding: 22px; }
+      display: grid; place-items: center; padding: 22px; overflow-wrap: anywhere; }
     .wrap { width: min(560px, 100%); }
     .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
     .brand img { width: 40px; height: 40px; border-radius: 8px; }
@@ -39,7 +39,9 @@
       display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
     .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .btn.warn { background: linear-gradient(135deg, var(--coral), var(--pink)); color: #0b1220; }
-    .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+    a:focus-visible, button:focus-visible, input:focus-visible, .btn:focus-visible {
+      outline: 3px solid var(--pink); outline-offset: 3px;
+    }
     .note { color: var(--quiet); font-size: 12px; line-height: 1.5; margin-top: 16px; }
     .note.action-error { color: #fecdd3; }
     .preference-card { margin-top: 18px; border: 1px solid var(--line); border-radius: 14px;
@@ -62,10 +64,12 @@
     .modal .modal-error { color: #fecdd3; border: 1px solid rgba(251,113,133,.45);
       background: rgba(80,24,36,.3); border-radius: 9px; padding: 10px 12px; }
     .modal .modal-error[hidden] { display: none; }
-    .reasons { display: grid; gap: 8px; margin: 16px 0 2px; }
+    .reasons { display: grid; gap: 8px; margin: 16px 0 2px; padding: 0; border: 0; }
+    .reasons legend { color: var(--muted); font-size: 13px; line-height: 1.45; margin-bottom: 8px; }
     .reasons label { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line);
       border-radius: 10px; padding: 12px 14px; cursor: pointer; font-size: 14px; color: var(--text); }
     .reasons label:has(input:checked) { border-color: var(--pink); background: rgba(181,121,255,.08); }
+    .reasons label:has(input:focus-visible) { outline: 3px solid var(--pink); outline-offset: 2px; }
     .offer { border: 1px solid rgba(52,211,153,.4); background: rgba(52,211,153,.08);
       border-radius: 12px; padding: 14px 16px; margin-top: 14px; font-size: 14px; line-height: 1.55; }
     .offer b { color: var(--green); }
@@ -102,10 +106,19 @@
         background: var(--panel); }
       .actions .btn { flex: 1 1 100%; }
     }
+    @media (max-width: 420px) {
+      body { padding: 14px; }
+      .card { padding: 20px 18px; }
+      .detail { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .detail b { overflow-wrap: anywhere; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
     @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -131,10 +144,10 @@
   </main>
 
   <script src="/js/navigation-safety.js?v=1"></script>
-  <script src="/js/cloudApi.js?v=50"></script>
+  <script src="/js/cloudApi.js?v=52"></script>
   <script src="/js/authApi.js?v=6"></script>
-  <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=15"></script>
+  <script src="/js/billing-config.js?v=8"></script>
+  <script src="/js/billing.js?v=17"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -167,8 +180,7 @@
       function planLabel(code) {
         const p = String(code || '').toLowerCase();
         if (p === 'family') return 'Norva Family';
-        if (p === 'premium') return 'Norva Premium';
-        if (!p || p === 'none' || p === 'free' || p === 'plus' || p === 'trial' || p === 'manual') return 'Norva';
+        if (!p || p === 'none' || p === 'free' || p === 'plus' || p === 'premium' || p === 'trial' || p === 'manual') return 'Norva';
         return 'Norva ' + p.charAt(0).toUpperCase() + p.slice(1);
       }
       function isNative() { try { return !!(window.NorvaBilling && window.NorvaBilling.isNative()); } catch (_) { return false; } }
@@ -289,7 +301,10 @@
       function restoreButton() {
         // Restore/purchase run on the phone/web, never on the paired TV (Play
         // Billing crashes on some TV boxes — this is what closed the TV app).
-        if (!isNative() || isTvShell() || !(window.NorvaBilling && window.NorvaBilling.restore)) return null;
+        if (!isNative() || isTvShell() || !(window.NorvaBilling
+            && window.NorvaBilling.restore
+            && window.NorvaBilling.hasNativeBilling
+            && window.NorvaBilling.hasNativeBilling())) return null;
         // Deliberately a subtle secondary link (`.linkish`), not a primary button:
         // Norva is account-centric (signing in already restores access), so restore
         // is only a recovery affordance for an out-of-sync store purchase.
@@ -518,6 +533,32 @@
             : (trialing
                 ? "You keep full access until your trial ends, and you won't be charged."
                 : 'You keep full access until the end of the current period, and nothing further will be charged.')));
+          // Optional, same-screen feedback: it improves cancellation data without
+          // adding a gate, counter-offer, or an extra confirmation step. A user can
+          // still cancel immediately without answering.
+          let cancelReason = 'skipped';
+          const reasons = document.createElement('fieldset');
+          reasons.className = 'reasons';
+          const legend = document.createElement('legend');
+          legend.textContent = 'Optional — what is the main reason?';
+          reasons.appendChild(legend);
+          [
+            ['too_expensive', 'It costs too much'],
+            ['not_using', 'I am not using Norva enough'],
+            ['technical', 'I had a technical problem'],
+            ['other', 'Another reason']
+          ].forEach(function (entry) {
+            const label = document.createElement('label');
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = 'cancel-reason';
+            input.value = entry[0];
+            input.addEventListener('change', function () { cancelReason = input.value; });
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(entry[1]));
+            reasons.appendChild(label);
+          });
+          cm.modal.appendChild(reasons);
           const row = el('div', 'actions');
           const cancelNow = el('button', 'btn danger', 'Cancel plan');
           const modalError = el('p', 'modal-error');
@@ -530,7 +571,7 @@
             b.disabled = true; b.textContent = 'Cancelling…';
             keep.disabled = true;
             try {
-              await doCancel('skipped');
+              await doCancel(cancelReason);
               cm.close();
               location.reload();
             } catch (e) {
@@ -749,7 +790,7 @@
           card.appendChild(el('span', 'pill muted', 'No active plan'));
           card.appendChild(el('div', 'plan-name', 'Norva'));
           card.appendChild(el('p', 'msg', status === 'expired'
-            ? 'Your Norva plan has ended. Resubscribe to keep watching on every screen.'
+            ? 'Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile and Android TV.'
             : "You don't have an active Norva plan yet."));
           content.appendChild(card);
           const row = el('div', 'actions');

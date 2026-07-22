@@ -633,8 +633,12 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       }
       return;
     }
-    const back = encodeURIComponent(location.pathname + location.search);
-    window.location.href = '/subscribe.html?returnTo=' + back;
+    // Keep the exact screen/profile-picker context and make the intended remedy
+    // explicit.  The plan picker already understands `plan=family`; without it a
+    // locked-profile upsell landed on the generic annual/default offer and made
+    // the user rediscover why they were there.
+    const back = encodeURIComponent(location.pathname + location.search + location.hash);
+    window.location.href = '/subscribe.html?plan=family&context=locked_profile&returnTo=' + back;
   }
 
   function selectProfile(p) {

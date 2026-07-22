@@ -14,7 +14,7 @@
       --line: #283246;
       --text: #f8fafc;
       --muted: #a8b3c7;
-      --quiet: #6b7690;
+      --quiet: #8490aa;
       --accent: #5b7cfa;
       --danger: #fb7185;
     }
@@ -26,6 +26,7 @@
       display: grid;
       place-items: center;
       padding: 22px;
+      overflow-wrap: anywhere;
     }
     .panel {
       width: min(720px, 100%);
@@ -115,12 +116,14 @@
     html.tv .status { font-size: 18px; }
     html.tv .btn { min-height: 64px; font-size: 18px; padding: 0 28px; }
     @media (max-width: 560px) {
+      body { padding: 14px; }
+      .panel { padding: 20px 18px; }
       .actions { display: grid; }
       .btn { width: 100%; }
     }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -135,16 +138,15 @@
     </div>
     <h1>Norva Access</h1>
     <p class="lead">
-      Norva powers your private streaming ecosystem: apps, cloud sync, trusted screens and reliable
-      playback across every screen. Norva includes 2 profiles; Norva Family includes 5. Start with a 7-day free trial,
-      then keep everything on a single plan.
-      Your TV content remains provided by your own TV service.
+      <strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
+      Keep profiles, favorites and playback progress in sync on compatible devices. Norva includes 2 profiles;
+      Norva Family includes 5. Norva is a media player; no content or TV subscription is included.
     </p>
     <div class="status" id="paywall-status">Checking Norva access...</div>
     <div class="actions">
-      <button class="btn" id="paywall-primary">Continue</button>
+      <button class="btn" id="paywall-primary" type="button">Continue</button>
       <a class="btn secondary" id="paywall-account" href="/account.html">Account</a>
-      <button class="btn secondary" id="paywall-retry">Retry check</button>
+      <button class="btn secondary" id="paywall-retry" type="button">Retry check</button>
     </div>
     <p class="note">
       Billing and TV service errors are intentionally separate. If your TV provider needs repair, Norva will show that
@@ -152,7 +154,7 @@
     </p>
   </main>
 
-  <script src="/js/cloudApi.js?v=50"></script>
+  <script src="/js/cloudApi.js?v=52"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/navigation-safety.js?v=1"></script>
   <script>
@@ -206,6 +208,66 @@
         }
       }
 
+      // This access gate is also reachable by active accounts and by fail-open
+      // recovery paths. Arm measurement only after the entitlement API confirms a
+      // denial, then require the gate hero to be genuinely visible.
+      let exposureObserverArmed = false;
+      function observeDeniedPaywallExposure() {
+        if (exposureObserverArmed || !hasAnyCloudSession()) return;
+        const hero = document.querySelector('.panel');
+        const billing = window.NorvaCloud && window.NorvaCloud.billing;
+        if (!hero || !billing || typeof billing.recordPaywallExposure !== 'function') return;
+        exposureObserverArmed = true;
+        let inFlight = false;
+        let confirmed = false;
+        let visible = false;
+        let retryTimer = 0;
+        let retryDelayMs = 1000;
+        const scheduleRetry = function (observer) {
+          if (confirmed || retryTimer || !visible) return;
+          retryTimer = window.setTimeout(function () {
+            retryTimer = 0;
+            record(observer);
+          }, retryDelayMs);
+          retryDelayMs = Math.min(retryDelayMs * 2, 30000);
+        };
+        const record = function (observer) {
+          if (confirmed || inFlight || !visible) return;
+          inFlight = true;
+          Promise.resolve(billing.recordPaywallExposure({
+            placement: 'access_gate'
+          })).then(function () {
+            confirmed = true;
+            if (retryTimer) window.clearTimeout(retryTimer);
+            if (observer) observer.disconnect();
+          }).catch(function (error) {
+            // Access and navigation remain independent from analytics availability.
+            console.warn('[paywall] exposure was not recorded', error);
+            scheduleRetry(observer);
+          }).finally(function () {
+            inFlight = false;
+          });
+        };
+        if (typeof IntersectionObserver === 'function') {
+          const observer = new IntersectionObserver(function (entries) {
+            visible = entries.some(function (entry) { return entry.isIntersecting && entry.intersectionRatio > 0; });
+            if (visible) {
+              record(observer);
+            }
+          }, { threshold: 0.01 });
+          observer.observe(hero);
+          window.addEventListener('online', function () { if (visible) record(observer); });
+          return;
+        }
+        requestAnimationFrame(function () {
+          const rect = hero.getBoundingClientRect();
+          visible = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+          if (visible) {
+            record(null);
+          }
+        });
+      }
+
       async function checkAccess() {
         setStatus('Checking Norva access...', false);
         if (!hasAnyCloudSession()) {
@@ -246,6 +308,7 @@
             return;
           }
           showDenied(decision);
+          observeDeniedPaywallExposure();
         } catch (error) {
           console.warn('[paywall] access check failed', error);
           if (error?.status === 401) {

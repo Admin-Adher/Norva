@@ -83,46 +83,73 @@ async function logEvent(userId: string, kind: string, summary: string, actor: st
   catch (_) { /* best-effort audit */ }
 }
 
-async function recordRefundLifecycleEvent(
+async function resolveCapturedResubscribeException(
+  orderId: string,
   userId: string,
-  refundPi: string,
-  amountCents: number,
-  currency: string,
-): Promise<string | null> {
-  const { error } = await admin.from("cloud_entitlement_events").upsert({
-    user_id: userId,
-    provider: "revolut",
-    provider_event_id: `admin:${refundPi}:refund-confirmed`,
-    event_type: "REFUND_CONFIRMED",
-    payload: {
-      amount_cents: amountCents,
-      currency: currency.toUpperCase(),
-      reference: refundPi.replace(/^rfnd_/, "NV-").slice(0, 32),
-    },
-    processed_at: new Date().toISOString(),
-  }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
-  return error?.message ?? null;
+): Promise<{ result: string | null; error: string | null }> {
+  const { data, error } = await admin.rpc("resolve_revolut_resubscribe_refund", {
+    p_order_id: orderId,
+    p_user_id: userId,
+  });
+  return {
+    result: typeof data === "string" ? data : null,
+    error: error?.message ?? null,
+  };
 }
 
 // Merchant-initiated refund of a Revolut order. Mirrors norva-revolut-billing's charge call
 // (new Merchant API + version header — the legacy /api/1.0 payment path 404s). Refunds the given
-// amount in cents (USD). Returns Revolut's raw outcome so the caller can journal + surface it.
-async function revolutRefund(orderId: string, amountCents: number): Promise<{ ok: boolean; status: number; body: JsonRecord }> {
-  const res = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/refund`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "Revolut-Api-Version": "2024-09-01",
-    },
-    body: JSON.stringify({ amount: amountCents, currency: "USD" }),
-    signal: AbortSignal.timeout(12_000),
-  });
-  const text = await res.text();
-  let parsed: unknown = text;
-  try { parsed = JSON.parse(text); } catch (_) { /* keep raw */ }
-  return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
+// amount in the capture's authoritative ISO currency. Returns Revolut's raw
+// outcome so the caller can journal + surface it.
+async function revolutRefund(
+  orderId: string,
+  amountCents: number,
+  currency: string,
+  idempotencyKey: string,
+): Promise<{ ok: boolean; status: number; body: JsonRecord }> {
+  try {
+    const res = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/refund`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Revolut-Api-Version": "2024-09-01",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ amount: amountCents, currency }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const text = await res.text();
+    let parsed: unknown = text;
+    try { parsed = JSON.parse(text); } catch (_) { /* keep raw */ }
+    return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
+  } catch (error) {
+    return { ok: false, status: 0, body: {
+      error: "network_error", message: error instanceof Error ? error.message : String(error),
+    } };
+  }
+}
+
+async function revolutOrder(orderId: string): Promise<{ ok: boolean; status: number; body: JsonRecord }> {
+  try {
+    const res = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}`, {
+      headers: {
+        Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
+        "Accept": "application/json",
+        "Revolut-Api-Version": "2024-09-01",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const raw = await res.text();
+    let parsed: unknown = raw;
+    try { parsed = JSON.parse(raw); } catch (_) { /* keep raw */ }
+    return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
+  } catch (error) {
+    return { ok: false, status: 0, body: {
+      error: "network_error", message: error instanceof Error ? error.message : String(error),
+    } };
+  }
 }
 
 // Infra URLs live server-side (edge secrets first, else the cloud_runtime_config table). We only need
@@ -621,58 +648,127 @@ Deno.serve(async (req) => {
 
       const full = Number(pay.amount) || 0;
       const amountCents = body.amount_cents != null ? Math.round(Number(body.amount_cents)) : full;
-      if (!Number.isFinite(amountCents) || amountCents <= 0 || amountCents > full) {
-        return json(req, { error: `Montant invalide (1..${full} cents).` }, 400);
+      if (!Number.isFinite(amountCents) || amountCents !== full || full <= 0) {
+        return json(req, { error: `Seul le remboursement total (${full} cents) est disponible.` }, 400);
+      }
+      const cur = String(pay.currency ?? "usd").toUpperCase();
+      if (!/^[A-Z]{3}$/.test(cur)) {
+        return json(req, { error: "La devise du paiement est invalide; remboursement bloqué." }, 409);
+      }
+      const leaseToken = crypto.randomUUID();
+      const { data: claimed, error: claimError } = await admin.rpc("claim_revolut_full_refund", {
+        p_order_id: orderId,
+        p_user_id: userId,
+        p_original_pi_id: piId,
+        p_amount_cents: amountCents,
+        p_currency: cur,
+        p_lease_token: leaseToken,
+        p_lease_seconds: 90,
+      });
+      if (claimError) return json(req, { error: `Refund reservation failed: ${claimError.message}` }, 409);
+      const claim = (Array.isArray(claimed) ? claimed[0] : claimed) as {
+        action?: string; refund_key?: string; provider_refund_id?: string | null;
+      } | null;
+      if (!claim?.refund_key) return json(req, { error: "Refund reservation returned no idempotency key." }, 503);
+      if (claim.action === "wait") {
+        return json(req, { error: "Un remboursement est déjà en cours pour ce paiement." }, 409);
+      }
+      if (claim.action === "done") {
+        const resolved = await resolveCapturedResubscribeException(orderId, userId);
+        if (resolved.error) return json(req, { error: "Refund completed; terminal reconciliation is pending." }, 503);
+        return json(req, {
+          ok: true, idempotent: true, refunded_cents: amountCents, order_id: orderId,
+          terminal_resolution: resolved.result,
+          message: `Remboursement de ${(amountCents / 100).toFixed(2)} ${cur} déjà effectué.`,
+        });
+      }
+      if (claim.action !== "create" && claim.action !== "reconcile") {
+        return json(req, { error: "Refund reservation is not actionable." }, 503);
       }
 
-      // Idempotency: one refund ledger row per order → refuse a re-refund (guards double money-out).
-      const refundPi = `rfnd_${orderId}`;
-      const { data: existing } = await admin
-        .from("cloud_billing_ledger").select("pi_id,amount,currency").eq("pi_id", refundPi).maybeSingle();
-      if (existing) {
-        const eventError = await recordRefundLifecycleEvent(
-          userId, refundPi, Number(existing.amount ?? amountCents), String(existing.currency ?? pay.currency ?? "usd"),
-        );
-        if (eventError) return json(req, { error: "Refund completed; confirmation is pending." }, 503);
-        return json(req, { error: "Ce paiement a déjà été remboursé." }, 409);
-      }
-
-      const r = await revolutRefund(orderId, amountCents);
+      const r = claim.action === "create"
+        ? await revolutRefund(orderId, amountCents, cur, claim.refund_key)
+        : await revolutOrder(String(claim.provider_refund_id ?? ""));
       if (!r.ok) {
         const detail = JSON.stringify(r.body).slice(0, 300);
+        if (claim.action === "create") {
+          await admin.rpc("fail_revolut_full_refund", {
+            p_order_id: orderId, p_user_id: userId, p_lease_token: leaseToken,
+            p_error: `HTTP ${r.status}: ${detail}`,
+          });
+        } else if (claim.provider_refund_id) {
+          await admin.rpc("mark_revolut_full_refund_processing", {
+            p_order_id: orderId, p_user_id: userId, p_lease_token: leaseToken,
+            p_provider_refund_id: claim.provider_refund_id,
+            p_provider_response: r.body,
+          });
+        }
         console.error("[norva-admin] refund failed", r.status, detail);
+        if (claim.action === "reconcile") {
+          return json(req, { error: "Refund status is temporarily unavailable.", detail }, 503);
+        }
         return json(req, { error: `Revolut a refusé le remboursement (HTTP ${r.status}).`, detail }, 502);
       }
-
-      // Le remboursement HÉRITE du pays de la vente d'origine (base TVA/OSS : la
-      // correction doit réduire le bon pays) ; fallback : pays de la carte sauvegardée.
-      let refundCountry: string | null = (typeof pay.country_code === "string" && /^[A-Z]{2}$/.test(pay.country_code)) ? pay.country_code : null;
-      if (!refundCountry) {
-        const { data: rcRow } = await admin.from("cloud_revolut_customers")
-          .select("card_country").eq("user_id", userId).maybeSingle();
-        const cc = (rcRow as { card_country?: string } | null)?.card_country;
-        if (typeof cc === "string" && /^[A-Z]{2}$/.test(cc)) refundCountry = cc;
+      const providerRefundId = typeof r.body.id === "string"
+        ? r.body.id
+        : typeof r.body.refund_id === "string" ? r.body.refund_id : claim.provider_refund_id ?? null;
+      if (!providerRefundId || (claim.provider_refund_id && providerRefundId !== claim.provider_refund_id)) {
+        if (claim.action === "create") {
+          await admin.rpc("fail_revolut_full_refund", {
+            p_order_id: orderId, p_user_id: userId, p_lease_token: leaseToken,
+            p_error: "provider refund response has no stable order id",
+          });
+        }
+        return json(req, { error: "Provider refund order id is missing or inconsistent." }, 502);
+      }
+      const { data: processing, error: processingError } = await admin.rpc(
+        "mark_revolut_full_refund_processing",
+        {
+          p_order_id: orderId, p_user_id: userId, p_lease_token: leaseToken,
+          p_provider_refund_id: providerRefundId, p_provider_response: r.body,
+        },
+      );
+      if (processingError) {
+        return json(req, { error: "Refund created; durable processing confirmation is pending." }, 503);
+      }
+      if (processing === "already_applied") {
+        return json(req, { ok: true, idempotent: true, refunded_cents: amountCents, order_id: orderId });
       }
 
-      // Journal the refund (kind='refund' → excluded from `collected`, shown in the fiche history).
-      // supabase-js resolves with { error } rather than throwing; the money already moved either way.
-      const { error: insErr } = await admin.from("cloud_billing_ledger").insert({
-        pi_id: refundPi, user_id: userId, kind: "refund",
-        amount: amountCents, currency: (pay.currency ?? "usd"), status: "refunded",
-        provider: "revolut", order_id: orderId, provider_payment_id: pay.provider_payment_id ?? null,
-        country_code: refundCountry,
+      const providerState = String(r.body.state ?? "").toUpperCase();
+      if (["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(providerState)) {
+        await admin.rpc("fail_revolut_refund_order", {
+          p_provider_refund_id: providerRefundId,
+          p_provider_state: providerState,
+          p_provider_response: r.body,
+        });
+        return json(req, { error: `Refund failed (${providerState}).`, retryable: true }, 502);
+      }
+      if (providerState !== "COMPLETED") {
+        return json(req, {
+          ok: true, pending: true, status: "refund_processing",
+          refund_order_id: providerRefundId, refunded_cents: amountCents, order_id: orderId,
+          message: "The refund was accepted and is still processing.",
+        }, 202);
+      }
+
+      const { data: completed, error: completeError } = await admin.rpc("complete_revolut_full_refund", {
+        p_order_id: orderId, p_user_id: userId,
+        p_provider_refund_id: providerRefundId,
+        p_provider_state: providerState,
+        p_related_order_id: typeof r.body.related_order_id === "string" ? r.body.related_order_id : null,
+        p_provider_amount_cents: Number.isFinite(Number(r.body.amount)) ? Math.round(Number(r.body.amount)) : null,
+        p_provider_currency: typeof r.body.currency === "string" ? r.body.currency.toUpperCase() : null,
+        p_provider_response: r.body,
       });
-      if (insErr) console.error("[norva-admin] refund ledger insert failed", insErr.message);
-
-      const cur = String(pay.currency ?? "usd").toUpperCase();
-      const lifecycleError = await recordRefundLifecycleEvent(userId, refundPi, amountCents, cur);
-      if (lifecycleError) {
-        console.error("[norva-admin] refund lifecycle event failed", lifecycleError);
-        return json(req, { error: "Refund completed; confirmation is pending." }, 503);
+      if (completeError) {
+        return json(req, { error: "Refund completed; atomic confirmation is pending." }, 503);
       }
+      const terminalResolution = String(completed ?? "applied");
       await logEvent(userId, "refund", `Remboursement Revolut ${(amountCents / 100).toFixed(2)} ${cur}`, actorEmail,
-        { order_id: orderId, pi_id: piId, amount_cents: amountCents });
+        { order_id: orderId, pi_id: piId, amount_cents: amountCents, terminal_resolution: terminalResolution });
       return json(req, { ok: true, refunded_cents: amountCents, order_id: orderId,
+        terminal_resolution: terminalResolution,
         message: `Remboursement de ${(amountCents / 100).toFixed(2)} ${cur} effectué.` });
     }
 

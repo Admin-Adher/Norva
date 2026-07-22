@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260722003000_lifecycle_email_delivery_outbox.sql');
 const billingIntents = read('supabase/migrations/20260722003500_lifecycle_billing_event_intents.sql');
+const paymentTerminal = read('supabase/migrations/20260722121000_payment_terminal_reconciliation.sql');
 const lifecycle = read('supabase/functions/norva-lifecycle/index.ts');
 const worker = read('supabase/functions/norva-branded-email-worker/index.ts');
 const templates = read('supabase/functions/_shared/lifecycle-email.ts');
@@ -147,7 +148,8 @@ test('billing events use an immutable journal bridge and every supported produce
   assert.match(revolutBilling, /"PAYMENT_RECOVERED"/);
   assert.match(revolutBilling, /"PLAN_CHANGE_APPLIED"/);
   assert.match(revolutBilling, /"ACCESS_EXPIRED"/);
-  assert.match(admin, /"REFUND_CONFIRMED"/);
+  assert.match(admin, /complete_revolut_full_refund/);
+  assert.match(paymentTerminal, /'REFUND_CONFIRMED'/);
   assert.match(billingWebhook, /previous_status: existingProjection\?\.status/);
   for (const renderer of [
     'renderCancellationConfirmed', 'renderSubscriptionResumed',

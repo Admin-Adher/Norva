@@ -28,6 +28,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getCatalog, getPrices } from "../_shared/prices.ts";
+import {
+  claimPaywallExperiment,
+  normalizePaywallPlacement,
+  normalizePaywallSurface,
+  paywallExperimentForPlacement,
+} from "../_shared/paywall-experiments.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
@@ -42,7 +48,6 @@ const VALIDATION_CENTS = boundedInt(Deno.env.get("NORVA_REVOLUT_VALIDATION_CENTS
 // One-shot cancel-flow counter-offer: % off the NEXT charge (applied once, then cleared).
 const SAVE_OFFER_PCT = 50;
 const CANCEL_REASONS = new Set(["too_expensive", "not_using", "technical", "other", "skipped"]);
-
 // Prices are SERVER-decided (the client only sends {plan, period}) and live in the
 // billing_prices table — single source, read via _shared/prices.ts (60 s cache +
 // hard-coded fallback). Promos are a table update, never a code change.
@@ -73,9 +78,13 @@ async function checkoutIntentKey(
   amount: number,
   promoBase: number | null,
   promoCycles: number | null,
-  returnTo: string,
 ): Promise<string> {
-  const fingerprint = ["v2", userId, kind, plan, period, amount, promoBase ?? "", promoCycles ?? "", returnTo].join("|");
+  const fingerprint = [
+    // UI route, placement, surface and experiment context are deliberately not
+    // monetary identity. A retry from another Norva surface must recover the
+    // exact same provider order instead of opening a second debit.
+    "v4", userId, kind, plan, period, amount, promoBase ?? "", promoCycles ?? "", "USD",
+  ].join("|");
   return `rvi_${userId.replace(/-/g, "").slice(0, 16)}_${(await sha256Hex(fingerprint)).slice(0, 24)}`;
 }
 
@@ -85,6 +94,53 @@ async function checkoutExtRef(userId: string, intentKey: string, generation: num
 }
 
 type JsonRecord = Record<string, unknown>;
+
+type CheckoutCommercialTerms = {
+  plan: "plus" | "family";
+  period: "monthly" | "annual";
+  cadence: "monthly" | "annual";
+  price_amount_minor: number;
+  requested_amount_cents: number;
+  currency: "USD";
+  charge_mode: "after_trial" | "next_cycle" | "immediate" | "card_validation_only";
+  trial_days: number | null;
+  first_charge_at: string | null;
+};
+
+function isoTimestampOrNull(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const millis = new Date(value).getTime();
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
+}
+
+function checkoutTermsFromJournal(journal: unknown): CheckoutCommercialTerms | null {
+  const meta = journal && typeof journal === "object" ? journal as JsonRecord : {};
+  if (meta.plan !== "family" && meta.plan !== "plus") return null;
+  if (meta.period !== "annual" && meta.period !== "monthly") return null;
+  const rawPrice = Number(meta.requested_amount_cents);
+  if (!Number.isInteger(rawPrice) || rawPrice < 1) return null;
+  const rawMode = String(meta.charge_mode ?? "");
+  const allowedModes = new Set(["after_trial", "next_cycle", "immediate", "card_validation_only"]);
+  if (!allowedModes.has(rawMode)) return null;
+  const rawTrialDays = meta.trial_days == null ? null : Number(meta.trial_days);
+  if (rawTrialDays != null && (!Number.isInteger(rawTrialDays) || rawTrialDays < 0 || rawTrialDays > 90)) {
+    return null;
+  }
+  const firstChargeAt = isoTimestampOrNull(meta.first_charge_at);
+  if ((rawMode === "after_trial" || rawMode === "next_cycle") && !firstChargeAt) return null;
+  if (String(meta.currency ?? "").toUpperCase() !== "USD") return null;
+  return {
+    plan: meta.plan,
+    period: meta.period,
+    cadence: meta.period,
+    price_amount_minor: rawPrice,
+    requested_amount_cents: rawPrice,
+    currency: "USD",
+    charge_mode: rawMode as CheckoutCommercialTerms["charge_mode"],
+    trial_days: rawTrialDays,
+    first_charge_at: firstChargeAt,
+  };
+}
 
 async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, extraHeaders?: Record<string, string>) {
   try {
@@ -120,17 +176,28 @@ type ExpectedCheckoutOrder = {
   plan: string;
   period: string;
   amountCents: number;
+  orderAmountCents: number;
 };
 
 function checkoutOrderMatches(order: JsonRecord, expected: ExpectedCheckoutOrder): boolean {
   if (String(order.merchant_order_ext_ref ?? "") !== expected.extRef) return false;
+  if (Number(order.amount) !== expected.orderAmountCents || String(order.currency ?? "").toUpperCase() !== "USD") return false;
   const meta = (order.metadata && typeof order.metadata === "object") ? order.metadata as JsonRecord : {};
   return String(meta.user_id ?? "") === expected.userId
     && String(meta.intent_key ?? "") === expected.intentKey
     && String(meta.kind ?? "") === expected.kind
     && String(meta.plan ?? "") === expected.plan
     && String(meta.period ?? "") === expected.period
-    && Number(meta.amount_cents) === expected.amountCents;
+    && Number(meta.amount_cents) === expected.amountCents
+    && String(meta.price_currency ?? "") === "USD";
+}
+
+function addBillingPeriod(fromIso: string, period: "monthly" | "annual"): string {
+  const from = new Date(fromIso);
+  const out = new Date(from.getTime());
+  if (period === "annual") out.setUTCFullYear(out.getUTCFullYear() + 1);
+  else out.setUTCMonth(out.getUTCMonth() + 1);
+  return out.toISOString();
 }
 
 async function findOrderByExtRef(expected: ExpectedCheckoutOrder): Promise<JsonRecord | null> {
@@ -369,7 +436,16 @@ Deno.serve(async (req) => {
     const billingGuard = await guardInternalBilling(db, user.id);
     if (billingGuard) return billingGuard;
 
-    let payload: { plan?: string; period?: string; returnTo?: string; intent?: string } = {};
+    let payload: {
+      plan?: string;
+      period?: string;
+      returnTo?: string;
+      intent?: string;
+      placement?: string;
+      surface?: string;
+      // `variant` may be sent by an old/hostile client but is intentionally not
+      // part of this type nor read below. Assignment is server-authoritative.
+    } = {};
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
@@ -382,6 +458,30 @@ Deno.serve(async (req) => {
     const promoInfo = catalog.promos[plan]?.[period] ?? null;
     const promoCycles = promoInfo?.cycles ?? null;
     const promoBase = promoCycles ? promoInfo!.base_cents : null;
+    let placement: string;
+    let surface: ReturnType<typeof normalizePaywallSurface>;
+    try {
+      placement = normalizePaywallPlacement(payload.placement, "subscribe");
+      surface = normalizePaywallSurface(payload.surface, "web");
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : "Invalid paywall context" }, 400);
+    }
+    let experimentKey: string | null = null;
+    let experimentVariant: string | null = null;
+    const selectedExperiment = paywallExperimentForPlacement(placement).experimentKey;
+    if (!selectedExperiment) {
+      return json({ error: "Unsupported paywall placement" }, 400);
+    }
+    if (selectedExperiment) {
+      try {
+        const assignment = await claimPaywallExperiment(db, user.id, selectedExperiment);
+        experimentKey = assignment.eligible ? assignment.experimentKey : null;
+        experimentVariant = assignment.eligible ? assignment.variant : null;
+      } catch (error) {
+        console.error("[norva-revolut] paywall assignment failed", error instanceof Error ? error.message : error);
+        return json({ error: "Could not resolve checkout offer" }, 503);
+      }
+    }
 
     // ── Checkout KIND, decided SERVER-SIDE from the account's real state ───────
     // (kind decided server-side): trial_setup grants trial days ONCE;
@@ -429,15 +529,61 @@ Deno.serve(async (req) => {
       }
       kind = "plan_change";
     }
-    else if (proj?.trial_consumed_at) kind = "resubscribe";
+    else if (proj?.trial_consumed_at && terminalStatus) kind = "resubscribe";
+    else if (proj && projStatus && projStatus !== "expired") {
+      // past_due/grace and an ended cancellation still belong to the renewal /
+      // dunning state machine. Opening an independent AUTOMATIC checkout here
+      // could debit in parallel with its already-claimed billing cycle.
+      return json({
+        error: "The current subscription transition is still being reconciled",
+        code: "subscription_not_terminal",
+        retryable: true,
+      }, 409);
+    }
+
+    // This is the complete, server-owned quote returned to the UI. It is also
+    // copied into provider metadata and the local order journal so creation,
+    // refresh/reuse, webhook finalization and the first recurring debit all
+    // describe the same commercial commitment.
+    const quotedAt = new Date(nowMs).toISOString();
+    const nextCycleAt = projStatus === "trialing"
+      ? (proj?.trial_ends_at ?? proj?.current_period_end ?? null)
+      : (proj?.current_period_end ?? null);
+    const chargeMode: CheckoutCommercialTerms["charge_mode"] = kind === "trial_setup"
+      ? "after_trial"
+      : kind === "plan_change"
+        ? "next_cycle"
+        : kind === "resubscribe"
+          ? "immediate"
+          : "card_validation_only";
+    const firstChargeAt = kind === "trial_setup"
+      ? new Date(nowMs + TRIAL_DAYS * 86_400_000).toISOString()
+      : kind === "plan_change"
+        ? isoTimestampOrNull(nextCycleAt)
+        : kind === "resubscribe"
+          ? quotedAt
+          : null;
+    const commercialTerms: CheckoutCommercialTerms = {
+      plan,
+      period,
+      cadence: period,
+      price_amount_minor: amount,
+      requested_amount_cents: amount,
+      currency: "USD",
+      charge_mode: chargeMode,
+      trial_days: kind === "trial_setup" ? TRIAL_DAYS : null,
+      first_charge_at: firstChargeAt,
+    };
 
     const returnTo = (
       typeof payload.returnTo === "string" && /^\/(?!\/)/.test(payload.returnTo) && !payload.returnTo.includes("\\")
     ) ? payload.returnTo : "";
-    const intentKey = await checkoutIntentKey(user.id, kind, plan, period, amount, promoBase, promoCycles, returnTo);
+    const intentKey = await checkoutIntentKey(
+      user.id, kind, plan, period, amount, promoBase, promoCycles,
+    );
     const leaseToken = crypto.randomUUID();
     type CheckoutClaim = {
-      action: "create" | "recover" | "reuse" | "wait";
+      action: "create" | "recover" | "reuse" | "wait" | "billing_inflight" | "not_terminal";
       order_id: string | null;
       public_id: string | null;
       checkout_url: string | null;
@@ -470,6 +616,38 @@ Deno.serve(async (req) => {
       return json({ error: "Could not reserve checkout" }, 503);
     }
 
+    if (intent.action === "billing_inflight") {
+      return json({
+        error: "A subscription payment is already being reconciled",
+        code: "billing_reconciliation_in_progress",
+        retryable: true,
+        retry_after_ms: 3000,
+      }, 409);
+    }
+    if (intent.action === "not_terminal") {
+      return json({
+        error: "The subscription state changed; refresh before subscribing again",
+        code: "subscription_not_terminal",
+        retryable: false,
+      }, 409);
+    }
+
+    const { error: attributionWriteError } = await db.from("cloud_revolut_checkout_intents")
+      .update({
+        currency: "USD",
+        experiment_key: experimentKey,
+        experiment_variant: experimentVariant,
+        paywall_placement: placement,
+        paywall_surface: surface,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("intent_key", intentKey)
+      .eq("user_id", user.id);
+    if (attributionWriteError) {
+      console.error("[norva-revolut] checkout attribution write failed", attributionWriteError.message);
+      return json({ error: "Could not persist checkout offer" }, 503);
+    }
+
     if (intent.action === "wait") {
       // A different tab/worker owns the short creation lease. Returning 409 makes
       // the page retry the same deterministic intent; it must never POST a second
@@ -493,6 +671,19 @@ Deno.serve(async (req) => {
           updated_at: nowIso,
         }).eq("order_id", intent.order_id);
         if (["PENDING", "PROCESSING", "AUTHORISED", "COMPLETED"].includes(remoteState)) {
+          const { data: frozenOrder, error: frozenOrderError } = await db.from("cloud_revolut_orders")
+            .select("plan,period,requested_amount_cents,currency,charge_mode,trial_days,first_charge_at")
+            .eq("order_id", intent.order_id).eq("user_id", user.id).maybeSingle();
+          if (frozenOrderError || !frozenOrder) {
+            return json({ error: "checkout_terms_unavailable", retryable: true }, 503);
+          }
+          // The local immutable journal is authoritative on reuse. Provider GET
+          // responses may omit metadata, and the live catalog may have changed
+          // since order creation; neither may rewrite what was quoted.
+          const terms = checkoutTermsFromJournal(frozenOrder);
+          if (!terms) {
+            return json({ error: "checkout_terms_invalid", retryable: false }, 409);
+          }
           return json({
             ok: true,
             order_id: intent.order_id,
@@ -503,6 +694,7 @@ Deno.serve(async (req) => {
             reused: true,
             already_authorized: remoteState === "AUTHORISED" || remoteState === "COMPLETED",
             expires_at: intent.expires_at,
+            ...terms,
           });
         }
         // The cached order reached a terminal state without a Norva finalization.
@@ -529,31 +721,12 @@ Deno.serve(async (req) => {
     const name = String(user.user_metadata?.display_name ?? user.user_metadata?.name ?? "").trim();
     const custId = await ensureRevolutCustomer(db, user.id, user.email, name);
 
-    // Record the customer id on the mapping row. The recurring plan (plan/period/
-    // amount_cents) is what the renewal engine charges, so WHEN it lands here depends
-    // on the account's state:
-    //   • trial_setup / resubscribe — no live entitlement is armed for renewal, so
-    //     staging the plan now is harmless AND required: the hosted-page flow can
-    //     convert via the webhook alone (no /confirm), and the cron needs the row.
-    //   • plan_change — a live entitlement IS armed for renewal. Writing the new
-    //     plan before payment would let an abandoned checkout (this endpoint fires
-    //     on page load) reprice the next renewal to an amount the customer never
-    //     approved. Staged in the order metadata below instead; committed by
-    //     /confirm (or the webhook) once the order is actually paid.
-    //   • card_update — must never touch plan/period (would corrupt the mapping).
+    // Before payment, persist only provider/customer identity. Recurring plan,
+    // amount and promotion counters are monetary state and are committed only by
+    // the terminal confirmation/webhook transaction.
     const nowIso = new Date().toISOString();
     const custRow: JsonRecord = { user_id: user.id, updated_at: nowIso };
     if (custId) custRow.revolut_customer_id = custId;
-    if (kind === "trial_setup" || kind === "resubscribe") {
-      custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount;
-      // Les nulls explicites effacent un éventuel état promo d'un checkout précédent.
-      custRow.base_amount_cents = promoBase;
-      custRow.promo_cycles_left = promoCycles;
-      custRow.pending_plan = null; custRow.pending_period = null;
-      custRow.pending_amount_cents = null; custRow.pending_base_amount_cents = null;
-      custRow.pending_promo_cycles = null; custRow.pending_effective_at = null;
-      custRow.pending_order_id = null;
-    }
     const { error: customerStageError } = await db.from("cloud_revolut_customers").upsert(custRow);
     if (customerStageError) {
       await db.rpc("fail_revolut_checkout_intent", {
@@ -567,12 +740,12 @@ Deno.serve(async (req) => {
     const DESCRIPTIONS: Record<string, string> = {
       trial_setup: `Norva ${plan} ${period} — card check for 7-day free trial`,
       plan_change: `Norva ${plan} ${period} — plan change (card check, not charged)`,
-      resubscribe: `Norva ${plan} ${period} — resubscribe (card check; first charge follows)`,
+      resubscribe: `Norva ${plan} ${period} — subscription payment`,
       card_update: `Norva — payment method update (card check, not charged)`,
     };
-    // capture_mode:MANUAL → authorise a small validation amount (card check), never
-    // captured; the saved token (savePaymentMethodFor:"merchant" on the widget) drives
-    // renewals. The plan price applies at trial end via a merchant-initiated charge.
+    // New trials / plan changes / card updates use a MANUAL validation hold. A
+    // resubscribe has no trial left and charges the snapshotted plan price now;
+    // access is not activated until that order is authoritatively COMPLETED.
     // After a payment on the HOSTED checkout page (the widget's fallback link), Revolut
     // must send the customer back here to finalize (capture card, void hold, start the
     // trial) — else they land on Revolut's own "payment complete" page and never return.
@@ -584,10 +757,14 @@ Deno.serve(async (req) => {
     if (returnTo) redirectParams.set("returnTo", returnTo);
     const redirectUrl = `${frontOrigin}/checkout-revolut.html?${redirectParams.toString()}`;
     const merchantExtRef = await checkoutExtRef(user.id, intentKey, Number(intent.generation || 1));
+    const immediateCharge = kind === "resubscribe";
     const orderBody: JsonRecord = {
-      amount: VALIDATION_CENTS,
+      // A returning subscriber has already consumed the trial: this order is the
+      // actual subscription purchase and may activate access only after COMPLETED.
+      // All other checkout kinds remain uncaptured card-validation holds.
+      amount: immediateCharge ? amount : VALIDATION_CENTS,
       currency: "USD",
-      capture_mode: "MANUAL",
+      capture_mode: immediateCharge ? "AUTOMATIC" : "MANUAL",
       // Save the card for merchant-initiated renewals at the ORDER level (not only via
       // the widget submit), so the card is tokenised whichever path the customer takes —
       // the embedded card field OR the hosted checkout_url fallback (which also offers
@@ -604,6 +781,14 @@ Deno.serve(async (req) => {
         user_id: user.id, plan, period, kind, amount_cents: amount,
         base_amount_cents: promoBase, promo_cycles: promoCycles,
         intent_key: intentKey, intent_generation: Number(intent.generation || 1),
+        price_currency: "USD", price_source: "billing_prices",
+        billing_cadence: commercialTerms.cadence,
+        charge_mode: commercialTerms.charge_mode,
+        checkout_charge_mode: immediateCharge ? "immediate" : "validation_hold",
+        trial_days: commercialTerms.trial_days,
+        first_charge_at: commercialTerms.first_charge_at,
+        experiment_key: experimentKey, experiment_variant: experimentVariant,
+        paywall_placement: placement, paywall_surface: surface,
       },
     };
     // customer_id links the order → customer so the saved card attaches; fall back to
@@ -611,6 +796,7 @@ Deno.serve(async (req) => {
     if (custId) orderBody.customer_id = custId; else orderBody.customer_email = user.email;
     const expectedOrder: ExpectedCheckoutOrder = {
       extRef: merchantExtRef, userId: user.id, intentKey, kind, plan, period, amountCents: amount,
+      orderAmountCents: immediateCharge ? amount : VALIDATION_CENTS,
     };
     // The deprecated /api/1.0 order-create contract does not document an
     // Idempotency-Key header. Its supported correlation primitive is
@@ -672,12 +858,32 @@ Deno.serve(async (req) => {
 
     const expiresAt = intent.expires_at || new Date(Date.now() + CHECKOUT_TTL_SECONDS * 1000).toISOString();
     const checkoutUrl = created.body.checkout_url ? String(created.body.checkout_url) : null;
+    const frozenMeta = (created.body.metadata && typeof created.body.metadata === "object")
+      ? created.body.metadata as JsonRecord
+      : orderBody.metadata as JsonRecord;
+    const frozenExperimentKey = typeof frozenMeta.experiment_key === "string" && frozenMeta.experiment_key
+      ? frozenMeta.experiment_key : null;
+    const frozenExperimentVariant = typeof frozenMeta.experiment_variant === "string" && frozenMeta.experiment_variant
+      ? frozenMeta.experiment_variant : null;
+    const frozenPlacement = typeof frozenMeta.paywall_placement === "string" && frozenMeta.paywall_placement
+      ? frozenMeta.paywall_placement : null;
+    const frozenSurface = typeof frozenMeta.paywall_surface === "string" && frozenMeta.paywall_surface
+      ? frozenMeta.paywall_surface : null;
     const { error: orderWriteError } = await db.from("cloud_revolut_orders").upsert({
       order_id: orderId, public_id: token, user_id: user.id, kind,
       plan, period, requested_amount_cents: amount,
-      amount: VALIDATION_CENTS, currency: "USD",
+      amount: immediateCharge ? amount : VALIDATION_CENTS, currency: "USD",
+      base_amount_cents: promoBase, promo_cycles: promoCycles,
+      price_source: "billing_prices",
+      charge_mode: commercialTerms.charge_mode,
+      trial_days: commercialTerms.trial_days,
+      first_charge_at: commercialTerms.first_charge_at,
       merchant_ext_ref: String(orderBody.merchant_order_ext_ref),
       intent_key: intentKey, checkout_url: checkoutUrl, expires_at: expiresAt,
+      // Recovery may happen from another page/surface. Freeze the attribution
+      // carried by the provider order itself; never rewrite it from retry UI.
+      experiment_key: frozenExperimentKey, experiment_variant: frozenExperimentVariant,
+      paywall_placement: frozenPlacement, paywall_surface: frozenSurface,
       state: String(created.body.state ?? "PENDING").toUpperCase(), updated_at: new Date().toISOString(),
     });
     if (orderWriteError) {
@@ -715,6 +921,7 @@ Deno.serve(async (req) => {
       ok: true, order_id: orderId, public_id: token, kind,
       checkout_url: checkoutUrl,
       sandbox: isTestKey(), reused: false, expires_at: expiresAt,
+      ...commercialTerms,
     });
   }
 
@@ -747,6 +954,8 @@ Deno.serve(async (req) => {
       kind: string;
       plan?: string | null;
       period?: string | null;
+      amount?: number | null;
+      currency?: string | null;
       requested_amount_cents?: number | null;
       merchant_ext_ref?: string | null;
       intent_key?: string | null;
@@ -754,9 +963,13 @@ Deno.serve(async (req) => {
       expired_at?: string | null;
       superseded_at?: string | null;
       finalization_result?: JsonRecord | null;
+      experiment_key?: string | null;
+      experiment_variant?: string | null;
+      paywall_placement?: string | null;
+      paywall_surface?: string | null;
     };
     const { data: journalRow, error: journalReadError } = await db.from("cloud_revolut_orders")
-      .select("order_id,kind,plan,period,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result")
+      .select("order_id,kind,plan,period,amount,currency,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result,experiment_key,experiment_variant,paywall_placement,paywall_surface")
       .eq("order_id", orderId).eq("user_id", user.id).maybeSingle();
     if (journalReadError) return json({ error: "Could not read checkout journal" }, 503);
     const journal = journalRow as CheckoutJournal | null;
@@ -767,7 +980,7 @@ Deno.serve(async (req) => {
       const result = String(finalized.result ?? "already_finalized");
       const statusByResult: Record<string, string> = {
         trial_started: "trialing", already_confirmed: "trialing", already_active: "active",
-        resubscribed: "active", plan_change_scheduled: "plan_change_scheduled",
+        resubscribed: "active", payment_processing: "payment_processing", plan_change_scheduled: "plan_change_scheduled",
         card_updated: "updated", card_updated_retrying: "retrying",
       };
       if (result === "plan_change_scheduled") {
@@ -787,21 +1000,15 @@ Deno.serve(async (req) => {
         ok: true, status: statusByResult[result] ?? "updated",
         kind: String(finalized.kind ?? journal.kind),
         effective_at: finalized.effective_at ?? null,
+        trial_days: String(finalized.kind ?? journal.kind) === "trial_setup" ? TRIAL_DAYS : null,
+        first_charge_at: finalized.first_charge_at ?? finalized.trial_ends_at ?? null,
         idempotent: true,
       });
     }
-    if (journal.expired_at || journal.superseded_at) {
-      return json({
-        error: "This checkout is no longer current",
-        code: journal.superseded_at ? "checkout_superseded" : "checkout_expired",
-      }, 409);
-    }
-
     const fetched = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(orderId)}`);
     if (!fetched.ok) return json({ ok: false, status: "not_found" });
     const order = fetched.body;
     const meta = (order.metadata && typeof order.metadata === "object") ? order.metadata as JsonRecord : {};
-    if (String(meta.user_id ?? "") !== user.id) return json({ error: "Forbidden" }, 403);
 
     const remoteKind = String(meta.kind ?? "");
     const remotePlan = String(meta.plan ?? "") === "family" ? "family" : "plus";
@@ -809,24 +1016,97 @@ Deno.serve(async (req) => {
     const remoteAmount = Number(meta.amount_cents);
     const remoteIntent = String(meta.intent_key ?? "");
     const remoteExtRef = String(order.merchant_order_ext_ref ?? "");
-    if (journal.kind !== remoteKind
-      || (journal.plan && journal.plan !== remotePlan)
-      || (journal.period && journal.period !== remotePeriod)
-      || (journal.requested_amount_cents != null && journal.requested_amount_cents !== remoteAmount)
-      || (journal.intent_key && journal.intent_key !== remoteIntent)
-      || (journal.merchant_ext_ref && journal.merchant_ext_ref !== remoteExtRef)) {
-      console.error("[norva-revolut] checkout journal/provider mismatch", orderId);
-      return json({ error: "Checkout order failed integrity validation" }, 409);
-    }
-
+    const remoteCurrency = String(order.currency ?? meta.price_currency ?? "").toUpperCase();
+    const remoteOrderAmount = Number(order.amount);
     const state = String(order.state ?? "").toUpperCase();
     const observedIso = new Date().toISOString();
     const { error: observedError } = await db.from("cloud_revolut_orders").update({
       state, last_reconciled_at: observedIso, updated_at: observedIso,
     }).eq("order_id", orderId).eq("user_id", user.id);
     if (observedError) return json({ error: "Could not reconcile order" }, 503);
-    const paid = state === "AUTHORISED" || state === "COMPLETED";
-    if (!paid) return json({ ok: true, status: order.state, pending: true });
+    const expectedOrderAmount = journal.kind === "resubscribe"
+      ? Number(journal.requested_amount_cents)
+      : Number(journal.amount);
+    const integrityMismatch = String(meta.user_id ?? "") !== user.id
+      || journal.kind !== remoteKind
+      || (journal.plan && journal.plan !== remotePlan)
+      || (journal.period && journal.period !== remotePeriod)
+      || (journal.requested_amount_cents != null && journal.requested_amount_cents !== remoteAmount)
+      || (journal.amount != null && Number.isFinite(expectedOrderAmount) && expectedOrderAmount !== remoteOrderAmount)
+      || (journal.currency && journal.currency.toUpperCase() !== remoteCurrency)
+      || (journal.intent_key && journal.intent_key !== remoteIntent)
+      || (journal.merchant_ext_ref && journal.merchant_ext_ref !== remoteExtRef)
+      || (journal.experiment_key && journal.experiment_key !== String(meta.experiment_key ?? ""))
+      || (journal.experiment_variant && journal.experiment_variant !== String(meta.experiment_variant ?? ""))
+      || (journal.paywall_placement && journal.paywall_placement !== String(meta.paywall_placement ?? ""))
+      || (journal.paywall_surface && journal.paywall_surface !== String(meta.paywall_surface ?? ""));
+    if (integrityMismatch) {
+      console.error("[norva-revolut] checkout journal/provider mismatch", orderId);
+      // The authenticated local journal is the ownership anchor. Provider
+      // metadata is precisely what failed integrity validation, so a missing or
+      // forged remote kind/user must not make a real capture disappear.
+      if (journal.kind === "resubscribe" && state === "COMPLETED") {
+        const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+        const providerPaymentId = payments.length
+          ? String(payments[payments.length - 1]?.id ?? "") || null
+          : null;
+        const { data: quarantined, error: quarantineError } = await db.rpc(
+          "reconcile_completed_revolut_resubscribe",
+          {
+            p_order_id: orderId,
+            p_user_id: user.id,
+            p_provider_payment_id: providerPaymentId,
+            p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+            p_captured_currency: remoteCurrency || null,
+            p_provider_integrity_valid: false,
+          },
+        );
+        if (quarantineError) return json({ error: "Could not quarantine captured payment" }, 503);
+        const resolution = (Array.isArray(quarantined) ? quarantined[0] : quarantined) as {
+          result?: string; exception_reason?: string | null;
+        } | null;
+        if (resolution?.result === "already_refunded") {
+          return json({
+            ok: false,
+            status: "refunded",
+            code: "captured_payment_already_refunded",
+            idempotent: true,
+          }, 409);
+        }
+        return json({
+          error: "Payment captured but provider data failed integrity validation",
+          code: "captured_payment_refund_required",
+          reason: resolution?.exception_reason ?? "commercial_terms_invalid",
+        }, 409);
+      }
+      return json({ error: "Checkout order failed integrity validation" }, 409);
+    }
+
+    const paid = remoteKind === "resubscribe"
+      ? state === "COMPLETED"
+      : state === "AUTHORISED" || state === "COMPLETED";
+    const staleCheckout = Boolean(journal.expired_at || journal.superseded_at);
+    // TTL/supersession is authoritative for an uncharged validation hold, but
+    // never grounds for discarding real money. A COMPLETED resubscribe continues
+    // into the locked reconciliation RPC below, which either grants access once
+    // or creates an explicit full-refund review item.
+    if (staleCheckout && !(journal.kind === "resubscribe" && state === "COMPLETED")) {
+      return json({
+        error: "This checkout is no longer current",
+        code: journal.superseded_at ? "checkout_superseded" : "checkout_expired",
+      }, 409);
+    }
+    if (!paid) {
+      return json({
+        ok: true,
+        status: remoteKind === "resubscribe" ? "payment_processing" : order.state,
+        provider_status: order.state,
+        pending: true,
+        kind: remoteKind,
+        trial_days: remoteKind === "trial_setup" ? TRIAL_DAYS : null,
+        first_charge_at: null,
+      });
+    }
 
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
@@ -894,7 +1174,7 @@ Deno.serve(async (req) => {
     // the legacy /api/1.0 path 404s. Best-effort: a lingering auth auto-expires anyway.
     let holdReleased = state !== "AUTHORISED";
     let journalState = state;
-    if (state === "AUTHORISED") {
+    if (state === "AUTHORISED" && kind !== "resubscribe") {
       const cancelled = await revolut("POST", `/api/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" });
       holdReleased = cancelled.ok;
       if (cancelled.ok) journalState = "CANCELLED";
@@ -932,7 +1212,7 @@ Deno.serve(async (req) => {
     const crossRail = (kind === "plan_change" || kind === "card_update")
       ? curProvider !== "revolut"
       : foreignRailBlocked;
-    if (curHardBlocked) {
+    if (curHardBlocked && kind !== "resubscribe") {
       const stampError = await stampFinalized("rejected_account_blocked", { existing_status: curStatus });
       if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
       return json({
@@ -940,7 +1220,7 @@ Deno.serve(async (req) => {
         code: "account_billing_blocked",
       }, 409);
     }
-    if (crossRail) {
+    if (crossRail && kind !== "resubscribe") {
       const stampError = await stampFinalized("rejected_cross_rail", { existing_provider: curProvider || null });
       if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
       return json({ error: "This subscription is managed by another billing provider", code: "billing_rail_mismatch" }, 409);
@@ -952,7 +1232,7 @@ Deno.serve(async (req) => {
     }
 
     const willStartTrial = kind === "trial_setup" && !cur?.trial_consumed_at && !curLive;
-    const willCommitRecurring = kind === "resubscribe" || willStartTrial;
+    const willCommitRecurring = willStartTrial;
     const custPatch: JsonRecord = {
       user_id: user.id, revolut_customer_id: customerId ?? undefined, payment_method_id: pmId ?? undefined,
       card_last4: last4 ?? undefined, card_brand: brand ?? undefined, card_exp: cardExp ?? undefined,
@@ -975,19 +1255,21 @@ Deno.serve(async (req) => {
       custPatch.pending_effective_at = planEffectiveAt;
       custPatch.pending_order_id = orderId;
     }
-    const { error: customerCommitError } = await db.from("cloud_revolut_customers").upsert(custPatch);
-    if (customerCommitError) {
-      const rejection = revolutMappingRejection(customerCommitError.message);
-      if (rejection) {
-        const stampError = await stampFinalized(rejection.finalization, {
-          mapping_guard: rejection.code,
-        });
-        if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
-        return json({ error: rejection.error, code: rejection.code }, 409);
+    if (kind !== "resubscribe") {
+      const { error: customerCommitError } = await db.from("cloud_revolut_customers").upsert(custPatch);
+      if (customerCommitError) {
+        const rejection = revolutMappingRejection(customerCommitError.message);
+        if (rejection) {
+          const stampError = await stampFinalized(rejection.finalization, {
+            mapping_guard: rejection.code,
+          });
+          if (stampError) return json({ error: "Could not finalize rejected checkout" }, 503);
+          return json({ error: rejection.error, code: rejection.code }, 409);
+        }
+        return json({ error: "Could not save billing profile" }, 503);
       }
-      return json({ error: "Could not save billing profile" }, 503);
     }
-    if (cardCountry) {
+    if (cardCountry && kind !== "resubscribe") {
       const { error: countryError } = await db.from("cloud_entitlement_projection")
         .update({ country_code: cardCountry, country_source: "card" }).eq("user_id", user.id);
       if (countryError) return json({ error: "Could not save billing country" }, 503);
@@ -1036,14 +1318,47 @@ Deno.serve(async (req) => {
     }
 
     if (kind === "resubscribe") {
-      const projectionError = await replaceProjectionWithRailCas({
-        user_id: user.id, status: "active", provider: "revolut", provider_customer_id: customerId,
-        plan_code: plan, current_period_end: nowIso, last_event_at: nowIso,
+      const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+      const providerPaymentId = payments.length
+        ? String(payments[payments.length - 1]?.id ?? "") || null
+        : null;
+      const { data: reconciled, error: reconcileError } = await db.rpc(
+        "reconcile_completed_revolut_resubscribe",
+        {
+          p_order_id: orderId,
+          p_user_id: user.id,
+          p_provider_payment_id: providerPaymentId,
+          p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+          p_captured_currency: remoteCurrency || null,
+          p_provider_integrity_valid: true,
+          p_customer_id: customerId,
+          p_payment_method_id: pmId ?? null,
+          p_card_last4: last4 ?? null,
+          p_card_brand: brand ?? null,
+          p_card_exp: cardExp ?? null,
+          p_card_country: cardCountry,
+        },
+      );
+      if (reconcileError) return json({ error: "Could not reconcile captured subscription payment" }, 503);
+      const resolution = (Array.isArray(reconciled) ? reconciled[0] : reconciled) as {
+        result?: string; period_end?: string | null; exception_reason?: string | null;
+      } | null;
+      if (resolution?.result === "refund_required") {
+        return json({
+          error: "Payment captured but account activation requires support review",
+          code: "captured_payment_refund_required",
+          reason: resolution.exception_reason ?? "manual_review",
+        }, 409);
+      }
+      if (!resolution || !["applied", "already_applied"].includes(String(resolution.result))) {
+        return json({ error: "Captured payment reconciliation is incomplete" }, 503);
+      }
+      return json({
+        ok: true, status: "active", kind,
+        current_period_end: resolution.period_end ?? null,
+        trial_days: null, first_charge_at: null,
+        idempotent: resolution.result === "already_applied",
       });
-      if (projectionError) return json({ error: "Could not reactivate subscription" }, 503);
-      const stampError = await stampFinalized("resubscribed");
-      if (stampError) return json({ error: "Could not finalize order journal" }, 503);
-      return json({ ok: true, status: "active", kind });
     }
 
     // trial_setup — the ONLY path that grants trial days. Replay-guarded: re-confirming
@@ -1061,17 +1376,30 @@ Deno.serve(async (req) => {
       if (stampError) return json({ error: "Could not finalize order journal" }, 503);
       return json({ ok: true, status: "active", kind, note: "already_active" });
     }
+    // New checkouts freeze the exact first debit date in server metadata. The
+    // fallback exists only for legacy orders opened before that contract.
+    const trialEnd = isoTimestampOrNull(meta.first_charge_at)
+      ?? new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString();
     const trialError = await replaceProjectionWithRailCas({
       user_id: user.id, status: "trialing", provider: "revolut", provider_customer_id: customerId,
-      plan_code: plan, trial_ends_at: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
-      trial_consumed_at: nowIso, current_period_end: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
-      last_event_at: nowIso,
+      plan_code: plan, trial_ends_at: trialEnd,
+      trial_consumed_at: nowIso, current_period_end: trialEnd,
+      last_event_at: nowIso, last_verified_at: nowIso,
+      mrr_cents: amount,
+      bill_period: period, billing_currency: "USD",
+      billing_product_id: null, billing_package_id: null,
+      billing_terms_source: "revolut_order_snapshot",
       ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
     });
     if (trialError) return json({ error: "Could not start trial" }, 503);
-    const stampError = await stampFinalized("trial_started");
+    const trialEventError = await recordLifecycleBillingEvent(
+      db, user.id, `checkout:${orderId}:trial-started`, "TRIAL_STARTED",
+      { order_id: orderId, plan_label: plan, bill_period: period, first_charge_at: trialEnd },
+    );
+    if (trialEventError) return json({ error: "Could not journal trial activation" }, 503);
+    const stampError = await stampFinalized("trial_started", { trial_ends_at: trialEnd, first_charge_at: trialEnd });
     if (stampError) return json({ error: "Could not finalize order journal" }, 503);
-    return json({ ok: true, status: "trialing", kind });
+    return json({ ok: true, status: "trialing", kind, trial_days: TRIAL_DAYS, trial_ends_at: trialEnd, first_charge_at: trialEnd });
   }
 
   // ── /profile — user-authed: read-only billing profile for display ──────────

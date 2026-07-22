@@ -910,6 +910,19 @@
         } catch (_) { hasUser = false; }
         return !hasUser && Boolean(getDeviceToken());
     }
+
+    // Analytics surface is deliberately derived from the trusted app shell
+    // rather than accepted from arbitrary page state. The backend still applies
+    // its own allow-list and resolves the account behind a paired-device token.
+    function paywallSurface() {
+        const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+        if (/NorvaTV-AndroidTV/i.test(ua)) return 'android_tv';
+        if (/Tizen|SamsungBrowser.*TV|Samsung.*SmartTV/i.test(ua)) return 'samsung_tv';
+        if (/NorvaTV-/i.test(ua) || (typeof window !== 'undefined' && (window.NorvaTVCloud || window.NodeCastNative))) {
+            return 'mobile_android';
+        }
+        return 'web';
+    }
     // Pick (path, token) for a route that exists in both scopes, by session mode.
     const dualGet = (userPath, params = {}) => isDeviceOnly()
         ? request('GET', `/device${userPath}${query(params)}`, null, { token: getDeviceToken() })
@@ -1001,7 +1014,24 @@
             // Account-level trial eligibility (one trial per account across every
             // rail — keyed to trial_consumed_at). Lets the paywall show "Start
             // free trial" vs "Subscribe".
-            trialEligibility: () => cachedGet('trialEligibility', PROFILES_TTL_MS, () => request('GET', '/billing/trial-eligibility'))
+            trialEligibility: () => cachedGet('trialEligibility', PROFILES_TTL_MS, () => request('GET', '/billing/trial-eligibility')),
+
+            // Sticky account-level paywall assignment. No variant is accepted
+            // from the client: norva-cloud claims it server-side from user_id (or
+            // the account behind a paired device token), so Web/mobile/TV cannot
+            // drift into different experiment arms.
+            paywallExperiment: () => {
+                return isDeviceOnly()
+                    ? request('GET', '/device/experiments/paywall', null, { token: getDeviceToken() })
+                    : request('GET', '/experiments/paywall');
+            },
+            recordPaywallExposure: ({ placement = 'subscribe' } = {}) => {
+                const body = { placement, surface: paywallSurface() };
+                return isDeviceOnly()
+                    ? request('POST', '/device/experiments/paywall/exposure', body, { token: getDeviceToken() })
+                    : request('POST', '/experiments/paywall/exposure', body);
+            },
+            paywallSurface
         },
 
         // Device-aware so a paired TV can list + pick the SAME profile as the phone

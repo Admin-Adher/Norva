@@ -15,6 +15,12 @@ import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, isAdminUser, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor } from "../_shared/xtream-sync.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import {
+  claimPaywallExperiment,
+  normalizePaywallSurface,
+  paywallExperimentForPlacement,
+  recordPaywallExposure,
+} from "../_shared/paywall-experiments.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -176,6 +182,131 @@ async function getTrialEligibility(userId: string, db: SupabaseClient) {
   };
 }
 
+async function paywallExperimentClaim(url: URL, userId: string, db: SupabaseClient) {
+  let experimentKey: string | null;
+  try {
+    // The placement is descriptive input. The server allowlist owns the
+    // placement -> experiment mapping; an experimentKey query parameter is
+    // intentionally ignored even when sent by an old or hostile client.
+    ({ experimentKey } = paywallExperimentForPlacement(
+      url.searchParams.get("placement"),
+      "subscribe",
+    ));
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : "Invalid paywall placement");
+  }
+  if (!experimentKey) throw new HttpError(400, "Unsupported paywall placement");
+  return await claimPaywallExperiment(db, userId, experimentKey);
+}
+
+async function paywallExperimentExposure(req: Request, userId: string, db: SupabaseClient) {
+  const body = await req.json().catch(() => null) as JsonRecord | null;
+  if (!body) throw new HttpError(400, "Invalid JSON");
+  // A forged `variant` or `experimentKey` property is ignored. The placement
+  // selects an allowlisted server experiment, then the server resolves the
+  // account's sticky assignment again.
+  let experimentKey: string | null;
+  let placement: string;
+  let surface: ReturnType<typeof normalizePaywallSurface>;
+  try {
+    ({ placement, experimentKey } = paywallExperimentForPlacement(body.placement, "subscribe"));
+    surface = normalizePaywallSurface(body.surface);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : "Invalid exposure");
+  }
+  if (!experimentKey) throw new HttpError(400, "Unsupported paywall placement");
+  return await recordPaywallExposure(db, userId, { experimentKey, placement, surface });
+}
+
+async function googlePlayCheckoutStarted(req: Request, userId: string, db: SupabaseClient) {
+  const body = await req.json().catch(() => null) as JsonRecord | null;
+  if (!body) throw new HttpError(400, "Invalid JSON");
+  const requestId = stringOr(body.requestId, "");
+  const offeringId = stringOr(body.offeringId, "");
+  const packageId = stringOr(body.packageId, "");
+  const storeProductId = stringOr(body.storeProductId, "");
+  const planCode = stringOr(body.planCode, "").toLowerCase();
+  const cadenceIso = stringOr(body.billingCadence, "").toUpperCase();
+  const currency = stringOr(body.priceCurrency, "").toUpperCase();
+  const amountMicros = Number(body.priceAmountMicros);
+  if (!requestId || requestId.length > 160 || !offeringId || offeringId.length > 160
+      || !packageId || packageId.length > 160 || !storeProductId || storeProductId.length > 160
+      || !["plus", "family"].includes(planCode)
+      || !["P1M", "P1Y"].includes(cadenceIso)
+      || !/^[A-Z]{3}$/.test(currency)
+      || !Number.isSafeInteger(amountMicros) || amountMicros <= 0) {
+    throw new HttpError(400, "Invalid Google Play checkout snapshot");
+  }
+  const { placement, experimentKey } = paywallExperimentForPlacement(body.placement, "subscribe");
+  if (!experimentKey) throw new HttpError(400, "Unsupported paywall placement");
+  // Immutable server-owned tuple catalog. RevenueCat/Play prices are dynamic,
+  // so this validates identity and cadence only; client prices remain evidence,
+  // never commercial truth. Final purchase truth comes from the RC webhook.
+  const googlePlayCatalog: Readonly<Record<string, Readonly<{
+    planCode: "plus" | "family"; cadence: "monthly" | "annual"; cadenceIso: "P1M" | "P1Y";
+  }>>> = Object.freeze({
+    "$rc_monthly|norva_plus": Object.freeze({ planCode: "plus", cadence: "monthly", cadenceIso: "P1M" }),
+    "$rc_annual|norva_plus": Object.freeze({ planCode: "plus", cadence: "annual", cadenceIso: "P1Y" }),
+    "family_monthly|norva_family": Object.freeze({ planCode: "family", cadence: "monthly", cadenceIso: "P1M" }),
+    "family_annual|norva_family": Object.freeze({ planCode: "family", cadence: "annual", cadenceIso: "P1Y" }),
+  });
+  const productBaseId = storeProductId.split(":", 1)[0];
+  const catalogEntry = googlePlayCatalog[`${packageId}|${productBaseId}`];
+  if (!catalogEntry || catalogEntry.planCode !== planCode || catalogEntry.cadenceIso !== cadenceIso) {
+    throw new HttpError(400, "Unknown or inconsistent Google Play checkout tuple");
+  }
+  const assignment = await claimPaywallExperiment(db, userId, experimentKey);
+  if (!assignment.eligible || !assignment.variant) {
+    return { ok: true, recorded: false, reason: assignment.reason ?? "account_excluded" };
+  }
+  const { data: previous } = await db.from("paywall_funnel_events")
+    .select("id").eq("user_id", userId).eq("event_type", "paywall_exposed")
+    .eq("experiment_key", experimentKey).eq("surface", "mobile_android")
+    .eq("placement", placement)
+    .gte("occurred_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+    .order("occurred_at", { ascending: false }).limit(1).maybeSingle();
+  if (!(previous as { id?: string } | null)?.id) {
+    return { ok: true, recorded: false, reason: "no_recent_mobile_exposure" };
+  }
+  const dedupeKey = `checkout_started:google_play:${userId}:${requestId}`;
+  const { data, error } = await db.from("paywall_funnel_events").upsert({
+    user_id: userId,
+    event_type: "checkout_started",
+    event_source: "native_google_play",
+    experiment_key: assignment.experimentKey,
+    experiment_variant: assignment.variant,
+    placement,
+    surface: "mobile_android",
+    plan_code: catalogEntry.planCode,
+    billing_cadence: catalogEntry.cadence,
+    price_amount_minor: null,
+    price_currency: null,
+    previous_event_id: (previous as { id: string }).id,
+    dedupe_key: dedupeKey,
+    metadata: {
+      store: "google_play",
+      requested_selection: {
+        offering_id: offeringId,
+        package_id: packageId,
+        store_product_id: storeProductId,
+        offering_id_authority: "unverified_current_offering_observation",
+      },
+      client_store_snapshot: {
+        price_amount_micros: amountMicros,
+        price_currency: currency,
+        price_formatted: stringOrNull(body.priceFormatted),
+        billing_period_iso: cadenceIso,
+        authority: "unverified_native_client_observation",
+      },
+      commercial_terms_authority: "pending_revenuecat_webhook",
+      trial_eligible: body.trialEligible === true,
+      native_request_id: requestId,
+    },
+  }, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id,dedupe_key").maybeSingle();
+  if (error) throw new Error(`Google Play checkout funnel write failed: ${error.message}`);
+  return { ok: true, eventId: (data as { id?: string } | null)?.id ?? null, dedupeKey };
+}
+
 async function route(
   req: Request,
   url: URL,
@@ -269,6 +400,14 @@ async function route(
     if (req.method === "GET" && id === "entitlements") {
       const decision = await getEntitlementDecision(db, device.user_id);
       return { body: { ...decision, features: featuresForDecision(decision) } };
+    }
+    if (id === "experiments" && action === "paywall") {
+      if (req.method === "GET" && !segments[3]) {
+        return { body: await paywallExperimentClaim(url, device.user_id, db) };
+      }
+      if (req.method === "POST" && segments[3] === "exposure") {
+        return { body: await paywallExperimentExposure(req, device.user_id, db) };
+      }
     }
     if (id === "playback" && action === "sessions" && req.method === "POST") {
       await requirePlanCapacity(device.user_id, db, "concurrent_streams", "cloud_playback_sessions", {
@@ -415,6 +554,18 @@ async function route(
   if (scope === "entitlements" && req.method === "GET") {
     const decision = await getEntitlementDecision(db, user.id, { isAdmin: isAdminUser(user) });
     return { body: { ...decision, features: featuresForDecision(decision) } };
+  }
+
+  if (scope === "experiments" && id === "paywall") {
+    if (req.method === "GET" && !action) {
+      return { body: await paywallExperimentClaim(url, user.id, db) };
+    }
+    if (req.method === "POST" && action === "exposure") {
+      return { body: await paywallExperimentExposure(req, user.id, db) };
+    }
+    if (req.method === "POST" && action === "checkout-start") {
+      return { status: 201, body: await googlePlayCheckoutStarted(req, user.id, db) };
+    }
   }
 
   // Conversion-signal log (observe-mode scaffold): the client posts when a user

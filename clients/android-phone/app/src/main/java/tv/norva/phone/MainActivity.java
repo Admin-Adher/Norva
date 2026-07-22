@@ -40,6 +40,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.ContextCompat;
+import androidx.webkit.JavaScriptReplyProxy;
+import androidx.webkit.WebMessageCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 import androidx.credentials.Credential;
 import androidx.credentials.CredentialManager;
 import androidx.credentials.CredentialManagerCallback;
@@ -58,12 +62,17 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.BufferedReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Collections;
 
 /**
  * Norva Mobile — Android phone client.
@@ -75,6 +84,8 @@ public class MainActivity extends Activity {
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
     private static final String CLOUD_ACCOUNT_URL = "https://norva.tv/account.html?returnTo=%2Fapp.html%3Fmobile%3D1%23home";
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
+    private static final String SUPABASE_USER_URL = "https://api.norva.tv/auth/v1/user";
+    private static final long BILLING_SESSION_CACHE_MS = 60_000L;
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
     private static final int    REQ_PLAYER      = 1001;
     private static final int    REQ_NOTIF_PERM  = 1002;
@@ -83,6 +94,10 @@ public class MainActivity extends Activity {
             + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
     private boolean             cloudBridgeAdded = false;
     private final ExecutorService ioPool = Executors.newCachedThreadPool();
+    private final Object billingSessionLock = new Object();
+    private String cachedBillingUserId;
+    private String cachedBillingTokenHash;
+    private long cachedBillingVerifiedAt;
 
     private FrameLayout  root;
     private WebView      webView;
@@ -270,7 +285,11 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // The initial cloud load is HTTPS-only. LAN mode explicitly relaxes this
+        // immediately before loading a user-entered local server.
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setUserAgentString(s.getUserAgentString() + UA_SUFFIX);
@@ -278,12 +297,46 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
-                // Grant camera access so QR scanning works inside the WebView
-                request.grant(request.getResources());
+                Uri origin = request == null ? null : request.getOrigin();
+                boolean trusted = origin != null && (isTrustedCloudUrl(origin.toString())
+                        || isSameOrigin(origin.toString(), lastLoadedUrl));
+                boolean cameraRequested = false;
+                if (request != null && request.getResources() != null) {
+                    for (String resource : request.getResources()) {
+                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                            cameraRequested = true;
+                            break;
+                        }
+                    }
+                }
+                if (trusted && cameraRequested) {
+                    request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                } else if (request != null) {
+                    request.deny();
+                }
             }
         });
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request == null || !request.isForMainFrame()) return false;
+                return routeTopLevelNavigation(request.getUrl() == null
+                        ? null : request.getUrl().toString());
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return routeTopLevelNavigation(url);
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                webAppReady = false;
+                configureWebSecurity(url);
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 loadHandler.removeCallbacks(loadTimeout);
@@ -309,10 +362,21 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler,
                                            SslError error) {
-                // Accept self-signed certs on local network
-                handler.proceed();
+                // Public/cloud TLS must always fail closed. A self-signed
+                // certificate is accepted only for an explicitly private LAN
+                // server selected in Advanced setup.
+                String failingUrl = error == null ? null : error.getUrl();
+                if ("server".equals(prefs().getString(PREF_MODE, null))
+                        && isExplicitLocalTlsUrl(failingUrl)
+                        && isSameOrigin(failingUrl, lastLoadedUrl)) {
+                    handler.proceed();
+                } else {
+                    handler.cancel();
+                }
             }
         });
+
+        installOriginScopedBillingChannel();
 
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -448,7 +512,13 @@ public class MainActivity extends Activity {
     // ---- Navigation ----
 
     private void connect(String url) {
+        setCloudBridgeEnabled(false);
+        connectInternal(url);
+    }
+
+    private void connectInternal(String url) {
         lastLoadedUrl = url;
+        configureWebSecurity(url);
         setupPanel.setVisibility(View.GONE);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         showSplash();
@@ -497,11 +567,126 @@ public class MainActivity extends Activity {
 
     /** Cloud playback: expose the native player bridge, then load the cloud app. */
     private void connectCloud(String url) {
-        if (!cloudBridgeAdded) {
+        if (!isTrustedCloudUrl(url)) {
+            openExternalUrl(url);
+            return;
+        }
+        setCloudBridgeEnabled(true);
+        connectInternal(url);
+    }
+
+    private void setCloudBridgeEnabled(boolean enabled) {
+        if (enabled && !cloudBridgeAdded) {
             webView.addJavascriptInterface(new CloudBridge(), "NorvaTVCloud");
             cloudBridgeAdded = true;
+        } else if (!enabled && cloudBridgeAdded) {
+            webView.removeJavascriptInterface("NorvaTVCloud");
+            cloudBridgeAdded = false;
         }
-        connect(url);
+    }
+
+    private void configureWebSecurity(String url) {
+        if (webView == null) return;
+        boolean cloud = "cloud".equals(prefs().getString(PREF_MODE, null))
+                || isTrustedCloudUrl(url);
+        WebSettings settings = webView.getSettings();
+        settings.setMixedContentMode(cloud
+                ? WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                : WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        settings.setAllowFileAccess(!cloud);
+        settings.setAllowContentAccess(!cloud);
+    }
+
+    /** Keep only Norva cloud pages, or the selected LAN origin, inside the WebView. */
+    private boolean routeTopLevelNavigation(String url) {
+        if (url == null || url.isEmpty()) return true;
+        if (isTrustedCloudUrl(url)) return false;
+        if ("server".equals(prefs().getString(PREF_MODE, null))
+                && isSameOrigin(url, lastLoadedUrl)) return false;
+        openExternalUrl(url);
+        return true;
+    }
+
+    private void openExternalUrl(String url) {
+        if (url == null || url.isEmpty()) return;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            startActivity(intent);
+        } catch (Exception ignored) {
+            Toast.makeText(this, "No app can open this link", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private static boolean isTrustedCloudUrl(String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            int port = uri.getPort();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "norva.tv".equalsIgnoreCase(uri.getHost())
+                    && (port == -1 || port == 443);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isTrustedBillingPage(String value) {
+        if (!isTrustedCloudUrl(value)) return false;
+        try {
+            String path = Uri.parse(value).getPath();
+            return "/subscribe.html".equals(path) || "/subscription.html".equals(path);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isSameOrigin(String left, String right) {
+        if (left == null || right == null) return false;
+        try {
+            Uri a = Uri.parse(left);
+            Uri b = Uri.parse(right);
+            int aPort = a.getPort() == -1 ? defaultPort(a.getScheme()) : a.getPort();
+            int bPort = b.getPort() == -1 ? defaultPort(b.getScheme()) : b.getPort();
+            return safeEqualsIgnoreCase(a.getScheme(), b.getScheme())
+                    && safeEqualsIgnoreCase(a.getHost(), b.getHost())
+                    && aPort == bPort;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static int defaultPort(String scheme) {
+        return "https".equalsIgnoreCase(scheme) ? 443 : 80;
+    }
+
+    private static boolean safeEqualsIgnoreCase(String left, String right) {
+        return left != null && right != null && left.equalsIgnoreCase(right);
+    }
+
+    private static boolean isExplicitLocalTlsUrl(String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
+            String host = uri.getHost();
+            if (host == null) return false;
+            String h = host.toLowerCase(java.util.Locale.US);
+            if ("localhost".equals(h) || "127.0.0.1".equals(h) || "::1".equals(h)
+                    || h.endsWith(".local")) return true;
+            if (h.startsWith("10.") || h.startsWith("192.168.")
+                    || h.startsWith("169.254.") || h.startsWith("fc")
+                    || h.startsWith("fd") || h.startsWith("fe80:")) return true;
+            if (h.startsWith("172.")) {
+                String[] parts = h.split("\\.");
+                if (parts.length == 4) {
+                    int second = Integer.parseInt(parts[1]);
+                    return second >= 16 && second <= 31;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     /**
@@ -609,27 +794,6 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> startActivity(new Intent(MainActivity.this, DownloadsActivity.class)));
         }
 
-        // ---- Billing (Google Play Billing via RevenueCat) ----
-
-        /** Associate the RevenueCat App User ID with the Supabase user id. */
-        @android.webkit.JavascriptInterface
-        public void billingLogin(final String userId) {
-            NorvaBilling.login(userId);
-        }
-
-        /** Start a subscription purchase for the given RevenueCat package id. */
-        @android.webkit.JavascriptInterface
-        public void purchase(final String packageId, final String planCode, final String requestId) {
-            NorvaBilling.purchase(MainActivity.this, packageId,
-                    (status, error) -> sendBillingResult(requestId, status, planCode, error));
-        }
-
-        /** Restore previous purchases for the signed-in account. */
-        @android.webkit.JavascriptInterface
-        public void restore(final String requestId) {
-            NorvaBilling.restore((status, error) -> sendBillingResult(requestId, status, null, error));
-        }
-
         // ---- Push notifications (FCM) ----
 
         /**
@@ -644,10 +808,244 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Post a billing result back to the web layer (subscribe.html / billing.js). */
-    private void sendBillingResult(String requestId, String status, String planCode, String error) {
+    private interface VerifiedBillingUserCallback {
+        void onVerified(String userId, String accessToken);
+        void onError(String error);
+    }
+
+    /**
+     * Billing deliberately does not live on the legacy JavascriptInterface: that
+     * object is visible to every frame. WebMessageListener gives Android the
+     * authenticated source origin and main-frame bit for every request.
+     */
+    private void installOriginScopedBillingChannel() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        WebViewCompat.addWebMessageListener(webView, "NorvaBillingNative",
+                Collections.singleton("https://norva.tv"),
+                new WebViewCompat.WebMessageListener() {
+                    @Override
+                    public void onPostMessage(WebView view, WebMessageCompat message,
+                                              Uri sourceOrigin, boolean isMainFrame,
+                                              JavaScriptReplyProxy replyProxy) {
+                        if (!isMainFrame || sourceOrigin == null
+                                || !isTrustedCloudUrl(sourceOrigin.toString())
+                                || view == null || !isTrustedBillingPage(view.getUrl())) return;
+                        dispatchBillingMessage(message == null ? null : message.getData());
+                    }
+                });
+    }
+
+    private void dispatchBillingMessage(String raw) {
+        final JSONObject request;
+        final JSONArray args;
+        final String method;
+        final String requestId;
         try {
-            org.json.JSONObject o = new org.json.JSONObject();
+            request = new JSONObject(raw == null ? "" : raw);
+            method = request.optString("method", "");
+            requestId = request.optString("requestId", "");
+            args = request.optJSONArray("args");
+            if (requestId.isEmpty() || args == null) throw new IllegalArgumentException();
+        } catch (Exception ignored) {
+            return;
+        }
+        final String claimedUserId = args.optString(0, "");
+        withVerifiedBillingUser(claimedUserId, new VerifiedBillingUserCallback() {
+            @Override
+            public void onVerified(String verifiedUserId, String accessToken) {
+                if ("getOfferingsForUser".equals(method) && args.length() == 1) {
+                    NorvaBilling.getOfferingsForUser(verifiedUserId, requestId,
+                            payloadJson -> sendBillingOfferings(payloadJson));
+                } else if ("purchaseForUser".equals(method) && args.length() == 6) {
+                    final String offeringId = args.optString(1, "");
+                    final String packageId = args.optString(2, "");
+                    final String productId = args.optString(3, "");
+                    final String planCode = args.optString(4, "");
+                    final String placement = args.optString(5, "");
+                    NorvaBilling.purchaseForUser(MainActivity.this, verifiedUserId, accessToken,
+                            offeringId, packageId, productId, planCode, placement, requestId,
+                            (status, error, detailsJson) -> sendBillingResult(
+                                    requestId, status, planCode, error, detailsJson));
+                } else if ("restoreForUser".equals(method) && args.length() == 1) {
+                    NorvaBilling.restoreForUser(verifiedUserId,
+                            (status, error) -> sendBillingResult(
+                                    requestId, status, null, error, null));
+                } else {
+                    sendBillingResult(requestId, "error", null, "invalid_billing_request", null);
+                }
+            }
+
+            @Override
+            public void onError(String error) {
+                if ("getOfferingsForUser".equals(method)) {
+                    sendBillingOfferingsError(requestId, claimedUserId, error);
+                } else {
+                    sendBillingResult(requestId, "error", null, error, null);
+                }
+            }
+        });
+    }
+
+    /**
+     * Bind every RevenueCat operation to the signed-in Norva account. The id
+     * supplied by JavaScript is treated only as a claim: the top-level paywall
+     * session is read natively and its access token is verified against the
+     * Supabase user endpoint before RevenueCat can log in or purchase.
+     */
+    private void withVerifiedBillingUser(final String claimedUserId,
+                                         final VerifiedBillingUserCallback callback) {
+        if (callback == null) return;
+        if (!validBillingUserId(claimedUserId)) {
+            callback.onError("invalid_user_id");
+            return;
+        }
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (webView == null || !cloudBridgeAdded
+                        || !isTrustedBillingPage(webView.getUrl())) {
+                    callback.onError("untrusted_billing_context");
+                    return;
+                }
+                webView.evaluateJavascript(
+                        "(function(){try{return localStorage.getItem('norva-cloud-session')||''}catch(e){return ''}})()",
+                        new ValueCallback<String>() {
+                            @Override
+                            public void onReceiveValue(String rawValue) {
+                                verifyBillingSessionValue(claimedUserId, rawValue, callback);
+                            }
+                        });
+            }
+        });
+    }
+
+    private void verifyBillingSessionValue(final String claimedUserId, String rawValue,
+                                           final VerifiedBillingUserCallback callback) {
+        final String accessToken;
+        final String sessionUserId;
+        try {
+            if (rawValue == null || "null".equals(rawValue)) throw new IllegalArgumentException();
+            JSONArray decoded = new JSONArray("[" + rawValue + "]");
+            String sessionJson = decoded.optString(0, "");
+            JSONObject session = new JSONObject(sessionJson);
+            accessToken = session.optString("access_token", "");
+            JSONObject user = session.optJSONObject("user");
+            sessionUserId = user == null ? "" : user.optString("id", "");
+        } catch (Exception ignored) {
+            callback.onError("billing_session_missing");
+            return;
+        }
+        if (accessToken.isEmpty() || !claimedUserId.equals(sessionUserId)) {
+            callback.onError("billing_account_mismatch");
+            return;
+        }
+
+        final String tokenHash = sha256(accessToken);
+        long now = System.currentTimeMillis();
+        synchronized (billingSessionLock) {
+            if (claimedUserId.equals(cachedBillingUserId)
+                    && tokenHash.equals(cachedBillingTokenHash)
+                    && now - cachedBillingVerifiedAt <= BILLING_SESSION_CACHE_MS) {
+                callback.onVerified(claimedUserId, accessToken);
+                return;
+            }
+        }
+
+        ioPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                HttpURLConnection connection = null;
+                String error = "billing_session_verification_failed";
+                try {
+                    connection = (HttpURLConnection) new URL(SUPABASE_USER_URL).openConnection();
+                    connection.setRequestMethod("GET");
+                    connection.setInstanceFollowRedirects(false);
+                    connection.setConnectTimeout(10_000);
+                    connection.setReadTimeout(10_000);
+                    connection.setRequestProperty("Accept", "application/json");
+                    connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+                    connection.setRequestProperty("apikey", BuildConfig.SUPABASE_PUBLISHABLE_KEY);
+                    if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                        error = "billing_session_invalid";
+                    } else {
+                        JSONObject verifiedUser = new JSONObject(readBoundedJson(connection.getInputStream()));
+                        String verifiedUserId = verifiedUser.optString("id", "");
+                        if (!claimedUserId.equals(verifiedUserId)) {
+                            error = "billing_account_mismatch";
+                        } else {
+                            synchronized (billingSessionLock) {
+                                cachedBillingUserId = verifiedUserId;
+                                cachedBillingTokenHash = tokenHash;
+                                cachedBillingVerifiedAt = System.currentTimeMillis();
+                            }
+                            final String finalVerifiedUserId = verifiedUserId;
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    callback.onVerified(finalVerifiedUserId, accessToken);
+                                }
+                            });
+                            return;
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Never expose network details or the bearer token to JavaScript.
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+                final String finalError = error;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.onError(finalError);
+                    }
+                });
+            }
+        });
+    }
+
+    private static boolean validBillingUserId(String userId) {
+        return userId != null && userId.length() >= 8 && userId.length() <= 128
+                && userId.equals(userId.trim()) && !userId.startsWith("$RCAnonymousID:");
+    }
+
+    private static String readBoundedJson(InputStream stream) throws Exception {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(
+                stream, StandardCharsets.UTF_8));
+        StringBuilder out = new StringBuilder();
+        char[] buffer = new char[2048];
+        int count;
+        while ((count = reader.read(buffer)) != -1) {
+            if (out.length() + count > 65_536) throw new IllegalArgumentException("response_too_large");
+            out.append(buffer, 0, count);
+        }
+        return out.toString();
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder out = new StringBuilder(digest.length * 2);
+            for (byte b : digest) out.append(String.format(java.util.Locale.US, "%02x", b & 0xff));
+            return out.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    /** Post a billing result back to the web layer (subscribe.html / billing.js). */
+    private void sendBillingResult(String requestId, String status, String planCode,
+                                   String error, String detailsJson) {
+        try {
+            org.json.JSONObject o;
+            try {
+                o = detailsJson == null || detailsJson.isEmpty()
+                        ? new org.json.JSONObject()
+                        : new org.json.JSONObject(detailsJson);
+            } catch (Exception ignored) {
+                o = new org.json.JSONObject();
+            }
             o.put("requestId", requestId);
             o.put("status", status);
             if (planCode != null) o.put("planCode", planCode);
@@ -657,6 +1055,31 @@ public class MainActivity extends Activity {
                 try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
             });
         } catch (Exception ignored) { }
+    }
+
+    /** Post the live, localized Play catalog back to public/js/billing.js. */
+    private void sendBillingOfferings(String payloadJson) {
+        final String js = "window.__norvaBilling && window.__norvaBilling.onOfferings(" +
+                jsStr(payloadJson == null ? "{}" : payloadJson) + ")";
+        runOnUiThread(() -> {
+            try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+        });
+    }
+
+    private void sendBillingOfferingsError(String requestId, String claimedUserId, String error) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("nativeBillingContract", 2);
+            payload.put("requestId", requestId == null ? "" : requestId);
+            payload.put("appUserId", claimedUserId == null ? "" : claimedUserId);
+            payload.put("status", "error");
+            payload.put("error", error == null ? "billing_session_verification_failed" : error);
+            payload.put("packages", new JSONArray());
+            sendBillingOfferings(payload.toString());
+        } catch (Exception ignored) {
+            sendBillingOfferings("{\"nativeBillingContract\":2,\"status\":\"error\","
+                    + "\"error\":\"billing_session_verification_failed\",\"packages\":[]}");
+        }
     }
 
     // ---- Offline downloads ----
@@ -870,7 +1293,7 @@ public class MainActivity extends Activity {
             if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
             if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
             if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
-            startActivityForResult(intent, REQ_PLAYER);
+            launchPlayerWithEphemeralAuth(intent);
         });
     }
 
@@ -890,8 +1313,56 @@ public class MainActivity extends Activity {
             if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
             if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
             if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
-            startActivityForResult(intent, REQ_PLAYER);
+            launchPlayerWithEphemeralAuth(intent);
         });
+    }
+
+    /**
+     * Read the already-authenticated cloud token just in time and keep it only
+     * in the explicit, non-exported PlayerActivity intent. A short fail-open
+     * timer guarantees telemetry can never delay playback materially.
+     */
+    private void launchPlayerWithEphemeralAuth(final Intent intent) {
+        if (webView == null || !cloudBridgeAdded || !isTrustedCloudUrl(webView.getUrl())) {
+            startActivityForResult(intent, REQ_PLAYER);
+            return;
+        }
+        final AtomicBoolean launched = new AtomicBoolean(false);
+        final Runnable fallback = new Runnable() {
+            @Override
+            public void run() {
+                if (launched.compareAndSet(false, true)) {
+                    startActivityForResult(intent, REQ_PLAYER);
+                }
+            }
+        };
+        loadHandler.postDelayed(fallback, 250L);
+        webView.evaluateJavascript(
+                "(function(){try{var d=localStorage.getItem('norva-cloud-device-token')||'';"
+                        + "var u=localStorage.getItem('norva-cloud-token')||'';"
+                        + "if(!u){var s=JSON.parse(localStorage.getItem('norva-cloud-session')||'null');"
+                        + "u=(s&&s.access_token)||'';}return d||u||'';}catch(e){return '';}})()",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String raw) {
+                        String token = decodeJavascriptString(raw);
+                        if (!launched.compareAndSet(false, true)) return;
+                        loadHandler.removeCallbacks(fallback);
+                        if (!token.isEmpty() && token.length() <= 16_384) {
+                            intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_TOKEN, token);
+                        }
+                        startActivityForResult(intent, REQ_PLAYER);
+                    }
+                });
+    }
+
+    private static String decodeJavascriptString(String raw) {
+        try {
+            if (raw == null || "null".equals(raw)) return "";
+            return new JSONArray("[" + raw + "]").optString(0, "");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private static String emptyToNull(String s) {

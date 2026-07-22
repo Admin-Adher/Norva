@@ -117,15 +117,10 @@
       item_id: inferCta(cta),
       page_path: location.pathname
     });
-    if (cta.classList && cta.classList.contains('buy')) {
-      var card = cta.closest('[data-plan]');
-      track('begin_checkout', {
-        currency: 'USD',
-        value: card && card.dataset ? Number(card.dataset.monthly || 0) : undefined,
-        plan: card && card.dataset ? card.dataset.plan : undefined,
-        page_path: location.pathname
-      });
-    }
+    // begin_checkout is emitted by the billing flow only after the selected
+    // cadence and authoritative store/server price are known. Emitting it here
+    // used to double-count web checkouts and always attached the monthly USD
+    // fallback, even when the visitor had selected annual or another currency.
   }, true);
 
   window.NorvaMarketing = {

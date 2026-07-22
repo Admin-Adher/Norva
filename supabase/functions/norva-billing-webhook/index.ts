@@ -43,6 +43,11 @@ import {
   resolveRevenueCatPlan,
   shouldRejectUnmappedRevenueCatEvent,
 } from "../_shared/billing-policy.mjs";
+import {
+  latestPaywallAttribution,
+  type PaywallAttribution,
+  type PaywallSurface,
+} from "../_shared/paywall-experiments.ts";
 
 type JsonRecord = Record<string, unknown>;
 type ProjectionSnapshot = {
@@ -139,7 +144,7 @@ Deno.serve(async (req) => {
     const periodType = String(effective.period_type ?? "").toUpperCase();
     const reconcilesProjection = statusForEvent(
       eventType,
-      periodType === "TRIAL" || periodType === "INTRO",
+      isFreeTrialPeriod(effective),
       effective,
     ) !== null;
     let existingProjection: ProjectionSnapshot | null = null;
@@ -177,6 +182,43 @@ Deno.serve(async (req) => {
         throw new Error(`unmapped RevenueCat product: ${resolution.productId || "(missing)"}`);
       }
     }
+    // RevenueCat INTRO is a paid discounted period, never a synonym for a free
+    // trial. If a charge-bearing INTRO delivery has no authoritative amount,
+    // fail before the cash journal or entitlement projection so RevenueCat will
+    // retry after its payload/source data is corrected.
+    if (
+      periodType === "INTRO"
+      && ["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"].includes(eventType)
+      && paidMoney(effective) == null
+    ) {
+      throw new Error("RevenueCat paid INTRO event has no authoritative amount/currency");
+    }
+    const attributionSurface = surfaceForStore(stringOrNull(effective.store));
+    const purchaseMs = Number(effective.purchased_at_ms);
+    const attribution = (
+      ["INITIAL_PURCHASE", "NON_RENEWING_PURCHASE"].includes(eventType) &&
+      Number.isFinite(purchaseMs)
+    )
+      ? await latestPaywallAttribution(admin, userId, {
+        occurredAfter: new Date(purchaseMs - 30 * 86_400_000).toISOString(),
+        occurredBefore: new Date(purchaseMs + 5 * 60_000).toISOString(),
+        requiredSurfaces: attributionSurface === "mobile_android"
+          ? ["mobile_android", "android_tv"]
+          : [attributionSurface],
+        requireExposure: true,
+      })
+      : {
+        experimentKey: null,
+        experimentVariant: null,
+        placement: null,
+        surface: null,
+      } satisfies PaywallAttribution;
+
+    // A captured purchase must exist in the immutable payment journal before
+    // the entitlement projection can become active. The projection trigger then
+    // chains activation to that exact payment_captured funnel event.
+    await journalRcPayment(admin, userId, eventType, event, resolvedPlan, attribution);
+
     const patch = projectionPatch(userId, eventType, event, resolvedPlan);
     let projectionApplied = false;
     if (patch) {
@@ -199,11 +241,6 @@ Deno.serve(async (req) => {
         });
       }
     }
-
-    // Journal the mobile charge into the shared payments ledger (cloud_billing_ledger,
-    // rail-tagged) so collected / conversions / recent-payments / by-rail KPIs see
-    // Play & Apple revenue alongside the web rail's own order journal.
-    await journalRcPayment(admin, userId, eventType, event, resolvedPlan);
 
     await recordProcessedEvent(admin, userId, eventId, eventType, {
       ...event,
@@ -244,8 +281,7 @@ function projectionPatch(
   // PRODUCT_CHANGE is informational: a downgrade can be deferred. The later
   // RENEWAL/INITIAL_PURCHASE is the authoritative event that changes access.
   const event = effectiveEvent(type, rawEvent);
-  const periodType = String(event.period_type ?? "").toUpperCase();
-  const isTrial = periodType === "TRIAL" || periodType === "INTRO";
+  const isTrial = isFreeTrialPeriod(event);
   const status = statusForEvent(type, isTrial, event);
   if (!status) return null; // nothing to reconcile (e.g. TRANSFER — TODO below)
 
@@ -298,8 +334,19 @@ function projectionPatch(
   // when a price is present, so price-less events (cancel/expire) never null it.
   const baseCents = basePriceCents(event);
   if (baseCents != null) {
+    const cadence = billPeriodForEvent(event);
+    // RevenueCat `price` is USD and describes the full purchased period. The
+    // finance views normalize annual terms once; the projection must not divide.
     patch.mrr_cents = baseCents;
-    patch.bill_period = billPeriodForEvent(event);
+    patch.bill_period = cadence;
+    patch.billing_currency = "USD";
+  }
+  const billingProductId = stringOrNull(event.product_id);
+  const billingPackageId = packageIdOf(event);
+  if (billingProductId) patch.billing_product_id = billingProductId;
+  if (billingPackageId) patch.billing_package_id = billingPackageId;
+  if (billingProductId || billingPackageId || baseCents != null) {
+    patch.billing_terms_source = "revenuecat_webhook";
   }
 
   // TODO(transfer): handle the TRANSFER event by moving the entitlement from
@@ -377,6 +424,25 @@ function rcCurrency(event: JsonRecord): string | null {
   return /^[A-Z]{3}$/.test(value) ? value.toLowerCase() : null;
 }
 
+function surfaceForStore(store: string | null): PaywallSurface {
+  switch ((store ?? "").toUpperCase()) {
+    case "PLAY_STORE": return "mobile_android";
+    case "STRIPE":
+    case "RC_BILLING":
+    case "PADDLE": return "web";
+    default: return "unknown";
+  }
+}
+
+function packageIdOf(event: JsonRecord): string | null {
+  const context = event.presented_offering_context && typeof event.presented_offering_context === "object"
+    ? event.presented_offering_context as JsonRecord
+    : {};
+  return stringOrNull(event.package_id)
+    ?? stringOrNull(event.package_identifier)
+    ?? stringOrNull(context.package_identifier);
+}
+
 // Prefer the buyer-currency amount only when RevenueCat also supplies its ISO
 // currency. Otherwise fall back to RevenueCat's USD `price`; never label an
 // unknown local amount as USD. Values are gross of store commission.
@@ -390,6 +456,11 @@ function paidMoney(event: JsonRecord): RcMoney | null {
   return Number.isFinite(usd) && usd > 0
     ? { cents: Math.round(usd * 100), currency: "usd" }
     : null;
+}
+
+function isFreeTrialPeriod(event: JsonRecord): boolean {
+  const periodType = String(event.period_type ?? "").toUpperCase();
+  return periodType === "TRIAL";
 }
 
 function refundedMoney(event: JsonRecord): RcMoney | null {
@@ -446,6 +517,12 @@ async function journalRcPayment(
   type: string,
   rawEvent: JsonRecord,
   resolvedPlan?: string | null,
+  attribution: PaywallAttribution = {
+    experimentKey: null,
+    experimentVariant: null,
+    placement: null,
+    surface: null,
+  },
 ): Promise<void> {
   const event = effectiveEvent(type, rawEvent);
   if (type === "CANCELLATION" && isRefundCancellation(event)) {
@@ -472,6 +549,13 @@ async function journalRcPayment(
       plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
       bill_period: billPeriodForEvent(event),
       billing_period_end: msToIso(event.expiration_at_ms),
+      experiment_key: attribution.experimentKey,
+      experiment_variant: attribution.experimentVariant,
+      paywall_placement: attribution.placement,
+      paywall_surface: attribution.surface,
+      store_product_id: stringOrNull(event.product_id),
+      store_package_id: packageIdOf(event),
+      commercial_terms_source: "revenuecat_webhook",
     }, { onConflict: "pi_id", ignoreDuplicates: true });
     if (error && (error as { code?: string }).code !== "23505") {
       throw new Error(`rc refund journal failed: ${error.message}`);
@@ -481,9 +565,8 @@ async function journalRcPayment(
 
   const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
   if (!MONEY.has(type)) return;
-  const periodType = String(event.period_type ?? "").toUpperCase();
-  if (periodType === "TRIAL" || periodType === "INTRO") return; // no cash during a trial/intro
   const money = paidMoney(event);
+  if (isFreeTrialPeriod(event)) return;
   if (!money || money.cents > 9_999_999) return;
   const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.id);
   if (!txId) return;
@@ -503,6 +586,13 @@ async function journalRcPayment(
     plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
     bill_period: billPeriodForEvent(event),
     billing_period_end: msToIso(event.expiration_at_ms),
+    experiment_key: attribution.experimentKey,
+    experiment_variant: attribution.experimentVariant,
+    paywall_placement: attribution.placement,
+    paywall_surface: attribution.surface,
+    store_product_id: stringOrNull(event.product_id),
+    store_package_id: packageIdOf(event),
+    commercial_terms_source: "revenuecat_webhook",
   }, { onConflict: "pi_id", ignoreDuplicates: true });
   if (error && (error as { code?: string }).code !== "23505") {
     throw new Error(`rc payment journal failed: ${error.message}`);

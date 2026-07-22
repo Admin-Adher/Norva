@@ -28,6 +28,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { latestPaywallAttribution, type PaywallAttribution } from "../_shared/paywall-experiments.ts";
 import { renderReceipt } from "../_shared/lifecycle-email.ts";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 
@@ -1080,6 +1081,24 @@ async function chargeUser(
     try {
       await journal(result);
       const nextEnd = addPeriod(identity.canonicalAnchor, cadence);
+      let attribution: PaywallAttribution = {
+        experimentKey: null, experimentVariant: null, placement: null, surface: null,
+      };
+      try {
+        if (kind === "first_charge") {
+          const anchorMs = new Date(identity.canonicalAnchor).getTime();
+          attribution = await latestPaywallAttribution(db, row.user_id, {
+            occurredAfter: new Date(anchorMs - 30 * 86_400_000).toISOString(),
+            occurredBefore: new Date(anchorMs + 5 * 60_000).toISOString(),
+            requiredSurface: "web",
+            requireExposure: true,
+          });
+        }
+      } catch (error) {
+        // Analytics attribution must never turn a captured debit into an
+        // unjournaled/unknown billing outcome.
+        console.warn("[norva-revolut-billing] paywall attribution unavailable", error);
+      }
       const { error: ledgerError } = await db.from("cloud_billing_ledger").upsert({
         pi_id: `rvl_${result.orderId ?? claim.merchant_ext_ref}`,
         user_id: row.user_id,
@@ -1094,6 +1113,13 @@ async function chargeUser(
         plan_code: plan,
         bill_period: cadence,
         billing_period_end: nextEnd,
+        experiment_key: attribution.experimentKey,
+        experiment_variant: attribution.experimentVariant,
+        paywall_placement: attribution.placement,
+        paywall_surface: attribution.surface,
+        store_product_id: null,
+        store_package_id: null,
+        commercial_terms_source: "revolut_billing_mapping",
       }, { onConflict: "pi_id", ignoreDuplicates: true });
       if (ledgerError) throw new Error(`billing_ledger_write_failed:${ledgerError.message}`);
       const applied = await applyBillingSuccess(db, identity.cycleKey, leaseToken, nextEnd);

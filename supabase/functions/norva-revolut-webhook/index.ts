@@ -82,6 +82,117 @@ Deno.serve(async (req) => {
     // TODO(subscriptions): fetch the subscription object for SUBSCRIPTION_* events.
     const order = orderId ? await fetchOrder(orderId) : {};
     const remoteState = String(order.state ?? "").toUpperCase();
+    const { data: refundAttemptRow, error: refundAttemptError } = orderId
+      ? await admin.from("cloud_revolut_refund_attempts")
+        .select("order_id,user_id,amount_cents,currency,status,provider_refund_id")
+        .eq("provider_refund_id", orderId).maybeSingle()
+      : { data: null, error: null };
+    if (refundAttemptError) throw new Error(`refund attempt lookup failed: ${refundAttemptError.message}`);
+    type RefundAttempt = {
+      order_id: string; user_id: string; amount_cents: number; currency: string;
+      status: string; provider_refund_id: string | null;
+    };
+    let refundAttempt = refundAttemptRow as RefundAttempt | null;
+    // Revolut may deliver the refund webhook before POST /refund returns. The
+    // authoritative refund order still carries related_order_id, so correlate
+    // it to the unique local reservation instead of acknowledging it as an
+    // unrelated checkout event.
+    const refundRelatedOrderId = stringOrNull(order.related_order_id);
+    if (
+      !refundAttempt && orderId
+      && String(order.type ?? "").toLowerCase() === "refund"
+      && refundRelatedOrderId
+    ) {
+      const { data: relatedAttempt, error: relatedAttemptError } = await admin
+        .from("cloud_revolut_refund_attempts")
+        .select("order_id,user_id,amount_cents,currency,status,provider_refund_id")
+        .eq("order_id", refundRelatedOrderId)
+        .in("status", ["creating", "processing"])
+        .maybeSingle();
+      if (relatedAttemptError) {
+        throw new Error(`related refund attempt lookup failed: ${relatedAttemptError.message}`);
+      }
+      refundAttempt = relatedAttempt as RefundAttempt | null;
+    }
+    if (refundAttempt) {
+      // Refunds are distinct provider orders. They intentionally do not carry
+      // the original checkout metadata; provider_refund_id is the durable local
+      // correlation anchor and related_order_id links back to the capture.
+      const relatedOrderId = stringOrNull(order.related_order_id);
+      const providerAmount = Number(order.amount);
+      const providerCurrency = String(order.currency ?? "").toUpperCase();
+      const integrityValid = String(order.type ?? "").toLowerCase() === "refund"
+        && relatedOrderId === refundAttempt.order_id
+        && Number.isFinite(providerAmount)
+        && Math.round(providerAmount) === refundAttempt.amount_cents
+        && providerCurrency === refundAttempt.currency;
+      if (!integrityValid) throw new Error("provider refund order failed integrity validation");
+      if (refundAttempt.provider_refund_id !== orderId) {
+        const { error: bindError } = await admin.rpc("mark_revolut_full_refund_processing", {
+          p_order_id: refundAttempt.order_id,
+          p_user_id: refundAttempt.user_id,
+          p_lease_token: null,
+          p_provider_refund_id: orderId,
+          p_provider_response: order,
+        });
+        if (bindError) throw new Error(`refund order correlation failed: ${bindError.message}`);
+        refundAttempt = { ...refundAttempt, status: "processing", provider_refund_id: orderId };
+      }
+
+      if (eventType === "ORDER_COMPLETED" && remoteState === "COMPLETED") {
+        const { data: completed, error: completeError } = await admin.rpc(
+          "complete_revolut_full_refund",
+          {
+            p_order_id: refundAttempt.order_id,
+            p_user_id: refundAttempt.user_id,
+            p_provider_refund_id: orderId,
+            p_provider_state: remoteState,
+            p_related_order_id: relatedOrderId,
+            p_provider_amount_cents: Math.round(providerAmount),
+            p_provider_currency: providerCurrency,
+            p_provider_response: order,
+          },
+        );
+        if (completeError) throw new Error(`refund completion failed: ${completeError.message}`);
+        await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
+          event: body, refund_order: order, refund_result: completed,
+        });
+        return json({ ok: true, refund: completed, state: remoteState });
+      }
+      if (
+        ["ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED", "ORDER_CANCELLED"].includes(eventType)
+        || ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(remoteState)
+      ) {
+        const failureState = ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(remoteState)
+          ? remoteState
+          : eventType.replace(/^ORDER_(?:PAYMENT_)?/, "");
+        const { error: failureError } = await admin.rpc("fail_revolut_refund_order", {
+          p_provider_refund_id: orderId,
+          p_provider_state: failureState,
+          p_provider_response: order,
+        });
+        if (failureError) throw new Error(`refund failure write failed: ${failureError.message}`);
+        await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
+          event: body, refund_order: order, refund_result: "failed",
+        });
+        return json({ ok: true, refund: "failed", state: failureState });
+      }
+      // A delivery can race the provider state transition. Do not acknowledge a
+      // supposed completion until the authoritative GET is actually COMPLETED.
+      if (eventType === "ORDER_COMPLETED") {
+        throw new Error(`authoritative refund state not settled: ${remoteState || "missing"}`);
+      }
+      await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
+        event: body, refund_order: order, refund_result: "processing",
+      });
+      return json({ ok: true, refund: "processing", state: remoteState });
+    }
+    if (String(order.type ?? "").toLowerCase() === "refund") {
+      // Never acknowledge an uncorrelated money-out event: a reservation may
+      // still be committing in another process, and Revolut retry is what makes
+      // that race converge once the local row becomes visible.
+      throw new Error("provider refund order has no durable local reservation");
+    }
     if (orderId) {
       const reconciledAt = new Date().toISOString();
       const { error: journalError } = await admin.from("cloud_revolut_orders").update({
@@ -91,56 +202,120 @@ Deno.serve(async (req) => {
       }).eq("order_id", orderId);
       if (journalError) throw new Error(`order journal reconcile failed: ${journalError.message}`);
     }
+    // The immutable local journal is the ownership anchor. Provider metadata is
+    // still validated below, but missing/corrupted metadata must not make a real
+    // COMPLETED resubscribe capture disappear from the ledger/refund queue.
+    const { data: journalRow, error: journalReadError } = orderId
+      ? await admin.from("cloud_revolut_orders")
+        .select("order_id,user_id,kind,plan,period,amount,currency,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result,experiment_key,experiment_variant,paywall_placement,paywall_surface")
+        .eq("order_id", orderId).maybeSingle()
+      : { data: null, error: null };
+    if (journalReadError) throw new Error(`order journal read failed: ${journalReadError.message}`);
     const meta = recordOrEmpty(order.metadata);
-    const userId = resolveUserId(meta);
+    const metadataUserId = resolveUserId(meta);
+    const journalUserId = stringOrNull((journalRow as JsonRecord | null)?.user_id);
+    const userId = journalUserId ?? metadataUserId;
     if (!userId) {
       console.warn("[norva-revolut-webhook] no user_id in order metadata — skipped", { eventType, orderId });
       return json({ ok: true, skipped: "no_user_metadata" });
     }
 
     const kind = String(meta.kind ?? "").toLowerCase();
-    const checkoutKind = ["trial_setup", "plan_change", "resubscribe", "card_update"].includes(kind);
-    const checkoutEvent = ["ORDER_AUTHORISED", "ORDER_COMPLETED"].includes(eventType) && checkoutKind;
-    const remoteCheckoutSuccess = ["AUTHORISED", "COMPLETED"].includes(remoteState);
-    const { data: journalRow, error: journalReadError } = orderId
-      ? await admin.from("cloud_revolut_orders")
-        .select("order_id,user_id,kind,plan,period,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result")
-        .eq("order_id", orderId).maybeSingle()
-      : { data: null, error: null };
-    if (journalReadError) throw new Error(`order journal read failed: ${journalReadError.message}`);
     const journal = journalRow as {
       user_id?: string;
       kind?: string | null;
       plan?: string | null;
       period?: string | null;
       requested_amount_cents?: number | null;
+      amount?: number | null;
+      currency?: string | null;
       merchant_ext_ref?: string | null;
       intent_key?: string | null;
       finalized_at?: string | null;
       expired_at?: string | null;
       superseded_at?: string | null;
       finalization_result?: JsonRecord | null;
+      experiment_key?: string | null;
+      experiment_variant?: string | null;
+      paywall_placement?: string | null;
+      paywall_surface?: string | null;
     } | null;
+    const anchoredKind = String(journal?.kind ?? kind).toLowerCase();
+    const checkoutKind = ["trial_setup", "plan_change", "resubscribe", "card_update"].includes(anchoredKind);
+    const checkoutEvent = ["ORDER_AUTHORISED", "ORDER_COMPLETED"].includes(eventType) && checkoutKind;
+    // Resubscribe is a real full-price AUTOMATIC purchase. A mere card
+    // authorization must never grant access; all other checkout kinds are
+    // intentionally uncaptured validation holds where AUTHORISED is success.
+    const remoteCheckoutSuccess = anchoredKind === "resubscribe"
+      ? remoteState === "COMPLETED"
+      : ["AUTHORISED", "COMPLETED"].includes(remoteState);
     if (checkoutEvent && (!journal || journal.user_id !== userId)) {
       throw new Error("checkout order journal missing or ownership mismatch");
     }
     if (checkoutEvent && journal) {
       const remoteExtRef = stringOrNull(order.merchant_order_ext_ref) ?? stringOrNull(order.merchant_ext_ref);
       const remoteAmount = Number(meta.amount_cents);
+      const remoteOrderAmount = Number(order.amount);
+      const remoteCurrency = String(order.currency ?? meta.price_currency ?? "").toUpperCase();
+      const expectedOrderAmount = journal.kind === "resubscribe"
+        ? Number(journal.requested_amount_cents)
+        : Number(journal.amount);
       const immutableMismatch =
+        metadataUserId !== userId ||
         (journal.kind != null && journal.kind !== kind) ||
         (journal.plan != null && journal.plan !== planForMeta(meta)) ||
         (journal.period != null && journal.period !== (String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly")) ||
         (journal.requested_amount_cents != null && remoteAmount !== journal.requested_amount_cents) ||
+        (journal.amount != null && Number.isFinite(expectedOrderAmount) && remoteOrderAmount !== expectedOrderAmount) ||
+        (journal.currency != null && remoteCurrency !== journal.currency.toUpperCase()) ||
         (journal.merchant_ext_ref != null && remoteExtRef !== journal.merchant_ext_ref) ||
-        (journal.intent_key != null && stringOrNull(meta.intent_key) !== journal.intent_key);
-      if (immutableMismatch) throw new Error("checkout order metadata does not match immutable journal");
+        (journal.intent_key != null && stringOrNull(meta.intent_key) !== journal.intent_key) ||
+        (journal.experiment_key != null && stringOrNull(meta.experiment_key) !== journal.experiment_key) ||
+        (journal.experiment_variant != null && stringOrNull(meta.experiment_variant) !== journal.experiment_variant) ||
+        (journal.paywall_placement != null && stringOrNull(meta.paywall_placement) !== journal.paywall_placement) ||
+        (journal.paywall_surface != null && stringOrNull(meta.paywall_surface) !== journal.paywall_surface);
+      if (immutableMismatch) {
+        if (journal.kind === "resubscribe" && remoteState === "COMPLETED" && orderId) {
+          const payment = paymentSnapshotFromOrder(order);
+          const { data: quarantined, error: quarantineError } = await admin.rpc(
+            "reconcile_completed_revolut_resubscribe",
+            {
+              p_order_id: orderId,
+              p_user_id: userId,
+              p_provider_payment_id: payment.providerPaymentId,
+              p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+              p_captured_currency: remoteCurrency || null,
+              p_provider_integrity_valid: false,
+            },
+          );
+          if (quarantineError) {
+            throw new Error(`captured checkout quarantine failed: ${quarantineError.message}`);
+          }
+          const outcome = Array.isArray(quarantined)
+            ? quarantined[0] as JsonRecord | undefined
+            : quarantined as JsonRecord | null;
+          if (stringOrNull(outcome?.result) === "already_refunded") {
+            await recordProcessedEvent(admin, userId, eventId, eventType, {
+              event: body, order, already_refunded: true,
+            });
+            return json({ ok: true, already_refunded: true, state: "REFUNDED" });
+          }
+          throw new Error(
+            `captured checkout integrity mismatch requires refund: ${stringOrNull(outcome?.exception_reason) ?? "commercial_terms_invalid"}`,
+          );
+        }
+        throw new Error("checkout order metadata does not match immutable journal");
+      }
     }
     if (checkoutEvent && journal?.finalized_at) {
       await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, already_finalized: true });
       return json({ ok: true, duplicate_finalization: true, state: remoteState });
     }
-    if (checkoutEvent && (journal?.expired_at || journal?.superseded_at)) {
+    if (
+      checkoutEvent &&
+      (journal?.expired_at || journal?.superseded_at) &&
+      !(anchoredKind === "resubscribe" && remoteState === "COMPLETED")
+    ) {
       const holdReleased = remoteState === "AUTHORISED" ? await cancelValidationHold(String(orderId)) : true;
       await recordProcessedEvent(admin, userId, eventId, eventType, {
         event: body, order, skipped_checkout: journal.superseded_at ? "superseded" : "expired", hold_released: holdReleased,
@@ -148,6 +323,12 @@ Deno.serve(async (req) => {
       return json({ ok: true, skipped: journal.superseded_at ? "superseded_checkout" : "expired_checkout" });
     }
     if (checkoutEvent && !remoteCheckoutSuccess) {
+      if (anchoredKind === "resubscribe" && ["AUTHORISED", "AUTHORIZED", "PROCESSING", "PENDING"].includes(remoteState)) {
+        await recordProcessedEvent(admin, userId, eventId, eventType, {
+          event: body, order, checkout_status: "payment_processing",
+        });
+        return json({ ok: true, pending: true, status: "payment_processing", state: remoteState });
+      }
       if (["CANCELLED", "FAILED", "DECLINED", "REVERSED", "VOIDED", "EXPIRED"].includes(remoteState)) {
         await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, skipped_state: remoteState });
         return json({ ok: true, skipped: "authoritative_state_not_successful", state: remoteState });
@@ -175,7 +356,8 @@ Deno.serve(async (req) => {
     }
 
     let effectiveAt: string | null = null;
-    if (checkoutSuccess && ["trial_started", "already_confirmed", "resubscribed", "plan_change_scheduled"].includes(String(checkoutResult))) {
+    let firstChargeAt: string | null = null;
+    if (checkoutSuccess && ["trial_started", "already_confirmed", "plan_change_scheduled"].includes(String(checkoutResult))) {
       const planCommit = await commitOrderPlan(admin, userId, eventType, meta, orderId);
       effectiveAt = planCommit.effectiveAt;
       // A tag/hard-block/rail move can win after entitlement finalization but
@@ -183,6 +365,11 @@ Deno.serve(async (req) => {
       // authoritative; still release the validation hold and journal the
       // rejected checkout instead of relying on a later webhook retry.
       if (planCommit.rejectedAs) checkoutResult = planCommit.rejectedAs;
+    }
+    if (checkoutSuccess && checkoutResult === "trial_started") {
+      const { data: trialProjection } = await admin.from("cloud_entitlement_projection")
+        .select("trial_ends_at").eq("user_id", userId).maybeSingle();
+      firstChargeAt = stringOrNull((trialProjection as { trial_ends_at?: unknown } | null)?.trial_ends_at);
     }
     if (checkoutSuccess && orderId) {
       let holdReleased = remoteState !== "AUTHORISED";
@@ -194,6 +381,7 @@ Deno.serve(async (req) => {
       const finalizationResult = {
           result: checkoutResult, kind, remote_state: remoteState,
           hold_released: holdReleased, source: "webhook", effective_at: effectiveAt,
+          first_charge_at: firstChargeAt, trial_ends_at: firstChargeAt,
         };
       const { data: finalizationOutcome, error: finalizedError } = await admin.rpc(
         "finalize_revolut_checkout_order",
@@ -351,7 +539,7 @@ async function finalizeCheckoutEntitlement(
   // A checkout may complete after an administrator converted an account to an
   // included pilot.  The order is still finalized/released by the caller, but it
   // cannot create a paid plan or a recurring-customer mapping.
-  if (internalAccount) return "rejected_internal_account";
+  if (internalAccount && kind !== "resubscribe") return "rejected_internal_account";
   const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
     .select("status,provider,trial_ends_at,trial_consumed_at,current_period_end,fail_open_until")
     .eq("user_id", userId).maybeSingle();
@@ -370,7 +558,7 @@ async function finalizeCheckoutEntitlement(
   // A checkout opened before a security/refund decision may return through the
   // webhook after that decision. Journal it and release its validation hold, but
   // never replace the authoritative hard block or commit a recurring plan.
-  if (hardBlocked) return "rejected_account_blocked";
+  if (hardBlocked && kind !== "resubscribe") return "rejected_account_blocked";
   const currentEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
   const trialEndMs = cur?.trial_ends_at ? new Date(cur.trial_ends_at).getTime() : 0;
   const failOpenMs = cur?.fail_open_until ? new Date(cur.fail_open_until).getTime() : 0;
@@ -437,25 +625,75 @@ async function finalizeCheckoutEntitlement(
   }
 
   if (kind === "resubscribe") {
-    if (foreignRailBlocked) return "rejected_cross_rail";
-    await replaceProjectionWithRailCas({
-      user_id: userId, status: "active", provider: "revolut", provider_customer_id: customerId,
-      plan_code: plan, current_period_end: nowIso, last_event_at: nowIso, last_verified_at: nowIso,
-      ...(amount ? { mrr_cents: amount, bill_period: period } : {}),
-      ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
-    });
+    const orderId = stringOrNull(order.id);
+    if (!orderId || String(order.state ?? "").toUpperCase() !== "COMPLETED") {
+      return "payment_processing";
+    }
+    const payment = paymentSnapshotFromOrder(order);
+    const { data: reconciled, error: reconcileError } = await db.rpc(
+      "reconcile_completed_revolut_resubscribe",
+      {
+        p_order_id: orderId,
+        p_user_id: userId,
+        p_provider_payment_id: payment.providerPaymentId,
+        p_captured_amount_cents: Number.isFinite(Number(order.amount)) ? Math.round(Number(order.amount)) : null,
+        p_captured_currency: String(order.currency ?? meta.price_currency ?? "").toUpperCase() || null,
+        p_provider_integrity_valid: true,
+        p_customer_id: customerId,
+        p_payment_method_id: payment.paymentMethodId,
+        p_card_last4: payment.cardLast4,
+        p_card_brand: payment.cardBrand,
+        p_card_exp: payment.cardExp,
+        p_card_country: cardCountry,
+      },
+    );
+    if (reconcileError) {
+      throw new Error(`resubscribe terminal reconciliation failed: ${reconcileError.message}`);
+    }
+    const outcome = Array.isArray(reconciled) ? reconciled[0] as JsonRecord | undefined : reconciled as JsonRecord | null;
+    const result = stringOrNull(outcome?.result);
+    if (result === "refund_required") {
+      throw new Error(`captured resubscribe requires refund: ${stringOrNull(outcome?.exception_reason) ?? "manual_review"}`);
+    }
+    if (result !== "applied" && result !== "already_applied") {
+      throw new Error(`resubscribe terminal reconciliation returned ${result ?? "no_result"}`);
+    }
     return "resubscribed";
   }
 
   if (foreignRailBlocked) return "rejected_cross_rail";
   if (cur?.trial_consumed_at) return "already_confirmed";
   if (isLive) return "already_active";
-  const trialEnd = new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
+  // New checkout orders freeze the exact first debit date in server metadata;
+  // the calculated fallback is retained only for pre-contract legacy orders.
+  const trialEnd = isoTimestampOrNull(meta.first_charge_at)
+    ?? new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
+  const trialOrderId = stringOrNull(order.id);
+  if (trialOrderId) {
+    const { error: lifecycleError } = await db.from("cloud_entitlement_events").upsert({
+      user_id: userId,
+      provider: "revolut",
+      provider_event_id: `checkout:${trialOrderId}:trial-started`,
+      event_type: "TRIAL_STARTED",
+      payload: { order_id: trialOrderId, plan_label: plan, bill_period: period, first_charge_at: trialEnd },
+      processed_at: nowIso,
+    }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+    if (lifecycleError) throw new Error(`trial lifecycle write failed: ${lifecycleError.message}`);
+  }
   await replaceProjectionWithRailCas({
     user_id: userId, status: "trialing", provider: "revolut", provider_customer_id: customerId,
     plan_code: plan, trial_ends_at: trialEnd, trial_consumed_at: nowIso,
     current_period_end: trialEnd, last_event_at: nowIso, last_verified_at: nowIso,
-    ...(amount ? { mrr_cents: amount, bill_period: period } : {}),
+    ...(amount ? {
+      // mrr_cents stores the full billed-period amount. Annual normalization is
+      // performed exactly once by the reporting views.
+      mrr_cents: amount,
+      bill_period: period,
+      billing_currency: "USD",
+      billing_product_id: null,
+      billing_package_id: null,
+      billing_terms_source: "revolut_order_snapshot",
+    } : {}),
     ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
   });
   return "trial_started";
@@ -530,6 +768,31 @@ function mappingGuardFinalization(message: string): string | null {
   return null;
 }
 
+function paymentSnapshotFromOrder(order: JsonRecord): {
+  providerPaymentId: string | null;
+  paymentMethodId: string | null;
+  cardLast4: string | null;
+  cardBrand: string | null;
+  cardExp: string | null;
+} {
+  const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+  const payment = payments.length ? payments[payments.length - 1] : {};
+  const method = recordOrEmpty(payment.payment_method);
+  const card = recordOrEmpty(method.card);
+  const expMonth = stringOrNull(card.expiry_month) ?? stringOrNull(card.exp_month);
+  const expYear = stringOrNull(card.expiry_year) ?? stringOrNull(card.exp_year);
+  const cardExp = expMonth && expYear
+    ? `${expMonth.padStart(2, "0")}/${expYear.length === 4 ? expYear.slice(-2) : expYear}`
+    : stringOrNull(card.expiry);
+  return {
+    providerPaymentId: stringOrNull(payment.id),
+    paymentMethodId: stringOrNull(method.id) ?? stringOrNull(payment.payment_method_id),
+    cardLast4: stringOrNull(card.last4) ?? stringOrNull(method.last4),
+    cardBrand: stringOrNull(card.brand) ?? stringOrNull(method.brand),
+    cardExp,
+  };
+}
+
 async function commitOrderPlan(
   db: SupabaseClient,
   userId: string,
@@ -541,7 +804,10 @@ async function commitOrderPlan(
     return { effectiveAt: null, rejectedAs: null };
   }
   const kind = String(meta.kind ?? "").toLowerCase();
-  if (kind !== "trial_setup" && kind !== "plan_change" && kind !== "resubscribe") {
+  // Resubscribe recurring terms are committed only by the locked terminal
+  // reconciliation RPC after a real capture. This helper handles validation-
+  // hold checkouts only.
+  if (kind !== "trial_setup" && kind !== "plan_change") {
     return { effectiveAt: null, rejectedAs: null };
   }
   const plan = planForMeta(meta);
@@ -711,6 +977,13 @@ function stringOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const t = value.trim();
   return t.length ? t : null;
+}
+
+function isoTimestampOrNull(value: unknown): string | null {
+  const raw = stringOrNull(value);
+  if (!raw) return null;
+  const millis = new Date(raw).getTime();
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
 }
 
 function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {

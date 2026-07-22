@@ -4,13 +4,13 @@
 
 /**
  * Companion apps advertised by the navbar "Devices" popover ("Use Norva
- * elsewhere"). The store listings aren't live yet, so every row renders a
- * Coming-soon badge; fill in a storeUrl (e.g. the Play Store listing) and that
- * row flips to a real Install link — nothing else to change.
+ * elsewhere"). Both Android applications are available today. A public
+ * storeUrl can be added independently when its listing is visible to every
+ * visitor; availability must not regress to a false "Coming soon" meanwhile.
  */
 const NORVA_DEVICE_APPS = [
-    { key: 'mobile', name: 'Mobile app', hint: 'For your phone or tablet', storeUrl: '' },
-    { key: 'tv', name: 'TV app', hint: 'For the big screen, remote-friendly', storeUrl: '' },
+    { key: 'mobile', name: 'Android mobile app', hint: 'For your phone or tablet', storeUrl: '', available: true },
+    { key: 'tv', name: 'Android TV app', hint: 'For the big screen, remote-friendly', storeUrl: '', available: true },
 ];
 
 class App {
@@ -615,7 +615,8 @@ class App {
         if (nativeShell) return;
         btn.hidden = false;
         // "New" dot: only once at least one app is actually installable, and
-        // only until the first open — a Coming-soon teaser doesn't earn a nudge.
+        // only until the first open. A public install link earns the nudge;
+        // availability alone does not create a dead-end notification.
         const hasLinks = NORVA_DEVICE_APPS.some(a => a.storeUrl);
         let seen = false;
         try { seen = localStorage.getItem('norva-devices-seen') === '1'; } catch (_) { /* noop */ }
@@ -651,7 +652,7 @@ class App {
                         </span>
                         ${a.storeUrl
                             ? `<a class="norva-device-get" href="${esc(a.storeUrl)}" target="_blank" rel="noopener noreferrer">Install</a>`
-                            : '<span class="norva-device-soon">Coming soon</span>'}
+                            : `<span class="norva-device-soon">${a.available ? 'Available now' : 'Unavailable'}</span>`}
                     </div>`).join('')}
             </div>`;
         document.body.appendChild(panel);
@@ -1290,8 +1291,7 @@ class App {
     }
 
     // Informative recap opened from the trial chip. Transparent about the end date
-    // and the no-auto-charge model; the positive action is converting ("See plans"),
-    // not a prominent cancel path. A dimmed backdrop keeps it the only thing on
+    // and automatic conversion into the plan already selected. A dimmed backdrop keeps it the only thing on
     // screen; Escape/backdrop-tap dismiss.
     showTrialRecap() {
         try {
@@ -1308,7 +1308,7 @@ class App {
             try { dateStr = end.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); }
             catch (_) { dateStr = end.toISOString().slice(0, 10); }
             const here = location.pathname + location.search + location.hash;
-            const seePlansHref = '/subscribe.html?returnTo=' + encodeURIComponent(here);
+            const managePlanHref = '/subscription.html?returnTo=' + encodeURIComponent(here);
             const prevFocus = document.activeElement;
 
             const backdrop = document.createElement('div');
@@ -1326,9 +1326,9 @@ class App {
                 '</div>' +
                 '<div style="font-size:22px;font-weight:800;margin-bottom:6px">' + (lastDay ? 'Last day' : daysLeft + ' days left') + '</div>' +
                 '<p style="color:#aeb8cc;margin:0 0 6px">Your free trial ends <strong style="color:#f8fafc">' + dateStr + '</strong>.</p>' +
-                '<p style="color:#aeb8cc;margin:0 0 20px">You\'re never charged automatically — subscribe before then to keep your catalogue, offline downloads and cross-device sync.</p>' +
+                '<p style="color:#aeb8cc;margin:0 0 20px">Your selected plan starts and renews automatically when the trial ends unless you cancel before then. You can manage or cancel it anytime.</p>' +
                 '<div style="display:flex;flex-direction:column;gap:10px">' +
-                    '<a href="' + seePlansHref + '" data-recap-primary style="display:block;text-align:center;width:100%;box-sizing:border-box;min-height:46px;line-height:46px;border-radius:12px;background:#5b7cfa;color:#fff;font-weight:800;font-size:15px;text-decoration:none">See plans</a>' +
+                    '<a href="' + managePlanHref + '" data-recap-primary style="display:block;text-align:center;width:100%;box-sizing:border-box;min-height:46px;line-height:46px;border-radius:12px;background:#5b7cfa;color:#fff;font-weight:800;font-size:15px;text-decoration:none">Manage plan</a>' +
                     '<button type="button" data-recap-dismiss style="width:100%;min-height:44px;border:0;border-radius:12px;background:transparent;color:#aeb8cc;font-weight:700;font-size:14px;cursor:pointer">Not now</button>' +
                 '</div>';
 
@@ -2428,7 +2428,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=83';
+                s.src = '/js/pages/AdminPage.js?v=84';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

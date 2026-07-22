@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="prices-pending">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -10,13 +10,13 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
-      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --coral: #ff8067;
+      --muted: #a8b3c7; --quiet: #8490aa; --accent: #5b7cfa; --coral: #ff8067;
       --pink: #b579ff; --green: #34d399; --danger: #fb7185;
     }
     body {
       min-height: 100vh; background: var(--bg); color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      display: grid; place-items: center; padding: 22px;
+      display: grid; place-items: center; padding: 22px; overflow-wrap: anywhere;
     }
     .wrap { width: min(860px, 100%); }
     .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
@@ -24,9 +24,17 @@
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.05; margin-bottom: 10px; }
     .lead { color: var(--muted); font-size: 16px; line-height: 1.55; max-width: 620px; }
+    .platform-value { margin-top: 14px; padding: 13px 15px; border: 1px solid rgba(91,124,250,.42);
+      border-radius: 12px; background: rgba(91,124,250,.09); color: var(--muted); font-size: 13.5px;
+      line-height: 1.5; }
+    .platform-value strong { display: block; margin-bottom: 2px; color: var(--text); font-size: 15px; }
+    .tv-purchase-path { margin-top: 16px; padding: 18px 20px; border: 1px solid rgba(181,121,255,.5);
+      border-radius: 14px; background: rgba(181,121,255,.1); color: var(--muted); font-size: 16px; line-height: 1.55; }
+    .tv-purchase-path strong { display: block; color: var(--text); font-size: 19px; margin-bottom: 4px; }
+    html.tv-purchase-only .buy, html.tv-purchase-only .save-hint { display: none !important; }
     /* Dark glass so the toggle stays readable over any campaign artwork; the
        active option carries a bright accent gradient — impossible to miss. */
-    .toggle { display: inline-flex; gap: 4px; margin: 22px 0 6px; padding: 6px;
+    .toggle { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; margin: 22px 0 6px; padding: 6px;
       border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; background: rgba(10,13,20,0.72);
       -webkit-backdrop-filter: blur(12px) saturate(130%); backdrop-filter: blur(12px) saturate(130%);
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 30px -16px rgba(0,0,0,0.85); }
@@ -72,6 +80,8 @@
     #annual-nudge:hover { text-decoration: underline; }
     #annual-nudge[hidden] { display: none; }
     .btn[disabled] { opacity: 0.6; cursor: default; }
+    html.prices-pending .price, html.prices-pending .price-note,
+    html.native-prices-pending .price, html.native-prices-pending .price-note { visibility: hidden; }
     /* Event promo: badge above the price + struck-through base price beside it.
        Badge and background colors are themed per event from JS (PROMO_THEMES);
        an uploaded campaign image replaces the tinted background. */
@@ -146,7 +156,10 @@
     .confirm p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 20px; }
     .confirm .btn { max-width: 320px; margin: 0 auto; }
     /* Keyboard / D-pad focus ring — matters most on Android TV (10-foot view). */
-    .period:focus-visible, .buy:focus-visible, .btn:focus-visible, .confirm .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+    a:focus-visible, button:focus-visible, input:focus-visible,
+    .period:focus-visible, .buy:focus-visible, .btn:focus-visible, .confirm .btn:focus-visible {
+      outline: 3px solid var(--pink); outline-offset: 3px;
+    }
     .card:focus-within { border-color: var(--pink); }
     /* Landing deep-link (?plan=…) — pre-highlight the plan the visitor picked. */
     .card.preselected { border-color: var(--pink); box-shadow: 0 0 50px rgba(181,121,255,.28); }
@@ -158,9 +171,8 @@
     html.tv .lead { font-size: 18px; }
     /* ── Desktop: the whole page fits the viewport (no scroll) ────────────────
        Same layout and hierarchy, only the vertical rhythm densifies with screen
-       height. Two stages; on short laptops the per-card feature lists give way —
-       the compare box already states both plans include everything. Phones keep
-       their natural scroll (cards stack there). TV keeps its 10-foot sizes. */
+       height. All copy remains available and the document can scroll, including
+       when browser zoom reduces the effective viewport. */
     @media (min-width: 640px) and (max-height: 979px) {
       html:not(.tv) body { padding: 14px 22px; }
       html:not(.tv) .brand { margin-bottom: 8px; }
@@ -184,12 +196,11 @@
       html:not(.tv) .promo-badge { margin-bottom: 6px; }
     }
     @media (min-width: 640px) and (max-height: 799px) {
-      /* Les LISTES D'AVANTAGES restent toujours visibles (règle produit) — ce qui
-         s'efface sur écran court, c'est ce qui les répète : le lead, le bloc
-         compare (« both plans include every feature ») et la note légale. */
-      html:not(.tv) .lead { display: none; }
-      html:not(.tv) .compare { display: none; }
-      html:not(.tv) .note { display: none; }
+      html:not(.tv) .lead { font-size: 13px; line-height: 1.4; }
+      html:not(.tv) .platform-value { margin-top: 6px; padding: 8px 12px; font-size: 12px; }
+      html:not(.tv) .platform-value strong { font-size: 12.5px; }
+      html:not(.tv) .compare { margin-top: 8px; padding: 8px 12px; font-size: 12px; }
+      html:not(.tv) .note { margin-top: 8px; font-size: 12px; }
       html:not(.tv) .brand { margin-bottom: 6px; }
       html:not(.tv) h1 { font-size: 20px; margin-bottom: 4px; }
       html:not(.tv) .toggle { margin: 8px 0 0; }
@@ -199,10 +210,10 @@
       html:not(.tv) .card h2 { font-size: 17px; }
       html:not(.tv) .card .tag { margin-bottom: 8px; font-size: 12px; }
       html:not(.tv) .price { font-size: 28px; }
-      html:not(.tv) .price-note { min-height: 12px; margin: 2px 0 6px; font-size: 11px; }
+      html:not(.tv) .price-note { min-height: 12px; margin: 2px 0 6px; font-size: 12px; }
       html:not(.tv) .card ul { gap: 4px; margin: 2px 0 10px; font-size: 12.5px; }
       html:not(.tv) .btn { min-height: 40px; }
-      html:not(.tv) .assurance { margin-top: 8px; padding: 7px 12px; font-size: 11px; }
+      html:not(.tv) .assurance { margin-top: 8px; padding: 7px 12px; font-size: 12px; }
       html:not(.tv) .pay-marks { margin-top: 6px; }
       html:not(.tv) .row { margin-top: 8px; }
       html:not(.tv) .row .btn { min-height: 38px; font-size: 13px; }
@@ -211,23 +222,47 @@
       html:not(.tv) #promo-countdown { margin-top: 8px; padding: 5px 14px 5px 7px; font-size: 12px; }
       html:not(.tv) #promo-countdown b { font-size: 14px; }
     }
+    @media (max-width: 420px) {
+      body { padding: 16px; }
+      .toggle { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toggle button { justify-content: center; min-width: 0; padding: 10px 12px; }
+      .card { padding: 20px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
   <script>
     // Bigger targets + focus tuning on Android TV (D-pad navigation).
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
-      document.documentElement.classList.add('tv');
+      document.documentElement.classList.add('tv', 'tv-purchase-only');
+    }
+    if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') &&
+        ((window.NorvaTVCloud && typeof window.NorvaTVCloud.purchase === 'function') ||
+         (window.NodeCastNative && typeof window.NodeCastNative.purchase === 'function'))) {
+      document.documentElement.classList.add('native-prices-pending');
     }
   </script>
   <main class="wrap">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Choose your Norva plan</h1>
     <p class="lead">Every plan unlocks all of Norva. Plans differ only by how many
-      profiles your household gets. Start with a 7-day free trial.</p>
+      profiles your household gets. Eligible new customers can start with a free trial;
+      the exact terms are shown before checkout.</p>
+    <div class="platform-value" role="note">
+      <strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
+      Keep profiles, favorites and playback progress in sync on compatible devices.
+    </div>
+
+    <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
+      <strong>Choose your plan on your phone or computer</strong>
+      Open norva.tv, sign in with this same Norva account, then choose your plan. Your access updates on this TV automatically.
+    </div>
 
     <div class="status" id="already-sub"></div>
 
@@ -248,7 +283,7 @@
         <small class="price-note"></small>
         <ul>
           <li>Up to 2 profiles</li>
-          <li>Sync across Web, phone, tablet &amp; TV</li>
+          <li>Sync across Web, Android mobile and Android TV</li>
           <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
@@ -259,7 +294,7 @@
         data-plan="family"
         data-product="norva_family"
         data-package-monthly="family_monthly" data-package-annual="family_annual"
-        data-monthly="8.99" data-annual="75.99" data-annual-note="That's about $6.33/mo, billed yearly.">
+        data-monthly="8.99" data-annual="74.99" data-annual-note="That's about $6.25/mo, billed yearly.">
         <span class="badge">Best for households</span>
         <h2>Norva Family</h2>
         <p class="tag">The full Norva experience for the whole home.</p>
@@ -267,7 +302,7 @@
         <small class="price-note"></small>
         <ul>
           <li>Up to 5 profiles</li>
-          <li>Sync across Web, phone, tablet &amp; TV</li>
+          <li>Sync across Web, Android mobile and Android TV</li>
           <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
@@ -320,14 +355,16 @@
 
     <p class="note">The free trial requires a payment method and converts to a paid plan unless
       cancelled before it ends — cancel anytime. Norva is a media player; no content or TV
-      subscription is included. Your TV content stays provided by your own TV service.</p>
+      subscription is included. Your TV content stays provided by your own TV service.<br>
+      <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> ·
+      <a href="/subscription.html">Manage or cancel a subscription</a></p>
   </main>
 
-  <script src="/js/cloudApi.js?v=50"></script>
+  <script src="/js/cloudApi.js?v=52"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/navigation-safety.js?v=1"></script>
-  <script src="/js/billing-config.js?v=7"></script>
-  <script src="/js/billing.js?v=15"></script>
+  <script src="/js/billing-config.js?v=8"></script>
+  <script src="/js/billing.js?v=17"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -335,6 +372,9 @@
         return window.NorvaNavigation.safeLocalPath(value, '/app#home');
       }
       const returnTo = safeLocalPath(params.get('returnTo'));
+      const paywallPlacement = params.get('context') === 'locked_profile'
+        ? 'locked_profile'
+        : 'subscribe_plans';
       const statusEl = document.getElementById('status');
       const restoreBtn = document.getElementById('restore');
       const backBtn = document.getElementById('back');
@@ -347,8 +387,51 @@
       let hasLivePlan = false;
       let currentPlan = null;     // 'plus' | 'family' | null
       let currentPeriod = null;   // 'monthly' | 'annual' | null (web rail only)
+      const tvPurchaseOnly = Boolean(window.NorvaBilling && window.NorvaBilling.isTvShell && window.NorvaBilling.isTvShell());
+      const nativeOffersRequired = Boolean(!tvPurchaseOnly && window.NorvaBilling
+        && window.NorvaBilling.isNative && window.NorvaBilling.isNative());
+      const webPricesRequired = Boolean(!tvPurchaseOnly && !nativeOffersRequired
+        && window.NorvaBilling && window.NorvaBilling.isRevolutEnabled
+        && window.NorvaBilling.isRevolutEnabled());
+      let nativeOffersReady = !nativeOffersRequired;
+      let nativeOffersError = '';
+      let nativeOfferByPackage = Object.create(null);
+      let nativeAnyTrial = null;
+      let nativeCurrentOfferingId = '';
+      let exposureObserverArmed = false;
+      let entitlementResolved = false;
+      let webPricesReady = !webPricesRequired;
+      let webPricesError = '';
 
-      function offersTrial() { return trialEligible && !hasLivePlan; }
+      if (nativeOffersRequired) document.documentElement.classList.add('native-prices-pending');
+      if (!webPricesRequired) document.documentElement.classList.remove('prices-pending');
+
+      function offersTrial() { return trialEligible && !hasLivePlan && nativeAnyTrial !== false; }
+      function nativeOfferFor(card, cadence) {
+        if (!card || !nativeOffersRequired || !nativeOffersReady) return null;
+        const packageId = cadence === 'annual' ? card.dataset.packageAnnual : card.dataset.packageMonthly;
+        return nativeOfferByPackage[packageId] || null;
+      }
+      function cardOffersTrial(card) {
+        if (!offersTrial()) return false;
+        if (!nativeOffersRequired) return true;
+        const offer = nativeOfferFor(card, period);
+        const eligibility = String((offer && offer.trialEligibility) || '').toLowerCase();
+        return eligibility === 'eligible';
+      }
+      function nativeTrialLabel(offer) {
+        const iso = String((offer && offer.trialPeriodIso8601) || '').toUpperCase();
+        const cycles = Math.max(1, Number(offer && offer.trialBillingCycles) || 1);
+        let match = iso.match(/^P(\d+)D$/);
+        if (match) return (Number(match[1]) * cycles) + '-day';
+        match = iso.match(/^P(\d+)W$/);
+        if (match) return (Number(match[1]) * cycles) + '-week';
+        match = iso.match(/^P(\d+)M$/);
+        if (match) return (Number(match[1]) * cycles) + '-month';
+        match = iso.match(/^P(\d+)Y$/);
+        if (match) return (Number(match[1]) * cycles) + '-year';
+        return '';
+      }
 
       backBtn.setAttribute('href', returnTo);
 
@@ -357,6 +440,84 @@
           const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
           return session && session.user && session.user.id ? session.user.id : null;
         } catch (_) { return null; }
+      }
+
+      // Count an exposure only after a real offer card has entered the viewport and
+      // an account/device session exists. The server owns the sticky account-level
+      // variant; this page never invents or persists an assignment per browser.
+      function observePaywallExposure() {
+        if (exposureObserverArmed) return;
+        // A plan picker is not an acquisition paywall for an account that
+        // already has access. Wait for the authoritative entitlement response
+        // before adding anyone to the paywall denominator.
+        if (!entitlementResolved || hasLivePlan) return;
+        // A native paywall is not an actual commercial exposure until every
+        // exact Play price and enabled CTA is visible. A failed/partial catalog
+        // must not inflate the denominator of the funnel.
+        if (nativeOffersRequired && !nativeOffersReady) return;
+        if (webPricesRequired && !webPricesReady) return;
+        exposureObserverArmed = true;
+        const cards = Array.from(document.querySelectorAll('.card'));
+        if (!cards.length) return;
+        let inFlight = false;
+        let confirmed = false;
+        let visible = false;
+        let retryTimer = 0;
+        let retryDelayMs = 1000;
+        const hasSession = function () {
+          return Boolean(
+            appUserId() ||
+            (window.NorvaCloud && window.NorvaCloud.deviceToken) ||
+            localStorage.getItem('norva-cloud-device-token')
+          );
+        };
+        const scheduleRetry = function (observer) {
+          if (confirmed || retryTimer || !visible) return;
+          retryTimer = window.setTimeout(function () {
+            retryTimer = 0;
+            record(observer);
+          }, retryDelayMs);
+          retryDelayMs = Math.min(retryDelayMs * 2, 30000);
+        };
+        const record = function (observer) {
+          if (confirmed || inFlight || !visible || !hasSession()) return;
+          const billing = window.NorvaCloud && window.NorvaCloud.billing;
+          if (!billing || typeof billing.recordPaywallExposure !== 'function') return;
+          inFlight = true;
+          Promise.resolve(billing.recordPaywallExposure({
+            placement: paywallPlacement
+          })).then(function () {
+            confirmed = true;
+            if (retryTimer) window.clearTimeout(retryTimer);
+            if (observer) observer.disconnect();
+          }).catch(function (error) {
+            // Measurement must never delay, hide, or disable the purchase UI.
+            console.warn('[subscribe] paywall exposure was not recorded', error);
+            scheduleRetry(observer);
+          }).finally(function () {
+            inFlight = false;
+          });
+        };
+        if (typeof IntersectionObserver === 'function') {
+          const observer = new IntersectionObserver(function (entries) {
+            visible = entries.some(function (entry) { return entry.isIntersecting && entry.intersectionRatio > 0; });
+            if (visible) {
+              record(observer);
+            }
+          }, { threshold: 0.01 });
+          cards.forEach(function (card) { observer.observe(card); });
+          window.addEventListener('online', function () { if (visible) record(observer); });
+          return;
+        }
+        // Legacy WebViews: use an actual viewport intersection check instead of
+        // treating page load as an impression.
+        requestAnimationFrame(function () {
+          visible = cards.some(function (card) {
+            const rect = card.getBoundingClientRect();
+            return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+          });
+          if (visible) record(null);
+        });
       }
 
       function setStatus(message, isError) {
@@ -373,6 +534,21 @@
         document.querySelectorAll('.card').forEach(function (card) {
           const b = card.querySelector('.buy');
           if (!b) return;
+          if (tvPurchaseOnly) {
+            b.disabled = true;
+            b.hidden = true;
+            return;
+          }
+          if (nativeOffersRequired && !nativeOffersReady) {
+            b.disabled = true;
+            b.textContent = nativeOffersError ? 'Google Play price unavailable' : 'Loading Google Play price…';
+            return;
+          }
+          if (webPricesRequired && !webPricesReady) {
+            b.disabled = true;
+            b.textContent = webPricesError ? 'Current price unavailable' : 'Loading current price…';
+            return;
+          }
           const samePlan = hasLivePlan && currentPlan === card.dataset.plan;
           const isCurrent = samePlan && (currentPeriod === null || currentPeriod === period);
           b.disabled = isCurrent;
@@ -406,7 +582,10 @@
           } else if (hasLivePlan) {
             b.textContent = 'Switch to this plan';
           } else {
-            b.textContent = offersTrial() ? 'Start 7-day free trial' : 'Subscribe';
+            const trialLabel = nativeOffersRequired ? nativeTrialLabel(nativeOfferFor(card, period)) : '7-day';
+            b.textContent = cardOffersTrial(card)
+              ? ('Start ' + (trialLabel ? trialLabel + ' ' : '') + 'free trial')
+              : (nativeOffersRequired ? 'Subscribe with Google Play' : 'Subscribe');
           }
         });
       }
@@ -419,14 +598,17 @@
         const lead = document.querySelector('.lead');
         if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
         const note = document.querySelector('.note');
-        if (note) note.textContent = 'Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.';
+        if (note) note.innerHTML = 'Norva is a media player; no content or TV subscription is included. ' +
+          'Your TV content stays provided by your own TV service.<br>' +
+          '<a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> · ' +
+          '<a href="/subscription.html">Manage or cancel a subscription</a>';
       }
 
       // Clear "trial started" confirmation so the renewal terms are explicit
       // before the user continues — reduces surprise charges / chargebacks.
       // `result` (from NorvaBilling.purchase) tailors the copy for the one-click
       // plan-change path — existing subscribers change plans with no card re-entry.
-      function showTrialConfirmation(result) {
+      function showTrialConfirmation(result, selectedCard, selectedOffer) {
         const rs = result && result.status;
         // A 'redirect' result means purchase() is navigating us to the embedded checkout
         // widget (Revolut) — the card hasn't been entered and the trial hasn't started yet.
@@ -450,12 +632,26 @@
         } else if (rs === 'unchanged') {
           title.textContent = "You're already on this plan";
           msg.textContent = 'No changes were made — your plan stays exactly as it is.';
-        } else if (offersTrial()) {
+        } else if (nativeOffersRequired && (!result || result.purchaseVerified !== true
+            || result.entitlementActive !== true)) {
+          title.textContent = 'Purchase received';
+          msg.textContent = 'Google Play confirmed your purchase. Norva is syncing your access now; you can continue as soon as it appears on your account.';
+        } else if (nativeOffersRequired
+            ? Boolean(selectedOffer
+              && nativeTrialLabel(selectedOffer)
+              && String(selectedOffer.trialEligibility || '').toLowerCase() === 'eligible'
+              && result.displayedOfferTrialEligible === true
+              && result.selectedOfferTrialEligible === true
+              && result.trialActive === true
+              && result.entitlementActive === true
+              && result.purchaseVerified === true)
+            : (selectedCard ? cardOffersTrial(selectedCard) : offersTrial())) {
+          const trialLabel = nativeOffersRequired ? nativeTrialLabel(selectedOffer) : '7-day';
           title.textContent = 'Your free trial has started';
-          msg.textContent = "You have full access now and won't be charged until your 7-day trial ends. Cancel anytime before then.";
+          msg.textContent = "You have full access now and won't be charged until your " + trialLabel + " trial ends. Cancel anytime before then.";
         } else {
           title.textContent = "You're subscribed";
-          msg.textContent = 'Your plan is active — enjoy Norva on every screen.';
+          msg.textContent = 'Your plan is active on Web, Android mobile and Android TV.';
         }
         if (cont) { cont.setAttribute('href', returnTo); }
         if (panel) { panel.hidden = false; }
@@ -510,6 +706,9 @@
       // sur les prix de base). Un clic bascule sur Annual.
       function refreshAnnualNudge() {
         let n = document.getElementById('annual-nudge');
+        // Google Play already presents its own localized offer comparison. Do not
+        // manufacture a USD savings sentence from a localized native catalog.
+        if (nativeOffersRequired) { if (n) n.hidden = true; return; }
         if (period !== 'monthly') { if (n) n.hidden = true; return; }
         let bestAmt = 0, firstYear = false;
         document.querySelectorAll('.card').forEach(function (card) {
@@ -544,13 +743,37 @@
         });
         refreshAnnualNudge();
         document.querySelectorAll('.card').forEach(function (card) {
+          const cur = card.querySelector('.cur');
           const amount = card.querySelector('.amount');
           const per = card.querySelector('.per');
           const note = card.querySelector('.price-note');
           const annual = period === 'annual';
-          amount.textContent = annual ? card.dataset.annual : card.dataset.monthly;
+          const nativePrice = annual ? card.dataset.nativePriceAnnual : card.dataset.nativePriceMonthly;
+          if (nativeOffersRequired) {
+            if (cur) cur.textContent = '';
+            amount.textContent = nativeOffersReady ? (nativePrice || '—') : '—';
+          } else if (webPricesRequired && !webPricesReady) {
+            if (cur) cur.textContent = '';
+            amount.textContent = '—';
+          } else {
+            if (cur) cur.textContent = '$';
+            amount.textContent = annual ? card.dataset.annual : card.dataset.monthly;
+          }
           per.textContent = annual ? '/yr' : '/mo';
-          note.textContent = annual ? (card.dataset.annualNote || '') : '';
+          if (nativeOffersRequired) {
+            const offer = nativeOfferFor(card, period);
+            const trialLabel = cardOffersTrial(card) ? nativeTrialLabel(offer) : '';
+            const trialPrice = trialLabel && offer && offer.trialPriceString ? ' (' + offer.trialPriceString + ')' : '';
+            note.textContent = nativeOffersReady
+              ? ((trialLabel ? trialLabel + ' free trial' + trialPrice + '. ' : '') + (annual ? 'Billed yearly through Google Play.' : 'Billed monthly through Google Play.'))
+              : 'Current Google Play price unavailable.';
+          } else if (webPricesRequired && !webPricesReady) {
+            note.textContent = webPricesError
+              ? 'Current price unavailable. Reload to try again.'
+              : 'Loading current price…';
+          } else {
+            note.textContent = annual ? (card.dataset.annualNote || '') : '';
+          }
           // Active promo on this plan+period → event badge + struck-through base
           // price next to the (already promo) displayed price.
           const promo = livePromos && livePromos[card.dataset.plan] && livePromos[card.dataset.plan][period];
@@ -643,7 +866,109 @@
         b.addEventListener('click', function () { applyPeriod(b.dataset.period); });
       });
 
+      async function loadNativePrices() {
+        if (!nativeOffersRequired) return;
+        nativeOffersReady = false;
+        nativeOffersError = '';
+        refreshCtas();
+        try {
+          const uid = appUserId();
+          if (!uid) throw new Error('native_user_required');
+          const catalog = await window.NorvaBilling.nativeOfferings(uid);
+          const currentOfferingId = String(catalog && catalog.currentOfferingId || '');
+          if (!currentOfferingId || String(catalog.appUserId || '') !== uid) {
+            throw new Error('invalid_current_offering');
+          }
+          const byPackage = Object.create(null);
+          const packages = Array.isArray(catalog && catalog.packages) ? catalog.packages : [];
+          const expectedPackageIds = [];
+          document.querySelectorAll('.card').forEach(function (card) {
+            expectedPackageIds.push(String(card.dataset.packageMonthly || ''));
+            expectedPackageIds.push(String(card.dataset.packageAnnual || ''));
+          });
+          if (expectedPackageIds.some(function (id) { return !id; })
+              || new Set(expectedPackageIds).size !== expectedPackageIds.length) {
+            throw new Error('duplicate_expected_package_id');
+          }
+          // Both cadences for both plans must be known before any native CTA is
+          // enabled. Each expected package must occur exactly once in the current
+          // offering and carry the product + ISO cadence rendered by its card.
+          document.querySelectorAll('.card').forEach(function (card) {
+            ['Monthly', 'Annual'].forEach(function (suffix) {
+              const packageId = card.dataset['package' + suffix];
+              const expectedPeriod = suffix === 'Annual' ? 'P1Y' : 'P1M';
+              const matches = packages.filter(function (offer) {
+                return offer && String(offer.packageId || '') === packageId;
+              });
+              if (matches.length !== 1) throw new Error('ambiguous_' + packageId);
+              const offer = matches[0];
+              if (String(offer.offeringId || '') !== currentOfferingId
+                  || String(offer.productId || '') !== String(card.dataset.product || '')
+                  || String(offer.periodIso8601 || '').toUpperCase() !== expectedPeriod
+                  || offer.supported !== true
+                  || !offer.priceString || Number(offer.priceMicros) <= 0
+                  || !offer.currencyCode) {
+                throw new Error('invalid_' + packageId);
+              }
+              byPackage[packageId] = offer;
+              const key = suffix === 'Annual' ? 'Annual' : 'Monthly';
+              card.dataset['nativePrice' + key] = String(offer.priceString);
+              card.dataset[suffix === 'Annual' ? 'annual' : 'monthly'] = (Number(offer.priceMicros) / 1000000).toFixed(6);
+              card.dataset['nativeCurrency' + key] = String(offer.currencyCode || '');
+            });
+          });
+          const nativeCurrencies = new Set(packages
+            .filter(function (offer) { return offer && byPackage[String(offer.packageId || '')]; })
+            .map(function (offer) { return String(offer.currencyCode || '').toUpperCase(); }));
+          if (nativeCurrencies.size !== 1) throw new Error('inconsistent_store_currency');
+
+          // The store owns the prices, so it also owns any annual-savings claim.
+          // Recompute the badge from the exact localized monthly/yearly packages;
+          // never leave the static web percentage beside a different Play price.
+          const nativeSavings = Array.from(document.querySelectorAll('.card')).map(function (card) {
+            const monthly = Number(card.dataset.monthly);
+            const annual = Number(card.dataset.annual);
+            return monthly > 0 && annual > 0 ? Math.round((1 - annual / (monthly * 12)) * 100) : 0;
+          }).filter(function (saving) { return saving > 0 && saving < 100; });
+          const nativeSaveBadge = document.querySelector('.toggle .save');
+          if (nativeSaveBadge) {
+            if (nativeSavings.length) {
+              const minSaving = Math.min.apply(Math, nativeSavings);
+              const maxSaving = Math.max.apply(Math, nativeSavings);
+              nativeSaveBadge.textContent = minSaving === maxSaving
+                ? 'Save ' + minSaving + '%'
+                : 'Save ' + minSaving + '–' + maxSaving + '%';
+              nativeSaveBadge.hidden = false;
+            } else {
+              nativeSaveBadge.hidden = true;
+            }
+          }
+          nativeOfferByPackage = byPackage;
+          nativeCurrentOfferingId = currentOfferingId;
+          const nativeOffers = Object.keys(byPackage).map(function (key) { return byPackage[key]; });
+          nativeAnyTrial = nativeOffers.some(function (offer) {
+            return String(offer && offer.trialEligibility || '').toLowerCase() === 'eligible';
+          });
+          if (!nativeAnyTrial) applyNoTrialCopy();
+          nativeOffersReady = true;
+          document.documentElement.classList.remove('native-prices-pending');
+          applyPeriod(period);
+        } catch (error) {
+          nativeOffersReady = false;
+          nativeCurrentOfferingId = '';
+          nativeOfferByPackage = Object.create(null);
+          nativeOffersError = 'unavailable';
+          document.documentElement.classList.remove('native-prices-pending');
+          applyPeriod(period);
+          setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available.', true);
+        }
+      }
+
       async function buy(card, button) {
+        if (tvPurchaseOnly) {
+          setStatus('Open norva.tv on your phone or computer and sign in with this same account to choose a plan.', false);
+          return;
+        }
         const uid = appUserId();
         if (!uid) {
           window.location.href = '/account.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search);
@@ -654,20 +979,49 @@
           setStatus('Billing is not configured yet on this platform. Please try again once setup is complete.', true);
           return;
         }
+        if (nativeOffersRequired && !nativeOffersReady) {
+          setStatus('Current Google Play prices are still loading or unavailable. No purchase has started.', true);
+          return;
+        }
+        if (webPricesRequired && !webPricesReady) {
+          setStatus('Current web prices are unavailable. No checkout has started. Please retry when the exact price can be loaded.', true);
+          return;
+        }
         const packageId = period === 'annual' ? card.dataset.packageAnnual : card.dataset.packageMonthly;
+        const selectedOffer = nativeOffersRequired ? nativeOfferFor(card, period) : null;
+        if (nativeOffersRequired && (!selectedOffer || !nativeCurrentOfferingId
+            || selectedOffer.offeringId !== nativeCurrentOfferingId
+            || selectedOffer.packageId !== packageId
+            || selectedOffer.productId !== card.dataset.product
+            || selectedOffer.supported !== true)) {
+          setStatus('The selected Google Play offer is no longer current. Reload prices before purchasing.', true);
+          return;
+        }
         const original = button.textContent;
         button.disabled = true;
         button.textContent = 'Opening checkout…';
         try {
-          window.NorvaBilling.login(uid);
+          if (nativeOffersRequired && window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
+            const offer = selectedOffer;
+            window.NorvaMarketing.track('begin_checkout', {
+              currency: offer && offer.currencyCode,
+              value: offer ? Number(offer.priceMicros) / 1000000 : undefined,
+              plan: card.dataset.plan,
+              period: period,
+              package_id: packageId,
+              checkout_kind: 'google_play'
+            });
+          }
           const result = await window.NorvaBilling.purchase({
+            offeringId: selectedOffer ? selectedOffer.offeringId : undefined,
             packageId: packageId,
-            productId: card.dataset.product,
+            productId: selectedOffer ? selectedOffer.productId : card.dataset.product,
             planCode: card.dataset.plan,
             appUserId: uid,
+            placement: paywallPlacement,
             returnTo: returnTo, // Revolut web → carried through so the return page can go back here.
           });
-          showTrialConfirmation(result);
+          showTrialConfirmation(result, card, selectedOffer);
         } catch (e) {
           if (e && e.code === 'cancelled') {
             setStatus('Checkout cancelled. You can pick a plan whenever you\'re ready.', false);
@@ -747,11 +1101,12 @@
       async function checkExisting() {
         try {
           const ent = window.NorvaCloud && window.NorvaCloud.entitlements;
-          if (!ent) return;
+          if (!ent) return false;
           const dec = appUserId() ? await ent.get() : await ent.device();
-          if (!dec || dec.enforced === false || dec.mode === 'observe') return;
+          if (!dec) return false;
+          entitlementResolved = true;
           const st = String(dec.status || '');
-          if (['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) === -1) return;
+          if (['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) === -1) return true;
           // Live plan → no trial wording anywhere, and the current plan card must
           // read as such instead of inviting a re-purchase.
           hasLivePlan = true;
@@ -781,7 +1136,8 @@
           a.style.cssText = 'color:var(--pink);font-weight:700;text-decoration:none';
           box.appendChild(a);
           box.classList.add('show');
-        } catch (_) { /* ignore */ }
+          return true;
+        } catch (_) { return false; }
       }
 
       // The card-check hold only applies to the web checkout (Revolut). Reveal the
@@ -792,9 +1148,10 @@
       // payment follows the card check, so this variant promises nothing about "no charge".
       function maybeShowAssurance() {
         try {
+          if (tvPurchaseOnly) return;
           const b = window.NorvaBilling;
           const webCheckout = b && (b.isRevolutEnabled && b.isRevolutEnabled());
-          if (webCheckout && !b.hasNativeBilling()) {
+          if (webCheckout && !b.hasNativeBilling() && !b.isNative()) {
             const el = document.getElementById('trial-assurance');
             if (el && !offersTrial()) {
               const body = el.querySelector('div');
@@ -845,9 +1202,9 @@
       // The static data-* values remain the fallback when the endpoint is down.
       function applyLivePrices(catalog) {
         try {
-          if (!catalog || !catalog.prices) return;
+          if (!catalog || !catalog.prices) return false;
           const b = window.NorvaBilling;
-          if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling())) return;
+          if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling() && !b.isNative())) return false;
           const prices = catalog.prices; // EFFECTIVE cents — an active promo is already applied
           livePromos = catalog.promos || null;
           // Campaign visual URL. billing.js normally resolves it (bg_url), but the
@@ -929,8 +1286,29 @@
             rootEl.classList.remove('has-campaign');
             rootEl.style.backgroundImage = '';
           }
+          webPricesReady = true;
+          webPricesError = '';
+          document.documentElement.classList.remove('prices-pending');
           applyPeriod(period); // re-render amounts, notes, promo badges and CTAs
-        } catch (_) { /* keep static prices */ }
+          if (entitlementResolved && !hasLivePlan) observePaywallExposure();
+          return true;
+        } catch (_) { return false; }
+      }
+
+      function markWebPricesUnavailable() {
+        if (!webPricesRequired || webPricesReady) return;
+        webPricesError = 'unavailable';
+        document.documentElement.classList.remove('prices-pending');
+        document.querySelectorAll('.card').forEach(function (card) {
+          const cur = card.querySelector('.cur');
+          const amount = card.querySelector('.amount');
+          const note = card.querySelector('.price-note');
+          if (cur) cur.textContent = '';
+          if (amount) amount.textContent = '—';
+          if (note) note.textContent = 'Current price unavailable. Reload to try again.';
+        });
+        refreshCtas();
+        setStatus('Exact current prices could not be loaded. No purchase can start until they are available.', true);
       }
 
       // Real urgency: countdown to the soonest promo_ends_at among active promos —
@@ -1014,11 +1392,33 @@
         } catch (_) { /* jamais bloquant */ }
       }
 
-      window.NorvaBilling.login(appUserId());
-      loadTrialEligibility(); // reveals the card-check reassurance once eligibility is known
-      checkExisting();
+      if (tvPurchaseOnly) {
+        document.documentElement.classList.add('tv-purchase-only');
+        const tvPath = document.getElementById('tv-purchase-path');
+        if (tvPath) tvPath.hidden = false;
+      }
       maybeGateRestore();
-      if (window.NorvaBilling.revolutPrices) window.NorvaBilling.revolutPrices().then(applyLivePrices);
+      // Resolve account eligibility and exact native offers before measuring a
+      // visible commercial paywall. Failures keep the UI usable but do not
+      // manufacture an exposure from an unknown entitlement state.
+      Promise.allSettled([
+        loadNativePrices(),
+        loadTrialEligibility(),
+        checkExisting()
+      ]).then(function () {
+        if (entitlementResolved && !hasLivePlan
+            && (!nativeOffersRequired || nativeOffersReady)
+            && (!webPricesRequired || webPricesReady)) {
+          observePaywallExposure();
+        }
+      });
+      if (!window.NorvaBilling.isNative() && window.NorvaBilling.revolutPrices) {
+        window.NorvaBilling.revolutPrices().then(function (catalog) {
+          if (!applyLivePrices(catalog)) markWebPricesUnavailable();
+        }).catch(markWebPricesUnavailable);
+      } else if (webPricesRequired) {
+        markWebPricesUnavailable();
+      }
     })();
   </script>
 </body>

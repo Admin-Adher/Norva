@@ -39,7 +39,7 @@ window.NORVA_BILLING_CONFIG = {
     // Display prices per plan/period (amounts are charged server-side in cents).
     plans: {
       plus:   { monthly: '4.99', annual: '41.99' },
-      family: { monthly: '8.99', annual: '75.99' },
+      family: { monthly: '8.99', annual: '74.99' },
     },
   },
 };

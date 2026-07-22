@@ -476,8 +476,7 @@ class SettingsPage {
     planName(decision = {}) {
         const plan = String(decision.planCode || decision.plan_code || decision.projection?.plan_code || '').toLowerCase();
         if (plan === 'family') return 'Norva Family';
-        if (plan === 'premium') return 'Norva Premium';
-        if (plan === 'plus') return 'Norva';
+        if (plan === 'premium' || plan === 'plus') return 'Norva';
         return null;
     }
 
@@ -637,15 +636,6 @@ class SettingsPage {
                 if (autoRefreshRow) autoRefreshRow.style.display = autoRefreshToggle.checked ? '' : 'none';
             });
             autoRefreshInterval?.addEventListener('change', () => {
-                // The "even when closed" cadence is the Premium tier (cloud cron,
-                // not built yet). Selecting it logs the conversion signal, shows
-                // the upsell and reverts — nothing is enforced.
-                if (autoRefreshInterval.value === 'premium') {
-                    try { window.NorvaCloud?.entitlements?.recordSignal?.('auto_refresh_background', { source: 'frequency_select' }); } catch (_) { /* best-effort */ }
-                    try { this.app.sourceManager?.toast?.('Background updates even when Norva is closed are coming with Premium ✦'); } catch (_) { /* noop */ }
-                    autoRefreshInterval.value = lastFreeInterval;
-                    return;
-                }
                 lastFreeInterval = autoRefreshInterval.value;
                 this.app.player.settings.autoRefreshIntervalHours = parseInt(autoRefreshInterval.value, 10) || 24;
                 this.app.player.saveSettings();

@@ -45,10 +45,19 @@ test('recovery accepts only the exact external reference and immutable owner met
   const expected = {
     extRef: 'checkout-abc', userId: 'user-a', intentKey: 'intent-a',
     kind: 'trial_setup', plan: 'plus', period: 'monthly', amountCents: 899,
+    orderAmountCents: 50, experimentKey: 'paywall_positioning_v1',
+    experimentVariant: 'control', placement: 'subscribe', surface: 'web',
   };
   const valid = {
     merchant_order_ext_ref: 'checkout-abc',
-    metadata: { user_id: 'user-a', intent_key: 'intent-a', kind: 'trial_setup', plan: 'plus', period: 'monthly', amount_cents: 899 },
+    amount: 50,
+    currency: 'USD',
+    metadata: {
+      user_id: 'user-a', intent_key: 'intent-a', kind: 'trial_setup', plan: 'plus',
+      period: 'monthly', amount_cents: 899, price_currency: 'USD',
+      experiment_key: 'paywall_positioning_v1', experiment_variant: 'control',
+      paywall_placement: 'subscribe', paywall_surface: 'web',
+    },
   };
   assert.equal(matches(valid, expected), true);
   assert.equal(matches({ ...valid, merchant_order_ext_ref: 'checkout-other' }, expected), false);
@@ -77,7 +86,7 @@ test('webhook retries provider read failures and marks events only after mandato
   const fetchOrder = source.slice(source.indexOf('async function fetchOrder'), source.indexOf('async function cancelValidationHold'));
   assert.match(fetchOrder, /throw new Error\(`provider order unavailable:/);
   assert.doesNotMatch(fetchOrder, /return \{\}/);
-  assert.match(source, /remoteCheckoutSuccess = \["AUTHORISED", "COMPLETED"\]\.includes\(remoteState\)/);
+  assert.match(source, /anchoredKind === "resubscribe"[\s\S]*remoteState === "COMPLETED"[\s\S]*\["AUTHORISED", "COMPLETED"\]\.includes\(remoteState\)/);
   assert.match(source, /checkout order metadata does not match immutable journal/);
   assert.match(source, /journal\?\.finalized_at[\s\S]*duplicate_finalization/);
   assert.match(source, /journal\?\.expired_at \|\| journal\?\.superseded_at/);
@@ -90,22 +99,24 @@ test('webhook retries provider read failures and marks events only after mandato
   assert.match(source, /throw new Error\(`pending plan commit failed:/);
 });
 
-test('Revolut webhook journals but never applies a checkout over a hard block', () => {
+test('Revolut webhook rejects validation holds over a hard block and quarantines captured resubscriptions', () => {
   const source = read('supabase/functions/norva-revolut-webhook/index.ts');
   const start = source.indexOf('async function finalizeCheckoutEntitlement');
   const end = source.indexOf('// Card issuing country', start);
   const finalize = source.slice(start, end);
-  const guard = finalize.indexOf('if (hardBlocked) return "rejected_account_blocked"');
+  const guard = finalize.indexOf('if (hardBlocked && kind !== "resubscribe") return "rejected_account_blocked"');
   assert.ok(guard >= 0);
   assert.ok(guard < finalize.indexOf('if (kind === "card_update")'));
   assert.ok(guard < finalize.indexOf('replaceProjectionWithRailCas({'));
-  assert.match(source, /checkoutSuccess && \["trial_started", "already_confirmed", "resubscribed", "plan_change_scheduled"\]/);
+  assert.match(source, /reconcile_completed_revolut_resubscribe/);
+  assert.match(source, /captured resubscribe requires refund/);
+  assert.match(source, /checkoutSuccess && \["trial_started", "already_confirmed", "plan_change_scheduled"\]/);
   assert.doesNotMatch(source, /checkoutSuccess && \[[^\]]*rejected_account_blocked/);
 });
 
 test('Revolut webhook preserves internal and terminal accounts for every event kind', () => {
   const source = read('supabase/functions/norva-revolut-webhook/index.ts');
-  assert.match(source, /if \(internalAccount\) return "rejected_internal_account"/);
+  assert.match(source, /if \(internalAccount && kind !== "resubscribe"\) return "rejected_internal_account"/);
   assert.match(source, /applyNonCheckoutProjectionPatch\(admin, userId, eventId, patch\)/);
   assert.match(source, /\.rpc\("apply_revolut_entitlement_event"/);
   assert.match(source, /skipped_projection_result: projectionResult/);
@@ -145,10 +156,12 @@ test('hosted checkout restores server kind, uses truthful profile copy, and neve
   assert.match(html, /Your current plan stays unchanged until renewal/);
 });
 
-test('browser confirmation cannot apply an expired or superseded checkout', () => {
+test('browser confirmation rejects stale validation holds but reconciles captured stale resubscriptions', () => {
   const source = read('supabase/functions/norva-revolut/index.ts');
   const confirm = source.slice(source.indexOf('type CheckoutJournal'), source.indexOf('// ── /profile'));
   assert.match(confirm, /finalized_at,expired_at,superseded_at/);
-  assert.match(confirm, /if \(journal\.expired_at \|\| journal\.superseded_at\)/);
-  assert.ok(confirm.indexOf('if (journal.expired_at || journal.superseded_at)') < confirm.indexOf('const fetched = await revolut'));
+  assert.match(confirm, /const staleCheckout = Boolean\(journal\.expired_at \|\| journal\.superseded_at\)/);
+  assert.match(confirm, /staleCheckout && !\(journal\.kind === "resubscribe" && state === "COMPLETED"\)/);
+  assert.ok(confirm.indexOf('const fetched = await revolut') < confirm.indexOf('const staleCheckout'));
+  assert.match(confirm, /reconcile_completed_revolut_resubscribe/);
 });

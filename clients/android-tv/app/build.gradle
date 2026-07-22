@@ -16,12 +16,11 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 35
-        versionCode 20
-        versionName "3.8.7-hybrid"
+        versionCode 21
+        versionName "3.8.8-hybrid"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
-        buildConfigField "String", "REVENUECAT_API_KEY", "\"${project.findProperty('REVENUECAT_API_KEY') ?: ''}\""
     }
 
     buildFeatures {
@@ -90,5 +89,4 @@ dependencies {
     // latest v8 release (8.25.0) for reproducible release builds — this is what the
     // old "8.+" range already resolved to, now frozen so a future v9/v10 with API
     // changes can't slip into a release unnoticed. Bump deliberately when testing a newer v8.
-    implementation "com.revenuecat.purchases:purchases:8.25.0"
 }

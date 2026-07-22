@@ -56,6 +56,8 @@ public class MainActivity extends Activity {
     private TextView errorText;
     private Button errorRetryBtn;
     private String lastLoadedUrl;
+    private boolean cloudBridgeAdded;
+    private boolean nativeBridgeAdded;
 
     // Poster/title of the playback in flight, kept for the launcher's Play Next
     // row (the player result only carries ids + position).
@@ -186,7 +188,9 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setUserAgentString(s.getUserAgentString() + UA_SUFFIX);
@@ -194,8 +198,22 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request == null || !request.isForMainFrame()) return false;
+                return routeTopLevelNavigation(request.getUrl() == null
+                        ? null : request.getUrl().toString());
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return routeTopLevelNavigation(url);
+            }
+
+            @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                configureWebSecurity(url);
                 // Honest readiness: navigating away (pairing screen, error page, redirect)
                 // means the bridge is gone until the next app-shell finishes loading.
                 webAppReady = false;
@@ -226,8 +244,16 @@ public class MainActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                // Home servers typically use self-signed certs
-                handler.proceed();
+                String failingUrl = error == null ? null : error.getUrl();
+                String mode = prefs().getString(PREF_MODE, null);
+                if (("server".equals(mode) || "standalone".equals(mode))
+                        && isExplicitLocalTlsUrl(failingUrl)
+                        && isSameOrigin(failingUrl, lastLoadedUrl)) {
+                    handler.proceed();
+                } else {
+                    // norva.tv and every other public host fail closed.
+                    handler.cancel();
+                }
             }
         });
 
@@ -385,7 +411,24 @@ public class MainActivity extends Activity {
     }
 
     private void connect(String url) {
+        String mode = prefs().getString(PREF_MODE, null);
+        if ("cloud".equals(mode)) {
+            if (!isTrustedCloudUrl(url)) {
+                openExternalUrl(url);
+                return;
+            }
+            setBridgeMode(true, false);
+        } else if ("standalone".equals(mode)) {
+            setBridgeMode(false, true);
+        } else {
+            setBridgeMode(false, false);
+        }
+        connectInternal(url);
+    }
+
+    private void connectInternal(String url) {
         lastLoadedUrl = url;
+        configureWebSecurity(url);
         setupPanel.setVisibility(View.GONE);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         showSplash();
@@ -453,7 +496,7 @@ public class MainActivity extends Activity {
     }
 
     private void connectCloudPairing() {
-        webView.addJavascriptInterface(new CloudBridge(), "NorvaTVCloud");
+        setBridgeMode(true, false);
         connect(CLOUD_PAIR_URL);
     }
 
@@ -468,8 +511,119 @@ public class MainActivity extends Activity {
             showSetup("Could not start the embedded server: " + e.getMessage());
             return;
         }
-        webView.addJavascriptInterface(new NativeBridge(), "NodeCastNative");
+        setBridgeMode(false, true);
         connect("http://127.0.0.1:" + LocalServer.PORT + "/");
+    }
+
+    private void setBridgeMode(boolean cloud, boolean nativeBridge) {
+        if (cloud && !cloudBridgeAdded) {
+            webView.addJavascriptInterface(new CloudBridge(), "NorvaTVCloud");
+            cloudBridgeAdded = true;
+        } else if (!cloud && cloudBridgeAdded) {
+            webView.removeJavascriptInterface("NorvaTVCloud");
+            cloudBridgeAdded = false;
+        }
+        if (nativeBridge && !nativeBridgeAdded) {
+            webView.addJavascriptInterface(new NativeBridge(), "NodeCastNative");
+            nativeBridgeAdded = true;
+        } else if (!nativeBridge && nativeBridgeAdded) {
+            webView.removeJavascriptInterface("NodeCastNative");
+            nativeBridgeAdded = false;
+        }
+    }
+
+    private void configureWebSecurity(String url) {
+        if (webView == null) return;
+        boolean cloud = "cloud".equals(prefs().getString(PREF_MODE, null))
+                || isTrustedCloudUrl(url);
+        WebSettings settings = webView.getSettings();
+        settings.setMixedContentMode(cloud
+                ? WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                : WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        settings.setAllowFileAccess(!cloud);
+        settings.setAllowContentAccess(!cloud);
+    }
+
+    private boolean routeTopLevelNavigation(String url) {
+        if (url == null || url.isEmpty()) return true;
+        String mode = prefs().getString(PREF_MODE, null);
+        if ("cloud".equals(mode) && isTrustedCloudUrl(url)) return false;
+        if (("server".equals(mode) || "standalone".equals(mode))
+                && isSameOrigin(url, lastLoadedUrl)) return false;
+        openExternalUrl(url);
+        return true;
+    }
+
+    private void openExternalUrl(String url) {
+        if (url == null || url.isEmpty()) return;
+        try {
+            android.content.Intent intent = new android.content.Intent(
+                    android.content.Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addCategory(android.content.Intent.CATEGORY_BROWSABLE);
+            startActivity(intent);
+        } catch (Exception ignored) {
+            android.widget.Toast.makeText(this, "No app can open this link",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private static boolean isTrustedCloudUrl(String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            int port = uri.getPort();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "norva.tv".equalsIgnoreCase(uri.getHost())
+                    && (port == -1 || port == 443);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isSameOrigin(String left, String right) {
+        if (left == null || right == null) return false;
+        try {
+            Uri a = Uri.parse(left);
+            Uri b = Uri.parse(right);
+            int aPort = a.getPort() == -1 ? defaultPort(a.getScheme()) : a.getPort();
+            int bPort = b.getPort() == -1 ? defaultPort(b.getScheme()) : b.getPort();
+            return a.getScheme() != null && b.getScheme() != null
+                    && a.getHost() != null && b.getHost() != null
+                    && a.getScheme().equalsIgnoreCase(b.getScheme())
+                    && a.getHost().equalsIgnoreCase(b.getHost())
+                    && aPort == bPort;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static int defaultPort(String scheme) {
+        return "https".equalsIgnoreCase(scheme) ? 443 : 80;
+    }
+
+    private static boolean isExplicitLocalTlsUrl(String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
+            String host = uri.getHost();
+            if (host == null) return false;
+            String h = host.toLowerCase(java.util.Locale.US);
+            if ("localhost".equals(h) || "127.0.0.1".equals(h) || "::1".equals(h)
+                    || h.endsWith(".local")) return true;
+            if (h.startsWith("10.") || h.startsWith("192.168.")
+                    || h.startsWith("169.254.") || h.startsWith("fc")
+                    || h.startsWith("fd") || h.startsWith("fe80:")) return true;
+            if (h.startsWith("172.")) {
+                String[] parts = h.split("\\.");
+                if (parts.length == 4) {
+                    int second = Integer.parseInt(parts[1]);
+                    return second >= 16 && second <= 31;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     /**
@@ -521,32 +675,6 @@ public class MainActivity extends Activity {
             MainActivity.this.confirmProgressSaved(token);
         }
 
-        // ---- Billing (Google Play Billing via RevenueCat) ----
-
-        @android.webkit.JavascriptInterface
-        public void billingLogin(final String userId) {
-            NorvaBilling.login(userId);
-        }
-
-        @android.webkit.JavascriptInterface
-        public void purchase(final String packageId, final String planCode, final String requestId) {
-            NorvaBilling.purchase(MainActivity.this, packageId, new NorvaBilling.ResultCallback() {
-                @Override
-                public void onResult(String status, String error) {
-                    sendBillingResult(requestId, status, planCode, error);
-                }
-            });
-        }
-
-        @android.webkit.JavascriptInterface
-        public void restore(final String requestId) {
-            NorvaBilling.restore(new NorvaBilling.ResultCallback() {
-                @Override
-                public void onResult(String status, String error) {
-                    sendBillingResult(requestId, status, null, error);
-                }
-            });
-        }
     }
 
     private class CloudBridge {
@@ -584,33 +712,6 @@ public class MainActivity extends Activity {
                                                final String sourceId, final String itemType, final String itemId,
                                                final int resumeSeconds) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl);
-        }
-
-        // ---- Billing (Google Play Billing via RevenueCat) ----
-
-        @android.webkit.JavascriptInterface
-        public void billingLogin(final String userId) {
-            NorvaBilling.login(userId);
-        }
-
-        @android.webkit.JavascriptInterface
-        public void purchase(final String packageId, final String planCode, final String requestId) {
-            NorvaBilling.purchase(MainActivity.this, packageId, new NorvaBilling.ResultCallback() {
-                @Override
-                public void onResult(String status, String error) {
-                    sendBillingResult(requestId, status, planCode, error);
-                }
-            });
-        }
-
-        @android.webkit.JavascriptInterface
-        public void restore(final String requestId) {
-            NorvaBilling.restore(new NorvaBilling.ResultCallback() {
-                @Override
-                public void onResult(String status, String error) {
-                    sendBillingResult(requestId, status, null, error);
-                }
-            });
         }
 
         // The web layer's history save SUCCEEDED for the pending record carrying this token —
@@ -665,9 +766,53 @@ public class MainActivity extends Activity {
                 if (nextTitle != null && !nextTitle.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
                 if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
                 if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
-                startActivityForResult(intent, REQ_PLAYER);
+                launchPlayerWithEphemeralAuth(intent);
             }
         });
+    }
+
+    private void launchPlayerWithEphemeralAuth(final android.content.Intent intent) {
+        if (webView == null || !cloudBridgeAdded || !isTrustedCloudUrl(webView.getUrl())) {
+            startActivityForResult(intent, REQ_PLAYER);
+            return;
+        }
+        final java.util.concurrent.atomic.AtomicBoolean launched =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Runnable fallback = new Runnable() {
+            @Override
+            public void run() {
+                if (launched.compareAndSet(false, true)) {
+                    startActivityForResult(intent, REQ_PLAYER);
+                }
+            }
+        };
+        uiHandler.postDelayed(fallback, 250L);
+        webView.evaluateJavascript(
+                "(function(){try{var d=localStorage.getItem('norva-cloud-device-token')||'';"
+                        + "var u=localStorage.getItem('norva-cloud-token')||'';"
+                        + "if(!u){var s=JSON.parse(localStorage.getItem('norva-cloud-session')||'null');"
+                        + "u=(s&&s.access_token)||'';}return d||u||'';}catch(e){return '';}})()",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String raw) {
+                        String token = decodeJavascriptString(raw);
+                        if (!launched.compareAndSet(false, true)) return;
+                        uiHandler.removeCallbacks(fallback);
+                        if (!token.isEmpty() && token.length() <= 16_384) {
+                            intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_TOKEN, token);
+                        }
+                        startActivityForResult(intent, REQ_PLAYER);
+                    }
+                });
+    }
+
+    private static String decodeJavascriptString(String raw) {
+        try {
+            if (raw == null || "null".equals(raw)) return "";
+            return new org.json.JSONArray("[" + raw + "]").optString(0, "");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     /** JSON-payload launch used by the newest web bridge (playVideoJson). */
@@ -798,24 +943,6 @@ public class MainActivity extends Activity {
                 }
             });
         }
-    }
-
-    /** Post a billing result back to the web layer (subscribe.html / billing.js). */
-    private void sendBillingResult(final String requestId, final String status, final String planCode, final String error) {
-        try {
-            org.json.JSONObject o = new org.json.JSONObject();
-            o.put("requestId", requestId);
-            o.put("status", status);
-            if (planCode != null) o.put("planCode", planCode);
-            if (error != null) o.put("error", error);
-            final String js = "window.__norvaBilling && window.__norvaBilling.onResult(" + jsStr(o.toString()) + ")";
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
-                }
-            });
-        } catch (Exception ignored) { }
     }
 
     @Override

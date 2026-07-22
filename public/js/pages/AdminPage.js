@@ -298,6 +298,17 @@ class AdminPage {
 #page-admin .hbar-fill.warn{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
 #page-admin .hbar-v{font-size:13px;font-weight:700;color:var(--adm-tx);text-align:right;font-variant-numeric:tabular-nums;}
 @media(max-width:560px){#page-admin .hbar{grid-template-columns:100px 1fr 42px;gap:8px;}}
+/* Paywall funnel: experiment state and non-additive dimensional cohorts. */
+#page-admin .pw-exp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:12px 0 14px;}
+#page-admin .pw-exp{background:rgba(255,255,255,.018);border:1px solid var(--adm-line2);border-radius:12px;padding:11px 13px;min-width:0;}
+#page-admin .pw-exp-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:12px;font-weight:650;}
+#page-admin .pw-exp-v{display:flex;flex-wrap:wrap;gap:6px;}
+#page-admin .pw-exp-v .badge{font-variant-numeric:tabular-nums;}
+#page-admin .pw-dims{margin-top:14px;border-top:1px solid var(--adm-line2);padding-top:11px;}
+#page-admin .pw-dims summary{cursor:pointer;color:var(--adm-tx2);font-size:12px;font-weight:650;list-style-position:inside;}
+#page-admin .pw-dims[open] summary{margin-bottom:9px;color:var(--adm-tx);}
+#page-admin .pw-dims td{font-size:12px;}
+#page-admin .pw-dims-note{font-size:11px;color:var(--adm-tx3);margin-top:8px;line-height:1.45;}
 /* Moteur: Matching TMDB (left) ‖ Crons (right) */
 #page-admin .mot-cols{display:grid;grid-template-columns:0.9fr 2.2fr;gap:16px;margin-bottom:18px;align-items:stretch;}
 #page-admin .mot-cols > *{margin-bottom:0;min-width:0;}
@@ -1123,14 +1134,20 @@ class AdminPage {
             <div id="fin-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
-            const [f, sparks, vat, fc] = await Promise.all([
+            const [f, sparks, vat, fc, paywall] = await Promise.all([
                 this._rpc('admin_finance'),
                 this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null), // sparklines are non-critical
                 this._rpc('admin_vat_report').catch(() => null), // panneau TVA non-critique (absent avant migration)
-                this._rpc('admin_vat_forecast').catch(() => null) // provision + prévision T+1 + ETA (non-critique)
+                this._rpc('admin_vat_forecast').catch(() => null), // provision + prévision T+1 + ETA (non-critique)
+                // Experiment analytics stay separate from admin_finance(). An older
+                // deployment without this RPC must never take the Finance page down.
+                this._rpc('admin_paywall_funnel_30d').catch(error => ({
+                    unavailable: true,
+                    message: error && error.message ? error.message : 'RPC indisponible'
+                }))
             ]);
             this._vatForecast = fc || null; // trimestre-indépendant — survit aux re-renders du panneau
-            this._renderFinance(f || {}, sparks && sparks.series, vat);
+            this._renderFinance(f || {}, sparks && sparks.series, vat, paywall);
         } catch (e) {
             const el = document.getElementById('fin-body');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
@@ -1716,7 +1733,7 @@ class AdminPage {
         }
     }
 
-    _renderFinance(f, sparks, vat) {
+    _renderFinance(f, sparks, vat, paywall) {
         const el = document.getElementById('fin-body');
         if (!el) return;
         const n = AdminPage.n, money = AdminPage.money, esc = AdminPage.esc;
@@ -1751,7 +1768,7 @@ class AdminPage {
             const max = Math.max(1, ...rows.map(r => Number(r.v) || 0));
             return `<div class="hbars">${rows.map(r => {
                 const val = Number(r.v) || 0, pct = Math.max(2, Math.round(100 * val / max));
-                return `<div class="hbar"><div class="hbar-l" title="${esc(r.label)}">${esc(r.label)}</div>` +
+                return `<div class="hbar"${r.tip ? ` title="${esc(r.tip)}"` : ''}><div class="hbar-l" title="${esc(r.label)}">${esc(r.label)}</div>` +
                     `<div class="hbar-track"><div class="hbar-fill ${cls || ''}" style="width:${pct}%"></div></div>` +
                     `<div class="hbar-v">${n(val)}</div></div>`;
             }).join('')}</div>`;
@@ -1765,6 +1782,87 @@ class AdminPage {
         const funnelMap = {};
         (Array.isArray(f.funnel_30d) ? f.funnel_30d : []).forEach(r => { funnelMap[r.stage] = r.users; });
         const funnelData = FUNNEL_ORDER.filter(s => funnelMap[s] != null).map(s => ({ label: FUNNEL_LABELS[s] || s, v: funnelMap[s] }));
+
+        // Dedicated paywall funnel. The server provides a true 30-day distinct-account
+        // rollup plus dimensional cohorts. Never sum users from `stage_totals`: the same
+        // account can legitimately appear on several placements or surfaces.
+        const PAYWALL_ORDER = ['paywall_exposed', 'checkout_started', 'order_authorized', 'payment_captured', 'entitlement_activated', 'first_play'];
+        const PAYWALL_LABELS = {
+            paywall_exposed: 'Paywall affiché',
+            checkout_started: 'Checkout démarré',
+            order_authorized: 'Paiement autorisé',
+            payment_captured: 'Paiement encaissé',
+            entitlement_activated: 'Accès activé',
+            first_play: '1ʳᵉ lecture réussie'
+        };
+        const pw = paywall && typeof paywall === 'object' ? paywall : {};
+        const pwUnavailable = pw.unavailable === true;
+        const pwStageTotals = Array.isArray(pw.stage_totals) ? pw.stage_totals : [];
+        const hasPwRollup = Array.isArray(pw.stage_rollup);
+        // Compatibility with a short-lived RPC version: a dimensional row can stand in
+        // for a global total only when it is the sole row for that stage. No addition.
+        const pwSingleDimensionFallback = hasPwRollup ? [] : PAYWALL_ORDER.map(stage => {
+            const rows = pwStageTotals.filter(row => row && row.stage === stage);
+            return rows.length === 1 ? rows[0] : null;
+        }).filter(Boolean);
+        const pwRollup = hasPwRollup ? pw.stage_rollup : pwSingleDimensionFallback;
+        const pwRollupByStage = new Map((Array.isArray(pwRollup) ? pwRollup : [])
+            .filter(row => row && PAYWALL_ORDER.includes(row.stage))
+            .map(row => [row.stage, row]));
+        const pwFunnelData = PAYWALL_ORDER.filter(stage => pwRollupByStage.has(stage)).map(stage => {
+            const row = pwRollupByStage.get(stage);
+            return {
+                label: PAYWALL_LABELS[stage],
+                v: row.users,
+                tip: `${n(row.users)} compte(s) unique(s) · ${n(row.events)} événement(s)`
+            };
+        });
+        const pwDimensions = pwStageTotals.filter(row => row && PAYWALL_ORDER.includes(row.stage)).slice().sort((a, b) => {
+            const stage = PAYWALL_ORDER.indexOf(a.stage) - PAYWALL_ORDER.indexOf(b.stage);
+            if (stage) return stage;
+            return ['experiment_key', 'variant', 'placement', 'surface']
+                .map(key => String(a[key] || '').localeCompare(String(b[key] || ''), 'fr'))
+                .find(value => value) || 0;
+        });
+        const pwDim = value => value ? `<span class="badge gray">${esc(value)}</span>` : '<span class="ssub">—</span>';
+        const pwDimensionRows = pwDimensions.map(row => `<tr>
+            <td>${esc(PAYWALL_LABELS[row.stage] || row.stage)}</td>
+            <td>${pwDim(row.experiment_key)}</td><td>${pwDim(row.variant)}</td>
+            <td>${pwDim(row.placement)}</td><td>${pwDim(row.surface)}</td>
+            <td class="num">${n(row.users)}</td><td class="num">${n(row.events)}</td>
+        </tr>`).join('');
+        const pwAssignments = Array.isArray(pw.assignments) ? pw.assignments : [];
+        const assignedAccounts = (experimentKey, variant) => {
+            const row = pwAssignments.find(a => a && a.experiment_key === experimentKey && a.variant === variant);
+            return row ? Number(row.accounts) || 0 : 0;
+        };
+        const pwExperiments = (Array.isArray(pw.experiments) ? pw.experiments : []).map(experiment => {
+            const variants = Array.isArray(experiment.variants) ? experiment.variants : [];
+            const variantBadges = variants.map(variant => {
+                const allocation = (Number(variant.allocation_bps) || 0) / 100;
+                const accounts = assignedAccounts(experiment.experiment_key, variant.variant);
+                const cls = variant.active === false ? 'gray' : allocation > 0 ? 'blue' : 'gray';
+                return `<span class="badge ${cls}" title="Allocation pour les nouvelles assignations">${esc(variant.variant)} · ${allocation.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} % · ${n(accounts)} compte(s)</span>`;
+            }).join('');
+            return `<div class="pw-exp"><div class="pw-exp-h"><span>${esc(experiment.experiment_key)}</span>` +
+                `<span class="badge ${experiment.active ? 'green' : 'gray'}">${experiment.active ? 'actif' : 'inactif'}</span></div>` +
+                `<div class="pw-exp-v">${variantBadges || '<span class="ssub">Aucune variante.</span>'}</div></div>`;
+        }).join('');
+        const pwGenerated = pw.generated_at ? ` · généré ${esc(AdminPage.timeAgo(pw.generated_at))}` : '';
+        const paywallFunnelHtml = pwUnavailable
+            ? `<div class="admin-block"><h2>🧭 Funnel paywall (30 j)</h2><div class="ssub" title="${esc(pw.message || '')}">Analyse paywall indisponible sur ce déploiement. Le funnel historique et le reste de Finance restent accessibles.</div></div>`
+            : `<div class="admin-block"><h2>🧭 Funnel paywall (30 j)</h2>
+                <div class="ssub" style="margin-bottom:10px">Comptes uniques sur toute la fenêtre, calculés côté serveur — comptes internes exclus${pwGenerated}.</div>
+                ${pwFunnelData.length ? hbars(pwFunnelData, '')
+                    : (hasPwRollup
+                        ? '<div class="ssub">Aucune exposition ou conversion commerciale sur les 30 derniers jours.</div>'
+                        : '<div class="ssub">Totaux uniques globaux indisponibles sur cette version du RPC. Le détail dimensionnel ci-dessous reste exact et n’est pas additionné.</div>')}
+                ${pwExperiments ? `<div class="pw-exp-grid">${pwExperiments}</div>` : '<div class="ssub" style="margin-top:12px">Aucune expérience configurée.</div>'}
+                ${pwDimensionRows ? `<details class="pw-dims"><summary>Détail par variante, placement et surface · ${n(pwDimensions.length)} cohorte(s)</summary>
+                    <div class="scroll"><table><thead><tr><th>Étape</th><th>Expérience</th><th>Variante</th><th>Placement</th><th>Surface</th><th class="num">Comptes</th><th class="num">Événements</th></tr></thead><tbody>${pwDimensionRows}</tbody></table></div>
+                    <div class="pw-dims-note">Les comptes sont uniques dans chaque cohorte. Ne pas additionner les lignes entre placements ou surfaces : un même compte peut apparaître dans plusieurs cohortes.</div>
+                </details>` : ''}
+            </div>`;
 
         const REASONS = { too_expensive: 'Trop cher', not_using: 'Utilise pas assez', technical: 'Problème technique', other: 'Autre', skipped: 'Non précisé' };
         const reasonData = (Array.isArray(f.cancel_reasons) ? f.cancel_reasons : []).map(r => ({ label: REASONS[r.reason] || r.reason, v: r.n }));
@@ -1945,8 +2043,9 @@ class AdminPage {
             </div>
             <!-- 📊 Onglet Analyse : funnel + rétention -->
             <div id="fin-tab-analyse"${finShow('analyse')}>
+                ${paywallFunnelHtml}
                 <div class="fin-cols">
-                    <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2>
+                    <div class="admin-block"><h2>🔀 Funnel historique (30 j)</h2>
                         ${funnelData.length ? hbars(funnelData, '') : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
                     </div>
                     <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
