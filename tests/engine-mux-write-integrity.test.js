@@ -73,14 +73,28 @@ test('every generated wasm helper checks packet-write errors inside the worker',
 
 test('engine cache-busts the loader, worker glue, and wasm binary together', () => {
     const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.ok(src.includes("libav-norva.mjs?v=43"),
+    assert.ok(src.includes("libav-norva.mjs?v=44"),
         'dynamic loader import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=43"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=44"),
         'worker glue import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=43"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=44"),
         'wasm binary fetch must be revisioned');
     assert.ok(src.includes('toImport: LIBAV_RUNTIME'));
     assert.ok(src.includes('wasmurl: LIBAV_WASM'));
+});
+
+test('engine failure telemetry preserves bounded timestamp and last-append evidence', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'pages', 'WatchPage.js'), 'utf8');
+    assert.ok(src.includes('videoDtsRepairs: snap.videoDtsRepairs'));
+    assert.ok(src.includes('firstVideoTimestampError: snap.firstVideoTimestampError'));
+    assert.ok(src.includes('videoDurationCorrections: snap.videoDurationCorrections'));
+    assert.ok(src.includes('firstVideoDurationError: snap.firstVideoDurationError'));
+    assert.ok(src.includes('snap.recentAppends[snap.recentAppends.length - 1]'));
+    assert.ok(src.includes("a.boxes.slice(0, 160)"),
+        'only a bounded last-append box summary may be persisted');
+    const compact = src.slice(src.indexOf('engineSnapshot: snap ? {'), src.indexOf('} : null', src.indexOf('engineSnapshot: snap ? {')));
+    assert.ok(!compact.includes('recentAppends: snap.recentAppends'),
+        'the growing append ring must never be persisted wholesale');
 });
 
 test('video DTS reconstruction does not accumulate rounded 23.976 fps packet durations', () => {
@@ -115,6 +129,65 @@ test('video DTS reconstruction does not accumulate rounded 23.976 fps packet dur
 
     assert.strictEqual(engine._diag.videoDtsRepairs || 0, 0,
         'normal fractional cadence must not need one-tick duplicate repair');
+});
+
+test('video packet durations exactly bridge reconstructed DTS across every fragment', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    const muxPackets = [];
+
+    // Use enough frames to cross the production failure window (>200 s), with
+    // keyframes every 48 frames so each one starts a fresh fMP4 fragment.
+    for (let i = 0; i < 6000; i++) {
+        const presentationIndex = Math.floor(i / 3) * 3 + [0, 2, 1][i % 3];
+        const pts = 53_416 + Math.round(presentationIndex * 1001 / 24);
+        const [ptsLo, ptsHi] = split64(pts);
+        const packet = {
+            pts: ptsLo,
+            ptshi: ptsHi,
+            duration: 43,
+            flags: i % 48 === 0 ? 1 : 0,
+        };
+        const ready = engine._prepareVideoPacket(packet);
+        if (ready) muxPackets.push(ready);
+    }
+
+    assert.ok(muxPackets.length > 5900);
+    let startDts = null;
+    let trackDuration = 0;
+    let fragments = 0;
+    for (let i = 0; i < muxPackets.length; i++) {
+        const packet = muxPackets[i];
+        const dts = join64(packet.dts, packet.dtshi);
+        if (startDts === null) startDts = dts;
+        if ((packet.flags & 1) && i > 0) {
+            fragments += 1;
+            // movenc performs exactly this adjustment for the first packet in a
+            // new fragment. A mismatch here becomes a delayed MSE append failure.
+            assert.strictEqual(startDts + trackDuration, dts,
+                `fragment ${fragments}: duration sum must land on its first DTS`);
+        }
+        assert.ok(packet.duration > 0);
+        assert.strictEqual(packet.durationhi, 0);
+        if (i + 1 < muxPackets.length) {
+            const nextDts = join64(muxPackets[i + 1].dts, muxPackets[i + 1].dtshi);
+            assert.strictEqual(packet.duration, nextDts - dts,
+                `packet ${i}: duration must equal the next DTS delta`);
+        }
+        trackDuration = dts - startDts + packet.duration;
+    }
+
+    assert.ok(fragments > 100, 'the regression must cover many fMP4 fragments');
+    assert.ok(engine._diag.videoDurationCorrections > 1000,
+        'rounded source durations should be replaced by exact 41/42 ms deltas');
+    assert.strictEqual(engine._diag.firstVideoDurationError || null, null);
 });
 
 test('a successful batch uses one worker RPC and commits staged bytes only afterwards', async () => {

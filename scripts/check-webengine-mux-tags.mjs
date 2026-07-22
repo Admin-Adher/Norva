@@ -65,6 +65,7 @@ async function remux(mkv) {
   await libav.avformat_write_header(oc, 0);
 
   const D_REORDER = 16; let vBase = null, vFd0 = 0, vLastDts = null;
+  let pendingVideo = null, lastVideoDuration = null;
   const vPtsWindow = [];
   const setVideoDts = (p) => {
     const pts = to64(p.pts, p.ptshi);
@@ -79,6 +80,20 @@ async function remux(mkv) {
     vLastDts = dts;
     const [lo, hi] = from64(dts); p.dts = lo; p.dtshi = hi;
   };
+  const prepareVideo = (p) => {
+    setVideoDts(p);
+    const ready = pendingVideo;
+    pendingVideo = p;
+    if (!ready) return null;
+    const duration = to64(p.dts, p.dtshi) - to64(ready.dts, ready.dtshi);
+    if (!(Number.isSafeInteger(duration) && duration > 0 && duration <= 0x7fffffff)) {
+      throw new Error(`VIDEO_DURATION_INVALID:${duration}`);
+    }
+    ready.duration = duration;
+    ready.durationhi = 0;
+    lastVideoDuration = duration;
+    return ready;
+  };
   const pkt = await libav.av_packet_alloc();
   let res, guard = 0;
   do {
@@ -86,12 +101,22 @@ async function remux(mkv) {
     [res, packets] = await libav.ff_read_frame_multi(fmtCtx, pkt, { limit: 256 * 1024 });
     const wl = [];
     for (const k in packets) for (const p of packets[k]) {
-      if (vS && p.stream_index === vS.index) { p.stream_index = V_IDX; setVideoDts(p); wl.push(p); }
+      if (vS && p.stream_index === vS.index) {
+        p.stream_index = V_IDX;
+        const ready = prepareVideo(p);
+        if (ready) wl.push(ready);
+      }
       else if (aS && copyAudio && p.stream_index === aS.index) { p.stream_index = A_IDX; wl.push(p); }
     }
     if (wl.length) await libav.ff_write_multi(oc, pkt, wl);
     if (++guard > 200000) break;
   } while (res === 0 || res === -libav.EAGAIN);
+  if (pendingVideo) {
+    pendingVideo.duration = lastVideoDuration || vFd0 || 1;
+    pendingVideo.durationhi = 0;
+    await libav.ff_write_multi(oc, pkt, [pendingVideo]);
+    pendingVideo = null;
+  }
   await libav.av_write_trailer(oc);
 
   const total = chunks.reduce((n, c) => n + c.length, 0);

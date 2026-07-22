@@ -3792,6 +3792,21 @@ class WatchPage {
                         seekWrites: snap.seekWrites, firstSeek: snap.firstSeek,
                         writeDiscontinuities: snap.writeDiscontinuities,
                         firstWriteDiscontinuity: snap.firstWriteDiscontinuity,
+                        videoDtsRepairs: snap.videoDtsRepairs,
+                        firstVideoTimestampError: snap.firstVideoTimestampError,
+                        videoDurationCorrections: snap.videoDurationCorrections,
+                        firstVideoDurationError: snap.firstVideoDurationError,
+                        lastAppend: Array.isArray(snap.recentAppends) && snap.recentAppends.length
+                            ? (() => {
+                                const a = snap.recentAppends[snap.recentAppends.length - 1] || {};
+                                return {
+                                    n: Number.isFinite(a.n) ? a.n : null,
+                                    bytes: Number.isFinite(a.bytes) ? a.bytes : null,
+                                    boxes: typeof a.boxes === 'string' ? a.boxes.slice(0, 160) : null,
+                                    tsOffset: Number.isFinite(a.tsOffset) ? a.tsOffset : null,
+                                };
+                            })()
+                            : null,
                         video: snap.video, sb: snap.sb, ms: snap.ms, timings: snap.timings,
                     } : null
                 }

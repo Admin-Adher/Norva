@@ -183,6 +183,7 @@ async function streamRemux(id) {
     // can round 23.976 fps to 43 ms and make synthetic DTS overtake PTS after ~22s.
     const D_REORDER = 16;
     let vBase = null, vFd0 = 0, vLastDts = null;
+    let pendingVideo = null, lastVideoDuration = null;
     const vPtsWindow = [];
     const setVideoDts = (p) => {
       const pts = to64(p.pts, p.ptshi);
@@ -196,6 +197,20 @@ async function streamRemux(id) {
       if ((vLastDts !== null && dts <= vLastDts) || dts > pts) throw new Error(`VIDEO_TIMESTAMP_INVALID:${pts}:${dts}:${vLastDts}`);
       vLastDts = dts;
       const [lo, hi] = from64(dts); p.dts = lo; p.dtshi = hi;
+    };
+    const prepareVideo = (p) => {
+      setVideoDts(p);
+      const ready = pendingVideo;
+      pendingVideo = p;
+      if (!ready) return null;
+      const duration = to64(p.dts, p.dtshi) - to64(ready.dts, ready.dtshi);
+      if (!(Number.isSafeInteger(duration) && duration > 0 && duration <= 0x7fffffff)) {
+        throw new Error(`VIDEO_DURATION_INVALID:${duration}`);
+      }
+      ready.duration = duration;
+      ready.durationhi = 0;
+      lastVideoDuration = duration;
+      return ready;
     };
 
     const initFilter = async (fr) => {
@@ -227,8 +242,8 @@ async function streamRemux(id) {
       [res, packets] = await lib.ff_read_frame_multi(fmtCtx, pkt, { limit: 256 * 1024 });
       for (const k in packets) for (const p of packets[k]) {
         if (vS && p.stream_index === vS.index) {
-          p.stream_index = V_IDX; setVideoDts(p); vc++;
-          await lib.ff_write_multi(oc, pkt, [p]);
+          p.stream_index = V_IDX; const ready = prepareVideo(p); vc++;
+          if (ready) await lib.ff_write_multi(oc, pkt, [ready]);
         } else if (aS && p.stream_index === aS.index) {
           ac++;
           if (COPY_AUDIO) { p.stream_index = A_IDX; await lib.ff_write_multi(oc, pkt, [p]); }
@@ -238,6 +253,12 @@ async function streamRemux(id) {
       if (++guard > 200000) { log('garde-fou boucle atteint'); break; }
     } while (res === 0 || res === -lib.EAGAIN);
 
+    if (pendingVideo) {
+      pendingVideo.duration = lastVideoDuration || vFd0 || 1;
+      pendingVideo.durationhi = 0;
+      await lib.ff_write_multi(oc, pkt, [pendingVideo]);
+      pendingVideo = null;
+    }
     if (aS && !COPY_AUDIO) { const fr = await lib.ff_decode_multi(decCtx, decPkt, decFrame, [], true); await pushAudio(fr, true); }
     await lib.av_write_trailer(oc);
     ended = true; drain();

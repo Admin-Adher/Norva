@@ -18,10 +18,10 @@
 (function () {
   'use strict';
 
-  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=43';
+  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=44';
   const LIBAV_BASE = '/webengine/vendor/libav';
-  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=43';
-  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=43';
+  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=44';
+  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=44';
   const STREAM_TOP_LEVEL_BOXES = new Set([
     'ftyp', 'free', 'skip', 'wide', 'mdat', 'moov', 'moof', 'mfra', 'mfro',
     'sidx', 'ssix', 'styp', 'prft', 'emsg', 'pdin', 'uuid',
@@ -265,7 +265,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 43;
+  const ENGINE_VERSION = 44;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -354,6 +354,15 @@
       // rejects the packet with EINVAL.
       this._videoPtsWindow = [];
       this._lastVideoDts = null;
+      // movenc writes each sample duration into trun and uses the sum of those
+      // durations to retime the first DTS of the next fragment. Matroska packet
+      // duration is commonly rounded (43 ms for 23.976 fps), while the real DTS
+      // cadence alternates 41/42 ms. Keep one video packet pending so its exact
+      // duration can be set from the following reconstructed DTS before movenc
+      // ever sees it. Otherwise the fragment timeline drifts until MSE rejects a
+      // later moof even though every incoming DTS itself is legal.
+      this._pendingVideoPacket = null;
+      this._lastExactVideoDuration = null;
       this._onSeeking = this._handleSeeking.bind(this);
       this._onTimeUpdate = this._handleTimeUpdate.bind(this);
       // Engine-wide abort: destroy() fires it so EVERY in-flight byte-range fetch is
@@ -1402,6 +1411,8 @@
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
       this._videoPtsWindow = [];
       this._lastVideoDts = null;
+      this._pendingVideoPacket = null;
+      this._lastExactVideoDuration = null;
       this.fg = null; this.fsrc = null; this.fsink = null; // filter is lazy per run
       // Drop captured cues: a seek re-demuxes from the new point and re-bases vBase/_tsAnchor,
       // so old-epoch cues would convert to the wrong local time. The player keeps the cues it
@@ -1670,7 +1681,8 @@
             if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
             p.stream_index = this.V_IDX;
             if (this._convertAnnexb) p.data = annexbToAvcc(p.data); // MPEG-TS: annexb → AVCC for mp4
-            this._setVideoDts(p); writeList.push(p);
+            const readyVideo = this._prepareVideoPacket(p);
+            if (readyVideo) writeList.push(readyVideo);
           } else if (this.aS && p.stream_index === this.aS.index) {
             // Hold audio until the first video keyframe is anchored, so a mid-GOP resume starts A/V
             // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
@@ -1742,6 +1754,8 @@
         return;
       }
       // EOF: flush audio + trailer + endOfStream
+      const tailVideo = this._flushPendingVideoPacket();
+      if (tailVideo && !(await this._writePacketsChecked([tailVideo]))) return;
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);
         const enc = await this._encodeAudio(fr, true);
@@ -1831,6 +1845,48 @@
           dur: p.duration || 0, anchor: this._tsAnchor, gopFloor: this._gopFloorPts,
         };
       }
+    }
+
+    _prepareVideoPacket(p) {
+      this._setVideoDts(p);
+      const pending = this._pendingVideoPacket;
+      this._pendingVideoPacket = p;
+      if (!pending) return null;
+
+      const pendingDts = to64(pending.dts, pending.dtshi);
+      const nextDts = to64(p.dts, p.dtshi);
+      const exactDuration = nextDts - pendingDts;
+      // _setVideoDts already records/repairs illegal ordering. Do not hide an
+      // unrecoverable reset here: retain a positive bounded duration so the
+      // transactional mux write reports the actual bad DTS through onFatal.
+      if (Number.isSafeInteger(exactDuration) && exactDuration > 0 && exactDuration <= 0x7fffffff) {
+        pending.duration = exactDuration;
+        pending.durationhi = 0;
+        this._lastExactVideoDuration = exactDuration;
+        if (this._diag && exactDuration !== this.vFd0) {
+          this._diag.videoDurationCorrections = (this._diag.videoDurationCorrections || 0) + 1;
+        }
+      } else {
+        pending.duration = this._lastExactVideoDuration || this.vFd0 || 1;
+        pending.durationhi = 0;
+        if (this._diag && !this._diag.firstVideoDurationError) {
+          this._diag.firstVideoDurationError = { pendingDts, nextDts, exactDuration };
+        }
+      }
+      return pending;
+    }
+
+    _flushPendingVideoPacket() {
+      const pending = this._pendingVideoPacket;
+      this._pendingVideoPacket = null;
+      if (!pending) return null;
+      // Only natural EOF needs this estimate; during normal playback every
+      // packet gets the exact next-DTS delta. Reusing the latest exact duration
+      // keeps the final trun coherent without affecting any later fragment.
+      pending.duration = this._lastExactVideoDuration || this.vFd0 ||
+        (((pending.duration || 0) > 0) ? pending.duration : 1);
+      pending.durationhi = 0;
+      return pending;
     }
 
     // ---- MSE buffer plumbing ----------------------------------------------
@@ -2006,6 +2062,8 @@
         firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
         videoDtsRepairs: d.videoDtsRepairs || 0,
         firstVideoTimestampError: d.firstVideoTimestampError || null,
+        videoDurationCorrections: d.videoDurationCorrections || 0,
+        firstVideoDurationError: d.firstVideoDurationError || null,
         muxStructureErrors: d.muxStructureErrors || 0,
         firstMuxStructureError: d.firstMuxStructureError || null,
         muxRejectedBytes: d.muxRejectedBytes || 0,
