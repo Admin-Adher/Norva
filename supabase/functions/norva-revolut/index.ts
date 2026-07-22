@@ -420,7 +420,8 @@ Deno.serve(async (req) => {
   // `prices` are EFFECTIVE (an active promo already applied); `promos` carries the
   // struck-through base + event badge for display. Display only — every order
   // amount is still decided server-side from the same source. The pages keep
-  // their static values as fallback when this is down.
+  // fail closed when the endpoint is unavailable; the Edge-side catalog keeps
+  // its own server-controlled emergency fallback for order continuity.
   if (req.method === "GET" && path === "/prices") {
     const catalog = await getCatalog(db);
     return json({ ok: true, currency: "usd", prices: catalog.prices, promos: catalog.promos, campaign: catalog.campaign });

@@ -1,6 +1,6 @@
 /**
  * Norva billing client — one abstraction over both rails:
- *   - Native (Android phone / tablet / TV APK): Google Play Billing, driven by
+ *   - Native (Android phone / tablet APK): Google Play Billing, driven by
  *     the RevenueCat SDK on the native side and reached through the WebView
  *     bridge (window.NorvaTVCloud / window.NodeCastNative).
  *   - Web (browser): Revolut Merchant (embedded card checkout) is the live rail,
@@ -11,7 +11,8 @@
  * exact Supabase user id supplied by that operation and verifies the resulting
  * App User ID before continuing.
  *
- * Everything here is guarded: with no native bridge and no web key, the calls
+ * Android TV deliberately uses the external Web subscription path and exposes
+ * no native billing channel. Everything here is guarded: with no native bridge and no web key, the calls
  * reject with a clear code instead of throwing at load time.
  */
 (function () {
