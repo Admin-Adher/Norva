@@ -4542,10 +4542,11 @@ function startFfmpeg(session) {
     const requireKnownStreams =
         session.fastInputProbe === true ||
         session.forceFullInputProbe === true;
-    const audioArgs = audioArgsForSession(session);
+    const copyAudio = shouldCopyAudio(session);
+    const audioArgs = audioArgsForSession(session, copyAudio);
     const audioMap = audioMapForSession(session, requireKnownStreams);
     const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
-    const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo);
+    const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo, copyAudio);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
     const args = [
         '-hide_banner',
@@ -4684,8 +4685,16 @@ function seekArgsForSession(session, encodeVideo) {
     return { preInputSeek: ['-seekable', '0'], postInputSeek: ['-ss', String(seekOffset)] };
 }
 
-function usesSourceTimestampedCopySeek(session, encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session)) {
-    return !encodeVideo && Number(session.seekOffset) > 0;
+function usesSourceTimestampedCopySeek(session, encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session), copyAudio = shouldCopyAudio(session)) {
+    // `-copyts` must cover every A/V output on the same clock. When video is
+    // copied but audio is encoded (for example H.264 + E-AC-3 -> AAC), FFmpeg
+    // preserves the video's absolute source PTS while the audio encoder starts
+    // at zero. The resulting HLS segment advertises two incompatible timelines:
+    // Chromium waits outside the playable intersection and appears to jump far
+    // beyond the requested resume point. Let FFmpeg rebase both tracks together
+    // in that mixed copy/encode case. Source-timestamp measurement remains useful
+    // only when both selected A/V streams are copied unchanged.
+    return !encodeVideo && copyAudio && Number(session.seekOffset) > 0;
 }
 
 async function observeSessionStartOffset(session) {
@@ -4833,8 +4842,8 @@ function isLiveSession(session) {
     }
 }
 
-function audioArgsForSession(session) {
-    return shouldCopyAudio(session) ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
+function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
+    return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
 }
 
 function audioModeForSession(session) {

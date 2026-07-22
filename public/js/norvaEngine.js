@@ -18,10 +18,10 @@
 (function () {
   'use strict';
 
-  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=44';
+  const LIBAV_LOADER = '/webengine/vendor/libav/libav-norva.mjs?v=45';
   const LIBAV_BASE = '/webengine/vendor/libav';
-  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=44';
-  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=44';
+  const LIBAV_RUNTIME = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.mjs?v=45';
+  const LIBAV_WASM = '/webengine/vendor/libav/libav-6.8.8.0-norva.wasm.wasm?v=45';
   const STREAM_TOP_LEVEL_BOXES = new Set([
     'ftyp', 'free', 'skip', 'wide', 'mdat', 'moov', 'moof', 'mfra', 'mfro',
     'sidx', 'ssix', 'styp', 'prft', 'emsg', 'pdin', 'uuid',
@@ -63,6 +63,11 @@
   const AAC_CHANNEL_LAYOUT = 3; // stereo
   const AAC_BIT_RATE = 192000;
   const D_REORDER = 16; // video DTS reconstruction reorder depth (frames)
+  // Some Matroska files expose a real, monotonic decode timeline while others
+  // expose AV_NOPTS_VALUE or merely copy reordered PTS into DTS. Validate one
+  // full reorder window before trusting source DTS so no synthetic offset is
+  // imposed on streams (such as no-B-frame H.264) that already have exact DTS.
+  const SOURCE_DTS_PROBE_PACKETS = D_REORDER;
 
   const to64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
   const from64 = (v) => { const hi = Math.floor(v / 4294967296); return [(v - hi * 4294967296) >>> 0, hi]; };
@@ -265,7 +270,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 44;
+  const ENGINE_VERSION = 45;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -343,17 +348,34 @@
       this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
       this.decCtx = null; this.decPkt = null; this.decFrame = null;
       this.encCtx = null; this.encFrame = null; this.encPkt = null; this.frameSize = 0; this.encCodecpar = null;
+      // Audio transcode output is clocked from one exact 48 kHz sample counter.
+      // The filter can propagate Matroska's rounded millisecond PTS (1013/1061
+      // tick jumps for 1024-sample AAC frames), which eventually creates gaps in
+      // the fMP4 track. Preserve one real starting PTS, then advance by samples.
+      this._audioNextPts48k = null;
+      this._audioDecodedAnchor48k = null;
       this.fg = null; this.fsrc = null; this.fsink = null;
       this.oc = null; this.pkt = null;
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
-      // H.264/H.265 packets from Matroska often have no usable DTS. Reconstruct it
-      // from a bounded window of the *actual* PTS values instead of accumulating
-      // AVPacket.duration. Container durations can be rounded (for example 43 ms
-      // for 23.976 fps whose real cadence is about 41.7 ms); accumulating that
-      // rounding error eventually makes synthetic DTS overtake PTS and movenc
-      // rejects the packet with EINVAL.
+      // Preserve a real source DTS when it is valid. If DTS is AV_NOPTS but PTS
+      // is already monotonic (the common no-B-frame Matroska case), DTS=PTS is the
+      // exact decode timeline and must not receive an invented 16-frame offset.
+      // Only reordered PTS without a usable source DTS needs reconstruction from
+      // a bounded window of the actual PTS values.
       this._videoPtsWindow = [];
       this._lastVideoDts = null;
+      this._videoPtsWindowSeeded = false;
+      this._videoDtsMode = null; // null while probing, then source / pts-monotonic / reconstructed
+      this._videoDtsProbe = [];
+      this._sourceDtsProbeLast = null;
+      this._sourceDtsProbeViable = true;
+      this._sourceDtsProbeRejectedReason = null;
+      this._videoPtsProbeLast = null;
+      this._monotonicPtsProbeViable = true;
+      this._monotonicPtsProbeRejectedReason = null;
+      // Do not let audio reach av_interleaved_write_frame while the initial
+      // video DTS verdict is unresolved. At most one reorder window is held.
+      this._videoDtsProbeAudio = [];
       // movenc writes each sample duration into trun and uses the sum of those
       // durations to retime the first DTS of the next fragment. Matroska packet
       // duration is commonly rounded (43 ms for 23.976 fps), while the real DTS
@@ -586,6 +608,9 @@
     }
 
     destroy() {
+      // A retained lookahead packet belongs to this mux generation only. Abort
+      // paths must drop it, never estimate/write it into a replacement muxer.
+      this._discardPendingVideoPacket();
       this.destroyed = true;
       this._stopRequested = true;
       // Invalidate an in-flight ff_write_multi result before terminating its
@@ -1237,6 +1262,9 @@
     }
 
     async _initMuxer() {
+      // _initMuxer also runs after a seek. Clear any packet retained by the old
+      // generation before creating or writing the replacement muxer.
+      this._discardPendingVideoPacket();
       const lib = this.lib;
       const muxGeneration = ++this._muxGeneration;
       this._muxWriteStage = null;
@@ -1411,8 +1439,9 @@
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
       this._videoPtsWindow = [];
       this._lastVideoDts = null;
-      this._pendingVideoPacket = null;
-      this._lastExactVideoDuration = null;
+      this._videoPtsWindowSeeded = false;
+      this._audioNextPts48k = null;
+      this._audioDecodedAnchor48k = null;
       this.fg = null; this.fsrc = null; this.fsink = null; // filter is lazy per run
       // Drop captured cues: a seek re-demuxes from the new point and re-bases vBase/_tsAnchor,
       // so old-epoch cues would convert to the wrong local time. The player keeps the cues it
@@ -1602,6 +1631,9 @@
 
     // ---- teardown for re-seek ---------------------------------------------
     async _resetForSeek() {
+      // A seek abandons the old segment. Its one-packet duration lookahead must
+      // not survive until the replacement muxer is initialised.
+      this._discardPendingVideoPacket();
       const lib = this.lib;
       // Make a delayed old-batch resolution uncommittable before freeing its muxer.
       this._muxGeneration += 1;
@@ -1638,11 +1670,22 @@
 
     // ---- the pump (demand-driven remux) ------------------------------------
     _startPump() {
-      if (this._pumpRunning) return;
+      if (this._pumpRunning || this._fatalSignaled) return;
       this._pumpRunning = true; this._stopRequested = false; this.ended = false;
       this._pump().catch((e) => {
         if (this.destroyed) return;
+        const code = e && typeof e.code === 'string' ? e.code : '';
+        const isAudioTimelineFailure = code.startsWith('AUDIO_');
+        if (isAudioTimelineFailure && this._fatalSignaled) return;
         this.report({ stage: 'pump', message: errStr(e) });
+        // A typed audio-clock failure cannot recover inside the same mux
+        // generation. Escalate once so WatchPage can use its bounded engine ->
+        // gateway fallback instead of leaving a permanently spinning player.
+        if (isAudioTimelineFailure) {
+          this._fatalSignaled = true;
+          this._stopRequested = true;
+          try { this.onFatal(e); } catch (_) {}
+        }
       }).finally(() => { this._pumpRunning = false; });
     }
 
@@ -1667,39 +1710,51 @@
         // hold audio until the keyframe).
         const pktKeys = Object.keys(packets);
         if (this.vS) pktKeys.sort((a, b) => (Number(a) === this.vS.index ? -1 : (Number(b) === this.vS.index ? 1 : 0)));
-        for (const k of pktKeys) for (const p of packets[k]) {
-          if (this.vS && p.stream_index === this.vS.index) {
-            // MSE requires the first video sample of a media segment to be a keyframe. A precise seek
-            // (mkv index) lands on one, but an APPROXIMATE seek — MPEG-TS has no exact keyframe index —
-            // lands mid-GOP, so the first packet read is a non-keyframe. Drop leading non-key video
-            // until the first keyframe BEFORE anchoring vBase, or Chromium rejects the non-IDR first
-            // append (CHUNK_DEMUXER_ERROR_APPEND_FAILED — why resuming a .ts failed but a fresh start
-            // did not). AV_PKT_FLAG_KEY === 1.
-            if (this.vBase === null && !(p.flags & 1)) { this._diag.droppedPreKey = (this._diag.droppedPreKey || 0) + 1; continue; }
-            // Open-GOP: after the keyframe, drop leading B-frames whose PTS is BEFORE it (they
-            // reference pre-seek frames), so the keyframe is first in presentation order too.
-            if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
-            p.stream_index = this.V_IDX;
-            if (this._convertAnnexb) p.data = annexbToAvcc(p.data); // MPEG-TS: annexb → AVCC for mp4
-            const readyVideo = this._prepareVideoPacket(p);
-            if (readyVideo) writeList.push(readyVideo);
-          } else if (this.aS && p.stream_index === this.aS.index) {
-            // Hold audio until the first video keyframe is anchored, so a mid-GOP resume starts A/V
-            // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
-            // processed first and anchors vBase before any audio) and when there's no video stream.
-            if (this.vS && this.vBase === null) { this._diag.droppedPreKeyAudio = (this._diag.droppedPreKeyAudio || 0) + 1; continue; }
-            if (this.copyAudio) { p.stream_index = this.A_IDX; if (this._stripAdts) p.data = stripAdts(p.data); writeList.push(p); }
-            else {
-              const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [p], false);
-              const enc = await this._encodeAudio(fr, false);
-              for (const ep of enc) writeList.push(ep);
+        for (const k of pktKeys) {
+          // The video key is sorted first. Once it resolves the initial DTS
+          // verdict, release audio retained by earlier small read batches before
+          // processing newer audio from this batch.
+          if (this.vS && Number(k) !== this.vS.index) {
+            this._releaseVideoDtsProbeAudio(writeList);
+          }
+          for (const p of packets[k]) {
+            if (this.vS && p.stream_index === this.vS.index) {
+              // MSE requires the first video sample of a media segment to be a keyframe. A precise seek
+              // (mkv index) lands on one, but an APPROXIMATE seek — MPEG-TS has no exact keyframe index —
+              // lands mid-GOP, so the first packet read is a non-keyframe. Drop leading non-key video
+              // until the first keyframe BEFORE anchoring vBase, or Chromium rejects the non-IDR first
+              // append (CHUNK_DEMUXER_ERROR_APPEND_FAILED — why resuming a .ts failed but a fresh start
+              // did not). AV_PKT_FLAG_KEY === 1.
+              if (this.vBase === null && !(p.flags & 1)) { this._diag.droppedPreKey = (this._diag.droppedPreKey || 0) + 1; continue; }
+              // Open-GOP: after the keyframe, drop leading B-frames whose PTS is BEFORE it (they
+              // reference pre-seek frames), so the keyframe is first in presentation order too.
+              if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
+              p.stream_index = this.V_IDX;
+              if (this._convertAnnexb) p.data = annexbToAvcc(p.data); // MPEG-TS: annexb → AVCC for mp4
+              const readyVideo = this._ingestVideoPacket(p);
+              for (const packet of readyVideo) writeList.push(packet);
+            } else if (this.aS && p.stream_index === this.aS.index) {
+              // Hold audio until the first video keyframe is anchored, so a mid-GOP resume starts A/V
+              // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
+              // processed first and anchors vBase before any audio) and when there's no video stream.
+              if (this.vS && this.vBase === null) { this._diag.droppedPreKeyAudio = (this._diag.droppedPreKeyAudio || 0) + 1; continue; }
+              if (this.copyAudio) {
+                p.stream_index = this.A_IDX;
+                if (this._stripAdts) p.data = stripAdts(p.data);
+                this._stageAudioForVideoDtsProbe(p, writeList);
+              } else {
+                const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [p], false);
+                const enc = await this._encodeAudio(fr, false);
+                for (const ep of enc) this._stageAudioForVideoDtsProbe(ep, writeList);
+              }
+            } else if (this._subCapture && this._subMeta && this._subMeta.has(p.stream_index)) {
+              // In-band text subtitles: collect the cue, never mux it (subtitles aren't in
+              // the fMP4 output). Best-effort so a malformed packet never breaks playback.
+              try { this._captureSubtitlePacket(p); } catch (_) { /* ignore */ }
             }
-          } else if (this._subCapture && this._subMeta && this._subMeta.has(p.stream_index)) {
-            // In-band text subtitles: collect the cue, never mux it (subtitles aren't in
-            // the fMP4 output). Best-effort so a malformed packet never breaks playback.
-            try { this._captureSubtitlePacket(p); } catch (_) { /* ignore */ }
           }
         }
+        this._releaseVideoDtsProbeAudio(writeList);
         if (writeList.length && !(await this._writePacketsChecked(writeList))) return;
         if (++guard > 5000000) { this.report({ stage: 'pump', message: 'guard' }); break; }
       } while ((res === 0 || res === -lib.EAGAIN) && !this._stopRequested && !this.destroyed);
@@ -1754,12 +1809,16 @@
         return;
       }
       // EOF: flush audio + trailer + endOfStream
-      const tailVideo = this._flushPendingVideoPacket();
-      if (tailVideo && !(await this._writePacketsChecked([tailVideo]))) return;
+      const tailVideo = this._flushVideoPacketsAtEof();
+      this._releaseVideoDtsProbeAudio(tailVideo, true);
+      if (tailVideo.length && !(await this._writePacketsChecked(tailVideo))) return;
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);
         const enc = await this._encodeAudio(fr, true);
-        if (enc.length && !(await this._writePacketsChecked(enc))) return;
+        const tailAudio = [];
+        for (const packet of enc) this._stageAudioForVideoDtsProbe(packet, tailAudio);
+        this._releaseVideoDtsProbeAudio(tailAudio, true);
+        if (tailAudio.length && !(await this._writePacketsChecked(tailAudio))) return;
       }
       // Drop the trailer's bytes (mfra/mfro): they are file-seeking metadata, NOT a
       // valid MSE media segment. Appending them is what produced
@@ -1771,8 +1830,123 @@
       this.log('stream ended (' + this._diag.pumpExitReason + ')');
     }
 
+    _rescaleAudioPtsTo48k(frame) {
+      if (!frame || !Number.isInteger(frame.pts)) return null;
+      const hi = Number.isInteger(frame.ptshi) ? frame.ptshi :
+        ((frame.pts >= 0 && Number.isSafeInteger(frame.pts)) ? 0 : null);
+      if (hi === null || ((frame.pts >>> 0) === 0 && hi === -2147483648)) return null;
+      const pts = to64(frame.pts, hi);
+      if (!Number.isSafeInteger(pts)) return null;
+
+      let tbNum = frame.time_base_num;
+      let tbDen = frame.time_base_den;
+      if (!Number.isSafeInteger(tbNum) || tbNum <= 0 ||
+          !Number.isSafeInteger(tbDen) || tbDen <= 0) {
+        tbNum = this.aS && this.aS.time_base_num;
+        tbDen = this.aS && this.aS.time_base_den;
+      }
+      if (!Number.isSafeInteger(tbNum) || tbNum <= 0 ||
+          !Number.isSafeInteger(tbDen) || tbDen <= 0) return null;
+
+      const numerator = BigInt(pts) * BigInt(tbNum) * BigInt(AAC_SAMPLE_RATE);
+      const denominator = BigInt(tbDen);
+      const absNumerator = numerator < 0n ? -numerator : numerator;
+      const roundedAbs = (absNumerator + denominator / 2n) / denominator;
+      const rounded = numerator < 0n ? -roundedAbs : roundedAbs;
+      const out = Number(rounded);
+      return Number.isSafeInteger(out) ? out : null;
+    }
+
+    _captureDecodedAudioAnchor(frames) {
+      if (this._audioNextPts48k !== null || this._audioDecodedAnchor48k !== null) return;
+      for (const frame of frames || []) {
+        const pts48k = this._rescaleAudioPtsTo48k(frame);
+        if (pts48k !== null) {
+          this._audioDecodedAnchor48k = pts48k;
+          return;
+        }
+      }
+    }
+
+    _audioTimelineFailure(code, detail) {
+      const error = new Error(`${code}:${detail}`);
+      error.code = code;
+      if (this._diag) {
+        this._diag.audioTimelineFailures = (this._diag.audioTimelineFailures || 0) + 1;
+        if (!this._diag.firstAudioTimelineFailure) {
+          this._diag.firstAudioTimelineFailure = { code, detail: String(detail).slice(0, 160) };
+        }
+      }
+      return error;
+    }
+
+    _normalizeFilteredAudioFrames(frames) {
+      if (!Array.isArray(frames) || !frames.length) return frames;
+
+      if (this._audioNextPts48k === null) {
+        // Prefer the filter's own PTS because it includes decoder/filter delay.
+        // If an initial output frame lacks PTS, a later valid frame anchors the
+        // earlier frames by their exact sample counts. Decoded PTS is the final
+        // safe fallback; inventing zero would silently desynchronise A/V.
+        let prefixSamples = 0;
+        let anchor = null;
+        for (const frame of frames) {
+          const pts48k = this._rescaleAudioPtsTo48k(frame);
+          if (pts48k !== null) {
+            anchor = pts48k - prefixSamples;
+            break;
+          }
+          const samples = Number(frame.nb_samples);
+          if (!Number.isSafeInteger(samples) || samples <= 0) {
+            throw this._audioTimelineFailure('AUDIO_SAMPLE_COUNT_INVALID', String(frame.nb_samples));
+          }
+          prefixSamples += samples;
+        }
+        if (anchor === null) anchor = this._audioDecodedAnchor48k;
+        if (!Number.isSafeInteger(anchor)) {
+          throw this._audioTimelineFailure('AUDIO_PTS_UNAVAILABLE',
+            'filtered and decoded frames contain only AV_NOPTS_VALUE');
+        }
+        this._audioNextPts48k = anchor;
+        if (this._diag) {
+          this._diag.audioClockAnchor48k = anchor;
+          this._diag.audioClockAnchorSource = frames.some((frame) =>
+            this._rescaleAudioPtsTo48k(frame) !== null) ? 'filtered' : 'decoded';
+        }
+      }
+
+      for (const frame of frames) {
+        const samples = Number(frame.nb_samples);
+        if (!Number.isSafeInteger(samples) || samples <= 0) {
+          throw this._audioTimelineFailure('AUDIO_SAMPLE_COUNT_INVALID', String(frame.nb_samples));
+        }
+        const expected = this._audioNextPts48k;
+        const raw = this._rescaleAudioPtsTo48k(frame);
+        if (raw === null) {
+          if (this._diag) this._diag.audioFramesWithoutPts = (this._diag.audioFramesWithoutPts || 0) + 1;
+        } else if (raw !== expected && this._diag) {
+          this._diag.audioClockCorrections = (this._diag.audioClockCorrections || 0) + 1;
+          if (!this._diag.firstAudioClockCorrection) {
+            this._diag.firstAudioClockCorrection = {
+              rawPts48k: raw, expectedPts48k: expected, delta48k: raw - expected, samples,
+            };
+          }
+        }
+        const [lo, hi] = from64(expected);
+        frame.pts = lo; frame.ptshi = hi;
+        frame.time_base_num = 1; frame.time_base_den = AAC_SAMPLE_RATE;
+        const next = expected + samples;
+        if (!Number.isSafeInteger(next)) {
+          throw this._audioTimelineFailure('AUDIO_PTS_OVERFLOW', String(next));
+        }
+        this._audioNextPts48k = next;
+      }
+      return frames;
+    }
+
     async _encodeAudio(frames, fin) {
       const lib = this.lib;
+      this._captureDecodedAudioAnchor(frames);
       if (!this.fg && frames.length) {
         const fr = frames[0];
         const itb = (fr.time_base_den > 0) ? [fr.time_base_num, fr.time_base_den] : [this.aS.time_base_num, this.aS.time_base_den];
@@ -1783,12 +1957,13 @@
       }
       if (!this.fg) return [];
       const ff = await lib.ff_filter_multi(this.fsrc, this.fsink, this.encFrame, frames, !!fin);
+      this._normalizeFilteredAudioFrames(ff);
       const pk = await lib.ff_encode_multi(this.encCtx, this.encFrame, this.encPkt, ff, !!fin);
       for (const p of pk) p.stream_index = this.A_IDX;
       return pk;
     }
 
-    _setVideoDts(p) {
+    _primeVideoTimeline(p) {
       const pts = to64(p.pts, p.ptshi);
       if (this._firstVpktPending && this.vS) {
         // Real keyframe PTS → exact placement of the re-based-to-0 output. Subtract the MPEG-TS
@@ -1801,13 +1976,78 @@
         this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1;
         this.vOffset = D_REORDER * this.vFd0;
         this._gopFloorPts = pts;
+      }
+      return pts;
+    }
+
+    _readSourceVideoDts(p) {
+      if (!p || !Number.isInteger(p.dts) || !Number.isInteger(p.dtshi)) return null;
+      // libav.js exposes AV_NOPTS_VALUE as low=0, high=INT32_MIN. Converting that
+      // sentinel to Number loses integer precision, so reject the pair explicitly.
+      if ((p.dts >>> 0) === 0 && p.dtshi === -2147483648) return null;
+      const dts = to64(p.dts, p.dtshi);
+      return Number.isSafeInteger(dts) ? dts : null;
+    }
+
+    _validateSourceVideoDts(p, lastDts) {
+      const pts = to64(p.pts, p.ptshi);
+      const dts = this._readSourceVideoDts(p);
+      if (dts === null) return { ok: false, reason: 'missing', pts, dts: null };
+      if (dts > pts) return { ok: false, reason: 'after-pts', pts, dts };
+      if (lastDts !== null && dts <= lastDts) {
+        return { ok: false, reason: 'non-monotonic', pts, dts };
+      }
+      return { ok: true, reason: null, pts, dts };
+    }
+
+    _selectVideoDtsMode(mode) {
+      this._videoDtsMode = mode;
+      this._sourceDtsProbeLast = null;
+      this._videoPtsProbeLast = null;
+      if (mode === 'source' || mode === 'pts-monotonic') this.vOffset = 0;
+      if (this._diag) {
+        this._diag.videoDtsMode = mode;
+        this._diag.sourceVideoDtsProbePackets = this._videoDtsProbe.length;
+        this._diag.sourceVideoDtsRejectedReason = this._sourceDtsProbeRejectedReason;
+        this._diag.monotonicPtsRejectedReason = this._monotonicPtsProbeRejectedReason;
+      }
+    }
+
+    _recordVideoDts(p, pts, dts) {
+      // Strict MP4 muxing requires DTS to increase and PTS >= DTS. Record an
+      // impossible source reset so the transactional mux path can recover
+      // without hiding the timestamp that caused it.
+      if ((this._lastVideoDts !== null && dts <= this._lastVideoDts) || dts > pts) {
+        if (this._diag && !this._diag.firstVideoTimestampError) {
+          this._diag.firstVideoTimestampError = { pts, dts, lastDts: this._lastVideoDts };
+        }
+      }
+      this._lastVideoDts = dts;
+      const [lo, hi] = from64(dts);
+      p.dts = lo; p.dtshi = hi;
+      this.vCum += 1;
+      // Diagnostics: the first video packet of a segment must be a keyframe in
+      // presentation order, or Chromium rejects the media fragment append.
+      if (this._diag && this._diag.firstVideoPkt == null) {
+        this._diag.firstVideoPkt = {
+          ptsSrc: pts, dtsHL: hi + ':' + lo, key: !!(p.flags & 1),
+          dur: p.duration || 0, anchor: this._tsAnchor, gopFloor: this._gopFloorPts,
+          dtsMode: this._videoDtsMode || 'reconstructed',
+        };
+      }
+    }
+
+    _setVideoDts(p) {
+      const pts = this._primeVideoTimeline(p);
+      if (!this._videoPtsWindowSeeded) {
         // Seed a reorder-depth window before the first PTS. Thereafter each DTS
         // is the oldest presentation timestamp released by the window. Unlike
         // vBase + sum(packet.duration), this follows the source's real cadence and
         // cannot drift merely because a millisecond time base rounded 41.7 to 43.
         this._videoPtsWindow = [];
-        for (let i = D_REORDER; i > 0; i--) this._videoPtsWindow.push(pts - i * this.vFd0);
+        for (let i = D_REORDER; i > 0; i--) this._videoPtsWindow.push(this.vBase - i * this.vFd0);
         this._lastVideoDts = null;
+        this._videoPtsWindowSeeded = true;
       }
       this._videoPtsWindow.push(pts);
       this._videoPtsWindow.sort((a, b) => a - b);
@@ -1823,32 +2063,81 @@
           if (this._diag) this._diag.videoDtsRepairs = (this._diag.videoDtsRepairs || 0) + 1;
         }
       }
-      // If a source contains a timestamp reset larger than the reorder window,
-      // there is no legal DTS greater than the prior one while preserving this
-      // packet's PTS. Record the exact invariant; the checked worker write below
-      // will reject it transactionally and invoke the normal engine recovery.
-      // Do not throw here: an uncaught pump exception would bypass onFatal.
-      if ((this._lastVideoDts !== null && dts <= this._lastVideoDts) || dts > pts) {
-        if (this._diag && !this._diag.firstVideoTimestampError) {
-          this._diag.firstVideoTimestampError = { pts, dts, lastDts: this._lastVideoDts };
+      this._recordVideoDts(p, pts, dts);
+    }
+
+    _setSourceVideoDts(p) {
+      const pts = this._primeVideoTimeline(p);
+      const check = this._validateSourceVideoDts(p, this._lastVideoDts);
+      let dts = check.dts;
+      if (!check.ok) {
+        // A source selected only after a full validation window should remain
+        // valid. If one later packet loses DTS, bridge it conservatively when a
+        // legal decode timestamp still exists; an actual reorder/reset where
+        // pts <= lastDts stays invalid and is surfaced by the checked mux write.
+        const step = this._lastExactVideoDuration || this.vFd0 || 1;
+        let repaired = this._lastVideoDts === null ? pts : this._lastVideoDts + step;
+        if (repaired > pts && this._lastVideoDts !== null) repaired = this._lastVideoDts + 1;
+        if (this._lastVideoDts === null || repaired <= pts) {
+          dts = repaired;
+          if (this._diag) {
+            this._diag.videoDtsRepairs = (this._diag.videoDtsRepairs || 0) + 1;
+            this._diag.sourceVideoDtsRuntimeRepairs = (this._diag.sourceVideoDtsRuntimeRepairs || 0) + 1;
+          }
+        } else {
+          dts = check.dts === null ? pts : check.dts;
+        }
+        if (this._diag && !this._diag.sourceVideoDtsRuntimeError) {
+          this._diag.sourceVideoDtsRuntimeError = {
+            reason: check.reason, pts, dts: check.dts, lastDts: this._lastVideoDts,
+          };
         }
       }
-      this._lastVideoDts = dts;
-      const [lo, hi] = from64(dts);
-      p.dts = lo; p.dtshi = hi;
-      this.vCum += 1;
-      // Diagnostics: the first video packet of a segment must be a keyframe in
-      // presentation order, or Chromium rejects the media fragment append. Record it.
-      if (this._diag && this._diag.firstVideoPkt == null) {
-        this._diag.firstVideoPkt = {
-          ptsSrc: pts, dtsHL: hi + ':' + lo, key: !!(p.flags & 1),
-          dur: p.duration || 0, anchor: this._tsAnchor, gopFloor: this._gopFloorPts,
-        };
+      this._recordVideoDts(p, pts, dts);
+      if (this._diag) {
+        this._diag.sourceVideoDtsPackets = (this._diag.sourceVideoDtsPackets || 0) + 1;
+      }
+    }
+
+    _setMonotonicPtsVideoDts(p) {
+      const pts = this._primeVideoTimeline(p);
+      let dts = pts;
+      if (this._lastVideoDts !== null && dts <= this._lastVideoDts) {
+        // The initial probe proved monotonic PTS. A later reset cannot be
+        // repaired while keeping DTS increasing and DTS<=PTS; retain the exact
+        // evidence so the checked mux write invokes normal recovery.
+        if (this._diag && !this._diag.monotonicPtsRuntimeError) {
+          this._diag.monotonicPtsRuntimeError = { pts, lastDts: this._lastVideoDts };
+        }
+      }
+      this._recordVideoDts(p, pts, dts);
+      if (this._diag) {
+        this._diag.monotonicPtsVideoPackets = (this._diag.monotonicPtsVideoPackets || 0) + 1;
       }
     }
 
     _prepareVideoPacket(p) {
       this._setVideoDts(p);
+      return this._queueVideoPacket(p);
+    }
+
+    _prepareSourceVideoPacket(p) {
+      this._setSourceVideoDts(p);
+      return this._queueVideoPacket(p);
+    }
+
+    _prepareMonotonicPtsVideoPacket(p) {
+      this._setMonotonicPtsVideoDts(p);
+      return this._queueVideoPacket(p);
+    }
+
+    _prepareSelectedVideoPacket(p) {
+      if (this._videoDtsMode === 'source') return this._prepareSourceVideoPacket(p);
+      if (this._videoDtsMode === 'pts-monotonic') return this._prepareMonotonicPtsVideoPacket(p);
+      return this._prepareVideoPacket(p);
+    }
+
+    _queueVideoPacket(p) {
       const pending = this._pendingVideoPacket;
       this._pendingVideoPacket = p;
       if (!pending) return null;
@@ -1874,6 +2163,191 @@
         }
       }
       return pending;
+    }
+
+    _ingestVideoPacket(p) {
+      const pts = this._primeVideoTimeline(p);
+      if (this._videoDtsMode === null) {
+        this._videoDtsProbe.push(p);
+        if (this._sourceDtsProbeViable) {
+          const check = this._validateSourceVideoDts(p, this._sourceDtsProbeLast);
+          if (!check.ok) {
+            this._sourceDtsProbeViable = false;
+            this._sourceDtsProbeRejectedReason = check.reason;
+          } else {
+            this._sourceDtsProbeLast = check.dts;
+          }
+        }
+        if (this._monotonicPtsProbeViable) {
+          if (!Number.isSafeInteger(pts) ||
+              (this._videoPtsProbeLast !== null && pts <= this._videoPtsProbeLast)) {
+            this._monotonicPtsProbeViable = false;
+            this._monotonicPtsProbeRejectedReason = Number.isSafeInteger(pts)
+              ? 'non-monotonic' : 'invalid';
+          } else {
+            this._videoPtsProbeLast = pts;
+          }
+        }
+
+        if (!this._sourceDtsProbeViable && !this._monotonicPtsProbeViable) {
+          this._selectVideoDtsMode('reconstructed');
+        } else if (this._videoDtsProbe.length >= SOURCE_DTS_PROBE_PACKETS) {
+          this._selectVideoDtsMode(this._sourceDtsProbeViable ? 'source' : 'pts-monotonic');
+        } else {
+          return [];
+        }
+
+        const queued = this._videoDtsProbe;
+        this._videoDtsProbe = [];
+        const ready = [];
+        for (const packet of queued) {
+          const out = this._prepareSelectedVideoPacket(packet);
+          if (out) ready.push(out);
+        }
+        return ready;
+      }
+
+      const ready = this._prepareSelectedVideoPacket(p);
+      return ready ? [ready] : [];
+    }
+
+    _audioPacketEndsAtOrBeforeVideoBase(packet) {
+      if (!packet || this.vBase === null || !this.vS ||
+          !Number.isSafeInteger(this.vBase)) return false;
+      if (!Number.isInteger(packet.pts)) return false;
+      const ptsHi = Number.isInteger(packet.ptshi) ? packet.ptshi :
+        ((packet.pts >= 0 && Number.isSafeInteger(packet.pts)) ? 0 : null);
+      if (ptsHi === null || ((packet.pts >>> 0) === 0 && ptsHi === -2147483648)) return false;
+      const pts = to64(packet.pts, ptsHi);
+      if (!Number.isSafeInteger(pts)) return false;
+
+      let duration = null;
+      if (Number.isInteger(packet.durationhi) && Number.isInteger(packet.duration)) {
+        duration = to64(packet.duration, packet.durationhi);
+      } else if (Number.isSafeInteger(packet.duration)) {
+        duration = packet.duration;
+      }
+      // Unknown/empty duration cannot prove that the whole sample precedes the
+      // keyframe. Keep it; dropping a potentially overlapping AAC frame creates
+      // a real audible gap.
+      if (!Number.isSafeInteger(duration) || duration <= 0) return false;
+      const end = pts + duration;
+      if (!Number.isSafeInteger(end)) return false;
+
+      let aNum = packet.time_base_num;
+      let aDen = packet.time_base_den;
+      if (!Number.isSafeInteger(aNum) || aNum <= 0 ||
+          !Number.isSafeInteger(aDen) || aDen <= 0) {
+        if (this.copyAudio && this.aS) {
+          aNum = this.aS.time_base_num; aDen = this.aS.time_base_den;
+        } else {
+          aNum = 1; aDen = AAC_SAMPLE_RATE;
+        }
+      }
+      const vNum = this.vS.time_base_num;
+      const vDen = this.vS.time_base_den;
+      if (!Number.isSafeInteger(aNum) || aNum <= 0 ||
+          !Number.isSafeInteger(aDen) || aDen <= 0 ||
+          !Number.isSafeInteger(vNum) || vNum <= 0 ||
+          !Number.isSafeInteger(vDen) || vDen <= 0) return false;
+
+      // Compare (audioEnd * audioTB) <= (vBase * videoTB) without converting
+      // either side to floating-point seconds. This remains exact for long files
+      // and for unlike time bases such as 1/48000 audio vs 1/1000 video.
+      const audioEndScaled = BigInt(end) * BigInt(aNum) * BigInt(vDen);
+      const videoBaseScaled = BigInt(this.vBase) * BigInt(vNum) * BigInt(aDen);
+      return audioEndScaled <= videoBaseScaled;
+    }
+
+    _dropAudioBeforeVideoBase(packet) {
+      if (!this._audioPacketEndsAtOrBeforeVideoBase(packet)) return false;
+      if (this._diag) {
+        this._diag.droppedProbeAudioBeforeVideoBase =
+          (this._diag.droppedProbeAudioBeforeVideoBase || 0) + 1;
+        if (!this._diag.firstDroppedProbeAudioBeforeVideoBase) {
+          const ptsHi = Number.isInteger(packet.ptshi) ? packet.ptshi : 0;
+          const duration = Number.isInteger(packet.durationhi)
+            ? to64(packet.duration, packet.durationhi) : packet.duration;
+          this._diag.firstDroppedProbeAudioBeforeVideoBase = {
+            pts: to64(packet.pts, ptsHi), duration,
+            audioTb: `${packet.time_base_num || (this.copyAudio && this.aS ? this.aS.time_base_num : 1)}/${packet.time_base_den || (this.copyAudio && this.aS ? this.aS.time_base_den : AAC_SAMPLE_RATE)}`,
+            vBase: this.vBase,
+            videoTb: `${this.vS.time_base_num}/${this.vS.time_base_den}`,
+          };
+        }
+      }
+      return true;
+    }
+
+    _stageAudioForVideoDtsProbe(packet, writeList) {
+      if (this._dropAudioBeforeVideoBase(packet)) return;
+      if (this.vS && this._videoDtsMode === null) {
+        // The verdict is reached after at most one 16-video-packet window, so
+        // this post-encode audio hold cannot grow for the rest of playback.
+        this._videoDtsProbeAudio.push(packet);
+        if (this._diag) {
+          this._diag.videoDtsProbeAudioDeferred = (this._diag.videoDtsProbeAudioDeferred || 0) + 1;
+          this._diag.videoDtsProbeAudioMax = Math.max(
+            this._diag.videoDtsProbeAudioMax || 0, this._videoDtsProbeAudio.length);
+        }
+        return;
+      }
+      writeList.push(packet);
+    }
+
+    _releaseVideoDtsProbeAudio(writeList, force = false) {
+      if (!force && this.vS && this._videoDtsMode === null) return;
+      if (!this._videoDtsProbeAudio.length) return;
+      let released = 0;
+      for (const packet of this._videoDtsProbeAudio) {
+        // Recheck at release so lifecycle/reseek changes cannot leak an audio
+        // sample that now sits wholly before the retained keyframe.
+        if (this._dropAudioBeforeVideoBase(packet)) continue;
+        writeList.push(packet);
+        released += 1;
+      }
+      if (this._diag) {
+        this._diag.videoDtsProbeAudioReleased = (this._diag.videoDtsProbeAudioReleased || 0) +
+          released;
+      }
+      this._videoDtsProbeAudio = [];
+    }
+
+    _discardPendingVideoPacket() {
+      this._pendingVideoPacket = null;
+      this._lastExactVideoDuration = null;
+      this._videoDtsProbe = [];
+      this._sourceDtsProbeLast = null;
+      this._sourceDtsProbeViable = true;
+      this._sourceDtsProbeRejectedReason = null;
+      this._videoPtsProbeLast = null;
+      this._monotonicPtsProbeViable = true;
+      this._monotonicPtsProbeRejectedReason = null;
+      this._videoDtsMode = null;
+      this._videoDtsProbeAudio = [];
+      this._audioNextPts48k = null;
+      this._audioDecodedAnchor48k = null;
+    }
+
+    _flushVideoPacketsAtEof() {
+      const ready = [];
+      if (this._videoDtsMode === null && this._videoDtsProbe.length) {
+        // EOF before the normal validation window: choose only a candidate that
+        // every observed packet proved safe. This keeps short AV_NOPTS streams on
+        // DTS=PTS without misclassifying short reordered/B-frame streams.
+        if (this._sourceDtsProbeViable) this._selectVideoDtsMode('source');
+        else if (this._monotonicPtsProbeViable) this._selectVideoDtsMode('pts-monotonic');
+        else this._selectVideoDtsMode('reconstructed');
+        const queued = this._videoDtsProbe;
+        this._videoDtsProbe = [];
+        for (const packet of queued) {
+          const out = this._prepareSelectedVideoPacket(packet);
+          if (out) ready.push(out);
+        }
+      }
+      const tail = this._flushPendingVideoPacket();
+      if (tail) ready.push(tail);
+      return ready;
     }
 
     _flushPendingVideoPacket() {
@@ -2060,6 +2534,27 @@
         firstWriteDiscontinuity: d.firstWriteDiscontinuity,
         muxPacketWriteErrors: d.muxPacketWriteErrors || 0,
         firstMuxPacketWriteError: d.firstMuxPacketWriteError || null,
+        videoDtsMode: d.videoDtsMode || this._videoDtsMode || null,
+        sourceVideoDtsProbePackets: d.sourceVideoDtsProbePackets || 0,
+        sourceVideoDtsRejectedReason: d.sourceVideoDtsRejectedReason || null,
+        sourceVideoDtsPackets: d.sourceVideoDtsPackets || 0,
+        sourceVideoDtsRuntimeRepairs: d.sourceVideoDtsRuntimeRepairs || 0,
+        sourceVideoDtsRuntimeError: d.sourceVideoDtsRuntimeError || null,
+        monotonicPtsRejectedReason: d.monotonicPtsRejectedReason || null,
+        monotonicPtsVideoPackets: d.monotonicPtsVideoPackets || 0,
+        monotonicPtsRuntimeError: d.monotonicPtsRuntimeError || null,
+        videoDtsProbeAudioDeferred: d.videoDtsProbeAudioDeferred || 0,
+        videoDtsProbeAudioReleased: d.videoDtsProbeAudioReleased || 0,
+        videoDtsProbeAudioMax: d.videoDtsProbeAudioMax || 0,
+        droppedProbeAudioBeforeVideoBase: d.droppedProbeAudioBeforeVideoBase || 0,
+        firstDroppedProbeAudioBeforeVideoBase: d.firstDroppedProbeAudioBeforeVideoBase || null,
+        audioClockAnchor48k: d.audioClockAnchor48k,
+        audioClockAnchorSource: d.audioClockAnchorSource || null,
+        audioClockCorrections: d.audioClockCorrections || 0,
+        firstAudioClockCorrection: d.firstAudioClockCorrection || null,
+        audioFramesWithoutPts: d.audioFramesWithoutPts || 0,
+        audioTimelineFailures: d.audioTimelineFailures || 0,
+        firstAudioTimelineFailure: d.firstAudioTimelineFailure || null,
         videoDtsRepairs: d.videoDtsRepairs || 0,
         firstVideoTimestampError: d.firstVideoTimestampError || null,
         videoDurationCorrections: d.videoDurationCorrections || 0,

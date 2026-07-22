@@ -73,11 +73,11 @@ test('every generated wasm helper checks packet-write errors inside the worker',
 
 test('engine cache-busts the loader, worker glue, and wasm binary together', () => {
     const src = fs.readFileSync(path.join(ROOT, 'public', 'js', 'norvaEngine.js'), 'utf8');
-    assert.ok(src.includes("libav-norva.mjs?v=44"),
+    assert.ok(src.includes("libav-norva.mjs?v=45"),
         'dynamic loader import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=44"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.mjs?v=45"),
         'worker glue import must be revisioned');
-    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=44"),
+    assert.ok(src.includes("libav-6.8.8.0-norva.wasm.wasm?v=45"),
         'wasm binary fetch must be revisioned');
     assert.ok(src.includes('toImport: LIBAV_RUNTIME'));
     assert.ok(src.includes('wasmurl: LIBAV_WASM'));
@@ -129,6 +129,388 @@ test('video DTS reconstruction does not accumulate rounded 23.976 fps packet dur
 
     assert.strictEqual(engine._diag.videoDtsRepairs || 0, 0,
         'normal fractional cadence must not need one-tick duplicate repair');
+});
+
+test('a stable source DTS timeline is preserved without the synthetic 16-frame offset', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    const expectedDts = [];
+    const emitted = [];
+    for (let i = 0; i < 80; i++) {
+        const ts = 83 + Math.round(i * 1001 / 24);
+        expectedDts.push(ts);
+        const [lo, hi] = split64(ts);
+        const packet = { id: i, pts: lo, ptshi: hi, dts: lo, dtshi: hi, duration: 43, flags: i === 0 ? 1 : 0 };
+        emitted.push(...engine._ingestVideoPacket(packet));
+    }
+    emitted.push(...engine._flushVideoPacketsAtEof());
+
+    assert.strictEqual(engine._videoDtsMode, 'source');
+    assert.strictEqual(engine._diag.videoDtsMode, 'source');
+    assert.strictEqual(engine._diag.sourceVideoDtsRejectedReason || null, null);
+    assert.strictEqual(engine._diag.sourceVideoDtsPackets, expectedDts.length);
+    assert.strictEqual(emitted.length, expectedDts.length);
+    assert.deepStrictEqual(emitted.map((packet) => join64(packet.dts, packet.dtshi)), expectedDts);
+    assert.strictEqual(join64(emitted[0].dts, emitted[0].dtshi), 83,
+        'the first exact source DTS must not become 83 - (16 * 43)');
+});
+
+test('PTS copied into a reordered DTS field is rejected before any packet reaches the muxer', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    // This is the shape exposed by the vendored demuxer for the HEVC fixture:
+    // DTS is merely copied from reordered PTS (0, 167, 83, 42, ...).
+    const ptsValues = [0, 167, 83, 42, 125, 333, 250, 208, 292, 500, 417, 375, 458, 667, 583, 542, 625];
+    const emitted = [];
+    for (let i = 0; i < ptsValues.length; i++) {
+        const [lo, hi] = split64(ptsValues[i]);
+        const ready = engine._ingestVideoPacket({
+            id: i, pts: lo, ptshi: hi, dts: lo, dtshi: hi, duration: 41, flags: i === 0 ? 1 : 0,
+        });
+        if (i < 2) assert.strictEqual(ready.length, 0, 'probe packets must not leak before the verdict');
+        emitted.push(...ready);
+    }
+    emitted.push(...engine._flushVideoPacketsAtEof());
+
+    assert.strictEqual(engine._videoDtsMode, 'reconstructed');
+    assert.strictEqual(engine._diag.sourceVideoDtsRejectedReason, 'non-monotonic');
+    assert.strictEqual(engine._diag.sourceVideoDtsPackets || 0, 0);
+    assert.strictEqual(emitted.length, ptsValues.length);
+    let lastDts = null;
+    for (const packet of emitted) {
+        const dts = join64(packet.dts, packet.dtshi);
+        const pts = join64(packet.pts, packet.ptshi);
+        if (lastDts !== null) assert.ok(dts > lastDts);
+        assert.ok(dts <= pts);
+        lastDts = dts;
+    }
+});
+
+test('AV_NOPTS_VALUE with monotonic PTS uses DTS=PTS while a short valid stream keeps source DTS at EOF', () => {
+    const NorvaEngine = loadEngineClass();
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = { time_base_num: 1, time_base_den: 1000 };
+        const ptsValues = Array.from({ length: 20 }, (_, i) => Math.round(i * 1001 / 24));
+        const emitted = [];
+        for (let i = 0; i < ptsValues.length; i++) {
+            const [pts, ptshi] = split64(ptsValues[i]);
+            emitted.push(...engine._ingestVideoPacket({
+                id: i, pts, ptshi, dts: 0, dtshi: -2147483648,
+                duration: 43, flags: i === 0 ? 1 : 0,
+            }));
+        }
+        emitted.push(...engine._flushVideoPacketsAtEof());
+        assert.strictEqual(engine._videoDtsMode, 'pts-monotonic');
+        assert.strictEqual(engine._diag.sourceVideoDtsRejectedReason, 'missing');
+        assert.strictEqual(engine._diag.monotonicPtsRejectedReason || null, null);
+        assert.deepStrictEqual(emitted.map((packet) => join64(packet.dts, packet.dtshi)), ptsValues);
+        assert.strictEqual(join64(emitted[0].dts, emitted[0].dtshi), 0,
+            'missing DTS on a monotonic stream must not invent a negative reorder offset');
+    }
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = { time_base_num: 1, time_base_den: 1000 };
+        const sourceDts = [10_000, 10_042, 10_083];
+        const emitted = [];
+        for (let i = 0; i < sourceDts.length; i++) {
+            const [lo, hi] = split64(sourceDts[i]);
+            emitted.push(...engine._ingestVideoPacket({
+                id: i, pts: lo, ptshi: hi, dts: lo, dtshi: hi, duration: 43, flags: i === 0 ? 1 : 0,
+            }));
+        }
+        assert.strictEqual(emitted.length, 0, 'a short stream remains in the bounded probe until EOF');
+        emitted.push(...engine._flushVideoPacketsAtEof());
+        assert.strictEqual(engine._videoDtsMode, 'source');
+        assert.deepStrictEqual(emitted.map((packet) => join64(packet.dts, packet.dtshi)), sourceDts);
+    }
+});
+
+test('short AV_NOPTS streams choose monotonic PTS or reconstruction correctly at EOF', () => {
+    const NorvaEngine = loadEngineClass();
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = { time_base_num: 1, time_base_den: 1000 };
+        const ptsValues = [10_000, 10_042, 10_083];
+        for (let i = 0; i < ptsValues.length; i++) {
+            const [pts, ptshi] = split64(ptsValues[i]);
+            assert.strictEqual(engine._ingestVideoPacket({
+                id: i, pts, ptshi, dts: 0, dtshi: -2147483648,
+                duration: 43, flags: i === 0 ? 1 : 0,
+            }).length, 0);
+        }
+        const emitted = engine._flushVideoPacketsAtEof();
+        assert.strictEqual(engine._videoDtsMode, 'pts-monotonic');
+        assert.deepStrictEqual(Array.from(emitted, (packet) => join64(packet.dts, packet.dtshi)), ptsValues);
+    }
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = { time_base_num: 1, time_base_den: 1000 };
+        const ptsValues = [0, 167, 83, 42, 125];
+        const emitted = [];
+        for (let i = 0; i < ptsValues.length; i++) {
+            const [pts, ptshi] = split64(ptsValues[i]);
+            emitted.push(...engine._ingestVideoPacket({
+                id: i, pts, ptshi, dts: 0, dtshi: -2147483648,
+                duration: 42, flags: i === 0 ? 1 : 0,
+            }));
+        }
+        emitted.push(...engine._flushVideoPacketsAtEof());
+        assert.strictEqual(engine._videoDtsMode, 'reconstructed');
+        assert.strictEqual(engine._diag.sourceVideoDtsRejectedReason, 'missing');
+        assert.strictEqual(engine._diag.monotonicPtsRejectedReason, 'non-monotonic');
+        let lastDts = null;
+        for (const packet of emitted) {
+            const dts = join64(packet.dts, packet.dtshi);
+            const pts = join64(packet.pts, packet.ptshi);
+            assert.ok(dts <= pts);
+            if (lastDts !== null) assert.ok(dts > lastDts);
+            lastDts = dts;
+        }
+    }
+});
+
+test('audio cannot reach the muxer before the source-DTS probe resolves', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { index: 0, time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const writeList = [];
+    engine._stageAudioForVideoDtsProbe({ id: 'audio-old-1' }, writeList);
+    engine._stageAudioForVideoDtsProbe({ id: 'audio-old-2' }, writeList);
+    assert.deepStrictEqual(writeList, [], 'no audio-only mux write is legal during the video probe');
+    assert.strictEqual(engine._videoDtsProbeAudio.length, 2);
+
+    let readyVideo = [];
+    for (let i = 0; i < 16; i++) {
+        const ts = 1_000 + i * 42;
+        const [lo, hi] = split64(ts);
+        readyVideo.push(...engine._ingestVideoPacket({
+            id: `video-${i}`, pts: lo, ptshi: hi, dts: lo, dtshi: hi, duration: 42, flags: i === 0 ? 1 : 0,
+        }));
+    }
+    assert.strictEqual(engine._videoDtsMode, 'source');
+    assert.ok(readyVideo.length > 0);
+    writeList.push(...readyVideo);
+    engine._releaseVideoDtsProbeAudio(writeList);
+    engine._stageAudioForVideoDtsProbe({ id: 'audio-new' }, writeList);
+
+    const ids = writeList.map((packet) => packet.id);
+    assert.ok(ids.indexOf('audio-old-1') > ids.lastIndexOf('video-14'),
+        'deferred audio is released only after probe video becomes mux-ready');
+    assert.deepStrictEqual(ids.slice(-3), ['audio-old-1', 'audio-old-2', 'audio-new'],
+        'older deferred audio must precede newer audio from the resolving batch');
+    assert.strictEqual(engine._videoDtsProbeAudio.length, 0);
+    assert.strictEqual(engine._diag.videoDtsProbeAudioDeferred, 2);
+    assert.strictEqual(engine._diag.videoDtsProbeAudioReleased, 2);
+});
+
+test('transcoded audio uses one continuous 48 kHz sample clock', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.aS = { time_base_num: 1, time_base_den: 1000 };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+
+    // Real filter output observed on the Matroska AAC-transcode fixture. The
+    // rounded source clock advances 1013/1014/1061 ticks even though every frame
+    // contains exactly 1024 samples.
+    const rawPts = [-1104, -80, 933, 1947, 2961, 4022, 5035, 6049, 7062, 8123, 9137];
+    const frames = rawPts.map((pts) => {
+        const [lo, hi] = split64(pts);
+        return {
+            pts: lo, ptshi: hi, time_base_num: 1, time_base_den: 48000,
+            nb_samples: 1024,
+        };
+    });
+    engine._normalizeFilteredAudioFrames(frames);
+
+    const expected = rawPts.map((_, i) => -1104 + i * 1024);
+    assert.deepStrictEqual(frames.map((frame) => join64(frame.pts, frame.ptshi)), expected);
+    assert.ok(frames.every((frame) => frame.time_base_num === 1 && frame.time_base_den === 48000));
+    assert.strictEqual(engine._audioNextPts48k, -1104 + frames.length * 1024);
+    assert.strictEqual(engine._diag.audioClockAnchorSource, 'filtered');
+    assert.strictEqual(engine._diag.audioClockCorrections, 9);
+    assert.deepStrictEqual({ ...engine._diag.firstAudioClockCorrection }, {
+        rawPts48k: 933, expectedPts48k: 944, delta48k: -11, samples: 1024,
+    });
+
+    const { engine: millisEngine } = makeEngine(NorvaEngine);
+    millisEngine.aS = { time_base_num: 1, time_base_den: 1000 };
+    const [msLo, msHi] = split64(83);
+    const millisecondFrame = {
+        pts: msLo, ptshi: msHi, time_base_num: 1, time_base_den: 1000,
+        nb_samples: 1024,
+    };
+    millisEngine._normalizeFilteredAudioFrames([millisecondFrame]);
+    assert.strictEqual(join64(millisecondFrame.pts, millisecondFrame.ptshi), 3984,
+        '83 ms must be rescaled exactly onto the 48 kHz encoder clock');
+    assert.strictEqual(millisEngine._audioNextPts48k, 5008);
+});
+
+test('audio timeline falls back to decoded PTS and fails typed when every PTS is unavailable', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.aS = { time_base_num: 1, time_base_den: 1000 };
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    const [decodedLo, decodedHi] = split64(1000);
+    engine._captureDecodedAudioAnchor([{
+        pts: decodedLo, ptshi: decodedHi, time_base_num: 1, time_base_den: 1000,
+        nb_samples: 1024,
+    }]);
+    const filtered = [{
+        pts: 0, ptshi: -2147483648, time_base_num: 1, time_base_den: 48000,
+        nb_samples: 1024,
+    }];
+    engine._normalizeFilteredAudioFrames(filtered);
+    assert.strictEqual(join64(filtered[0].pts, filtered[0].ptshi), 48000);
+    assert.strictEqual(engine._diag.audioClockAnchorSource, 'decoded');
+
+    const { engine: noPtsEngine } = makeEngine(NorvaEngine);
+    noPtsEngine.aS = { time_base_num: 1, time_base_den: 1000 };
+    assert.throws(() => noPtsEngine._normalizeFilteredAudioFrames([{
+        pts: 0, ptshi: -2147483648, time_base_num: 1, time_base_den: 48000,
+        nb_samples: 1024,
+    }]), (error) => error && error.code === 'AUDIO_PTS_UNAVAILABLE');
+    assert.strictEqual(noPtsEngine._diag.audioTimelineFailures, 1);
+    assert.strictEqual(noPtsEngine._diag.firstAudioTimelineFailure.code, 'AUDIO_PTS_UNAVAILABLE');
+});
+
+test('a typed audio timeline failure reports and enters fatal recovery only once', async () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine, reports, fatals } = makeEngine(NorvaEngine);
+    const failure = new Error('AUDIO_PTS_UNAVAILABLE:no timestamp');
+    failure.code = 'AUDIO_PTS_UNAVAILABLE';
+    engine._pump = async () => { throw failure; };
+
+    engine._startPump();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(reports.filter((event) => event.stage === 'pump').length, 1);
+    assert.strictEqual(fatals.length, 1);
+    assert.strictEqual(fatals[0], failure);
+    assert.strictEqual(engine._fatalSignaled, true);
+    assert.strictEqual(engine._stopRequested, true);
+
+    engine._startPump();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.strictEqual(reports.filter((event) => event.stage === 'pump').length, 1,
+        'a second rejected pump must not duplicate the persisted report');
+    assert.strictEqual(fatals.length, 1, 'onFatal must be signalled once per mux generation');
+});
+
+test('deferred audio drops only samples wholly before the retained video keyframe', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { index: 0, time_base_num: 1, time_base_den: 1000 };
+    engine.vBase = 1000;
+    engine.copyAudio = false;
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const audio = (id, pts, duration) => {
+        const [lo, hi] = split64(pts);
+        return {
+            id, pts: lo, ptshi: hi, duration, durationhi: 0,
+            time_base_num: 1, time_base_den: 48000,
+        };
+    };
+
+    const writeList = [];
+    engine._stageAudioForVideoDtsProbe(audio('ends-at-base', 47000, 1000), writeList);
+    engine._stageAudioForVideoDtsProbe(audio('overlaps-base', 47500, 1024), writeList);
+    engine._stageAudioForVideoDtsProbe(audio('after-base', 48000, 1024), writeList);
+    assert.deepStrictEqual(writeList, []);
+    assert.deepStrictEqual(Array.from(engine._videoDtsProbeAudio, (packet) => packet.id),
+        ['overlaps-base', 'after-base'],
+        'a packet overlapping vBase must be retained; only end<=vBase is dropped');
+    assert.strictEqual(engine._diag.droppedProbeAudioBeforeVideoBase, 1);
+
+    engine._videoDtsMode = 'pts-monotonic';
+    engine._releaseVideoDtsProbeAudio(writeList);
+    assert.deepStrictEqual(writeList.map((packet) => packet.id), ['overlaps-base', 'after-base']);
+    assert.strictEqual(engine._diag.videoDtsProbeAudioReleased, 2);
+});
+
+test('EOF writes probed video before deferred audio and lifecycle discard drops both', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { index: 0, time_base_num: 1, time_base_den: 1000 };
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+
+    for (let i = 0; i < 3; i++) {
+        const ts = 5_000 + i * 42;
+        const [lo, hi] = split64(ts);
+        assert.strictEqual(engine._ingestVideoPacket({
+            id: `video-${i}`, pts: lo, ptshi: hi, dts: lo, dtshi: hi, duration: 42, flags: i === 0 ? 1 : 0,
+        }).length, 0);
+    }
+    engine._stageAudioForVideoDtsProbe({ id: 'audio-eof' }, []);
+    const eofPackets = engine._flushVideoPacketsAtEof();
+    engine._releaseVideoDtsProbeAudio(eofPackets, true);
+    assert.deepStrictEqual(Array.from(eofPackets, (packet) => packet.id),
+        ['video-0', 'video-1', 'video-2', 'audio-eof']);
+
+    engine._videoDtsProbe.push({ id: 'stale-video' });
+    engine._videoDtsProbeAudio.push({ id: 'stale-audio' });
+    engine._sourceDtsProbeViable = false;
+    engine._sourceDtsProbeRejectedReason = 'missing';
+    engine._monotonicPtsProbeViable = false;
+    engine._monotonicPtsProbeRejectedReason = 'non-monotonic';
+    engine._audioNextPts48k = 1234;
+    engine._audioDecodedAnchor48k = 1200;
+    engine._discardPendingVideoPacket();
+    assert.strictEqual(engine._videoDtsProbe.length, 0);
+    assert.strictEqual(engine._videoDtsProbeAudio.length, 0);
+    assert.strictEqual(engine._videoDtsMode, null);
+    assert.strictEqual(engine._sourceDtsProbeViable, true);
+    assert.strictEqual(engine._sourceDtsProbeRejectedReason, null);
+    assert.strictEqual(engine._monotonicPtsProbeViable, true);
+    assert.strictEqual(engine._monotonicPtsProbeRejectedReason, null);
+    assert.strictEqual(engine._audioNextPts48k, null);
+    assert.strictEqual(engine._audioDecodedAnchor48k, null);
 });
 
 test('video packet durations exactly bridge reconstructed DTS across every fragment', () => {
@@ -188,6 +570,112 @@ test('video packet durations exactly bridge reconstructed DTS across every fragm
     assert.ok(engine._diag.videoDurationCorrections > 1000,
         'rounded source durations should be replaced by exact 41/42 ms deltas');
     assert.strictEqual(engine._diag.firstVideoDurationError || null, null);
+});
+
+test('video lookahead survives batch partitions and EOF emits every packet exactly once', () => {
+    const NorvaEngine = loadEngineClass();
+    const { engine } = makeEngine(NorvaEngine);
+    engine.vS = { time_base_num: 1, time_base_den: 1000 };
+
+    const split64 = (value) => {
+        const hi = Math.floor(value / 4294967296);
+        return [(value - hi * 4294967296) >>> 0, hi];
+    };
+    const join64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+    const ptsValues = [53_416, 53_458, 53_499, 53_541, 53_583, 53_625, 53_666];
+    const packets = ptsValues.map((pts, id) => {
+        const [ptsLo, ptsHi] = split64(pts);
+        return { id, pts: ptsLo, ptshi: ptsHi, duration: 43, flags: id === 0 ? 1 : 0 };
+    });
+    // Model independent ff_read_frame_multi calls, including empty and
+    // single-video batches. The lookahead must remain engine state, not local
+    // state tied to one batch.
+    const batches = [[packets[0]], [], [packets[1], packets[2]], [packets[3]],
+        [packets[4], packets[5]], [packets[6]]];
+    const emitted = [];
+    for (const batch of batches) {
+        for (const packet of batch) {
+            const ready = engine._prepareVideoPacket(packet);
+            if (ready) emitted.push(ready);
+        }
+    }
+    const tail = engine._flushPendingVideoPacket();
+    if (tail) emitted.push(tail);
+
+    assert.deepStrictEqual(emitted.map((packet) => packet.id), packets.map((packet) => packet.id));
+    assert.strictEqual(engine._pendingVideoPacket, null);
+    for (let i = 0; i < emitted.length; i++) {
+        assert.ok(emitted[i].duration > 0, `packet ${i}: duration must be positive`);
+        assert.strictEqual(emitted[i].durationhi, 0);
+        if (i + 1 < emitted.length) {
+            const dts = join64(emitted[i].dts, emitted[i].dtshi);
+            const nextDts = join64(emitted[i + 1].dts, emitted[i + 1].dtshi);
+            assert.strictEqual(emitted[i].duration, nextDts - dts);
+        }
+    }
+});
+
+test('seek, mux reinitialisation, and destroy discard lookahead before teardown work', async () => {
+    const NorvaEngine = loadEngineClass();
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        const retained = { id: 'seek-old-generation' };
+        engine._pendingVideoPacket = retained;
+        engine._lastExactVideoDuration = 42;
+        let freed = false;
+        engine.lib = {
+            ff_free_muxer: async () => {
+                assert.strictEqual(engine._pendingVideoPacket, null,
+                    'seek must discard lookahead before freeing the old muxer');
+                assert.strictEqual(engine._lastExactVideoDuration, null);
+                freed = true;
+            },
+        };
+        await engine._resetForSeek();
+        assert.strictEqual(freed, true);
+    }
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine.vS = null;
+        engine.aS = null;
+        engine._pendingVideoPacket = { id: 'init-old-generation' };
+        engine._lastExactVideoDuration = 41;
+        let unlinked = false;
+        engine.lib = {
+            unlink: async () => {
+                assert.strictEqual(engine._pendingVideoPacket, null,
+                    'mux init must discard lookahead before touching the output device');
+                assert.strictEqual(engine._lastExactVideoDuration, null);
+                unlinked = true;
+            },
+            mkstreamwriterdev: async () => {},
+            ff_init_muxer: async () => [303, null, null, []],
+            av_opt_set: async () => {},
+            avformat_write_header: async () => {},
+            av_packet_alloc: async () => 404,
+        };
+        await engine._initMuxer();
+        assert.strictEqual(unlinked, true);
+    }
+
+    {
+        const { engine } = makeEngine(NorvaEngine);
+        engine._pendingVideoPacket = { id: 'destroy-old-generation' };
+        engine._lastExactVideoDuration = 42;
+        let terminated = false;
+        engine.lib = {
+            terminate: () => {
+                assert.strictEqual(engine._pendingVideoPacket, null,
+                    'destroy must discard lookahead before terminating the worker');
+                assert.strictEqual(engine._lastExactVideoDuration, null);
+                terminated = true;
+            },
+        };
+        engine.destroy();
+        assert.strictEqual(terminated, true);
+    }
 });
 
 test('a successful batch uses one worker RPC and commits staged bytes only afterwards', async () => {

@@ -98,10 +98,44 @@ test('playback hint carries the compact codec facts already known for the exact 
 function loadGatewayFunction(name, nextName, globals = {}) {
     const source = read('services/media-gateway/src/index.js').replace(/\r\n/g, '\n');
     const start = source.indexOf(`function ${name}(`);
-    const end = source.indexOf(`\nfunction ${nextName}(`, start);
+    let end = source.indexOf(`\nfunction ${nextName}(`, start);
+    if (end < 0) end = source.indexOf(`\nasync function ${nextName}(`, start);
     assert.ok(start >= 0 && end > start, `${name} source not found`);
     return vm.runInNewContext(`(${source.slice(start, end).trim()})`, globals);
 }
+
+test('Gateway seek never mixes source-timestamped copied video with rebased encoded audio', () => {
+    const usesSourceTimestampedCopySeek = loadGatewayFunction(
+        'usesSourceTimestampedCopySeek',
+        'observeSessionStartOffset',
+        {
+            shouldCopyVideo: () => true,
+            shouldCopyAudio: () => true,
+        }
+    );
+    const seekSession = { mode: 'remux', seekOffset: 384 };
+
+    assert.strictEqual(
+        usesSourceTimestampedCopySeek(seekSession, false, false),
+        false,
+        'AAC encoding must rebase copied video onto the same zero-based HLS timeline'
+    );
+    assert.strictEqual(
+        usesSourceTimestampedCopySeek(seekSession, false, true),
+        true,
+        'a pure A/V copy seek may preserve timestamps for exact offset measurement'
+    );
+    assert.strictEqual(
+        usesSourceTimestampedCopySeek(seekSession, true, true),
+        false,
+        'encoded video already uses the normalized session timeline'
+    );
+    assert.strictEqual(
+        usesSourceTimestampedCopySeek({ ...seekSession, seekOffset: 0 }, false, true),
+        false,
+        'initial playback does not need source-timestamp preservation'
+    );
+});
 
 test('only an exact zero subtitle count suppresses the cold Gateway track probe', () => {
     const shouldProbeMissingSubtitleTracks = loadGatewayFunction(
