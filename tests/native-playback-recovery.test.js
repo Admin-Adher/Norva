@@ -149,6 +149,26 @@ for (const target of nativeTargets) {
   });
 }
 
+test('Android phone network Retry preserves the cloud native-player bridge', () => {
+  const source = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');
+  const errorPanel = section(
+    source,
+    'private void buildErrorPanel()',
+    'private void showNetworkError(String detail)',
+  );
+
+  assert.match(
+    errorPanel,
+    /if \("cloud"\.equals\(prefs\(\)\.getString\(PREF_MODE, null\)\)\) \{\s*connectCloud\(lastLoadedUrl\);/,
+    'Retrying a cloud shell must restore NorvaTVCloud before reloading the catalog',
+  );
+  assert.match(
+    errorPanel,
+    /else \{\s*connect\(lastLoadedUrl\);\s*\}/,
+    'LAN/server retries must keep their non-cloud bridge path',
+  );
+});
+
 test('standalone native recovery is item-scoped, with bounded VOD and persistent live recovery', () => {
   const source = read('public/js/utils/standalone.js');
   const recovery = section(

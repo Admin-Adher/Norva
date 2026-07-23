@@ -1652,7 +1652,15 @@ public class MainActivity extends Activity {
         retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         retryBtn.setOnClickListener(v -> {
             if (lastLoadedUrl != null && !lastLoadedUrl.isEmpty()) {
-                connect(lastLoadedUrl);
+                // A failed first cloud load can happen before the emulator/device
+                // has usable networking. Retrying through connect() would remove
+                // NorvaTVCloud, so the web catalog would appear healthy while every
+                // Play action silently lost its native PlayerActivity handoff.
+                if ("cloud".equals(prefs().getString(PREF_MODE, null))) {
+                    connectCloud(lastLoadedUrl);
+                } else {
+                    connect(lastLoadedUrl);
+                }
             } else {
                 connectCloud(CLOUD_WATCH_URL);
             }
