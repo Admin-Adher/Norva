@@ -68,7 +68,7 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:theme="@style/PlayerTheme"
-            android:screenOrientation="fullUser" />
+            android:screenOrientation="sensorLandscape" />
 
         <!-- Offline downloads: native list of saved movies (the "Downloads" screen). -->
         <activity

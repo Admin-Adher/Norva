@@ -23,8 +23,11 @@
  */
 
 (() => {
-    const bridge = window.NodeCastNative || window.NorvaTVCloud;
-    if (!bridge) return;
+    const bootNativeBridge = () => {
+        if (window.__norvaStandaloneBooted) return true;
+        const bridge = window.NodeCastNative || window.NorvaTVCloud;
+        if (!bridge) return false;
+        window.__norvaStandaloneBooted = true;
 
     // Implicit session only in standalone (the embedded server has a single
     // admin user). In cloud mode the TV uses its real Norva account session —
@@ -297,7 +300,7 @@
     };
 
     // Route all playback to the native player once the page classes exist
-    document.addEventListener('DOMContentLoaded', () => {
+    const installNativeOverrides = () => {
         // Double-tap guard. Launching the native player starts a new fullscreen
         // Android activity and backgrounds the WebView; a rapid double-tap fires
         // two launches before the activity covers the screen, stacking two
@@ -1030,7 +1033,31 @@
             setTimeout(hideLogout, 1500);
             setTimeout(hideLogout, 4000);
         }
-    });
+    };
+    if (!document.readyState || document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installNativeOverrides, { once: true });
+    } else {
+        installNativeOverrides();
+    }
 
     console.log(`[Native] Playback bridge active (${isStandalone ? 'standalone' : 'cloud'})`);
+        return true;
+    };
+
+    if (bootNativeBridge()) return;
+    // Some WebView builds expose an addJavascriptInterface object a few ticks
+    // after deferred scripts begin executing. The previous one-shot check then
+    // left WatchPage on the embedded browser player for the whole session. Retry
+    // only in a native-looking shell and install immediately even if DOMContentLoaded
+    // has already fired.
+    const nativeShellExpected = /NorvaTV-/i.test(navigator.userAgent || '')
+        || /[?&]mobile=1\b/.test(window.location.search || '');
+    if (!nativeShellExpected) return;
+    let bridgeAttempts = 0;
+    const bridgeTimer = window.setInterval(() => {
+        bridgeAttempts += 1;
+        if (bootNativeBridge() || bridgeAttempts >= 100) {
+            window.clearInterval(bridgeTimer);
+        }
+    }, 100);
 })();

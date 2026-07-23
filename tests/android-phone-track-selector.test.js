@@ -125,7 +125,10 @@ test('Android phone exposes one unified selector and keeps failed changes in-pla
   );
 
   assert.match(player, /setShowSubtitleButton\(false\)/);
-  assert.match(player, /installTrackControl\(root\)/);
+  assert.match(player, /installCompactBottomControls\(\)/);
+  assert.match(player, /R\.id\.norva_player_audio_button/);
+  assert.match(player, /R\.id\.norva_player_subtitle_button/);
+  assert.match(player, /showTrackDialog\(section\)/);
   assert.match(selector, /player_tracks_title/);
   assert.match(selector, /player_audio_section/);
   assert.match(selector, /player_subtitle_section/);

@@ -148,6 +148,21 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#0a0a0f"));
         setContentView(root);
+        // Android 15 enforces edge-to-edge for targetSdk 35. Keep browsing
+        // content below the visible status/navigation bars so the gesture pill
+        // and classic three-button row never cover Norva's bottom navigation or
+        // the HTML-player fallback controls.
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                android.graphics.Insets safe = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars()
+                                | android.view.WindowInsets.Type.displayCutout());
+                v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
 
         buildWebView();
         buildSetupPanel();

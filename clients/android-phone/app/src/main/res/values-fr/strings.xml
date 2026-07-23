@@ -20,6 +20,10 @@
     <string name="player_tracks_button">Audio et sous-titres</string>
     <string name="player_tracks_title">Audio et sous-titres</string>
     <string name="player_tracks_pane_title">Options audio et sous-titres</string>
+    <string name="player_audio_button">Pistes audio</string>
+    <string name="player_subtitles_button">Sous-titres</string>
+    <string name="player_audio_selected_description">Audio : %1$s</string>
+    <string name="player_subtitles_selected_description">Sous-titres : %1$s</string>
     <string name="player_audio_section">Audio</string>
     <string name="player_subtitle_section">Sous-titres</string>
     <string name="player_subtitles_off">Désactivés</string>
@@ -58,6 +62,7 @@
     <string name="player_resize">Redimensionner la vidéo</string>
     <string name="player_resize_fit">Ajuster</string>
     <string name="player_resize_zoom">Zoomer</string>
+    <string name="player_resize_selected_description">Affichage vidéo : %1$s</string>
     <string name="player_resize_feedback">Affichage vidéo : %1$s</string>
     <string name="player_playback_speed_section">Vitesse de lecture</string>
     <string name="player_playback_speed_normal">Normale</string>

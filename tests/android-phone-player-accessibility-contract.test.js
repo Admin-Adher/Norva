@@ -32,7 +32,8 @@ test('Android phone player exposes stable IDs for automation and accessibility f
     'norva_player_back_button',
     'norva_player_title',
     'norva_player_controls',
-    'norva_player_track_button',
+    'norva_player_audio_button',
+    'norva_player_subtitle_button',
     'norva_player_track_dialog',
     'norva_player_audio_section',
     'norva_player_subtitle_section',
@@ -83,6 +84,10 @@ test('Android phone French resources translate the complete player string contra
 
   for (const key of [
     'player_tracks_button',
+    'player_audio_button',
+    'player_subtitles_button',
+    'player_audio_selected_description',
+    'player_subtitles_selected_description',
     'player_back_content_description',
     'player_subtitles_burned_in',
     'player_subtitles_burned_in_unknown',
@@ -91,6 +96,7 @@ test('Android phone French resources translate the complete player string contra
     'player_unlock',
     'player_resize_fit',
     'player_resize_zoom',
+    'player_resize_selected_description',
     'player_version_title',
     'player_cast_connected_to',
     'player_reconnecting',
@@ -147,7 +153,8 @@ test('Android phone player assigns stable IDs to the generated native views', ()
     'R.id.norva_player_back_button',
     'R.id.norva_player_title',
     'R.id.norva_player_controls',
-    'R.id.norva_player_track_button',
+    'R.id.norva_player_audio_button',
+    'R.id.norva_player_subtitle_button',
     'R.id.norva_player_track_dialog',
     'R.id.norva_player_audio_section',
     'R.id.norva_player_subtitle_section',
@@ -176,18 +183,79 @@ test('Android phone player assigns stable IDs to the generated native views', ()
   );
 });
 
+test('Android phone player keeps compact actions inside the Media3 control row', () => {
+  const player = read(
+    'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
+  );
+
+  assert.match(player, /private void installCompactBottomControls\(\)/);
+  assert.match(player, /R\.id\.exo_basic_controls/);
+  assert.match(player, /R\.id\.exo_extra_controls/);
+  assert.match(player, /R\.drawable\.exo_ic_audiotrack/);
+  assert.match(player, /R\.drawable\.exo_ic_subtitle_off/);
+  assert.match(player, /new LinearLayout\.LayoutParams\(dp\(48\), dp\(48\)\)/);
+  assert.match(player, /R\.id\.exo_overflow_hide/);
+  assert.match(
+    player,
+    /media3Overflow\.addView\(brightnessButton, extraInsertAt\+\+[\s\S]*media3Overflow\.addView\(resizeButton, extraInsertAt,/,
+  );
+  assert.doesNotMatch(player, /installUtilityControls\(FrameLayout root\)/);
+});
+
 test('Android phone player offers explicit alternatives to gesture-only controls', () => {
   const player = read(
     'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
   );
 
-  assert.match(player, /private void installUtilityControls\(FrameLayout root\)/);
+  assert.match(player, /private void installCompactBottomControls\(\)/);
   assert.match(player, /private void toggleResizeMode\(\)/);
   assert.match(player, /private void showBrightnessDialog\(\)/);
   assert.match(player, /new SeekBar\(this\)/);
   assert.match(player, /setAccessibilityLiveRegion\(View\.ACCESSIBILITY_LIVE_REGION_POLITE\)/);
   assert.match(player, /setAccessibilityHeading\(true\)/);
-  assert.match(player, /scroll\.requestFocus\(\)/);
+  assert.match(player, /focusSection\.requestFocus\(\)/);
+  assert.match(player, /availableWidthDp >= 480/g);
+});
+
+test('Android phone player reserves system navigation and cutout insets', () => {
+  const player = read(
+    'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
+  );
+
+  assert.match(player, /getInsetsIgnoringVisibility\([\s\S]*WindowInsets\.Type\.navigationBars\(\)/);
+  assert.match(player, /findViewById\(androidx\.media3\.ui\.R\.id\.exo_controller\)/);
+  assert.match(player, /controller\.setPadding\([\s\S]*safeInsetBottom/);
+  assert.doesNotMatch(player, /playerView\.setPadding\(/);
+  assert.match(player, /topBar\.addView\(variantButton, lp\)/);
+  assert.match(player, /topBar\.addView\(castButton, btnLp\)/);
+  assert.match(player, /castBar\.setPadding\([\s\S]*safeInsetRight/);
+});
+
+test('Android phone native player is landscape and uses modern immersive mode', () => {
+  const manifest = read('clients/android-phone/app/src/main/AndroidManifest.xml');
+  const player = read(
+    'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
+  );
+
+  assert.match(
+    manifest,
+    /android:name="\.PlayerActivity"[\s\S]*android:screenOrientation="sensorLandscape"/,
+  );
+  assert.match(player, /setDecorFitsSystemWindows\(false\)/);
+  assert.match(player, /BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/);
+});
+
+test('Android phone browsing shell also accounts for system bars', () => {
+  const main = read(
+    'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
+  );
+
+  assert.match(main, /setDecorFitsSystemWindows\(false\)/);
+  assert.match(
+    main,
+    /WindowInsets\.Type\.systemBars\(\)[\s\S]*WindowInsets\.Type\.displayCutout\(\)/,
+  );
+  assert.match(main, /v\.setPadding\(safe\.left, safe\.top, safe\.right, safe\.bottom\)/);
 });
 
 test('Android phone player UI telemetry is bounded and excludes provider payload', () => {

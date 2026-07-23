@@ -168,7 +168,7 @@ public class PlayerActivity extends Activity {
 
     // Lock controls: swallow every gesture until explicitly unlocked.
     private boolean controlsLocked = false;
-    private Button lockBtn;
+    private android.widget.ImageButton lockBtn;
     private Button unlockBtn;
     private final Runnable hideUnlockBtn = new Runnable() {
         @Override public void run() { if (unlockBtn != null) unlockBtn.setVisibility(View.GONE); }
@@ -181,6 +181,7 @@ public class PlayerActivity extends Activity {
     // Chromecast: discovery + session hand-over (see CastSupport).
     private CastSupport castSupport;
     private android.widget.ImageButton castButton;
+    private Button variantButton;
     private LinearLayout castBar;
     private TextView castBarLabel;
     private org.json.JSONArray variants;      // live quality variants, null for single-variant/movies
@@ -192,20 +193,25 @@ public class PlayerActivity extends Activity {
     private String nextTitle;
     private FrameLayout playerRoot;
     private LinearLayout topBar;
+    private int safeInsetLeft;
+    private int safeInsetTop;
+    private int safeInsetRight;
+    private int safeInsetBottom;
 
-    // Norva's unified audio/subtitle control. The exact-file arrays contain only
-    // track-scoped evidence accepted by the web layer; provider/category labels
-    // such as "Netflix" or "Nordic" are deliberately never transported.
-    private Button trackButton;
-    private Button resizeButton;
-    private Button brightnessButton;
-    private LinearLayout utilityControls;
+    // Compact actions injected into Media3's own bottom bar, on the same row as
+    // the elapsed/duration labels. The selector remains unified internally, but
+    // audio and subtitle icons take viewers directly to the relevant section.
+    private android.widget.ImageButton audioButton;
+    private android.widget.ImageButton subtitleButton;
+    private android.widget.ImageButton resizeButton;
+    private android.widget.ImageButton brightnessButton;
     private android.app.AlertDialog trackDialog;
     private org.json.JSONArray verifiedAudioTracks;
     private org.json.JSONArray exactSubtitleTracks;
     private boolean hasBurnedSubtitle;
     private String burnedSubtitleLanguage;
-    private boolean hasTrackChoices = false;
+    private boolean hasAudioChoices = false;
+    private boolean hasSubtitleChoices = false;
     private String selectedAudioLabel;
     private String selectedSubtitleLabel;
     private String preferenceScopeJson;
@@ -218,6 +224,8 @@ public class PlayerActivity extends Activity {
             PlaybackPreferenceStore.Preferences.empty();
     private TrackOption pendingTrackSelection;
     private boolean pendingSubtitleOff;
+    private static final int TRACK_SECTION_AUDIO = 1;
+    private static final int TRACK_SECTION_SUBTITLES = 2;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
@@ -360,7 +368,7 @@ public class PlayerActivity extends Activity {
             getWindow().getAttributes().layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
-        playerView.setOnApplyWindowInsetsListener((v, insets) -> {
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
             int l = 0, t = 0, r = 0, b = 0;
             if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
                 DisplayCutout dc = insets.getDisplayCutout();
@@ -369,10 +377,33 @@ public class PlayerActivity extends Activity {
                 r = dc.getSafeInsetRight();
                 b = dc.getSafeInsetBottom();
             }
-            v.setPadding(l, t, r, b);
+            // Reserve the navigation/gesture area even while immersive mode has
+            // hidden it. Android reveals that bar transiently over the app; without
+            // this stable inset, the seek bar and trailing controls become
+            // untappable on gesture and classic three-button devices.
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets nav = insets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.navigationBars());
+                android.graphics.Insets gestures = insets.getInsets(
+                        WindowInsets.Type.mandatorySystemGestures());
+                l = Math.max(l, Math.max(nav.left, gestures.left));
+                t = Math.max(t, Math.max(nav.top, gestures.top));
+                r = Math.max(r, Math.max(nav.right, gestures.right));
+                b = Math.max(b, Math.max(nav.bottom, gestures.bottom));
+            } else if (Build.VERSION.SDK_INT >= 23) {
+                l = Math.max(l, insets.getStableInsetLeft());
+                t = Math.max(t, insets.getStableInsetTop());
+                r = Math.max(r, insets.getStableInsetRight());
+                b = Math.max(b, insets.getStableInsetBottom());
+            }
+            safeInsetLeft = l;
+            safeInsetTop = t;
+            safeInsetRight = r;
+            safeInsetBottom = b;
+            applyPlayerSafeInsets();
             return insets;
         });
-        playerView.requestApplyInsets();
+        root.requestApplyInsets();
         applyImmersive();
 
         DataSource.Factory dataSourceFactory;
@@ -449,8 +480,7 @@ public class PlayerActivity extends Activity {
         playerView.setShowSubtitleButton(false);
         installGestureOverlay();
         installTopBar(root);
-        installTrackControl(root);
-        installUtilityControls(root);
+        installCompactBottomControls();
         // Chromecast: the receiver fetches the provider URL itself from the same
         // home network. Local (encrypted) downloads can't be cast.
         if (!isLocal) installCastSupport(root);
@@ -1262,76 +1292,120 @@ public class PlayerActivity extends Activity {
                 : TrackSelectionResolver.Role.MAIN;
     }
 
-    private void installTrackControl(FrameLayout root) {
-        trackButton = new Button(this);
-        trackButton.setId(R.id.norva_player_track_button);
-        trackButton.setAllCaps(false);
-        trackButton.setTextColor(Color.WHITE);
-        trackButton.setTextSize(12);
-        trackButton.setMaxLines(2);
-        trackButton.setGravity(Gravity.CENTER);
-        trackButton.setPadding(dp(14), dp(7), dp(14), dp(7));
-        trackButton.setBackgroundColor(Color.parseColor("#CC111827"));
-        trackButton.setText(getString(R.string.player_tracks_button));
-        trackButton.setContentDescription(getString(R.string.player_tracks_button));
-        trackButton.setVisibility(View.GONE);
-        trackButton.setOnClickListener(v -> {
-            NativePlayerUiTelemetry.log(this, "player_tracks_open", "open", "tracks",
-                    hasBurnedSubtitle ? "burned_subtitles" : "available");
-            showTrackDialog();
-        });
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.END);
-        lp.bottomMargin = dp(64);
-        lp.rightMargin = dp(16);
-        root.addView(trackButton, lp);
+    private android.widget.ImageButton compactIconButton(
+            int id, int drawable, int description, View.OnClickListener listener) {
+        android.widget.ImageButton button = new android.widget.ImageButton(this);
+        button.setId(id);
+        button.setImageResource(drawable);
+        button.setColorFilter(Color.WHITE);
+        button.setBackgroundColor(Color.TRANSPARENT);
+        button.setPadding(dp(9), dp(9), dp(9), dp(9));
+        button.setMinimumWidth(dp(48));
+        button.setMinimumHeight(dp(48));
+        button.setContentDescription(getString(description));
+        button.setOnClickListener(listener);
+        if (Build.VERSION.SDK_INT >= 26) button.setTooltipText(getString(description));
+        return button;
     }
 
-    private void installUtilityControls(FrameLayout root) {
-        utilityControls = new LinearLayout(this);
-        utilityControls.setOrientation(LinearLayout.HORIZONTAL);
-        utilityControls.setGravity(Gravity.CENTER_VERTICAL);
-        utilityControls.setVisibility(View.GONE);
+    /**
+     * Keep every secondary playback action in Media3's own bottom action row.
+     * This preserves the progress-bar geometry and keeps the title/back overlay
+     * clear of the lock control on small landscape phones.
+     */
+    private void installCompactBottomControls() {
+        LinearLayout media3Actions =
+                playerView.findViewById(androidx.media3.ui.R.id.exo_basic_controls);
+        if (media3Actions == null) return;
+        LinearLayout media3Overflow =
+                playerView.findViewById(androidx.media3.ui.R.id.exo_extra_controls);
 
-        resizeButton = new Button(this);
-        resizeButton.setId(R.id.norva_player_resize_button);
-        resizeButton.setAllCaps(false);
-        resizeButton.setText(getString(R.string.player_resize_fit));
-        resizeButton.setContentDescription(getString(R.string.player_resize));
-        resizeButton.setTextColor(Color.WHITE);
-        resizeButton.setBackgroundColor(Color.parseColor("#CC111827"));
-        resizeButton.setOnClickListener(v -> toggleResizeMode());
-        utilityControls.addView(resizeButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        audioButton = compactIconButton(
+                R.id.norva_player_audio_button,
+                androidx.media3.ui.R.drawable.exo_ic_audiotrack,
+                R.string.player_audio_button,
+                v -> openTrackSection(TRACK_SECTION_AUDIO));
+        audioButton.setVisibility(View.GONE);
 
-        brightnessButton = new Button(this);
-        brightnessButton.setId(R.id.norva_player_brightness_button);
-        brightnessButton.setAllCaps(false);
-        brightnessButton.setText(getString(R.string.player_brightness));
-        brightnessButton.setContentDescription(getString(R.string.player_brightness));
-        brightnessButton.setTextColor(Color.WHITE);
-        brightnessButton.setBackgroundColor(Color.parseColor("#CC111827"));
-        brightnessButton.setOnClickListener(v -> showBrightnessDialog());
-        LinearLayout.LayoutParams brightLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        brightLp.leftMargin = dp(8);
-        utilityControls.addView(brightnessButton, brightLp);
+        subtitleButton = compactIconButton(
+                R.id.norva_player_subtitle_button,
+                androidx.media3.ui.R.drawable.exo_ic_subtitle_off,
+                R.string.player_subtitles_button,
+                v -> openTrackSection(TRACK_SECTION_SUBTITLES));
+        subtitleButton.setVisibility(View.GONE);
 
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.START);
-        lp.bottomMargin = dp(64);
-        lp.leftMargin = dp(16);
-        root.addView(utilityControls, lp);
+        brightnessButton = compactIconButton(
+                R.id.norva_player_brightness_button,
+                android.R.drawable.ic_menu_day,
+                R.string.player_brightness,
+                v -> showBrightnessDialog());
+
+        resizeButton = compactIconButton(
+                R.id.norva_player_resize_button,
+                android.R.drawable.ic_menu_crop,
+                R.string.player_resize,
+                v -> toggleResizeMode());
+
+        lockBtn = compactIconButton(
+                R.id.norva_player_lock_button,
+                android.R.drawable.ic_lock_lock,
+                R.string.player_lock,
+                v -> setControlsLocked(true));
+
+        View settings = playerView.findViewById(androidx.media3.ui.R.id.exo_settings);
+        int insertAt = settings == null ? media3Actions.getChildCount()
+                : Math.max(0, media3Actions.indexOfChild(settings));
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        // Add primary actions as direct Media3 children so its layout manager can
+        // move them into the stock overflow instead of treating five icons as one
+        // indivisible block.
+        media3Actions.addView(audioButton, insertAt++, new LinearLayout.LayoutParams(actionLp));
+        media3Actions.addView(subtitleButton, insertAt++, new LinearLayout.LayoutParams(actionLp));
+        media3Actions.addView(lockBtn, insertAt, new LinearLayout.LayoutParams(actionLp));
+
+        // Brightness and resize duplicate gestures, so they live in the secondary
+        // Media3 tray. They remain explicit and accessible without competing with
+        // elapsed/duration, audio, CC or Lock.
+        if (media3Overflow != null) {
+            // Media3 requires exo_overflow_hide to remain the final child. Its
+            // layout manager temporarily moves every preceding extra into the
+            // primary row, then overflows only what does not fit.
+            View overflowHide =
+                    playerView.findViewById(androidx.media3.ui.R.id.exo_overflow_hide);
+            int extraInsertAt = overflowHide == null
+                    ? media3Overflow.getChildCount()
+                    : Math.max(0, media3Overflow.indexOfChild(overflowHide));
+            media3Overflow.addView(brightnessButton, extraInsertAt++,
+                    new LinearLayout.LayoutParams(dp(48), dp(48)));
+            media3Overflow.addView(resizeButton, extraInsertAt,
+                    new LinearLayout.LayoutParams(dp(48), dp(48)));
+        }
     }
 
-    private void updateUtilityControlVisibility(boolean controllerVisible) {
-        int visibility = controllerVisible && !controlsLocked ? View.VISIBLE : View.GONE;
-        if (utilityControls != null) utilityControls.setVisibility(visibility);
-        if (resizeButton != null) resizeButton.setVisibility(visibility);
-        if (brightnessButton != null) brightnessButton.setVisibility(visibility);
+    private void updateCompactControlVisibility(boolean controllerVisible) {
+        boolean visible = controllerVisible && !controlsLocked;
+        int availableWidthDp = getResources().getConfiguration().screenWidthDp;
+        if (audioButton != null) {
+            audioButton.setVisibility(visible && hasAudioChoices ? View.VISIBLE : View.GONE);
+        }
+        if (subtitleButton != null) {
+            subtitleButton.setVisibility(visible && hasSubtitleChoices ? View.VISIBLE : View.GONE);
+        }
+        // Audio, captions and Lock are the primary actions. On a compact or
+        // multi-window player, brightness remains available through the vertical
+        // gesture and resize through pinch, so those duplicate icons yield first
+        // instead of squeezing the duration or Android navigation affordance.
+        if (brightnessButton != null) {
+            brightnessButton.setVisibility(
+                    visible && availableWidthDp >= 480 ? View.VISIBLE : View.GONE);
+        }
+        if (resizeButton != null) {
+            resizeButton.setVisibility(
+                    visible && availableWidthDp >= 480 ? View.VISIBLE : View.GONE);
+        }
+        if (lockBtn != null) {
+            lockBtn.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void toggleResizeMode() {
@@ -1343,7 +1417,10 @@ public class PlayerActivity extends Activity {
         String label = getString(next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 ? R.string.player_resize_zoom
                 : R.string.player_resize_fit);
-        if (resizeButton != null) resizeButton.setText(label);
+        if (resizeButton != null) {
+            resizeButton.setContentDescription(
+                    getString(R.string.player_resize_selected_description, label));
+        }
         showSeekFeedback(getString(R.string.player_resize_feedback, label));
         NativePlayerUiTelemetry.log(this, "player_gesture", "tap", "resize",
                 next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "zoom" : "fit");
@@ -1395,23 +1472,24 @@ public class PlayerActivity extends Activity {
     }
 
     private void refreshTrackControl(Tracks tracks) {
-        if (trackButton == null) return;
+        if (audioButton == null || subtitleButton == null) return;
         List<TrackOption> audio = collectTrackOptions(tracks, C.TRACK_TYPE_AUDIO);
         List<TrackOption> subtitles = collectTrackOptions(tracks, C.TRACK_TYPE_TEXT);
-        hasTrackChoices = audio.size() > 1 || !subtitles.isEmpty() || hasBurnedSubtitle;
+        hasAudioChoices = !audio.isEmpty();
+        hasSubtitleChoices = !subtitles.isEmpty() || hasBurnedSubtitle;
         selectedAudioLabel = selectedLabel(audio, getString(R.string.player_audio_unavailable));
         String burnedLabel = burnedSubtitleLabel();
         selectedSubtitleLabel = hasBurnedSubtitle
                 ? burnedLabel
                 : selectedLabel(subtitles, getString(R.string.player_subtitles_off));
-        String shortSubtitle = hasBurnedSubtitle
-                ? burnedLabel
-                : selectedLabel(subtitles, getString(R.string.player_subtitles_off_short));
-        trackButton.setText(getString(R.string.player_tracks_button) + "\n"
-                + selectedAudioLabel + " · " + shortSubtitle);
-        trackButton.setContentDescription(getString(
-                R.string.player_tracks_selected_description,
-                selectedAudioLabel, selectedSubtitleLabel));
+        audioButton.setContentDescription(getString(
+                R.string.player_audio_selected_description, selectedAudioLabel));
+        subtitleButton.setContentDescription(getString(
+                R.string.player_subtitles_selected_description, selectedSubtitleLabel));
+        subtitleButton.setImageResource(
+                hasBurnedSubtitle || hasSelectedTrack(subtitles)
+                        ? androidx.media3.ui.R.drawable.exo_ic_subtitle_on
+                        : androidx.media3.ui.R.drawable.exo_ic_subtitle_off);
         updateTrackButtonVisibility(playerView != null && playerView.isControllerFullyVisible());
     }
 
@@ -1423,9 +1501,14 @@ public class PlayerActivity extends Activity {
     }
 
     private void updateTrackButtonVisibility(boolean controllerVisible) {
-        if (trackButton == null) return;
-        trackButton.setVisibility(controllerVisible && !controlsLocked && hasTrackChoices
-                ? View.VISIBLE : View.GONE);
+        updateCompactControlVisibility(controllerVisible);
+    }
+
+    private void openTrackSection(int section) {
+        NativePlayerUiTelemetry.log(this, "player_tracks_open", "open",
+                section == TRACK_SECTION_AUDIO ? "audio" : "subtitle",
+                hasBurnedSubtitle ? "burned_subtitles" : "available");
+        showTrackDialog(section);
     }
 
     private TextView sectionTitle(String text) {
@@ -1459,7 +1542,7 @@ public class PlayerActivity extends Activity {
         return radio;
     }
 
-    private void showTrackDialog() {
+    private void showTrackDialog(int initialSection) {
         if (player == null) return;
         final List<TrackOption> audio = collectTrackOptions(
                 player.getCurrentTracks(), C.TRACK_TYPE_AUDIO);
@@ -1605,7 +1688,11 @@ public class PlayerActivity extends Activity {
                 .create();
         trackDialog.setOnDismissListener(d -> trackDialog = null);
         trackDialog.show();
-        scroll.requestFocus();
+        TextView focusSection = initialSection == TRACK_SECTION_SUBTITLES
+                ? subtitleTitle : audioTitle;
+        focusSection.setFocusable(true);
+        focusSection.requestFocus();
+        scroll.post(() -> scroll.smoothScrollTo(0, Math.max(0, focusSection.getTop())));
     }
 
     private String burnedSubtitleLabel() {
@@ -1619,8 +1706,8 @@ public class PlayerActivity extends Activity {
         topBar.setId(R.id.norva_player_top_bar);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(dp(12), dp(10), dp(72), dp(10));
-        topBar.setBackgroundColor(Color.parseColor("#99000000"));
+        topBar.setPadding(dp(12), dp(6), dp(12), dp(6));
+        topBar.setBackgroundColor(Color.TRANSPARENT);
         topBar.setVisibility(View.GONE);
 
         android.widget.ImageButton back = new android.widget.ImageButton(this);
@@ -1636,6 +1723,7 @@ public class PlayerActivity extends Activity {
         title.setText(mediaTitle == null || mediaTitle.trim().isEmpty() ? "Norva" : mediaTitle);
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
+        title.setShadowLayer(dp(2), 0, dp(1), Color.BLACK);
         title.setSingleLine(true);
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
@@ -1646,6 +1734,38 @@ public class PlayerActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP));
+        applyPlayerSafeInsets();
+    }
+
+    private void applyPlayerSafeInsets() {
+        if (playerView != null) {
+            View controller = playerView.findViewById(androidx.media3.ui.R.id.exo_controller);
+            if (controller != null) {
+                controller.setPadding(
+                        safeInsetLeft, safeInsetTop, safeInsetRight, safeInsetBottom);
+            }
+        }
+        if (topBar != null) {
+            topBar.setPadding(
+                    dp(12) + safeInsetLeft,
+                    dp(6) + safeInsetTop,
+                    dp(12) + safeInsetRight,
+                    dp(6));
+        }
+        if (castBar != null) {
+            castBar.setPadding(
+                    dp(20) + safeInsetLeft,
+                    dp(12) + safeInsetTop,
+                    dp(20) + safeInsetRight,
+                    dp(12));
+        }
+        if (errorPanel != null) {
+            errorPanel.setPadding(
+                    dp(32) + safeInsetLeft,
+                    dp(32) + safeInsetTop,
+                    dp(32) + safeInsetRight,
+                    dp(32) + safeInsetBottom);
+        }
     }
 
     private void updateTopBarVisibility(boolean controllerVisible) {
@@ -2081,7 +2201,9 @@ public class PlayerActivity extends Activity {
                     if (pinchAccum > 1.15f) {
                         playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
                         if (resizeButton != null) {
-                            resizeButton.setText(getString(R.string.player_resize_zoom));
+                            resizeButton.setContentDescription(getString(
+                                    R.string.player_resize_selected_description,
+                                    getString(R.string.player_resize_zoom)));
                         }
                         showSeekFeedback(getString(R.string.player_resize_feedback,
                                 getString(R.string.player_resize_zoom)));
@@ -2090,7 +2212,9 @@ public class PlayerActivity extends Activity {
                     } else if (pinchAccum < 0.87f) {
                         playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
                         if (resizeButton != null) {
-                            resizeButton.setText(getString(R.string.player_resize_fit));
+                            resizeButton.setContentDescription(getString(
+                                    R.string.player_resize_selected_description,
+                                    getString(R.string.player_resize_fit)));
                         }
                         showSeekFeedback(getString(R.string.player_resize_feedback,
                                 getString(R.string.player_resize_fit)));
@@ -2119,27 +2243,13 @@ public class PlayerActivity extends Activity {
         overlay.addView(seekBubble, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
 
-        // Lock controls: shown alongside the controller; when locked, every
-        // gesture is swallowed and only the transient unlock pill responds.
-        lockBtn = new Button(this);
-        lockBtn.setId(R.id.norva_player_lock_button);
-        lockBtn.setText(getString(R.string.player_lock));
-        lockBtn.setTextColor(Color.WHITE);
-        lockBtn.setBackgroundColor(Color.parseColor("#66000000"));
-        lockBtn.setOnClickListener(v -> setControlsLocked(true));
-        FrameLayout.LayoutParams lockLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.START);
-        lockLp.topMargin = dp(20);
-        lockLp.leftMargin = dp(20);
-        overlay.addView(lockBtn, lockLp);
+        // All visible actions, including Lock, live in Media3's bottom row.
+        // Only the temporary Unlock affordance floats over the picture while
+        // controls are locked.
         playerView.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility -> {
-            lockBtn.setVisibility(visibility == View.VISIBLE && !controlsLocked ? View.VISIBLE : View.GONE);
             updateTrackButtonVisibility(visibility == View.VISIBLE);
             updateTopBarVisibility(visibility == View.VISIBLE);
-            updateUtilityControlVisibility(visibility == View.VISIBLE);
         });
-        lockBtn.setVisibility(View.GONE);
 
         unlockBtn = new Button(this);
         unlockBtn.setId(R.id.norva_player_unlock_button);
@@ -2160,10 +2270,10 @@ public class PlayerActivity extends Activity {
         playerView.setUseController(!locked);
         if (locked) {
             playerView.hideController();
-            lockBtn.setVisibility(View.GONE);
+            if (lockBtn != null) lockBtn.setVisibility(View.GONE);
             updateTrackButtonVisibility(false);
             updateTopBarVisibility(false);
-            updateUtilityControlVisibility(false);
+            updateCompactControlVisibility(false);
             flashUnlockButton();
         } else {
             unlockBtn.removeCallbacks(hideUnlockBtn);
@@ -2171,7 +2281,7 @@ public class PlayerActivity extends Activity {
             playerView.showController();
             updateTrackButtonVisibility(true);
             updateTopBarVisibility(true);
-            updateUtilityControlVisibility(true);
+            updateCompactControlVisibility(true);
         }
     }
 
@@ -2198,25 +2308,25 @@ public class PlayerActivity extends Activity {
      * swap the source in place).
      */
     private void installVariantControl(FrameLayout root) {
-        if (variants == null) return;
-        Button variantBtn = new Button(this);
-        variantBtn.setId(R.id.norva_player_variant_button);
-        variantBtn.setText(currentVariantLabel() + "  ▾");
-        variantBtn.setAllCaps(false);
-        variantBtn.setTextColor(Color.WHITE);
-        variantBtn.setBackgroundColor(Color.parseColor("#66000000"));
-        variantBtn.setContentDescription(getString(R.string.player_version_change_description));
-        variantBtn.setOnClickListener(v -> {
+        if (variants == null || topBar == null) return;
+        variantButton = new Button(this);
+        variantButton.setId(R.id.norva_player_variant_button);
+        variantButton.setText(currentVariantLabel() + "  ▾");
+        variantButton.setAllCaps(false);
+        variantButton.setTextColor(Color.WHITE);
+        variantButton.setTextSize(13);
+        variantButton.setMinHeight(dp(48));
+        variantButton.setBackgroundColor(Color.parseColor("#66000000"));
+        variantButton.setContentDescription(getString(R.string.player_version_change_description));
+        variantButton.setOnClickListener(v -> {
             NativePlayerUiTelemetry.log(this, "player_ui_summary",
                     "open", "variant", "available");
             showVariantDialog();
         });
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.START);
-        lp.topMargin = dp(20);
-        lp.leftMargin = dp(20);
-        root.addView(variantBtn, lp);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
+        lp.leftMargin = dp(8);
+        topBar.addView(variantButton, lp);
     }
 
     private String currentVariantLabel() {
@@ -2281,11 +2391,11 @@ public class PlayerActivity extends Activity {
                     "open", "cast", "picker");
             if (castSupport != null) castSupport.showRoutePicker();
         });
-        FrameLayout.LayoutParams btnLp = new FrameLayout.LayoutParams(
-                dp(48), dp(48), Gravity.TOP | Gravity.END);
-        btnLp.topMargin = dp(20);
-        btnLp.rightMargin = dp(20);
-        root.addView(castButton, btnLp);
+        if (topBar != null) {
+            LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            btnLp.leftMargin = dp(8);
+            topBar.addView(castButton, btnLp);
+        }
 
         castBar = new LinearLayout(this);
         castBar.setId(R.id.norva_player_cast_bar);
@@ -2329,6 +2439,7 @@ public class PlayerActivity extends Activity {
         root.addView(castBar, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP));
+        applyPlayerSafeInsets();
 
         castSupport = new CastSupport(this, new CastSupport.Listener() {
             @Override
@@ -2392,13 +2503,44 @@ public class PlayerActivity extends Activity {
     /** Immersive fullscreen: hide the status and navigation bars (sticky, so a
      *  swipe reveals them transiently without resizing the video). */
     private void applyImmersive() {
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.systemBars());
+                controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController
+                                .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        applyImmersive();
+        if (playerRoot != null) playerRoot.requestApplyInsets();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applyImmersive();
+        if (playerRoot != null) playerRoot.requestApplyInsets();
+        updateCompactControlVisibility(
+                playerView != null && playerView.isControllerFullyVisible());
     }
 
     @Override

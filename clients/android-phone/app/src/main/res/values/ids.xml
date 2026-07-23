@@ -8,7 +8,8 @@
     <item name="norva_player_back_button" type="id" />
     <item name="norva_player_title" type="id" />
     <item name="norva_player_controls" type="id" />
-    <item name="norva_player_track_button" type="id" />
+    <item name="norva_player_audio_button" type="id" />
+    <item name="norva_player_subtitle_button" type="id" />
     <item name="norva_player_track_dialog" type="id" />
     <item name="norva_player_audio_section" type="id" />
     <item name="norva_player_subtitle_section" type="id" />

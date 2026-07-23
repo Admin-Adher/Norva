@@ -175,6 +175,16 @@ test('Android phone network Retry preserves the cloud native-player bridge', () 
   );
 });
 
+test('native bridge bootstrap survives delayed WebView interface injection', () => {
+  const source = read('public/js/utils/standalone.js');
+
+  assert.match(source, /const bootNativeBridge = \(\) =>/);
+  assert.match(source, /window\.__norvaStandaloneBooted/);
+  assert.match(source, /document\.readyState === 'loading'/);
+  assert.match(source, /window\.setInterval\(\(\) =>/);
+  assert.match(source, /bridgeAttempts >= 100/);
+});
+
 test('standalone native recovery is item-scoped, with bounded VOD and persistent live recovery', () => {
   const source = read('public/js/utils/standalone.js');
   const recovery = section(
