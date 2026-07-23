@@ -162,35 +162,52 @@ test('stale completion tokens cannot release a newer lease', () => {
   assert.deepStrictEqual(state, { claimToken: 'new', leaseUntil: 900, dispatchCount: 5 });
 });
 
-test('twelve-lane cycle preserves the fifty-percent movie Whisper share', () => {
+test('twelve-lane cycle doubles every exact-file series stage without raising provider concurrency', () => {
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   const dispatcher = between(
     sourceSync,
     'async function runEnrichmentFleetClaim(',
     '\n// Claim a bounded, fair batch',
   );
-  const isMovieSpeech = (dispatchCount) => [1, 2, 4, 6, 8, 10].includes(dispatchCount % 12);
-  const isSeriesInventory = (dispatchCount) => dispatchCount % 12 === 5;
-  const isEpisodeProbe = (dispatchCount) => dispatchCount % 12 === 7;
-  const isEpisodeSpeech = (dispatchCount) => dispatchCount % 12 === 9;
+  const isMovieSpeech = (dispatchCount) => [1, 4, 8].includes(dispatchCount % 12);
+  const isSeriesInventory = (dispatchCount) => [5, 9].includes(dispatchCount % 12);
+  const isEpisodeProbe = (dispatchCount) => [2, 7].includes(dispatchCount % 12);
+  const isEpisodeSpeech = (dispatchCount) => [6, 10].includes(dispatchCount % 12);
   const isOverview = (dispatchCount) => dispatchCount % 12 === 11;
+  assert.match(sourceSync, /seriesPriorityCycleV2: true/);
   assert.deepStrictEqual(
     Array.from({ length: 12 }, (_, lane) => isMovieSpeech(lane)),
-    [false, true, true, false, true, false, true, false, true, false, true, false],
+    [false, true, false, false, true, false, false, false, true, false, false, false],
   );
   assert.strictEqual(
     Array.from({ length: 12 }, (_, lane) => isMovieSpeech(lane)).filter(Boolean).length,
-    6,
-    'movie Whisper must retain the previous 3/6 = 50% share',
+    3,
+    'movie Whisper keeps two tagged lanes and one untagged lane',
   );
-  assert.strictEqual(isSeriesInventory(5), true);
-  assert.strictEqual(isEpisodeProbe(7), true);
-  assert.strictEqual(isEpisodeSpeech(9), true);
+  assert.deepStrictEqual(
+    Array.from({ length: 12 }, (_, lane) => isSeriesInventory(lane))
+      .map((enabled, lane) => enabled ? lane : null).filter((lane) => lane !== null),
+    [5, 9],
+  );
+  assert.deepStrictEqual(
+    Array.from({ length: 12 }, (_, lane) => isEpisodeProbe(lane))
+      .map((enabled, lane) => enabled ? lane : null).filter((lane) => lane !== null),
+    [2, 7],
+  );
+  assert.deepStrictEqual(
+    Array.from({ length: 12 }, (_, lane) => isEpisodeSpeech(lane))
+      .map((enabled, lane) => enabled ? lane : null).filter((lane) => lane !== null),
+    [6, 10],
+  );
   assert.match(dispatcher, /dispatch_count\) \|\| 0\) % 12/);
   assert.match(
     dispatcher,
-    /const speechVerification =\s*lane === 1 \|\| lane === 2 \|\| lane === 4 \|\| lane === 6 \|\| lane === 8 \|\| lane === 10/,
+    /const speechVerification = lane === 1 \|\| lane === 4 \|\| lane === 8/,
   );
+  assert.match(dispatcher, /const seriesInventory = lane === 5 \|\| lane === 9/);
+  assert.match(dispatcher, /const episodeProbe = lane === 2 \|\| lane === 7/);
+  assert.match(dispatcher, /const episodeSpeech = lane === 6 \|\| lane === 10/);
+  assert.match(dispatcher, /concurrency: 1/);
   // finish_catalog_enrichment_source increments on every valid completion,
   // including an error with leases retained.
   assert.strictEqual(isOverview(11), true);
@@ -281,8 +298,8 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
     '\nasync function runOneDimension(',
   );
 
-  assert.match(dispatcher, /const episodeProbe = lane === 7/);
-  assert.match(dispatcher, /const episodeSpeech = lane === 9/);
+  assert.match(dispatcher, /const episodeProbe = lane === 2 \|\| lane === 7/);
+  assert.match(dispatcher, /const episodeSpeech = lane === 6 \|\| lane === 10/);
   assert.match(dispatcher, /type: episodeProbe \|\| episodeSpeech \? "episode" : "movie"/);
   assert.match(dispatcher, /mode: speechVerification \|\| episodeSpeech \? "whisper" : "probe"/);
   assert.match(
@@ -291,12 +308,14 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   );
 
   const laneContract = (lane) => ({
-    type: lane === 7 || lane === 9 ? 'episode' : 'movie',
-    mode: [1, 2, 4, 6, 8, 9, 10].includes(lane) ? 'whisper' : 'probe',
-    limit: lane === 7 ? 4 : lane === 9 ? 1 : [1, 2, 4, 6, 8, 10].includes(lane) ? 2 : 4,
+    type: [2, 6, 7, 10].includes(lane) ? 'episode' : 'movie',
+    mode: [1, 4, 6, 8, 10].includes(lane) ? 'whisper' : 'probe',
+    limit: [2, 7].includes(lane) ? 4 : [6, 10].includes(lane) ? 1 : [1, 4, 8].includes(lane) ? 2 : 4,
   });
+  assert.deepStrictEqual(laneContract(2), { type: 'episode', mode: 'probe', limit: 4 });
   assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 4 });
-  assert.deepStrictEqual(laneContract(9), { type: 'episode', mode: 'whisper', limit: 1 });
+  assert.deepStrictEqual(laneContract(6), { type: 'episode', mode: 'whisper', limit: 1 });
+  assert.deepStrictEqual(laneContract(10), { type: 'episode', mode: 'whisper', limit: 1 });
 
   assert.match(exactWorker, /p_key: "episode_audio_scan_enabled"/);
   assert.match(exactWorker, /if \(error \|\| enabled !== true\)/);
@@ -363,7 +382,7 @@ test('series inventory lane is local, metadata-only, bounded, and fail closed', 
     '\nasync function signSeriesInventoryRelayToken(',
   );
 
-  assert.match(dispatcher, /const seriesInventory = lane === 5/);
+  assert.match(dispatcher, /const seriesInventory = lane === 5 \|\| lane === 9/);
   assert.match(
     dispatcher,
     /if \(seriesInventory\) \{\s*localLane = true;\s*const result = await runSeriesInventoryFleetLane/,

@@ -90,6 +90,7 @@ Deno.serve(async (req) => {
         enrichmentFleetCycle: 12,
         seriesEpisodeInventory: true,
         exactEpisodeAudioPipeline: true,
+        seriesPriorityCycleV2: true,
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
@@ -1399,18 +1400,23 @@ async function runEnrichmentFleetClaim(
   backfillToken: string,
 ) {
   const controller = new AbortController();
-  // Six of every twelve claims preserve the historical 50% movie speech share.
-  // Three individually bounded lanes extend the exact-file pipeline to series:
-  // exact episode inventory, header probe, then speech LID. Episode work is
-  // feature-flagged; cheap probes use a four-file sequential batch while the
-  // expensive speech fallback remains one file per claim.
+  // Series coverage is far behind movies, so the twelve-lane cycle gives every
+  // exact-file series stage two turns without raising provider concurrency:
+  // inventory (5,9), header probe (2,7), then speech LID (6,10). Each claim
+  // still owns the same per-user/provider leases and every provider operation
+  // stays sequential. Movie Whisper keeps three turns (1,4,8), with one
+  // untagged lane, while movie probe, subtitles and overview retain one each.
+  //
+  // Compared with the previous 1/1/1 series allocation this doubles the
+  // structural ceiling of inventory, episode probes and episode LID. It does
+  // not enlarge an individual provider batch, so viewer pre-emption continues
+  // to be checked between every file/series rather than only between claims.
   const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 12;
   const subtitleProbe = lane === 3;
-  const seriesInventory = lane === 5;
-  const episodeProbe = lane === 7;
-  const episodeSpeech = lane === 9;
-  const speechVerification =
-    lane === 1 || lane === 2 || lane === 4 || lane === 6 || lane === 8 || lane === 10;
+  const seriesInventory = lane === 5 || lane === 9;
+  const episodeProbe = lane === 2 || lane === 7;
+  const episodeSpeech = lane === 6 || lane === 10;
+  const speechVerification = lane === 1 || lane === 4 || lane === 8;
   const providerOverview = lane === 11;
   // Fast language detection still owns a provider connection and is therefore
   // sequential within one source. Two files per claim materially improve
@@ -1424,7 +1430,7 @@ async function runEnrichmentFleetClaim(
   // hence two tagged lanes. Keep one dedicated untagged lane so generic
   // "Audio 2" tracks cannot starve behind that much larger backlog.
   const speechTarget = speechVerification
-    ? (lane === 4 || lane === 8 ? "untagged" : "tagged")
+    ? (lane === 4 ? "untagged" : "tagged")
     : undefined;
   let responseReceived = false;
   let localLane = false;

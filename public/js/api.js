@@ -171,6 +171,39 @@ function _hasCloudDeviceSession() {
     return Boolean(window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token'));
 }
 
+// localStorage survives sign-out/sign-in in the same browser profile. Any
+// catalogue response cached there must therefore be namespaced by the owning
+// account (or paired device), otherwise the next account can briefly receive
+// the previous account's facet menu.
+function _catalogFacetCacheScope() {
+    try {
+        const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+        const userId = String(session?.user?.id || '').trim();
+        if (userId) return `user-${encodeURIComponent(userId)}`;
+
+        const deviceId = String(localStorage.getItem('norva-cloud-device-id') || '').trim();
+        if (deviceId) return `device-${encodeURIComponent(deviceId)}`;
+
+        // Older paired clients can have a device token without the separately
+        // persisted device id. Hash the token so the cache remains isolated
+        // without copying a bearer credential into a localStorage key.
+        const deviceToken = String(
+            window.NorvaCloud?.deviceToken ||
+            localStorage.getItem('norva-cloud-device-token') ||
+            ''
+        );
+        if (deviceToken) {
+            let hash = 2166136261;
+            for (let i = 0; i < deviceToken.length; i += 1) {
+                hash ^= deviceToken.charCodeAt(i);
+                hash = Math.imul(hash, 16777619);
+            }
+            return `device-token-${(hash >>> 0).toString(36)}`;
+        }
+    } catch (_) { /* unscoped cache is disabled below */ }
+    return '';
+}
+
 function _cloudAvailable() {
     return Boolean(window.NorvaCloud) && (_hasCloudUserSession() || _hasCloudDeviceSession());
 }
@@ -2434,15 +2467,15 @@ const API = {
         // momentarily-stale option is harmless.
         languageFacets: (params = {}) => {
             const type = params && params.type === 'series' ? 'series' : 'movie';
-            // v2 key: the v1 cache could persist an EMPTY {audio:[],subtitles:[]} for 60s and serve
-            // it before ever hitting the endpoint — so a one-time empty (e.g. while the catalogue
-            // was still enriching) stuck the menus on "Any …" indefinitely. Bumping the key drops
-            // every stale v1 entry on first load.
-            const key = `norva-facets2-${type}`;
+            const scope = _catalogFacetCacheScope();
+            // v3 is account-scoped. v2 only included the media type, so switching
+            // accounts in one browser could serve the prior tenant's languages for
+            // up to 60 seconds. If no trusted scope is available, skip local caching.
+            const key = scope ? `norva-facets3-${scope}-${type}` : '';
             const TTL = 60000; // 60s, aligned with the server-side facet memo
             const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {
-                const raw = localStorage.getItem(key);
+                const raw = key ? localStorage.getItem(key) : null;
                 if (raw) {
                     const cached = JSON.parse(raw);
                     // Only trust a cached result that actually has options — never an empty one.
@@ -2462,7 +2495,7 @@ const API = {
                 try {
                     // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
                     // next call re-fetches instead of serving a stale blank menu.
-                    if (nonEmpty(value)) {
+                    if (key && nonEmpty(value)) {
                         localStorage.setItem(key, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }

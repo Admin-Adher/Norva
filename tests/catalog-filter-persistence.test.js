@@ -639,6 +639,48 @@ test('MoviesPage forwards the selected provider to genre item queries', () => {
     });
 });
 
+test('SeriesPage forwards the selected cloud provider using the catalog source parameter', () => {
+    const { Page } = loadPage('public/js/pages/SeriesPage.js', 'SeriesPage');
+    const page = Object.create(Page.prototype);
+    Object.assign(page, {
+        sourceSelect: { value: '900001' },
+        sources: [{ id: 900001, cloudId: '11111111-1111-4111-8111-111111111111' }],
+        audioSelect: { value: 'fr' },
+        subtitleSelect: { value: '' },
+        yearSelect: { value: '' },
+        ratingSelect: { value: '' },
+        addedSelect: { value: '' },
+        sortSelect: { value: 'default' },
+        searchInput: { value: '' }
+    });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(page.currentLanguageParams())), {
+        source: '11111111-1111-4111-8111-111111111111',
+        audio: 'fr'
+    });
+    assert.equal(page.currentLanguageParams().sourceId, undefined);
+});
+
+test('SeriesPage keeps an already-cloud source UUID unchanged', () => {
+    const { Page } = loadPage('public/js/pages/SeriesPage.js', 'SeriesPage');
+    const page = Object.create(Page.prototype);
+    Object.assign(page, {
+        sourceSelect: { value: '22222222-2222-4222-8222-222222222222' },
+        sources: [],
+        audioSelect: { value: '' },
+        subtitleSelect: { value: '' },
+        yearSelect: { value: '' },
+        ratingSelect: { value: '' },
+        addedSelect: { value: '' },
+        sortSelect: { value: 'default' },
+        searchInput: { value: '' }
+    });
+
+    assert.deepEqual(JSON.parse(JSON.stringify(page.currentLanguageParams())), {
+        source: '22222222-2222-4222-8222-222222222222'
+    });
+});
+
 test('MoviesPage flat TV params never reinterpret a genre bucket as a source id', () => {
     const { Page } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
     const page = Object.create(Page.prototype);

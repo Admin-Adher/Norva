@@ -319,8 +319,8 @@ class SeriesPage {
     // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
         const params = {};
-        const tv = this._isTvMode();
-        if (tv && this.sourceSelect?.value) params.sourceId = this.sourceSelect.value;
+        const source = this.selectedCloudSourceId();
+        if (source) params.source = source;
         if (this.audioSelect?.value) params.audio = this.audioSelect.value;
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
@@ -339,6 +339,19 @@ class SeriesPage {
         const search = (this.searchInput?.value || '').trim();
         if (search) params.q = search;
         return params;
+    }
+
+    // genre-items is a catalog edge route and accepts the cloud source UUID in
+    // its `source` query parameter. The source picker stores a local/provider id,
+    // so resolve it through the loaded source aliases just like MoviesPage.
+    selectedCloudSourceId() {
+        const selected = String(this.sourceSelect?.value || '').trim();
+        if (!selected) return '';
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selected)) {
+            return selected;
+        }
+        const source = (this.sources || []).find(item => String(item.id) === selected);
+        return String(source?.cloudId || source?.cloud_id || '').trim();
     }
 
     // The request params are only half of a bucket's identity: Favorites and
