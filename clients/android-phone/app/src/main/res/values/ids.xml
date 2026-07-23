@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stable IDs for native-player automation and accessibility focus.
+         The views are created programmatically in PlayerActivity. -->
+    <item name="norva_player_root" type="id" />
+    <item name="norva_player_view" type="id" />
+    <item name="norva_player_top_bar" type="id" />
+    <item name="norva_player_back_button" type="id" />
+    <item name="norva_player_title" type="id" />
+    <item name="norva_player_controls" type="id" />
+    <item name="norva_player_track_button" type="id" />
+    <item name="norva_player_track_dialog" type="id" />
+    <item name="norva_player_audio_section" type="id" />
+    <item name="norva_player_subtitle_section" type="id" />
+    <item name="norva_player_error_panel" type="id" />
+    <item name="norva_player_error_title" type="id" />
+    <item name="norva_player_error_message" type="id" />
+    <item name="norva_player_retry_button" type="id" />
+    <item name="norva_player_error_back_button" type="id" />
+    <item name="norva_player_lock_button" type="id" />
+    <item name="norva_player_unlock_button" type="id" />
+    <item name="norva_player_variant_button" type="id" />
+    <item name="norva_player_cast_button" type="id" />
+    <item name="norva_player_cast_bar" type="id" />
+    <item name="norva_player_cast_label" type="id" />
+    <item name="norva_player_cast_pause_button" type="id" />
+    <item name="norva_player_cast_stop_button" type="id" />
+    <item name="norva_player_seek_feedback" type="id" />
+    <item name="norva_player_resize_button" type="id" />
+    <item name="norva_player_brightness_button" type="id" />
+</resources>

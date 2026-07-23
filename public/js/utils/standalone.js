@@ -99,6 +99,50 @@
         }
     };
 
+    // Native track changes are merged into the same history data blob used by
+    // the web player. MainActivity invokes this before onProgress, so the next
+    // cloud write carries the exact preference to every device.
+    window.__norvaNative.onTrackPreferences = (sourceId, itemType, itemId, rawPreferences) => {
+        try {
+            const parsed = typeof rawPreferences === 'string'
+                ? JSON.parse(rawPreferences)
+                : rawPreferences;
+            if (!parsed || typeof parsed !== 'object') return false;
+            const clean = {};
+            const normalize = (value) => {
+                if (!value || typeof value !== 'object') return null;
+                const result = {};
+                const stableId = String(value.stableId || value.stable_id || '').slice(0, 160);
+                const language = String(value.language || value.lang || '').toLowerCase().slice(0, 16);
+                const role = String(value.role || '').toLowerCase().slice(0, 32);
+                if (stableId) result.stableId = stableId;
+                if (/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(language)) result.language = language;
+                if (/^(main|original|dub|audio_description|commentary|full|forced|sdh)$/.test(role)) {
+                    result.role = role;
+                }
+                if (value.disabled === true) result.disabled = true;
+                return Object.keys(result).length ? result : null;
+            };
+            const audio = normalize(parsed.audio);
+            const subtitle = normalize(parsed.subtitle);
+            if (audio) clean.audio = audio;
+            if (subtitle) clean.subtitle = subtitle;
+            if (!clean.audio && !clean.subtitle) return false;
+            const key = nativeProgressKey(sourceId, itemType, itemId);
+            const meta = nativeProgressMeta.get(key) || {};
+            meta.data = {
+                ...(meta.data || {}),
+                sourceId: String(sourceId || ''),
+                playbackPreferences: clean
+            };
+            nativeProgressMeta.set(key, meta);
+            return true;
+        } catch (error) {
+            console.warn('[Native] track preference merge failed:', error?.message || error);
+            return false;
+        }
+    };
+
     // Natural end of a native VOD playback → let the open Series fiche autoplay the
     // next episode. MainActivity fires this only when the player reached the end
     // (not on a user-close), so it's harmlessly inert in older APKs that never call it.
@@ -409,6 +453,110 @@
                     || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]));
             return 'scheduled';
         };
+
+        // Native track labels are fail-closed: only exact-file catalogue
+        // evidence crosses the bridge. Provider/category prose (Netflix,
+        // Nordic, "Audio 2", Unknown, ...) is never copied into this payload.
+        const NATIVE_ACCEPTED_AUDIO_EVIDENCE = new Set([
+            'verified', 'verified_union', 'probed', 'probed_union'
+        ]);
+        const safeNativeTrackLanguage = (value) => {
+            const raw = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+            const base = raw.split('-')[0];
+            return /^[a-z]{2,3}$/.test(base) && !['und', 'unk', 'mul', 'mis'].includes(base)
+                ? base
+                : '';
+        };
+        const normalizeNativeTrack = (track) => {
+            if (!track || typeof track !== 'object') return null;
+            const normalized = {};
+            const index = Number(track.index ?? track.streamIndex ?? track.stream_index);
+            if (Number.isInteger(index) && index >= 0) normalized.index = index;
+            const id = String(track.id || track.trackId || track.track_id || '').trim();
+            if (/^[a-z0-9._:+/-]{1,120}$/i.test(id)) normalized.id = id;
+            const language = safeNativeTrackLanguage(
+                track.lang || track.language || track.iso_639_1 || track.iso639 || track.code
+            );
+            if (language) normalized.lang = language;
+            const codec = String(track.codec || '').trim().toLowerCase();
+            if (/^[a-z0-9._+-]{1,16}$/.test(codec)) normalized.codec = codec;
+            const channels = Number(track.channels ?? track.channelCount ?? track.channel_count);
+            if (Number.isInteger(channels) && channels > 0 && channels <= 32) {
+                normalized.channels = channels;
+            }
+            if (track.forced === true || track.isForced === true || track.is_forced === true) {
+                normalized.forced = true;
+            }
+            if (track.sdh === true || track.hearingImpaired === true || track.hearing_impaired === true) {
+                normalized.sdh = true;
+            }
+            const role = String(track.role || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            if (['main', 'original', 'dub', 'audio_description', 'commentary',
+                'full', 'forced', 'sdh'].includes(role)) {
+                normalized.role = role;
+            }
+            if (track.default === true || track.isDefault === true || track.is_default === true) {
+                normalized.default = true;
+            }
+            return normalized;
+        };
+        const buildNativeTrackMetadata = (content) => {
+            if (!content || typeof content !== 'object') return null;
+            const audioStatus = String(
+                content.audioLanguageValidationStatus ||
+                content.audio_language_validation_status ||
+                ''
+            ).toLowerCase();
+            const audioScope = String(
+                content.audioTracksScope || content.audio_tracks_scope || ''
+            ).toLowerCase();
+            const subtitleScope = String(
+                content.subtitleTracksScope || content.subtitle_tracks_scope || ''
+            ).toLowerCase();
+            const rawAudioTracks = Array.isArray(content.audioTracks)
+                ? content.audioTracks
+                : (Array.isArray(content.audio_tracks) ? content.audio_tracks : []);
+            const rawSubtitleTracks = Array.isArray(content.subtitleTracks)
+                ? content.subtitleTracks
+                : (Array.isArray(content.subtitle_tracks) ? content.subtitle_tracks : []);
+            const audioTracks = audioScope === 'file' && NATIVE_ACCEPTED_AUDIO_EVIDENCE.has(audioStatus)
+                ? rawAudioTracks.slice(0, 64).map(normalizeNativeTrack).filter(Boolean)
+                : [];
+            const subtitleTracks = subtitleScope === 'file'
+                ? rawSubtitleTracks.slice(0, 64).map(normalizeNativeTrack).filter(Boolean)
+                : [];
+            let burnedSubtitle = null;
+            // The catalogue can explicitly prove that the current file has no
+            // selectable subtitle stream while its title/category carries one
+            // of Norva's established burned-in markers (AR-SUBS, Persian SUB,
+            // and similar). Reuse the same conservative detector as the web
+            // player so native never presents an impossible "Off" action.
+            if (subtitleScope === 'file' && rawSubtitleTracks.length === 0) {
+                try {
+                    const subtitle = window.MediaUtils?.deriveTrackIntel?.({
+                        title: content.title || content.name || '',
+                        category: content.category || content.categoryName || content.group || '',
+                        hasSubtitleStream: false,
+                        originalLanguage: content.originalLanguage || content.original_language || ''
+                    })?.subtitle;
+                    if (subtitle?.type === 'burned-in') {
+                        const language = safeNativeTrackLanguage(subtitle.code);
+                        burnedSubtitle = language ? { lang: language } : {};
+                    }
+                } catch (_) {
+                    burnedSubtitle = null;
+                }
+            }
+            if (!audioTracks.length && !subtitleTracks.length && !burnedSubtitle) return null;
+            return {
+                audioValidationStatus: audioTracks.length ? audioStatus : '',
+                audioTracksScope: audioTracks.length ? 'file' : '',
+                audioTracks,
+                subtitleTracksScope: subtitleTracks.length ? 'file' : '',
+                subtitleTracks,
+                ...(burnedSubtitle ? { burnedSubtitle } : {})
+            };
+        };
         const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras) => {
             const nowTs = Date.now();
             if (nowTs - lastNativePlayAt < 1500) return false;
@@ -432,6 +580,9 @@
                     resumeSeconds: resume,
                     poster,
                     nextTitle: extras?.nextTitle || '',
+                    trackMetadata: extras?.trackMetadata || null,
+                    preferenceScope: extras?.preferenceScope || null,
+                    playbackPreferences: extras?.playbackPreferences || null,
                     // Live quality variants (label + streamId + sourceId) for the native
                     // player's quality menu. Metadata only, never pre-resolved URLs: a live
                     // gateway grants ONE slot, so resolving each variant up front would close
@@ -505,6 +656,32 @@
         const contentMeta = (content) => {
             if (!content?.sourceId || content?.id == null) return null;
             return { sourceId: content.sourceId, itemType: historyType(content), itemId: historyId(content) };
+        };
+
+        const nativePreferenceScope = (content) => {
+            let accountId = '';
+            let profileId = '';
+            try {
+                const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+                accountId = String(session?.user?.id || localStorage.getItem('norva-cloud-device-id') || '');
+                profileId = String(
+                    window.NorvaCloud?.profiles?.getActiveId?.()
+                    || localStorage.getItem('norva-active-profile-id')
+                    || ''
+                );
+            } catch (_) { /* scoped local fallback below */ }
+            const rawVersionKey = content?.versionKey
+                || content?.version_key
+                || content?.streamId
+                || content?.stream_id
+                || content?.id
+                || '';
+            return {
+                accountId: accountId.slice(0, 160),
+                profileId: profileId.slice(0, 160),
+                seriesId: String(content?.seriesId || content?.series_id || '').slice(0, 160),
+                versionKey: String(rawVersionKey).slice(0, 200)
+            };
         };
 
         const channelMeta = (channel) => {
@@ -719,7 +896,12 @@
                     const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
                     if (!nativePlay(resolved.url, nativeTitle(content), meta, resumeAt, fallbackUrl, {
                         poster: content.poster || '',
-                        nextTitle: content.nextEpisodeLabel || ''
+                        nextTitle: content.nextEpisodeLabel || '',
+                        trackMetadata: buildNativeTrackMetadata(content),
+                        preferenceScope: nativePreferenceScope(content),
+                        playbackPreferences: content.playbackPreferences
+                            || content.playback_preferences
+                            || null
                     })) {
                         throw new Error('Native relaunch throttled');
                     }

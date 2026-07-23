@@ -29,17 +29,23 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.SeekBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.OptIn;
 import androidx.annotation.RequiresApi;
+import androidx.core.content.ContextCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackGroup;
+import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
@@ -53,6 +59,11 @@ import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
 import com.google.firebase.analytics.FirebaseAnalytics;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
 /**
  * Norva phone/tablet native player (ExoPlayer / media3).
@@ -85,6 +96,19 @@ public class PlayerActivity extends Activity {
     // in-place source swap).
     public static final String EXTRA_VARIANTS = "variants";
     public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
+    // Exact-file, fail-closed track metadata from the already-loaded Norva
+    // catalogue. This never opens a second provider connection.
+    public static final String EXTRA_TRACK_METADATA = "trackMetadata";
+    public static final String EXTRA_PREFERENCE_SCOPE = "preferenceScope";
+    public static final String EXTRA_PLAYBACK_PREFERENCES = "playbackPreferences";
+    public static final String EXTRA_POSTER_URL = "poster";
+    public static final String EXTRA_NEXT_TITLE = "nextTitle";
+    public static final String ACTION_REQUEST_FRESH_STREAM =
+            "tv.norva.phone.action.REQUEST_FRESH_STREAM";
+    public static final String ACTION_APPLY_FRESH_STREAM =
+            "tv.norva.phone.action.APPLY_FRESH_STREAM";
+    public static final String EXTRA_RECOVERY_TOKEN = "recoveryToken";
+    public static final String EXTRA_RECOVERY_PAYLOAD = "recoveryPayload";
     // Ephemeral bearer (user session or paired-device token) used once to post
     // authoritative first-frame truth. PlayerActivity is non-exported.
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
@@ -113,6 +137,8 @@ public class PlayerActivity extends Activity {
     private String playbackAuthToken;
     private boolean freshStreamRequested = false;
     private String freshStreamReason;
+    private String recoveryToken;
+    private BroadcastReceiver freshStreamReceiver;
     private String sourceId;
     private String itemType;
     private String itemId;
@@ -162,6 +188,36 @@ public class PlayerActivity extends Activity {
     private String pendingVariantStreamId;    // set when the viewer picks a variant → attached to the result in finish()
     private String pendingVariantSourceId;
     private String mediaTitle;
+    private String posterUrl;
+    private String nextTitle;
+    private FrameLayout playerRoot;
+    private LinearLayout topBar;
+
+    // Norva's unified audio/subtitle control. The exact-file arrays contain only
+    // track-scoped evidence accepted by the web layer; provider/category labels
+    // such as "Netflix" or "Nordic" are deliberately never transported.
+    private Button trackButton;
+    private Button resizeButton;
+    private Button brightnessButton;
+    private LinearLayout utilityControls;
+    private android.app.AlertDialog trackDialog;
+    private org.json.JSONArray verifiedAudioTracks;
+    private org.json.JSONArray exactSubtitleTracks;
+    private boolean hasBurnedSubtitle;
+    private String burnedSubtitleLanguage;
+    private boolean hasTrackChoices = false;
+    private String selectedAudioLabel;
+    private String selectedSubtitleLabel;
+    private String preferenceScopeJson;
+    private String cloudPlaybackPreferencesJson;
+    private String currentTrackPreferencesJson;
+    private boolean trackPreferencesApplied;
+    private PlaybackPreferenceStore preferenceStore;
+    private PlaybackPreferenceStore.Scope preferenceScope;
+    private PlaybackPreferenceStore.Preferences resolvedTrackPreferences =
+            PlaybackPreferenceStore.Preferences.empty();
+    private TrackOption pendingTrackSelection;
+    private boolean pendingSubtitleOff;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
@@ -180,6 +236,14 @@ public class PlayerActivity extends Activity {
             recoverPlayback("no_data_timeout");
         }
     };
+    private final Runnable freshStreamTimeout = new Runnable() {
+        @Override public void run() {
+            if (!freshStreamRequested) return;
+            freshStreamRequested = false;
+            recoveryToken = null;
+            showStreamError(getString(R.string.player_reconnect_failed));
+        }
+    };
 
     @OptIn(markerClass = UnstableApi.class)
     @Override
@@ -193,6 +257,10 @@ public class PlayerActivity extends Activity {
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
+        preferenceScopeJson = getIntent().getStringExtra(EXTRA_PREFERENCE_SCOPE);
+        cloudPlaybackPreferencesJson = getIntent().getStringExtra(EXTRA_PLAYBACK_PREFERENCES);
+        posterUrl = getIntent().getStringExtra(EXTRA_POSTER_URL);
+        nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
         playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
@@ -203,6 +271,9 @@ public class PlayerActivity extends Activity {
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
         isLocal = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
         activeStreamId = getIntent().getStringExtra(EXTRA_ACTIVE_VARIANT);
+        readTrackMetadata(getIntent().getStringExtra(EXTRA_TRACK_METADATA));
+        initializePlaybackPreferences();
+        registerFreshStreamReceiver();
         try {
             String vj = getIntent().getStringExtra(EXTRA_VARIANTS);
             if (vj != null && !vj.isEmpty()) {
@@ -212,6 +283,7 @@ public class PlayerActivity extends Activity {
         } catch (Exception ignored) { variants = null; }
 
         playerView = new PlayerView(this);
+        playerView.setId(R.id.norva_player_view);
         // Black everywhere behind the video so letterbox/pillarbox and any
         // cutout-safe insets read as clean black bars, never the theme's grey.
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
@@ -221,18 +293,25 @@ public class PlayerActivity extends Activity {
         // Root = player + a centered error overlay, so a failed stream shows the
         // real reason on screen instead of hanging silently at 00:00.
         FrameLayout root = new FrameLayout(this);
+        playerRoot = root;
+        root.setId(R.id.norva_player_root);
+        root.setContentDescription(getString(R.string.player_show_controls));
+        root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         root.setBackgroundColor(Color.BLACK);
         root.addView(playerView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         // Recoverable error panel: a headline + the diagnostic detail + Retry/Back,
         // so a failed stream is a recoverable moment instead of a silent 00:00 hang.
         errorPanel = new LinearLayout(this);
+        errorPanel.setId(R.id.norva_player_error_panel);
         errorPanel.setOrientation(LinearLayout.VERTICAL);
         errorPanel.setGravity(Gravity.CENTER);
         errorPanel.setPadding(dp(32), dp(32), dp(32), dp(32));
         errorPanel.setVisibility(View.GONE);
 
         TextView errorTitle = new TextView(this);
+        errorTitle.setId(R.id.norva_player_error_title);
+        if (Build.VERSION.SDK_INT >= 28) errorTitle.setAccessibilityHeading(true);
         errorTitle.setText(getString(R.string.player_error_title));
         errorTitle.setTextColor(Color.WHITE);
         errorTitle.setTextSize(20);
@@ -241,6 +320,8 @@ public class PlayerActivity extends Activity {
         errorPanel.addView(errorTitle);
 
         errorView = new TextView(this);
+        errorView.setId(R.id.norva_player_error_message);
+        errorView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         errorView.setTextColor(Color.parseColor("#cbd5e1"));
         errorView.setTextSize(13);
         errorView.setGravity(Gravity.CENTER);
@@ -248,6 +329,7 @@ public class PlayerActivity extends Activity {
         errorPanel.addView(errorView);
 
         Button retryBtn = new Button(this);
+        retryBtn.setId(R.id.norva_player_retry_button);
         retryBtn.setText(getString(R.string.player_retry));
         retryBtn.setTextColor(Color.WHITE);
         retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
@@ -258,10 +340,11 @@ public class PlayerActivity extends Activity {
         errorPanel.addView(retryBtn, retryLp);
 
         Button backBtn = new Button(this);
+        backBtn.setId(R.id.norva_player_error_back_button);
         backBtn.setText(getString(R.string.player_back));
         backBtn.setTextColor(Color.WHITE);
         backBtn.setBackgroundColor(Color.parseColor("#272d3a"));
-        backBtn.setOnClickListener(v -> finish());
+        backBtn.setOnClickListener(v -> finishWithoutRecovery());
         errorPanel.addView(backBtn, new LinearLayout.LayoutParams(dp(220),
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -335,6 +418,11 @@ public class PlayerActivity extends Activity {
                 .setSeekForwardIncrementMs(10_000)
                 .build();
         playerView.setPlayer(player);
+        // Media3's settings popup would expose a second audio selector. Keep a
+        // single Norva-owned entry point; playback speed is surfaced in that
+        // same panel instead of a competing gear menu.
+        View media3Settings = playerView.findViewById(androidx.media3.ui.R.id.exo_settings);
+        if (media3Settings != null) media3Settings.setVisibility(View.GONE);
         // Bind a MediaSession so hardware/Bluetooth media buttons and the system
         // media controls (lock screen / notification shade) drive this player.
         try { mediaSession = new MediaSession.Builder(this, player).build(); } catch (Exception ignored) { }
@@ -355,15 +443,21 @@ public class PlayerActivity extends Activity {
             }
         } catch (Exception ignored) { pipReceiver = null; }
         playerView.setKeepScreenOn(true);
-        playerView.setShowSubtitleButton(true);
+        // Audio and subtitles now share one explicit Norva panel. Hiding the
+        // separate stock CC button avoids two competing subtitle entry points;
+        // the stock settings gear remains available for playback speed.
+        playerView.setShowSubtitleButton(false);
         installGestureOverlay();
+        installTopBar(root);
+        installTrackControl(root);
+        installUtilityControls(root);
         // Chromecast: the receiver fetches the provider URL itself from the same
         // home network. Local (encrypted) downloads can't be cast.
         if (!isLocal) installCastSupport(root);
         installVariantControl(root);
-        // Re-apply the viewer's last subtitle choice for this title before the
-        // first track selection, so it doesn't reset to the stream default.
-        applySavedSubtitlePref();
+        // The P1 resolver applies account/profile/version preferences after
+        // actual TrackGroups arrive. The old per-title subtitle value is
+        // migrated into that scoped store once.
 
         player.addListener(new Player.Listener() {
             @Override
@@ -413,9 +507,10 @@ public class PlayerActivity extends Activity {
                     recoverPlayback(error.getErrorCodeName());
                     return;
                 }
-                // Surface the real failure on screen (error code, HTTP status, cause,
-                // host) instead of a silent hang — so it can be read/screenshotted.
-                showStreamError(diagnose(error));
+                // Viewer-facing copy stays concise and actionable. Detailed
+                // diagnostics remain available to support in Logcat.
+                android.util.Log.w("NorvaPlayer", diagnose(error), error);
+                showStreamError(friendlyPlaybackError(error));
             }
 
             @Override
@@ -437,9 +532,15 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onTracksChanged(Tracks tracks) {
-                // Remember whatever subtitle track ends up showing (or Off) so the
-                // next launch of this title restores it.
-                persistCurrentSubtitleSelection(tracks);
+                if (!trackPreferencesApplied) {
+                    trackPreferencesApplied = true;
+                    if (applyResolvedTrackPreferences(tracks)) {
+                        refreshTrackControl(tracks);
+                        return;
+                    }
+                }
+                confirmPendingTrackSelection(tracks);
+                refreshTrackControl(tracks);
             }
         });
 
@@ -560,6 +661,1113 @@ public class PlayerActivity extends Activity {
         // No text tracks at all: leave any existing preference untouched.
     }
 
+    // ==================== Scoped playback preferences ====================
+
+    private void initializePlaybackPreferences() {
+        final android.content.SharedPreferences local =
+                getSharedPreferences("norva_playback_preferences", MODE_PRIVATE);
+        preferenceStore = new PlaybackPreferenceStore(new PlaybackPreferenceStore.Backend() {
+            @Override public String get(String key) { return local.getString(key, null); }
+            @Override public void put(String key, String value) {
+                local.edit().putString(key, value).apply();
+            }
+            @Override public void remove(String key) { local.edit().remove(key).apply(); }
+            @Override public boolean contains(String key) { return local.contains(key); }
+        });
+
+        org.json.JSONObject rawScope = null;
+        try {
+            if (preferenceScopeJson != null && !preferenceScopeJson.isEmpty()) {
+                rawScope = new org.json.JSONObject(preferenceScopeJson);
+            }
+        } catch (Exception ignored) { rawScope = null; }
+        String accountId = rawScope == null ? "" : rawScope.optString("accountId", "");
+        String profileId = rawScope == null ? "" : rawScope.optString("profileId", "");
+        if (!accountId.isEmpty() && profileId.isEmpty()) profileId = "account-default";
+        preferenceScope = PlaybackPreferenceStore.Scope.builder()
+                .accountId(accountId)
+                .profileId(profileId)
+                .sourceId(sourceId)
+                .versionKey(rawScope == null ? itemId : rawScope.optString("versionKey", itemId))
+                .itemType(itemType)
+                .itemId(itemId)
+                .seriesId(rawScope == null ? "" : rawScope.optString("seriesId", ""))
+                .build();
+
+        PlaybackPreferenceStore.Preferences cloudDefaults =
+                parsePlaybackPreferences(cloudPlaybackPreferencesJson);
+        String legacyKey = PlaybackPreferenceStore.legacySubtitleKey(itemType, itemId);
+        if (legacyKey != null) {
+            android.content.SharedPreferences legacy =
+                    getSharedPreferences(SUB_PREFS, MODE_PRIVATE);
+            String legacyValue = legacy.getString(legacyKey, null);
+            if (preferenceStore.migrateLegacySubtitle(preferenceScope, legacyValue)) {
+                legacy.edit().remove(legacyKey).apply();
+            }
+        }
+        resolvedTrackPreferences = preferenceStore.resolve(preferenceScope, cloudDefaults);
+        currentTrackPreferencesJson = preferencesToJson(resolvedTrackPreferences);
+    }
+
+    private static PlaybackPreferenceStore.Preferences parsePlaybackPreferences(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return PlaybackPreferenceStore.Preferences.empty();
+        }
+        try {
+            org.json.JSONObject object = new org.json.JSONObject(raw);
+            return new PlaybackPreferenceStore.Preferences(
+                    parseTrackPreference(object.optJSONObject("audio")),
+                    parseTrackPreference(object.optJSONObject("subtitle")));
+        } catch (Exception ignored) {
+            return PlaybackPreferenceStore.Preferences.empty();
+        }
+    }
+
+    private static TrackSelectionResolver.Preference parseTrackPreference(
+            org.json.JSONObject raw) {
+        if (raw == null) return null;
+        String source = raw.optString("source", "");
+        String mode = raw.optString("mode", "");
+        if (raw.optBoolean("disabled", false)
+                || "off".equalsIgnoreCase(source)
+                || "off".equalsIgnoreCase(mode)) {
+            return TrackSelectionResolver.Preference.off();
+        }
+        String stableId = firstNonEmpty(
+                raw.optString("stableId", ""),
+                raw.optString("stable_id", ""));
+        if (stableId == null) {
+            int streamIndex = raw.has("streamIndex")
+                    ? raw.optInt("streamIndex", -1)
+                    : raw.optInt("stream_index", -1);
+            if (streamIndex >= 0) stableId = "stream:" + streamIndex;
+        }
+        String language = firstNonEmpty(
+                raw.optString("language", ""),
+                raw.optString("lang", ""));
+        TrackSelectionResolver.Role role =
+                TrackSelectionResolver.Role.from(raw.optString("role", ""));
+        if ((stableId == null || stableId.isEmpty())
+                && (language == null || language.isEmpty())
+                && role == TrackSelectionResolver.Role.UNKNOWN) {
+            return null;
+        }
+        return TrackSelectionResolver.Preference.selected(stableId, language, role);
+    }
+
+    private static List<TrackSelectionResolver.Track> resolverTracks(
+            List<TrackOption> options) {
+        List<TrackSelectionResolver.Track> result = new ArrayList<>();
+        for (int i = 0; i < options.size(); i++) {
+            TrackOption option = options.get(i);
+            result.add(new TrackSelectionResolver.Track(
+                    i,
+                    option.stableId,
+                    option.language,
+                    option.role,
+                    option.supported,
+                    option.selected,
+                    option.defaultTrack));
+        }
+        return result;
+    }
+
+    private boolean applyResolvedTrackPreferences(Tracks tracks) {
+        if (player == null || tracks == null || resolvedTrackPreferences == null) return false;
+        androidx.media3.common.TrackSelectionParameters.Builder builder =
+                player.getTrackSelectionParameters().buildUpon();
+        boolean changed = false;
+
+        TrackSelectionResolver.Preference audioPreference =
+                resolvedTrackPreferences.getAudio();
+        if (audioPreference != null && !audioPreference.isDisabled()) {
+            List<TrackOption> audio = collectTrackOptions(tracks, C.TRACK_TYPE_AUDIO);
+            TrackSelectionResolver.Resolution resolution =
+                    TrackSelectionResolver.resolve(audioPreference, resolverTracks(audio));
+            if (resolution.hasTrack()) {
+                TrackOption option = audio.get(resolution.getTrackIndex());
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .setOverrideForType(new TrackSelectionOverride(
+                                option.group, option.trackIndex));
+                changed = !option.selected;
+            }
+        }
+
+        TrackSelectionResolver.Preference subtitlePreference =
+                resolvedTrackPreferences.getSubtitle();
+        if (subtitlePreference != null) {
+            List<TrackOption> subtitles = collectTrackOptions(tracks, C.TRACK_TYPE_TEXT);
+            if (subtitlePreference.isDisabled()) {
+                builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+                changed = changed || hasSelectedTrack(subtitles);
+            } else {
+                TrackSelectionResolver.Resolution resolution =
+                        TrackSelectionResolver.resolve(
+                                subtitlePreference, resolverTracks(subtitles));
+                if (resolution.hasTrack()) {
+                    TrackOption option = subtitles.get(resolution.getTrackIndex());
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setOverrideForType(new TrackSelectionOverride(
+                                    option.group, option.trackIndex));
+                    changed = changed || !option.selected;
+                }
+            }
+        }
+        if (changed) player.setTrackSelectionParameters(builder.build());
+        return changed;
+    }
+
+    private void confirmPendingTrackSelection(Tracks tracks) {
+        if (pendingSubtitleOff) {
+            List<TrackOption> subtitles = collectTrackOptions(tracks, C.TRACK_TYPE_TEXT);
+            if (!hasSelectedTrack(subtitles)) {
+                saveTrackPreference(C.TRACK_TYPE_TEXT, TrackSelectionResolver.Preference.off());
+            } else {
+                Toast.makeText(this, R.string.player_track_change_failed, Toast.LENGTH_SHORT).show();
+            }
+            pendingSubtitleOff = false;
+        }
+        if (pendingTrackSelection != null) {
+            TrackOption requested = pendingTrackSelection;
+            List<TrackOption> current = collectTrackOptions(tracks, requested.type);
+            TrackOption selected = null;
+            for (TrackOption option : current) {
+                if (option.selected && option.stableId.equals(requested.stableId)) {
+                    selected = option;
+                    break;
+                }
+            }
+            if (selected != null) {
+                saveTrackPreference(requested.type,
+                        TrackSelectionResolver.Preference.selected(
+                                selected.stableId, selected.language, selected.role));
+            } else {
+                Toast.makeText(this, R.string.player_track_change_failed, Toast.LENGTH_SHORT).show();
+            }
+            pendingTrackSelection = null;
+        }
+        captureCurrentTrackPreferences(tracks);
+    }
+
+    private void saveTrackPreference(
+            int type, TrackSelectionResolver.Preference exactPreference) {
+        if (preferenceStore == null || preferenceScope == null || exactPreference == null) return;
+        TrackSelectionResolver.Preference portable = exactPreference.isDisabled()
+                ? TrackSelectionResolver.Preference.off()
+                : TrackSelectionResolver.Preference.selected(
+                        "", exactPreference.getLanguage(), exactPreference.getRole());
+        if (type == C.TRACK_TYPE_AUDIO) {
+            preferenceStore.saveExactAudio(preferenceScope, exactPreference);
+            preferenceStore.saveSeriesAudio(preferenceScope, portable);
+            preferenceStore.saveProfileAudio(preferenceScope, portable);
+            resolvedTrackPreferences = resolvedTrackPreferences.withAudio(exactPreference);
+        } else if (type == C.TRACK_TYPE_TEXT) {
+            preferenceStore.saveExactSubtitle(preferenceScope, exactPreference);
+            preferenceStore.saveSeriesSubtitle(preferenceScope, portable);
+            preferenceStore.saveProfileSubtitle(preferenceScope, portable);
+            resolvedTrackPreferences = resolvedTrackPreferences.withSubtitle(exactPreference);
+        }
+        currentTrackPreferencesJson = preferencesToJson(resolvedTrackPreferences);
+    }
+
+    private void captureCurrentTrackPreferences(Tracks tracks) {
+        if (tracks == null) return;
+        TrackSelectionResolver.Preference audio = null;
+        for (TrackOption option : collectTrackOptions(tracks, C.TRACK_TYPE_AUDIO)) {
+            if (option.selected) {
+                audio = TrackSelectionResolver.Preference.selected(
+                        option.stableId, option.language, option.role);
+                break;
+            }
+        }
+        TrackSelectionResolver.Preference subtitle = null;
+        List<TrackOption> subtitles = collectTrackOptions(tracks, C.TRACK_TYPE_TEXT);
+        for (TrackOption option : subtitles) {
+            if (option.selected) {
+                subtitle = TrackSelectionResolver.Preference.selected(
+                        option.stableId, option.language, option.role);
+                break;
+            }
+        }
+        if (subtitle == null && !subtitles.isEmpty()) {
+            subtitle = TrackSelectionResolver.Preference.off();
+        }
+        currentTrackPreferencesJson = preferencesToJson(
+                new PlaybackPreferenceStore.Preferences(audio, subtitle));
+    }
+
+    private static String preferencesToJson(PlaybackPreferenceStore.Preferences preferences) {
+        if (preferences == null || preferences.isEmpty()) return null;
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            org.json.JSONObject audio = preferenceToJson(preferences.getAudio());
+            org.json.JSONObject subtitle = preferenceToJson(preferences.getSubtitle());
+            if (audio != null) root.put("audio", audio);
+            if (subtitle != null) root.put("subtitle", subtitle);
+            return root.length() == 0 ? null : root.toString();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static org.json.JSONObject preferenceToJson(
+            TrackSelectionResolver.Preference preference) throws org.json.JSONException {
+        if (preference == null) return null;
+        org.json.JSONObject value = new org.json.JSONObject();
+        if (preference.isDisabled()) {
+            value.put("disabled", true);
+            value.put("source", "off");
+            value.put("mode", "off");
+            return value;
+        }
+        if (!preference.getStableId().isEmpty()) {
+            value.put("stableId", preference.getStableId());
+        }
+        if (!preference.getLanguage().isEmpty()) {
+            value.put("language", preference.getLanguage());
+        }
+        if (preference.getRole() != TrackSelectionResolver.Role.UNKNOWN) {
+            value.put("role", preference.getRole().name().toLowerCase(Locale.ROOT));
+        }
+        return value.length() == 0 ? null : value;
+    }
+
+    // ==================== Unified audio & subtitles ====================
+
+    /**
+     * Accept only exact-file metadata that the web layer has already reduced to
+     * track-scoped evidence. Title/group aggregates are intentionally ignored:
+     * they could label one provider file with a sibling version's language.
+     */
+    private void readTrackMetadata(String json) {
+        verifiedAudioTracks = null;
+        exactSubtitleTracks = null;
+        hasBurnedSubtitle = false;
+        burnedSubtitleLanguage = null;
+        if (json == null || json.isEmpty()) return;
+        try {
+            org.json.JSONObject metadata = new org.json.JSONObject(json);
+            String status = metadata.optString("audioValidationStatus", "").toLowerCase(Locale.ROOT);
+            if ("file".equals(metadata.optString("audioTracksScope", ""))
+                    && isAcceptedAudioEvidence(status)) {
+                org.json.JSONArray tracks = metadata.optJSONArray("audioTracks");
+                if (tracks != null) verifiedAudioTracks = tracks;
+            }
+            if ("file".equals(metadata.optString("subtitleTracksScope", ""))) {
+                org.json.JSONArray tracks = metadata.optJSONArray("subtitleTracks");
+                if (tracks != null) exactSubtitleTracks = tracks;
+            }
+            org.json.JSONObject burned = metadata.optJSONObject("burnedSubtitle");
+            if (burned != null) {
+                hasBurnedSubtitle = true;
+                burnedSubtitleLanguage = safeLanguageName(burned.optString("lang", ""));
+            }
+        } catch (Exception ignored) {
+            // Bad optional metadata must never delay or prevent playback.
+        }
+    }
+
+    private static boolean isAcceptedAudioEvidence(String status) {
+        return "verified".equals(status)
+                || "verified_union".equals(status)
+                || "probed".equals(status)
+                || "probed_union".equals(status);
+    }
+
+    private static final class TrackMeta {
+        int streamIndex = -1;
+        String stableId;
+        String language;
+        String codec;
+        int channels = -1;
+        boolean forced;
+        boolean sdh;
+        boolean defaultTrack;
+        TrackSelectionResolver.Role role = TrackSelectionResolver.Role.UNKNOWN;
+    }
+
+    private static final class TrackOption {
+        final int type;
+        final TrackGroup group;
+        final int trackIndex;
+        final String label;
+        final String stableId;
+        final String language;
+        final TrackSelectionResolver.Role role;
+        final boolean selected;
+        final boolean supported;
+        final boolean defaultTrack;
+
+        TrackOption(int type, TrackGroup group, int trackIndex, String label,
+                    String stableId, String language, TrackSelectionResolver.Role role,
+                    boolean selected, boolean supported, boolean defaultTrack) {
+            this.type = type;
+            this.group = group;
+            this.trackIndex = trackIndex;
+            this.label = label;
+            this.stableId = stableId;
+            this.language = language;
+            this.role = role;
+            this.selected = selected;
+            this.supported = supported;
+            this.defaultTrack = defaultTrack;
+        }
+    }
+
+    private TrackMeta trackMetaAt(org.json.JSONArray tracks, Format format, int ordinal) {
+        if (tracks == null || tracks.length() == 0) return null;
+        int formatIndex = numericTrackId(format == null ? null : format.id);
+        if (formatIndex >= 0) {
+            for (int i = 0; i < tracks.length(); i++) {
+                org.json.JSONObject candidate = tracks.optJSONObject(i);
+                if (candidate != null && candidate.optInt("index", -1) == formatIndex) {
+                    return parseTrackMeta(candidate);
+                }
+            }
+        }
+        // The catalogue contract is an ordered exact-file map. Some extractors
+        // omit Format.id, so ordinal is the safe fallback within the same type.
+        return ordinal >= 0 && ordinal < tracks.length()
+                ? parseTrackMeta(tracks.optJSONObject(ordinal))
+                : null;
+    }
+
+    private static TrackMeta parseTrackMeta(org.json.JSONObject raw) {
+        if (raw == null) return null;
+        TrackMeta meta = new TrackMeta();
+        meta.streamIndex = raw.optInt("index", -1);
+        meta.stableId = raw.optString("id", "");
+        meta.language = firstNonEmpty(
+                raw.optString("lang", ""),
+                raw.optString("language", ""),
+                raw.optString("iso_639_1", ""),
+                raw.optString("iso639", ""),
+                raw.optString("code", ""));
+        meta.codec = raw.optString("codec", "");
+        meta.channels = raw.optInt("channels", raw.optInt("channelCount", -1));
+        meta.forced = raw.optBoolean("forced", false)
+                || raw.optBoolean("isForced", false)
+                || raw.optBoolean("is_forced", false);
+        meta.sdh = raw.optBoolean("sdh", false)
+                || raw.optBoolean("hearingImpaired", false)
+                || raw.optBoolean("hearing_impaired", false);
+        meta.defaultTrack = raw.optBoolean("default", false)
+                || raw.optBoolean("isDefault", false)
+                || raw.optBoolean("is_default", false);
+        meta.role = TrackSelectionResolver.Role.from(raw.optString("role", ""));
+        if (meta.forced) meta.role = TrackSelectionResolver.Role.FORCED;
+        if (meta.sdh) meta.role = TrackSelectionResolver.Role.SDH;
+        return meta;
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) return value.trim();
+        }
+        return null;
+    }
+
+    private static int numericTrackId(String id) {
+        if (id == null || id.isEmpty()) return -1;
+        try {
+            if (id.matches("\\d+")) return Integer.parseInt(id);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+)$").matcher(id);
+            return matcher.find() ? Integer.parseInt(matcher.group(1)) : -1;
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
+    /**
+     * Turn only real ISO language codes into a display claim. Provider labels
+     * and generic extractor names are never accepted as languages.
+     */
+    private static String safeLanguageName(String raw) {
+        if (raw == null) return null;
+        String code = raw.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        int dash = code.indexOf('-');
+        if (dash > 0) code = code.substring(0, dash);
+        switch (code) {
+            case "fre":
+            case "fra": code = "fr"; break;
+            case "eng": code = "en"; break;
+            case "spa": code = "es"; break;
+            case "ger":
+            case "deu": code = "de"; break;
+            case "ita": code = "it"; break;
+            case "por": code = "pt"; break;
+            case "ara": code = "ar"; break;
+            case "rus": code = "ru"; break;
+            case "tur": code = "tr"; break;
+            case "hin": code = "hi"; break;
+            case "dut":
+            case "nld": code = "nl"; break;
+            case "gre":
+            case "ell": code = "el"; break;
+            case "chi":
+            case "zho": code = "zh"; break;
+            case "jpn": code = "ja"; break;
+            case "kor": code = "ko"; break;
+            case "pol": code = "pl"; break;
+            case "rum":
+            case "ron": code = "ro"; break;
+            case "swe": code = "sv"; break;
+            case "nor": code = "no"; break;
+            case "dan": code = "da"; break;
+            case "fin": code = "fi"; break;
+            case "heb": code = "he"; break;
+            case "per":
+            case "fas": code = "fa"; break;
+            case "ukr": code = "uk"; break;
+            default: break;
+        }
+        if (!code.matches("[a-z]{2,3}")
+                || "und".equals(code) || "unk".equals(code)
+                || "mul".equals(code) || "mis".equals(code)) return null;
+        try {
+            Locale language = new Locale(code);
+            String display = language.getDisplayLanguage(Locale.getDefault());
+            if (display == null || display.trim().isEmpty() || display.equalsIgnoreCase(code)) return null;
+            return display.substring(0, 1).toUpperCase(Locale.getDefault()) + display.substring(1);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String safeCodec(String raw) {
+        if (raw == null) return null;
+        String codec = raw.trim().toUpperCase(Locale.ROOT);
+        if (codec.startsWith("AUDIO/")) codec = codec.substring(6);
+        if (codec.isEmpty() || codec.length() > 16 || !codec.matches("[A-Z0-9._+-]+")) return null;
+        if ("EAC3".equals(codec)) return "E-AC-3";
+        if ("AC3".equals(codec)) return "AC-3";
+        return codec;
+    }
+
+    private String safeTrackLabel(int type, Format format, TrackMeta metadata, int position) {
+        String language = metadata == null ? null : safeLanguageName(metadata.language);
+        // Subtitle tags are track-scoped even when no catalogue row exists.
+        // Audio deliberately remains fail-closed unless exact-file evidence was
+        // transported, because incorrect provider audio tags caused this issue.
+        if (language == null && type == C.TRACK_TYPE_TEXT && format != null) {
+            language = safeLanguageName(format.language);
+        }
+        String label = language;
+        if (label == null) {
+            label = getString(type == C.TRACK_TYPE_AUDIO
+                    ? R.string.player_audio_unknown
+                    : R.string.player_subtitle_unknown, position);
+        }
+
+        List<String> details = new ArrayList<>();
+        String codec = safeCodec(metadata != null && metadata.codec != null
+                ? metadata.codec
+                : (format == null ? null : format.sampleMimeType));
+        if (codec != null) details.add(codec);
+        int channels = metadata != null && metadata.channels > 0
+                ? metadata.channels
+                : (format == null ? -1 : format.channelCount);
+        if (type == C.TRACK_TYPE_AUDIO && channels > 0) {
+            if (channels == 1) details.add(getString(R.string.player_audio_mono));
+            else if (channels == 2) details.add(getString(R.string.player_audio_stereo));
+            else if (channels == 6) details.add("5.1");
+            else if (channels == 8) details.add("7.1");
+        }
+        if (type == C.TRACK_TYPE_TEXT && metadata != null) {
+            if (metadata.forced) details.add(getString(R.string.player_subtitle_forced));
+            if (metadata.sdh) details.add("SDH");
+        }
+        return details.isEmpty() ? label : label + " · " + android.text.TextUtils.join(" · ", details);
+    }
+
+    private List<TrackOption> collectTrackOptions(Tracks tracks, int type) {
+        List<TrackOption> result = new ArrayList<>();
+        if (tracks == null) return result;
+        int ordinal = 0;
+        org.json.JSONArray metadata = type == C.TRACK_TYPE_AUDIO
+                ? verifiedAudioTracks : exactSubtitleTracks;
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != type) continue;
+            for (int i = 0; i < group.length; i++) {
+                Format format = group.getTrackFormat(i);
+                TrackMeta exact = trackMetaAt(metadata, format, ordinal);
+                TrackSelectionResolver.Role role = trackRole(type, format, exact);
+                String language = exact == null ? null : exact.language;
+                if ((language == null || language.isEmpty()) && type == C.TRACK_TYPE_TEXT) {
+                    language = format.language;
+                }
+                String stableId = exact != null && exact.stableId != null
+                        && !exact.stableId.trim().isEmpty()
+                        ? exact.stableId
+                        : (exact != null && exact.streamIndex >= 0
+                            ? "stream:" + exact.streamIndex
+                            : (format.id != null && !format.id.trim().isEmpty()
+                                ? format.id
+                                : TrackSelectionResolver.fallbackStableId(
+                                    type == C.TRACK_TYPE_AUDIO ? "audio" : "subtitle",
+                                    language,
+                                    role,
+                                    exact != null ? exact.codec : format.sampleMimeType,
+                                    exact != null && exact.channels > 0
+                                            ? exact.channels : format.channelCount)));
+                boolean defaultTrack = exact != null && exact.defaultTrack
+                        || (format.selectionFlags & C.SELECTION_FLAG_DEFAULT) != 0;
+                result.add(new TrackOption(
+                        type,
+                        group.getMediaTrackGroup(),
+                        i,
+                        safeTrackLabel(type, format, exact, ordinal + 1),
+                        stableId,
+                        language,
+                        role,
+                        group.isTrackSelected(i),
+                        group.isTrackSupported(i),
+                        defaultTrack));
+                ordinal++;
+            }
+        }
+        return result;
+    }
+
+    private static TrackSelectionResolver.Role trackRole(
+            int type, Format format, TrackMeta exact) {
+        if (exact != null && exact.role != TrackSelectionResolver.Role.UNKNOWN) {
+            return exact.role;
+        }
+        if (format == null) return type == C.TRACK_TYPE_TEXT
+                ? TrackSelectionResolver.Role.FULL
+                : TrackSelectionResolver.Role.MAIN;
+        if ((format.selectionFlags & C.SELECTION_FLAG_FORCED) != 0) {
+            return TrackSelectionResolver.Role.FORCED;
+        }
+        if ((format.roleFlags & C.ROLE_FLAG_DESCRIBES_VIDEO) != 0) {
+            return TrackSelectionResolver.Role.AUDIO_DESCRIPTION;
+        }
+        if ((format.roleFlags & C.ROLE_FLAG_COMMENTARY) != 0) {
+            return TrackSelectionResolver.Role.COMMENTARY;
+        }
+        if ((format.roleFlags & C.ROLE_FLAG_DUB) != 0) {
+            return TrackSelectionResolver.Role.DUB;
+        }
+        if ((format.roleFlags & (C.ROLE_FLAG_TRANSCRIBES_DIALOG
+                | C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND)) != 0) {
+            return TrackSelectionResolver.Role.SDH;
+        }
+        return type == C.TRACK_TYPE_TEXT
+                ? TrackSelectionResolver.Role.FULL
+                : TrackSelectionResolver.Role.MAIN;
+    }
+
+    private void installTrackControl(FrameLayout root) {
+        trackButton = new Button(this);
+        trackButton.setId(R.id.norva_player_track_button);
+        trackButton.setAllCaps(false);
+        trackButton.setTextColor(Color.WHITE);
+        trackButton.setTextSize(12);
+        trackButton.setMaxLines(2);
+        trackButton.setGravity(Gravity.CENTER);
+        trackButton.setPadding(dp(14), dp(7), dp(14), dp(7));
+        trackButton.setBackgroundColor(Color.parseColor("#CC111827"));
+        trackButton.setText(getString(R.string.player_tracks_button));
+        trackButton.setContentDescription(getString(R.string.player_tracks_button));
+        trackButton.setVisibility(View.GONE);
+        trackButton.setOnClickListener(v -> {
+            NativePlayerUiTelemetry.log(this, "player_tracks_open", "open", "tracks",
+                    hasBurnedSubtitle ? "burned_subtitles" : "available");
+            showTrackDialog();
+        });
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.END);
+        lp.bottomMargin = dp(64);
+        lp.rightMargin = dp(16);
+        root.addView(trackButton, lp);
+    }
+
+    private void installUtilityControls(FrameLayout root) {
+        utilityControls = new LinearLayout(this);
+        utilityControls.setOrientation(LinearLayout.HORIZONTAL);
+        utilityControls.setGravity(Gravity.CENTER_VERTICAL);
+        utilityControls.setVisibility(View.GONE);
+
+        resizeButton = new Button(this);
+        resizeButton.setId(R.id.norva_player_resize_button);
+        resizeButton.setAllCaps(false);
+        resizeButton.setText(getString(R.string.player_resize_fit));
+        resizeButton.setContentDescription(getString(R.string.player_resize));
+        resizeButton.setTextColor(Color.WHITE);
+        resizeButton.setBackgroundColor(Color.parseColor("#CC111827"));
+        resizeButton.setOnClickListener(v -> toggleResizeMode());
+        utilityControls.addView(resizeButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        brightnessButton = new Button(this);
+        brightnessButton.setId(R.id.norva_player_brightness_button);
+        brightnessButton.setAllCaps(false);
+        brightnessButton.setText(getString(R.string.player_brightness));
+        brightnessButton.setContentDescription(getString(R.string.player_brightness));
+        brightnessButton.setTextColor(Color.WHITE);
+        brightnessButton.setBackgroundColor(Color.parseColor("#CC111827"));
+        brightnessButton.setOnClickListener(v -> showBrightnessDialog());
+        LinearLayout.LayoutParams brightLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        brightLp.leftMargin = dp(8);
+        utilityControls.addView(brightnessButton, brightLp);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.START);
+        lp.bottomMargin = dp(64);
+        lp.leftMargin = dp(16);
+        root.addView(utilityControls, lp);
+    }
+
+    private void updateUtilityControlVisibility(boolean controllerVisible) {
+        int visibility = controllerVisible && !controlsLocked ? View.VISIBLE : View.GONE;
+        if (utilityControls != null) utilityControls.setVisibility(visibility);
+        if (resizeButton != null) resizeButton.setVisibility(visibility);
+        if (brightnessButton != null) brightnessButton.setVisibility(visibility);
+    }
+
+    private void toggleResizeMode() {
+        if (playerView == null) return;
+        int next = playerView.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                ? AspectRatioFrameLayout.RESIZE_MODE_FIT
+                : AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+        playerView.setResizeMode(next);
+        String label = getString(next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                ? R.string.player_resize_zoom
+                : R.string.player_resize_fit);
+        if (resizeButton != null) resizeButton.setText(label);
+        showSeekFeedback(getString(R.string.player_resize_feedback, label));
+        NativePlayerUiTelemetry.log(this, "player_gesture", "tap", "resize",
+                next == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "zoom" : "fit");
+    }
+
+    private float currentBrightness() {
+        float value = getWindow().getAttributes().screenBrightness;
+        if (value >= 0f) return Math.max(0.02f, Math.min(1f, value));
+        try {
+            return Math.max(0.02f, Math.min(1f,
+                    android.provider.Settings.System.getInt(
+                            getContentResolver(),
+                            android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f));
+        } catch (Exception ignored) {
+            return 0.5f;
+        }
+    }
+
+    private void setWindowBrightness(float value) {
+        float bounded = Math.max(0.02f, Math.min(1f, value));
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = bounded;
+        getWindow().setAttributes(lp);
+        showSeekFeedback(getString(R.string.player_brightness_value,
+                Math.round(bounded * 100)));
+    }
+
+    private void showBrightnessDialog() {
+        final SeekBar bar = new SeekBar(this);
+        bar.setMax(100);
+        bar.setProgress(Math.round(currentBrightness() * 100));
+        bar.setPadding(dp(24), dp(12), dp(24), dp(4));
+        bar.setContentDescription(getString(R.string.player_brightness));
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) setWindowBrightness(Math.max(2, progress) / 100f);
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                        "slider", "brightness", String.valueOf(seekBar.getProgress()));
+            }
+        });
+        new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle(R.string.player_brightness)
+                .setView(bar)
+                .setNegativeButton(R.string.player_tracks_close, null)
+                .show();
+    }
+
+    private void refreshTrackControl(Tracks tracks) {
+        if (trackButton == null) return;
+        List<TrackOption> audio = collectTrackOptions(tracks, C.TRACK_TYPE_AUDIO);
+        List<TrackOption> subtitles = collectTrackOptions(tracks, C.TRACK_TYPE_TEXT);
+        hasTrackChoices = audio.size() > 1 || !subtitles.isEmpty() || hasBurnedSubtitle;
+        selectedAudioLabel = selectedLabel(audio, getString(R.string.player_audio_unavailable));
+        String burnedLabel = burnedSubtitleLabel();
+        selectedSubtitleLabel = hasBurnedSubtitle
+                ? burnedLabel
+                : selectedLabel(subtitles, getString(R.string.player_subtitles_off));
+        String shortSubtitle = hasBurnedSubtitle
+                ? burnedLabel
+                : selectedLabel(subtitles, getString(R.string.player_subtitles_off_short));
+        trackButton.setText(getString(R.string.player_tracks_button) + "\n"
+                + selectedAudioLabel + " · " + shortSubtitle);
+        trackButton.setContentDescription(getString(
+                R.string.player_tracks_selected_description,
+                selectedAudioLabel, selectedSubtitleLabel));
+        updateTrackButtonVisibility(playerView != null && playerView.isControllerFullyVisible());
+    }
+
+    private static String selectedLabel(List<TrackOption> options, String fallback) {
+        for (TrackOption option : options) {
+            if (option.selected) return option.label;
+        }
+        return fallback;
+    }
+
+    private void updateTrackButtonVisibility(boolean controllerVisible) {
+        if (trackButton == null) return;
+        trackButton.setVisibility(controllerVisible && !controlsLocked && hasTrackChoices
+                ? View.VISIBLE : View.GONE);
+    }
+
+    private TextView sectionTitle(String text) {
+        TextView title = new TextView(this);
+        title.setText(text);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(17);
+        title.setPadding(0, dp(14), 0, dp(6));
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
+        return title;
+    }
+
+    private TextView emptyTrackMessage(String text) {
+        TextView message = new TextView(this);
+        message.setText(text);
+        message.setTextColor(Color.parseColor("#94A3B8"));
+        message.setTextSize(14);
+        message.setPadding(dp(8), dp(8), dp(8), dp(12));
+        return message;
+    }
+
+    private RadioButton trackRadio(String text, boolean checked, boolean enabled) {
+        RadioButton radio = new RadioButton(this);
+        radio.setText(text);
+        radio.setTextColor(enabled ? Color.WHITE : Color.parseColor("#64748B"));
+        radio.setTextSize(15);
+        radio.setChecked(checked);
+        radio.setEnabled(enabled);
+        radio.setMinHeight(dp(48));
+        radio.setPadding(dp(4), 0, dp(4), 0);
+        return radio;
+    }
+
+    private void showTrackDialog() {
+        if (player == null) return;
+        final List<TrackOption> audio = collectTrackOptions(
+                player.getCurrentTracks(), C.TRACK_TYPE_AUDIO);
+        final List<TrackOption> subtitles = collectTrackOptions(
+                player.getCurrentTracks(), C.TRACK_TYPE_TEXT);
+        if (audio.isEmpty() && subtitles.isEmpty() && !hasBurnedSubtitle) {
+            Toast.makeText(this, R.string.player_tracks_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setId(R.id.norva_player_track_dialog);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(4), dp(20), dp(16));
+        scroll.addView(content, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+
+        TextView audioTitle = sectionTitle(getString(R.string.player_audio_section));
+        audioTitle.setId(R.id.norva_player_audio_section);
+        content.addView(audioTitle);
+        final List<RadioButton> audioRows = new ArrayList<>();
+        if (audio.isEmpty()) {
+            content.addView(emptyTrackMessage(getString(R.string.player_audio_unavailable)));
+        } else {
+            for (int i = 0; i < audio.size(); i++) {
+                final int picked = i;
+                TrackOption option = audio.get(i);
+                RadioButton row = trackRadio(option.label, option.selected, option.supported);
+                audioRows.add(row);
+                row.setOnClickListener(v -> {
+                    if (selectTrack(audio.get(picked))) {
+                        NativePlayerUiTelemetry.log(this, "player_track_select",
+                                "select", "audio", audio.get(picked).language);
+                        for (int j = 0; j < audioRows.size(); j++) {
+                            audioRows.get(j).setChecked(j == picked);
+                        }
+                    } else {
+                        NativePlayerUiTelemetry.log(this, "player_track_select_fail",
+                                "select", "audio", "failed");
+                        row.setChecked(option.selected);
+                    }
+                });
+                content.addView(row);
+            }
+        }
+
+        TextView subtitleTitle = sectionTitle(getString(R.string.player_subtitle_section));
+        subtitleTitle.setId(R.id.norva_player_subtitle_section);
+        content.addView(subtitleTitle);
+        final List<RadioButton> subtitleRows = new ArrayList<>();
+        boolean subtitleSelected = false;
+        for (TrackOption option : subtitles) subtitleSelected |= option.selected;
+        if (hasBurnedSubtitle) {
+            RadioButton burned = trackRadio(burnedSubtitleLabel(), true, false);
+            burned.setContentDescription(
+                    burnedSubtitleLabel() + ". "
+                            + getString(R.string.player_subtitles_burned_in_detail));
+            content.addView(burned);
+            content.addView(emptyTrackMessage(
+                    getString(R.string.player_subtitles_burned_in_detail)));
+        } else {
+            RadioButton off = trackRadio(
+                    getString(R.string.player_subtitles_off), !subtitleSelected, true);
+            subtitleRows.add(off);
+            off.setOnClickListener(v -> {
+                if (disableSubtitles()) {
+                    NativePlayerUiTelemetry.log(this, "player_track_select",
+                            "off", "subtitle", "off");
+                    for (RadioButton row : subtitleRows) row.setChecked(row == off);
+                } else {
+                    NativePlayerUiTelemetry.log(this, "player_track_select_fail",
+                            "off", "subtitle", "failed");
+                    off.setChecked(!hasSelectedTrack(subtitles));
+                }
+            });
+            content.addView(off);
+        }
+        for (int i = 0; i < subtitles.size(); i++) {
+            final int picked = i;
+            TrackOption option = subtitles.get(i);
+            RadioButton row = trackRadio(option.label, option.selected, option.supported);
+            subtitleRows.add(row);
+            row.setOnClickListener(v -> {
+                if (selectTrack(subtitles.get(picked))) {
+                    NativePlayerUiTelemetry.log(this, "player_track_select",
+                            "select", "subtitle", subtitles.get(picked).language);
+                    for (int j = 0; j < subtitleRows.size(); j++) {
+                        subtitleRows.get(j).setChecked(
+                                j == picked + (hasBurnedSubtitle ? 0 : 1));
+                    }
+                } else {
+                    NativePlayerUiTelemetry.log(this, "player_track_select_fail",
+                            "select", "subtitle", "failed");
+                    row.setChecked(option.selected);
+                }
+            });
+            content.addView(row);
+        }
+        if (subtitles.isEmpty() && !hasBurnedSubtitle) {
+            content.addView(emptyTrackMessage(getString(R.string.player_subtitles_unavailable)));
+        }
+
+        if (!isLiveContent()) {
+            content.addView(sectionTitle(getString(R.string.player_playback_speed_section)));
+            final float[] speeds = new float[] { 0.75f, 1f, 1.25f, 1.5f, 2f };
+            final List<RadioButton> speedRows = new ArrayList<>();
+            float currentSpeed = player.getPlaybackParameters().speed;
+            for (int i = 0; i < speeds.length; i++) {
+                final int picked = i;
+                String label = speeds[i] == 1f
+                        ? getString(R.string.player_playback_speed_normal)
+                        : String.format(Locale.ROOT, "%s×", speeds[i]);
+                RadioButton row = trackRadio(
+                        label, Math.abs(currentSpeed - speeds[i]) < 0.01f, true);
+                speedRows.add(row);
+                row.setOnClickListener(v -> {
+                    try {
+                        player.setPlaybackSpeed(speeds[picked]);
+                        NativePlayerUiTelemetry.log(this, "player_track_select",
+                                "select", "speed", String.format(Locale.ROOT, "%.2f", speeds[picked]));
+                        for (int j = 0; j < speedRows.size(); j++) {
+                            speedRows.get(j).setChecked(j == picked);
+                        }
+                    } catch (Throwable ignored) {
+                        NativePlayerUiTelemetry.log(this, "player_track_select_fail",
+                                "select", "speed", "failed");
+                        row.setChecked(false);
+                        Toast.makeText(this, R.string.player_track_change_failed,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+                content.addView(row);
+            }
+        }
+
+        if (trackDialog != null) trackDialog.dismiss();
+        trackDialog = new android.app.AlertDialog.Builder(
+                this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle(R.string.player_tracks_title)
+                .setView(scroll)
+                .setNegativeButton(R.string.player_tracks_close, null)
+                .create();
+        trackDialog.setOnDismissListener(d -> trackDialog = null);
+        trackDialog.show();
+        scroll.requestFocus();
+    }
+
+    private String burnedSubtitleLabel() {
+        return burnedSubtitleLanguage == null
+                ? getString(R.string.player_subtitles_burned_in_unknown)
+                : getString(R.string.player_subtitles_burned_in, burnedSubtitleLanguage);
+    }
+
+    private void installTopBar(FrameLayout root) {
+        topBar = new LinearLayout(this);
+        topBar.setId(R.id.norva_player_top_bar);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(12), dp(10), dp(72), dp(10));
+        topBar.setBackgroundColor(Color.parseColor("#99000000"));
+        topBar.setVisibility(View.GONE);
+
+        android.widget.ImageButton back = new android.widget.ImageButton(this);
+        back.setId(R.id.norva_player_back_button);
+        back.setImageResource(android.R.drawable.ic_menu_revert);
+        back.setBackgroundColor(Color.TRANSPARENT);
+        back.setContentDescription(getString(R.string.player_back_content_description));
+        back.setOnClickListener(v -> finishWithoutRecovery());
+        topBar.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        TextView title = new TextView(this);
+        title.setId(R.id.norva_player_title);
+        title.setText(mediaTitle == null || mediaTitle.trim().isEmpty() ? "Norva" : mediaTitle);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        titleLp.leftMargin = dp(8);
+        topBar.addView(title, titleLp);
+        root.addView(topBar, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP));
+    }
+
+    private void updateTopBarVisibility(boolean controllerVisible) {
+        if (topBar != null) {
+            topBar.setVisibility(controllerVisible && !controlsLocked ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void registerFreshStreamReceiver() {
+        freshStreamReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (!ACTION_APPLY_FRESH_STREAM.equals(intent.getAction())) return;
+                String token = intent.getStringExtra(EXTRA_RECOVERY_TOKEN);
+                String payload = intent.getStringExtra(EXTRA_RECOVERY_PAYLOAD);
+                if (!freshStreamRequested || recoveryToken == null
+                        || !recoveryToken.equals(token) || payload == null) return;
+                applyFreshStreamPayload(payload);
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                freshStreamReceiver,
+                new IntentFilter(ACTION_APPLY_FRESH_STREAM),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void applyFreshStreamPayload(String payloadJson) {
+        try {
+            org.json.JSONObject payload = new org.json.JSONObject(payloadJson);
+            String nextUrl = payload.optString("url", "");
+            if (nextUrl.isEmpty() || player == null) throw new IllegalArgumentException("missing url");
+            String nextSource = payload.optString("sourceId", "");
+            String nextItem = payload.optString("itemId", "");
+            if (!String.valueOf(sourceId).equals(nextSource)
+                    || !String.valueOf(itemId).equals(nextItem)) {
+                throw new SecurityException("item mismatch");
+            }
+
+            errHandler.removeCallbacks(freshStreamTimeout);
+            freshStreamRequested = false;
+            recoveryToken = null;
+            originalUrl = nextUrl;
+            fallbackUrl = emptyToNull(payload.optString("fallbackUrl", ""));
+            streamHost = hostOf(nextUrl);
+            fallbackTried = false;
+            playRetries = 0;
+            trackPreferencesApplied = false;
+            org.json.JSONObject metadata = payload.optJSONObject("trackMetadata");
+            readTrackMetadata(metadata == null ? null : metadata.toString());
+            org.json.JSONObject scope = payload.optJSONObject("preferenceScope");
+            if (scope != null) preferenceScopeJson = scope.toString();
+            org.json.JSONObject preferences = payload.optJSONObject("playbackPreferences");
+            if (preferences != null) cloudPlaybackPreferencesJson = preferences.toString();
+            long requestedPosition = Math.max(0L, payload.optLong("resumeSeconds", 0L) * 1000L);
+            if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+            showSeekFeedback(getString(R.string.player_reconnecting));
+            originalMediaItem = new MediaItem.Builder().setUri(nextUrl).build();
+            player.setMediaItem(originalMediaItem, requestedPosition);
+            player.prepare();
+            player.setPlayWhenReady(true);
+        } catch (Exception ignored) {
+            freshStreamRequested = false;
+            recoveryToken = null;
+            errHandler.removeCallbacks(freshStreamTimeout);
+            showStreamError(getString(R.string.player_reconnect_failed));
+        }
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.trim().isEmpty() ? null : value;
+    }
+
+    private void finishWithoutRecovery() {
+        freshStreamRequested = false;
+        recoveryToken = null;
+        errHandler.removeCallbacks(freshStreamTimeout);
+        finish();
+    }
+
+    private static boolean hasSelectedTrack(List<TrackOption> options) {
+        for (TrackOption option : options) if (option.selected) return true;
+        return false;
+    }
+
+    /**
+     * Selection is deliberately in-place. A malformed or unsupported option
+     * leaves the current stream untouched and never finishes PlayerActivity.
+     */
+    private boolean selectTrack(TrackOption option) {
+        if (player == null || option == null || !option.supported) return false;
+        try {
+            pendingTrackSelection = option;
+            pendingSubtitleOff = false;
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .setTrackTypeDisabled(option.type, false)
+                    .setOverrideForType(new TrackSelectionOverride(option.group, option.trackIndex))
+                    .build());
+            return true;
+        } catch (Throwable ignored) {
+            pendingTrackSelection = null;
+            Toast.makeText(this, R.string.player_track_change_failed, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+    }
+
+    private boolean disableSubtitles() {
+        if (player == null) return false;
+        try {
+            pendingTrackSelection = null;
+            pendingSubtitleOff = true;
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build());
+            return true;
+        } catch (Throwable ignored) {
+            pendingSubtitleOff = false;
+            Toast.makeText(this, R.string.player_track_change_failed, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+    }
+
     // ==================== Error display ====================
 
     private void showStreamError(String message) {
@@ -567,10 +1775,13 @@ public class PlayerActivity extends Activity {
         errorView.setText(message);
         errorPanel.setVisibility(View.VISIBLE);
         errorPanel.bringToFront();
+        errorPanel.requestFocus();
+        NativePlayerUiTelemetry.log(this, "player_error_action", "show", "error", "visible");
     }
 
     /** A manual retry must resolve a new provider/Gateway session, not reuse a stale signed URL. */
     private void retryPlayback() {
+        NativePlayerUiTelemetry.log(this, "player_error_action", "retry", "error", "manual");
         requestFreshStream("manual_retry");
     }
 
@@ -655,18 +1866,31 @@ public class PlayerActivity extends Activity {
         recoveryGeneration++;
         if (isLocal || sourceId == null || sourceId.isEmpty()
                 || itemId == null || itemId.isEmpty()) {
-            showStreamError(getString(R.string.player_no_data)
-                    + (streamHost != null ? "\nHost: " + streamHost : ""));
+            showStreamError(getString(R.string.player_error_network));
             return;
         }
         freshStreamRequested = true;
         freshStreamReason = reason == null ? "playback_interrupted" : reason;
-        showStreamError("Reconnecting\u2026");
-        errHandler.postDelayed(new Runnable() {
-            @Override public void run() {
-                if (!isFinishing()) finish();
-            }
-        }, 350L);
+        recoveryToken = UUID.randomUUID().toString();
+        long position = recoverPositionMs();
+        long duration = player != null && player.getDuration() > 0
+                ? player.getDuration() : 0L;
+        showStreamError(getString(R.string.player_reconnecting));
+        // Release the active provider socket before resolving its replacement.
+        // This protects one-slot IPTV accounts while the Activity stays open.
+        if (player != null) player.stop();
+        Intent request = new Intent(ACTION_REQUEST_FRESH_STREAM)
+                .setPackage(getPackageName())
+                .putExtra(EXTRA_RECOVERY_TOKEN, recoveryToken)
+                .putExtra(EXTRA_SOURCE_ID, sourceId)
+                .putExtra(EXTRA_ITEM_TYPE, itemType)
+                .putExtra(EXTRA_ITEM_ID, itemId)
+                .putExtra("positionSeconds", Math.max(0L, position / 1000L))
+                .putExtra("durationSeconds", Math.max(0L, duration / 1000L))
+                .putExtra("retryReason", freshStreamReason);
+        sendBroadcast(request);
+        errHandler.removeCallbacks(freshStreamTimeout);
+        errHandler.postDelayed(freshStreamTimeout, 25_000L);
     }
 
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
@@ -674,6 +1898,7 @@ public class PlayerActivity extends Activity {
         recoveryGeneration++;
         fallbackTried = true;
         playRetries = 0;              // one fresh in-place retry budget for the fallback URL
+        trackPreferencesApplied = false;
         streamHost = hostOf(fallbackUrl);
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
@@ -693,6 +1918,20 @@ public class PlayerActivity extends Activity {
         int code = e.errorCode;
         return code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
                 && code <= PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED;
+    }
+
+    private String friendlyPlaybackError(PlaybackException error) {
+        if (error == null) return getString(R.string.player_error_generic);
+        int code = error.errorCode;
+        if (code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                && code <= PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE) {
+            return getString(R.string.player_error_network);
+        }
+        if (code >= PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
+                && code <= PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED) {
+            return getString(R.string.player_error_unsupported);
+        }
+        return getString(R.string.player_error_generic);
     }
 
     /** Compact, shareable diagnostic from a playback failure (code, HTTP status, cause, host). */
@@ -744,6 +1983,8 @@ public class PlayerActivity extends Activity {
         if (overlay == null) return;
 
         seekBubble = new TextView(this);
+        seekBubble.setId(R.id.norva_player_seek_feedback);
+        seekBubble.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         seekBubble.setTextColor(Color.WHITE);
         seekBubble.setTextSize(18);
         seekBubble.setBackgroundColor(Color.parseColor("#99000000"));
@@ -786,7 +2027,11 @@ public class PlayerActivity extends Activity {
                 if (player == null || controlsLocked) return false;
                 boolean forward = e.getX() > overlay.getWidth() / 2f;
                 player.seekTo(Math.max(0, player.getCurrentPosition() + (forward ? 10_000 : -10_000)));
-                showSeekFeedback(forward ? "+10s" : "-10s");
+                showSeekFeedback(getString(forward
+                        ? R.string.player_seek_forward_feedback
+                        : R.string.player_seek_backward_feedback));
+                NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                        "double_tap", "seek", forward ? "forward" : "back");
                 return true;
             }
 
@@ -809,13 +2054,19 @@ public class PlayerActivity extends Activity {
                     WindowManager.LayoutParams lp = getWindow().getAttributes();
                     lp.screenBrightness = b;
                     getWindow().setAttributes(lp);
-                    showSeekFeedback("🔆 " + Math.round(b * 100) + "%");
+                    showSeekFeedback(getString(R.string.player_brightness_value,
+                            Math.round(b * 100)));
+                    NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                            "drag", "brightness", "adjust");
                 } else if (audio != null) {
                     int max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
                     int v = Math.round(Math.max(0, Math.min(max,
                             gestureStartVolume + (totalDy / range) * max)));
                     audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0);
-                    showSeekFeedback("🔊 " + Math.round(v * 100f / max) + "%");
+                    showSeekFeedback(getString(R.string.player_volume_value,
+                            Math.round(v * 100f / max)));
+                    NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                            "drag", "volume", "adjust");
                 }
                 return true;
             }
@@ -829,10 +2080,22 @@ public class PlayerActivity extends Activity {
                 if (!controlsLocked) {
                     if (pinchAccum > 1.15f) {
                         playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-                        showSeekFeedback("Zoom");
+                        if (resizeButton != null) {
+                            resizeButton.setText(getString(R.string.player_resize_zoom));
+                        }
+                        showSeekFeedback(getString(R.string.player_resize_feedback,
+                                getString(R.string.player_resize_zoom)));
+                        NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                                "pinch", "resize", "zoom");
                     } else if (pinchAccum < 0.87f) {
                         playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
-                        showSeekFeedback("Fit");
+                        if (resizeButton != null) {
+                            resizeButton.setText(getString(R.string.player_resize_fit));
+                        }
+                        showSeekFeedback(getString(R.string.player_resize_feedback,
+                                getString(R.string.player_resize_fit)));
+                        NativePlayerUiTelemetry.log(PlayerActivity.this, "player_gesture",
+                                "pinch", "resize", "fit");
                     }
                 }
                 pinchAccum = 1f;
@@ -840,6 +2103,8 @@ public class PlayerActivity extends Activity {
         });
 
         View touchLayer = new View(this);
+        touchLayer.setId(R.id.norva_player_controls);
+        touchLayer.setContentDescription(getString(R.string.player_show_controls));
         touchLayer.setOnTouchListener((v, ev) -> {
             scaleDetector.onTouchEvent(ev);
             boolean handled = detector.onTouchEvent(ev);
@@ -857,7 +2122,8 @@ public class PlayerActivity extends Activity {
         // Lock controls: shown alongside the controller; when locked, every
         // gesture is swallowed and only the transient unlock pill responds.
         lockBtn = new Button(this);
-        lockBtn.setText("\uD83D\uDD12 Lock");
+        lockBtn.setId(R.id.norva_player_lock_button);
+        lockBtn.setText(getString(R.string.player_lock));
         lockBtn.setTextColor(Color.WHITE);
         lockBtn.setBackgroundColor(Color.parseColor("#66000000"));
         lockBtn.setOnClickListener(v -> setControlsLocked(true));
@@ -867,12 +2133,17 @@ public class PlayerActivity extends Activity {
         lockLp.topMargin = dp(20);
         lockLp.leftMargin = dp(20);
         overlay.addView(lockBtn, lockLp);
-        playerView.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility ->
-                lockBtn.setVisibility(visibility == View.VISIBLE && !controlsLocked ? View.VISIBLE : View.GONE));
+        playerView.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility -> {
+            lockBtn.setVisibility(visibility == View.VISIBLE && !controlsLocked ? View.VISIBLE : View.GONE);
+            updateTrackButtonVisibility(visibility == View.VISIBLE);
+            updateTopBarVisibility(visibility == View.VISIBLE);
+            updateUtilityControlVisibility(visibility == View.VISIBLE);
+        });
         lockBtn.setVisibility(View.GONE);
 
         unlockBtn = new Button(this);
-        unlockBtn.setText("\uD83D\uDD13 Unlock");
+        unlockBtn.setId(R.id.norva_player_unlock_button);
+        unlockBtn.setText(getString(R.string.player_unlock));
         unlockBtn.setTextColor(Color.WHITE);
         unlockBtn.setBackgroundColor(Color.parseColor("#99000000"));
         unlockBtn.setVisibility(View.GONE);
@@ -890,11 +2161,17 @@ public class PlayerActivity extends Activity {
         if (locked) {
             playerView.hideController();
             lockBtn.setVisibility(View.GONE);
+            updateTrackButtonVisibility(false);
+            updateTopBarVisibility(false);
+            updateUtilityControlVisibility(false);
             flashUnlockButton();
         } else {
             unlockBtn.removeCallbacks(hideUnlockBtn);
             unlockBtn.setVisibility(View.GONE);
             playerView.showController();
+            updateTrackButtonVisibility(true);
+            updateTopBarVisibility(true);
+            updateUtilityControlVisibility(true);
         }
     }
 
@@ -923,12 +2200,17 @@ public class PlayerActivity extends Activity {
     private void installVariantControl(FrameLayout root) {
         if (variants == null) return;
         Button variantBtn = new Button(this);
+        variantBtn.setId(R.id.norva_player_variant_button);
         variantBtn.setText(currentVariantLabel() + "  ▾");
         variantBtn.setAllCaps(false);
         variantBtn.setTextColor(Color.WHITE);
         variantBtn.setBackgroundColor(Color.parseColor("#66000000"));
-        variantBtn.setContentDescription("Changer la version (qualité)");
-        variantBtn.setOnClickListener(v -> showVariantDialog());
+        variantBtn.setContentDescription(getString(R.string.player_version_change_description));
+        variantBtn.setOnClickListener(v -> {
+            NativePlayerUiTelemetry.log(this, "player_ui_summary",
+                    "open", "variant", "available");
+            showVariantDialog();
+        });
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.START);
@@ -938,15 +2220,15 @@ public class PlayerActivity extends Activity {
     }
 
     private String currentVariantLabel() {
-        if (variants == null) return "Version";
+        if (variants == null) return getString(R.string.player_version);
         try {
             for (int i = 0; i < variants.length(); i++) {
                 org.json.JSONObject v = variants.optJSONObject(i);
                 if (v != null && activeStreamId != null && activeStreamId.equals(v.optString("streamId")))
-                    return v.optString("label", "Version");
+                    return v.optString("label", getString(R.string.player_version));
             }
         } catch (Exception ignored) { }
-        return "Version";
+        return getString(R.string.player_version);
     }
 
     private void showVariantDialog() {
@@ -969,7 +2251,7 @@ public class PlayerActivity extends Activity {
         } catch (Exception ignored) { }
         if (labels.size() < 2) return;
         new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                .setTitle("Version")
+                .setTitle(R.string.player_version_title)
                 .setSingleChoiceItems(labels.toArray(new String[0]), selected,
                         new android.content.DialogInterface.OnClickListener() {
                             @Override
@@ -988,12 +2270,17 @@ public class PlayerActivity extends Activity {
 
     private void installCastSupport(FrameLayout root) {
         castButton = new android.widget.ImageButton(this);
+        castButton.setId(R.id.norva_player_cast_button);
         castButton.setImageResource(R.drawable.ic_cast);
         castButton.setBackgroundColor(Color.parseColor("#66000000"));
         castButton.setPadding(dp(12), dp(12), dp(12), dp(12));
-        castButton.setContentDescription("Diffuser (Chromecast)");
+        castButton.setContentDescription(getString(R.string.player_cast_description));
         castButton.setVisibility(View.GONE);
-        castButton.setOnClickListener(v -> { if (castSupport != null) castSupport.showRoutePicker(); });
+        castButton.setOnClickListener(v -> {
+            NativePlayerUiTelemetry.log(this, "player_ui_summary",
+                    "open", "cast", "picker");
+            if (castSupport != null) castSupport.showRoutePicker();
+        });
         FrameLayout.LayoutParams btnLp = new FrameLayout.LayoutParams(
                 dp(48), dp(48), Gravity.TOP | Gravity.END);
         btnLp.topMargin = dp(20);
@@ -1001,6 +2288,9 @@ public class PlayerActivity extends Activity {
         root.addView(castButton, btnLp);
 
         castBar = new LinearLayout(this);
+        castBar.setId(R.id.norva_player_cast_bar);
+        castBar.setContentDescription(getString(R.string.player_cast_description));
+        castBar.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         castBar.setOrientation(LinearLayout.HORIZONTAL);
         castBar.setGravity(Gravity.CENTER_VERTICAL);
         castBar.setBackgroundColor(Color.parseColor("#CC0A0A0F"));
@@ -1008,6 +2298,7 @@ public class PlayerActivity extends Activity {
         castBar.setVisibility(View.GONE);
 
         castBarLabel = new TextView(this);
+        castBarLabel.setId(R.id.norva_player_cast_label);
         castBarLabel.setTextColor(Color.WHITE);
         castBarLabel.setTextSize(15);
         LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
@@ -1015,6 +2306,8 @@ public class PlayerActivity extends Activity {
         castBar.addView(castBarLabel, labelLp);
 
         Button pauseBtn = new Button(this);
+        pauseBtn.setId(R.id.norva_player_cast_pause_button);
+        pauseBtn.setContentDescription(getString(R.string.player_cast_pause_resume));
         pauseBtn.setText("⏯");
         pauseBtn.setTextColor(Color.WHITE);
         pauseBtn.setBackgroundColor(Color.parseColor("#33FFFFFF"));
@@ -1025,7 +2318,8 @@ public class PlayerActivity extends Activity {
         castBar.addView(pauseBtn, pauseLp);
 
         Button stopBtn = new Button(this);
-        stopBtn.setText("Arrêter");
+        stopBtn.setId(R.id.norva_player_cast_stop_button);
+        stopBtn.setText(getString(R.string.player_cast_stop));
         stopBtn.setTextColor(Color.WHITE);
         stopBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         stopBtn.setOnClickListener(v -> { if (castSupport != null) castSupport.endSession(); });
@@ -1050,9 +2344,18 @@ public class PlayerActivity extends Activity {
                     long pos = player == null ? 0 : Math.max(0, player.getCurrentPosition());
                     String castUrl = fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl;
                     boolean live = "channel".equals(itemType);
-                    castSupport.loadMedia(castUrl, mediaTitle, null, live ? 0 : pos, live);
-                    if (player != null) player.pause();
-                    if (castBarLabel != null) castBarLabel.setText("Diffusion sur " + deviceName);
+                    // Stop (not merely pause) before the receiver opens the URL:
+                    // providers with one allowed socket otherwise see two active
+                    // consumers during hand-off and reject the Chromecast.
+                    if (player != null) {
+                        player.pause();
+                        player.stop();
+                    }
+                    castSupport.loadMedia(castUrl, mediaTitle, posterUrl, live ? 0 : pos, live);
+                    if (castBarLabel != null) {
+                        castBarLabel.setText(getString(
+                                R.string.player_cast_connected_to, deviceName));
+                    }
                     if (castBar != null) castBar.setVisibility(View.VISIBLE);
                 });
             }
@@ -1062,10 +2365,14 @@ public class PlayerActivity extends Activity {
                 runOnUiThread(() -> {
                     if (castBar != null) castBar.setVisibility(View.GONE);
                     if (player != null) {
-                        if (resumePositionMs > 0 && !"channel".equals(itemType)) {
-                            player.seekTo(resumePositionMs);
-                        }
-                        player.play();
+                        String localUrl = fallbackTried && fallbackUrl != null
+                                ? fallbackUrl : originalUrl;
+                        trackPreferencesApplied = false;
+                        player.setMediaItem(new MediaItem.Builder().setUri(localUrl).build(),
+                                resumePositionMs > 0 && !"channel".equals(itemType)
+                                        ? resumePositionMs : 0L);
+                        player.prepare();
+                        player.setPlayWhenReady(true);
                     }
                 });
             }
@@ -1098,6 +2405,15 @@ public class PlayerActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) applyImmersive();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (trackDialog != null) {
+            trackDialog.dismiss();
+            return;
+        }
+        finishWithoutRecovery();
     }
 
     /**
@@ -1176,6 +2492,14 @@ public class PlayerActivity extends Activity {
                 if (data == null) data = new Intent();
                 data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
                 data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
+            }
+            if (currentTrackPreferencesJson != null
+                    && !currentTrackPreferencesJson.isEmpty()) {
+                if (data == null) data = new Intent();
+                data.putExtra("sourceId", sourceId);
+                data.putExtra("itemType", itemType);
+                data.putExtra("itemId", itemId);
+                data.putExtra("trackPreferences", currentTrackPreferencesJson);
             }
             if (freshStreamRequested) {
                 if (data == null) data = new Intent();
@@ -1269,6 +2593,11 @@ public class PlayerActivity extends Activity {
     protected void onDestroy() {
         playbackAuthToken = null;
         errHandler.removeCallbacksAndMessages(null);
+        if (freshStreamReceiver != null) {
+            try { unregisterReceiver(freshStreamReceiver); } catch (Exception ignored) { }
+            freshStreamReceiver = null;
+        }
+        if (trackDialog != null) { trackDialog.dismiss(); trackDialog = null; }
         if (pipReceiver != null) { try { unregisterReceiver(pipReceiver); } catch (Exception ignored) { } pipReceiver = null; }
         if (castSupport != null) { castSupport.stop(); castSupport = null; }
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }

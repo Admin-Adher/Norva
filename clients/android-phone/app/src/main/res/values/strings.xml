@@ -2,15 +2,85 @@
 <resources>
     <string name="app_name">Norva</string>
 
-    <!-- Native Google Sign-In: the WEB OAuth client id (…apps.googleusercontent.com)
+    <!-- Native Google Sign-In: the WEB OAuth client id (...apps.googleusercontent.com)
          from Google Cloud, used as the Credential Manager serverClientId. Leave empty
          to keep native Google sign-in dormant. Requires an Android OAuth client for
          tv.norva.phone + the Play signing SHA-256 registered in the same project. -->
     <string name="norva_google_web_client_id" translatable="false">973428500788-deum57fe7eh659tuce15n0beg1t6fq71.apps.googleusercontent.com</string>
 
-    <!-- Native player -->
+    <!-- Native player: recoverable errors and top-level navigation. -->
     <string name="player_error_title">Couldn\'t play this title</string>
+    <string name="player_error_pane_title">Playback problem</string>
     <string name="player_retry">Retry</string>
     <string name="player_back">Back</string>
-    <string name="player_no_data">No data received (35s timeout). The provider accepted the connection but isn\'t sending a playable stream.</string>
+    <string name="player_back_content_description">Go back</string>
+    <string name="player_navigate_back">Go back</string>
+    <string name="player_no_data">No data received. The provider accepted the connection but isn\'t sending a playable stream.</string>
+    <string name="player_error_network">The connection was interrupted. Check your network, then try again.</string>
+    <string name="player_error_unsupported">This video format cannot be played on this device.</string>
+    <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
+    <string name="player_show_controls">Show playback controls</string>
+
+    <!-- Unified native track selector. These labels stay deliberately neutral
+         when exact-file language evidence is unavailable. -->
+    <string name="player_tracks_button">Audio and subtitles</string>
+    <string name="player_tracks_title">Audio and subtitles</string>
+    <string name="player_tracks_pane_title">Audio and subtitle options</string>
+    <string name="player_audio_section">Audio</string>
+    <string name="player_subtitle_section">Subtitles</string>
+    <string name="player_subtitles_off">Off</string>
+    <string name="player_subtitles_off_short">Subtitles off</string>
+    <string name="player_audio_unavailable">No audio track available</string>
+    <string name="player_subtitles_unavailable">No selectable subtitles</string>
+    <string name="player_tracks_unavailable">No audio or subtitle options available</string>
+    <string name="player_audio_unknown">Audio track %1$d · language not identified</string>
+    <string name="player_subtitle_unknown">Subtitle track %1$d · language not identified</string>
+    <string name="player_audio_mono">mono</string>
+    <string name="player_audio_stereo">stereo</string>
+    <string name="player_subtitle_forced">forced</string>
+    <string name="player_subtitle_sdh">SDH</string>
+    <string name="player_tracks_close">Close</string>
+    <string name="player_track_change_failed">Couldn\'t change tracks. Playback is continuing.</string>
+    <string name="player_tracks_selected_description">Audio: %1$s. Subtitles: %2$s.</string>
+    <string name="player_track_selected_state">Selected</string>
+    <string name="player_track_not_selected_state">Not selected</string>
+    <string name="player_subtitles_burned_in">%1$s · burned into picture</string>
+    <string name="player_subtitles_burned_in_unknown">Burned-in subtitles · always on</string>
+    <string name="player_subtitles_burned_in_detail">Always visible; cannot be turned off</string>
+
+    <!-- Player controls and feedback. -->
+    <string name="player_lock">Lock controls</string>
+    <string name="player_unlock">Unlock controls</string>
+    <string name="player_controls_locked">Playback controls locked</string>
+    <string name="player_controls_unlocked">Playback controls unlocked</string>
+    <string name="player_seek_forward">Forward 10 seconds</string>
+    <string name="player_seek_backward">Back 10 seconds</string>
+    <string name="player_seek_forward_feedback">+10s</string>
+    <string name="player_seek_backward_feedback">−10s</string>
+    <string name="player_brightness">Brightness</string>
+    <string name="player_brightness_value">Brightness %1$d%%</string>
+    <string name="player_volume">Volume</string>
+    <string name="player_volume_value">Volume %1$d%%</string>
+    <string name="player_resize">Resize video</string>
+    <string name="player_resize_fit">Fit</string>
+    <string name="player_resize_zoom">Zoom</string>
+    <string name="player_resize_feedback">Video display: %1$s</string>
+    <string name="player_playback_speed_section">Playback speed</string>
+    <string name="player_playback_speed_normal">Normal</string>
+
+    <!-- Live variants, recovery and Chromecast. -->
+    <string name="player_version">Version</string>
+    <string name="player_version_title">Choose a version</string>
+    <string name="player_version_change_description">Change version or quality</string>
+    <string name="player_reconnecting">Reconnecting…</string>
+    <string name="player_reconnecting_attempt">Reconnecting… attempt %1$d</string>
+    <string name="player_reconnect_failed">Couldn\'t reconnect. Please try again.</string>
+    <string name="player_cast_description">Cast with Chromecast</string>
+    <string name="player_cast_picker_title">Cast to...</string>
+    <string name="player_cast_active_title">Casting in progress</string>
+    <string name="player_cast_stop_streaming">Stop casting</string>
+    <string name="player_cast_pause_resume">Pause or resume casting</string>
+    <string name="player_cast_stop">Stop</string>
+    <string name="player_cast_connected_to">Casting to %1$s</string>
+    <string name="player_cast_controls_description">Casting controls for %1$s</string>
 </resources>

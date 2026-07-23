@@ -125,9 +125,11 @@ final class CastSupport {
         if (current != null) {
             // Already casting → the picker becomes the disconnect affordance.
             new AlertDialog.Builder(activity)
-                    .setTitle("Diffusion en cours")
-                    .setMessage("Diffusion sur " + deviceName(current))
-                    .setPositiveButton("Arrêter la diffusion", (d, w) -> endSession())
+                    .setTitle(activity.getString(R.string.player_cast_active_title))
+                    .setMessage(activity.getString(
+                            R.string.player_cast_connected_to, deviceName(current)))
+                    .setPositiveButton(activity.getString(R.string.player_cast_stop_streaming),
+                            (d, w) -> endSession())
                     .setNegativeButton("Fermer", null)
                     .show();
             return;
@@ -135,7 +137,7 @@ final class CastSupport {
         String[] names = new String[routes.size()];
         for (int i = 0; i < routes.size(); i++) names[i] = routes.get(i).getName();
         new AlertDialog.Builder(activity)
-                .setTitle("Diffuser sur…")
+                .setTitle(activity.getString(R.string.player_cast_picker_title))
                 .setItems(names, (d, which) -> {
                     try { mediaRouter.selectRoute(routes.get(which)); } catch (Exception ignored) { }
                 })

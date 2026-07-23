@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Norva</string>
+
+    <!-- Lecteur natif : erreurs récupérables et navigation principale. -->
+    <string name="player_error_title">Impossible de lire ce titre</string>
+    <string name="player_error_pane_title">Problème de lecture</string>
+    <string name="player_retry">Réessayer</string>
+    <string name="player_back">Retour</string>
+    <string name="player_back_content_description">Revenir en arrière</string>
+    <string name="player_navigate_back">Revenir en arrière</string>
+    <string name="player_no_data">Aucune donnée reçue. Le fournisseur accepte la connexion, mais n’envoie aucun flux lisible.</string>
+    <string name="player_error_network">La connexion a été interrompue. Vérifiez votre réseau, puis réessayez.</string>
+    <string name="player_error_unsupported">Ce format vidéo ne peut pas être lu sur cet appareil.</string>
+    <string name="player_error_generic">La lecture s’est arrêtée de manière inattendue. Veuillez réessayer.</string>
+    <string name="player_show_controls">Afficher les commandes de lecture</string>
+
+    <!-- Sélecteur natif unifié des pistes. Ces libellés restent volontairement
+         neutres quand la langue du fichier exact n’est pas vérifiée. -->
+    <string name="player_tracks_button">Audio et sous-titres</string>
+    <string name="player_tracks_title">Audio et sous-titres</string>
+    <string name="player_tracks_pane_title">Options audio et sous-titres</string>
+    <string name="player_audio_section">Audio</string>
+    <string name="player_subtitle_section">Sous-titres</string>
+    <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_subtitles_off_short">Sous-titres désactivés</string>
+    <string name="player_audio_unavailable">Aucune piste audio disponible</string>
+    <string name="player_subtitles_unavailable">Aucun sous-titre sélectionnable</string>
+    <string name="player_tracks_unavailable">Aucune option audio ou de sous-titres disponible</string>
+    <string name="player_audio_unknown">Piste audio %1$d · langue non identifiée</string>
+    <string name="player_subtitle_unknown">Sous-titre %1$d · langue non identifiée</string>
+    <string name="player_audio_mono">mono</string>
+    <string name="player_audio_stereo">stéréo</string>
+    <string name="player_subtitle_forced">forcés</string>
+    <string name="player_subtitle_sdh">SME</string>
+    <string name="player_tracks_close">Fermer</string>
+    <string name="player_track_change_failed">Impossible de changer de piste. La lecture continue.</string>
+    <string name="player_tracks_selected_description">Audio : %1$s. Sous-titres : %2$s.</string>
+    <string name="player_track_selected_state">Sélectionnée</string>
+    <string name="player_track_not_selected_state">Non sélectionnée</string>
+    <string name="player_subtitles_burned_in">%1$s · incrustés dans l’image</string>
+    <string name="player_subtitles_burned_in_unknown">Sous-titres incrustés · toujours affichés</string>
+    <string name="player_subtitles_burned_in_detail">Toujours affichés ; impossible à désactiver</string>
+
+    <!-- Commandes et retours d’état du lecteur. -->
+    <string name="player_lock">Verrouiller les commandes</string>
+    <string name="player_unlock">Déverrouiller les commandes</string>
+    <string name="player_controls_locked">Commandes de lecture verrouillées</string>
+    <string name="player_controls_unlocked">Commandes de lecture déverrouillées</string>
+    <string name="player_seek_forward">Avancer de 10 secondes</string>
+    <string name="player_seek_backward">Reculer de 10 secondes</string>
+    <string name="player_seek_forward_feedback">+10 s</string>
+    <string name="player_seek_backward_feedback">−10 s</string>
+    <string name="player_brightness">Luminosité</string>
+    <string name="player_brightness_value">Luminosité %1$d %%</string>
+    <string name="player_volume">Volume</string>
+    <string name="player_volume_value">Volume %1$d %%</string>
+    <string name="player_resize">Redimensionner la vidéo</string>
+    <string name="player_resize_fit">Ajuster</string>
+    <string name="player_resize_zoom">Zoomer</string>
+    <string name="player_resize_feedback">Affichage vidéo : %1$s</string>
+    <string name="player_playback_speed_section">Vitesse de lecture</string>
+    <string name="player_playback_speed_normal">Normale</string>
+
+    <!-- Variantes du direct, reconnexion et Chromecast. -->
+    <string name="player_version">Version</string>
+    <string name="player_version_title">Choisir une version</string>
+    <string name="player_version_change_description">Changer de version ou de qualité</string>
+    <string name="player_reconnecting">Reconnexion…</string>
+    <string name="player_reconnecting_attempt">Reconnexion… tentative %1$d</string>
+    <string name="player_reconnect_failed">Impossible de se reconnecter. Veuillez réessayer.</string>
+    <string name="player_cast_description">Diffuser avec Chromecast</string>
+    <string name="player_cast_picker_title">Diffuser sur…</string>
+    <string name="player_cast_active_title">Diffusion en cours</string>
+    <string name="player_cast_stop_streaming">Arrêter la diffusion</string>
+    <string name="player_cast_pause_resume">Mettre en pause ou reprendre la diffusion</string>
+    <string name="player_cast_stop">Arrêter</string>
+    <string name="player_cast_connected_to">Diffusion sur %1$s</string>
+    <string name="player_cast_controls_description">Commandes de diffusion pour %1$s</string>
+</resources>

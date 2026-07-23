@@ -85,7 +85,13 @@ for (const target of nativeTargets) {
 
     assert.match(freshRequest, /freshStreamRequested = true;/);
     assert.match(freshRequest, /freshStreamReason\s*=/);
-    assert.match(freshRequest, /finish\(\);/);
+    if (target.name === 'Android phone') {
+      assert.match(freshRequest, /sendBroadcast\(request\);/);
+      assert.match(freshRequest, /errHandler\.postDelayed\(freshStreamTimeout, 25_000L\);/);
+      assert.doesNotMatch(freshRequest, /finish\(\);/);
+    } else {
+      assert.match(freshRequest, /finish\(\);/);
+    }
     for (const extra of [
       'sourceId',
       'itemType',

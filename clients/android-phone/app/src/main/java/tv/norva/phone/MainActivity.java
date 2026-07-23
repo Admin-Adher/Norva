@@ -3,7 +3,10 @@ package tv.norva.phone;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -114,6 +117,12 @@ public class MainActivity extends Activity {
     private TextView     errorText;
     private String       lastLoadedUrl;
     private long         lastBackPressMs = 0L;
+    // A fresh provider URL can now be delivered back into the still-open
+    // PlayerActivity. The token binds one recovery request to one response so
+    // another playback intent can never replace the current title.
+    private BroadcastReceiver playerRecoveryReceiver;
+    private String pendingPlayerRecoveryToken;
+    private String pendingPlayerRecoveryKey;
 
     // Cold-start watchdog: if a page neither finishes nor errors within the timeout
     // (a silently hung load), surface the friendly error screen instead of stranding
@@ -145,6 +154,7 @@ public class MainActivity extends Activity {
         buildErrorPanel();
         buildSplash();
         showSplash();
+        registerPlayerRecoveryBridge();
 
         // Handle norva://pair and https://norva.tv/... deep links
         if (handleDeepLink(getIntent())) return;
@@ -265,9 +275,84 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         loadHandler.removeCallbacks(loadTimeout);
+        if (playerRecoveryReceiver != null) {
+            try { unregisterReceiver(playerRecoveryReceiver); } catch (Exception ignored) { }
+            playerRecoveryReceiver = null;
+        }
         if (webView != null) webView.destroy();
         ioPool.shutdownNow();
         super.onDestroy();
+    }
+
+    private static String recoveryKey(String sourceId, String itemType, String itemId) {
+        return String.valueOf(sourceId) + "|" + String.valueOf(itemType) + "|" + String.valueOf(itemId);
+    }
+
+    /**
+     * PlayerActivity stays visible while the WebView mints a replacement
+     * provider/Gateway URL. This removes the old close -> details -> relaunch
+     * flash and keeps controls, position and track choices stable.
+     */
+    private void registerPlayerRecoveryBridge() {
+        playerRecoveryReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (!PlayerActivity.ACTION_REQUEST_FRESH_STREAM.equals(intent.getAction())
+                        || webView == null) return;
+                String token = intent.getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN);
+                String sourceId = intent.getStringExtra(PlayerActivity.EXTRA_SOURCE_ID);
+                String itemType = intent.getStringExtra(PlayerActivity.EXTRA_ITEM_TYPE);
+                String itemId = intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID);
+                if (token == null || token.length() < 16 || token.length() > 160
+                        || sourceId == null || sourceId.isEmpty()
+                        || itemId == null || itemId.isEmpty()) return;
+                pendingPlayerRecoveryToken = token;
+                pendingPlayerRecoveryKey = recoveryKey(sourceId, itemType, itemId);
+                long position = Math.max(0L, intent.getLongExtra("positionSeconds", 0L));
+                long duration = Math.max(0L, intent.getLongExtra("durationSeconds", 0L));
+                String reason = intent.getStringExtra("retryReason");
+                String saveProgress = position > 0
+                        ? "window.__norvaNative&&window.__norvaNative.onProgress&&"
+                        + "window.__norvaNative.onProgress("
+                        + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
+                        + "," + position + "," + duration + ");"
+                        : "";
+                String retry = saveProgress
+                        + "window.__norvaNative&&window.__norvaNative.retryPlayback&&"
+                        + "window.__norvaNative.retryPlayback("
+                        + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
+                        + "," + position + "," + jsStr(reason) + ");";
+                runOnUiThread(() -> {
+                    try { webView.evaluateJavascript(retry, null); } catch (Exception ignored) { }
+                });
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                playerRecoveryReceiver,
+                new IntentFilter(PlayerActivity.ACTION_REQUEST_FRESH_STREAM),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * Intercept the next JSON launch only when it answers the active recovery.
+     * Normal taps still create a new PlayerActivity.
+     */
+    private boolean deliverRecoveredStreamToPlayer(JSONObject payload) {
+        String token = pendingPlayerRecoveryToken;
+        String expectedKey = pendingPlayerRecoveryKey;
+        if (token == null || expectedKey == null || payload == null) return false;
+        String sourceId = emptyToNull(payload.optString("sourceId"));
+        String itemType = emptyToNull(payload.optString("itemType"));
+        String itemId = emptyToNull(payload.optString("itemId"));
+        if (!expectedKey.equals(recoveryKey(sourceId, itemType, itemId))) return false;
+        pendingPlayerRecoveryToken = null;
+        pendingPlayerRecoveryKey = null;
+        Intent response = new Intent(PlayerActivity.ACTION_APPLY_FRESH_STREAM)
+                .setPackage(getPackageName())
+                .putExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN, token)
+                .putExtra(PlayerActivity.EXTRA_RECOVERY_PAYLOAD, payload.toString());
+        sendBroadcast(response);
+        return true;
     }
 
     // ---- Build UI ----
@@ -732,7 +817,11 @@ public class MainActivity extends Activity {
                 org.json.JSONObject o = new org.json.JSONObject(json);
                 final String url = o.optString("url");
                 if (url.isEmpty()) return;
+                if (deliverRecoveredStreamToPlayer(o)) return;
                 org.json.JSONArray variants = o.optJSONArray("variants");
+                org.json.JSONObject trackMetadata = o.optJSONObject("trackMetadata");
+                org.json.JSONObject preferenceScope = o.optJSONObject("preferenceScope");
+                org.json.JSONObject playbackPreferences = o.optJSONObject("playbackPreferences");
                 openPlayer(
                         url,
                         o.optString("title", "Norva"),
@@ -742,7 +831,12 @@ public class MainActivity extends Activity {
                         o.optInt("resumeSeconds", 0),
                         emptyToNull(o.optString("fallbackUrl")),
                         (variants != null && variants.length() > 1) ? variants.toString() : null,
-                        emptyToNull(o.optString("activeStreamId")));
+                        emptyToNull(o.optString("activeStreamId")),
+                        trackMetadata == null ? null : trackMetadata.toString(),
+                        preferenceScope == null ? null : preferenceScope.toString(),
+                        playbackPreferences == null ? null : playbackPreferences.toString(),
+                        emptyToNull(o.optString("poster")),
+                        emptyToNull(o.optString("nextTitle")));
             } catch (Exception ignored) {
                 // Malformed payload → the web falls back to the fixed-signature methods.
             }
@@ -1301,7 +1395,10 @@ public class MainActivity extends Activity {
     // currently-playing streamId, so the player can offer a "Version" menu.
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds,
-                            final String fallbackUrl, final String variantsJson, final String activeStreamId) {
+                            final String fallbackUrl, final String variantsJson, final String activeStreamId,
+                            final String trackMetadataJson, final String preferenceScopeJson,
+                            final String playbackPreferencesJson, final String posterUrl,
+                            final String nextTitle) {
         runOnUiThread(() -> {
             Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
             intent.putExtra(PlayerActivity.EXTRA_URL, url);
@@ -1313,6 +1410,21 @@ public class MainActivity extends Activity {
             if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
             if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
             if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
+            if (trackMetadataJson != null && !trackMetadataJson.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_TRACK_METADATA, trackMetadataJson);
+            }
+            if (preferenceScopeJson != null && !preferenceScopeJson.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_PREFERENCE_SCOPE, preferenceScopeJson);
+            }
+            if (playbackPreferencesJson != null && !playbackPreferencesJson.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_PREFERENCES, playbackPreferencesJson);
+            }
+            if (posterUrl != null && !posterUrl.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_POSTER_URL, posterUrl);
+            }
+            if (nextTitle != null && !nextTitle.isEmpty()) {
+                intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
+            }
             launchPlayerWithEphemeralAuth(intent);
         });
     }
@@ -1377,6 +1489,21 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        final String sourceId = data.getStringExtra("sourceId");
+        final String itemType = data.getStringExtra("itemType");
+        final String itemId = data.getStringExtra("itemId");
+        final String trackPreferences = data.getStringExtra("trackPreferences");
+        if (sourceId != null && itemId != null
+                && trackPreferences != null && !trackPreferences.isEmpty()) {
+            final String jsPreferences =
+                    "window.__norvaNative&&window.__norvaNative.onTrackPreferences&&"
+                    + "window.__norvaNative.onTrackPreferences("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
+                    + "," + jsStr(trackPreferences) + ")";
+            runOnUiThread(() -> {
+                try { webView.evaluateJavascript(jsPreferences, null); } catch (Exception ignored) { }
+            });
+        }
         // Viewer picked a different quality variant in the native player: ask the web to
         // re-select it (resolves a fresh stream + relaunches native playback).
         final String pickedVariant = data.getStringExtra("selectedVariantStreamId");
@@ -1389,9 +1516,6 @@ public class MainActivity extends Activity {
             });
             return;
         }
-        final String sourceId = data.getStringExtra("sourceId");
-        final String itemType = data.getStringExtra("itemType");
-        final String itemId = data.getStringExtra("itemId");
         final long pos = data.getLongExtra("positionSeconds", 0);
         final long dur = data.getLongExtra("durationSeconds", 0);
         final boolean ended = data.getBooleanExtra("ended", false);
