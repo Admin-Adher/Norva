@@ -19,8 +19,6 @@ android {
         versionCode 24
         versionName "3.8.11-hybrid"
 
-        // RevenueCat public SDK key, injected at build time. Empty by default so
-        // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
     }
 
     buildFeatures {
