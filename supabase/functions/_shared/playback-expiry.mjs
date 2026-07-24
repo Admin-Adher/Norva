@@ -1,5 +1,13 @@
 const SECONDS_PER_HOUR = 60 * 60;
 
+/**
+ * @typedef {Object} PlaybackExpiryOptions
+ * @property {number} [nowMs]
+ * @property {string} [itemType]
+ * @property {Record<string, unknown>} [playbackHint]
+ * @property {number} [sessionTtlSeconds]
+ */
+
 // Playback sessions deliberately remain short-lived: they participate in the
 // concurrent-stream ledger and a client that disappears without running its
 // teardown must not lock the account for hours.
@@ -78,6 +86,7 @@ export function vodTransportTtlSeconds({
   );
 }
 
+/** @param {PlaybackExpiryOptions} [options] */
 export function vodTransportExpiresAt({
   nowMs = Date.now(),
   ...options
@@ -100,6 +109,7 @@ export function playbackTransportTtlSeconds(options = {}) {
   return transportTtl;
 }
 
+/** @param {PlaybackExpiryOptions} [options] */
 export function playbackTransportExpiresAt({
   nowMs = Date.now(),
   ...options
@@ -123,6 +133,7 @@ export function nativeFallbackTokenTtlSeconds(options = {}) {
   return playbackTransportTtlSeconds(options);
 }
 
+/** @param {PlaybackExpiryOptions} [options] */
 export function nativeFallbackTokenExpiresAt({
   nowMs = Date.now(),
   ...options

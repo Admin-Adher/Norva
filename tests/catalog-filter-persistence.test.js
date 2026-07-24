@@ -85,6 +85,7 @@ class FakeSelect {
 
 function controlsFor(pageType) {
     const controls = {
+        sourceSelect: { value: '900001' },
         sortSelect: { value: 'year' },
         genreSelect: { value: 'Drama' },
         yearSelect: { value: '2020' },
@@ -172,16 +173,22 @@ for (const spec of [
     test(`${spec.className} wires both saved audio and subtitles through facet loading`, async () => {
         const { Page, context } = loadPage(spec.file, spec.className);
         const page = Object.create(Page.prototype);
+        let requested;
         page.audioSelect = new FakeSelect('<option value="">Any Audio</option>');
         page.subtitleSelect = new FakeSelect('<option value="">Any Subtitles</option>');
         page.savedFilters = { audio: 'fr', subtitle: 'en' };
+        page.sourceSelect = { value: '900001' };
+        page.sources = [{ id: 900001, cloudId: '11111111-1111-4111-8111-111111111111' }];
         page.isCloudPagedMode = () => true;
         context.API = {
             media: {
-                languageFacets: async () => ({
+                languageFacets: async (params) => {
+                    requested = params;
+                    return {
                     audio: [{ value: 'fr', label: 'French' }],
                     subtitles: [{ value: 'en', label: 'English' }]
-                })
+                    };
+                }
             }
         };
 
@@ -189,6 +196,35 @@ for (const spec of [
 
         assert.equal(page.audioSelect.value, 'fr');
         assert.equal(page.subtitleSelect.value, 'en');
+        assert.deepEqual(JSON.parse(JSON.stringify(requested)), {
+            type: spec.key === 'movies' ? 'movie' : 'series',
+            source: '11111111-1111-4111-8111-111111111111'
+        });
+    });
+
+    test(`${spec.className} keeps a selected language visible at zero for a provider without it`, () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        const audio = new FakeSelect(
+            '<option value="">Any Audio</option>' +
+            `<option value="fr">French · 12 ${spec.key}</option>`
+        );
+        audio.value = 'fr';
+
+        page.applyFacetOptions(
+            audio,
+            'Any Audio',
+            [{ value: 'en', label: `English · 4 ${spec.key}` }],
+            '',
+            spec.key
+        );
+
+        assert.equal(audio.value, 'fr');
+        assert.equal(
+            audio.options.find(option => option.value === 'fr').text,
+            `French · 0 ${spec.key}`
+        );
+        assert.equal(page.facetLanguageName('fr', audio.options.find(option => option.value === 'fr').text), 'French');
     });
 
     test(`${spec.className} restores every static control and toggle`, () => {
@@ -249,6 +285,7 @@ for (const spec of [
         assert.equal(saves[0].pageKey, spec.key);
         assert.equal(saves[0].filters.audio, 'fr');
         assert.equal(saves[0].filters.subtitle, 'en');
+        assert.equal(saves[0].filters.source, '900001');
         assert.deepEqual(saves[0].filters.categories, ['drame']);
         assert.deepEqual(JSON.parse(JSON.stringify(page.savedFilters)), saves[0].filters);
     });
@@ -412,6 +449,7 @@ for (const spec of [
         });
         Object.assign(page, {
             savedFilters: { genre: 'Drama', categories: ['drame'], audio: 'fr' },
+            sourceSelect: { value: '900001' },
             sortSelect: { value: 'year', querySelector: () => ({ value: 'default' }) },
             genreSelect: emptySelect(),
             yearSelect: emptySelect(),
@@ -446,6 +484,7 @@ for (const spec of [
         assert.deepEqual(saved.categories, []);
         assert.equal(saved.audio, '');
         assert.equal(saved.search, '');
+        assert.equal(saved.source, '900001');
     });
 
     test(`${spec.className} Back clears a provisionally restored category permanently`, () => {
@@ -516,31 +555,36 @@ for (const spec of [
     });
 }
 
-test('MoviesPage persists and restores the selected provider scope', () => {
-    const { Page, saves } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
-    const page = Object.create(Page.prototype);
-    Object.assign(page, {
-        sourceSelect: new FakeSelect(
-            '<option value="">All Sources</option>' +
-            '<option value="900001">AtlasPro</option>'
-        ),
-        savedFilters: {},
-        categoryMulti: { getSelected: () => new Set() },
-        groupDuplicates: true,
-        showFavoritesOnly: false,
-        _genreFilterHydrated: true,
-        _categoriesRestored: true
+for (const spec of [
+    { key: 'movies', file: 'public/js/pages/MoviesPage.js', className: 'MoviesPage' },
+    { key: 'series', file: 'public/js/pages/SeriesPage.js', className: 'SeriesPage' }
+]) {
+    test(`${spec.className} persists and restores the selected provider scope`, () => {
+        const { Page, saves } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        Object.assign(page, {
+            sourceSelect: new FakeSelect(
+                '<option value="">All Sources</option>' +
+                '<option value="900001">AtlasPro</option>'
+            ),
+            savedFilters: {},
+            categoryMulti: { getSelected: () => new Set() },
+            groupDuplicates: true,
+            showFavoritesOnly: false,
+            _genreFilterHydrated: true,
+            _categoriesRestored: true
+        });
+        page.sourceSelect.value = '900001';
+
+        page.persistFilters();
+        assert.equal(saves.at(-1).filters.source, '900001');
+
+        page.sourceSelect.value = '';
+        page.savedFilters = saves.at(-1).filters;
+        page.applyFiltersToUI();
+        assert.equal(page.sourceSelect.value, '900001');
     });
-    page.sourceSelect.value = '900001';
-
-    page.persistFilters();
-    assert.equal(saves.at(-1).filters.source, '900001');
-
-    page.sourceSelect.value = '';
-    page.savedFilters = saves.at(-1).filters;
-    page.applyFiltersToUI();
-    assert.equal(page.sourceSelect.value, '900001');
-});
+}
 
 test('MoviesPage sends all selected categories as one OR bucket', () => {
     const { Page, context } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');

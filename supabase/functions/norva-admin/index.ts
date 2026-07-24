@@ -184,9 +184,54 @@ async function ping(url: string): Promise<JsonRecord> {
   }
 }
 
+type LidCascadeLeaseState = "active" | "expiring" | "expired" | "conflict" | "inactive";
+
+async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
+  const { data, error } = await admin.rpc("audio_lid_cascade_lease_health");
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    return {
+      state: "conflict" satisfies LidCascadeLeaseState,
+      reason: "health-unavailable",
+    };
+  }
+
+  const raw = data as JsonRecord;
+  const candidate = String(raw.state ?? "");
+  const allowed = new Set<LidCascadeLeaseState>([
+    "active",
+    "expiring",
+    "expired",
+    "conflict",
+    "inactive",
+  ]);
+  const state: LidCascadeLeaseState = allowed.has(candidate as LidCascadeLeaseState)
+    ? candidate as LidCascadeLeaseState
+    : "conflict";
+  const finiteNumberOrNull = (value: unknown) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  // Whitelist operational fields. Never forward arbitrary DB payloads or
+  // provider/runtime configuration through the admin health endpoint.
+  return {
+    state,
+    policyVersion: typeof raw.policyVersion === "string" ? raw.policyVersion : null,
+    rolloutMode: typeof raw.rolloutMode === "string" ? raw.rolloutMode : null,
+    canaryBps: finiteNumberOrNull(raw.canaryBps),
+    dailyCap: finiteNumberOrNull(raw.dailyCap),
+    expiresAt: typeof raw.expiresAt === "string" ? raw.expiresAt : null,
+    secondsRemaining: finiteNumberOrNull(raw.secondsRemaining),
+    lastRenewedAt: typeof raw.lastRenewedAt === "string" ? raw.lastRenewedAt : null,
+    checkedAt: typeof raw.checkedAt === "string" ? raw.checkedAt : null,
+  };
+}
+
 // ── Proactive ops alerting (pg_cron → /ops-alert every 15 min) ─────────────────────────────────
 // Checks are CHEAP: counters come from the precomputed admin_dashboard_cache overview (refreshed
-// every 5 min by its own cron) + two live pings (gateway/relay). Each problem has a stable key with
+// every 5 min by its own cron) + two live pings (gateway/relay) + one bounded LID lease RPC.
+// Each problem has a stable key with
 // a 6h cooldown persisted in admin_alert_state so an ongoing incident emails at most 4×/day — and
 // the state row is DELETED the moment its condition heals, so a NEW occurrence alerts immediately.
 const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
@@ -204,10 +249,11 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 2) Live infra pings — including Revolut (the payment API: any HTTP response = reachable).
   const { gateway, relay } = await resolveInfraUrls();
   const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
-  const [gw, rl, st] = await Promise.all([
+  const [gw, rl, st, lidCascade] = await Promise.all([
     gateway ? ping(gateway) : Promise.resolve(null),
     relay ? ping(relay) : Promise.resolve(null),
     ping(revolutApiBase),
+    readLidCascadeLeaseHealth(),
   ]);
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
@@ -232,6 +278,32 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
   if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
+
+  const lidState = String(lidCascade.state ?? "conflict");
+  const lidExpiresAt = typeof lidCascade.expiresAt === "string"
+    ? lidCascade.expiresAt
+    : null;
+  const lidExpiryDetail = lidExpiresAt ? ` (expiration ${lidExpiresAt})` : "";
+  if (lidState === "expired") {
+    problems.push({
+      key: "lid_cascade_expired",
+      detail: `Le fast path LID canary est expiré${lidExpiryDetail}; les détections ont replié sur Whisper complet`,
+    });
+  } else if (lidState === "expiring") {
+    const remainingHours = Math.max(
+      0,
+      Math.ceil(Number(lidCascade.secondsRemaining ?? 0) / 3600),
+    );
+    problems.push({
+      key: "lid_cascade_expiring",
+      detail: `Le fast path LID canary expire dans ${remainingHours} h${lidExpiryDetail}; renouvellement opérateur requis`,
+    });
+  } else if (lidState === "conflict") {
+    problems.push({
+      key: "lid_cascade_conflict",
+      detail: "Le fast path LID canary est en conflit de configuration; lease non renouvelable tant que les flags ou bornes ne sont pas sûrs",
+    });
+  }
 
   // VAT / OSS proactive nudges (from the cache overview). The 10 000 € threshold is
   // assessed on the current AND previous calendar year (whichever is higher). Amounts
@@ -276,7 +348,11 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
     if (r.details) stateDetails.set(String(r.key), String(r.details));
   }
   const activeKeys = new Set(problems.map((p) => p.key));
-  const healed = [...state.keys()].filter((k) => !activeKeys.has(k));
+  const lidIncidentActive = problems.some((p) => p.key.startsWith("lid_cascade_"));
+  const healed = [...state.keys()].filter((k) =>
+    !activeKeys.has(k) &&
+    !(lidIncidentActive && k.startsWith("lid_cascade_"))
+  );
   const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
 
   // 5) Notify — one digest per sweep, Telegram first, plus the one explicitly
@@ -415,7 +491,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
 
   return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "vat_threshold", "vat_fx_pending"],
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "lid_cascade_expired", "lid_cascade_expiring", "lid_cascade_conflict", "vat_threshold", "vat_fx_pending"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
     recovery_delivered: recoveryDelivered,
     recovery_channels: recoveryChannels,
@@ -524,11 +600,12 @@ Deno.serve(async (req) => {
       const revolutKey = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
       const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
       const revolutSandbox = /sandbox/i.test(revolutApiBase);
-      const [gw, rl, revolutPing, resendPing] = await Promise.all([
+      const [gw, rl, revolutPing, resendPing, lidCascade] = await Promise.all([
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
         relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
         ping(revolutApiBase),
         ping("https://api.resend.com"),
+        readLidCascadeLeaseHealth(),
       ]);
       const billing = {
         revolut_mode: revolutSandbox ? "sandbox" : "prod",
@@ -548,6 +625,7 @@ Deno.serve(async (req) => {
         gateway: { configured: Boolean(gateway), ...gw },
         relay: { configured: Boolean(relay), ...rl },
         billing,
+        lid_cascade: lidCascade,
       });
     }
 

@@ -2467,11 +2467,13 @@ const API = {
         // momentarily-stale option is harmless.
         languageFacets: (params = {}) => {
             const type = params && params.type === 'series' ? 'series' : 'movie';
+            const source = String(params?.source || params?.sourceId || '').trim().toLowerCase();
+            const sourceScope = source || 'all';
             const scope = _catalogFacetCacheScope();
-            // v3 is account-scoped. v2 only included the media type, so switching
-            // accounts in one browser could serve the prior tenant's languages for
-            // up to 60 seconds. If no trusted scope is available, skip local caching.
-            const key = scope ? `norva-facets3-${scope}-${type}` : '';
+            // v4 is account + media type + provider scoped. Without the provider in
+            // the key, switching AtlasPro -> Ferran could show the previous
+            // provider's languages for up to 60 seconds.
+            const key = scope ? `norva-facets4-${scope}-${type}-${sourceScope}` : '';
             const TTL = 60000; // 60s, aligned with the server-side facet memo
             const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {

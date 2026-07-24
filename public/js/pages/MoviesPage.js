@@ -93,6 +93,8 @@ class MoviesPage {
             // Save immediately: a refresh while the scoped facets are loading must
             // keep the provider the user just selected.
             this.persistFilters();
+            this._facetsLoadedAt = 0;
+            await this.populateLanguageFacets({ force: true });
             await this.loadCategories();
             // Category availability can change with the provider scope. Persist the
             // still-valid selection after setOptions has removed unavailable buckets.
@@ -381,7 +383,7 @@ class MoviesPage {
 
     // Dynamic filter menus: only show audio/subtitle languages actually present in
     // the catalogue (server facets). Falls back to the static <option>s on failure.
-    async populateLanguageFacets() {
+    async populateLanguageFacets({ force = false } = {}) {
         // Local (self-hosted) libraries carry no per-title language facets — the two
         // selects would be dead filters there, so hide them instead of lying.
         const cloud = this.isCloudPagedMode();
@@ -390,45 +392,69 @@ class MoviesPage {
         if (!cloud) return;
         // Restore saved choices synchronously. Facet counts can be temporarily
         // empty while a catalogue is crawling, but the saved filter is still valid.
-        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio);
-        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle);
+        const source = this.selectedCloudSourceId();
+        const scope = source || 'all';
+        const scopeChanged = this._facetsLoadedScope !== scope;
+        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio, 'movies', scopeChanged);
+        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle, 'movies', scopeChanged);
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
         // when nothing changed, so refreshing never disturbs the user.
         const now = Date.now();
-        if (this._facetsLoadedAt && (now - this._facetsLoadedAt) < 60000) return;
+        if (!force && !scopeChanged && this._facetsLoadedAt && (now - this._facetsLoadedAt) < 60000) return;
         this._facetsLoadedAt = now;
+        this._facetsLoadedScope = scope;
+        const requestId = (this._facetRequestId || 0) + 1;
+        this._facetRequestId = requestId;
         try {
-            const facets = await API.media.languageFacets({ type: 'movie' });
-            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio);
-            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle);
+            const facets = await API.media.languageFacets({
+                type: 'movie',
+                ...(source ? { source } : {})
+            });
+            if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
+            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio, 'movies');
+            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle, 'movies');
             this.renderActiveFilterChips();
         } catch (_) {
-            this._facetsLoadedAt = 0; // allow a retry on the next show
+            if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }
     }
 
-    applyFacetOptions(select, anyLabel, facets, savedValue = '') {
+    facetLanguageName(value, label = '') {
+        const base = String(label || '').replace(/\s+·\s+[\d,.]+\s+(?:movies|series)$/i, '').trim();
+        if (base) return base;
+        try {
+            return new Intl.DisplayNames(['en'], { type: 'language' }).of(String(value).toLowerCase())
+                || String(value).toUpperCase();
+        } catch (_) {
+            return String(value).toUpperCase();
+        }
+    }
+
+    applyFacetOptions(select, anyLabel, facets, savedValue = '', mediaNoun = 'movies', resetForScope = false) {
         if (!select || !Array.isArray(facets)) return;
         const current = select.value || savedValue || '';
-        if (!facets.length && !current) return;
+        if (!resetForScope && !facets.length && !current) return;
         const existing = Array.from(select.options || []);
         // The synchronous restore also runs on the 60s refresh timer. If the menu
         // is already hydrated, leave every existing choice untouched while the
         // request is pending (and if that request fails).
-        if (!facets.length && existing.some(option => option.value === current)) {
+        if (!resetForScope && !facets.length && existing.some(option => option.value === current)) {
             if (!select.value) select.value = current;
             return;
         }
         const options = facets.length
             ? facets.slice()
-            : existing
+            : resetForScope
+                ? []
+                : existing
                 .filter(option => option.value)
                 .map(option => ({ value: option.value, label: option.text?.trim() || option.value.toUpperCase() }));
         if (current && !options.some(f => f.value === current)) {
             const previous = existing.find(option => option.value === current)?.text?.trim();
-            options.push({ value: current, label: previous || current.toUpperCase() });
+            const name = this.facetLanguageName(current, previous);
+            options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
         const desired = [`<option value="">${anyLabel}</option>`]
             .concat(options.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
@@ -690,6 +716,7 @@ class MoviesPage {
         if (!host) return;
         const optText = (sel) => (sel && sel.selectedIndex >= 0)
             ? (sel.options[sel.selectedIndex]?.text || '').trim() : '';
+        const facetText = (sel) => this.facetLanguageName(sel?.value, optText(sel));
         const chips = [];
 
         const q = this.searchInput?.value?.trim();
@@ -710,8 +737,8 @@ class MoviesPage {
         if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
         if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
         if (this.durationSelect?.value) chips.push({ label: optText(this.durationSelect), clear: () => { this.durationSelect.value = ''; } });
-        if (this.audioSelect?.value) chips.push({ label: `Audio: ${optText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
-        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${optText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.audioSelect?.value) chips.push({ label: `Audio: ${facetText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${facetText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
         if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('movies-favorites-btn')?.classList.remove('active');

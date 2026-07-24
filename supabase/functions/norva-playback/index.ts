@@ -35,6 +35,7 @@ type LidDetectionPolicy = {
   cascadeDailyCap: number;
   cascadeAttemptsToday: number;
   cascadeExpiresAt: string | null;
+  cascadeHealth: "inactive" | "active" | "expiring" | "expired" | "conflict" | "misconfigured";
   cascadeTaggedWritesEnabled: boolean;
 };
 
@@ -142,7 +143,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 36,
+        version: 37,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -155,6 +156,7 @@ Deno.serve(async (req) => {
         lidCascadeDailyCap: lidPolicy.cascadeDailyCap,
         lidCascadeAttemptsToday: lidPolicy.cascadeAttemptsToday,
         lidCascadeExpiresAt: lidPolicy.cascadeExpiresAt,
+        lidCascadeHealth: lidPolicy.cascadeHealth,
         lidCascadeWorkerConfigured: Boolean(config.lidWorkerUrl && config.lidWorkerToken),
         exactEpisodeAudioPipeline: true,
         entitlements: true,
@@ -1866,6 +1868,7 @@ async function createGatewaySession(
   playbackHint: JsonRecord = {},
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
+  const gatewayHints = gatewayPlaybackHints(playbackHint);
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     const audioStreamIndex = boundedNullableInt(
@@ -1898,7 +1901,6 @@ async function createGatewaySession(
     };
   }
 
-  const gatewayHints = gatewayPlaybackHints(playbackHint);
   const startupStartedAt = performance.now();
   const baseGatewayBody = {
     playbackSessionId,
@@ -2524,6 +2526,7 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
     cascadeDailyCap: 0,
     cascadeAttemptsToday: 0,
     cascadeExpiresAt: null,
+    cascadeHealth: "inactive",
     cascadeTaggedWritesEnabled: false,
   };
   try {
@@ -2580,6 +2583,12 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
       cascadeDailyCap: 0,
       cascadeAttemptsToday: 0,
       cascadeExpiresAt: null,
+      cascadeHealth: !enabled
+        ? "inactive"
+        : (cascadeStageCount > 1 || cascadeTaggedWritesEnabled || conflict ||
+            (cascadeStageCount === 1 && (primary || shadow)))
+          ? "conflict"
+          : (cascadeStageCount === 0 ? "inactive" : "misconfigured"),
       cascadeTaggedWritesEnabled,
     };
     if (
@@ -2603,16 +2612,19 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
       const dailyCap = boundedInt(policy.daily_cap, 0, 0, 1_000_000);
       const expiresAt = stringOrNull(policy.expires_at);
       const expiryMs = expiresAt ? new Date(expiresAt).getTime() : Number.NaN;
-      const activePolicy = (
+      const policyShapeValid = (
         policyVersion === "lid-cascade-v1" &&
         Boolean(rolloutSeed) &&
         dailyCap > 0 &&
         Number.isFinite(expiryMs) &&
-        expiryMs > Date.now() &&
         (value.cascadeMode !== "shadow" || shadowBps > 0) &&
-        (value.cascadeMode !== "canary" || canaryBps > 0)
+        (
+          value.cascadeMode !== "canary" ||
+          (canaryBps > 0 && canaryBps <= 1_000 && dailyCap <= 100)
+        )
       );
-      if (!activePolicy) {
+      const expired = policyShapeValid && expiryMs <= Date.now();
+      if (!policyShapeValid || expired) {
         value = {
           ...value,
           cascadeMode: "conflict",
@@ -2623,6 +2635,7 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
           cascadeCanaryBps: canaryBps,
           cascadeDailyCap: dailyCap,
           cascadeExpiresAt: expiresAt,
+          cascadeHealth: expired ? "expired" : "misconfigured",
         };
       } else {
         const todayUtc = new Date();
@@ -2649,6 +2662,9 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
           cascadeDailyCap: dailyCap,
           cascadeAttemptsToday: Math.max(0, count ?? 0),
           cascadeExpiresAt: expiresAt,
+          cascadeHealth: expiryMs - Date.now() <= 24 * 3600_000
+            ? "expiring"
+            : "active",
         };
       }
     }
@@ -2659,6 +2675,9 @@ async function getLidDetectionPolicy(db: SupabaseClient): Promise<LidDetectionPo
       cascadeMode: value.cascadeMode === "off" ? "off" : "conflict",
       cascadeScope: null,
       cascadeSeed: null,
+      cascadeHealth: value.cascadeMode === "off"
+        ? "inactive"
+        : (value.cascadeHealth === "conflict" ? "conflict" : "misconfigured"),
     };
   }
   lidDetectionPolicyCache = { value, expiresAt: Date.now() + 30_000 };
@@ -3131,7 +3150,7 @@ async function runLidCascadeAttempt(opts: {
         "X-Norva-Lid-Mode": selection.mode,
         "X-Norva-Lid-Protocol": String(LID_CASCADE_PROTOCOL_VERSION),
       },
-      body: wavBytes,
+      body: new Uint8Array(wavBytes).buffer,
       signal: AbortSignal.timeout(105_000),
     });
     const measuredInferenceMs = Math.max(1, Math.round(performance.now() - workerStartedAt));
@@ -5630,6 +5649,11 @@ function isBanishStatus(status: number): boolean {
   return status === 401 || status === 403 || status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
+function sanitizedProviderErrorCode(value: unknown): string | null {
+  const code = String(value ?? "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(code) ? code : null;
+}
+
 function finiteBenchmarkNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -6191,6 +6215,82 @@ function episodeAudioTracks(value: unknown): Array<{
     .filter((track) => Number.isInteger(track.index));
 }
 
+async function episodeProbeCircuitState(
+  db: SupabaseClient,
+  providerIdentityKey: string,
+): Promise<{ open: boolean; openUntil: string | null }> {
+  try {
+    const { data, error } = await db.rpc("provider_probe_circuit_state", {
+      p_identity_key: providerIdentityKey,
+    });
+    if (error) return { open: false, openUntil: null };
+    const state = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    return {
+      open: state?.open === true,
+      openUntil: stringOrNull(state?.open_until),
+    };
+  } catch (_) {
+    // Fail open on bookkeeping unavailability. Viewer/account/lease guards
+    // remain authoritative and no circuit read failure may strand the fleet.
+    return { open: false, openUntil: null };
+  }
+}
+
+async function episodeProbeRetryBlocked(
+  db: SupabaseClient,
+  values: { userId: string; sourceId: string; variantId: string; episodeId: string },
+): Promise<{ blocked: boolean; nextRetryAt: string | null }> {
+  try {
+    const { data, error } = await db.rpc("catalog_episode_probe_retry_state", {
+      p_user: values.userId,
+      p_source: values.sourceId,
+      p_variant: values.variantId,
+      p_episode_id: values.episodeId,
+    });
+    if (error) return { blocked: false, nextRetryAt: null };
+    const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    return {
+      blocked: row?.blocked === true,
+      nextRetryAt: stringOrNull(row?.next_retry_at),
+    };
+  } catch (_) {
+    return { blocked: false, nextRetryAt: null };
+  }
+}
+
+async function recordEpisodeProbeOutcome(
+  db: SupabaseClient,
+  values: {
+    userId: string;
+    sourceId: string;
+    variantId: string;
+    episodeId: string;
+    success: boolean;
+    status?: number | null;
+    code?: string | null;
+  },
+) {
+  try {
+    const { error } = await db.rpc("record_catalog_episode_probe_outcome", {
+      p_user: values.userId,
+      p_source: values.sourceId,
+      p_variant: values.variantId,
+      p_episode_id: values.episodeId,
+      p_success: values.success,
+      p_status: values.status ?? null,
+      p_code: values.code ?? null,
+      p_transport: "gateway",
+      p_retry_at: null,
+    });
+    if (error) {
+      console.warn(
+        "[norva-playback] episode probe retry state unavailable",
+        sanitizedProviderErrorCode(error.code) ?? "rpc_failed",
+      );
+    }
+  } catch (_) { /* best-effort exact-file cooldown */ }
+}
+
 async function runEpisodeAudioBackfill(
   db: SupabaseClient,
   body: JsonRecord,
@@ -6198,7 +6298,7 @@ async function runEpisodeAudioBackfill(
   const userId = stringOr(body.userId, "");
   const sourceId = stringOr(body.sourceId, "");
   const mode = stringOr(body.mode, "probe") === "whisper" ? "whisper" : "probe";
-  const limit = Math.max(1, Math.min(4, Number(body.limit) || 1));
+  const requestedLimit = Math.max(1, Math.min(6, Number(body.limit) || 1));
   if (!userId || !sourceId) {
     throw new HttpError(400, "Episode audio backfill requires userId and sourceId");
   }
@@ -6269,6 +6369,39 @@ async function runEpisodeAudioBackfill(
     return { mode, itemType: "episode", processed: 0, skipped: "provider-identity-pending" };
   }
 
+  const initialCircuit = await episodeProbeCircuitState(db, sourceIdentity.key);
+  if (initialCircuit.open) {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      skipped: "circuit_open",
+      openUntil: initialCircuit.openUntil,
+      // Deferred work is not completed work. Keeping hasMore=true here marks
+      // cycle_had_work and prevents the scheduler's lane-11 rest forever.
+      hasMore: false,
+    };
+  }
+
+  const footprint = await getFootprint(db, sourceId, userId);
+  // Low-footprint providers remain on the historical four-file ceiling even
+  // while the general canary advances to five/six.
+  const limit = footprint?.lowFootprint
+    ? Math.min(requestedLimit, 4)
+    : requestedLimit;
+  if (footprint?.lowFootprint && !footprint.allowed) {
+    return {
+      mode,
+      itemType: "episode",
+      processed: 0,
+      skipped: "footprint-budget",
+      hitsLastHour: footprint.hits,
+      maxPerHour: footprint.maxPerHour,
+      batchLimit: limit,
+      hasMore: false,
+    };
+  }
+
   const candidateRpc = mode === "whisper"
     ? "catalog_episode_lid_candidates"
     : "catalog_episode_probe_candidates";
@@ -6290,18 +6423,13 @@ async function runEpisodeAudioBackfill(
       && stringOr(row.variant_id, "")
     );
   if (!candidates.length) {
-    return { mode, itemType: "episode", processed: 0, candidates: 0, hasMore: false };
-  }
-
-  const footprint = await getFootprint(db, sourceId, userId);
-  if (footprint?.lowFootprint && !footprint.allowed) {
     return {
       mode,
       itemType: "episode",
       processed: 0,
-      skipped: "footprint-budget",
-      hitsLastHour: footprint.hits,
-      maxPerHour: footprint.maxPerHour,
+      candidates: 0,
+      batchLimit: limit,
+      hasMore: false,
     };
   }
 
@@ -6314,8 +6442,13 @@ async function runEpisodeAudioBackfill(
   let backpressured = 0;
   let failed = 0;
   let skipped: string | null = null;
+  let circuitOpenUntil: string | null = null;
+  let footprintHitsThisBatch = 0;
+  let probeHealthOk = 0;
+  let probeHealthBanish = 0;
   for (const candidate of candidates) {
     const episodeId = stringOr(candidate.episode_id, "");
+    const variantId = stringOr(candidate.variant_id, "");
     const targetUrl = xtreamStreamUrl({
       serverUrl,
       username,
@@ -6329,7 +6462,45 @@ async function runEpisodeAudioBackfill(
       skipped = beforeClaimBlock;
       break;
     }
+    const liveCircuit = await episodeProbeCircuitState(db, sourceIdentity.key);
+    if (liveCircuit.open) {
+      skipped = "circuit_open";
+      circuitOpenUntil = liveCircuit.openUntil;
+      break;
+    }
+    if (
+      footprint?.lowFootprint
+      && footprint.maxPerHour != null
+      && footprint.hits + footprintHitsThisBatch >= footprint.maxPerHour
+    ) {
+      skipped = "footprint-budget";
+      break;
+    }
+    if (mode === "probe") {
+      const retryState = await episodeProbeRetryBlocked(db, {
+        userId,
+        sourceId,
+        variantId,
+        episodeId,
+      });
+      if (retryState.blocked) {
+        deferred += 1;
+        continue;
+      }
+    }
     const leaseOwner = `episode-${mode}:${crypto.randomUUID()}`;
+    let probeResponseReceived = false;
+    let footprintHitRecorded = false;
+    const recordFootprintHit = async () => {
+      if (!footprint?.lowFootprint || footprintHitRecorded) return;
+      footprintHitRecorded = true;
+      footprintHitsThisBatch += 1;
+      try {
+        await db.rpc("provider_footprint_record_hit", {
+          p_identity_key: footprint.identityKey,
+        });
+      } catch (_) { /* best-effort budget accounting */ }
+    };
     if (!await claimProviderFileProbeStrict(
       db,
       sourceIdentity.key,
@@ -6359,18 +6530,96 @@ async function runEpisodeAudioBackfill(
           }),
           signal: AbortSignal.timeout(60_000),
         });
-        if (response.status === 409 || response.status === 429) {
+        probeResponseReceived = true;
+        const info = recordOrEmpty(await response.json().catch(() => ({})));
+        const providerCode = sanitizedProviderErrorCode(info.code);
+        const locallyRejected = (
+          providerCode === "account_busy"
+          || (response.status === 429 && providerCode === "background_busy")
+        );
+        // account_busy/background_busy are rejected before spawn. A
+        // viewer_preempted response happens after ffprobe opened the provider
+        // stream and was killed, so it still consumes the anti-ban budget.
+        if (!locallyRejected) await recordFootprintHit();
+        if (
+          response.status === 409
+          || providerCode === "account_busy"
+          || providerCode === "viewer_preempted"
+        ) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: response.status,
+            code: providerCode,
+          });
           backpressured += 1;
-          skipped = response.status === 409 ? "viewer-preempted" : "provider-backpressure";
+          skipped = "viewer-preempted";
+          break;
+        }
+        if (response.status === 429 && providerCode === "background_busy") {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: response.status,
+            code: providerCode,
+          });
+          backpressured += 1;
+          // This is the gateway's own sequential background lease, not a
+          // provider refusal. It must never open the provider circuit.
+          skipped = "background-busy";
+          break;
+        }
+        if (response.status === 429) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: response.status,
+            code: providerCode,
+          });
+          backpressured += 1;
+          probeHealthBanish += 1;
+          skipped = "provider-backpressure";
           break;
         }
         if (!response.ok) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: response.status,
+            code: providerCode,
+          });
           failed += 1;
+          if (isBanishStatus(response.status)) {
+            probeHealthBanish += 1;
+            skipped = "provider-refused";
+            break;
+          }
           continue;
         }
-        const info = recordOrEmpty(await response.json().catch(() => ({})));
+        probeHealthOk += 1;
         const audioTracks = episodeAudioTracks(info.audioTracks);
         if (!audioTracks.length) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: 422,
+            code: "no_audio_tracks",
+          });
           failed += 1;
           continue;
         }
@@ -6397,15 +6646,35 @@ async function runEpisodeAudioBackfill(
         );
         processed += 1;
         if (stored) {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: true,
+            status: 200,
+          });
           persisted += 1;
           resolved += audioTracks.filter((track) => Boolean(track.lang)).length;
         }
-        else failed += 1;
+        else {
+          await recordEpisodeProbeOutcome(db, {
+            userId,
+            sourceId,
+            variantId,
+            episodeId,
+            success: false,
+            status: 500,
+            code: "observation_write_failed",
+          });
+          failed += 1;
+        }
       } else {
         const audioTracks = episodeAudioTracks(candidate.audio_tracks);
         if (!audioTracks.some((track) => !track.lang)) {
           continue;
         }
+        await recordFootprintHit();
         const beforeUnknown = audioTracks.filter((track) => !track.lang).length;
         const beforeAttemptedAt = stringOrNull(candidate.audio_whisper_attempted_at);
         const beforeRetryAt = stringOrNull(candidate.audio_whisper_retry_at);
@@ -6458,18 +6727,40 @@ async function runEpisodeAudioBackfill(
           deferred += 1;
         }
       }
-      if (footprint?.lowFootprint) {
-        try {
-          await db.rpc("provider_footprint_record_hit", {
-            p_identity_key: footprint.identityKey,
-          });
-        } catch (_) { /* best-effort budget accounting */ }
+    } catch (error) {
+      if (mode === "probe") {
+        // The gateway may have opened ffprobe before the HTTP client timed out
+        // or disconnected. Conservatively count the provider attempt unless a
+        // typed pre-spawn local rejection already returned normally.
+        await recordFootprintHit();
+        const timedOut = error instanceof Error &&
+          (error.name === "TimeoutError" || error.name === "AbortError");
+        await recordEpisodeProbeOutcome(db, {
+          userId,
+          sourceId,
+          variantId,
+          episodeId,
+          success: false,
+          status: probeResponseReceived ? 500 : (timedOut ? 504 : 502),
+          code: probeResponseReceived
+            ? "observation_write_failed"
+            : (timedOut ? "gateway_timeout" : "gateway_unreachable"),
+        });
+        if (!probeResponseReceived) probeHealthBanish += 1;
       }
-    } catch (_) {
       failed += 1;
     } finally {
       await releaseProviderFileProbe(db, sourceIdentity.key, leaseOwner);
     }
+  }
+  if (mode === "probe" && (probeHealthOk > 0 || probeHealthBanish > 0)) {
+    try {
+      await db.rpc("provider_probe_circuit_record_tick", {
+        p_identity_key: sourceIdentity.key,
+        p_ok_count: probeHealthOk,
+        p_fail_count: probeHealthBanish,
+      });
+    } catch (_) { /* best-effort circuit bookkeeping */ }
   }
   return {
     mode,
@@ -6483,7 +6774,12 @@ async function runEpisodeAudioBackfill(
     failed,
     backpressured,
     skipped,
-    hasMore: candidates.length >= limit,
+    openUntil: circuitOpenUntil,
+    batchLimit: limit,
+    ...(probeHealthOk || probeHealthBanish
+      ? { probeHealth: { ok: probeHealthOk, banish: probeHealthBanish } }
+      : {}),
+    hasMore: skipped === null && candidates.length >= limit,
   };
 }
 
@@ -7360,7 +7656,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       }
       let candidateFootprint = footprint;
       if (!candidateFootprint && mode === "probe") {
-        candidateFootprint = footprintByCandidateSource.get(sourceId);
+        candidateFootprint = footprintByCandidateSource.get(sourceId) ?? null;
         if (candidateFootprint === undefined) {
           candidateFootprint = await getFootprint(db, sourceId, userId);
           footprintByCandidateSource.set(sourceId, candidateFootprint);
@@ -8038,7 +8334,7 @@ async function sha256Hex(value: string) {
 }
 
 async function sha256BytesHex(value: Uint8Array) {
-  const hash = await crypto.subtle.digest("SHA-256", value);
+  const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(value).buffer);
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

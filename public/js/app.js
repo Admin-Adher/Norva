@@ -1419,6 +1419,8 @@ class App {
                     watched: 'Watch status',
                     added: 'Added',
                     duration: 'Duration',
+                    audio: 'Audio language',
+                    subtitle: 'Subtitle language',
                     group: 'Group duplicates',
                     favorite: 'Favorites only',
                     reset: 'Reset'
@@ -1433,6 +1435,8 @@ class App {
                     watched: 'movies-watched',
                     added: 'movies-added',
                     duration: 'movies-duration',
+                    audio: 'movies-audio',
+                    subtitle: 'movies-subtitle',
                     group: 'movies-group-toggle',
                     random: 'movies-random',
                     favorite: 'movies-favorites-btn',
@@ -1451,6 +1455,8 @@ class App {
                     watched: 'Watch status',
                     added: 'Added',
                     status: 'Status',
+                    audio: 'Audio language',
+                    subtitle: 'Subtitle language',
                     group: 'Group duplicates',
                     favorite: 'Favorites only',
                     reset: 'Reset'
@@ -1465,6 +1471,8 @@ class App {
                     watched: 'series-watched',
                     added: 'series-added',
                     status: 'series-status',
+                    audio: 'series-audio',
+                    subtitle: 'series-subtitle',
                     group: 'series-group-toggle',
                     random: 'series-random',
                     favorite: 'series-favorites-btn',
@@ -1534,8 +1542,9 @@ class App {
         const sheetBody = document.createElement('div');
         sheetBody.className = 'mobile-filter-body';
         const catalogSection = this.createMobileFilterSection('Catalog');
+        const languageSection = this.createMobileFilterSection('Languages');
         const displaySection = this.createMobileFilterSection('Display');
-        sheetBody.append(catalogSection.section, displaySection.section);
+        sheetBody.append(catalogSection.section, languageSection.section, displaySection.section);
         filterBar.prepend(sheetHeader, sheetBody);
 
         const fieldWrappers = new Map();
@@ -1545,13 +1554,22 @@ class App {
             const field = document.createElement('div');
             field.className = 'mobile-filter-field';
             field.dataset.mobileField = name;
-            field.innerHTML = `<span class="mobile-filter-label">${config.labels[name] || name}</span>`;
+            const labelText = config.labels[name] || name;
+            const label = document.createElement(el.matches?.('select, input, textarea') ? 'label' : 'span');
+            label.className = 'mobile-filter-label';
+            label.textContent = labelText;
+            if (label.tagName === 'LABEL' && el.id) label.htmlFor = el.id;
+            if (!el.getAttribute?.('aria-label') && !el.getAttribute?.('aria-labelledby')) {
+                el.setAttribute?.('aria-label', labelText);
+            }
+            field.append(label);
             field.append(el);
             section.append(field);
             fieldWrappers.set(name, field);
         };
 
         ['source', 'category', 'genre', 'year', 'rating', 'watched', 'added', 'duration', 'status'].forEach(name => addField(catalogSection.body, name));
+        ['audio', 'subtitle'].forEach(name => addField(languageSection.body, name));
         ['group', 'hide', 'favorite', 'reset'].forEach(name => addField(displaySection.body, name));
 
         const close = () => {
@@ -1579,12 +1597,16 @@ class App {
                 const el = elements[name];
                 field.classList.toggle('hidden', !el || el.classList.contains('hidden'));
             });
+            languageSection.section.classList.toggle('hidden',
+                !['audio', 'subtitle'].some(name => {
+                    const field = fieldWrappers.get(name);
+                    return field && !field.classList.contains('hidden');
+                }));
         };
 
         const updateBadge = () => {
             const categoryBtn = document.getElementById(`${config.key}-category-btn`);
             const count = [
-                elements.source?.value,
                 categoryBtn?.classList.contains('has-selection') ? 'category' : '',
                 elements.genre?.value,
                 elements.year?.value,
@@ -1593,6 +1615,8 @@ class App {
                 elements.added?.value,
                 elements.duration?.value,
                 elements.status?.value,
+                elements.audio?.value,
+                elements.subtitle?.value,
                 elements.group && !elements.group.classList.contains('active') ? 'group-off' : '',
                 elements.hide && !elements.hide.classList.contains('active') ? 'hide-off' : '',
                 elements.favorite?.classList.contains('active') ? 'favorites' : ''

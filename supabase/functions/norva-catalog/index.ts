@@ -1711,7 +1711,17 @@ const FACET_CACHE_MAX = 512;
 const FACET_LANGUAGE_NAMES = new Intl.DisplayNames(["en"], { type: "language" });
 const FACET_NUMBER = new Intl.NumberFormat("en-US");
 
-function exactLanguageFacetItems(raw: unknown): Array<{ value: string; label: string; count: number }> {
+function languageFacetLabel(value: string, count: number, itemType: "movie" | "series"): string {
+  let name = value.toUpperCase();
+  try { name = FACET_LANGUAGE_NAMES.of(value) || name; } catch (_) { /* keep ISO */ }
+  const noun = itemType === "series" ? "series" : "movies";
+  return `${name} · ${FACET_NUMBER.format(count)} ${noun}`;
+}
+
+function exactLanguageFacetItems(
+  raw: unknown,
+  itemType: "movie" | "series",
+): Array<{ value: string; label: string; count: number }> {
   const counts = recordOrEmpty(raw);
   return Object.entries(counts)
     .map(([value, count]) => ({ value: value.toLowerCase(), count: Math.max(0, Number(count) || 0) }))
@@ -1720,17 +1730,21 @@ function exactLanguageFacetItems(raw: unknown): Array<{ value: string; label: st
       !["un", "und", "mul", "zxx", "mis", "nar"].includes(item.value) &&
       item.count > 0
     )
-    .map((item) => {
-      let name = item.value.toUpperCase();
-      try { name = FACET_LANGUAGE_NAMES.of(item.value) || name; } catch (_) { /* keep ISO */ }
-      return { ...item, label: `${name} · ${FACET_NUMBER.format(item.count)}` };
-    })
+    .map((item) => ({ ...item, label: languageFacetLabel(item.value, item.count, itemType) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
 async function listLanguageFacets(url: URL, userId: string) {
-  const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
-  const cacheKey = `${userId}:${itemType}`;
+  const itemType: "movie" | "series" = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const rawSource = (url.searchParams.get("source") || url.searchParams.get("sourceId") || "").trim();
+  const sourceId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSource)
+    ? rawSource
+    : null;
+  // A caller that explicitly selected a provider must never receive the global
+  // counts because its local/provider id was malformed or not mapped yet.
+  if (rawSource && !sourceId) return { audio: [], subtitles: [] };
+
+  const cacheKey = `${userId}:${itemType}:${sourceId || "all"}`;
   const nowMs = Date.now();
   const hit = FACET_CACHE.get(cacheKey);
   if (hit && hit.exp > nowMs) {
@@ -1743,14 +1757,20 @@ async function listLanguageFacets(url: URL, userId: string) {
   // file_subtitle_languages. Counts are exact per title and deserialize as jsonb.
   let value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
   try {
-    const { data, error } = await db.rpc("cloud_exact_language_counts", { p_user_id: userId, p_item_type: itemType });
+    const rpcName = sourceId
+      ? "cloud_exact_language_counts_by_source"
+      : "cloud_exact_language_counts";
+    const rpcArgs = sourceId
+      ? { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId }
+      : { p_user_id: userId, p_item_type: itemType };
+    const { data, error } = await db.rpc(rpcName, rpcArgs);
     if (!error && data && typeof data === "object") {
       const d = data as { audio?: unknown; subtitles?: unknown };
       value = {
-        audio: exactLanguageFacetItems(d.audio),
-        subtitles: exactLanguageFacetItems(d.subtitles),
+        audio: exactLanguageFacetItems(d.audio, itemType),
+        subtitles: exactLanguageFacetItems(d.subtitles, itemType),
       };
-    } else {
+    } else if (!sourceId) {
       // Rolling-deploy compatibility while the database migration lands.
       const legacy = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
       const d = legacy.data as { audio?: unknown; subtitles?: unknown } | null;

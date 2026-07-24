@@ -111,10 +111,42 @@ test('language facet cache is isolated by signed-in account and media type', asy
 
     const keys = [...storage.values.keys()].filter((key) => key.startsWith('norva-facets'));
     assert.deepEqual(keys.sort(), [
-        'norva-facets3-user-account-a-series',
-        'norva-facets3-user-account-b-movie',
-        'norva-facets3-user-account-b-series'
+        'norva-facets4-user-account-a-series-all',
+        'norva-facets4-user-account-b-movie-all',
+        'norva-facets4-user-account-b-series-all'
     ]);
+});
+
+test('language facet cache is isolated by selected provider', async () => {
+    const storage = createStorage({
+        'norva-cloud-session': session('account-a')
+    });
+    let requests = 0;
+    const API = loadApi(storage, async ({ source }) => {
+        requests += 1;
+        return {
+            audio: [{ value: source, label: source }],
+            subtitles: []
+        };
+    });
+
+    const atlas = await API.media.languageFacets({ type: 'series', source: 'provider-atlas' });
+    const ferran = await API.media.languageFacets({ type: 'series', source: 'provider-ferran' });
+    const atlasAgain = await API.media.languageFacets({ type: 'series', source: 'provider-atlas' });
+
+    assert.equal(atlas.audio[0].value, 'provider-atlas');
+    assert.equal(ferran.audio[0].value, 'provider-ferran');
+    assert.equal(atlasAgain.audio[0].value, 'provider-atlas');
+    assert.equal(requests, 2);
+    assert.deepEqual(
+        [...storage.values.keys()]
+            .filter((key) => key.startsWith('norva-facets4-user-account-a-series-'))
+            .sort(),
+        [
+            'norva-facets4-user-account-a-series-provider-atlas',
+            'norva-facets4-user-account-a-series-provider-ferran'
+        ]
+    );
 });
 
 test('language facet responses are not cached without an account or paired-device scope', async () => {

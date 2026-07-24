@@ -23,6 +23,11 @@ type RuntimeConfig = {
   relayBaseUrl: string;
   relayTokenSecret: string;
 };
+type SeriesInventoryTransport = "gateway" | "relay" | "direct";
+type SeriesInventoryMetadataResult = {
+  payload: unknown;
+  transport: SeriesInventoryTransport;
+};
 
 class HttpError extends Error {
   status: number;
@@ -79,7 +84,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 10,
+        version: 11,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -91,6 +96,7 @@ Deno.serve(async (req) => {
         seriesEpisodeInventory: true,
         exactEpisodeAudioPipeline: true,
         seriesPriorityCycleV2: true,
+        episodeProbeBatchCanary: "4/5",
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
@@ -1016,6 +1022,11 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
     registeredEpisodes: Math.max(0, Number(body.registeredEpisodes) || 0),
     failed: Math.max(0, Number(body.failed) || 0),
     backpressured: Math.max(0, Number(body.backpressured) || 0),
+    batchLimit: Math.max(0, Number(body.batchLimit) || 0),
+    openUntil: stringOrNull(body.openUntil ?? body.open_until),
+    nextRetryAt: stringOrNull(body.nextRetryAt ?? body.next_retry_at),
+    failureClass: stringOrNull(body.failureClass ?? body.failure_class),
+    probeHealth: isRecord(body.probeHealth) ? body.probeHealth : null,
     lastId: processed > 0 ? stringOrNull(body.lastId) : null,
     skipped: stringOrNull(body.skipped ?? body.stoppedAt),
     paused: body.paused === true,
@@ -1033,7 +1044,13 @@ function enrichmentFleetNextDelay(summary: JsonRecord, lane: number): number {
   if (summary.paused === true) return 30 * 60;
   if (skipped === "episode-audio-scan-disabled") return 30;
   if (skipped === "live-session" || skipped === "pregen-active") return 5 * 60;
-  if (skipped === "circuit_open") return 60 * 60;
+  if (skipped === "provider-inventory-backoff") return 30;
+  // The provider circuit belongs to file probes, not to the source-wide
+  // scheduler. Rotate through the remaining lanes so the metadata-only series
+  // inventory can continue. Probe workers re-check the same durable circuit
+  // before opening a provider connection, so this does not bypass anti-ban.
+  if ((skipped === "circuit_open" || skipped === "circuit-open") && lane < 11) return 30;
+  if (skipped === "circuit_open" || skipped === "circuit-open") return 60 * 60;
   // An empty explicit lane must rotate promptly: drained media/speech lanes
   // must not postpone synopsis recovery by hours. The final (provider overview)
   // lane requests a 6h rest; finish_catalog_enrichment_source clamps that to 30s
@@ -1166,6 +1183,59 @@ async function recordSeriesInventoryOutcome(
   }
 }
 
+async function providerInventoryBackoffState(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+): Promise<{ blocked: boolean; nextRetryAt: string | null; failureClass: string | null }> {
+  try {
+    const { data, error } = await db.rpc("catalog_provider_inventory_backoff_state", {
+      p_user: claim.user_id,
+      p_source: claim.source_id,
+    });
+    if (error) return { blocked: false, nextRetryAt: null, failureClass: null };
+    const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    return {
+      blocked: row?.blocked === true,
+      nextRetryAt: stringOrNull(row?.next_retry_at),
+      failureClass: stringOrNull(row?.failure_class),
+    };
+  } catch (_) {
+    // A bookkeeping outage must not strand series discovery. The viewer guard
+    // and gateway transport remain authoritative.
+    return { blocked: false, nextRetryAt: null, failureClass: null };
+  }
+}
+
+async function recordProviderInventoryOutcome(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+  values: {
+    success: boolean;
+    status?: number | null;
+    code?: string | null;
+    transport?: SeriesInventoryTransport | null;
+    retryAt?: string | null;
+  },
+) {
+  try {
+    const { error } = await db.rpc("record_catalog_provider_inventory_outcome", {
+      p_user: claim.user_id,
+      p_source: claim.source_id,
+      p_success: values.success,
+      p_status: values.status ?? null,
+      p_code: values.code ?? null,
+      p_transport: values.transport ?? null,
+      p_retry_at: values.retryAt ?? null,
+    });
+    if (error) {
+      console.warn(
+        "[enrichment-fleet] provider inventory retry state unavailable",
+        sanitizedProviderCode(error.code) ?? "rpc_failed",
+      );
+    }
+  } catch (_) { /* best-effort provider-specific retry state */ }
+}
+
 async function runSeriesInventoryFleetLane(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
@@ -1222,7 +1292,7 @@ async function runSeriesInventoryFleetLane(
       itemType: "series",
       processed: 0,
       skipped: "media-gateway-unavailable",
-      hasMore: true,
+      hasMore: false,
     };
   }
   const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
@@ -1259,7 +1329,21 @@ async function runSeriesInventoryFleetLane(
       skipped: initialAvailability === "busy"
         ? "provider-account-busy"
         : "provider-guard-unavailable",
-      hasMore: true,
+      hasMore: false,
+    };
+  }
+  const inventoryBackoff = await providerInventoryBackoffState(db, claim);
+  if (inventoryBackoff.blocked) {
+    return {
+      mode: "series-inventory",
+      itemType: "series",
+      processed: 0,
+      skipped: "provider-inventory-backoff",
+      nextRetryAt: inventoryBackoff.nextRetryAt,
+      failureClass: inventoryBackoff.failureClass,
+      // Deferred work is not evidence that this sweep did work. Otherwise
+      // cycle_had_work keeps a blocked source on a permanent 30-second loop.
+      hasMore: false,
     };
   }
 
@@ -1293,17 +1377,18 @@ async function runSeriesInventoryFleetLane(
     }
     processed += 1;
     try {
+      const inventoryResult = await fetchSeriesInventoryMetadata(
+        runtimeConfig,
+        {
+          serverUrl,
+          username,
+          password,
+          parentSeriesId,
+          userId: claim.user_id,
+        },
+      );
       const payload = recordOrEmpty(stripSeriesInventoryCredentials(
-        await fetchSeriesInventoryMetadata(
-          runtimeConfig,
-          {
-            serverUrl,
-            username,
-            password,
-            parentSeriesId,
-            userId: claim.user_id,
-          },
-        ),
+        inventoryResult.payload,
       ));
       const episodes = payload.episodes;
       if (!Array.isArray(episodes) && !isRecord(episodes)) {
@@ -1354,29 +1439,77 @@ async function runSeriesInventoryFleetLane(
         true,
         count,
         new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-        { method: "gateway-series-info-v1", status: "registered" },
+        {
+          method: "series-info-v2",
+          transport: inventoryResult.transport,
+          status: "registered",
+        },
       );
+      await recordProviderInventoryOutcome(db, claim, {
+        success: true,
+        transport: inventoryResult.transport,
+      });
       registeredEpisodes += count;
     } catch (error) {
+      const failure = classifySeriesInventoryFailure(error);
+      // Viewer and local background work always outrank inventory. A race can
+      // happen after provider_account_busy() and must rotate the lane without
+      // poisoning the parent series' retry history.
+      if (failure.failureClass === "viewer_priority" || failure.failureClass === "background_busy") {
+        await recordProviderInventoryOutcome(db, claim, {
+          success: false,
+          status: failure.status || null,
+          code: failure.code,
+          transport: failure.transport,
+          retryAt: new Date(Date.now() + failure.retryMs).toISOString(),
+        });
+        skipped = failure.failureClass === "viewer_priority"
+          ? "provider-account-busy"
+          : "provider-background-busy";
+        break;
+      }
       failed += 1;
-      const status = error instanceof HttpError ? error.status : 0;
+      const retryAt = new Date(Date.now() + failure.retryMs).toISOString();
+      const providerScopedFailure = (
+        failure.failureClass === "authentication"
+        || failure.failureClass === "forbidden"
+        || failure.failureClass === "rate_limited"
+        || failure.failureClass === "transient"
+      );
+      // 404/410 and malformed payloads are specific to one parent series.
+      // They already have exact catalog_series_inventory_state and must not
+      // postpone unrelated series on the same provider account.
+      if (providerScopedFailure) {
+        await recordProviderInventoryOutcome(db, claim, {
+          success: false,
+          status: failure.status || null,
+          code: failure.code,
+          transport: failure.transport,
+          retryAt,
+        });
+      }
       await recordSeriesInventoryOutcome(
         db,
         claim,
         parentSeriesId,
         false,
         null,
-        new Date(Date.now() + (status === 429 ? 60 : 24 * 60) * 60 * 1000).toISOString(),
+        retryAt,
         {
-          method: "gateway-series-info-v1",
+          method: "series-info-v2",
           status: "retry",
-          providerStatus: status || null,
+          transport: failure.transport,
+          failureClass: failure.failureClass,
+          providerStatus: failure.status || null,
+          providerCode: failure.code,
         },
       );
       // One provider-level refusal predicts the same result for the rest of the
       // batch. Stop immediately instead of multiplying rate-limit/auth failures.
-      if (status === 401 || status === 403 || status === 429 || status >= 500) {
-        skipped = status === 429 ? "provider-backpressure" : "provider-metadata-failed";
+      if (providerScopedFailure) {
+        skipped = failure.failureClass === "rate_limited"
+          ? "provider-backpressure"
+          : "provider-metadata-failed";
         break;
       }
     }
@@ -1390,7 +1523,7 @@ async function runSeriesInventoryFleetLane(
     registeredEpisodes,
     failed,
     skipped,
-    hasMore: candidates.length >= limit,
+    hasMore: skipped === null && candidates.length >= limit,
   };
 }
 
@@ -1418,13 +1551,19 @@ async function runEnrichmentFleetClaim(
   const episodeSpeech = lane === 6 || lane === 10;
   const speechVerification = lane === 1 || lane === 4 || lane === 8;
   const providerOverview = lane === 11;
+  // Progressive episode-probe canary: one of the two lanes moves from four to
+  // five files (+12.5% per full cycle). The worker accepts up to six, allowing
+  // a later promotion without ever increasing per-provider concurrency.
+  const episodeProbeLimit = episodeProbe ? (lane === 7 ? 5 : 4) : 0;
   // Fast language detection still owns a provider connection and is therefore
   // sequential within one source. Two files per claim materially improve
   // throughput while the 540s request budget and 1200s distributed lease keep
   // a slow/silent multi-track file from overlapping the next provider job.
   const timeout = setTimeout(
     () => controller.abort(),
-    (speechVerification || episodeSpeech) ? 540_000 : 105_000,
+    (speechVerification || episodeSpeech)
+      ? 540_000
+      : (episodeProbe ? 390_000 : 105_000),
   );
   // Raw probes currently find a usable container tag for nearly every file,
   // hence two tagged lanes. Keep one dedicated untagged lane so generic
@@ -1484,7 +1623,7 @@ async function runEnrichmentFleetClaim(
           // episode canary completed 14 probes / 72 tracks without one unknown
           // or provider failure, so cheap exact probes use the existing
           // four-file safety budget. Episode speech stays one-at-a-time.
-          limit: episodeProbe ? 4 : episodeSpeech ? 1 : speechVerification ? 2 : 4,
+          limit: episodeProbe ? episodeProbeLimit : episodeSpeech ? 1 : speechVerification ? 2 : 4,
           concurrency: 1,
           // Lanes are explicit and individually bounded. fallthrough would
           // append a 15-series + 10-subtitle + Whisper chain after an empty
@@ -2698,6 +2837,86 @@ function stripSeriesInventoryCredentials(value: unknown): unknown {
   return value;
 }
 
+function sanitizedProviderCode(value: unknown): string | null {
+  const code = String(value ?? "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(code) ? code : null;
+}
+
+function seriesInventoryTransportError(
+  error: unknown,
+  transport: SeriesInventoryTransport,
+): HttpError {
+  const status = error instanceof HttpError ? error.status : 502;
+  const rawDetails = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  const upstreamStatus = Number(rawDetails.upstreamStatus ?? rawDetails.upstream_status);
+  const boundedUpstreamStatus = Number.isInteger(upstreamStatus) &&
+      upstreamStatus >= 100 && upstreamStatus <= 599
+    ? upstreamStatus
+    : null;
+  // Gateway/relay may wrap the authoritative provider status in a 502. Use the
+  // upstream status for fallback and backoff decisions so a provider 401/403/
+  // 429 is never retried from a second egress IP as if infrastructure failed.
+  const effectiveStatus = boundedUpstreamStatus ?? status;
+  return new HttpError(
+    effectiveStatus,
+    error instanceof Error ? error.message : "Series inventory transport failed",
+    {
+      transport,
+      code: sanitizedProviderCode(rawDetails.code),
+      gatewayStatus: status,
+      upstreamStatus: boundedUpstreamStatus,
+    },
+  );
+}
+
+function classifySeriesInventoryFailure(error: unknown): {
+  status: number;
+  code: string | null;
+  transport: SeriesInventoryTransport | null;
+  failureClass:
+    | "viewer_priority"
+    | "background_busy"
+    | "authentication"
+    | "forbidden"
+    | "rate_limited"
+    | "transient"
+    | "item_unavailable"
+    | "invalid_response";
+  retryMs: number;
+} {
+  const status = error instanceof HttpError ? error.status : 0;
+  const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
+  const code = sanitizedProviderCode(details.code);
+  const transportValue = stringOrNull(details.transport);
+  const transport: SeriesInventoryTransport | null = (
+      transportValue === "gateway" || transportValue === "relay" || transportValue === "direct"
+    )
+    ? transportValue
+    : null;
+  if (status === 409 || code === "account_busy" || code === "viewer_preempted") {
+    return { status, code, transport, failureClass: "viewer_priority", retryMs: 60_000 };
+  }
+  if (code === "background_busy") {
+    return { status, code, transport, failureClass: "background_busy", retryMs: 2 * 60_000 };
+  }
+  if (status === 401) {
+    return { status, code, transport, failureClass: "authentication", retryMs: 24 * 3600_000 };
+  }
+  if (status === 403) {
+    return { status, code, transport, failureClass: "forbidden", retryMs: 24 * 3600_000 };
+  }
+  if (status === 429) {
+    return { status, code, transport, failureClass: "rate_limited", retryMs: 60 * 60_000 };
+  }
+  if (status === 408 || status === 502 || status === 503 || status === 504 || status >= 500) {
+    return { status, code, transport, failureClass: "transient", retryMs: 15 * 60_000 };
+  }
+  if (status === 404 || status === 410) {
+    return { status, code, transport, failureClass: "item_unavailable", retryMs: 24 * 3600_000 };
+  }
+  return { status, code, transport, failureClass: "invalid_response", retryMs: 6 * 3600_000 };
+}
+
 async function fetchSeriesInventoryMetadata(
   runtimeConfig: RuntimeConfig,
   args: {
@@ -2707,7 +2926,7 @@ async function fetchSeriesInventoryMetadata(
     parentSeriesId: string;
     userId: string;
   },
-): Promise<unknown> {
+): Promise<SeriesInventoryMetadataResult> {
   const providerUrl = xtreamApiUrl(
     {
       serverUrl: args.serverUrl,
@@ -2717,9 +2936,35 @@ async function fetchSeriesInventoryMetadata(
     },
     { series_id: args.parentSeriesId },
   );
-  // Some panels accept only the Cloudflare relay IP while others require the
-  // media gateway's sticky provider IP. Use the same proven order as the
-  // interactive series fiche; fall through only on infrastructure failures.
+  // The interactive series route and playback both originate from the sticky
+  // media-gateway IP. Inventory must use the same order; a relay-first 401/403
+  // is a provider-origin refusal and historically prevented the known-good
+  // gateway fallback from ever running.
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return {
+        payload: await requestGatewayMetadata(
+          runtimeConfig,
+          {
+            serverUrl: args.serverUrl,
+            username: args.username,
+            password: args.password,
+            action: "get_series_info",
+            params: { series_id: args.parentSeriesId },
+          },
+          45_000,
+        ),
+        transport: "gateway",
+      };
+    } catch (error) {
+      const wrapped = seriesInventoryTransportError(error, "gateway");
+      if (![404, 405, 502, 503, 504].includes(wrapped.status)) throw wrapped;
+      console.warn(
+        "[norva-source-sync] gateway series inventory unavailable, falling back",
+        wrapped.status,
+      );
+    }
+  }
   if (runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret) {
     try {
       const token = await signSeriesInventoryRelayToken(runtimeConfig.relayTokenSecret, {
@@ -2736,39 +2981,24 @@ async function fetchSeriesInventoryMetadata(
       if (!response.ok) {
         throw new HttpError(response.status, "Relay refused the series inventory request", payload);
       }
-      return payload;
+      return { payload, transport: "relay" };
     } catch (error) {
-      const status = error instanceof HttpError ? error.status : 502;
-      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      const wrapped = seriesInventoryTransportError(error, "relay");
+      if (![404, 405, 502, 503, 504].includes(wrapped.status)) throw wrapped;
       console.warn(
         "[norva-source-sync] relay series inventory unavailable, falling back",
-        status,
+        wrapped.status,
       );
     }
   }
-  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
-    try {
-      return await requestGatewayMetadata(
-        runtimeConfig,
-        {
-          serverUrl: args.serverUrl,
-          username: args.username,
-          password: args.password,
-          action: "get_series_info",
-          params: { series_id: args.parentSeriesId },
-        },
-        45_000,
-      );
-    } catch (error) {
-      const status = error instanceof HttpError ? error.status : 502;
-      if (![404, 405, 502, 503, 504].includes(status)) throw error;
-      console.warn(
-        "[norva-source-sync] gateway series inventory unavailable, falling back",
-        status,
-      );
-    }
+  try {
+    return {
+      payload: await fetchJson(providerUrl, 20_000),
+      transport: "direct",
+    };
+  } catch (error) {
+    throw seriesInventoryTransportError(error, "direct");
   }
-  return await fetchJson(providerUrl, 20_000);
 }
 
 async function signSeriesInventoryRelayToken(

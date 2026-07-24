@@ -92,7 +92,7 @@ test('source-sync dispatcher forwards claimed ownership, never static ids', () =
   assert.match(route, /fallthrough: false/);
   assert.match(
     route,
-    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /limit: episodeProbe \? episodeProbeLimit : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
   assert.match(sourceSync, /boundedInt\(url\.searchParams\.get\("limit"\), 8, 1, 8\)/);
   assert.match(route, /fileScope: true/);
@@ -239,6 +239,11 @@ test('drained audio lanes rotate promptly to subtitles before the full sweep res
   );
   assert.match(delay, /summary\.exhausted === true\) && lane < 11\) return 30/);
   assert.match(delay, /Number\(summary\.processed\) > 0\) return 30/);
+  assert.match(
+    delay,
+    /skipped === "circuit_open" \|\| skipped === "circuit-open"\) && lane < 11\) return 30/,
+  );
+  assert.match(delay, /skipped === "provider-inventory-backoff"\) return 30/);
 
   const nextDelay = (exhausted, lane) => exhausted && lane < 11 ? 30 : 6 * 60 * 60;
   assert.deepStrictEqual([0, 1, 2].map((lane) => nextDelay(true, lane)), [30, 30, 30]);
@@ -273,12 +278,16 @@ test('throughput tuning raises the fleet ceiling and speech batch without intra-
   assert.match(activation, /enrichment-fleet\?limit=8/);
   assert.match(
     route,
-    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /const episodeProbeLimit = episodeProbe \? \(lane === 7 \? 5 : 4\) : 0/,
+  );
+  assert.match(
+    route,
+    /limit: episodeProbe \? episodeProbeLimit : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
   assert.match(route, /concurrency: 1/);
   assert.match(
     route,
-    /\(speechVerification \|\| episodeSpeech\) \? 540_000 : 105_000/,
+    /\(episodeProbe \? 390_000 : 105_000\)/,
   );
   assert.match(route, /p_lease_seconds: 1200/);
   assert.doesNotMatch(activation, /delete from public\.catalog_enrichment_dispatch_leases/);
@@ -304,16 +313,16 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(dispatcher, /mode: speechVerification \|\| episodeSpeech \? "whisper" : "probe"/);
   assert.match(
     dispatcher,
-    /limit: episodeProbe \? 4 : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
+    /limit: episodeProbe \? episodeProbeLimit : episodeSpeech \? 1 : speechVerification \? 2 : 4/,
   );
 
   const laneContract = (lane) => ({
     type: [2, 6, 7, 10].includes(lane) ? 'episode' : 'movie',
     mode: [1, 4, 6, 8, 10].includes(lane) ? 'whisper' : 'probe',
-    limit: [2, 7].includes(lane) ? 4 : [6, 10].includes(lane) ? 1 : [1, 4, 8].includes(lane) ? 2 : 4,
+    limit: lane === 2 ? 4 : lane === 7 ? 5 : [6, 10].includes(lane) ? 1 : [1, 4, 8].includes(lane) ? 2 : 4,
   });
   assert.deepStrictEqual(laneContract(2), { type: 'episode', mode: 'probe', limit: 4 });
-  assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 4 });
+  assert.deepStrictEqual(laneContract(7), { type: 'episode', mode: 'probe', limit: 5 });
   assert.deepStrictEqual(laneContract(6), { type: 'episode', mode: 'whisper', limit: 1 });
   assert.deepStrictEqual(laneContract(10), { type: 'episode', mode: 'whisper', limit: 1 });
 
@@ -343,7 +352,29 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(exactWorker, /streamType: "series"/);
   assert.match(exactWorker, /sourceIdentity\.key,\s*"episode",\s*episodeId/);
   assert.match(exactWorker, /itemType: "episode"/);
-  assert.match(exactWorker, /response\.status === 409 \|\| response\.status === 429/);
+  assert.match(exactWorker, /const requestedLimit = Math\.max\(1, Math\.min\(6,/);
+  assert.match(exactWorker, /episodeProbeCircuitState\(db, sourceIdentity\.key\)/);
+  assert.match(exactWorker, /skipped: "circuit_open"/);
+  assert.match(exactWorker, /hasMore: false/);
+  assert.match(exactWorker, /provider_probe_circuit_record_tick/);
+  assert.match(exactWorker, /footprint\.hits \+ footprintHitsThisBatch >= footprint\.maxPerHour/);
+  assert.match(exactWorker, /if \(!locallyRejected\) await recordFootprintHit\(\)/);
+  const localRejectGuard = between(
+    exactWorker,
+    'const locallyRejected = (',
+    '\n        );',
+  );
+  assert.doesNotMatch(localRejectGuard, /viewer_preempted|response\.status === 409/);
+  assert.match(
+    exactWorker,
+    /catch \(error\) \{\s*if \(mode === "probe"\) \{[\s\S]*await recordFootprintHit\(\)/,
+  );
+  assert.match(exactWorker, /episode probe retry state unavailable/);
+  assert.match(exactWorker, /hasMore: skipped === null && candidates\.length >= limit/);
+  assert.match(exactWorker, /providerCode === "account_busy"/);
+  assert.match(exactWorker, /providerCode === "background_busy"/);
+  assert.match(exactWorker, /catalog_episode_probe_retry_state/);
+  assert.match(exactWorker, /record_catalog_episode_probe_outcome/);
   assert.match(exactWorker, /\.select\("audio_tracks,audio_whisper_attempted_at,audio_whisper_retry_at"\)/);
   assert.match(exactWorker, /if \(cacheAdvanced\) \{\s*processed \+= 1;\s*persisted \+= 1/);
   assert.match(exactWorker, /deferred \+= 1/);
@@ -406,7 +437,7 @@ test('series inventory lane is local, metadata-only, bounded, and fail closed', 
   assert.match(inventory, /parentSeriesId/);
   assert.match(inventory, /stripSeriesInventoryCredentials\(/);
   assert.doesNotMatch(inventory, /fetchProviderMetadata\(|fetchJson\(|xtreamApiUrl\(/);
-  assert.ok(transport.indexOf('runtimeConfig.relayBaseUrl') < transport.indexOf('requestGatewayMetadata('));
+  assert.ok(transport.indexOf('requestGatewayMetadata(') < transport.indexOf('runtimeConfig.relayBaseUrl'));
   assert.match(transport, /action: "get_series_info"/);
   assert.match(transport, /params: \{ series_id: args\.parentSeriesId \}/);
   assert.match(sourceSync, /key\.toLowerCase\(\) === "direct_source"/);
@@ -416,10 +447,17 @@ test('series inventory lane is local, metadata-only, bounded, and fail closed', 
   assert.match(inventory, /if \(initialAvailability !== "idle"\)/);
   assert.match(inventory, /const availability = await providerBusy\(\)/);
   assert.match(inventory, /if \(availability !== "idle"\)/);
-  assert.match(
-    inventory,
-    /status === 401 \|\| status === 403 \|\| status === 429 \|\| status >= 500/,
-  );
+  assert.match(inventory, /catalog_provider_inventory_backoff_state/);
+  assert.match(inventory, /record_catalog_provider_inventory_outcome/);
+  assert.match(inventory, /provider inventory retry state unavailable/);
+  assert.match(inventory, /failure\.failureClass === "authentication"/);
+  assert.match(inventory, /failure\.failureClass === "forbidden"/);
+  assert.match(inventory, /failure\.failureClass === "rate_limited"/);
+  assert.match(inventory, /failure\.failureClass === "transient"/);
+  assert.match(inventory, /const providerScopedFailure = \(/);
+  assert.match(inventory, /if \(providerScopedFailure\) \{\s*await recordProviderInventoryOutcome/);
+  assert.match(inventory, /404\/410 and malformed payloads are specific to one parent series/);
+  assert.match(inventory, /hasMore: skipped === null && candidates\.length >= limit/);
 
   assert.match(candidates, /variant\.user_id = p_user/);
   assert.match(candidates, /variant\.source_id = p_source/);

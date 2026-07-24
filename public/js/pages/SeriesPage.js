@@ -97,12 +97,16 @@ class SeriesPage {
         this.restoreSavedCategories([]);
 
         this.sourceSelect?.addEventListener('change', async () => {
+            // The provider is catalogue scope, not a disposable filter. Persist it
+            // before async facet/category work so refresh cannot jump back to All.
+            this.persistFilters();
+            this._facetsLoadedAt = 0;
+            await this.populateLanguageFacets({ force: true });
             await this.loadCategories();
+            this.persistFilters();
             await this.loadPlaybackStatuses();
-            // Preserve the rest of the active TV filter state. In particular, a TV
-            // Audio/Subtitles or genre view lives on the title-level bucket route;
-            // jumping straight to /media/page here silently discarded that filter.
-            if (this._isTvMode()) this.onFiltersChanged();
+            const buckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (this._isTvMode() || buckets.length || this.isLanguageFilterActive()) this.onFiltersChanged();
             else await this.loadSeries();
         });
 
@@ -210,6 +214,10 @@ class SeriesPage {
 
     applyFiltersToUI() {
         const s = this.savedFilters || {};
+        if (this.sourceSelect && s.source && Array.from(this.sourceSelect.options || [])
+            .some(option => String(option.value) === String(s.source))) {
+            this.sourceSelect.value = String(s.source);
+        }
         if (this.sortSelect && s.sort) this.sortSelect.value = s.sort;
         if (this.yearSelect && s.year) this.yearSelect.value = s.year;
         if (this.ratingSelect && s.rating) this.ratingSelect.value = s.rating;
@@ -226,6 +234,7 @@ class SeriesPage {
     persistFilters() {
         const selectedCategories = [...(this.categoryMulti?.getSelected() || [])];
         const filters = {
+            source: this.sourceSelect?.value || '',
             sort: this.sortSelect?.value || 'default',
             genre: this.genreSelect?.value ||
                 (!this._genreFilterHydrated ? this.savedFilters?.genre || '' : ''),
@@ -371,49 +380,73 @@ class SeriesPage {
 
     // Dynamic filter menus: only show audio/subtitle languages actually present in
     // the catalogue (server facets). Falls back to the static <option>s on failure.
-    async populateLanguageFacets() {
+    async populateLanguageFacets({ force = false } = {}) {
         // Local (self-hosted) libraries carry no per-title language facets — the two
         // selects would be dead filters there, so hide them instead of lying.
         const cloud = this.isCloudPagedMode();
         this.audioSelect?.classList.toggle('hidden', !cloud);
         this.subtitleSelect?.classList.toggle('hidden', !cloud);
         if (!cloud) return;
-        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio);
-        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle);
+        const source = this.selectedCloudSourceId();
+        const scope = source || 'all';
+        const scopeChanged = this._facetsLoadedScope !== scope;
+        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio, 'series', scopeChanged);
+        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle, 'series', scopeChanged);
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
         // when nothing changed, so refreshing never disturbs the user.
         const now = Date.now();
-        if (this._facetsLoadedAt && (now - this._facetsLoadedAt) < 60000) return;
+        if (!force && !scopeChanged && this._facetsLoadedAt && (now - this._facetsLoadedAt) < 60000) return;
         this._facetsLoadedAt = now;
+        this._facetsLoadedScope = scope;
+        const requestId = (this._facetRequestId || 0) + 1;
+        this._facetRequestId = requestId;
         try {
-            const facets = await API.media.languageFacets({ type: 'series' });
-            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio);
-            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle);
+            const facets = await API.media.languageFacets({
+                type: 'series',
+                ...(source ? { source } : {})
+            });
+            if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
+            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio, 'series');
+            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle, 'series');
             this.renderActiveFilterChips();
         } catch (_) {
-            this._facetsLoadedAt = 0; // allow a retry on the next show
+            if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }
     }
 
-    applyFacetOptions(select, anyLabel, facets, savedValue = '') {
+    facetLanguageName(value, label = '') {
+        const base = String(label || '').replace(/\s+·\s+[\d,.]+\s+(?:movies|series)$/i, '').trim();
+        if (base) return base;
+        try {
+            return new Intl.DisplayNames(['en'], { type: 'language' }).of(String(value).toLowerCase())
+                || String(value).toUpperCase();
+        } catch (_) {
+            return String(value).toUpperCase();
+        }
+    }
+
+    applyFacetOptions(select, anyLabel, facets, savedValue = '', mediaNoun = 'series', resetForScope = false) {
         if (!select || !Array.isArray(facets)) return;
         const current = select.value || savedValue || '';
-        if (!facets.length && !current) return;
+        if (!resetForScope && !facets.length && !current) return;
         const existing = Array.from(select.options || []);
-        if (!facets.length && existing.some(option => option.value === current)) {
+        if (!resetForScope && !facets.length && existing.some(option => option.value === current)) {
             if (!select.value) select.value = current;
             return;
         }
         const options = facets.length
             ? facets.slice()
-            : existing
+            : resetForScope
+                ? []
+                : existing
                 .filter(option => option.value)
                 .map(option => ({ value: option.value, label: option.text?.trim() || option.value.toUpperCase() }));
         if (current && !options.some(f => f.value === current)) {
             const previous = existing.find(option => option.value === current)?.text?.trim();
-            options.push({ value: current, label: previous || current.toUpperCase() });
+            const name = this.facetLanguageName(current, previous);
+            options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
         const desired = [`<option value="">${anyLabel}</option>`]
             .concat(options.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
@@ -709,6 +742,7 @@ class SeriesPage {
         if (!host) return;
         const optText = (sel) => (sel && sel.selectedIndex >= 0)
             ? (sel.options[sel.selectedIndex]?.text || '').trim() : '';
+        const facetText = (sel) => this.facetLanguageName(sel?.value, optText(sel));
         const chips = [];
 
         const q = this.searchInput?.value?.trim();
@@ -729,8 +763,8 @@ class SeriesPage {
         if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
         if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
         if (this.statusSelect?.value) chips.push({ label: optText(this.statusSelect), clear: () => { this.statusSelect.value = ''; } });
-        if (this.audioSelect?.value) chips.push({ label: `Audio: ${optText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
-        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${optText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.audioSelect?.value) chips.push({ label: `Audio: ${facetText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${facetText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
         if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('series-favorites-btn')?.classList.remove('active');
@@ -780,7 +814,7 @@ class SeriesPage {
     _coldPaintFromCache() {
         try {
             if (!this.container) return;
-            if (this.hasActiveFilters() || this.savedFilters?.audio || this.savedFilters?.subtitle
+            if (this.hasActiveFilters() || this.savedFilters?.source || this.savedFilters?.audio || this.savedFilters?.subtitle
                 || this.savedFilters?.categories?.length) return;
             if (this.seriesList && this.seriesList.length) return;                // real data already in memory
             if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return; // warm in-session return
@@ -1034,6 +1068,11 @@ class SeriesPage {
                 option.textContent = s.name;
                 this.sourceSelect.appendChild(option);
             });
+            const savedSource = String(this.savedFilters?.source || '');
+            if (savedSource && Array.from(this.sourceSelect.options || [])
+                .some(option => String(option.value) === savedSource)) {
+                this.sourceSelect.value = savedSource;
+            }
         } catch (err) {
             console.error('Error loading sources:', err);
         }
