@@ -180,9 +180,77 @@ test('native bridge bootstrap survives delayed WebView interface injection', () 
 
   assert.match(source, /const bootNativeBridge = \(\) =>/);
   assert.match(source, /window\.__norvaStandaloneBooted/);
-  assert.match(source, /document\.readyState === 'loading'/);
+  assert.match(source, /document\.readyState !== 'complete'/);
+  assert.doesNotMatch(source, /document\.readyState === 'loading'/);
   assert.match(source, /window\.setInterval\(\(\) =>/);
   assert.match(source, /bridgeAttempts >= 100/);
+});
+
+test('late native bridge injection installs player overrides after the document is complete', () => {
+  let bridgeRetry = null;
+  const location = {
+    hash: '#movies',
+    origin: 'https://norva.tv',
+    search: '?mobile=1',
+  };
+  const document = {
+    readyState: 'complete',
+    addEventListener() {},
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    body: { classList: { contains() { return false; } } },
+  };
+  const window = {
+    location,
+    history: { state: null, back() {} },
+    app: {},
+    addEventListener() {},
+    dispatchEvent() {},
+    setInterval(callback) {
+      bridgeRetry = callback;
+      return 1;
+    },
+    clearInterval() {},
+  };
+  const localStorage = {
+    getItem() { return null; },
+    setItem() {},
+  };
+  const context = vm.createContext({
+    window,
+    document,
+    localStorage,
+    location,
+    navigator: { userAgent: 'NorvaTV-AndroidPhone/1.0' },
+    URL,
+    console,
+    Date,
+    Map,
+    Set,
+    Promise,
+    CustomEvent: class CustomEvent {
+      constructor(type, init) { this.type = type; this.detail = init?.detail; }
+    },
+    setTimeout() { return 1; },
+    clearTimeout() {},
+  });
+
+  vm.runInContext(read('public/js/utils/standalone.js'), context);
+  assert.equal(typeof bridgeRetry, 'function', 'native shells must retry a bridge injected after script load');
+
+  class VideoPlayer {}
+  class WatchPage {}
+  window.NorvaTVCloud = { playVideoJson() {} };
+  window.VideoPlayer = VideoPlayer;
+  window.WatchPage = WatchPage;
+  context.VideoPlayer = VideoPlayer;
+  context.WatchPage = WatchPage;
+  bridgeRetry();
+
+  assert.equal(window.__norvaStandaloneBooted, true);
+  assert.equal(typeof WatchPage.prototype.play, 'function');
+  assert.equal(typeof VideoPlayer.prototype.play, 'function');
 });
 
 test('standalone native recovery is item-scoped, with bounded VOD and persistent live recovery', () => {
@@ -316,6 +384,7 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
   class WatchPage {}
   const location = { hash: '#live', origin: 'https://norva.tv' };
   const document = {
+    readyState: 'interactive',
     addEventListener(type, callback) {
       if (type === 'DOMContentLoaded') onDomReady = callback;
     },
@@ -329,8 +398,6 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
       playVideoJson(payload) { launches.push(JSON.parse(payload)); },
     },
     __norvaNative: {},
-    VideoPlayer,
-    WatchPage,
     location,
     history: { state: null, back() {} },
     app: { channelList: null },
@@ -352,8 +419,6 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
     Map,
     Set,
     Promise,
-    VideoPlayer,
-    WatchPage,
     CustomEvent: class CustomEvent {
       constructor(type, init) { this.type = type; this.detail = init?.detail; }
     },
@@ -363,7 +428,17 @@ test('ChannelList playback claim is consumed once and still launches VideoPlayer
 
   vm.runInContext(read('public/js/utils/standalone.js'), context);
   assert.equal(typeof onDomReady, 'function', 'standalone must install its DOM-ready hook');
+  assert.equal(VideoPlayer.prototype.play, undefined, 'deferred classes are not available yet');
+  window.VideoPlayer = VideoPlayer;
+  window.WatchPage = WatchPage;
+  context.VideoPlayer = VideoPlayer;
+  context.WatchPage = WatchPage;
   onDomReady();
+  assert.equal(
+    typeof VideoPlayer.prototype.play,
+    'function',
+    'interactive defer execution must wait until the player class exists',
+  );
 
   const channel = {
     sourceId: 'provider-7',

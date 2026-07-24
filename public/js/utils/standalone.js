@@ -1034,7 +1034,11 @@
             setTimeout(hideLogout, 4000);
         }
     };
-    if (!document.readyState || document.readyState === 'loading') {
+    // Deferred scripts run while readyState is "interactive", before the later
+    // deferred WatchPage/VideoPlayer scripts have defined their classes. Wait
+    // for DOMContentLoaded in both loading and interactive states so the native
+    // prototypes are installed only after every deferred dependency is ready.
+    if (document.readyState !== 'complete') {
         document.addEventListener('DOMContentLoaded', installNativeOverrides, { once: true });
     } else {
         installNativeOverrides();
