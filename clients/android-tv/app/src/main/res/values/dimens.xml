@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TV controls must remain inside the overscan-safe region. -->
+    <dimen name="norva_tv_player_safe_margin">48dp</dimen>
+    <dimen name="norva_tv_player_control_min_size">48dp</dimen>
+    <dimen name="norva_tv_player_primary_control_size">56dp</dimen>
+    <dimen name="norva_tv_player_control_spacing">12dp</dimen>
+</resources>

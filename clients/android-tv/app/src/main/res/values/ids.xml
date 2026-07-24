@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stable IDs for TV automation and deterministic D-pad focus targets.
+         PlayerActivity creates these views programmatically. -->
+    <item name="norva_tv_player_root" type="id" />
+    <item name="norva_tv_player_surface" type="id" />
+    <item name="norva_tv_player_subtitles" type="id" />
+    <item name="norva_tv_player_top_bar" type="id" />
+    <item name="norva_tv_player_back_button" type="id" />
+    <item name="norva_tv_player_title" type="id" />
+    <item name="norva_tv_player_clock" type="id" />
+    <item name="norva_tv_player_controls" type="id" />
+    <item name="norva_tv_player_seek_bar" type="id" />
+    <item name="norva_tv_player_time" type="id" />
+    <item name="norva_tv_player_transport" type="id" />
+    <item name="norva_tv_player_rewind_button" type="id" />
+    <item name="norva_tv_player_play_pause_button" type="id" />
+    <item name="norva_tv_player_forward_button" type="id" />
+    <item name="norva_tv_player_primary_controls" type="id" />
+    <item name="norva_tv_player_audio_button" type="id" />
+    <item name="norva_tv_player_subtitle_button" type="id" />
+    <item name="norva_tv_player_aspect_button" type="id" />
+    <item name="norva_tv_player_more_button" type="id" />
+    <item name="norva_tv_player_options_panel" type="id" />
+    <item name="norva_tv_player_quality_button" type="id" />
+    <item name="norva_tv_player_speed_button" type="id" />
+    <item name="norva_tv_player_sleep_button" type="id" />
+    <item name="norva_tv_player_variant_button" type="id" />
+    <item name="norva_tv_player_next_episode_button" type="id" />
+    <item name="norva_tv_player_episodes_button" type="id" />
+    <item name="norva_tv_player_error_panel" type="id" />
+    <item name="norva_tv_player_error_title" type="id" />
+    <item name="norva_tv_player_error_message" type="id" />
+    <item name="norva_tv_player_retry_button" type="id" />
+    <item name="norva_tv_player_error_back_button" type="id" />
+</resources>

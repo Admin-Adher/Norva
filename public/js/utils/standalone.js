@@ -320,6 +320,7 @@
         // away from the current Live/detail route.
         const nativeRecoveryLaunchers = new Map();
         const nativeRecoveryAttempts = new Map();
+        const activeNativeRecoveryTokens = new Map();
         const NATIVE_RECOVERY_WINDOW_MS = 5 * 60 * 1000;
         const NATIVE_RECOVERY_MAX = 3;
         const NATIVE_RECOVERY_DELAYS_MS = [1200, 3500, 7000];
@@ -356,6 +357,7 @@
             activeNativeIntentClaimConsumed = false;
             // This is a new viewer action, not an automatic recovery attempt.
             nativeRecoveryAttempts.delete(key);
+            activeNativeRecoveryTokens.delete(key);
             return activeNativeIntentClaim;
         };
         const consumeNativePlaybackIntent = (sourceId, itemType, itemId, claim) => {
@@ -376,6 +378,7 @@
         // the backgrounded page, and that must not cancel a legitimate recovery.
         const invalidateNativeRecoveryForRouteChange = () => {
             if (!activeNativeIntentKey || currentNativeRoute() === activeNativeIntentRoute) return;
+            activeNativeRecoveryTokens.delete(activeNativeIntentKey);
             activeNativeIntentKey = '';
             activeNativeIntentClaim = '';
             activeNativeIntentClaimConsumed = true;
@@ -394,6 +397,7 @@
                 if ((entry?.registeredAt || 0) < cutoff) {
                     nativeRecoveryLaunchers.delete(oldKey);
                     nativeRecoveryAttempts.delete(oldKey);
+                    activeNativeRecoveryTokens.delete(oldKey);
                 }
             }
         };
@@ -411,7 +415,14 @@
                 });
             } catch (_) { /* best-effort */ }
         };
-        window.__norvaNative.retryPlayback = (sourceId, itemType, itemId, positionSeconds, reason) => {
+        window.__norvaNative.retryPlayback = (
+            sourceId,
+            itemType,
+            itemId,
+            positionSeconds,
+            reason,
+            recoveryToken = ''
+        ) => {
             const key = nativeProgressKey(sourceId, itemType, itemId);
             const entry = nativeRecoveryLaunchers.get(key);
             if (!entry) {
@@ -419,6 +430,13 @@
                 return 'missing';
             }
             const now = Date.now();
+            const previousRecoveryToken = activeNativeRecoveryTokens.get(key);
+            if (recoveryToken && previousRecoveryToken !== recoveryToken) {
+                // A new native request gets its own retry budget. Recursive
+                // retries keep the same token and therefore keep their count.
+                nativeRecoveryAttempts.delete(key);
+                activeNativeRecoveryTokens.set(key, recoveryToken);
+            }
             let state = nativeRecoveryAttempts.get(key);
             if (!state || now - state.lastAttemptAt > NATIVE_RECOVERY_WINDOW_MS) {
                 state = { count: 0, lastAttemptAt: 0 };
@@ -438,16 +456,28 @@
                 if (scheduledGeneration !== nativeIntentGeneration
                     || activeNativeIntentKey !== key
                     || currentNativeRoute() !== activeNativeIntentRoute
-                    || nativeRecoveryLaunchers.get(key) !== entry) {
+                    || nativeRecoveryLaunchers.get(key) !== entry
+                    || (recoveryToken && activeNativeRecoveryTokens.get(key) !== recoveryToken)) {
                     console.info('[Native] Cancelled stale playback recovery for', key);
                     return;
                 }
                 try {
                     window.__norvaResetPlayThrottle?.();
-                    await entry.launcher(resume);
+                    await entry.launcher(resume, recoveryToken);
                 } catch (error) {
+                    if (recoveryToken && activeNativeRecoveryTokens.get(key) !== recoveryToken) {
+                        console.info('[Native] Ignored superseded playback recovery for', key);
+                        return;
+                    }
                     console.warn(`[Native] Fresh playback retry ${attempt + 1} failed:`, error?.message || error);
-                    window.__norvaNative.retryPlayback(sourceId, itemType, itemId, resume, reason || 'resolve_failed');
+                    window.__norvaNative.retryPlayback(
+                        sourceId,
+                        itemType,
+                        itemId,
+                        resume,
+                        reason || 'resolve_failed',
+                        recoveryToken
+                    );
                 }
             }, isLiveRecovery
                 ? (NATIVE_LIVE_RECOVERY_DELAYS_MS[attempt]
@@ -561,6 +591,11 @@
             };
         };
         const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras) => {
+            const recoveryToken = String(extras?.recoveryToken || '');
+            if (recoveryToken && meta) {
+                const key = nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId);
+                if (activeNativeRecoveryTokens.get(key) !== recoveryToken) return false;
+            }
             const nowTs = Date.now();
             if (nowTs - lastNativePlayAt < 1500) return false;
             lastNativePlayAt = nowTs;
@@ -586,6 +621,10 @@
                     trackMetadata: extras?.trackMetadata || null,
                     preferenceScope: extras?.preferenceScope || null,
                     playbackPreferences: extras?.playbackPreferences || null,
+                    // Binds this resolved URL to the exact native recovery that
+                    // requested it. Initial user launches intentionally carry
+                    // no token and remain normal PlayerActivity launches.
+                    ...(recoveryToken ? { recoveryToken } : {}),
                     // Live quality variants (label + streamId + sourceId) for the native
                     // player's quality menu. Metadata only, never pre-resolved URLs: a live
                     // gateway grants ONE slot, so resolving each variant up front would close
@@ -871,7 +910,7 @@
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const meta = initialMeta;
-                const launchResolved = async (resumeAt, fresh = false) => {
+                const launchResolved = async (resumeAt, fresh = false, recoveryToken = '') => {
                     let resolved;
                     if (fresh && meta && window.API?.proxy?.xtream?.getStreamUrl) {
                         const container = content.containerExtension || 'mp4';
@@ -904,12 +943,16 @@
                         preferenceScope: nativePreferenceScope(content),
                         playbackPreferences: content.playbackPreferences
                             || content.playback_preferences
-                            || null
+                            || null,
+                        recoveryToken
                     })) {
                         throw new Error('Native relaunch throttled');
                     }
                 };
-                registerNativeRecovery(meta, (resumeAt) => launchResolved(resumeAt, true));
+                registerNativeRecovery(
+                    meta,
+                    (resumeAt, recoveryToken) => launchResolved(resumeAt, true, recoveryToken)
+                );
                 await launchResolved(effectiveResume);
             };
         }
@@ -965,7 +1008,7 @@
                     channel.cloudPlaybackSessionId = null;
                     if (channel.playbackSessionId != null) channel.playbackSessionId = null;
                 };
-                const relaunchLive = async () => {
+                const relaunchLive = async (_resumeAt = 0, recoveryToken = '') => {
                     let fresh;
                     const liveStreamId = channel?.streamId ?? channel?.stream_id ?? channel?.id;
                     const canResolveXtream = channel?.sourceType === 'xtream'
@@ -1007,7 +1050,8 @@
                     if (!fresh?.url) throw new Error('No fresh live stream URL returned');
                     if (!nativePlay(fresh.url, channel?.name || 'Live TV', meta, 0, fresh.fallbackUrl || null, {
                         variants: buildNativeVariants(channel),
-                        activeStreamId: channel?.streamId != null ? String(channel.streamId) : ''
+                        activeStreamId: channel?.streamId != null ? String(channel.streamId) : '',
+                        recoveryToken
                     })) {
                         throw new Error('Native live relaunch throttled');
                     }

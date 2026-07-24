@@ -76,10 +76,12 @@ preBuild.dependsOn("syncNorvaWebAssets")
 
 dependencies {
     // Standalone-mode native player (full track selection, MKV/EAC3/HEVC).
-    // media3-ui is intentionally NOT used: the controls are built in code so
-    // the APK can also be assembled with raw SDK tools (no gradle daemon).
     implementation "androidx.media3:media3-exoplayer:1.5.1"
     implementation "androidx.media3:media3-exoplayer-hls:1.5.1"
+    // SubtitleView is used even though the remote-first controls stay custom:
+    // it preserves WebVTT/SSA positioning, styling and bitmap cues that a
+    // plain TextView cannot render faithfully.
+    implementation "androidx.media3:media3-ui:1.5.1"
     // MediaSession: Google Assistant voice transport ("pause", "reprends") and
     // the Android TV now-playing card drive the player.
     implementation "androidx.media3:media3-session:1.5.1"

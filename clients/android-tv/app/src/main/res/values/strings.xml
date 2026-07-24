@@ -1,3 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Norva TV</string>
+
+    <!-- Native TV player navigation and primary controls. -->
+    <string name="player_back">Back</string>
+    <string name="player_back_content_description">Go back</string>
+    <string name="player_show_controls">Show playback controls</string>
+    <string name="player_live">Live</string>
+    <string name="player_rewind_10">Rewind 10 seconds</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_forward_10">Forward 10 seconds</string>
+    <string name="player_quality">Quality</string>
+    <string name="player_audio_button">Audio</string>
+    <string name="player_audio_selected_description">Audio, %1$s selected</string>
+    <string name="player_subtitles_button">Subtitles</string>
+    <string name="player_cc_button">Closed captions</string>
+    <string name="player_subtitles_selected_description">Subtitles, %1$s selected</string>
+    <string name="player_subtitles_off">Off</string>
+    <string name="player_aspect_button">Picture size</string>
+    <string name="player_resize_selected_description">Picture size, %1$s selected</string>
+    <string name="player_more">More</string>
+    <string name="player_more_options">More playback options</string>
+
+    <!-- Exact-file track labels stay neutral when the language is not verified. -->
+    <string name="player_audio_track">Audio track</string>
+    <string name="player_video_track">Video track</string>
+    <string name="player_audio_unknown">Audio track %1$d · language not identified</string>
+    <string name="player_subtitle_unknown">Subtitle track %1$d · language not identified</string>
+    <string name="player_audio_unavailable">No audio track available</string>
+    <string name="player_subtitles_unavailable">No selectable subtitles</string>
+
+    <!-- Display, playback and episode options. -->
+    <string name="player_resize">Picture size</string>
+    <string name="player_resize_fit">Fit</string>
+    <string name="player_resize_zoom">Zoom</string>
+    <string name="player_playback_speed_section">Playback speed</string>
+    <string name="player_playback_speed_normal">Normal</string>
+    <string name="player_sleep">Sleep timer</string>
+    <string name="player_sleep_off">Off</string>
+    <string name="player_sleep_minutes">%1$d min</string>
+    <string name="player_episodes">Episodes</string>
+    <string name="player_episode_list">Episode list</string>
+    <string name="player_next_episode">Next episode</string>
+    <string name="player_up_next">Up next</string>
+    <string name="player_play_now">Play now</string>
+    <string name="player_playing_in">Playing in %1$d s</string>
+
+    <!-- Versions, recovery and actionable errors. -->
+    <string name="player_version">Version</string>
+    <string name="player_version_title">Choose a version</string>
+    <string name="player_change_version">Change version</string>
+    <string name="player_reconnecting">Reconnecting…</string>
+    <string name="player_reconnecting_attempt">Reconnecting… attempt %1$d</string>
+    <string name="player_reconnect_failed">Couldn’t reconnect. Please try again.</string>
+    <string name="player_error_title">Couldn’t play this title</string>
+    <string name="player_retry">Retry</string>
+    <string name="player_error_back">Back to Norva</string>
+    <string name="player_error_network">The connection was interrupted. Check your network, then try again.</string>
+    <string name="player_error_live">Live TV was interrupted. Norva will keep trying to reconnect.</string>
+    <string name="player_error_no_data">The provider accepted the connection but isn’t sending a playable stream.</string>
+    <string name="player_error_unsupported">This video format cannot be played on this device.</string>
+    <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
 </resources>

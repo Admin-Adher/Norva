@@ -70,39 +70,44 @@ for (const target of nativeTargets) {
     );
   });
 
-  test(`${target.name}: exhausted recovery returns exact retry metadata to the WebView`, () => {
+  test(`${target.name}: exhausted recovery requests a fresh stream in place with exact metadata`, () => {
     const source = read(target.player);
     const freshRequest = section(
       source,
       'private void requestFreshStream(String reason)',
-      'private void switchToFallback()',
-    );
-    const finishResult = section(
-      source,
-      'public void finish()',
-      'protected void onDestroy()',
+      target.name === 'Android TV'
+        ? 'private void registerFreshStreamReceiver()'
+        : 'private void switchToFallback()',
     );
 
     assert.match(freshRequest, /freshStreamRequested = true;/);
     assert.match(freshRequest, /freshStreamReason\s*=/);
-    if (target.name === 'Android phone') {
-      assert.match(freshRequest, /sendBroadcast\(request\);/);
-      assert.match(freshRequest, /errHandler\.postDelayed\(freshStreamTimeout, 25_000L\);/);
-      assert.doesNotMatch(freshRequest, /finish\(\);/);
-    } else {
-      assert.match(freshRequest, /finish\(\);/);
-    }
+    assert.match(freshRequest, /sendBroadcast\(request\);/);
+    assert.match(
+      freshRequest,
+      target.name === 'Android phone'
+        ? /errHandler\.postDelayed\(freshStreamTimeout, 25_000L\);/
+        : /handler\.postDelayed\(freshStreamTimeout, 25_000L\);/,
+    );
+    assert.doesNotMatch(
+      freshRequest,
+      /finish\(\);/,
+      'fresh resolution must stay in the native player instead of flashing the catalog',
+    );
     for (const extra of [
-      'sourceId',
-      'itemType',
-      'itemId',
-      'positionSeconds',
-      'retryPlayback',
-      'retryReason',
+      'EXTRA_SOURCE_ID',
+      'EXTRA_ITEM_TYPE',
+      'EXTRA_ITEM_ID',
+      '"positionSeconds"',
+      '"durationSeconds"',
+      '"retryReason"',
     ]) {
-      assert.match(finishResult, new RegExp(`putExtra\\("${extra}"`), `missing ${extra} result extra`);
+      assert.match(
+        freshRequest,
+        new RegExp(`putExtra\\(${extra.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+        `missing ${extra} recovery request extra`,
+      );
     }
-    assert.match(finishResult, /putExtra\("retryPlayback",\s*(?:true|freshStreamRequested)\)/);
   });
 
   test(`${target.name}: MainActivity dispatches retryPlayback before any ended callback`, () => {
@@ -271,12 +276,12 @@ test('standalone native recovery is item-scoped, with bounded VOD and persistent
   assert.match(recovery, /if \(!isLiveRecovery && state\.count >= NATIVE_RECOVERY_MAX\)/);
   assert.match(recovery, /return 'exhausted'/);
   assert.match(recovery, /state\.count \+= 1/);
-  assert.match(recovery, /await entry\.launcher\(resume\)/);
+  assert.match(recovery, /await entry\.launcher\(resume,\s*recoveryToken\)/);
   assert.match(recovery, /nativeRecoveryLaunchers\.get\(key\) !== entry/);
   assert.match(recovery, /currentNativeRoute\(\) !== activeNativeIntentRoute/);
   assert.match(
     recovery,
-    /window\.__norvaNative\.retryPlayback\(sourceId, itemType, itemId, resume, reason \|\| 'resolve_failed'\)/,
+    /window\.__norvaNative\.retryPlayback\([\s\S]{0,180}reason \|\| 'resolve_failed',[\s\S]{0,60}recoveryToken/,
   );
   assert.match(recovery, /NATIVE_RECOVERY_DELAYS_MS\[attempt\]/);
   assert.match(recovery, /NATIVE_LIVE_RECOVERY_DELAYS_MS\[attempt\]/);
@@ -313,9 +318,15 @@ test('Android TV keeps technical playback diagnostics out of the viewer UI', () 
 
   assert.match(errorFlow, /android\.util\.Log\.w\(TAG, diagnostic, error\)/);
   assert.match(errorFlow, /reportPlaybackStatus\("broken", error\.getErrorCodeName\(\)\)/);
-  assert.match(errorFlow, /errorView\.setText\(friendlyError\(code\)\)/);
+  assert.match(
+    errorFlow,
+    /(?:errorView\.setText\(|showActionableError\([\s\S]{0,180})friendlyError\(code\)\)/,
+    'the viewer UI must receive only the friendly error copy',
+  );
   assert.doesNotMatch(errorFlow, /errorView\.setText\([^;]*diagnos/);
   assert.doesNotMatch(errorFlow, /errorView\.setText\([^;]*getErrorCodeName/);
+  assert.doesNotMatch(errorFlow, /showActionableError\([^;]*diagnos/);
+  assert.doesNotMatch(errorFlow, /showActionableError\([^;]*getErrorCodeName/);
   assert.doesNotMatch(errorFlow, /reportPlaybackStatus\("broken", diagnostic\)/);
   assert.match(friendlyCopy, /final boolean live = isLiveContent\(\)/);
   assert.doesNotMatch(friendlyCopy, /Host:|Playback failed \(|getErrorCodeName/);
@@ -326,7 +337,10 @@ test('standalone VOD recovery resolves a fresh provider session at the saved tim
   const source = read('public/js/utils/standalone.js');
   const vodFlow = section(source, 'if (window.WatchPage)', 'if (window.VideoPlayer)');
 
-  assert.match(vodFlow, /const launchResolved = async \(resumeAt, fresh = false\)/);
+  assert.match(
+    vodFlow,
+    /const launchResolved = async \(resumeAt, fresh = false, recoveryToken = ''\)/,
+  );
   assert.match(vodFlow, /if \(fresh && meta && window\.API\?\.proxy\?\.xtream\?\.getStreamUrl\)/);
   assert.match(vodFlow, /await catalogPage\?\.prepareForPlaybackSession\?\.\(\)/);
   assert.match(
@@ -334,14 +348,17 @@ test('standalone VOD recovery resolves a fresh provider session at the saved tim
     /resolved = await window\.API\.proxy\.xtream\.getStreamUrl\([\s\S]*?content\.sourceId,[\s\S]*?content\.id,[\s\S]*?streamType,[\s\S]*?container,[\s\S]*?hint[\s\S]*?\);/,
   );
   assert.match(vodFlow, /nativePlay\(resolved\.url,[\s\S]*?resumeAt,[\s\S]*?fallbackUrl/);
-  assert.match(vodFlow, /registerNativeRecovery\(meta, \(resumeAt\) => launchResolved\(resumeAt, true\)\)/);
+  assert.match(
+    vodFlow,
+    /registerNativeRecovery\([\s\S]{0,100}\(resumeAt, recoveryToken\) => launchResolved\(resumeAt, true, recoveryToken\)/,
+  );
 });
 
 test('standalone Live recovery re-resolves the channel instead of replaying a stale URL', () => {
   const source = read('public/js/utils/standalone.js');
   const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
 
-  assert.match(liveFlow, /const relaunchLive = async \(\)/);
+  assert.match(liveFlow, /const relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
   assert.match(
     liveFlow,
     /fresh = await window\.API\.proxy\.xtream\.getStreamUrl\([\s\S]*?channel\.sourceId,[\s\S]*?liveStreamId,[\s\S]*?'live',[\s\S]*?providerContainer/,
@@ -516,10 +533,57 @@ test('standalone cancels stale delayed recovery but keeps same-route Android res
   );
 });
 
+test('standalone binds every recovered stream to the exact native recovery token', () => {
+  const source = read('public/js/utils/standalone.js');
+  const recovery = section(
+    source,
+    'window.__norvaNative.retryPlayback = (',
+    '// Native track labels are fail-closed',
+  );
+  const nativeLaunch = section(
+    source,
+    'const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras)',
+    'const nativeTitle =',
+  );
+  const vodFlow = section(source, 'if (window.WatchPage)', 'if (window.VideoPlayer)');
+  const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
+
+  assert.match(recovery, /recoveryToken\s*=\s*''/);
+  assert.match(
+    recovery,
+    /if \(recoveryToken && previousRecoveryToken !== recoveryToken\)[\s\S]{0,180}nativeRecoveryAttempts\.delete\(key\)/,
+    'a new native token must get a fresh bounded retry budget',
+  );
+  assert.match(recovery, /entry\.launcher\(resume,\s*recoveryToken\)/);
+  assert.match(
+    recovery,
+    /retryPlayback\([\s\S]{0,240}reason \|\| 'resolve_failed',[\s\S]{0,80}recoveryToken/,
+    'recursive retries must retain the original native token',
+  );
+  assert.match(
+    nativeLaunch,
+    /\.\.\.\(recoveryToken \? \{ recoveryToken \} : \{\}\)/,
+    'playVideoJson must return a token only for native recovery responses',
+  );
+  assert.match(nativeLaunch, /activeNativeRecoveryTokens\.get\(key\) !== recoveryToken/);
+  assert.match(vodFlow, /launchResolved = async \(resumeAt, fresh = false, recoveryToken = ''\)/);
+  assert.match(
+    vodFlow,
+    /\(resumeAt, recoveryToken\) => launchResolved\(resumeAt, true, recoveryToken\)/,
+  );
+  assert.match(vodFlow, /playbackPreferences:[\s\S]{0,180}recoveryToken/);
+  assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
+  assert.match(liveFlow, /activeStreamId:[\s\S]{0,140}recoveryToken/);
+});
+
 test('standalone Live recovery releases the previous cloud session before creating one replacement', () => {
   const source = read('public/js/utils/standalone.js');
   const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
-  const relaunch = section(liveFlow, 'const relaunchLive = async () =>', 'registerNativeRecovery(meta, relaunchLive)');
+  const relaunch = section(
+    liveFlow,
+    "const relaunchLive = async (_resumeAt = 0, recoveryToken = '') =>",
+    'registerNativeRecovery(meta, relaunchLive)',
+  );
   const releaseAt = relaunch.indexOf('await releasePreviousLiveSession()');
   const resolveAt = relaunch.indexOf('fresh = await window.API.proxy.xtream.getStreamUrl(');
   const replacementResolutions = relaunch.match(/fresh = await window\.API\.proxy\.xtream\.getStreamUrl\(/g) || [];

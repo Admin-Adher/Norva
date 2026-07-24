@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Norva TV</string>
+
+    <!-- Navigation et commandes principales du lecteur TV natif. -->
+    <string name="player_back">Retour</string>
+    <string name="player_back_content_description">Revenir en arrière</string>
+    <string name="player_show_controls">Afficher les commandes de lecture</string>
+    <string name="player_live">Direct</string>
+    <string name="player_rewind_10">Reculer de 10 secondes</string>
+    <string name="player_play">Lire</string>
+    <string name="player_pause">Mettre en pause</string>
+    <string name="player_forward_10">Avancer de 10 secondes</string>
+    <string name="player_quality">Qualité</string>
+    <string name="player_audio_button">Audio</string>
+    <string name="player_audio_selected_description">Audio, %1$s sélectionné</string>
+    <string name="player_subtitles_button">Sous-titres</string>
+    <string name="player_cc_button">Sous-titres</string>
+    <string name="player_subtitles_selected_description">Sous-titres, %1$s sélectionné</string>
+    <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_aspect_button">Taille de l’image</string>
+    <string name="player_resize_selected_description">Taille de l’image, %1$s sélectionnée</string>
+    <string name="player_more">Plus</string>
+    <string name="player_more_options">Plus d’options de lecture</string>
+
+    <!-- Les libellés restent neutres quand la langue du fichier n’est pas vérifiée. -->
+    <string name="player_audio_track">Piste audio</string>
+    <string name="player_video_track">Piste vidéo</string>
+    <string name="player_audio_unknown">Piste audio %1$d · langue non identifiée</string>
+    <string name="player_subtitle_unknown">Sous-titre %1$d · langue non identifiée</string>
+    <string name="player_audio_unavailable">Aucune piste audio disponible</string>
+    <string name="player_subtitles_unavailable">Aucun sous-titre sélectionnable</string>
+
+    <!-- Affichage, lecture et options des épisodes. -->
+    <string name="player_resize">Taille de l’image</string>
+    <string name="player_resize_fit">Ajuster</string>
+    <string name="player_resize_zoom">Zoomer</string>
+    <string name="player_playback_speed_section">Vitesse de lecture</string>
+    <string name="player_playback_speed_normal">Normale</string>
+    <string name="player_sleep">Minuteur de veille</string>
+    <string name="player_sleep_off">Désactivé</string>
+    <string name="player_sleep_minutes">%1$d min</string>
+    <string name="player_episodes">Épisodes</string>
+    <string name="player_episode_list">Liste des épisodes</string>
+    <string name="player_next_episode">Épisode suivant</string>
+    <string name="player_up_next">À suivre</string>
+    <string name="player_play_now">Lire maintenant</string>
+    <string name="player_playing_in">Lecture dans %1$d s</string>
+
+    <!-- Versions, reconnexion et erreurs actionnables. -->
+    <string name="player_version">Version</string>
+    <string name="player_version_title">Choisir une version</string>
+    <string name="player_change_version">Changer de version</string>
+    <string name="player_reconnecting">Reconnexion…</string>
+    <string name="player_reconnecting_attempt">Reconnexion… tentative %1$d</string>
+    <string name="player_reconnect_failed">Impossible de se reconnecter. Veuillez réessayer.</string>
+    <string name="player_error_title">Impossible de lire ce titre</string>
+    <string name="player_retry">Réessayer</string>
+    <string name="player_error_back">Retourner dans Norva</string>
+    <string name="player_error_network">La connexion a été interrompue. Vérifiez votre réseau, puis réessayez.</string>
+    <string name="player_error_live">Le direct a été interrompu. Norva continuera d’essayer de se reconnecter.</string>
+    <string name="player_error_no_data">Le fournisseur accepte la connexion, mais n’envoie aucun flux lisible.</string>
+    <string name="player_error_unsupported">Ce format vidéo ne peut pas être lu sur cet appareil.</string>
+    <string name="player_error_generic">La lecture s’est arrêtée de manière inattendue. Veuillez réessayer.</string>
+</resources>
