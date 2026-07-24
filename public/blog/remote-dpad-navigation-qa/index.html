@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Complete Remote and D-Pad Navigation QA Guide | Norva Blog</title>
+  <meta name="description" content="Test remote and D-pad navigation with a complete QA method for initial focus, directional routes, edges, dialogs, Back, async updates, and restoration.">
+  <link rel="canonical" href="https://norva.tv/blog/remote-dpad-navigation-qa/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Complete Remote and D-Pad Navigation QA Guide | Norva Blog">
+  <meta property="og:description" content="Test remote and D-pad navigation with a complete QA method for initial focus, directional routes, edges, dialogs, Back, async updates, and restoration.">
+  <meta property="og:url" content="https://norva.tv/blog/remote-dpad-navigation-qa/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Complete Remote and D-Pad Navigation QA Guide | Norva Blog">
+  <meta name="twitter:description" content="Test remote and D-pad navigation with a complete QA method for initial focus, directional routes, edges, dialogs, Back, async updates, and restoration.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "The Complete QA Guide for Remote and D-Pad Navigation",
+  "description": "Test remote and D-pad navigation with a complete QA method for initial focus, directional routes, edges, dialogs, Back, async updates, and restoration.",
+  "inLanguage": "en",
+  "datePublished": "2026-07-24T06:00:00+02:00",
+  "dateModified": "2026-07-24T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/remote-dpad-navigation-qa/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "The Complete QA Guide for Remote and D-Pad Navigation",
+      "item": "https://norva.tv/blog/remote-dpad-navigation-qa/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete QA Guide for Remote and D-Pad Navigation</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Remote &amp; D-pad Navigation</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-07-24T06:00:00+02:00">24 July 2026</time>
+        <span class="dot">·</span>
+        <span>9 min read</span>
+      </div>
+      <h1>The Complete QA Guide for Remote and D-Pad Navigation</h1>
+      <p class="lede">A route-based QA system for initial focus, directional movement, region changes, overlays, async updates, Back behavior, and exact origin restoration.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#inventory-screens-regions-and-focusable-targets">Inventory screens, regions, and focusable targets</a></li><li><a href="#verify-initial-focus-in-every-entry-state">Verify initial focus in every entry state</a></li><li><a href="#test-every-directional-edge-once">Test every directional edge once</a></li><li><a href="#define-edge-behavior-instead-of-accepting-accidents">Define edge behavior instead of accepting accidents</a></li><li><a href="#cover-transitions-between-regions">Cover transitions between regions</a></li><li><a href="#test-overlays-as-temporary-focus-graphs">Test overlays as temporary focus graphs</a></li><li><a href="#repeat-routes-after-data-and-layout-mutations">Repeat routes after data and layout mutations</a></li><li><a href="#verify-back-as-layered-navigation">Verify Back as layered navigation</a></li><li><a href="#test-disabled-empty-and-failure-states">Test disabled, empty, and failure states</a></li><li><a href="#capture-evidence-that-engineering-can-replay">Capture evidence that engineering can replay</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Model every TV screen as a focus graph, then test initial focus, each directional edge, region transitions, overlays, dynamic updates, Back, and restoration. Record the exact start target, key, expected destination, actual destination, and state. Randomly pressing arrows can reveal discomfort, but it cannot prove navigation quality.</blockquote>
+<p>Remote navigation is a contract between visual geometry and application state. A target can look nearby yet be unreachable; a route can work until a filter removes the remembered card; Back can close a screen but return focus to nowhere.</p>
+<h2 id="inventory-screens-regions-and-focusable-targets">Inventory screens, regions, and focusable targets</h2>
+<p>Divide each screen into regions: sidebar, header, filters, Continue Watching, results grid, detail panel, action row, episode list, recommendations, and dialog. For every region, record:</p>
+<ul><li>focusable target types;</li><li>intended entry and exit anchors;</li><li>scroll ownership;</li><li>behavior at each directional edge;</li><li>whether targets can appear, disappear, or become disabled;</li><li>the element that should regain focus after a temporary layer closes.</li></ul>
+<p>This inventory prevents the spatial engine from deciding every route from geometry alone. It also exposes hidden controls that are technically focusable but visually absent.</p>
+<h2 id="verify-initial-focus-in-every-entry-state">Verify initial focus in every entry state</h2>
+<p>Test fresh page entry, deep link, restored session, return from detail, return from a dialog, empty results, and error. Initial focus should be visible, safe, actionable, and appropriate to the viewer's likely task. It should not land on a destructive action, disabled target, skeleton card, or off-screen node.</p>
+<p>Use the decision method in choosing initial TV focus and record why the selected target wins over alternatives.</p>
+<h2 id="test-every-directional-edge-once">Test every directional edge once</h2>
+<p>For each focusable target, press Up, Down, Left, and Right separately from a known state. Record the expected and actual destination. Do not hold the key during baseline testing, because key repeat can hide an incorrect intermediate hop.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Start</th><th>Input</th><th>Expected</th><th>Actual</th><th>State</th><th>Result</th></tr></thead>
+<tbody><tr><td>Last filter</td><td>Down</td><td>Result-band anchor</td><td>Target</td><td>Results loaded</td><td>Pass/fail</td></tr><tr><td>First grid card</td><td>Left</td><td>Sidebar entry</td><td>Target</td><td>Default</td><td>Pass/fail</td></tr><tr><td>Dialog cancel</td><td>Back</td><td>Opener</td><td>Target</td><td>Modal open</td><td>Pass/fail</td></tr></tbody>
+</table></div>
+<p>After single-step coverage, repeat fast presses and reversals to detect queued animation, skipped targets, and stale geometry.</p>
+<h2 id="define-edge-behavior-instead-of-accepting-accidents">Define edge behavior instead of accepting accidents</h2>
+<p>At the end of a row or grid, the design may stop, wrap, enter another region, or reveal more content. Each option can be valid in context, but the result must match visual expectation and be consistent. The grid-edge decision guide helps document those rules.</p>
+<p>Test incomplete final rows, one-item rows, partially visible cards, and content added after loading. Verify that a boundary never sends focus to an unrelated distant control merely because its rectangle is mathematically closest.</p>
+<h2 id="cover-transitions-between-regions">Cover transitions between regions</h2>
+<p>Region changes cause many perceived freezes. Test sidebar to content and back, filters to result header, grid to detail panel, action row to episodes, one recommendation row to the next, and header to the first meaningful content.</p>
+<p>Each transition needs an explicit anchor and a reverse route. If Right enters results from a filter, Left should return to a sensible filter or region memory rather than trap the viewer. When a region scrolls, ensure the destination becomes fully visible before another input is processed.</p>
+<h2 id="test-overlays-as-temporary-focus-graphs">Test overlays as temporary focus graphs</h2>
+<p>Open dropdowns, keyboards, confirmation dialogs, variant pickers, and error dialogs from every supported origin. Verify initial focus, containment, directional order, scroll, activation, cancellation with Back, and restoration to the opener.</p>
+<p>An intentional modal contains focus; an accidental trap has no valid completion or cancellation route. Also test what happens if the opener disappears while the overlay is open.</p>
+<h2 id="repeat-routes-after-data-and-layout-mutations">Repeat routes after data and layout mutations</h2>
+<p>Run the graph after loading completes, a filter changes results, a favorite toggles, an item becomes unavailable, progress updates, a row expands, or an error resolves. These mutations often invalidate cached rectangles or element references.</p>
+<p>The expected fallback should be deterministic: exact origin when it remains valid, otherwise the nearest meaningful sibling or stable region anchor. Never reset to the page's first target without a documented reason.</p>
+<h2 id="verify-back-as-layered-navigation">Verify Back as layered navigation</h2>
+<p>Back should normally close the current temporary layer, leave a detail level, or return to the previous page state in that order. It should preserve query, filters, scroll, row offset, and originating item when those states still apply. The focus restoration guide turns that expectation into an origin token and fallback rule.</p>
+<p>Test Back from a focused variant, an episode, a scrolled recommendation row, a keyboard, and each dialog action. Also test repeated Back presses slowly so the first transition completes before the next begins.</p>
+<h2 id="test-disabled-empty-and-failure-states">Test disabled, empty, and failure states</h2>
+<p>Disabled controls must not become unexplained dead ends. Empty regions need a reachable message and valid next action. Errors must leave Back or recovery available. Loading surfaces must not steal focus, and completion must not reset a valid target.</p>
+<h2 id="capture-evidence-that-engineering-can-replay">Capture evidence that engineering can replay</h2>
+<p>For every failure, provide device and build, screen and data state, start target, exact key sequence, expected target, actual target, focus screenshot or recording, and reproducibility. A focus overlay or target identifier is valuable when available, but it does not replace the visible outcome.</p>
+<p>Maintain a route ledger by journey and rerun high-risk edges after changes to layout, virtualization, data loading, or navigation code. Platform guidance such as the <a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV quality criteria</a> should be combined with the product's documented navigation contract.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Testing only the happy path from the first card.</li><li>Holding an arrow key instead of verifying individual hops.</li><li>Ignoring reverse routes between regions.</li><li>Treating mouse clicks as remote evidence.</li><li>Skipping Back and focus restoration.</li><li>Testing before data loads but not after it mutates.</li><li>Reporting “focus freezes” without start state and key sequence.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="must-every-focusable-target-have-four-neighbours">Must every focusable target have four neighbours?</h3>
+<p>No. A direction may intentionally stop at a boundary. The important requirement is that the boundary is visible, consistent, and does not trap the overall task.</p>
+<h3 id="should-spatial-navigation-always-follow-nearest-geometry">Should spatial navigation always follow nearest geometry?</h3>
+<p>No. Geometry is useful within regular regions, but explicit routes are often needed between regions, around overlays, and after dynamic layout changes.</p>
+<h3 id="can-automated-tests-replace-remote-testing">Can automated tests replace remote testing?</h3>
+<p>They can protect deterministic routes and state restoration, but representative hardware and human review remain necessary for visible focus, viewing-distance clarity, remote timing, and display behavior.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Preview Norva's TV Navigation</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">WAI-ARIA APG: Developing a Keyboard Interface</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">Preview Norva's TV Navigation</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
