@@ -299,12 +299,13 @@ test('RPC-unavailable fallback never invents a stall from legacy zero throughput
   });
   assert.equal(active.kind, 'active');
 
-  const complete = AdminPage.engineState({
+  const legacyZero = AdminPage.engineState({
     never_probed: 0,
     probed_24h: 0,
     resolved_24h: 0,
   });
-  assert.equal(complete.kind, 'complete');
+  assert.equal(legacyZero.kind, 'unknown');
+  assert.notEqual(legacyZero.kind, 'complete');
 });
 
 test('Moteur renders fleet blockage and pg_cron failure as distinct incidents', () => {
@@ -372,9 +373,48 @@ test('legacy fallback renders uncertainty instead of a stopped-probe incident', 
   assert.match(incidentElement.innerHTML, /Sant\u00e9 d\u00e9taill\u00e9e indisponible/);
   assert.match(
     incidentElement.innerHTML,
-    /Une activit\u00e9 nulle sur 24 h ne permet pas de conclure \u00e0 un arr\u00eat\./,
+    /anciens compteurs portent sur des titres group\u00e9s, pas sur les fichiers exacts/,
   );
+  assert.match(incidentElement.innerHTML, /ni \u00e0 une fin de file ni \u00e0 un arr\u00eat/);
   assert.doesNotMatch(incidentElement.innerHTML, /Sondage \u00e0 l['\u2019]arr\u00eat/);
+});
+
+test('legacy fallback masks every exact-file counter instead of showing a fake small tail', () => {
+  const elements = {
+    'mot-health': { innerHTML: '' },
+    'admin-enrich': { innerHTML: '' },
+  };
+  const document = {
+    getElementById: (id) => elements[id] || null,
+    querySelector: () => null,
+  };
+  const AdminPage = loadAdminPage({ document });
+  const page = new AdminPage({});
+  page._engineHealth = { available: false };
+  const legacyRows = [{
+    owner_email: 'audit@example.test',
+    panel: 'Legacy panel',
+    item_type: 'movie',
+    total: 100,
+    resolved: 40,
+    resolved_pct: 40,
+    known_files: 766661,
+    never_probed: 766662,
+    probed_24h: 766663,
+    resolved_24h: 766664,
+    subtitle_found: 2,
+  }];
+
+  page._renderEngineHealth(legacyRows, [], {}, page._engineHealth);
+  page._renderEnrich(legacyRows);
+
+  assert.match(elements['mot-health'].innerHTML, /Progression exacte indisponible/);
+  assert.match(elements['mot-health'].innerHTML, /File exacte indisponible/);
+  assert.doesNotMatch(elements['mot-health'].innerHTML, /Progression legacy/);
+  assert.match(elements['admin-enrich'].innerHTML, /colonnes exactes restent masqu\u00e9es/);
+  for (const sentinel of ['766661', '766662', '766663', '766664']) {
+    assert.doesNotMatch(elements['admin-enrich'].innerHTML, new RegExp(sentinel));
+  }
 });
 
 test('dynamic scheduler issues distinguish missing, disabled, and failed pg_cron without duplicate job names', () => {
@@ -536,7 +576,7 @@ test('Moteur requests the versioned engine RPC and keeps legacy coverage as an e
   assert.match(admin, /engineState\(/);
   assert.match(admin, /engineSchedulerIssues\(/);
   assert.match(admin, /engineHealth\.available/);
-  assert.match(app, /AdminPage\.js\?v=85/);
+  assert.match(app, /AdminPage\.js\?v=86/);
   assert.match(
     enrichRenderer,
     /latest\(r\.last_probe_at,\s*r\.last_verified_at\)/,
@@ -547,7 +587,7 @@ test('Moteur requests the versioned engine RPC and keeps legacy coverage as an e
   assert.match(moteur, /pg_cron KO/);
   assert.match(
     moteur,
-    /Sant\u00e9 d\u00e9taill\u00e9e indisponible[\s\S]*Une activit\u00e9 nulle sur 24 h ne permet pas de conclure \u00e0 un arr\u00eat\./,
+    /Sant\u00e9 d\u00e9taill\u00e9e indisponible[\s\S]*anciens compteurs portent sur des titres group\u00e9s, pas sur les fichiers exacts/,
   );
   assert.match(moteur, /\? \u00e9tat inconnu \(legacy\)/);
   for (const reasonLabel of [

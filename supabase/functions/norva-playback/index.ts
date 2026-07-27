@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 37,
+        version: 38,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -164,6 +164,7 @@ Deno.serve(async (req) => {
         entitlementsEnforced: entitlementRuntime.enforced,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
+        exactTailDrainSafe: true,
       });
     }
     if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
@@ -5631,10 +5632,22 @@ async function exhaustedMap(db: SupabaseClient, keys: (string | null)[]): Promis
   return map;
 }
 
-async function recordExhaustion(db: SupabaseClient, key: string, processed: number, skipped: unknown) {
+function sweepHasPendingEvidence(result: JsonRecord): boolean {
+  return result.hasMore === true
+    || Math.max(0, Number(result.candidates) || 0) > 0
+    || Math.max(0, Number(result.attempted) || 0) > 0
+    || Math.max(0, Number(result.deferred) || 0) > 0
+    || Math.max(0, Number(result.failed) || 0) > 0
+    || Math.max(0, Number(result.backpressured) || 0) > 0;
+}
+
+async function recordExhaustion(db: SupabaseClient, key: string, result: JsonRecord) {
   try {
-    if (skipped) return;                              // live-session ticks say nothing about the panel
-    if (processed > 0) { await db.from("enrichment_exhausted").delete().eq("k", key); return; }
+    if (result.skipped) return;                       // live-session ticks say nothing about the panel
+    if (Number(result.processed) > 0 || sweepHasPendingEvidence(result)) {
+      await db.from("enrichment_exhausted").delete().eq("k", key);
+      return;
+    }
     await db.from("enrichment_exhausted").upsert(
       { k: key, exhausted_until: new Date(Date.now() + EXHAUSTED_TTL_MS).toISOString(), updated_at: new Date().toISOString() },
       { onConflict: "k" },
@@ -6083,7 +6096,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       return withAuditMeta({ skipped: "exhausted", key: soloKey, until: new Date(soloEx.get(soloKey)!).toISOString() });
     }
     const soloRes = (await runOneDimension(db, body)) as JsonRecord;
-    await recordExhaustion(db, soloKey, Number(soloRes?.processed ?? 0), soloRes?.skipped);
+    await recordExhaustion(db, soloKey, soloRes);
     return withAuditMeta(soloRes);
   }
   const fuId = stringOr(body.userId, "");
@@ -6114,7 +6127,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     }
     const r = (await runOneDimension(db, dim)) as JsonRecord;
     const processed = Number(r?.processed ?? 0);
-    if (key) await recordExhaustion(db, key, processed, r?.skipped);
+    if (key) await recordExhaustion(db, key, r);
     tried.push({ type: stringOr(dim.type, "?"), kind, processed, skipped: stringOrNull(r?.skipped) });
     if (r?.skipped) return withAuditMeta({ mode: "fallthrough", stoppedAt: r.skipped, tried });   // live viewer / in-flight pregen → stop the whole chain
     if (processed > 0) return withAuditMeta({ mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r });
@@ -6779,7 +6792,16 @@ async function runEpisodeAudioBackfill(
     ...(probeHealthOk || probeHealthBanish
       ? { probeHealth: { ok: probeHealthOk, banish: probeHealthBanish } }
       : {}),
-    hasMore: skipped === null && candidates.length >= limit,
+    // A short last page is not drained when every remaining exact file failed
+    // or was deferred. Keep the lane pending until retry state excludes those
+    // rows and a later candidate query genuinely returns zero.
+    hasMore: skipped === null && (
+      candidates.length >= limit
+      || (
+        processed === 0
+        && (attempted > 0 || deferred > 0 || failed > 0 || backpressured > 0)
+      )
+    ),
   };
 }
 

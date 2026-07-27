@@ -32,6 +32,14 @@ const HOT_POOL_SIZES: Record<string, number> = {
   'norva-catalog': 4,
   'norva-playback': 4,
 }
+// Most request/response functions must still recycle quickly, but the dynamic
+// enrichment chain intentionally owns longer bounded jobs. norva-playback can
+// spend up to 9 minutes on a speech batch and norva-source-sync must still
+// persist the schedule outcome after that inner request completes.
+const LONG_RUNNING_WORKER_TIMEOUT_MS: Record<string, number> = {
+  'norva-playback': 10 * 60 * 1000,
+  'norva-source-sync': 12 * 60 * 1000,
+}
 const rrCounters = new Map<string, number>()
 // Hoisted une fois : l'env ne change pas pendant la vie du conteneur (l'ancien
 // code refaisait Deno.env.toObject() + map à CHAQUE requête).
@@ -186,15 +194,17 @@ Deno.serve(async (req: Request) => {
   }
   const servicePath = `/home/deno/functions/${laneName}`
 
-  // Must comfortably exceed the sync engine's per-isolate work budget
+  // The default must comfortably exceed the sync engine's per-isolate work budget
   // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 90s finalize
   // loop deadline in norva-source-sync). Those loops run ~90s of work and THEN
   // self-invoke the next isolate; if the worker is recycled before that hand-off
   // lands, the discover/finalize chain breaks and the watchdog re-runs the same
   // slice forever (observed on a 275k catalogue: "wall clock duration warning"
   // every minute, finalize frozen on building_titles). 60s < 90s was the bug.
-  // 180s = 90s budget + margin for a slow final batch + the self-invoke fetch.
-  const workerTimeoutMs = 3 * 60 * 1000
+  // Long enrichment services use the explicit larger budgets above so a
+  // background request cannot die before finish_catalog_enrichment_source.
+  const workerTimeoutMs = LONG_RUNNING_WORKER_TIMEOUT_MS[service_name]
+    ?? 3 * 60 * 1000
   const noModuleCache = false
   const importMapPath = null
   // Les lanes chaudes brassent du gros JSON sous concurrence — un peu plus d'air

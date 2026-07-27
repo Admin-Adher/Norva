@@ -4261,7 +4261,7 @@ class AdminPage {
     }
 
     // Canonical UI state. The server owns every detailed classification. Legacy coverage is still
-    // rendered when the new RPC is unavailable, but a zero 24 h counter is explicitly unknown.
+    // rendered when the new RPC is unavailable, but it can never prove exact progress/completion.
     static engineState(r, healthAvailable = r?.__engine_health_v1 === true) {
         const canonical = !!r && healthAvailable === true;
         const allowed = new Set(['active', 'running', 'idle', 'complete', 'paused', 'blocked',
@@ -4273,9 +4273,6 @@ class AdminPage {
                 reason: String(r.reason || '').trim().toLowerCase().replace(/-/g, '_') || 'unknown',
                 canonical: true
             };
-        }
-        if (Number(r?.never_probed) === 0) {
-            return { kind: 'complete', reason: 'legacy_complete', canonical: false };
         }
         if (Number(r?.probed_24h) > 0) {
             return { kind: 'active', reason: 'legacy_progressing', canonical: false };
@@ -4308,7 +4305,6 @@ class AdminPage {
             source_disabled: 'source désactivée',
             source_not_ready: 'source non prête',
             schedule_missing: 'planification absente',
-            legacy_complete: 'métrique historique complète',
             legacy_progressing: 'progression historique observée',
             legacy_unmeasured: 'état inconnu (legacy)',
             unknown: 'raison inconnue'
@@ -4465,8 +4461,8 @@ class AdminPage {
         el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé moteur</div><div class="admin-cards">
             ${card(coverage + ' %', 'Couverture audio', covCls, '🔊')}
             ${card(n(fleetBlocked), 'Flotte bloquée', fleetBlocked > 0 ? 'alert' : 'ok', '⛔')}
-            ${card(n(progressing), exact ? 'Lignes en progression' : 'Progression legacy', progressing > 0 ? 'ok' : '', '▶️')}
-            ${card(n(neverProbed), exact ? 'Fichiers jamais sondés' : 'Mesure legacy en attente', '', '🗄️')}
+            ${card(exact ? n(progressing) : '—', exact ? 'Lignes en progression' : 'Progression exacte indisponible', exact && progressing > 0 ? 'ok' : '', '▶️')}
+            ${card(exact ? n(neverProbed) : '—', exact ? 'Fichiers jamais sondés' : 'File exacte indisponible', '', '🗄️')}
             ${card(n(stFound), 'Sous-titres trouvés', '', '💬')}
             ${card(n(cronKo), 'pg_cron KO', cronKo > 0 ? 'alert' : 'ok', '⏱️')}
         </div></div>`;
@@ -4496,7 +4492,7 @@ class AdminPage {
             inc.push({
                 p: 4, cls: 'warn', actionable: false,
                 t: '⚠ Santé détaillée indisponible',
-                d: 'métriques historiques affichées. Une activité nulle sur 24 h ne permet pas de conclure à un arrêt.'
+                d: 'les anciens compteurs portent sur des titres groupés, pas sur les fichiers exacts. Ils ne permettent de conclure ni à une fin de file ni à un arrêt.'
             });
         } else {
             enrich.forEach(r => {
@@ -5142,7 +5138,7 @@ class AdminPage {
             if (!value || !Number.isFinite(new Date(value).getTime())) return '—';
             return `<span title="${AdminPage.esc(new Date(value).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(value))}</span>`;
         };
-        // The server owns detailed fleet state. Legacy rows can only be active, complete or unknown.
+        // The server owns detailed fleet state. Legacy rows can only be active or unknown.
         const f = this._motFilter || '';
         let view = rows.filter(r => {
             const state = AdminPage.engineStateView(r);
@@ -5155,7 +5151,7 @@ class AdminPage {
             return true;
         });
         const legacyNote = !exact
-            ? '<div class="mot-legacy-note">Santé détaillée indisponible — métriques historiques affichées. Une activité nulle sur 24 h ne permet pas de conclure à un arrêt.</div>'
+            ? '<div class="mot-legacy-note">Santé détaillée indisponible — les anciens compteurs portent sur des titres groupés, pas sur les fichiers exacts. Les colonnes exactes restent masquées afin de ne pas simuler une fin de file ou un arrêt.</div>'
             : '';
         if (!view.length) {
             el.innerHTML = `${legacyNote}<div class="card"><span class="badge ${f ? 'gray' : 'green'}">${f ? '∅' : '✓'}</span> ${f ? 'Aucun panel ne correspond à ce filtre.' : 'Aucune donnée.'}</div>`;
@@ -5202,8 +5198,8 @@ class AdminPage {
             <td class="num">${AdminPage.n(r.total)}</td>
             <td class="num">${exact ? AdminPage.n(r.known_files) : '—'}</td>
             ${barCell(r.resolved, r.resolved_pct)}
-            <td class="num">${AdminPage.n(r.never_probed)}</td>
-            <td class="num">${AdminPage.n(r.probed_24h)}</td>
+            <td class="num">${exact ? AdminPage.n(r.never_probed) : '—'}</td>
+            <td class="num">${exact ? AdminPage.n(r.probed_24h) : '—'}</td>
             <td class="num">${exact ? AdminPage.n(r.resolved_24h) : '—'}</td>
             <td>
                 <span class="badge ${state.badge}" title="${AdminPage.esc(state.reasonLabel)}">${AdminPage.esc(state.label)}</span>

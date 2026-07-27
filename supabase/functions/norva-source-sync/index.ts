@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-source-sync",
-        version: 11,
+        version: 12,
         liveMaterialization: true,
         syncProgress: true,
         catalogFinalize: true,
@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
         exactEpisodeAudioPipeline: true,
         seriesPriorityCycleV2: true,
         episodeProbeBatchCanary: "4/5",
+        exactTailDrainSafe: true,
       });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
@@ -1009,32 +1010,54 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
   // or borrowing a nested result would make one scheduler completion appear
   // to have attempted rows that belonged to another lane.
   const processed = Math.max(0, Number(body.processed) || 0);
+  const attempted = Math.max(0, Number(body.attempted) || 0);
+  const candidates = Math.max(0, Number(body.candidates) || 0);
+  const deferred = Math.max(0, Number(body.deferred) || 0);
+  const failed = Math.max(0, Number(body.failed) || 0);
+  const backpressured = Math.max(0, Number(body.backpressured) || 0);
+  const skipped = stringOrNull(body.skipped ?? body.stoppedAt);
+  // A partial final page can contain only failed/deferred rows. The raw worker
+  // then reports hasMore=false because candidates < batchLimit, but the lane is
+  // not exhausted: those exact files still have durable retry work. Preserve
+  // hasMore as a compatibility signal for the current SQL scheduler so lane 11
+  // cannot put the whole source to sleep for six hours.
+  const pendingTail = processed === 0
+    && skipped === null
+    && (
+      candidates > 0
+      || attempted > 0
+      || deferred > 0
+      || failed > 0
+      || backpressured > 0
+    );
+  const hasMore = body.hasMore === true || pendingTail;
   return compactRecord({
     mode: stringOrNull(body.mode),
     itemType: stringOrNull(body.itemType),
-    attempted: Math.max(0, Number(body.attempted) || 0),
+    attempted,
     processed,
-    candidates: Math.max(0, Number(body.candidates) || 0),
+    candidates,
     updated: Math.max(0, Number(body.updated ?? body.persisted) || 0),
     persisted: Math.max(0, Number(body.persisted) || 0),
     resolved: Math.max(0, Number(body.resolved) || 0),
-    deferred: Math.max(0, Number(body.deferred) || 0),
+    deferred,
     registeredEpisodes: Math.max(0, Number(body.registeredEpisodes) || 0),
-    failed: Math.max(0, Number(body.failed) || 0),
-    backpressured: Math.max(0, Number(body.backpressured) || 0),
+    failed,
+    backpressured,
     batchLimit: Math.max(0, Number(body.batchLimit) || 0),
     openUntil: stringOrNull(body.openUntil ?? body.open_until),
     nextRetryAt: stringOrNull(body.nextRetryAt ?? body.next_retry_at),
     failureClass: stringOrNull(body.failureClass ?? body.failure_class),
     probeHealth: isRecord(body.probeHealth) ? body.probeHealth : null,
     lastId: processed > 0 ? stringOrNull(body.lastId) : null,
-    skipped: stringOrNull(body.skipped ?? body.stoppedAt),
+    skipped,
     paused: body.paused === true,
-    hasMore: body.hasMore === true,
+    hasMore,
+    pendingTail,
     exhausted: body.exhausted === true || (
       processed === 0
-      && body.hasMore !== true
-      && stringOrNull(body.skipped ?? body.stoppedAt) === null
+      && !hasMore
+      && skipped === null
     ),
   });
 }

@@ -293,6 +293,37 @@ test('throughput tuning raises the fleet ceiling and speech batch without intra-
   assert.doesNotMatch(activation, /delete from public\.catalog_enrichment_dispatch_leases/);
 });
 
+test('self-hosted Edge workers outlive every bounded enrichment request', () => {
+  const router = read('supabase/functions/main/index.ts');
+  const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const budgets = between(
+    router,
+    'const LONG_RUNNING_WORKER_TIMEOUT_MS:',
+    '\nconst rrCounters',
+  );
+
+  assert.match(budgets, /'norva-playback': 10 \* 60 \* 1000/);
+  assert.match(budgets, /'norva-source-sync': 12 \* 60 \* 1000/);
+  assert.match(
+    router,
+    /LONG_RUNNING_WORKER_TIMEOUT_MS\[service_name\]\s*\?\?\s*3 \* 60 \* 1000/,
+  );
+  assert.match(
+    sourceSync,
+    /\(speechVerification \|\| episodeSpeech\)\s*\? 540_000/,
+  );
+  assert.match(sourceSync, /episodeProbe \? 390_000/);
+  assert.match(sourceSync, /version: 12[\s\S]*exactTailDrainSafe: true/);
+  assert.match(playback, /version: 38[\s\S]*exactTailDrainSafe: true/);
+
+  const playbackWorkerMs = 10 * 60 * 1000;
+  const sourceWorkerMs = 12 * 60 * 1000;
+  const longestInnerRequestMs = 540_000;
+  assert.ok(playbackWorkerMs > longestInnerRequestMs);
+  assert.ok(sourceWorkerMs > playbackWorkerMs);
+});
+
 test('episode lanes are exact, individually bounded, flag-gated, and fail closed', () => {
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   const playback = read('supabase/functions/norva-playback/index.ts');
@@ -370,7 +401,10 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
     /catch \(error\) \{\s*if \(mode === "probe"\) \{[\s\S]*await recordFootprintHit\(\)/,
   );
   assert.match(exactWorker, /episode probe retry state unavailable/);
-  assert.match(exactWorker, /hasMore: skipped === null && candidates\.length >= limit/);
+  assert.match(
+    exactWorker,
+    /hasMore: skipped === null && \([\s\S]*candidates\.length >= limit[\s\S]*processed === 0[\s\S]*attempted > 0[\s\S]*deferred > 0[\s\S]*failed > 0[\s\S]*backpressured > 0/,
+  );
   assert.match(exactWorker, /providerCode === "account_busy"/);
   assert.match(exactWorker, /providerCode === "background_busy"/);
   assert.match(exactWorker, /catalog_episode_probe_retry_state/);
@@ -489,9 +523,45 @@ test('fleet audit metrics describe only the explicit row set actually attempted'
     '\nfunction enrichmentFleetNextDelay(',
   );
   assert.match(summary, /const processed = Math\.max\(0, Number\(body\.processed\) \|\| 0\)/);
-  assert.match(summary, /attempted: Math\.max\(0, Number\(body\.attempted\) \|\| 0\)/);
+  assert.match(summary, /const attempted = Math\.max\(0, Number\(body\.attempted\) \|\| 0\)/);
   assert.match(summary, /resolved: Math\.max\(0, Number\(body\.resolved\) \|\| 0\)/);
-  assert.match(summary, /deferred: Math\.max\(0, Number\(body\.deferred\) \|\| 0\)/);
+  assert.match(summary, /const deferred = Math\.max\(0, Number\(body\.deferred\) \|\| 0\)/);
   assert.match(summary, /lastId: processed > 0 \? stringOrNull\(body\.lastId\) : null/);
+  assert.match(summary, /const pendingTail = processed === 0/);
+  assert.match(summary, /candidates > 0[\s\S]*attempted > 0[\s\S]*deferred > 0[\s\S]*failed > 0[\s\S]*backpressured > 0/);
+  assert.match(summary, /const hasMore = body\.hasMore === true \|\| pendingTail/);
+  assert.match(summary, /&& !hasMore[\s\S]*&& skipped === null/);
   assert.doesNotMatch(summary, /processedFromTried|body\.tried|nested\.processed|nested\.lastId/);
+});
+
+test('partial failed or deferred episode tails never create an exhaustion barrier', () => {
+  const playback = read('supabase/functions/norva-playback/index.ts');
+  const exhaustion = between(
+    playback,
+    'function sweepHasPendingEvidence(',
+    '\n// A probe response status',
+  );
+
+  for (const counter of [
+    'candidates',
+    'attempted',
+    'deferred',
+    'failed',
+    'backpressured',
+  ]) {
+    assert.match(exhaustion, new RegExp(`result\\.${counter}`));
+  }
+  assert.match(exhaustion, /result\.hasMore === true/);
+  assert.match(
+    exhaustion,
+    /Number\(result\.processed\) > 0 \|\| sweepHasPendingEvidence\(result\)/,
+  );
+  assert.match(
+    exhaustion,
+    /delete\(\)\.eq\("k", key\)/,
+  );
+  assert.doesNotMatch(
+    exhaustion,
+    /recordExhaustion\([^)]*processed[^)]*skipped/,
+  );
 });

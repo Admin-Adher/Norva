@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
@@ -20,12 +21,35 @@ test('transaction paywalls make the supported-screen value proposition central a
   }
 });
 
-test('connected-product navigation presents the shipped Android apps as available', () => {
+test('connected-product navigation links both shipped Android apps to their canonical Play Store listings', () => {
   const app = read('public/js/app.js');
+  const appHtml = read('public/app.html');
+  const configStart = app.indexOf('const NORVA_DEVICE_APPS');
+  const configEnd = app.indexOf('\nclass App', configStart);
+  assert.ok(configStart >= 0 && configEnd > configStart, 'device app config must stay extractable');
+  const deviceApps = JSON.parse(JSON.stringify(vm.runInNewContext(
+    `${app.slice(configStart, configEnd)}\nNORVA_DEVICE_APPS;`,
+  )));
+
+  assert.deepEqual(deviceApps.map(({ key, storeUrl, available }) => ({ key, storeUrl, available })), [
+    {
+      key: 'mobile',
+      storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.phone',
+      available: true,
+    },
+    {
+      key: 'tv',
+      storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.tv',
+      available: true,
+    },
+  ]);
   assert.match(app, /Android mobile app/);
   assert.match(app, /Android TV app/);
+  assert.match(app, /NORVA_DEVICE_APPS\.some\(a => a\.storeUrl\)/);
+  assert.match(app, /href="\$\{esc\(a\.storeUrl\)\}" target="_blank" rel="noopener noreferrer">Install<\/a>/);
   assert.match(app, /Available now/);
   assert.doesNotMatch(app, />Coming soon</);
+  assert.match(appHtml, /\/js\/app\.js\?v=49/);
 });
 
 test('transaction screens keep terms, privacy and self-service cancellation accessible', () => {
@@ -55,8 +79,8 @@ test('all changed funnel assets use fresh cache keys', () => {
   assert.match(appHtml, /profiles\.js\?v=10/);
   assert.match(appHtml, /billing-config\.js\?v=8/);
   assert.match(appHtml, /billing\.js\?v=17/);
-  assert.match(appHtml, /app\.js\?v=48/);
-  assert.match(appJs, /AdminPage\.js\?v=85/);
+  assert.match(appHtml, /app\.js\?v=49/);
+  assert.match(appJs, /AdminPage\.js\?v=86/);
   assert.match(subscribe, /marketing\.js\?v=2/);
   assert.match(subscribe, /cloudApi\.js\?v=52/);
   assert.match(subscribe, /billing-config\.js\?v=8/);

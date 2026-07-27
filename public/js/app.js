@@ -4,13 +4,24 @@
 
 /**
  * Companion apps advertised by the navbar "Devices" popover ("Use Norva
- * elsewhere"). Both Android applications are available today. A public
- * storeUrl can be added independently when its listing is visible to every
- * visitor; availability must not regress to a false "Coming soon" meanwhile.
+ * elsewhere"). Keep the canonical public listings here so every web visitor
+ * gets the same install destination.
  */
 const NORVA_DEVICE_APPS = [
-    { key: 'mobile', name: 'Android mobile app', hint: 'For your phone or tablet', storeUrl: '', available: true },
-    { key: 'tv', name: 'Android TV app', hint: 'For the big screen, remote-friendly', storeUrl: '', available: true },
+    {
+        key: 'mobile',
+        name: 'Android mobile app',
+        hint: 'For your phone or tablet',
+        storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.phone',
+        available: true,
+    },
+    {
+        key: 'tv',
+        name: 'Android TV app',
+        hint: 'For the big screen, remote-friendly',
+        storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.tv',
+        available: true,
+    },
 ];
 
 class App {
@@ -2452,7 +2463,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=85';
+                s.src = '/js/pages/AdminPage.js?v=86';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);
