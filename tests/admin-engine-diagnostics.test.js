@@ -454,7 +454,7 @@ test('exact health renders probed-file coverage instead of obsolete resolved-tit
 
   assert.equal(health.rows[0].probed_pct, 25);
   assert.match(elements['mot-health'].innerHTML, />25 %</);
-  assert.match(elements['mot-health'].innerHTML, /Fichiers sond\u00e9s/);
+  assert.match(elements['mot-health'].innerHTML, /Fichiers exacts sond\u00e9s/);
   assert.doesNotMatch(elements['mot-health'].innerHTML, />0 %</);
   assert.match(elements['admin-enrich'].innerHTML, /Fichiers sond\u00e9s/);
   assert.match(elements['admin-enrich'].innerHTML, />25 \(25%\)</);
@@ -620,7 +620,7 @@ test('Moteur requests the versioned engine RPC and keeps legacy coverage as an e
   assert.match(admin, /engineState\(/);
   assert.match(admin, /engineSchedulerIssues\(/);
   assert.match(admin, /engineHealth\.available/);
-  assert.match(app, /AdminPage\.js\?v=87/);
+  assert.match(app, /AdminPage\.js\?v=88/);
   assert.match(
     enrichRenderer,
     /latest\(r\.last_probe_at,\s*r\.last_verified_at\)/,

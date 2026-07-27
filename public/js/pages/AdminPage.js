@@ -4384,7 +4384,7 @@ class AdminPage {
         const v = this._view();
         const filters = [['', 'Tout'], ['problem', 'À traiter'], ['progress', 'En cours'],
             ['waiting', 'En attente'], ['paused', 'En pause'], ['unknown', 'Inconnu'],
-            ['low', 'Couverture < 60 %']];
+            ['low', 'Sondage < 60 %']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
             <p class="crm-sub">Couverture / sondage audio par panel · matching catalogue TMDB · orchestration des crons jour/nuit.</p>
@@ -4469,9 +4469,12 @@ class AdminPage {
         const cronRec = cron.filter(c => Number(c.fails_24h) > 0 && String(c.last_status) !== 'failed').length;
         const covCls = coverage >= 90 ? 'ok' : coverage >= 60 ? 'warn' : 'alert';
         const tmdbBacklog = (Number(ov.tmdb_year_backlog) || 0) + (Number(ov.tmdb_unmatched) || 0) + (Number(ov.tmdb_unverified) || 0);
-        const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+        const card = (v, l, cls, icon, title = '') => `<div class="kpi ${cls || ''}"${title ? ` title="${AdminPage.esc(title)}"` : ''}><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+        const coverageDetail = exact
+            ? `${n(probedFiles)} sondés sur ${n(knownFiles)} fichiers exacts connus. L'ancien indicateur portait sur des titres groupés et n'est pas comparable.`
+            : 'Ancien indicateur par titres groupés ; ne mesure pas la file exacte.';
         el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé moteur</div><div class="admin-cards">
-            ${card(coverage + ' %', exact ? 'Fichiers sondés' : 'Couverture audio (legacy)', covCls, '🔊')}
+            ${card(coverage + ' %', exact ? 'Fichiers exacts sondés' : 'Couverture audio (legacy)', covCls, '🔊', coverageDetail)}
             ${card(n(fleetBlocked), 'Flotte bloquée', fleetBlocked > 0 ? 'alert' : 'ok', '⛔')}
             ${card(exact ? n(progressing) : '—', exact ? 'Lignes en progression' : 'Progression exacte indisponible', exact && progressing > 0 ? 'ok' : '', '▶️')}
             ${card(exact ? n(neverProbed) : '—', exact ? 'Fichiers jamais sondés' : 'File exacte indisponible', '', '🗄️')}
@@ -4483,7 +4486,7 @@ class AdminPage {
             let meta = tx.querySelector('.crm-head-meta');
             if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
             meta.innerHTML =
-                `<span class="crm-hpill ${covCls === 'alert' ? 'bad' : ''}"><b>${coverage} %</b> audio</span>` +
+                `<span class="crm-hpill ${covCls === 'alert' ? 'bad' : ''}" title="${AdminPage.esc(coverageDetail)}"><b>${coverage} %</b> ${exact ? 'fichiers exacts' : 'audio legacy'}</span>` +
                 `<span class="crm-hpill ${fleetBlocked > 0 ? 'bad' : ''}"><b>${n(fleetBlocked)}</b> flotte bloquée</span>` +
                 `<span class="crm-hpill ${cronKo > 0 ? 'bad' : ''}"><b>${n(cronKo)}</b> pg_cron KO</span>` +
                 (cronRec > 0 ? `<span class="crm-hpill"><b>${n(cronRec)}</b> échec(s) récupéré(s)</span>` : '') +

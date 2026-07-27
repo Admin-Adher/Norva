@@ -141,11 +141,29 @@ test('Android phone targets API 36 with a compatible build toolchain', () => {
   const appGradle = read('clients/android-phone/app/build.gradle');
   const rootGradle = read('clients/android-phone/build.gradle');
   const manifest = read('clients/android-phone/app/src/main/AndroidManifest.xml');
+  const buildWorkflow = read('.github/workflows/build.yml');
+  const releaseWorkflow = read('.github/workflows/android-release.yml');
 
   assert.match(appGradle, /compileSdk\s+36\b/);
   assert.match(appGradle, /targetSdk\s+36\b/);
   assert.match(rootGradle, /com\.android\.application" version "8\.10\.1"/);
   assert.doesNotMatch(manifest, /enableOnBackInvokedCallback="false"/);
+  for (const [name, workflow] of [
+    ['build', buildWorkflow],
+    ['release', releaseWorkflow],
+  ]) {
+    assert.doesNotMatch(workflow, /packages:\s*\|/, `${name} must not send one multiline package name`);
+    assert.equal(
+      (workflow.match(/uses: android-actions\/setup-android@v4/g) || []).length,
+      2,
+      `${name} must use the current Android SDK action for both apps`,
+    );
+    assert.equal(
+      (workflow.match(/run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35\.0\.0"/g) || []).length,
+      2,
+      `${name} must pass each SDK package as a distinct sdkmanager argument`,
+    );
+  }
 });
 
 test('Android phone migrates custom back handling for target API 36', () => {
