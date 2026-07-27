@@ -28,6 +28,11 @@ class HomePage {
                 this.loadDashboardData();
             }
         });
+        window.addEventListener('norva:notification-permission-changed', () => {
+            if (this.app?.currentPage === 'home') {
+                this.renderEcosystemCard(this.sourceSummary);
+            }
+        });
 
         // Hover preview (desktop): rails render via innerHTML + delegation, so the
         // preview data is resolved from the card's rail/history indices on demand.
@@ -160,6 +165,8 @@ class HomePage {
 
                 <section class="home-hero-section hidden" id="home-hero"></section>
 
+                <section id="home-ecosystem" class="dashboard-section home-ecosystem-card hidden"></section>
+
                 <section class="dashboard-section hidden" id="continue-watching-section">
                     <div class="section-header">
                         <h2>Continue Watching</h2>
@@ -209,6 +216,30 @@ class HomePage {
                 if (e.target.closest('[data-home-retry]')) {
                     this.lastLoadedAt = 0;
                     this.loadDashboardData();
+                    return;
+                }
+                if (e.target.closest('[data-ecosystem-dismiss]')) {
+                    try { localStorage.setItem('norva-ecosystem-card-dismissed-v1', '1'); } catch (_) { /* best effort */ }
+                    document.getElementById('home-ecosystem')?.classList.add('hidden');
+                    return;
+                }
+                if (e.target.closest('[data-ecosystem-pair]')) {
+                    this.app?.openScreensSettings?.();
+                    return;
+                }
+                const notificationsButton = e.target.closest('[data-ecosystem-notifications]');
+                if (notificationsButton) {
+                    const bridge = window.NorvaTVCloud || window.NodeCastNative;
+                    if (typeof bridge?.requestNotificationPermission === 'function') {
+                        notificationsButton.disabled = true;
+                        notificationsButton.textContent = 'Opening permission...';
+                        try {
+                            bridge.requestNotificationPermission();
+                        } catch (_) {
+                            notificationsButton.disabled = false;
+                            notificationsButton.textContent = 'Enable notifications';
+                        }
+                    }
                 }
             });
             this.container.addEventListener('keydown', (e) => {
@@ -385,6 +416,7 @@ class HomePage {
                 if (sourceSummary) {
                     this.renderServiceHealth(sourceSummary);
                 }
+                this.renderEcosystemCard(sourceSummary);
 
                 if (this.shouldShowSetupGate(sourceSummary)) {
                     // Gate is showing; the in-flight fetches are unused — attach a
@@ -567,6 +599,64 @@ class HomePage {
         document.getElementById('home-hero')?.classList.remove('hidden');
         document.getElementById('continue-watching-section')?.classList.remove('hidden');
         document.getElementById('favorite-channels-section')?.classList.remove('hidden');
+    }
+
+    notificationPermissionState() {
+        const bridge = window.NorvaTVCloud || window.NodeCastNative;
+        if (typeof bridge?.notificationPermissionState !== 'function') return 'unavailable';
+        try {
+            const state = String(bridge.notificationPermissionState() || '').toLowerCase();
+            return ['granted', 'prompt', 'denied'].includes(state) ? state : 'unavailable';
+        } catch (_) {
+            return 'unavailable';
+        }
+    }
+
+    renderEcosystemCard(summary = this.sourceSummary) {
+        const container = document.getElementById('home-ecosystem');
+        if (!container) return;
+
+        const isPhoneApp = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
+        const isCloud = Boolean(this.app?.currentUser?.cloud || window.API?.isCloudMode?.());
+        const ready = Boolean(this.app?.isCatalogReady?.(summary));
+        let dismissed = false;
+        try { dismissed = localStorage.getItem('norva-ecosystem-card-dismissed-v1') === '1'; } catch (_) { /* best effort */ }
+
+        if (!isPhoneApp || !isCloud || !ready || dismissed) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        const permissionState = this.notificationPermissionState();
+        const notificationPrompt = permissionState === 'prompt'
+            ? `
+                <div class="home-ecosystem-notifications">
+                    <span>
+                        <strong>Know when Norva is ready</strong>
+                        <small>Get a notification when imports and subtitles finish.</small>
+                    </span>
+                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications>Enable notifications</button>
+                </div>`
+            : '';
+
+        container.innerHTML = `
+            <button type="button" class="home-ecosystem-dismiss" data-ecosystem-dismiss aria-label="Dismiss multi-device tip">&times;</button>
+            <img class="home-ecosystem-visual" src="/assets/landing/norva-multi-device.svg"
+                alt="Norva on a TV, laptop, tablet and phone">
+            <div class="home-ecosystem-copy">
+                <span class="home-ecosystem-kicker">One account. Every screen.</span>
+                <h2>Norva, everywhere you watch</h2>
+                <p>Your profiles, favorites and playback progress stay in sync across web, phone, tablet and TV.</p>
+                <div class="home-ecosystem-actions">
+                    <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=tv.norva.tv"
+                        target="_blank" rel="noopener noreferrer">Install Android TV</a>
+                    <button type="button" class="btn btn-secondary" data-ecosystem-pair>Pair a TV</button>
+                </div>
+                ${notificationPrompt}
+            </div>
+        `;
+        container.classList.remove('hidden');
     }
 
     renderSetupGate(summary = {}) {

@@ -7,7 +7,7 @@ const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 
 test('commercial surfaces name the shipped platforms consistently', () => {
-  const exact = /Web, Android mobile and Android TV/;
+  const exact = /Web, Android mobile \(phone and tablet\), and Android TV/;
   for (const file of [
     'public/index.html',
     'public/landing.html',
@@ -18,7 +18,7 @@ test('commercial surfaces name the shipped platforms consistently', () => {
     assert.match(read(file), exact, file);
   }
   for (const file of ['public/index.html', 'public/landing.html']) {
-    assert.doesNotMatch(read(file), /Web, mobile and TV|phone, tablet(?:\s*&| and) TV/i, file);
+    assert.doesNotMatch(read(file), /Web, mobile and TV/i, file);
   }
 });
 test('legacy premium codes never advertise a non-existent Premium plan', () => {

@@ -24,9 +24,12 @@
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.05; margin-bottom: 10px; }
     .lead { color: var(--muted); font-size: 16px; line-height: 1.55; max-width: 620px; }
-    .platform-value { margin-top: 14px; padding: 13px 15px; border: 1px solid rgba(91,124,250,.42);
+    .platform-value { display: grid; grid-template-columns: 150px 1fr; gap: 15px; align-items: center;
+      margin-top: 14px; padding: 13px 15px; border: 1px solid rgba(91,124,250,.42);
       border-radius: 12px; background: rgba(91,124,250,.09); color: var(--muted); font-size: 13.5px;
       line-height: 1.5; }
+    .platform-value img { display: block; width: 100%; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.1); }
     .platform-value strong { display: block; margin-bottom: 2px; color: var(--text); font-size: 15px; }
     .tv-purchase-path { margin-top: 16px; padding: 18px 20px; border: 1px solid rgba(181,121,255,.5);
       border-radius: 14px; background: rgba(181,121,255,.1); color: var(--muted); font-size: 16px; line-height: 1.55; }
@@ -52,7 +55,10 @@
       text-transform: uppercase; color: #4fe0a8; background: rgba(52,211,153,0.16);
       border: 1px solid rgba(52,211,153,0.35); box-shadow: 0 0 14px rgba(52,211,153,0.28); }
     .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 16px; }
-    @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) {
+      .grid { grid-template-columns: 1fr; }
+      .platform-value { grid-template-columns: 110px 1fr; gap: 11px; padding: 11px; }
+    }
     .card { position: relative; border: 1px solid var(--line); border-radius: 14px;
       padding: 24px; background: var(--panel); }
     .card.featured { border-color: rgba(143,85,255,0.6); box-shadow: 0 0 50px rgba(143,85,255,0.16); }
@@ -261,8 +267,11 @@
       profiles your household gets. Eligible new customers can start with a free trial;
       the exact terms are shown before checkout.</p>
     <div class="platform-value" role="note">
-      <strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
-      Keep profiles, favorites and playback progress in sync on compatible devices.
+      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+      <span>
+        <strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong>
+        Keep profiles, favorites and playback progress in sync on compatible devices.
+      </span>
     </div>
 
     <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
@@ -289,7 +298,7 @@
         <small class="price-note"></small>
         <ul>
           <li>Up to 2 profiles</li>
-          <li>Sync across Web, Android mobile and Android TV</li>
+          <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
           <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
@@ -308,7 +317,7 @@
         <small class="price-note"></small>
         <ul>
           <li>Up to 5 profiles</li>
-          <li>Sync across Web, Android mobile and Android TV</li>
+          <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
           <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
@@ -658,7 +667,7 @@
           msg.textContent = "You have full access now and won't be charged until your " + trialLabel + " trial ends. Cancel anytime before then.";
         } else {
           title.textContent = "You're subscribed";
-          msg.textContent = 'Your plan is active on Web, Android mobile and Android TV.';
+          msg.textContent = 'Your plan is active on Web, Android mobile (phone and tablet), and Android TV.';
         }
         if (cont) { cont.setAttribute('href', returnTo); }
         if (panel) { panel.hidden = false; }

@@ -21,6 +21,13 @@
     .brand img { width: 40px; height: 40px; border-radius: 8px; }
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 18px; }
+    .ecosystem-proof { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: center;
+      margin: -4px 0 18px; padding: 13px; border: 1px solid rgba(91,124,250,.38);
+      border-radius: 14px; background: rgba(91,124,250,.08); color: var(--muted);
+      font-size: 13.5px; line-height: 1.5; }
+    .ecosystem-proof img { display: block; width: 100%; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.1); }
+    .ecosystem-proof strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 15px; }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 24px; background: var(--panel); }
     .pill { display: inline-block; padding: 5px 12px; border-radius: 999px; font-size: 12px;
       font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
@@ -96,6 +103,7 @@
     /* Mobile: the cancel modal becomes a bottom sheet — larger reason rows and a
        sticky action bar so "Keep / Cancel" is always reachable without scrolling. */
     @media (max-width: 560px) {
+      .ecosystem-proof { grid-template-columns: 108px 1fr; gap: 10px; padding: 11px; }
       .preference-card { align-items: flex-start; flex-direction: column; }
       .modal-back { align-items: end; padding: 0; }
       .modal { width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0;
@@ -128,6 +136,13 @@
   <main class="wrap">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Your subscription</h1>
+    <div class="ecosystem-proof" role="note">
+      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+      <span>
+        <strong>Your Norva account travels with you.</strong>
+        Keep profiles, favorites and playback progress in sync across Web, Android mobile (phone and tablet), and Android TV.
+      </span>
+    </div>
     <div id="content"><div class="loading">Loading your subscription…</div></div>
     <p class="note" id="store-note"></p>
     <section class="preference-card" id="marketing-preference" aria-labelledby="marketing-preference-title" hidden>
@@ -790,7 +805,7 @@
           card.appendChild(el('span', 'pill muted', 'No active plan'));
           card.appendChild(el('div', 'plan-name', 'Norva'));
           card.appendChild(el('p', 'msg', status === 'expired'
-            ? 'Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile and Android TV.'
+            ? 'Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile (phone and tablet), and Android TV.'
             : "You don't have an active Norva plan yet."));
           content.appendChild(card);
           const row = el('div', 'actions');

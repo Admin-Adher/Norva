@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=87">
+  <link rel="stylesheet" href="/css/main.css?v=88">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -822,11 +822,11 @@
           <!-- Tabs -->
           <div class="tabs">
             <button class="tab active" data-tab="account">Account</button>
+            <button class="tab" data-tab="screens" id="screens-tab" style="display:none;">Devices &amp; screens</button>
             <button class="tab" data-tab="player">Playback &amp; Discovery</button>
             <button class="tab tab-advanced" data-tab="sources">TV Service</button>
             <button class="tab tab-advanced" data-tab="transcode">Transcoding</button>
             <button class="tab tab-advanced" data-tab="content">Manage Content</button>
-            <button class="tab tab-advanced" data-tab="screens" id="screens-tab" style="display:none;">Screens &amp; pairing</button>
             <button class="tab tab-advanced" data-tab="users" id="users-tab" style="display:none;">Local Users</button>
             <button class="settings-advanced-toggle" id="settings-advanced-toggle" type="button" aria-expanded="false">Advanced</button>
           </div>
@@ -892,7 +892,7 @@
               .screens-wrap{max-width:880px}
               .screens-pair{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(91,124,250,.12),rgba(181,121,255,.06));border:1px solid #2b3550;border-radius:16px;padding:22px}
               .screens-pair .sp-icon{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;background:rgba(91,124,250,.18);color:#9db4ff;flex:0 0 auto}
-              .screens-pair .sp-icon svg{width:28px;height:28px}
+               .screens-pair .sp-icon img{width:38px;height:38px;object-fit:contain}
               .screens-pair .sp-text{flex:1;min-width:200px}
               .screens-pair .sp-text h4{font-size:17px;margin:0 0 4px;color:#f1f5fb}
               .screens-pair .sp-text p{color:#9aa6bd;font-size:13px;margin:0;line-height:1.5}
@@ -922,9 +922,9 @@
             <div class="screens-wrap">
 
               <div class="screens-pair">
-                <div class="sp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+                <div class="sp-icon"><img src="/assets/landing/norva-icon-web-android.svg" alt=""></div>
                 <div class="sp-text">
-                  <h4>Add a TV, phone or browser</h4>
+                  <h4>Add a TV, phone, tablet or browser</h4>
                   <p>Open Norva on the other device and type the code it shows here to link it to your account.</p>
                 </div>
                 <div class="screens-pair-form">
@@ -934,7 +934,7 @@
               </div>
               <div class="screens-status" id="screens-pair-status"></div>
 
-              <div class="screens-h">Your screens</div>
+              <div class="screens-h">Your devices &amp; screens</div>
               <div class="screens-grid" id="screens-devices-list"></div>
               <div class="screens-status" id="screens-devices-status"></div>
 
@@ -2031,7 +2031,7 @@
   <script defer src="/js/components/SourceManager.js?v=36"></script>
   <script defer src="/js/components/EpgGuide.js?v=13"></script>
   <script defer src="/js/components/LiveGuideFusion.js?v=27"></script>
-  <script defer src="/js/pages/HomePage.js?v=49"></script>
+  <script defer src="/js/pages/HomePage.js?v=50"></script>
   <script defer src="/js/pages/LivePage.js?v=6"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=51"></script>
@@ -2043,7 +2043,7 @@
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=17"></script>
-  <script defer src="/js/app.js?v=49"></script>
+  <script defer src="/js/app.js?v=50"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

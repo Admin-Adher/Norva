@@ -87,6 +87,8 @@ public class MainActivity extends Activity {
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
+    private static final String PREF_NOTIF_ASKED = "notificationPermissionAsked";
+    private static final String PREF_NOTIF_MIGRATED_V18 = "notificationPermissionMigrationV18";
     private static final String CLOUD_ACCOUNT_URL = "https://norva.tv/account.html?returnTo=%2Fapp.html%3Fmobile%3D1%23home";
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String SUPABASE_USER_URL = "https://api.norva.tv/auth/v1/user";
@@ -896,6 +898,35 @@ public class MainActivity extends Activity {
             return getSharedPreferences(NorvaMessagingService.PREFS, MODE_PRIVATE)
                     .getString(NorvaMessagingService.KEY_TOKEN, "");
         }
+
+        /**
+         * Notification permission stays contextual: the web Home card can explain
+         * the benefit before Android displays its system dialog.
+         */
+        @android.webkit.JavascriptInterface
+        public String notificationPermissionState() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                    || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        == PackageManager.PERMISSION_GRANTED) {
+                return "granted";
+            }
+            boolean asked = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getBoolean(PREF_NOTIF_ASKED, false);
+            return (asked || notificationPermissionPreviouslyAsked()) ? "denied" : "prompt";
+        }
+
+        @android.webkit.JavascriptInterface
+        public void requestNotificationPermission() {
+            getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .edit().putBoolean(PREF_NOTIF_ASKED, true).apply();
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                    || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        == PackageManager.PERMISSION_GRANTED) {
+                runOnUiThread(() -> dispatchNotificationPermissionChanged());
+                return;
+            }
+            ensureNotifPermission();
+        }
     }
 
     private interface VerifiedBillingUserCallback {
@@ -1328,14 +1359,38 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Push setup: request notification permission (Android 13+) and resolve the FCM token,
-     * caching it in the shared prefs the messaging service uses. The web bridge reads it via
-     * CloudBridge.getPushToken and registers it with the backend. Best-effort and silent —
-     * if Firebase isn't initialized (e.g. a dev build without google-services.json), push
-     * simply stays off and the rest of the app is unaffected.
+     * Upgrade-safe denial detection. Older Norva builds asked at launch before
+     * PREF_NOTIF_ASKED existed. Android exposes a rationale after a normal denial;
+     * for a permanently denied v17 install, the one-time v18 migration recognizes
+     * that this package was updated rather than freshly installed.
+     */
+    private boolean notificationPermissionPreviouslyAsked() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false;
+        if (shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+            return true;
+        }
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(PREF_NOTIF_MIGRATED_V18, false)) return false;
+        try {
+            android.content.pm.PackageInfo info = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0);
+            boolean upgradedFromEarlierBuild = info.lastUpdateTime > info.firstInstallTime + 5_000L;
+            SharedPreferences.Editor edit = prefs.edit()
+                    .putBoolean(PREF_NOTIF_MIGRATED_V18, true);
+            if (upgradedFromEarlierBuild) edit.putBoolean(PREF_NOTIF_ASKED, true);
+            edit.apply();
+            return upgradedFromEarlierBuild;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Push setup resolves the FCM token without interrupting first-run with a
+     * permission dialog. Home asks only after explaining the concrete benefit.
+     * Best-effort and silent — if Firebase is unavailable, the app continues normally.
      */
     private void setupPush() {
-        ensureNotifPermission();
         try {
             FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token -> {
                 if (token == null || token.isEmpty()) return;
@@ -1344,6 +1399,25 @@ public class MainActivity extends Activity {
             });
         } catch (Throwable ignored) {
             // No Firebase / no google-services.json — push disabled, app continues normally.
+        }
+    }
+
+    private void dispatchNotificationPermissionChanged() {
+        if (webView == null) return;
+        try {
+            webView.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('norva:notification-permission-changed'));",
+                    null);
+        } catch (Exception ignored) {
+            // The page may be between navigations; it will read the bridge state on Home.
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_NOTIF_PERM) {
+            dispatchNotificationPermissionChanged();
         }
     }
 

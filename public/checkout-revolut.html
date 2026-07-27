@@ -25,10 +25,17 @@
     .brand span { font-size: 20px; font-weight: 800; }
     h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 6px; }
     .sub { color: var(--muted); font-size: 15px; margin-bottom: 22px; }
-    .platform-value { margin: -10px 0 18px; color: #dbe7ff; font-size: 13.5px; line-height: 1.5; }
+    .platform-value { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: center;
+      margin: -10px 0 18px; padding: 12px; border: 1px solid rgba(91,124,250,.36);
+      border-radius: 12px; background: rgba(91,124,250,.08); color: #dbe7ff; font-size: 13.5px; line-height: 1.5; }
+    .platform-value img { display: block; width: 100%; border-radius: 9px;
+      border: 1px solid rgba(255,255,255,.1); }
     .platform-value strong { color: var(--text); }
     .grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 560px) {
+      .platform-value { grid-template-columns: 108px 1fr; gap: 10px; }
+    }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--panel); }
 
     /* ── Order summary ──────────────────────────────────────────────────── */
@@ -173,8 +180,11 @@
     <div id="checkout-view">
       <h1>Preparing your secure checkout</h1>
       <p class="sub">We are loading the exact offer and billing terms for this account.</p>
-      <p class="platform-value"><strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
-        Your profiles, favorites and playback progress stay in sync on compatible devices.</p>
+      <div class="platform-value" role="note">
+        <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+        <span><strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong>
+          Your profiles, favorites and playback progress stay in sync on compatible devices.</span>
+      </div>
 
       <div class="grid">
         <!-- Order summary -->
@@ -203,7 +213,7 @@
           <ul class="features" id="sum-features">
             <li>Up to 2 profiles</li>
             <li>Personalized watchlists and progress</li>
-            <li>Sync across Web, Android mobile and Android TV</li>
+            <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
             <li>Offline mode on compatible devices</li>
             <li>Every Norva feature included</li>
           </ul>
@@ -270,7 +280,7 @@
     <div class="success" id="success-view">
       <span class="badge-ok" aria-hidden="true">✓</span>
       <h2>Your free trial has started</h2>
-      <p>You have full access to Norva on Web, Android mobile and Android TV. Your selected plan starts automatically
+      <p>You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your selected plan starts automatically
         after the 7-day trial unless you cancel before then.</p>
       <a class="btn" id="continue-btn" href="/app#home">Continue to Norva</a>
     </div>
@@ -613,7 +623,7 @@
       const DONE_STATUSES = ['trialing', 'active', 'plan_change_scheduled', 'plan_changed', 'updated', 'retrying'];
       const SUCCESS_COPY = {
         trial_setup: ['Your free trial has started',
-          'You have full access to Norva on Web, Android mobile and Android TV. Your first payment is scheduled for ' + trialChargeDate() +
+          'You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for ' + trialChargeDate() +
           ', then your selected plan renews automatically unless you cancel.'],
         plan_change: ['Plan change confirmed',
           'Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.'],
@@ -670,7 +680,7 @@
         success.querySelector('h2').textContent = copy[0];
         let successMessage = copy[1];
         if (checkoutKind === 'trial_setup') {
-          successMessage = 'You have full access to Norva on Web, Android mobile and Android TV. Your first payment is scheduled for ' +
+          successMessage = 'You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for ' +
             trialChargeDate() + ', then your selected plan renews automatically unless you cancel.';
         }
         if (checkoutKind === 'plan_change' && confirmed && confirmed.effective_at) {

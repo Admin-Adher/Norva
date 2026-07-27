@@ -317,6 +317,12 @@
             border: 1px solid rgba(148,163,184,.18);
         }
         .onb-icon svg { width: 32px; height: 32px; color: #8fb3ff; }
+        .onb-device-visual {
+            display: block; width: min(220px, 64vw); aspect-ratio: 8 / 5;
+            object-fit: cover; border-radius: 16px; margin-bottom: 12px;
+            border: 1px solid rgba(148,163,184,.2);
+            box-shadow: 0 16px 34px rgba(0,0,0,.28);
+        }
         .onb-slide h2 { font-size: 21px; font-weight: 800; line-height: 1.2; margin-bottom: 8px; }
         .onb-slide p { color: var(--muted); font-size: 14px; line-height: 1.55; max-width: 320px; }
         .onb-badge {
@@ -349,6 +355,7 @@
         html.native-app .fine-collapse { display: none; }
         html.native-app .onb-icon { width: 52px; height: 52px; margin-bottom: 10px; }
         html.native-app .onb-icon svg { width: 26px; height: 26px; }
+        html.native-app .onb-device-visual { width: min(190px, 54vw); margin-bottom: 9px; }
         html.native-app .onb-slide h2 { font-size: 19px; margin-bottom: 6px; }
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
@@ -362,9 +369,10 @@
     <section class="native-onboarding" aria-label="Why Norva">
         <div class="onb-track" id="onb-track">
             <article class="onb-slide">
-                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg></div>
-                <h2>Your whole library, instantly</h2>
-                <p>Paste your provider link and Norva builds your entire library — movies, series and live TV, with posters, logos and categories.</p>
+                <img class="onb-device-visual" src="/assets/landing/norva-multi-device.svg"
+                    alt="Norva on a TV, laptop, tablet and phone">
+                <h2>Norva, everywhere you watch</h2>
+                <p>Phone, tablet, web and Android TV stay in sync — including your profiles, favorites and playback progress.</p>
             </article>
             <article class="onb-slide">
                 <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93C7.05 19.44 4 16.08 4 12c0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41C19.92 5.77 22 8.65 22 12c0 2.08-.8 3.97-2.1 5.39z"/></svg></div>

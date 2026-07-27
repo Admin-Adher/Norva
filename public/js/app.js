@@ -1744,6 +1744,16 @@ class App {
         document.getElementById('account-sheet')?.classList.remove('active');
     }
 
+    openScreensSettings() {
+        if (this.currentPage !== 'settings') {
+            this.navigateTo('settings');
+        }
+        // Settings.show() can still be completing its account/source refresh after the
+        // page becomes visible. switchTab itself is synchronous, so one animation frame
+        // is enough to select the permanent devices entry without flashing Advanced.
+        requestAnimationFrame(() => this.pages.settings?.switchTab?.('screens'));
+    }
+
     buildAccountSheet() {
         const overlay = document.createElement('div');
         overlay.id = 'account-sheet';
@@ -1761,6 +1771,13 @@ class App {
                 <button type="button" class="account-row" data-act="switch">
                     <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
                 </button>
+                <button type="button" class="account-row" data-act="screens">
+                    <img class="account-ic account-ic-devices" src="/assets/landing/norva-icon-web-android.svg" alt="">
+                    <span class="account-row-copy">
+                        <span class="account-row-title">Devices &amp; screens</span>
+                        <span class="account-row-hint">Web, phone, tablet and TV</span>
+                    </span>
+                </button>
                 <button type="button" class="account-row" data-act="settings">
                     <img class="account-ic" src="/img/icons/norva-settings.svg" alt=""><span>Settings</span>
                 </button>
@@ -1776,6 +1793,7 @@ class App {
                 const act = row.dataset.act;
                 this.closeAccountSheet();
                 if (act === 'switch') window.NorvaProfiles?.openSwitcher?.();
+                else if (act === 'screens') this.openScreensSettings();
                 else if (act === 'settings') this.navigateTo('settings');
                 else if (act === 'logout') this.signOut();
             });
@@ -1791,12 +1809,17 @@ class App {
         const name = sheet.querySelector('#account-name');
         const email = sheet.querySelector('#account-email');
         const switchRow = sheet.querySelector('[data-act="switch"]');
+        const screensRow = sheet.querySelector('[data-act="screens"]');
         if (avatar && cur.avatarUrl) avatar.src = cur.avatarUrl;
         if (switchIc && cur.avatarUrl) switchIc.src = cur.avatarUrl;
         if (name) name.textContent = cur.name || 'Profile';
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
         // Profile switching only exists in cloud mode.
         if (switchRow) switchRow.style.display = cur.isCloud ? '' : 'none';
+        if (screensRow) {
+            const cloudUser = Boolean(cur.isCloud || this.currentUser?.cloud || window.API?.isCloudMode?.());
+            screensRow.style.display = cloudUser ? '' : 'none';
+        }
     }
 
     // Canonical sign-out (cloud → Supabase + /account.html, else local token).

@@ -63,6 +63,25 @@
       line-height: 1.65;
       max-width: 620px;
     }
+    .ecosystem-proof {
+      display: grid;
+      grid-template-columns: minmax(150px, 220px) 1fr;
+      gap: 20px;
+      align-items: center;
+      margin: 20px 0 16px;
+      padding: 16px;
+      border: 1px solid rgba(91, 124, 250, 0.38);
+      border-radius: 14px;
+      background: rgba(91, 124, 250, 0.08);
+    }
+    .ecosystem-proof img {
+      display: block;
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .ecosystem-proof strong { display: block; margin-bottom: 5px; color: var(--text); line-height: 1.35; }
+    .ecosystem-proof span { color: var(--muted); font-size: 14px; line-height: 1.5; }
     .status {
       margin-top: 24px;
       padding: 16px;
@@ -118,6 +137,7 @@
     @media (max-width: 560px) {
       body { padding: 14px; }
       .panel { padding: 20px 18px; }
+      .ecosystem-proof { grid-template-columns: 112px 1fr; gap: 12px; padding: 12px; }
       .actions { display: grid; }
       .btn { width: 100%; }
     }
@@ -137,9 +157,15 @@
       <span>Norva</span>
     </div>
     <h1>Norva Access</h1>
+    <div class="ecosystem-proof" role="note">
+      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+      <span>
+        <strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong>
+        Keep profiles, favorites and playback progress in sync on compatible devices.
+      </span>
+    </div>
     <p class="lead">
-      <strong>One subscription. Your catalog connected across Web, Android mobile and Android TV.</strong>
-      Keep profiles, favorites and playback progress in sync on compatible devices. Norva includes 2 profiles;
+      Norva includes 2 profiles;
       Norva Family includes 5. Norva is a media player; no content or TV subscription is included.
     </p>
     <div class="status" id="paywall-status">Checking Norva access...</div>
