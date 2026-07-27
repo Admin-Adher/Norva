@@ -55,6 +55,11 @@ verify_jwt = false
 [functions.norva-branded-email-worker]
 verify_jwt = false
 
+# New-signup Telegram worker. PostgreSQL owns the durable outbox and wakes this
+# endpoint with NORVA_CRON_SHARED_SECRET; the function verifies that secret itself.
+[functions.norva-signup-notify]
+verify_jwt = false
+
 # Privileged admin actions on users (resend confirmation / change role / suspend).
 # The gateway JWT check is disabled so the OPTIONS preflight and the request reach
 # the function, which verifies the caller is an admin itself (getUser + app_metadata
