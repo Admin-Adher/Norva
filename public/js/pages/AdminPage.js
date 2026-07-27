@@ -4234,12 +4234,20 @@ class AdminPage {
         }
         const rows = payload.rows.map(raw => {
             const r = raw && typeof raw === 'object' ? raw : {};
+            const known = Math.max(0, Number(r.known_files) || 0);
             const never = Math.max(0, Number(r.never_probed_files) || 0);
+            const rawProbed = Number(r.probed_files);
+            const probed = Math.max(0, Number.isFinite(rawProbed)
+                ? rawProbed
+                : known - never);
             const recent = Math.max(0, Number(r.probed_files_24h) || 0);
             return {
                 ...r,
                 total: Math.max(0, Number(r.catalog_titles) || 0),
                 resolved: Math.max(0, Number(r.resolved_titles) || 0),
+                known_files: known,
+                probed_files: probed,
+                probed_pct: known ? Math.round(1000 * probed / known) / 10 : 0,
                 never_probed: never,
                 probed_24h: recent,
                 resolved_24h: Math.max(0, Number(r.verified_files_24h) || 0),
@@ -4441,7 +4449,11 @@ class AdminPage {
         const exact = engineHealth?.available === true;
         const totalTitles = enrich.reduce((a, r) => a + (Number(r.total) || 0), 0);
         const resolvedTitles = enrich.reduce((a, r) => a + (Number(r.resolved) || 0), 0);
-        const coverage = totalTitles ? Math.round(100 * resolvedTitles / totalTitles) : 100;
+        const knownFiles = enrich.reduce((a, r) => a + (Number(r.known_files) || 0), 0);
+        const probedFiles = enrich.reduce((a, r) => a + (Number(r.probed_files) || 0), 0);
+        const coverage = exact
+            ? (knownFiles ? Math.round(100 * probedFiles / knownFiles) : 0)
+            : (totalTitles ? Math.round(100 * resolvedTitles / totalTitles) : 0);
         const neverProbed = enrich.reduce((a, r) => a + (Number(r.never_probed) || 0), 0);
         const stFound = enrich.reduce((a, r) => a + (Number(r.subtitle_found) || 0), 0);
         // Only canonical server states may increment this counter. Legacy zeros remain unknown.
@@ -4459,7 +4471,7 @@ class AdminPage {
         const tmdbBacklog = (Number(ov.tmdb_year_backlog) || 0) + (Number(ov.tmdb_unmatched) || 0) + (Number(ov.tmdb_unverified) || 0);
         const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
         el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé moteur</div><div class="admin-cards">
-            ${card(coverage + ' %', 'Couverture audio', covCls, '🔊')}
+            ${card(coverage + ' %', exact ? 'Fichiers sondés' : 'Couverture audio (legacy)', covCls, '🔊')}
             ${card(n(fleetBlocked), 'Flotte bloquée', fleetBlocked > 0 ? 'alert' : 'ok', '⛔')}
             ${card(exact ? n(progressing) : '—', exact ? 'Lignes en progression' : 'Progression exacte indisponible', exact && progressing > 0 ? 'ok' : '', '▶️')}
             ${card(exact ? n(neverProbed) : '—', exact ? 'Fichiers jamais sondés' : 'File exacte indisponible', '', '🗄️')}
@@ -5147,7 +5159,9 @@ class AdminPage {
             if (f === 'waiting') return ['idle', 'retry_wait'].includes(state.kind);
             if (f === 'paused') return ['paused', 'disabled'].includes(state.kind);
             if (f === 'unknown') return state.kind === 'unknown';
-            if (f === 'low') return (Number(r.resolved_pct) || 0) < 60;
+            if (f === 'low') return (exact
+                ? (Number(r.probed_pct) || 0)
+                : (Number(r.resolved_pct) || 0)) < 60;
             return true;
         });
         const legacyNote = !exact
@@ -5169,7 +5183,7 @@ class AdminPage {
         const head = `<tr>
             <th>Provider</th><th>Type</th><th class="num">Catalogue</th>
             <th class="num" title="Fichiers exacts connus">Fichiers connus</th>
-            <th class="num">Audio résolu</th>
+            <th class="num">${exact ? 'Fichiers sondés' : 'Audio résolu (legacy)'}</th>
             <th class="num" title="Fichiers exacts sans analyse">Jamais sondé</th>
             <th class="num" title="Fichiers exacts analysés sur 24 h">Sondés 24h</th>
             <th class="num" title="Fichiers exacts avec audio vérifié sur 24 h">Vérifiés 24h</th>
@@ -5197,7 +5211,7 @@ class AdminPage {
             <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
             <td class="num">${AdminPage.n(r.total)}</td>
             <td class="num">${exact ? AdminPage.n(r.known_files) : '—'}</td>
-            ${barCell(r.resolved, r.resolved_pct)}
+            ${barCell(exact ? r.probed_files : r.resolved, exact ? r.probed_pct : r.resolved_pct)}
             <td class="num">${exact ? AdminPage.n(r.never_probed) : '—'}</td>
             <td class="num">${exact ? AdminPage.n(r.probed_24h) : '—'}</td>
             <td class="num">${exact ? AdminPage.n(r.resolved_24h) : '—'}</td>

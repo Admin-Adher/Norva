@@ -417,6 +417,50 @@ test('legacy fallback masks every exact-file counter instead of showing a fake s
   }
 });
 
+test('exact health renders probed-file coverage instead of obsolete resolved-title coverage', () => {
+  const elements = {
+    'mot-health': { innerHTML: '' },
+    'admin-enrich': { innerHTML: '' },
+  };
+  const document = {
+    getElementById: (id) => elements[id] || null,
+    querySelector: () => null,
+  };
+  const AdminPage = loadAdminPage({ document });
+  const page = new AdminPage({});
+  const health = AdminPage.normalizeEngineHealth({
+    schema_version: 1,
+    rows: [{
+      owner_email: 'audit@example.test',
+      panel: 'Exact panel',
+      item_type: 'movie',
+      catalog_titles: 1000,
+      resolved_titles: 0,
+      resolved_pct: 0,
+      known_files: 100,
+      probed_files: 25,
+      never_probed_files: 75,
+      probed_files_24h: 4,
+      verified_files_24h: 3,
+      subtitle_titles: 0,
+      state: 'active',
+      reason: 'progressing',
+    }],
+  });
+  page._engineHealth = health;
+
+  page._renderEngineHealth(health.rows, [], {}, health);
+  page._renderEnrich(health.rows);
+
+  assert.equal(health.rows[0].probed_pct, 25);
+  assert.match(elements['mot-health'].innerHTML, />25 %</);
+  assert.match(elements['mot-health'].innerHTML, /Fichiers sond\u00e9s/);
+  assert.doesNotMatch(elements['mot-health'].innerHTML, />0 %</);
+  assert.match(elements['admin-enrich'].innerHTML, /Fichiers sond\u00e9s/);
+  assert.match(elements['admin-enrich'].innerHTML, />25 \(25%\)</);
+  assert.doesNotMatch(elements['admin-enrich'].innerHTML, /Audio r\u00e9solu/);
+});
+
 test('dynamic scheduler issues distinguish missing, disabled, and failed pg_cron without duplicate job names', () => {
   const AdminPage = loadAdminPage();
   const jobname = 'norva-dynamic-enrichment-fleet';
@@ -576,7 +620,7 @@ test('Moteur requests the versioned engine RPC and keeps legacy coverage as an e
   assert.match(admin, /engineState\(/);
   assert.match(admin, /engineSchedulerIssues\(/);
   assert.match(admin, /engineHealth\.available/);
-  assert.match(app, /AdminPage\.js\?v=86/);
+  assert.match(app, /AdminPage\.js\?v=87/);
   assert.match(
     enrichRenderer,
     /latest\(r\.last_probe_at,\s*r\.last_verified_at\)/,
