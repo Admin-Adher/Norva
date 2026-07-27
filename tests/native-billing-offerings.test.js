@@ -11,8 +11,8 @@ const targets = [
     main: 'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
     manifest: 'clients/android-phone/app/src/main/AndroidManifest.xml',
     gradle: 'clients/android-phone/app/build.gradle',
-    versionCode: 17,
-    versionName: '1.3.4',
+    versionCode: 18,
+    versionName: '1.3.5',
     bridgeCount: 0,
   },
 ];
@@ -98,6 +98,7 @@ test('Android TV delegates purchases to the web and ships no native billing surf
   const main = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
   const gradle = read('clients/android-tv/app/build.gradle');
   const manifest = read('clients/android-tv/app/src/main/AndroidManifest.xml');
+  const releaseWorkflow = read('.github/workflows/android-release.yml');
   const subscribe = read('public/subscribe.html');
 
   assert.equal(fs.existsSync(path.join(root,
@@ -107,6 +108,9 @@ test('Android TV delegates purchases to the web and ships no native billing surf
   assert.doesNotMatch(main, /getOfferingsForUser|purchaseForUser|restoreForUser/);
   assert.doesNotMatch(gradle, /com\.revenuecat\.purchases|REVENUECAT_API_KEY/);
   assert.doesNotMatch(manifest, /NorvaApplication/);
+  assert.doesNotMatch(manifest, /com\.android\.vending\.BILLING/);
+  assert.doesNotMatch(releaseWorkflow, /REVENUECAT_API_KEY_TV/);
+  assert.match(gradle, /androidx\.tvprovider:tvprovider:1\.1\.0/);
   assert.match(subscribe, /id="tv-purchase-path"/);
   assert.match(subscribe, /Open norva\.tv, sign in with this same Norva account/i);
 });
@@ -133,6 +137,29 @@ test('RevenueCat 9 maps all four paywall packages to bare and store product ids'
   assert.match(billing, /baseProductId\(productId\)\.equals\(baseProductId\(storeProductId\)\)/);
 });
 
+test('Android phone targets API 36 with a compatible build toolchain', () => {
+  const appGradle = read('clients/android-phone/app/build.gradle');
+  const rootGradle = read('clients/android-phone/build.gradle');
+  const manifest = read('clients/android-phone/app/src/main/AndroidManifest.xml');
+
+  assert.match(appGradle, /compileSdk\s+36\b/);
+  assert.match(appGradle, /targetSdk\s+36\b/);
+  assert.match(rootGradle, /com\.android\.application" version "8\.10\.1"/);
+  assert.doesNotMatch(manifest, /enableOnBackInvokedCallback="false"/);
+});
+
+test('Android phone migrates custom back handling for target API 36', () => {
+  for (const file of [
+    'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
+    'clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java',
+  ]) {
+    const source = read(file);
+    assert.match(source, /getOnBackInvokedDispatcher\(\)\.registerOnBackInvokedCallback/);
+    assert.match(source, /this::handleBackPressed/);
+    assert.match(source, /private void handleBackPressed\(\)/);
+  }
+});
+
 test('native billing globally serializes operations with a tokenized watchdog', () => {
   const billing = read('clients/android-phone/app/src/main/java/tv/norva/phone/NorvaBilling.java');
   assert.match(billing, /activeOperationToken/);
@@ -155,6 +182,7 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
   for (const source of [phone, tv]) {
     assert.match(source, /MIXED_CONTENT_NEVER_ALLOW/);
     assert.match(source, /handler\.cancel\(\)/);
+    assert.doesNotMatch(source, /handler\.proceed\(\)/);
     assert.match(source, /shouldOverrideUrlLoading/);
     assert.match(source, /removeJavascriptInterface/);
     assert.match(source, /norva-cloud-device-token/);
@@ -183,4 +211,24 @@ test('Android TV release version remains explicit after billing removal', () => 
   const gradle = read('clients/android-tv/app/build.gradle');
   assert.match(gradle, /versionCode\s+24\b/);
   assert.match(gradle, /versionName\s+"3\.8\.11-hybrid"/);
+});
+
+test('Android builds enforce lint and opt out of OS data extraction', () => {
+  const workflow = read('.github/workflows/build.yml');
+  const phoneManifest = read('clients/android-phone/app/src/main/AndroidManifest.xml');
+  const tvManifest = read('clients/android-tv/app/src/main/AndroidManifest.xml');
+  const phoneRules = read('clients/android-phone/app/src/main/res/xml/data_extraction_rules.xml');
+  const tvRules = read('clients/android-tv/app/src/main/res/xml/data_extraction_rules.xml');
+
+  assert.equal((workflow.match(/gradle :app:lintDebug :app:assembleDebug/g) || []).length, 2);
+  for (const manifest of [phoneManifest, tvManifest]) {
+    assert.match(manifest, /android:allowBackup="false"/);
+    assert.match(manifest, /android:dataExtractionRules="@xml\/data_extraction_rules"/);
+    assert.match(manifest, /android:fullBackupContent="false"/);
+  }
+  for (const rules of [phoneRules, tvRules]) {
+    assert.match(rules, /<cloud-backup>/);
+    assert.match(rules, /<device-transfer>/);
+    assert.match(rules, /<exclude domain="sharedpref" path="\." \/>/);
+  }
 });

@@ -54,6 +54,7 @@ import androidx.credentials.CustomCredential;
 import androidx.credentials.GetCredentialRequest;
 import androidx.credentials.GetCredentialResponse;
 import androidx.credentials.exceptions.GetCredentialException;
+import androidx.credentials.exceptions.NoCredentialException;
 
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
@@ -71,11 +72,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Collections;
+import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.Collections;
 
 /**
  * Norva Mobile — Android phone client.
@@ -143,12 +145,17 @@ public class MainActivity extends Activity {
         // window then black flash; must be installed before super.onCreate().
         try { androidx.core.splashscreen.SplashScreen.installSplashScreen(this); } catch (Exception ignored) { }
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    this::handleBackPressed);
+        }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#0a0a0f"));
         setContentView(root);
-        // Android 15 enforces edge-to-edge for targetSdk 35. Keep browsing
+        // Android 15+ enforces edge-to-edge for current target SDKs. Keep browsing
         // content below the visible status/navigation bars so the gesture pill
         // and classic three-button row never cover Norva's bottom navigation or
         // the HTML-player fallback controls.
@@ -252,9 +259,16 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        // Pre-Android 13 fallback. Android 13+ dispatches to the registered
+        // OnBackInvokedCallback, which is mandatory once targetSdk reaches 36.
+        handleBackPressed();
+    }
+
+    private void handleBackPressed() {
         if (!webViewVisible || webView == null) {
-            super.onBackPressed();
+            finish();
             return;
         }
         // Let the web app consume Back first (close a menu, modal, channel drawer,
@@ -462,17 +476,9 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler,
                                            SslError error) {
-                // Public/cloud TLS must always fail closed. A self-signed
-                // certificate is accepted only for an explicitly private LAN
-                // server selected in Advanced setup.
-                String failingUrl = error == null ? null : error.getUrl();
-                if ("server".equals(prefs().getString(PREF_MODE, null))
-                        && isExplicitLocalTlsUrl(failingUrl)
-                        && isSameOrigin(failingUrl, lastLoadedUrl)) {
-                    handler.proceed();
-                } else {
-                    handler.cancel();
-                }
+                // Never bypass certificate validation, including for LAN servers.
+                // Users can still connect to an explicit local HTTP endpoint.
+                handler.cancel();
             }
         });
 
@@ -762,31 +768,6 @@ public class MainActivity extends Activity {
 
     private static boolean safeEqualsIgnoreCase(String left, String right) {
         return left != null && right != null && left.equalsIgnoreCase(right);
-    }
-
-    private static boolean isExplicitLocalTlsUrl(String value) {
-        if (value == null || value.isEmpty()) return false;
-        try {
-            Uri uri = Uri.parse(value);
-            if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
-            String host = uri.getHost();
-            if (host == null) return false;
-            String h = host.toLowerCase(java.util.Locale.US);
-            if ("localhost".equals(h) || "127.0.0.1".equals(h) || "::1".equals(h)
-                    || h.endsWith(".local")) return true;
-            if (h.startsWith("10.") || h.startsWith("192.168.")
-                    || h.startsWith("169.254.") || h.startsWith("fc")
-                    || h.startsWith("fd") || h.startsWith("fe80:")) return true;
-            if (h.startsWith("172.")) {
-                String[] parts = h.split("\\.");
-                if (parts.length == 4) {
-                    int second = Integer.parseInt(parts[1]);
-                    return second >= 16 && second <= 31;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
     }
 
     /**
@@ -1368,7 +1349,7 @@ public class MainActivity extends Activity {
 
     private static String sanitizeContainer(String c) {
         if (c == null) return "mp4";
-        String s = c.toLowerCase().replaceAll("[^a-z0-9]", "");
+        String s = c.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
         return s.isEmpty() ? "mp4" : s;
     }
 
@@ -1677,6 +1658,10 @@ public class MainActivity extends Activity {
                         public void onError(GetCredentialException e) {
                             watchdog.removeCallbacks(onTimeout);
                             if (!answered.compareAndSet(false, true)) return;
+                            if (e instanceof NoCredentialException) {
+                                sendGoogleIdTokenToWeb(null, "no_google_credential");
+                                return;
+                            }
                             // Surface the exception class too — e.g. NoCredentialException
                             // (no Google account on device) vs GetCredentialProviderConfigurationException
                             // (SHA-1 / OAuth client misconfigured) read very differently.
@@ -1729,9 +1714,7 @@ public class MainActivity extends Activity {
         splashPanel.setVisibility(View.GONE);
 
         ImageView logo = new ImageView(this);
-        int logoId = getResources().getIdentifier("norva_app_icon", "drawable", getPackageName());
-        if (logoId == 0) logoId = getResources().getIdentifier("ic_launcher", "drawable", getPackageName());
-        if (logoId != 0) logo.setImageResource(logoId);
+        logo.setImageResource(R.drawable.norva_app_icon);
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(96), dp(96));
         logoLp.bottomMargin = dp(28);
         splashPanel.addView(logo, logoLp);

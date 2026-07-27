@@ -1560,7 +1560,10 @@ class SeriesPage {
             }
             this.countEl.textContent = total;
         }
-        this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+        // Keep Reset in the TV action row even when no filter is active. Removing
+        // the focused control after reset changes the D-pad graph mid-command and
+        // can strand focus on an invisible element.
+        this.resetBtn?.classList.toggle('hidden', !this._isTvMode() && !this.hasActiveFilters());
         this.renderActiveFilterChips();
     }
 
@@ -2155,6 +2158,7 @@ class SeriesPage {
         append(catalogMeta, this.countEl);
         append(catalogHead, this.activeFiltersEl);
         append(catalogHead, this.sortSelect);
+        this.resetBtn?.classList.remove('hidden');
         this.activeFiltersEl?.removeAttribute('data-tv-nav-region');
 
         // Anything left in the legacy bar is intentionally absent from the TV mockup.

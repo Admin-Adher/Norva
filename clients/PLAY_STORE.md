@@ -36,7 +36,8 @@ default), this is your *upload* key; Google holds the app signing key.
 ## 2. App identity — **[repo, done]**
 
 - Application IDs (immutable after first publish): `tv.norva.phone`, `tv.norva.tv`.
-- Target/compile SDK 35, min SDK 23. ✅ (meets Play's API-35 requirement.)
+- Phone and TV: target/compile SDK 36; both min SDK 23.
+  ✅ (meets the August 2026 phone requirement and the Android TV exception.)
 - **Android App Links** (`public/.well-known/assetlinks.json`): only the phone
   app declares `autoVerify` https links to `norva.tv` (`/app.html`, `/t/`), so
   the file lists **only** `tv.norva.phone` — the TV app uses the `norva://open`

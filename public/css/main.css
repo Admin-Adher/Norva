@@ -10535,6 +10535,13 @@ kbd {
   color: var(--color-text-primary);
 }
 
+html.tv-mode .multi-select-item:focus {
+  outline: none;
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(47, 119, 255, 0.9);
+}
+
 .multi-select-item input {
   accent-color: var(--color-accent);
   flex-shrink: 0;

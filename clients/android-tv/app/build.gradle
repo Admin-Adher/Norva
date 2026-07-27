@@ -10,15 +10,14 @@ def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystore
 
 android {
     namespace "tv.norva.tv"
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId "tv.norva.tv"
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode 24
         versionName "3.8.11-hybrid"
-
     }
 
     buildFeatures {
@@ -84,9 +83,6 @@ dependencies {
     // the Android TV now-playing card drive the player.
     implementation "androidx.media3:media3-session:1.5.1"
     // Watch Next ("Play Next") row on the Android TV home screen.
-    implementation "androidx.tvprovider:tvprovider:1.0.0"
-    // In-app subscriptions (Google Play Billing) through RevenueCat. Pinned to the
-    // latest v8 release (8.25.0) for reproducible release builds — this is what the
-    // old "8.+" range already resolved to, now frozen so a future v9/v10 with API
-    // changes can't slip into a release unnoticed. Bump deliberately when testing a newer v8.
+    // 1.1.0 exposes the Watch Next builder contract as public API.
+    implementation "androidx.tvprovider:tvprovider:1.1.0"
 }

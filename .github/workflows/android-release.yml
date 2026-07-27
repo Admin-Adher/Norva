@@ -30,10 +30,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       - name: Decode release keystore
         env:
@@ -95,10 +100,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       - name: Decode release keystore
         env:
@@ -117,9 +127,6 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          # RevenueCat public SDK key for the TV app (goog_..., different from phone).
-          # Same mechanism as the phone job (ORG_GRADLE_PROJECT_ → findProperty).
-          ORG_GRADLE_PROJECT_REVENUECAT_API_KEY: ${{ secrets.REVENUECAT_API_KEY_TV }}
         run: gradle :app:bundleRelease --no-daemon
 
       - name: Upload AAB artifact

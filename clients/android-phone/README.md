@@ -18,7 +18,7 @@ The local connector (advanced) and `norva://pair` deep links still work.
 ## Prerequisites
 
 - Android Studio (or the Android command-line SDK tools) + JDK 17
-- Android SDK platform 35
+- Android SDK platform 36
 - A device/emulator running Android 6.0+ (API 23+)
 
 ## Build the APK

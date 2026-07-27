@@ -32,7 +32,16 @@ class MultiSelect {
             e.stopPropagation();
             this.panel?.classList.toggle('hidden');
             if (!this.panel?.classList.contains('hidden')) {
-                this.searchInput?.focus();
+                if (document.documentElement.classList.contains('tv-mode')) {
+                    // On Android TV, focusing the search field immediately opens
+                    // the system IME, which captures the D-pad before the web app.
+                    // Enter the panel on "All" instead; Up still reaches Search
+                    // when the user explicitly wants to type.
+                    const firstAction = this.panel.querySelector('[data-action="all"]');
+                    requestAnimationFrame(() => firstAction?.focus({ preventScroll: true }));
+                } else {
+                    this.searchInput?.focus();
+                }
             }
         });
 

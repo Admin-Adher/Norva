@@ -30,6 +30,18 @@
         '.channel-tile', '.dashboard-card', '.tv-more-like-card'
     ].join(',');
 
+    // Optional native audit bridge, present only in the opt-in debug APK used by
+    // the emulator matrix. It has zero effect in release/cloud browsers.
+    function auditDpad(action, el) {
+        const bridge = window.__norvaDpadAudit;
+        if (!bridge || typeof bridge.log !== 'function') return;
+        const page = el?.closest?.('.page');
+        const id = el?.id || '-';
+        const classes = String(el?.className || '-').trim().replace(/\s+/g, '.');
+        const text = String(el?.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+        bridge.log(`${action} id=${id} class=${classes} text=${text} page=${page?.id || '-'}`);
+    }
+
     // Visibility test on an already-measured rect — same truthiness as isVisible's
     // rect checks, split out so getCandidatesWithRects can reuse the one rect it
     // already read instead of forcing a second getBoundingClientRect() per element.
@@ -134,6 +146,10 @@
             // are never D-pad stops. (The detail-panel favourite is .movie-secondary-
             // action / .series-secondary-action — a different class — and stays.)
             if (el.classList.contains('favorite-btn') || el.classList.contains('version-badge')) continue;
+            // A category row and its nested checkbox represent the same action.
+            // Keep the full row as the sole TV stop so one category never requires
+            // two arrow presses or leaves the focus ring on the tiny checkbox.
+            if (el.matches('.multi-select-item input[type="checkbox"]')) continue;
             if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
             const rect = el.getBoundingClientRect();
             if (!isVisibleRect(rect)) continue;
@@ -272,6 +288,8 @@
     let lastNavKeyAt = 0;
     let lastNavMoveAt = 0;
     let navBurst = false;
+    let lastNavDirection = null;
+    let lastNavDirectionReleased = true;
     const NAV_BURST_MS = 250;
     // Held-key rate cap: while a direction is held the OS repeats keydown ~25-40x/s, and
     // the full pipeline (candidate scan + geometry reads + scroll) ran on every repeat,
@@ -280,6 +298,13 @@
     // track by eye AND far cheaper. Isolated presses are never throttled.
     const NAV_THROTTLE_MS = 80;
     function navScrollBehavior() { return navBurst ? 'auto' : 'smooth'; }
+
+    // A fast change of direction is a distinct command, not a held-key repeat.
+    // Android TV WebView does not reliably set KeyboardEvent.repeat, so use the
+    // absence of an intervening keyup plus the same direction as the repeat signal.
+    function isHeldNavRepeat(direction, previousDirection, previousReleased, burst) {
+        return burst && direction === previousDirection && !previousReleased;
+    }
 
     function scrollActivePage(direction, focused = null) {
         const target = findVerticalScroller(focused, direction);
@@ -331,6 +356,58 @@
 
     // Nearest VISIBLE card above `card` within its grid — lets UP walk up the visible rows before
     // the scroll step. Prefers the same column, then the nearest row.
+    // Movies/Series filter controls form two explicit D-pad rows. Generic spatial
+    // scoring is deliberately NOT used inside or between those rows: controls with
+    // different widths (notably Any Time -> Favorites) can otherwise become a dead
+    // end in older Android WebViews. DOM order is the visual left-to-right order.
+    function catalogFilterRows() {
+        const page = activePage();
+        if (!page || (page.id !== 'page-movies' && page.id !== 'page-series')) return [];
+        const selector = page.id === 'page-series'
+            ? '.tv-series-filter-row'
+            : '.tv-movies-filter-row';
+        return [...page.querySelectorAll(selector)]
+            .filter(isVisible)
+            .map((row) => ({
+                row,
+                items: [...row.querySelectorAll(INTERACTIVE_SELECTOR)].filter((el) =>
+                    !el.disabled && !el.closest('.hidden, [hidden]') && isVisible(el))
+            }))
+            .filter(({ items }) => items.length);
+    }
+
+    function nearestCatalogFilterItem(items, fromEl) {
+        if (!items?.length || !fromEl) return null;
+        const fromX = centerOf(fromEl).x;
+        return items.reduce((best, item) => {
+            const distance = Math.abs(centerOf(item).x - fromX);
+            return distance < best.distance ? { item, distance } : best;
+        }, { item: items[0], distance: Infinity }).item;
+    }
+
+    function catalogFilterStep(focused, direction) {
+        if (!focused) return null;
+        const rows = catalogFilterRows();
+        const rowIndex = rows.findIndex(({ row }) => row.contains(focused));
+        if (rowIndex < 0) return null;
+        const itemIndex = rows[rowIndex].items.indexOf(focused);
+        if (itemIndex < 0) return null;
+
+        if (direction === 'ArrowRight') {
+            return rows[rowIndex].items[itemIndex + 1] || null;
+        }
+        if (direction === 'ArrowLeft') {
+            return rows[rowIndex].items[itemIndex - 1] || null;
+        }
+        if (direction === 'ArrowDown' && rowIndex < rows.length - 1) {
+            return nearestCatalogFilterItem(rows[rowIndex + 1].items, focused);
+        }
+        if (direction === 'ArrowUp' && rowIndex > 0) {
+            return nearestCatalogFilterItem(rows[rowIndex - 1].items, focused);
+        }
+        return null;
+    }
+
     function gridCardAbove(card) {
         const grid = card?.closest?.('.movies-grid, .series-grid');
         if (!grid) return null;
@@ -505,6 +582,7 @@
             el.setAttribute('tabindex', '-1');
         }
         el.focus({ preventScroll: true });
+        auditDpad('focus', el);
         // inline:'center' keeps the focused card centered as the D-pad walks a
         // horizontal rail (instead of leaving it stuck against an edge). Instant
         // during a held-key burst so overlapping smooth scrolls don't jank the TV.
@@ -604,13 +682,20 @@
         const isEnter = e.key === 'Enter';
         if (!isArrow && !isEnter) return;
 
+        let heldNavRepeat = false;
+
         // Refresh the held-key burst flag so this move's scroll (focusElement /
         // scrollActivePage) is instant when presses are coming fast, smooth when
         // isolated. Only arrows drive scrolling, so only they update the cadence.
         if (isArrow) {
             const now = e.timeStamp || (typeof performance !== 'undefined' ? performance.now() : 0);
             navBurst = (now - lastNavKeyAt) < NAV_BURST_MS;
+            heldNavRepeat = isHeldNavRepeat(
+                e.key, lastNavDirection, lastNavDirectionReleased, navBurst
+            );
             lastNavKeyAt = now;
+            lastNavDirection = e.key;
+            lastNavDirectionReleased = false;
         }
 
         // Start this keydown with a fresh candidate scan, and guarantee the memo is
@@ -621,12 +706,13 @@
         else Promise.resolve().then(() => { candCache = null; });
 
         const focused = currentFocus();
+        auditDpad(`key ${e.key}`, focused);
 
         // Held-key throttle (spatial nav only — text-field caret stays fully responsive).
         // A burst repeat that lands too soon after the last processed move is dropped; the
         // NEXT repeat still moves, so held-scroll keeps flowing without running the whole
         // navigation pipeline 30-40x/s on a weak TV.
-        if (isArrow && navBurst && !isTextField(focused)) {
+        if (isArrow && heldNavRepeat && !isTextField(focused)) {
             const nowMs = (typeof performance !== 'undefined' ? performance.now() : (e.timeStamp || 0));
             if (nowMs - lastNavMoveAt < NAV_THROTTLE_MS) { e.preventDefault(); return; }
             lastNavMoveAt = nowMs;
@@ -819,6 +905,19 @@
             return;
         }
 
+        // The two catalogue filter bands are a deterministic control graph, not a
+        // loose cloud of rectangles. This handles all four arrows inside/between the
+        // rows; boundary presses intentionally fall through to the rail, content, or
+        // split-panel rules below.
+        if (navScope() === document &&
+            (activePage()?.id === 'page-movies' || activePage()?.id === 'page-series')) {
+            const filterStep = catalogFilterStep(focused, e.key);
+            if (filterStep) {
+                focusElement(filterStep);
+                return;
+            }
+        }
+
         if (e.key === 'ArrowDown' && focused.closest('.navbar')) {
             // Left rail (TV): walk the vertical rail top-to-bottom by GEOMETRY, so the
             // bottom utility cluster (Search / bell / profile) stays reachable across the
@@ -856,10 +955,9 @@
             }
         }
 
-        // Movies/Series TV: walk each filter band internally, then bridge its right
-        // edge straight to the docked preview CTA. Pure geometry cannot make this hop
-        // reliably because the large poster pushes the first panel button far below
-        // the filters, so cards underneath otherwise out-score it.
+        // Movies/Series TV: catalogFilterStep above owns the two filter rows. This
+        // fallback keeps toolbar chips/sort walking horizontally and bridges the
+        // right edge of any catalogue control band to the docked preview CTA.
         if (e.key === 'ArrowRight' &&
             (activePage()?.id === 'page-movies' || activePage()?.id === 'page-series') &&
             navScope() === document) {
@@ -1120,6 +1218,7 @@
     // marks a genuine second press (a continuous hold emits keydowns with no interleaved keyup).
     document.addEventListener('keyup', (e) => {
         if (e.key === 'ArrowUp') upReleased = true;
+        if (e.key === lastNavDirection) lastNavDirectionReleased = true;
     }, true);
 
     // Auto-focus the first field/button when a modal opens, so the remote

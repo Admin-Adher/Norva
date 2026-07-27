@@ -27,6 +27,7 @@ import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
@@ -39,6 +40,7 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.text.CueGroup;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
@@ -70,6 +72,7 @@ import java.util.UUID;
  * Built entirely in code (no media3-ui) so the APK assembles with raw SDK
  * tools and stays small.
  */
+@OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends Activity {
 
     private static final String TAG = "NorvaPlayer";
@@ -2765,7 +2768,7 @@ public class PlayerActivity extends Activity {
             // VOD only: a live channel would write a junk history row per tick.
             if (!"channel".equals(itemType) && now - lastCloudRelayMs >= 45000L) {
                 lastCloudRelayMs = now;
-                MainActivity main = MainActivity.current;
+                MainActivity main = MainActivity.currentInstance();
                 if (main != null) main.relayNativeHeartbeat(sourceId, itemType, itemId, pos, dur);
             }
         } catch (Exception ignored) { /* progress persistence is best-effort */ }

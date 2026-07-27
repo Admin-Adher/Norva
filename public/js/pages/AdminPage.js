@@ -333,6 +333,8 @@ class AdminPage {
 #page-admin .mot-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--adm-tx3);margin-top:10px;}
 #page-admin .mot-legend b{color:var(--adm-tx2);}
 #page-admin tr.mot-bad{background:rgba(248,113,113,.05);}
+#page-admin .mot-state-detail{font-size:10.5px;color:var(--adm-tx3);line-height:1.35;margin-top:4px;max-width:230px;}
+#page-admin .mot-legacy-note{background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.22);color:#fcd34d;border-radius:10px;padding:9px 12px;font-size:11.5px;line-height:1.45;margin-bottom:10px;}
 /* Support header KPI cards (big icon on the left, like the mockup) */
 #page-admin .sup-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:14px;margin-bottom:20px;}
 #page-admin .sup-card{display:flex;align-items:center;gap:14px;background:linear-gradient(158deg,var(--adm-card1),var(--adm-card2));border:1px solid var(--adm-line);border-radius:14px;padding:16px 18px;box-shadow:0 2px 10px rgba(0,0,0,.22);}
@@ -4220,19 +4222,165 @@ class AdminPage {
     }
 
     // ── Page: Moteur (enrichment + crons) ──
-    // Per enrichment row → single incident class (precedence: done > muet > arrêt > slow > active).
-    _enrichKind(r) {
-        if (Number(r.never_probed) === 0) return 'done';
-        if (Number(r.probed_24h) >= 20 && Number(r.resolved_24h) === 0) return 'muet';
-        if (Number(r.probed_24h) === 0) return 'arret';
-        if (Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 365) return 'slow';
-        return 'active';
+    // Normalize the exact-file fleet RPC into the historical table shape. This keeps the renderers
+    // small while preserving a strict marker: only rows carrying __engine_health_v1 may ever be
+    // classified blocked/stalled. A missing RPC must degrade to "unknown", never manufacture an
+    // outage from the obsolete cloud_titles.audio_probed_at counter.
+    static normalizeEngineHealth(payload) {
+        const available = !!payload && typeof payload === 'object'
+            && Number(payload.schema_version) >= 1 && Array.isArray(payload.rows);
+        if (!available) {
+            return { available: false, schema_version: 0, flags: {}, scheduler: {}, summary: {}, rows: [] };
+        }
+        const rows = payload.rows.map(raw => {
+            const r = raw && typeof raw === 'object' ? raw : {};
+            const never = Math.max(0, Number(r.never_probed_files) || 0);
+            const recent = Math.max(0, Number(r.probed_files_24h) || 0);
+            return {
+                ...r,
+                total: Math.max(0, Number(r.catalog_titles) || 0),
+                resolved: Math.max(0, Number(r.resolved_titles) || 0),
+                never_probed: never,
+                probed_24h: recent,
+                resolved_24h: Math.max(0, Number(r.verified_files_24h) || 0),
+                subtitle_found: Math.max(0, Number(r.subtitle_titles) || 0),
+                eta_days: recent > 0 ? Math.ceil(never / recent) : null,
+                __engine_health_v1: true
+            };
+        });
+        return {
+            available: true,
+            schema_version: Number(payload.schema_version),
+            generated_at: payload.generated_at || null,
+            window_hours: Number(payload.window_hours) || 24,
+            flags: payload.flags || {},
+            scheduler: payload.scheduler || {},
+            summary: payload.summary || {},
+            rows
+        };
     }
+
+    // Canonical UI state. The server owns every detailed classification. Legacy coverage is still
+    // rendered when the new RPC is unavailable, but a zero 24 h counter is explicitly unknown.
+    static engineState(r, healthAvailable = r?.__engine_health_v1 === true) {
+        const canonical = !!r && healthAvailable === true;
+        const allowed = new Set(['active', 'running', 'idle', 'complete', 'paused', 'blocked',
+            'retry_wait', 'stalled', 'disabled', 'not_scheduled']);
+        if (canonical) {
+            const rawState = String(r.state || '').trim().toLowerCase().replace(/-/g, '_');
+            return {
+                kind: allowed.has(rawState) ? rawState : 'unknown',
+                reason: String(r.reason || '').trim().toLowerCase().replace(/-/g, '_') || 'unknown',
+                canonical: true
+            };
+        }
+        if (Number(r?.never_probed) === 0) {
+            return { kind: 'complete', reason: 'legacy_complete', canonical: false };
+        }
+        if (Number(r?.probed_24h) > 0) {
+            return { kind: 'active', reason: 'legacy_progressing', canonical: false };
+        }
+        return { kind: 'unknown', reason: 'legacy_unmeasured', canonical: false };
+    }
+
+    static engineReasonLabel(reason) {
+        const labels = {
+            progressing: 'progression confirmée',
+            lease_active: 'traitement en cours',
+            no_recent_probe: 'aucun fichier récent à traiter',
+            complete: 'première passe terminée',
+            exhausted: 'file de travail drainée',
+            no_known_files: 'inventaire de fichiers en attente',
+            enrichment_paused: 'pause globale demandée',
+            episode_audio_scan_disabled: 'scan audio des épisodes désactivé',
+            live_session: 'lecture utilisateur prioritaire',
+            pregen_active: 'prégénération prioritaire',
+            provider_account_busy: 'compte provider occupé',
+            provider_background_busy: 'provider occupé par une autre tâche',
+            footprint_budget: 'quota anti-ban atteint',
+            rate_limited: 'rate-limit provider',
+            circuit_open: 'circuit ouvert',
+            authentication: 'authentification refusée',
+            forbidden: 'accès provider interdit',
+            worker_error: 'erreur du worker',
+            retry_scheduled: 'nouvel essai planifié',
+            queue_overdue: 'file de travail en retard',
+            source_disabled: 'source désactivée',
+            source_not_ready: 'source non prête',
+            schedule_missing: 'planification absente',
+            legacy_complete: 'métrique historique complète',
+            legacy_progressing: 'progression historique observée',
+            legacy_unmeasured: 'état inconnu (legacy)',
+            unknown: 'raison inconnue'
+        };
+        return labels[reason] || String(reason || 'raison inconnue').replace(/_/g, ' ');
+    }
+
+    static engineStateView(r) {
+        const s = AdminPage.engineState(r);
+        const stateLabels = {
+            active: '▶ progression',
+            running: '● en cours',
+            idle: 'veille',
+            complete: '✓ complet',
+            paused: '⏸ pause',
+            blocked: '⛔ bloqué',
+            retry_wait: '⏳ nouvel essai',
+            stalled: '⛔ bloqué',
+            disabled: 'désactivé',
+            not_scheduled: 'non planifié',
+            unknown: '? état inconnu'
+        };
+        const badge = ['active', 'complete'].includes(s.kind) ? 'green'
+            : s.kind === 'running' ? 'blue'
+                : s.kind === 'retry_wait' ? 'amber'
+                    : ['blocked', 'stalled', 'not_scheduled'].includes(s.kind) ? 'red' : 'gray';
+        const incidentReasons = new Set(['rate_limited', 'circuit_open', 'authentication',
+            'forbidden', 'worker_error']);
+        const infoReasons = new Set(['live_session', 'pregen_active', 'provider_account_busy',
+            'provider_background_busy', 'footprint_budget']);
+        return {
+            ...s,
+            label: s.kind === 'unknown' && !s.canonical
+                ? '? état inconnu (legacy)'
+                : (stateLabels[s.kind] || stateLabels.unknown),
+            reasonLabel: AdminPage.engineReasonLabel(s.reason),
+            badge,
+            actionable: ['blocked', 'stalled', 'not_scheduled'].includes(s.kind) || incidentReasons.has(s.reason),
+            informational: infoReasons.has(s.reason)
+        };
+    }
+
+    // Dynamic-fleet scheduler diagnostics can be newer than admin_cron_health. Return only
+    // scheduler incidents not already represented by a failing legacy cron row.
+    static engineSchedulerIssues(engineHealth, cronRows = []) {
+        if (engineHealth?.available !== true) return [];
+        const raw = engineHealth.scheduler;
+        const schedulers = Array.isArray(raw)
+            ? raw
+            : raw && typeof raw === 'object' && Object.keys(raw).length ? [raw] : [];
+        const legacyFailures = new Set((Array.isArray(cronRows) ? cronRows : [])
+            .filter(r => Number(r.fails_24h) > 0 && String(r.last_status).toLowerCase() === 'failed')
+            .map(r => String(r.jobname || '')));
+        return schedulers.flatMap((scheduler, index) => {
+            const jobname = String(scheduler?.jobname || `flotte dynamique ${index + 1}`);
+            const issue = scheduler?.present === false ? 'schedule_missing'
+                : scheduler?.active === false ? 'schedule_disabled'
+                    : String(scheduler?.last_status || '').toLowerCase() === 'failed' ? 'schedule_failed'
+                        : null;
+            if (!issue || legacyFailures.has(jobname)) return [];
+            return [{ ...scheduler, jobname, issue }];
+        });
+    }
+
+    _enrichKind(r) { return AdminPage.engineState(r).kind; }
 
     async _pageMoteur() {
         this._setCrumb('Moteur', this._lastTs);
         const v = this._view();
-        const filters = [['', 'Tout'], ['problem', 'À traiter'], ['muet', 'Muets'], ['arret', 'À l\'arrêt'], ['low', 'Couverture < 60 %']];
+        const filters = [['', 'Tout'], ['problem', 'À traiter'], ['progress', 'En cours'],
+            ['waiting', 'En attente'], ['paused', 'En pause'], ['unknown', 'Inconnu'],
+            ['low', 'Couverture < 60 %']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
             <p class="crm-sub">Couverture / sondage audio par panel · matching catalogue TMDB · orchestration des crons jour/nuit.</p>
@@ -4244,10 +4392,10 @@ class AdminPage {
                 </div>
                 <div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div>
                 <div class="mot-legend">
-                  <span><b>Jamais sondé</b> = titres jamais analysés</span>
-                  <span><b>Sondé 24h</b> = analysés sur 24 h</span>
-                  <span><b>ETA 1ᵉʳ passage</b> = temps estimé pour la 1ᵉʳ analyse complète</span>
-                  <span><b>⚠ muet</b> = sonde mais 0 langue résolue</span>
+                  <span><b>Jamais sondé</b> = fichiers exacts sans analyse</span>
+                  <span><b>Sondés / vérifiés 24h</b> = progression exacte de la flotte</span>
+                  <span><b>Bloqué</b> = verdict serveur explicite, jamais déduit d'un compteur nul</span>
+                  <span><b>En attente</b> = lecture, quota, rate-limit ou nouvel essai planifié</span>
                 </div>
             </div>
             <div class="mot-cols">
@@ -4260,20 +4408,26 @@ class AdminPage {
         }));
         this._syncMotFilters();
         // Independent section loads: a failure in one section must not blank the others.
-        const [enrichR, cronR, ovR] = await Promise.allSettled([
+        const [enrichR, cronR, ovR, engineR] = await Promise.allSettled([
             this._rpc('admin_enrichment_coverage'),
             this._rpc('admin_cron_health'),
-            this._rpc('admin_overview')
+            this._rpc('admin_overview'),
+            this._rpc('admin_enrichment_engine_health')
         ]);
-        const enrich = enrichR.status === 'fulfilled' && Array.isArray(enrichR.value) ? enrichR.value : [];
+        const engineHealth = AdminPage.normalizeEngineHealth(
+            engineR.status === 'fulfilled' ? engineR.value : null
+        );
+        const legacyEnrich = enrichR.status === 'fulfilled' && Array.isArray(enrichR.value) ? enrichR.value : [];
+        const enrich = engineHealth.available ? engineHealth.rows : legacyEnrich;
         const cron = cronR.status === 'fulfilled' && Array.isArray(cronR.value) ? cronR.value : [];
         const ov = ovR.status === 'fulfilled' ? (ovR.value || {}) : {};
         this._enrich = enrich;
+        this._engineHealth = engineHealth;
         this._dressHeader();
         const secErr = (id, r) => { const e = document.getElementById(id); if (e && r.status === 'rejected') { e.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc((r.reason && r.reason.message) || 'chargement')}</div>`; return true; } return false; };
-        this._renderEngineHealth(enrich, cron, ov);
-        this._renderIncidents(enrich, cron);
-        if (!secErr('admin-enrich', enrichR)) this._renderEnrich(enrich);
+        this._renderEngineHealth(enrich, cron, ov, engineHealth);
+        this._renderIncidents(enrich, cron, engineHealth);
+        if (engineHealth.available || !secErr('admin-enrich', enrichR)) this._renderEnrich(enrich);
         if (!secErr('admin-cron', cronR)) this._renderCron(cron);
         if (!secErr('admin-tmdb', ovR)) this._renderTmdb(ov);
     }
@@ -4283,31 +4437,38 @@ class AdminPage {
         document.querySelectorAll('#mot-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
     }
 
-    // "Santé moteur" band (audio coverage / muets / arrêt / jamais sondés / ST / crons KO) + header pills.
-    _renderEngineHealth(enrich, cron, ov) {
+    // Fleet health and pg_cron transport health are deliberately separate signals.
+    _renderEngineHealth(enrich, cron, ov, engineHealth) {
         const el = document.getElementById('mot-health');
         if (!el) return;
         const n = AdminPage.n;
+        const exact = engineHealth?.available === true;
         const totalTitles = enrich.reduce((a, r) => a + (Number(r.total) || 0), 0);
         const resolvedTitles = enrich.reduce((a, r) => a + (Number(r.resolved) || 0), 0);
         const coverage = totalTitles ? Math.round(100 * resolvedTitles / totalTitles) : 100;
         const neverProbed = enrich.reduce((a, r) => a + (Number(r.never_probed) || 0), 0);
         const stFound = enrich.reduce((a, r) => a + (Number(r.subtitle_found) || 0), 0);
-        const muet = new Set(enrich.filter(r => this._enrichKind(r) === 'muet').map(r => r.panel)).size;
-        const arret = new Set(enrich.filter(r => this._enrichKind(r) === 'arret').map(r => r.panel)).size;
+        // Only canonical server states may increment this counter. Legacy zeros remain unknown.
+        const fleetBlocked = enrich.filter(r => r.__engine_health_v1 === true
+            && ['blocked', 'stalled'].includes(this._enrichKind(r))).length;
+        const progressing = enrich.filter(r => ['active', 'running'].includes(this._enrichKind(r))).length;
         // KO = le DERNIER run est encore en échec ; échec suivi d'un run OK = récupéré (info, pas alerte).
-        const cronKo = cron.filter(c => Number(c.fails_24h) > 0 && String(c.last_status) === 'failed').length;
+        const cronKoNames = new Set(cron
+            .filter(c => Number(c.fails_24h) > 0 && String(c.last_status).toLowerCase() === 'failed')
+            .map(c => String(c.jobname || '')));
+        AdminPage.engineSchedulerIssues(engineHealth, cron).forEach(s => cronKoNames.add(s.jobname));
+        const cronKo = cronKoNames.size;
         const cronRec = cron.filter(c => Number(c.fails_24h) > 0 && String(c.last_status) !== 'failed').length;
         const covCls = coverage >= 90 ? 'ok' : coverage >= 60 ? 'warn' : 'alert';
         const tmdbBacklog = (Number(ov.tmdb_year_backlog) || 0) + (Number(ov.tmdb_unmatched) || 0) + (Number(ov.tmdb_unverified) || 0);
         const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
         el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé moteur</div><div class="admin-cards">
             ${card(coverage + ' %', 'Couverture audio', covCls, '🔊')}
-            ${card(n(muet), 'Providers muets', muet > 0 ? 'alert' : 'ok', '⚠️')}
-            ${card(n(arret), 'Sondage à l\'arrêt', arret > 0 ? 'warn' : 'ok', '⏸️')}
-            ${card(n(neverProbed), 'Titres jamais sondés', '', '🗄️')}
+            ${card(n(fleetBlocked), 'Flotte bloquée', fleetBlocked > 0 ? 'alert' : 'ok', '⛔')}
+            ${card(n(progressing), exact ? 'Lignes en progression' : 'Progression legacy', progressing > 0 ? 'ok' : '', '▶️')}
+            ${card(n(neverProbed), exact ? 'Fichiers jamais sondés' : 'Mesure legacy en attente', '', '🗄️')}
             ${card(n(stFound), 'Sous-titres trouvés', '', '💬')}
-            ${card(n(cronKo), 'Crons KO 24 h', cronKo > 0 ? 'alert' : 'ok', '⏱️')}
+            ${card(n(cronKo), 'pg_cron KO', cronKo > 0 ? 'alert' : 'ok', '⏱️')}
         </div></div>`;
         const tx = document.querySelector('#page-admin .crm-head-tx');
         if (tx) {
@@ -4315,32 +4476,72 @@ class AdminPage {
             if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
             meta.innerHTML =
                 `<span class="crm-hpill ${covCls === 'alert' ? 'bad' : ''}"><b>${coverage} %</b> audio</span>` +
-                `<span class="crm-hpill ${(muet + arret) > 0 ? 'bad' : ''}"><b>${n(muet + arret)}</b> à traiter</span>` +
-                `<span class="crm-hpill ${cronKo > 0 ? 'bad' : ''}"><b>${n(cronKo)}</b> crons KO</span>` +
+                `<span class="crm-hpill ${fleetBlocked > 0 ? 'bad' : ''}"><b>${n(fleetBlocked)}</b> flotte bloquée</span>` +
+                `<span class="crm-hpill ${cronKo > 0 ? 'bad' : ''}"><b>${n(cronKo)}</b> pg_cron KO</span>` +
                 (cronRec > 0 ? `<span class="crm-hpill"><b>${n(cronRec)}</b> échec(s) récupéré(s)</span>` : '') +
+                (!exact ? '<span class="crm-hpill"><b>legacy</b> santé détaillée indisponible</span>' : '') +
                 `<span class="crm-hpill"><b>${n(tmdbBacklog)}</b> backlog TMDB</span>`;
         }
     }
 
-    // Consolidated engine incidents (muet / arrêt / ETA>1 an / cron KO), prioritized above the tables.
-    _renderIncidents(enrich, cron) {
+    // Consolidated exact-fleet incidents. Busy/viewer/footprint states are informational;
+    // auth, rate-limit, circuit, worker and explicit blocked/stalled states are actionable.
+    _renderIncidents(enrich, cron, engineHealth) {
         const el = document.getElementById('mot-incidents');
         if (!el) return;
         const esc = AdminPage.esc, n = AdminPage.n;
         const typeLbl = (r) => r.item_type === 'series' ? 'séries' : 'films';
         const inc = [];
-        enrich.forEach(r => {
-            const k = this._enrichKind(r);
-            if (k === 'muet') inc.push({ p: 0, cls: '', t: `⚠ Provider muet · ${esc(r.panel)} (${typeLbl(r)})`, d: `sondé ${n(r.probed_24h)} en 24 h, 0 langue résolue — identifiants morts / banni ?` });
-            else if (k === 'arret') inc.push({ p: 1, cls: 'warn', t: `⏸ Sondage à l'arrêt · ${esc(r.panel)} (${typeLbl(r)})`, d: `${n(r.never_probed)} titre(s) jamais sondé(s), 0 sondage en 24 h` });
-            else if (k === 'slow') inc.push({ p: 2, cls: 'gray', t: `🐌 ETA > 1 an · ${esc(r.panel)} (${typeLbl(r)})`, d: `débit quasi nul — ${n(r.never_probed)} titre(s) en attente` });
+        if (engineHealth?.available !== true) {
+            inc.push({
+                p: 4, cls: 'warn', actionable: false,
+                t: '⚠ Santé détaillée indisponible',
+                d: 'métriques historiques affichées. Une activité nulle sur 24 h ne permet pas de conclure à un arrêt.'
+            });
+        } else {
+            enrich.forEach(r => {
+                const view = AdminPage.engineStateView(r);
+                if (!view.actionable && !view.informational) return;
+                const retry = r.next_retry_at
+                    ? ` · prochain essai ${esc(new Date(r.next_retry_at).toLocaleString('fr-FR'))}` : '';
+                const last = r.last_probe_at
+                    ? ` · dernier progrès ${esc(AdminPage.timeAgo(r.last_probe_at))}` : '';
+                const error = r.last_error ? ` · ${esc(String(r.last_error).slice(0, 140))}` : '';
+                const detail = `${esc(view.reasonLabel)}${last}${retry}${error}`;
+                const severe = ['blocked', 'stalled', 'not_scheduled'].includes(view.kind)
+                    || ['authentication', 'forbidden', 'worker_error'].includes(view.reason);
+                const prefix = severe ? '⛔' : view.actionable ? '⚠' : 'ℹ';
+                inc.push({
+                    p: severe ? 0 : view.actionable ? 1 : 3,
+                    cls: severe ? '' : view.actionable ? 'warn' : 'gray',
+                    actionable: view.actionable,
+                    t: `${prefix} ${esc(view.reasonLabel)} · ${esc(r.panel)} (${typeLbl(r)})`,
+                    d: detail
+                });
+            });
+        }
+        cron.filter(c => Number(c.fails_24h) > 0).forEach(c => inc.push(String(c.last_status).toLowerCase() === 'failed'
+            ? { p: 0, cls: '', actionable: true, t: `⏱ pg_cron en échec · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run KO` }
+            : { p: 3, cls: 'gray', actionable: false, t: `⏱ Échec pg_cron récupéré · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run OK — auto-réparé` }));
+        AdminPage.engineSchedulerIssues(engineHealth, cron).forEach(scheduler => {
+            const reason = scheduler.issue === 'schedule_missing' ? 'planification absente'
+                : scheduler.issue === 'schedule_disabled' ? 'planification désactivée'
+                    : 'dernier run en échec';
+            const lastRun = scheduler.last_run_at
+                ? ` · dernier run ${esc(AdminPage.timeAgo(scheduler.last_run_at))}` : '';
+            const failures = Number(scheduler.failures_24h) > 0
+                ? ` · ${n(scheduler.failures_24h)} échec(s) sur 24 h` : '';
+            inc.push({
+                p: 0, cls: '', actionable: true,
+                t: `⏱ pg_cron dynamique · ${esc(scheduler.jobname)}`,
+                d: `${reason}${lastRun}${failures}`
+            });
         });
-        cron.filter(c => Number(c.fails_24h) > 0).forEach(c => inc.push(String(c.last_status) === 'failed'
-            ? { p: 0, cls: '', t: `⏱ Cron en échec · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run KO` }
-            : { p: 3, cls: 'gray', t: `⏱ Échec récupéré · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run OK — auto-réparé` }));
-        if (!inc.length) { el.innerHTML = '<div class="mot-inc-ok">✓ Aucun incident moteur — providers actifs, crons OK.</div>'; return; }
+        if (!inc.length) { el.innerHTML = '<div class="mot-inc-ok">✓ Aucun incident moteur — flotte saine, pg_cron OK.</div>'; return; }
         inc.sort((a, b) => a.p - b.p);
-        el.innerHTML = `<div class="kpi-gtitle" style="margin-bottom:10px">🚨 Incidents moteur (${n(inc.length)})</div><div class="mot-inc">` +
+        const actionable = inc.filter(i => i.actionable).length;
+        const heading = actionable ? `🚨 Incidents moteur (${n(actionable)})` : 'ℹ️ État moteur';
+        el.innerHTML = `<div class="kpi-gtitle" style="margin-bottom:10px">${heading}</div><div class="mot-inc">` +
             inc.map(i => `<div class="mot-inc-row ${i.cls}"><span class="mi-t">${i.t}</span> <span class="mi-d">— ${i.d}</span></div>`).join('') + `</div>`;
     }
 
@@ -4924,62 +5125,96 @@ class AdminPage {
         const el = document.getElementById('admin-enrich');
         if (!el) return;
         rows = Array.isArray(rows) ? rows : [];
+        const exact = this._engineHealth?.available === true;
         // Threshold-coloured coverage bar (green > 90 %, amber 60–90 %, red < 60 %).
         const barCell = (a, p) => {
-            const pct = Number(p) || 0, bcls = pct >= 90 ? '' : pct >= 60 ? 'b-warn' : 'b-bad';
+            const pct = Math.max(0, Number(p) || 0);
+            const bcls = pct >= 90 ? '' : pct >= 60 ? 'b-warn' : 'b-bad';
             return `<td class="num"><span class="bar ${bcls}"><i style="width:${Math.min(100, pct)}%"></i></span>${AdminPage.n(a)} (${pct}%)</td>`;
         };
-        const eta = (r) => {
-            if (Number(r.never_probed) === 0) {
-                const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
-                return `<span class="badge green" title="1ʳᵉ passe de sondage terminée : chaque titre a été sondé au moins une fois. Les ~${undPct}% non résolus sont « und » dans le conteneur (aucune langue déclarée) — seul whisper peut les résoudre.">✓ sondé</span>`;
-            }
-            if (Number(r.probed_24h) >= 20 && Number(r.resolved_24h) === 0) return `<span class="badge red" title="Sondé ${AdminPage.n(r.probed_24h)} en 24 h mais 0 langue résolue — provider probablement muet / identifiants morts / banni (le signal qui a manqué pour l'incident Ninja).">⚠ provider muet</span>`;
-            if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
-            if (Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 365) return `<span class="badge gray" title="~${AdminPage.n(r.eta_days)} j au rythme actuel — débit quasi nul, chiffre non actionnable.">≫ 1 an</span>`;
-            return `~${AdminPage.n(r.eta_days)} j`;
+        const latest = (...values) => {
+            const valid = values.map(value => ({ value, time: new Date(value).getTime() }))
+                .filter(x => x.value && Number.isFinite(x.time))
+                .sort((a, b) => b.time - a.time);
+            return valid[0]?.value || null;
         };
-        // Quick filter (À traiter / muets / à l'arrêt / faible couverture).
+        const when = (value) => {
+            if (!value || !Number.isFinite(new Date(value).getTime())) return '—';
+            return `<span title="${AdminPage.esc(new Date(value).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(value))}</span>`;
+        };
+        // The server owns detailed fleet state. Legacy rows can only be active, complete or unknown.
         const f = this._motFilter || '';
         let view = rows.filter(r => {
-            const k = this._enrichKind(r);
-            if (f === 'problem') return k === 'muet' || k === 'arret' || k === 'slow';
-            if (f === 'muet') return k === 'muet';
-            if (f === 'arret') return k === 'arret';
+            const state = AdminPage.engineStateView(r);
+            if (f === 'problem') return state.actionable;
+            if (f === 'progress') return ['active', 'running'].includes(state.kind);
+            if (f === 'waiting') return ['idle', 'retry_wait'].includes(state.kind);
+            if (f === 'paused') return ['paused', 'disabled'].includes(state.kind);
+            if (f === 'unknown') return state.kind === 'unknown';
             if (f === 'low') return (Number(r.resolved_pct) || 0) < 60;
             return true;
         });
+        const legacyNote = !exact
+            ? '<div class="mot-legacy-note">Santé détaillée indisponible — métriques historiques affichées. Une activité nulle sur 24 h ne permet pas de conclure à un arrêt.</div>'
+            : '';
         if (!view.length) {
-            el.innerHTML = `<div class="card"><span class="badge ${f ? 'gray' : 'green'}">${f ? '∅' : '✓'}</span> ${f ? 'Aucun panel ne correspond à ce filtre.' : 'Aucune donnée.'}</div>`;
+            el.innerHTML = `${legacyNote}<div class="card"><span class="badge ${f ? 'gray' : 'green'}">${f ? '∅' : '✓'}</span> ${f ? 'Aucun panel ne correspond à ce filtre.' : 'Aucune donnée.'}</div>`;
             return;
         }
-        // Priority sort: muet → arrêt → slow → active → done, then account/panel/type.
-        const rank = { muet: 0, arret: 1, slow: 2, active: 3, done: 4 };
-        view = view.slice().sort((a, b) => (rank[this._enrichKind(a)] - rank[this._enrichKind(b)]) ||
+        const rank = {
+            blocked: 0, stalled: 0, not_scheduled: 1, retry_wait: 2, running: 3,
+            active: 4, idle: 5, paused: 6, disabled: 7, unknown: 8, complete: 9
+        };
+        view = view.slice().sort((a, b) =>
+            ((rank[AdminPage.engineStateView(a).kind] ?? 99) - (rank[AdminPage.engineStateView(b).kind] ?? 99)) ||
             String(a.owner_email).localeCompare(String(b.owner_email)) ||
             String(a.panel).localeCompare(String(b.panel)) ||
             ((a.item_type === 'series') ? 1 : 0) - ((b.item_type === 'series') ? 1 : 0));
-        const head = `<tr><th>Provider</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num" title="Titres jamais analysés">Jamais sondé</th><th class="num" title="Titres analysés sur 24 h">Sondé 24h</th><th title="Temps estimé pour la 1ᵉʳ analyse complète">ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
-        let prevPanel = null;
+        const head = `<tr>
+            <th>Provider</th><th>Type</th><th class="num">Catalogue</th>
+            <th class="num" title="Fichiers exacts connus">Fichiers connus</th>
+            <th class="num">Audio résolu</th>
+            <th class="num" title="Fichiers exacts sans analyse">Jamais sondé</th>
+            <th class="num" title="Fichiers exacts analysés sur 24 h">Sondés 24h</th>
+            <th class="num" title="Fichiers exacts avec audio vérifié sur 24 h">Vérifiés 24h</th>
+            <th>État / raison</th><th>Dernier progrès</th><th>Prochain passage</th>
+            <th class="num">ST trouvés</th>
+        </tr>`;
+        let prevGroup = null;
         const body = view.map(r => {
-            const newGroup = r.panel !== prevPanel;
-            prevPanel = r.panel;
-            const bad = ['muet', 'arret'].includes(this._enrichKind(r));
+            const group = `${r.owner_email || ''}\u0000${r.panel || ''}`;
+            const newGroup = group !== prevGroup;
+            prevGroup = group;
+            const state = AdminPage.engineStateView(r);
+            // A completed worker may only have skipped work. Progress means an actual probe or
+            // verification, never merely a completed worker run.
+            const lastProgress = latest(r.last_probe_at, r.last_verified_at);
+            const nextPass = r.next_retry_at || r.next_run_at || null;
+            const eta = Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 0
+                ? ` · ETA ~${AdminPage.n(r.eta_days)} j`
+                : '';
             const panelCell = newGroup
                 ? `<td><div class="pname">${AdminPage.esc(r.panel)}</div><div class="pacct">${AdminPage.esc(r.owner_email || '')}</div></td>`
                 : `<td></td>`;
-            return `<tr class="${newGroup ? 'group-start' : ''} ${bad ? 'mot-bad' : ''}">
+            return `<tr class="${newGroup ? 'group-start' : ''} ${state.actionable ? 'mot-bad' : ''}">
             ${panelCell}
             <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
             <td class="num">${AdminPage.n(r.total)}</td>
+            <td class="num">${exact ? AdminPage.n(r.known_files) : '—'}</td>
             ${barCell(r.resolved, r.resolved_pct)}
             <td class="num">${AdminPage.n(r.never_probed)}</td>
             <td class="num">${AdminPage.n(r.probed_24h)}</td>
-            <td>${eta(r)}</td>
+            <td class="num">${exact ? AdminPage.n(r.resolved_24h) : '—'}</td>
+            <td>
+                <span class="badge ${state.badge}" title="${AdminPage.esc(state.reasonLabel)}">${AdminPage.esc(state.label)}</span>
+                <div class="mot-state-detail">${AdminPage.esc(state.reasonLabel)}${eta}</div>
+            </td>
+            <td>${when(lastProgress)}</td>
+            <td>${when(nextPass)}</td>
             <td class="num">${AdminPage.n(r.subtitle_found)}</td>
         </tr>`;
         }).join('');
-        el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+        el.innerHTML = `${legacyNote}<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
     _renderCron(rows) {
@@ -4993,10 +5228,10 @@ class AdminPage {
             const failing = rows.filter(r => Number(r.fails_24h) > 0 && String(r.last_status) === 'failed').length;
             const recovered = rows.filter(r => Number(r.fails_24h) > 0 && String(r.last_status) !== 'failed').length;
             sum.innerHTML = `<div class="cron-sum">
-                <span class="badge green">${AdminPage.n(active)} actifs</span>
-                <span class="badge gray">${AdminPage.n(paused)} en pause</span>
-                <span class="badge ${failing > 0 ? 'red' : 'gray'}">${AdminPage.n(failing)} encore en échec</span>
-                ${recovered > 0 ? `<span class="badge amber">${AdminPage.n(recovered)} récupéré(s) 24 h</span>` : ''}
+                <span class="badge green">${AdminPage.n(active)} pg_cron actifs</span>
+                <span class="badge gray">${AdminPage.n(paused)} pg_cron en pause</span>
+                <span class="badge ${failing > 0 ? 'red' : 'gray'}">${AdminPage.n(failing)} pg_cron encore en échec</span>
+                ${recovered > 0 ? `<span class="badge amber">${AdminPage.n(recovered)} pg_cron récupéré(s) 24 h</span>` : ''}
             </div>`;
         }
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun cron déclaré.</div>'; return; }

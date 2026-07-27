@@ -13,14 +13,14 @@ def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystore
 
 android {
     namespace "tv.norva.phone"
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId "tv.norva.phone"
         minSdk 23
-        targetSdk 35
-        versionCode 17
-        versionName "1.3.4"
+        targetSdk 36
+        versionCode 18
+        versionName "1.3.5"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
@@ -88,10 +88,10 @@ dependencies {
     implementation "androidx.webkit:webkit:1.12.1"
     // Branded cold-start splash (Android 12+ native, backported below).
     implementation "androidx.core:core-splashscreen:1.0.1"
-    // In-app subscriptions (Google Play Billing) through RevenueCat. Pinned to the
-    // latest v8 release (8.25.0) for reproducible release builds — this is what the
-    // old "8.+" range already resolved to, now frozen so a future v9/v10 with API
-    // changes can't slip into a release unnoticed. Bump deliberately when testing a newer v8.
+    // In-app subscriptions (Google Play Billing) through RevenueCat. RevenueCat
+    // 9.23.1 embeds Play Billing Library 8.0.0, which remains accepted for new
+    // apps and updates through August 31, 2027. Keep this version pinned so a
+    // future major SDK migration cannot enter a release unnoticed.
     implementation "com.revenuecat.purchases:purchases:9.23.1"
     // Firebase Cloud Messaging: push notifications ("your catalog is ready") delivered even when the
     // app is closed. The BoM pins compatible Firebase versions; messaging pulls the FCM SDK + service.

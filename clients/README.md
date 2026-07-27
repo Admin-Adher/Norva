@@ -31,7 +31,7 @@ Build requirements:
 
 - Android Studio
 - JDK 17+
-- Android SDK with platform 35+
+- Android SDK with platform 36+
 
 Open `clients/android-tv` in Android Studio, then build `app-debug.apk` or a
 signed release APK.

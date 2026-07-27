@@ -14,11 +14,13 @@ import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -31,6 +33,8 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
+
+import java.lang.ref.WeakReference;
 
 /**
  * Norva TV — Android TV client.
@@ -45,6 +49,8 @@ public class MainActivity extends Activity {
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
+    private static final String EXTRA_DEBUG_BUNDLED_DPAD_ASSETS =
+            "tv.norva.tv.DEBUG_BUNDLED_DPAD_ASSETS";
     private static final String CLOUD_PAIR_URL = "https://norva.tv/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home";
     // Marker appended to the WebView user agent: the web app detects it and
     // enables TV mode (D-pad spatial navigation, focus outlines).
@@ -64,6 +70,10 @@ public class MainActivity extends Activity {
     private String lastLoadedUrl;
     private boolean cloudBridgeAdded;
     private boolean nativeBridgeAdded;
+    // Debug-only emulator audit: serve the just-built D-pad assets over the live
+    // cloud shell so real account data can be tested without deploying or changing
+    // the cloud origin. Release builds can never enable this path.
+    private boolean debugBundledDpadAssets;
     // One recovery request is bound to one playback item and one unguessable
     // token. The next matching JSON launch is returned to the still-visible
     // PlayerActivity instead of opening a second activity.
@@ -90,15 +100,18 @@ public class MainActivity extends Activity {
     private volatile boolean webAppReady = false;
     // Retry counter for the pending-progress pump (mirrors the deep-link pump's 20×/1.5s).
     private int pendingProgressTries = 0;
-    // Live instance for PlayerActivity's in-playback heartbeat relay (same-process, single
-    // instance by design — cleared in onDestroy).
-    static volatile MainActivity current;
+    // Weak live instance for PlayerActivity's in-playback heartbeat relay.
+    private static volatile WeakReference<MainActivity> currentRef =
+            new WeakReference<>(null);
     private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        current = this;
+        currentRef = new WeakReference<>(this);
+        debugBundledDpadAssets =
+                (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                && getIntent().getBooleanExtra(EXTRA_DEBUG_BUNDLED_DPAD_ASSETS, false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         root = new FrameLayout(this);
@@ -318,9 +331,28 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setUserAgentString(s.getUserAgentString() + UA_SUFFIX);
+        if (debugBundledDpadAssets) {
+            webView.addJavascriptInterface(new DpadAuditBridge(), "__norvaDpadAudit");
+        }
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
+                if (debugBundledDpadAssets && message != null
+                        && message.message().startsWith("[TV-AUDIT]")) {
+                    android.util.Log.i("NorvaTV", message.message());
+                }
+                return super.onConsoleMessage(message);
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(
+                    WebView view, WebResourceRequest request) {
+                WebResourceResponse bundled = bundledDpadAssetForAudit(request);
+                return bundled != null ? bundled : super.shouldInterceptRequest(view, request);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request == null || !request.isForMainFrame()) return false;
@@ -338,6 +370,10 @@ public class MainActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 configureWebSecurity(url);
+                if (debugBundledDpadAssets) {
+                    view.postDelayed(() -> installDpadAuditProbe(view), 4_000);
+                    view.postDelayed(() -> installDpadAuditProbe(view), 12_000);
+                }
                 // Honest readiness: navigating away (pairing screen, error page, redirect)
                 // means the bridge is gone until the next app-shell finishes loading.
                 webAppReady = false;
@@ -347,6 +383,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 hideSplash();
                 webAppReady = isAppShellUrl(url);
+                if (debugBundledDpadAssets) installDpadAuditProbe(view);
                 if (!webAppReady) return; // no bridge on this page — nothing to flush against
                 // Flush any position the native player persisted before a non-graceful
                 // exit (power-off/standby/crash). Small delay lets standalone.js install
@@ -367,22 +404,144 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                // A renderer crash must not take down the Android TV process. WebView
+                // cannot be reused after this callback, so destroy it, recreate every
+                // JS bridge on a fresh instance, and reload the current page.
+                recoverFromRendererCrash(view, detail);
+                return true;
+            }
+
+            @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                String failingUrl = error == null ? null : error.getUrl();
-                String mode = prefs().getString(PREF_MODE, null);
-                if (("server".equals(mode) || "standalone".equals(mode))
-                        && isExplicitLocalTlsUrl(failingUrl)
-                        && isSameOrigin(failingUrl, lastLoadedUrl)) {
-                    handler.proceed();
-                } else {
-                    // norva.tv and every other public host fail closed.
-                    handler.cancel();
-                }
+                // Never bypass certificate validation, including for LAN servers.
+                // Users can still connect to an explicit local HTTP endpoint.
+                handler.cancel();
             }
         });
 
-        root.addView(webView, new FrameLayout.LayoutParams(
+        root.addView(webView, 0, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private WebResourceResponse bundledDpadAssetForAudit(WebResourceRequest request) {
+        if (!debugBundledDpadAssets || request == null || request.getUrl() == null) return null;
+        Uri uri = request.getUrl();
+        if (!"https".equalsIgnoreCase(uri.getScheme())
+                || !"norva.tv".equalsIgnoreCase(uri.getHost())) {
+            return null;
+        }
+        String assetPath;
+        String mimeType;
+        String path = uri.getPath();
+        if ("/js/utils/tvNavigation.js".equals(path)) {
+            assetPath = "www/js/utils/tvNavigation.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/SeriesPage.js".equals(path)) {
+            assetPath = "www/js/pages/SeriesPage.js";
+            mimeType = "application/javascript";
+        } else if ("/js/components/MultiSelect.js".equals(path)) {
+            assetPath = "www/js/components/MultiSelect.js";
+            mimeType = "application/javascript";
+        } else if ("/css/main.css".equals(path)) {
+            assetPath = "www/css/main.css";
+            mimeType = "text/css";
+        } else {
+            return null;
+        }
+        try {
+            android.util.Log.i("NorvaTV", "Serving bundled D-pad audit asset: " + path);
+            return new WebResourceResponse(
+                    mimeType,
+                    "UTF-8",
+                    getAssets().open(assetPath)
+            );
+        } catch (java.io.IOException error) {
+            android.util.Log.e("NorvaTV", "Bundled D-pad audit asset unavailable: " + path, error);
+            return null;
+        }
+    }
+
+    private void installDpadAuditProbe(WebView view) {
+        if (view == null) return;
+        view.evaluateJavascript(
+                "(function(){"
+                        + "if(window.__norvaDpadAuditProbe)return;"
+                        + "window.__norvaDpadAuditProbe=true;"
+                        + "function l(m){"
+                        + "if(window.__norvaDpadAudit&&window.__norvaDpadAudit.log)"
+                        + "window.__norvaDpadAudit.log(m);"
+                        + "else console.log('[TV-AUDIT] '+m);"
+                        + "}"
+                        + "function d(e){"
+                        + "if(!e)return 'none';"
+                        + "var p=e.closest?e.closest('.page'):null;"
+                        + "return 'id='+(e.id||'-')"
+                        + "+' class='+String(e.className||'-').replace(/\\s+/g,'.')"
+                        + "+' text='+String(e.textContent||'').trim().replace(/\\s+/g,' ').slice(0,60)"
+                        + "+' page='+(p?p.id:'-');"
+                        + "}"
+                        + "document.addEventListener('focusin',function(e){"
+                        + "l('focus '+d(e.target));"
+                        + "},true);"
+                        + "l('ready '+d(document.activeElement));"
+                        + "})();",
+                null
+        );
+    }
+
+    private final class DpadAuditBridge {
+        @android.webkit.JavascriptInterface
+        public void log(String message) {
+            android.util.Log.i("NorvaTV", "[TV-AUDIT] " + String.valueOf(message));
+        }
+    }
+
+    @android.annotation.TargetApi(26)
+    private void recoverFromRendererCrash(WebView crashedView, RenderProcessGoneDetail detail) {
+        String recoveryUrl = null;
+        try {
+            recoveryUrl = crashedView == null ? null : crashedView.getUrl();
+        } catch (Exception ignored) {
+            // The renderer is already gone; lastLoadedUrl remains the safe fallback.
+        }
+        if (recoveryUrl == null || recoveryUrl.isEmpty()) recoveryUrl = lastLoadedUrl;
+
+        android.util.Log.e("NorvaTV",
+                "WebView renderer exited (crash=" + (detail != null && detail.didCrash()) + "); rebuilding");
+        webAppReady = false;
+        webViewVisible = false;
+
+        if (crashedView != null) {
+            if (root != null) root.removeView(crashedView);
+            try {
+                crashedView.destroy();
+            } catch (Exception ignored) {
+                // The dead renderer may reject cleanup calls; it is already detached.
+            }
+        }
+        if (crashedView != webView || isFinishing() || isDestroyed()) return;
+
+        webView = null;
+        cloudBridgeAdded = false;
+        nativeBridgeAdded = false;
+        showSplash();
+        buildWebView();
+
+        String mode = prefs().getString(PREF_MODE, null);
+        setBridgeMode("cloud".equals(mode), "standalone".equals(mode));
+        if (recoveryUrl == null || recoveryUrl.isEmpty()) {
+            showNetworkError("The TV browser restarted. Select Retry to reconnect.");
+            return;
+        }
+
+        configureWebSecurity(recoveryUrl);
+        setupPanel.setVisibility(View.GONE);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
+        webViewVisible = true;
+        webView.loadUrl(withShellCacheBust(recoveryUrl));
+        webView.requestFocus();
     }
 
     private void buildSetupPanel() {
@@ -723,31 +882,6 @@ public class MainActivity extends Activity {
 
     private static int defaultPort(String scheme) {
         return "https".equalsIgnoreCase(scheme) ? 443 : 80;
-    }
-
-    private static boolean isExplicitLocalTlsUrl(String value) {
-        if (value == null || value.isEmpty()) return false;
-        try {
-            Uri uri = Uri.parse(value);
-            if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
-            String host = uri.getHost();
-            if (host == null) return false;
-            String h = host.toLowerCase(java.util.Locale.US);
-            if ("localhost".equals(h) || "127.0.0.1".equals(h) || "::1".equals(h)
-                    || h.endsWith(".local")) return true;
-            if (h.startsWith("10.") || h.startsWith("192.168.")
-                    || h.startsWith("169.254.") || h.startsWith("fc")
-                    || h.startsWith("fd") || h.startsWith("fe80:")) return true;
-            if (h.startsWith("172.")) {
-                String[] parts = h.split("\\.");
-                if (parts.length == 4) {
-                    int second = Integer.parseInt(parts[1]);
-                    return second >= 16 && second <= 31;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
     }
 
     /**
@@ -1279,9 +1413,7 @@ public class MainActivity extends Activity {
         splashPanel.setVisibility(View.GONE);
 
         ImageView logo = new ImageView(this);
-        int logoId = getResources().getIdentifier("norva_app_icon", "drawable", getPackageName());
-        if (logoId == 0) logoId = getResources().getIdentifier("ic_launcher", "mipmap", getPackageName());
-        if (logoId != 0) logo.setImageResource(logoId);
+        logo.setImageResource(R.drawable.norva_app_icon);
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(120), dp(120));
         logoLp.bottomMargin = dp(32);
         splashPanel.addView(logo, logoLp);
@@ -1446,7 +1578,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (current == this) current = null;
+        if (currentRef.get() == this) {
+            currentRef.clear();
+            currentRef = new WeakReference<>(null);
+        }
         clearPendingPlayerRecovery(null);
         if (playerRecoveryReceiver != null) {
             try { unregisterReceiver(playerRecoveryReceiver); } catch (Exception ignored) { }
@@ -1456,6 +1591,10 @@ public class MainActivity extends Activity {
             webView.destroy();
         }
         super.onDestroy();
+    }
+
+    static MainActivity currentInstance() {
+        return currentRef.get();
     }
 
     private int dp(int value) {

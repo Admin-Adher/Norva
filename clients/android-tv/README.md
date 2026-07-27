@@ -43,7 +43,7 @@ Norva Gateway is the cloud path for difficult streams once deployed.
 
 Build:
 
-1. Install Android Studio, JDK 17+, and Android SDK platform 35+.
+1. Install Android Studio, JDK 17+, and Android SDK platform 36+.
 2. Open this `clients/android-tv` folder.
 3. Let Gradle sync.
 4. Build `app-debug.apk` or a signed release APK.

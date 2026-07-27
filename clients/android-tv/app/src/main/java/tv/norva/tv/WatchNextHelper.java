@@ -9,7 +9,6 @@ import android.net.Uri;
 import android.os.Build;
 
 import androidx.tvprovider.media.tv.TvContractCompat;
-import androidx.tvprovider.media.tv.WatchNextProgram;
 
 /**
  * Publishes in-progress titles to the Android TV launcher's "Play Next" row.
@@ -46,19 +45,32 @@ final class WatchNextHelper {
                     .build();
             Intent open = new Intent(Intent.ACTION_VIEW, deepLink).setPackage(ctx.getPackageName());
 
-            WatchNextProgram.Builder b = new WatchNextProgram.Builder()
-                    .setType("episode".equals(itemType)
-                            ? TvContractCompat.PreviewProgramColumns.TYPE_TV_EPISODE
-                            : TvContractCompat.PreviewProgramColumns.TYPE_MOVIE)
-                    .setWatchNextType(TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE)
-                    .setLastEngagementTimeUtcMillis(System.currentTimeMillis())
-                    .setTitle(title)
-                    .setPosterArtUri(Uri.parse(posterUrl))
-                    .setIntent(open)
-                    .setInternalProviderId(providerId(sourceId, itemType, itemId));
-            if (positionMs > 0) b.setLastPlaybackPositionMillis((int) Math.min(positionMs, Integer.MAX_VALUE));
-            if (durationMs > 0) b.setDurationMillis((int) Math.min(durationMs, Integer.MAX_VALUE));
-            ContentValues values = b.build().toContentValues();
+            // Populate the public TV-provider contract directly. The inherited
+            // BaseProgram.Builder setters are library-restricted even though the
+            // official Watch Next samples expose the same columns to apps.
+            ContentValues values = new ContentValues();
+            values.put(TvContractCompat.WatchNextPrograms.COLUMN_TYPE,
+                    "episode".equals(itemType)
+                            ? TvContractCompat.WatchNextPrograms.TYPE_TV_EPISODE
+                            : TvContractCompat.WatchNextPrograms.TYPE_MOVIE);
+            values.put(TvContractCompat.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE,
+                    TvContractCompat.WatchNextPrograms.WATCH_NEXT_TYPE_CONTINUE);
+            values.put(TvContractCompat.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS,
+                    System.currentTimeMillis());
+            values.put(android.media.tv.TvContract.Programs.COLUMN_TITLE, title);
+            values.put(android.media.tv.TvContract.Programs.COLUMN_POSTER_ART_URI, posterUrl);
+            values.put(TvContractCompat.WatchNextPrograms.COLUMN_INTENT_URI,
+                    open.toUri(Intent.URI_INTENT_SCHEME));
+            values.put(TvContractCompat.WatchNextPrograms.COLUMN_INTERNAL_PROVIDER_ID,
+                    providerId(sourceId, itemType, itemId));
+            if (positionMs > 0) {
+                values.put(TvContractCompat.WatchNextPrograms.COLUMN_LAST_PLAYBACK_POSITION_MILLIS,
+                        (int) Math.min(positionMs, Integer.MAX_VALUE));
+            }
+            if (durationMs > 0) {
+                values.put(TvContractCompat.WatchNextPrograms.COLUMN_DURATION_MILLIS,
+                        (int) Math.min(durationMs, Integer.MAX_VALUE));
+            }
 
             long existing = findRow(ctx, providerId(sourceId, itemType, itemId));
             if (existing >= 0) {

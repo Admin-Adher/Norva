@@ -18,6 +18,7 @@ import com.google.android.gms.cast.framework.media.RemoteMediaClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Chromecast support for the native player, without AppCompat: route discovery
@@ -216,7 +217,7 @@ final class CastSupport {
 
     /** Receiver-side MIME hint from the URL extension. */
     private static String contentTypeFor(String url) {
-        String u = url.toLowerCase();
+        String u = url.toLowerCase(Locale.ROOT);
         int q = u.indexOf('?');
         if (q > 0) u = u.substring(0, q);
         if (u.endsWith(".m3u8") || u.contains("playlist.m3u8")) return "application/x-mpegURL";

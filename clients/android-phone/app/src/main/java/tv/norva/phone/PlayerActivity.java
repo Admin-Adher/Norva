@@ -72,6 +72,7 @@ import java.util.UUID;
  * hardware decoders, and reports the final position back so the cloud history
  * resumes on other devices. Touch controls come from media3-ui PlayerView.
  */
+@OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends Activity {
 
     public static final String EXTRA_URL = "url";
@@ -257,6 +258,11 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    this::handleBackPressed);
+        }
         playbackLaunchElapsedMs = SystemClock.elapsedRealtime();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -467,11 +473,11 @@ public class PlayerActivity extends Activity {
             }
         };
         try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(pipReceiver, new IntentFilter(ACTION_PIP_CONTROL), Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                registerReceiver(pipReceiver, new IntentFilter(ACTION_PIP_CONTROL));
-            }
+            ContextCompat.registerReceiver(
+                    this,
+                    pipReceiver,
+                    new IntentFilter(ACTION_PIP_CONTROL),
+                    ContextCompat.RECEIVER_NOT_EXPORTED);
         } catch (Exception ignored) { pipReceiver = null; }
         playerView.setKeepScreenOn(true);
         // Audio and subtitles now share one explicit Norva panel. Hiding the
@@ -611,7 +617,7 @@ public class PlayerActivity extends Activity {
     /** Map a download's container extension to a MIME type for the extractor. */
     private static String mimeForContainer(String container) {
         if (container == null) return null;
-        switch (container.toLowerCase()) {
+        switch (container.toLowerCase(Locale.ROOT)) {
             case "mp4":
             case "m4v":
             case "mov":
@@ -2550,7 +2556,14 @@ public class PlayerActivity extends Activity {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        // Pre-Android 13 fallback. Android 13+ dispatches to the registered
+        // OnBackInvokedCallback, which is mandatory once targetSdk reaches 36.
+        handleBackPressed();
+    }
+
+    private void handleBackPressed() {
         if (trackDialog != null) {
             trackDialog.dismiss();
             return;

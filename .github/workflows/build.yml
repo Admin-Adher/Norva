@@ -80,14 +80,19 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       - name: Build Android TV debug APK
         working-directory: clients/android-tv
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:lintDebug :app:assembleDebug --no-daemon
 
       - name: Upload Android TV APK artifact
         uses: actions/upload-artifact@v4
@@ -115,10 +120,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       # Optional FCM config: written from the secret when present so the debug APK can also do push;
       # absent → conditional plugin stays off, build still compiles (unchanged behaviour).
@@ -135,7 +145,7 @@ jobs:
 
       - name: Build Android Phone debug APK
         working-directory: clients/android-phone
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:lintDebug :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload Android Phone APK artifact
         uses: actions/upload-artifact@v4
