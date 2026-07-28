@@ -201,7 +201,7 @@ test('Android phone backgrounding cancels recovery work and cannot restart playb
   const foreground = section(
     source,
     'private void resumePlaybackAfterForegroundReturn()',
-    '@Override\n    protected void onResume()',
+    'protected void onResume()',
   );
   const pause = section(source, 'protected void onPause()', '// Picture-in-Picture:');
 

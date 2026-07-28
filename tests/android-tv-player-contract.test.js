@@ -653,7 +653,11 @@ test('Android TV error, resume and Up Next overlays own a closed D-pad focus loo
   assert.match(dispatch, /nextPanel[\s\S]{0,180}dispatchModalKey\(code,\s*nextActions/);
   assert.match(modal, /KEYCODE_DPAD_LEFT[\s\S]{0,160}KEYCODE_DPAD_RIGHT/);
   assert.match(modal, /%\s*actions\.getChildCount\(\)/, 'modal focus must wrap at both edges');
-  assert.match(modal, /KEYCODE_DPAD_CENTER[\s\S]{0,160}performClick\(\)/);
+  assert.match(
+    modal,
+    /KEYCODE_DPAD_CENTER[\s\S]{0,320}current\.performClick\(\)/,
+    'the focused modal action must remain activatable with D-pad Center',
+  );
   assert.match(modal, /return true;\s*\}/, 'unhandled playback keys must stay inside the modal');
   assert.match(error, /hideOverlayNow\(\)/, 'the OSD must be hidden while the error is actionable');
   assert.match(errorPanel, /hasAlternativeVariants\(\)[\s\S]{0,300}player_change_version/);

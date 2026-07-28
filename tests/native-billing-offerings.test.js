@@ -227,8 +227,8 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
 
 test('Android TV release version remains explicit after billing removal', () => {
   const gradle = read('clients/android-tv/app/build.gradle');
-  assert.match(gradle, /versionCode\s+24\b/);
-  assert.match(gradle, /versionName\s+"3\.8\.11-hybrid"/);
+  assert.match(gradle, /versionCode\s+25\b/);
+  assert.match(gradle, /versionName\s+"3\.8\.12-hybrid"/);
 });
 
 test('Android builds enforce lint and opt out of OS data extraction', () => {
