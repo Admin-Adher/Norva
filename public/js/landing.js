@@ -168,6 +168,8 @@
     let previousRight = '';
     let lockedScrollY = 0;
     let scrollLocked = false;
+    const modalBackground = Array.from(document.querySelectorAll('main, footer'));
+    const modalBackgroundState = new Map();
 
     const isModalPanel = () => {
       if (!panel) return false;
@@ -181,10 +183,36 @@
       }
     };
 
+    const setModalBackgroundInert = locked => {
+      modalBackground.forEach(region => {
+        if (locked) {
+          if (!modalBackgroundState.has(region)) {
+            modalBackgroundState.set(region, {
+              ariaHidden: region.getAttribute('aria-hidden'),
+              inert: Boolean(region.inert)
+            });
+          }
+          region.inert = true;
+          region.setAttribute('aria-hidden', 'true');
+          return;
+        }
+
+        const previous = modalBackgroundState.get(region);
+        region.inert = Boolean(previous?.inert);
+        if (previous?.ariaHidden === null || previous?.ariaHidden === undefined) {
+          region.removeAttribute('aria-hidden');
+        } else {
+          region.setAttribute('aria-hidden', previous.ariaHidden);
+        }
+        modalBackgroundState.delete(region);
+      });
+    };
+
     const setScrollLock = locked => {
       if (locked === scrollLocked) return;
       scrollLocked = locked;
       document.body.classList.toggle('nav-menu-open', locked);
+      setModalBackgroundInert(locked);
       if (locked) {
         lockedScrollY = Math.max(0, window.scrollY || window.pageYOffset || 0);
         previousOverflow = document.body.style.overflow;
@@ -921,7 +949,7 @@
       ['.faq-item', 'up'],
       ['.simpler-promo .promo-card', 'up'],
       ['.final-cta', 'up'],
-      ['.landing-footer > *', 'up']
+      ['.landing-footer > *, .premium-footer > *', 'up']
     ];
 
     const revealItems = [];
@@ -1089,7 +1117,7 @@
         {
           id: 'trial-terms', label: 'Clear trial terms', title: 'Start with a 7-day free trial',
           body: 'Payment method required. We remind you before renewal, and you can cancel anytime.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
+          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dannual', action: 'signup'
         }
       ],
       trust: [
@@ -1115,7 +1143,7 @@
         {
           id: 'ready-to-start', label: 'Ready when you are', title: 'Bring every screen together',
           body: 'Create your Norva space and begin with a 7-day free trial.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
+          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dannual', action: 'signup'
         }
       ]
     };
@@ -1130,7 +1158,7 @@
     // compact so the guide stays useful without reopening over the page.
     let mode = hasSavedMode && saved.mode !== 'expanded'
       ? saved.mode
-      : 'compact';
+      : 'dismissed';
     let currentContext = 'hero';
     let currentIndex = 0;
     let visible = false;
@@ -1477,7 +1505,10 @@
       }, { rootMargin: '-28% 0px -60% 0px', threshold: [0, 0.01] });
       sections.forEach(section => contextObserver.observe(section));
 
-      const blockers = [document.querySelector('.final-cta'), document.querySelector('.landing-footer')].filter(Boolean);
+      const blockers = [
+        document.querySelector('.final-cta'),
+        document.querySelector('.landing-footer, .premium-footer')
+      ].filter(Boolean);
       const obstructing = new Set();
       const obstructionObserver = new IntersectionObserver(entries => {
         entries.forEach(entry => {
@@ -1564,9 +1595,9 @@
         if (link.matches('[data-plan]')) return;
         link.addEventListener('click', () => emitLandingEvent('signup_started', {
           source: link.closest('.landing-nav') ? 'navigation'
-            : link.closest('.hero-section') ? 'hero'
+            : link.closest('.hero-section, .hero') ? 'hero'
               : link.closest('.final-cta') ? 'final_cta'
-                : link.closest('.landing-footer') ? 'footer' : 'landing',
+                : link.closest('.landing-footer, .premium-footer') ? 'footer' : 'landing',
           cta: link.textContent.trim().replace(/\s+/g, ' '),
           target: 'account',
           authenticated: false
