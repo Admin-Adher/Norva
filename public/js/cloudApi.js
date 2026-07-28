@@ -931,6 +931,17 @@
         ? request(method, `/device${userPath}`, body, { token: getDeviceToken() })
         : request(method, userPath, body);
 
+    // A provider item id is only unique inside its source. Keep the exact lookup in
+    // one helper so web, phone and paired TV always send the complete compatibility
+    // proof the backend uses to resolve the canonical cloud_titles identity.
+    async function getExactRating(params = {}) {
+        const sourceId = String(params.sourceId ?? params.source_id ?? '');
+        const itemId = String(params.itemId ?? params.item_id ?? '');
+        const itemType = String(params.itemType ?? params.item_type ?? '');
+        if (!sourceId || !itemId || !itemType) return { rating: 0 };
+        return dualGet('/ratings', { sourceId, itemId, itemType });
+    }
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get edgeUrl() { return edgeBase(); },
@@ -1141,6 +1152,7 @@
         // Device-aware so a paired TV writes/reads its ratings too.
         ratings: {
             get: (params = {}) => dualGet('/ratings', params),
+            getExact: getExactRating,
             set: (body) => dualMutate('POST', '/ratings', body)
         },
 

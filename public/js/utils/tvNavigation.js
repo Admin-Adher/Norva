@@ -359,7 +359,10 @@
         if (page?.id === 'page-movies' &&
             document.documentElement.classList.contains('tv-movies-active')) {
             panel = page.querySelector('#movie-details');
-            previewCard = page.querySelector('#movies-grid .movie-card.tv-preview-active');
+            previewCard = page.querySelector(
+                '#movies-grid .movie-card.tv-preview-active, ' +
+                '#movies-grid .dashboard-card.tv-preview-active'
+            );
             selectors = [
                 '#movie-primary-action', '#movie-detail-favorite',
                 '.movie-version-item.active', '.movie-version-item',
@@ -864,7 +867,10 @@
                 !card.closest('.hidden, [hidden]') &&
                 (card.offsetWidth > 0 || card.offsetHeight > 0)
             );
-            const preview = grid?.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
+            const preview = grid?.querySelector(
+                '.movie-card.tv-preview-active, .dashboard-card.tv-preview-active, ' +
+                '.series-card.tv-preview-active'
+            );
             const target = usable(preview)
                 ? preview
                 : (cards.find(isVisible) || cards.find(usable));
@@ -1700,7 +1706,10 @@
             if (!realPanelNeighbour) {
                 const grid = panel.closest('.page')?.querySelector('.movies-grid, .series-grid');
                 if (grid) {
-                    let target = grid.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
+                    let target = grid.querySelector(
+                        '.movie-card.tv-preview-active, .dashboard-card.tv-preview-active, ' +
+                        '.series-card.tv-preview-active'
+                    );
                     if (!target || !isVisible(target)) {
                         const origin = centerOf(focused);
                         const y = origin.y;

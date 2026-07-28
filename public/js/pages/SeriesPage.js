@@ -81,6 +81,15 @@ class SeriesPage {
     }
 
     init() {
+        this.ratingControl = window.TitleRatingControl?.fromIds({
+            rootId: 'series-title-rating',
+            upId: 'series-thumb-up',
+            downId: 'series-thumb-down',
+            statusId: 'series-rating-status',
+            retryId: 'series-rating-retry',
+            getApi: () => window.NorvaCloud?.ratings,
+        }) || null;
+
         this.categoryMulti = new MultiSelect({
             btnId: 'series-category-btn',
             panelId: 'series-category-panel',
@@ -167,8 +176,6 @@ class SeriesPage {
             await this.toggleFavorite(this.currentSeriesGroup, this.detailFavoriteBtn);
             this.syncDetailFavoriteButton();
         });
-        document.getElementById('series-thumb-up')?.addEventListener('click', () => this.setRating(1));
-        document.getElementById('series-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         // The catalogue panel is only a lightweight preview. Moving focus across
         // posters never fetches seriesInfo, seasons, episodes or recommendations.
@@ -3081,34 +3088,24 @@ class SeriesPage {
 
     // === Thumbs up/down (per-profile title rating) ===
 
-    paintThumbButtons(rating) {
-        document.getElementById('series-thumb-up')?.classList.toggle('active', rating === 1);
-        document.getElementById('series-thumb-down')?.classList.toggle('active', rating === -1);
+    ratingContext(series = this.currentSeries) {
+        if (!series) return null;
+        return {
+            // Keep the cloud UUID distinct from the local numeric provider key.
+            // The backend rejects ambiguous provider-local identities by design.
+            sourceId: series.cloudSourceId || series.cloud_source_id,
+            itemId: series.series_id,
+            itemType: 'series',
+            label: this.getSeriesDisplayTitle(series),
+        };
     }
 
-    async loadRating() {
-        this._currentRating = 0;
-        this.paintThumbButtons(0);
-        const series = this.currentSeries;
-        if (!series || !window.NorvaCloud?.ratings) return;
-        try {
-            const res = await NorvaCloud.ratings.get({ itemType: 'series', itemId: series.series_id });
-            this._currentRating = Number(res?.rating) || 0;
-            this.paintThumbButtons(this._currentRating);
-        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    loadRating() {
+        return this.ratingControl?.load(this.ratingContext()) || Promise.resolve(0);
     }
 
-    async setRating(value) {
-        const series = this.currentSeries;
-        if (!series || !window.NorvaCloud?.ratings) return;
-        const next = this._currentRating === value ? 0 : value;
-        this._currentRating = next;
-        this.paintThumbButtons(next);
-        try {
-            await NorvaCloud.ratings.set({ sourceId: series.sourceId, itemId: series.series_id, itemType: 'series', rating: next });
-        } catch (_) {
-            this.app?.showToast?.('Could not save your rating', { type: 'error' });
-        }
+    setRating(value) {
+        this.ratingControl?.choose(value);
     }
 
     playPrimaryEpisode({ fromStart = false } = {}) {

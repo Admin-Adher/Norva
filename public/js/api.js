@@ -363,6 +363,14 @@ const CloudAdapter = (() => {
         }
     }
 
+    function profileCacheScope() {
+        try {
+            return String(window.NorvaCloud?.profiles?.getActiveId?.() || 'default');
+        } catch (_) {
+            return 'default';
+        }
+    }
+
     function normalizeCategory(value) {
         const raw = value === null || value === undefined || value === '' ? 'uncategorized' : String(value);
         return {
@@ -616,16 +624,25 @@ const CloudAdapter = (() => {
         );
     }
 
-    async function getHomeRails({ type = '', limit = 12 } = {}) {
+    async function getHomeRails({ type = '', limit = 12, fresh = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : '';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 12));
-        const cacheKey = JSON.stringify({ type: normalizedType, limit: normalizedLimit, lang: contentLang() });
-        const cached = homeRailCache.get(cacheKey);
-        if (cached && cached.expiresAt > Date.now()) return cached.payload;
+        const cacheKey = JSON.stringify({
+            profile: profileCacheScope(),
+            type: normalizedType,
+            limit: normalizedLimit,
+            lang: contentLang()
+        });
+        const freshToken = String(fresh || '').trim();
+        if (!freshToken) {
+            const cached = homeRailCache.get(cacheKey);
+            if (cached && cached.expiresAt > Date.now()) return cached.payload;
+        }
 
         const payload = await cloudHomeApi().rails({
             type: normalizedType,
-            limit: normalizedLimit
+            limit: normalizedLimit,
+            ...(freshToken ? { fresh: freshToken } : {})
         });
         homeRailCache.set(cacheKey, {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
@@ -637,7 +654,13 @@ const CloudAdapter = (() => {
     async function getGenreRails({ type = '', limit = 18 } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 18));
-        const cacheKey = JSON.stringify({ genre: true, type: normalizedType, limit: normalizedLimit, lang: contentLang() });
+        const cacheKey = JSON.stringify({
+            profile: profileCacheScope(),
+            genre: true,
+            type: normalizedType,
+            limit: normalizedLimit,
+            lang: contentLang()
+        });
         const cached = homeRailCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.payload;
 
@@ -1979,7 +2002,11 @@ const CloudAdapter = (() => {
         if (method === 'GET' && path === '/home/rails') {
             const requestedType = query.get('type') || '';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '18', 10) || 18));
-            const payload = await getHomeRails({ type: requestedType, limit });
+            const payload = await getHomeRails({
+                type: requestedType,
+                limit,
+                fresh: query.get('fresh') || ''
+            });
             return {
                 ...payload,
                 rails: (payload.rails || []).map(rail => ({

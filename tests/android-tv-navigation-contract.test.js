@@ -957,6 +957,7 @@ test('Android TV live-data audit assets are opt-in and debug-only', () => {
     /debugBundledDpadAssets =\s*\(getApplicationInfo\(\)\.flags & android\.content\.pm\.ApplicationInfo\.FLAG_DEBUGGABLE\) != 0\s*&& getIntent\(\)\.getBooleanExtra\(EXTRA_DEBUG_BUNDLED_DPAD_ASSETS, false\);/
   );
   assert.match(main, /"\/js\/utils\/tvNavigation\.js"\.equals\(path\)/);
+  assert.match(main, /"\/js\/utils\/GenreRails\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/pages\/SeriesPage\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/profiles\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/components\/MultiSelect\.js"\.equals\(path\)/);
@@ -964,8 +965,36 @@ test('Android TV live-data audit assets are opt-in and debug-only', () => {
 });
 
 test('Android TV app shell cache-busts the repaired navigation script', () => {
-  assert.match(read('public/app.html'), /tvNavigation\.js\?v=29/);
-  assert.match(read('public/support.html'), /tvNavigation\.js\?v=29/);
+  assert.match(read('public/app.html'), /tvNavigation\.js\?v=30/);
+  assert.match(read('public/support.html'), /tvNavigation\.js\?v=30/);
+  assert.match(read('public/app.html'), /GenreRails\.js\?v=8/);
+});
+
+test('Android TV Movies dashboard cards restore the lightweight preview after Back', () => {
+  const movies = read('public/js/pages/MoviesPage.js');
+  const navigation = read('public/js/utils/tvNavigation.js');
+  const genreRails = read('public/js/utils/GenreRails.js');
+
+  assert.match(genreRails, /card\.__norvaItem = item \|\| null/);
+  assert.match(movies, /closest\?\.\('\.movie-card, \.dashboard-card'\)/);
+  assert.match(movies, /const group = this\._tvPreviewGroupForCard\(card\)/);
+  assert.match(movies, /\.dashboard-card\.tv-preview-active/);
+  assert.match(
+    movies,
+    /card === this\._lastPreviewCard && this\._extrasLoadedFor === null/,
+    'returning laterally from a committed panel must rebuild the lightweight preview',
+  );
+  assert.doesNotMatch(
+    movies,
+    /if \(card === this\._lastPreviewCard\) return;/,
+    'the same-card shortcut must not leave committed rating controls visible',
+  );
+  assert.match(navigation, /#movies-grid \.dashboard-card\.tv-preview-active/);
+  assert.match(navigation, /\.dashboard-card\.tv-preview-active,/);
+  assert.ok(
+    (navigation.match(/\.dashboard-card\.tv-preview-active/g) || []).length >= 3,
+    'entry, Back and ArrowLeft all preserve the active dashboard-card preview',
+  );
 });
 
 test('Android TV keeps the standard cloud pairing flow separate from advanced setup', () => {

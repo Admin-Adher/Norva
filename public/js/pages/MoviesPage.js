@@ -72,6 +72,15 @@ class MoviesPage {
     }
 
     init() {
+        this.ratingControl = window.TitleRatingControl?.fromIds({
+            rootId: 'movie-title-rating',
+            upId: 'movie-thumb-up',
+            downId: 'movie-thumb-down',
+            statusId: 'movie-rating-status',
+            retryId: 'movie-rating-retry',
+            getApi: () => window.NorvaCloud?.ratings,
+        }) || null;
+
         // Category multi-select
         this.categoryMulti = new MultiSelect({
             btnId: 'movies-category-btn',
@@ -164,8 +173,6 @@ class MoviesPage {
             if (this.currentMovieGroup) this.toggleFavorite(this.currentMovieGroup, this.detailFavoriteBtn);
         });
         this.detailDownloadBtn?.addEventListener('click', () => this.onDownloadClick());
-        document.getElementById('movie-thumb-up')?.addEventListener('click', () => this.setRating(1));
-        document.getElementById('movie-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         // Android TV split-view: moving D-pad focus across grid cards live-previews
         // the focused card synchronously in the docked panel. This avoids a delayed
@@ -173,7 +180,7 @@ class MoviesPage {
         // never moves focus; heavy extras load only when the panel is entered.
         this.container?.addEventListener('focusin', (event) => {
             if (!this._isTvMode()) return;
-            const card = event.target.closest?.('.movie-card');
+            const card = event.target.closest?.('.movie-card, .dashboard-card');
             if (!card) return;
             // Render immediately: a delayed panel rebuild could otherwise destroy
             // the action button already reached with ArrowRight.
@@ -2206,35 +2213,24 @@ class MoviesPage {
 
     // === Thumbs up/down (per-profile title rating) ===
 
-    paintThumbButtons(rating) {
-        document.getElementById('movie-thumb-up')?.classList.toggle('active', rating === 1);
-        document.getElementById('movie-thumb-down')?.classList.toggle('active', rating === -1);
+    ratingContext(movie = this.currentMovie) {
+        if (!movie) return null;
+        return {
+            // `sourceId` is the local numeric provider key used by the legacy
+            // catalogue adapter. Ratings must use the account-scoped UUID.
+            sourceId: movie.cloudSourceId || movie.cloud_source_id,
+            itemId: movie.stream_id,
+            itemType: 'movie',
+            label: this.getMovieDisplayTitle(movie),
+        };
     }
 
-    async loadRating() {
-        this._currentRating = 0;
-        this.paintThumbButtons(0);
-        const movie = this.currentMovie;
-        if (!movie || !window.NorvaCloud?.ratings) return;
-        try {
-            const res = await NorvaCloud.ratings.get({ itemType: 'movie', itemId: movie.stream_id });
-            this._currentRating = Number(res?.rating) || 0;
-            this.paintThumbButtons(this._currentRating);
-        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    loadRating() {
+        return this.ratingControl?.load(this.ratingContext()) || Promise.resolve(0);
     }
 
-    async setRating(value) {
-        const movie = this.currentMovie;
-        if (!movie || !window.NorvaCloud?.ratings) return;
-        // Clicking the active thumb clears it (toggle-off), like Netflix.
-        const next = this._currentRating === value ? 0 : value;
-        this._currentRating = next;
-        this.paintThumbButtons(next);
-        try {
-            await NorvaCloud.ratings.set({ sourceId: movie.sourceId, itemId: movie.stream_id, itemType: 'movie', rating: next });
-        } catch (_) {
-            this.app?.showToast?.('Could not save your rating', { type: 'error' });
-        }
+    setRating(value) {
+        this.ratingControl?.choose(value);
     }
 
     // === Offline downloads (native phone/tablet app only) ===
@@ -2567,21 +2563,42 @@ class MoviesPage {
     // preview (no grid takeover, no heavy extras, no focus steal). Extras load only
     // when the user steps into the panel (_loadPanelExtras).
     previewCard(card) {
-        const group = card?.__movieGroup;
+        const group = this._tvPreviewGroupForCard(card);
         if (!group?.items?.length) return;
-        // Re-focusing the SAME card (focusin re-fires; a fast D-pad burst that lands back
-        // here) must be free — showMovieDetails below rebuilds the entire panel. The panel
-        // already shows this card, so skip. Cleared on commit (_tvCommitCard) so backing out
-        // of the fiche re-previews correctly.
-        if (card === this._lastPreviewCard) return;
+        // Re-focusing the SAME card while its lightweight preview is still intact must
+        // be free — showMovieDetails below rebuilds the entire panel. Once focus has
+        // entered the panel, however, _loadPanelExtras marks it committed. Returning
+        // with ArrowLeft must then rebuild the light preview even for the same card so
+        // rating controls and fiche-only extras cannot remain exposed over the grid.
+        const isSameLightweightPreview =
+            card === this._lastPreviewCard && this._extrasLoadedFor === null;
+        if (isSameLightweightPreview) return;
         this._lastPreviewCard = card;
-        this.container?.querySelectorAll('.movie-card.tv-preview-active').forEach(active => {
+        this.container?.querySelectorAll(
+            '.movie-card.tv-preview-active, .dashboard-card.tv-preview-active'
+        ).forEach(active => {
             if (active !== card) active.classList.remove('tv-preview-active');
         });
         card.classList.add('tv-preview-active');
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const selected = this._selectInProgressVersion(ordered) || ordered[0];
         this.showMovieDetails(group, selected, { versions: ordered, isTvPreview: true });
+    }
+
+    _tvPreviewGroupForCard(card) {
+        if (card?.__movieGroup?.items?.length) return card.__movieGroup;
+        const item = card?.__norvaItem;
+        if (!item) return null;
+        const variants = [
+            ...(Array.isArray(item.variants) ? item.variants : []),
+            ...(Array.isArray(item.exposedVariants) ? item.exposedVariants : []),
+        ].filter((variant, index, all) => variant && all.indexOf(variant) === index);
+        const items = variants.length ? variants : [item];
+        return {
+            key: `tv-preview:${item.titleId || item.title_id || item.itemId || item.item_id || item.stream_id || ''}`,
+            items,
+            representative: item,
+        };
     }
 
     // On page entry, seed the panel with the first card so it's never empty.
@@ -2813,7 +2830,8 @@ class MoviesPage {
         // A TV grid preview can change several times per second. Defer the cloud
         // rating request until the user actually enters the panel, preventing
         // stale responses and network churn while navigating posters.
-        if (!isTvPreview) this.loadRating();
+        if (isTvPreview) this.ratingControl?.defer(this.ratingContext(movie));
+        else this.loadRating();
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
         // A version switch keeps the same title — re-highlighting the versions list above is

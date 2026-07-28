@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=91">
+  <link rel="stylesheet" href="/css/main.css?v=92">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -639,10 +639,30 @@
                     <span class="fav-icon">&hearts;</span>
                     <span class="fav-label">Favorite</span>
                   </button>
-                  <button id="movie-thumb-up" class="movie-secondary-action thumb-btn" type="button"
-                    title="I like this" aria-label="Rate up">👍</button>
-                  <button id="movie-thumb-down" class="movie-secondary-action thumb-btn" type="button"
-                    title="Not for me" aria-label="Rate down">👎</button>
+                  <div id="movie-title-rating" class="title-rating-control" data-state="idle"
+                    aria-label="Your preference for this movie" aria-busy="false">
+                    <div class="title-rating-buttons" role="group" aria-label="Rate this movie">
+                      <button id="movie-thumb-up"
+                        class="movie-secondary-action thumb-btn title-rating-choice" type="button"
+                        title="Like this title" aria-label="Like this title" aria-pressed="false" disabled>
+                        <span class="title-rating-icon title-rating-icon-up" aria-hidden="true"></span>
+                        <span class="title-rating-choice-label">Like</span>
+                      </button>
+                      <button id="movie-thumb-down"
+                        class="movie-secondary-action thumb-btn title-rating-choice title-rating-choice-down"
+                        type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled>
+                        <span class="title-rating-icon title-rating-icon-down" aria-hidden="true"></span>
+                        <span class="title-rating-choice-label">Not for me</span>
+                      </button>
+                    </div>
+                    <div class="title-rating-feedback">
+                      <span id="movie-rating-status" class="title-rating-status"
+                        role="status" aria-live="polite" aria-atomic="true"></span>
+                      <button id="movie-rating-retry" class="title-rating-retry" type="button" hidden disabled>
+                        Retry
+                      </button>
+                    </div>
+                  </div>
                   <button id="movie-detail-download" class="movie-secondary-action movie-download-action" type="button"
                     title="Download for offline" style="display:none">
                     <span class="download-icon">&#x2193;</span>
@@ -788,10 +808,30 @@
                       <span class="fav-icon">♡</span>
                       <span class="fav-label">Favorite</span>
                     </button>
-                    <button id="series-thumb-up" class="series-secondary-action thumb-btn" type="button"
-                      title="I like this" aria-label="Rate up">👍</button>
-                    <button id="series-thumb-down" class="series-secondary-action thumb-btn" type="button"
-                      title="Not for me" aria-label="Rate down">👎</button>
+                    <div id="series-title-rating" class="title-rating-control" data-state="idle"
+                      aria-label="Your preference for this series" aria-busy="false">
+                      <div class="title-rating-buttons" role="group" aria-label="Rate this series">
+                        <button id="series-thumb-up"
+                          class="series-secondary-action thumb-btn title-rating-choice" type="button"
+                          title="Like this title" aria-label="Like this title" aria-pressed="false" disabled>
+                          <span class="title-rating-icon title-rating-icon-up" aria-hidden="true"></span>
+                          <span class="title-rating-choice-label">Like</span>
+                        </button>
+                        <button id="series-thumb-down"
+                          class="series-secondary-action thumb-btn title-rating-choice title-rating-choice-down"
+                          type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled>
+                          <span class="title-rating-icon title-rating-icon-down" aria-hidden="true"></span>
+                          <span class="title-rating-choice-label">Not for me</span>
+                        </button>
+                      </div>
+                      <div class="title-rating-feedback">
+                        <span id="series-rating-status" class="title-rating-status"
+                          role="status" aria-live="polite" aria-atomic="true"></span>
+                        <button id="series-rating-retry" class="title-rating-retry" type="button" hidden disabled>
+                          Retry
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2008,34 +2048,35 @@
   <!-- JavaScript -->
   <script defer src="/js/icons.js"></script>
   <script defer src="/js/utils/regions.js?v=1"></script>
-  <script defer src="/js/cloudApi.js?v=52"></script>
+  <script defer src="/js/cloudApi.js?v=53"></script>
   <script defer src="/js/authApi.js?v=6"></script>
   <script defer src="/js/norvaEngine.js?v=45"></script>
-  <script defer src="/js/api.js?v=75"></script>
+  <script defer src="/js/api.js?v=76"></script>
   <script defer src="/js/utils/catalogCache.js?v=1"></script>
   <script defer src="/js/utils/mediaUtils.js?v=16"></script>
   <script defer src="/js/utils/hoverPreview.js?v=1"></script>
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=7"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=29"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=30"></script>
   <script defer src="/js/utils/standalone.js?v=9"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
-  <script defer src="/js/utils/GenreRails.js?v=7"></script>
+  <script defer src="/js/utils/GenreRails.js?v=8"></script>
   <script defer src="/js/components/NorvaModal.js?v=2"></script>
   <script defer src="/js/components/MultiSelect.js?v=4"></script>
   <script defer src="/js/components/RegionPicker.js?v=1"></script>
+  <script defer src="/js/components/TitleRatingControl.js?v=2"></script>
   <script defer src="/js/components/VideoPlayer.js?v=41"></script>
   <script defer src="/js/components/ChannelList.js?v=49"></script>
   <script defer src="/js/components/SourceManager.js?v=39"></script>
   <script defer src="/js/components/EpgGuide.js?v=13"></script>
   <script defer src="/js/components/LiveGuideFusion.js?v=29"></script>
-  <script defer src="/js/pages/HomePage.js?v=54"></script>
+  <script defer src="/js/pages/HomePage.js?v=55"></script>
   <script defer src="/js/pages/LivePage.js?v=9"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
-  <script defer src="/js/pages/MoviesPage.js?v=54"></script>
-  <script defer src="/js/pages/SeriesPage.js?v=52"></script>
+  <script defer src="/js/pages/MoviesPage.js?v=55"></script>
+  <script defer src="/js/pages/SeriesPage.js?v=53"></script>
   <script defer src="/js/pages/Settings.js?v=45"></script>
   <script defer src="/js/pages/WatchPage.js?v=126"></script>
   <script defer src="/js/profiles.js?v=13"></script>

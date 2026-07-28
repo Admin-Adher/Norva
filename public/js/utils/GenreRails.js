@@ -159,6 +159,10 @@
         container.querySelectorAll('.dashboard-card').forEach((card) => {
             const rail = usable[Number(card.dataset.railIndex)];
             const item = rail && rail.items[Number(card.dataset.itemIndex)];
+            // Keep the normalized catalogue identity on the card for TV's
+            // lightweight focus preview. It is an in-memory reference only and
+            // never becomes a DOM attribute or user-visible payload.
+            card.__norvaItem = item || null;
             attachHover(card, item, rail, onItemClick);
             card.addEventListener('click', () => {
                 if (item) onItemClick(item, rail);
@@ -187,6 +191,7 @@
         holder.innerHTML = (items || []).map((it, i) => cardHtml(it, 0, start + i)).join('');
         Array.prototype.slice.call(holder.children).forEach((card, i) => {
             const item = items[i];
+            card.__norvaItem = item || null;
             attachHover(card, item, null, onItemClick);
             card.addEventListener('click', () => onItemClick(item));
             gridEl.appendChild(card);

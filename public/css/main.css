@@ -14366,20 +14366,174 @@ html.tv-mode .watch-next-episode .next-actions .btn {
    Transversal — thumbs, notifications bell/inbox, focus-visible.
    ============================================================ */
 
-/* Thumbs up/down on the fiche */
-.thumb-btn {
-  font-size: 1.05rem;
-  line-height: 1;
-  opacity: 0.75;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+/* Shared Like / Not for me control on movie and series fiches. */
+.title-rating-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
 }
 
-.thumb-btn:hover { opacity: 1; }
+.title-rating-control[hidden] {
+  display: none !important;
+}
 
-.thumb-btn.active {
+.title-rating-buttons {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-sm);
+}
+
+.title-rating-control .title-rating-choice {
+  min-width: 44px;
+  min-height: 48px;
+  gap: 8px;
+  padding: 0 14px;
+  opacity: 0.82;
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 78%, transparent);
+  border-color: var(--color-border);
+  line-height: 1;
+  transition:
+    opacity var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.title-rating-control .title-rating-choice:hover {
   opacity: 1;
-  transform: scale(1.12);
-  background: rgba(255, 255, 255, 0.14);
+  color: var(--color-text-primary);
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-tertiary));
+}
+
+.title-rating-control .title-rating-choice.is-selected {
+  opacity: 1;
+  color: var(--color-text-primary);
+  border-color: color-mix(in srgb, var(--color-accent) 78%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 24%, var(--color-bg-tertiary));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 34%, transparent),
+    0 8px 24px color-mix(in srgb, var(--color-accent) 16%, transparent);
+  transform: translateY(-1px);
+}
+
+.title-rating-control .title-rating-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: none;
+}
+
+.title-rating-control[data-state="loading"] .title-rating-choice:disabled {
+  cursor: progress;
+}
+
+.title-rating-icon {
+  display: inline-block;
+  width: 19px;
+  height: 19px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.title-rating-icon-up {
+  -webkit-mask-image: url('/img/icons/norva-thumb-up.svg');
+  mask-image: url('/img/icons/norva-thumb-up.svg');
+}
+
+.title-rating-icon-down {
+  -webkit-mask-image: url('/img/icons/norva-thumb-down.svg');
+  mask-image: url('/img/icons/norva-thumb-down.svg');
+}
+
+.title-rating-choice-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.title-rating-feedback {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 2px;
+}
+
+.title-rating-status {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.title-rating-status:empty {
+  visibility: hidden;
+}
+
+.title-rating-control[data-state="saved"] .title-rating-status {
+  color: var(--color-success);
+}
+
+.title-rating-control[data-state="error"] .title-rating-status,
+.title-rating-control[data-state="offline"] .title-rating-status {
+  color: var(--color-warning);
+}
+
+.title-rating-retry {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, var(--color-border));
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-tertiary));
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.title-rating-control[data-state="saving"] .title-rating-choice.is-selected .title-rating-icon {
+  animation: titleRatingSaving 820ms ease-in-out infinite alternate;
+}
+
+@keyframes titleRatingSaving {
+  from { opacity: 0.5; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1.04); }
+}
+
+@media (max-width: 720px) {
+  .movie-detail-actions > .title-rating-control,
+  .series-detail-actions > .title-rating-control {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .title-rating-buttons {
+    width: 100%;
+  }
+
+  .title-rating-control .title-rating-choice {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-rating-control .title-rating-choice,
+  .title-rating-control .title-rating-icon {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* Notifications bell + unread dot (the Devices button shares the anatomy) */
@@ -16324,10 +16478,41 @@ html.tv-mode #page-movies .detail-trailer-btn {
   font-size: 0.72rem;
 }
 
-html.tv-mode #page-movies #movie-detail-download,
-html.tv-mode #page-movies #movie-thumb-up,
-html.tv-mode #page-movies #movie-thumb-down {
+html.tv-mode #page-movies #movie-detail-download {
   display: none !important;
+}
+
+/* Ratings are available on both TV catalogues once the viewer commits into the
+   fiche. The shared component defers/hides itself during lightweight poster
+   previews, so these controls never trigger network work while flying the D-pad. */
+html.tv-mode #page-movies .movie-detail-actions > .title-rating-control {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+html.tv-mode #page-movies .title-rating-buttons,
+html.tv-mode #page-series .title-rating-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+html.tv-mode #page-movies .title-rating-choice,
+html.tv-mode #page-series .title-rating-choice {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding-inline: 10px;
+}
+
+html.tv-mode #page-movies .title-rating-choice-label,
+html.tv-mode #page-series .title-rating-choice-label {
+  font-size: 0.72rem;
+}
+
+html.tv-mode #page-movies .title-rating-feedback,
+html.tv-mode #page-series .title-rating-feedback {
+  min-height: 16px;
 }
 
 html.tv-mode #page-movies .movie-detail-actions button:focus {

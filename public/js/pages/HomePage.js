@@ -20,6 +20,7 @@ class HomePage {
         this.heroItem = null;
         this.contentPreferences = {};
         this.contentPreferenceKey = '';
+        this._freshRailsPending = false;
         this.setupRefreshTimer = null;
         this.setupRecoveryToken = null;
         this.setupRecoverySourceId = null;
@@ -29,6 +30,9 @@ class HomePage {
             if (this.app?.currentPage === 'home') {
                 this.loadDashboardData();
             }
+        });
+        document.addEventListener('norva:title-rating-changed', () => {
+            this.invalidateRatingRecommendations();
         });
         window.addEventListener('norva:notification-permission-changed', () => {
             if (this.app?.currentPage === 'home') {
@@ -114,6 +118,19 @@ class HomePage {
         if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) return;
         this.lastLoadedAt = 0;
         this.loadDashboardData();
+    }
+
+    invalidateRatingRecommendations() {
+        this.lastLoadedAt = 0;
+        this._freshRailsPending = true;
+        try { window.API?.media?.clearRailCache?.(); } catch (_) { /* best-effort */ }
+        try { window.NorvaCatalogCache?.remove?.(this.homeCacheKey()); } catch (_) { /* best-effort */ }
+
+        if (this.app?.currentPage !== 'home') return;
+        // A refresh already in flight may have started before the confirmed rating.
+        // Retire that generation so it cannot repaint stale personalized rails.
+        if (this.isLoading) this.cancelPendingLoad();
+        this.loadDashboardData({ skipCache: true, freshRails: true });
     }
 
     async show() {
@@ -441,9 +458,10 @@ class HomePage {
         return generation === this.loadGeneration;
     }
 
-    async loadDashboardData() {
+    async loadDashboardData({ skipCache = false, freshRails = false } = {}) {
         if (this.isLoading) return this.loadPromise;
         const generation = ++this.loadGeneration;
+        const forceFreshRails = Boolean(freshRails || this._freshRailsPending);
         this.isLoading = true;
         this.setHomeLoadingState(true);
 
@@ -459,7 +477,12 @@ class HomePage {
                     // credentials, first-run): flashing yesterday's rails for the round-trip
                     // and then replacing them with the repair gate reads as a glitch.
                     const gatedBefore = this.sourceSummary && this.shouldShowSetupGate(this.sourceSummary);
-                    const cached = !gatedBefore ? window.NorvaCatalogCache?.read?.(this.homeCacheKey(), { version: window.API?.catalogSignature?.() }) : null;
+                    const cached = !skipCache && !forceFreshRails && !gatedBefore
+                        ? window.NorvaCatalogCache?.read?.(
+                            this.homeCacheKey(),
+                            { version: window.API?.catalogSignature?.() }
+                        )
+                        : null;
                     if (cached?.data?.rails) {
                         const ch = Array.isArray(cached.data.history) ? cached.data.history : [];
                         this.renderHistory(ch);
@@ -483,7 +506,11 @@ class HomePage {
                     'history'
                 );
                 const railsP = this.boundedHomeTask(
-                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
+                    window.API.request(
+                        'GET',
+                        `/home/rails?limit=${railFetchLimit}`
+                        + (forceFreshRails ? `&fresh=${Date.now()}-${generation}` : '')
+                    ),
                     'rails'
                 );
 
@@ -538,6 +565,7 @@ class HomePage {
                 if (railsResult.status === 'fulfilled') {
                     this.renderCloudRails(railsResult.value);
                     this.renderHero(history, this.railItems);
+                    this._freshRailsPending = false;
                     // Cache this Home for an instant next cold launch (SWR).
                     try {
                         window.NorvaCatalogCache?.write?.(this.homeCacheKey(), {
@@ -1400,15 +1428,15 @@ class HomePage {
         // Billboard = promotional quality: draw from the POPULAR rails first (views+rating
         // ranked), then the rest — not "whatever synced most recently".
         const heroRails = [
-            ...rails.filter(r => /popular|because-you-watched/.test(String(r.id || ''))),
-            ...rails.filter(r => !/popular|because-you-watched/.test(String(r.id || ''))),
+            ...rails.filter(r => /popular|because-you-(?:watched|liked)/.test(String(r.id || ''))),
+            ...rails.filter(r => !/popular|because-you-(?:watched|liked)/.test(String(r.id || ''))),
         ];
         // Editorial reason per hero slide, derived from the rail it was drawn from —
         // so the billboard can say WHY a title is featured (Popular / For You / New).
         const reasonOf = (rail) => {
             const rid = String(rail.id || '').toLowerCase();
             if (/popular/.test(rid)) return 'popular';
-            if (/because-you-watched/.test(rid)) return 'foryou';
+            if (/because-you-(?:watched|liked)/.test(rid)) return 'foryou';
             if (/recently-added/.test(rid)) return 'new';
             return 'featured';
         };
@@ -1767,12 +1795,15 @@ class HomePage {
     // "See all" target for a rail — the catalog page that matches its content type
     // (null when a rail has no clean single-type destination, e.g. mixed suggestions).
     railSeeAllPage(rail = {}) {
+        const id = String(rail.id || '').toLowerCase();
+        if (id.startsWith('because-you-liked') || rail.curation?.kind === 'because_you_liked') {
+            return null;
+        }
         const t = String(rail.itemType || rail.item_type || '').toLowerCase();
         if (t === 'series') return 'series';
         if (t === 'movie' || t === 'movies') return 'movies';
         if (t === 'channel' || t === 'live') return 'live';
         if (this.isRankedRail(rail)) return rail.itemType === 'series' ? 'series' : 'movies';
-        const id = String(rail.id || '').toLowerCase();
         if (/series/.test(id)) return 'series';
         if (/movie/.test(id)) return 'movies';
         return null;
@@ -1797,12 +1828,17 @@ class HomePage {
             const anchor = String(rail.curation?.anchorTitle || '').trim();
             return anchor ? `Because You Watched ${anchor}` : 'Because You Watched';
         }
+        if (id.startsWith('because-you-liked')) {
+            const anchor = String(rail.curation?.anchorTitle || '').trim();
+            return anchor ? `Because You Liked ${anchor}` : 'Because You Liked';
+        }
         return rail.title || rail.name || 'Norva Selection';
     }
 
     railSubtitle(rail = {}) {
         const id = String(rail.id || '').toLowerCase();
         if (id.startsWith('because-you-watched')) return 'Suggestions based on your watch history';
+        if (id.startsWith('because-you-liked')) return 'Suggestions inspired by titles you liked';
         if (id === 'action-movies') return 'Verified titles with enriched genres';
         if (id === 'popular-movies') return 'Verified titles with top ratings';
         return '';
