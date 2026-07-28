@@ -34,6 +34,10 @@ test('mobile navigation behavior and accessibility share the 980px breakpoint', 
     /@media \(max-width: 980px\)[\s\S]*?\.nav-shell\.landing-nav:not\(\.open\) \.nav-links/,
   );
   assert.match(
+    premiumCss,
+    /@media \(max-width: 980px\)[\s\S]*?\.nav-shell\.landing-nav,[\s\S]*?padding:\s*7px 16px;/,
+  );
+  assert.match(
     landingJs,
     /const mobile = window\.matchMedia\('\(max-width: 980px\)'\);/,
   );

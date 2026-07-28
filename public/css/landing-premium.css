@@ -1379,7 +1379,9 @@ html.norva-lite .particle-field i {
     width: min(100%, calc(100vw - 24px));
     min-height: 60px;
     margin: 0 auto;
-    padding: 7px 8px 7px 16px;
+    /* Keep the hamburger's trailing inset aligned with the brand's leading
+       inset; the previous 8px right padding made it hug the capsule edge. */
+    padding: 7px 16px;
     grid-template-columns: 1fr auto;
     gap: 12px;
   }
