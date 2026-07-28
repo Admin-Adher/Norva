@@ -149,6 +149,7 @@
 
   function setupMobileNavigation() {
     if (!nav || !toggle) return;
+    const mobile = window.matchMedia('(max-width: 980px)');
     const explicitPanels = Array.from(nav.querySelectorAll('[data-nav-panel]'));
     const panels = explicitPanels.length
       ? explicitPanels
@@ -175,7 +176,7 @@
       if (!panel) return false;
       if (nav.dataset.menuModal === 'true' || panels.some(controlled => controlled.getAttribute('aria-modal') === 'true')) return true;
       try {
-        return window.matchMedia('(max-width: 1100px)').matches &&
+        return mobile.matches &&
           (window.getComputedStyle(nav).position === 'fixed' ||
             panels.some(controlled => window.getComputedStyle(controlled).position === 'fixed'));
       } catch (_) {
@@ -262,7 +263,7 @@
       toggle.setAttribute('aria-expanded', String(open));
       toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
       panels.forEach(controlled => {
-        controlled.setAttribute('aria-hidden', String(!open && window.matchMedia('(max-width: 1100px)').matches));
+        controlled.setAttribute('aria-hidden', String(!open && mobile.matches));
       });
       setScrollLock(open && isModalPanel());
 
@@ -359,7 +360,6 @@
       }
     });
 
-    const mobile = window.matchMedia('(max-width: 1100px)');
     const syncViewport = () => {
       if (!mobile.matches) {
         setOpen(false, { restoreFocus: false });

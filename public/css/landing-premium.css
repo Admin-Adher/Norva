@@ -1322,7 +1322,43 @@ html.norva-lite .particle-field i {
   display: none;
 }
 
-@media (max-width: 1100px) {
+/* Keep the full navigation visible on landscape tablets. The tighter spacing
+   preserves the balanced desktop composition without crowding touch targets. */
+@media (min-width: 981px) and (max-width: 1100px) {
+  .site-header {
+    inset: max(14px, env(safe-area-inset-top, 0px)) 0 auto;
+  }
+
+  .nav-shell.landing-nav,
+  .nav-shell.landing-nav.compact {
+    width: min(100%, calc(100vw - 24px));
+    min-height: 60px;
+    padding: 7px 12px 7px 16px;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+  }
+
+  .nav-shell.landing-nav .nav-toggle {
+    display: none;
+  }
+
+  .nav-shell.landing-nav .nav-links,
+  .nav-shell.landing-nav.compact .nav-links {
+    display: flex;
+    gap: clamp(20px, 2.4vw, 26px);
+  }
+
+  .nav-shell.landing-nav .nav-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .nav-shell.landing-nav .edge-cta {
+    padding-inline: 18px;
+  }
+}
+
+@media (max-width: 980px) {
   .site-header {
     inset: max(14px, env(safe-area-inset-top, 0px)) 0 auto;
   }
