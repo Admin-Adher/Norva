@@ -795,7 +795,7 @@
             onError: function (err) {
               submitting = false;
               payBtn.disabled = false;
-              setStatus('Payment could not be completed' + (err && err.message ? ': ' + err.message : '') + '. Please check your card and try again.', true);
+              setStatus('Payment could not be completed. Please check your card and try again.', true);
             },
             onValidation: function (errors) {
               if (errors && errors.length) {

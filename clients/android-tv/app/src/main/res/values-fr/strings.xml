@@ -29,6 +29,7 @@
     <string name="player_audio_unknown">Piste audio %1$d · langue non identifiée</string>
     <string name="player_subtitle_unknown">Sous-titre %1$d · langue non identifiée</string>
     <string name="player_audio_unavailable">Aucune piste audio disponible</string>
+    <string name="player_video_unavailable">Aucune qualité vidéo sélectionnable</string>
     <string name="player_subtitles_unavailable">Aucun sous-titre sélectionnable</string>
 
     <!-- Affichage, lecture et options des épisodes. -->
@@ -62,4 +63,46 @@
     <string name="player_error_no_data">Le fournisseur accepte la connexion, mais n’envoie aucun flux lisible.</string>
     <string name="player_error_unsupported">Ce format vidéo ne peut pas être lu sur cet appareil.</string>
     <string name="player_error_generic">La lecture s’est arrêtée de manière inattendue. Veuillez réessayer.</string>
+    <!-- Démarrage, focus, accessibilité et récupération du lecteur TV premium. -->
+    <string name="player_aspect_short">Taille</string>
+    <string name="player_option_selected_description">%1$s, %2$s sélectionné</string>
+    <string name="player_option_unavailable">%1$s est indisponible</string>
+    <string name="player_loading_content_description">Chargement de la lecture</string>
+    <string name="player_loading_live">Connexion au direct…</string>
+    <string name="player_loading_vod">Préparation de la lecture…</string>
+    <string name="player_loading_resume">Préparation de votre reprise…</string>
+    <string name="player_loading_buffering">Chargement du meilleur flux disponible…</string>
+    <string name="player_loading_starting">Démarrage de la lecture…</string>
+    <string name="player_resume_waiting">Choisissez où commencer</string>
+    <string name="player_resume_title">Continuer la lecture ?</string>
+    <string name="player_resume_from">Reprendre à %1$s</string>
+    <string name="player_start_over">Recommencer depuis le début</string>
+    <string name="player_timeline">Barre de progression</string>
+    <string name="player_time_progress">%1$s / %2$s</string>
+    <string name="player_timeline_position">%1$s sur %2$s</string>
+    <string name="player_timeline_position_live">Position %1$s</string>
+    <string name="player_seek_destination">Aller à %1$s sur %2$s</string>
+    <string name="player_seek_destination_live">Aller à %1$s</string>
+    <string name="player_audio_mono">mono</string>
+    <string name="player_audio_stereo">stéréo</string>
+    <string name="player_on">Activé</string>
+    <string name="player_subtitle_forced">Forcé</string>
+    <string name="player_episode_list_unavailable">Liste des épisodes indisponible</string>
+    <string name="player_version_number">Version %1$d</string>
+    <string name="player_no_other_version">Aucune autre version n’est disponible</string>
+    <string name="player_live_reconnecting">Reconnexion au direct…</string>
+    <string name="player_live_reconnecting_slow">La reconnexion prend plus de temps. Norva continuera automatiquement.</string>
+    <string name="player_error_live_generic">Cette chaîne ne peut pas être lue pour le moment.</string>
+    <string name="player_error_provider">Ce titre est temporairement indisponible chez le fournisseur.</string>
+    <string name="player_error_no_data_live">Cette chaîne n’envoie aucun flux lisible. Norva continuera automatiquement.</string>
+    <string name="player_error_unsupported_live">Cette chaîne utilise un format incompatible avec ce téléviseur.</string>
+    <string name="player_error_try_another_version">Choisissez une autre version ou réessayez.</string>
+    <string name="player_choice_selected_description">%1$s, sélectionné</string>
+    <string name="player_choice_hint">Utilisez Haut et Bas pour choisir. Appuyez sur Retour pour annuler.</string>
+    <string name="player_selected">Sélectionné</string>
+    <string name="tv_exit_title">Quitter Norva ?</string>
+    <string name="tv_exit_message">Vous pourrez revenir à tout moment. Vos profils et votre progression restent synchronisés.</string>
+    <string name="tv_exit_cancel">Rester dans Norva</string>
+    <string name="tv_connection_settings">Paramètres de connexion</string>
+    <string name="tv_exit_confirm">Quitter Norva</string>
 </resources>

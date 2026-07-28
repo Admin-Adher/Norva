@@ -5,12 +5,17 @@
     <item name="norva_tv_player_root" type="id" />
     <item name="norva_tv_player_surface" type="id" />
     <item name="norva_tv_player_subtitles" type="id" />
+    <item name="norva_tv_player_startup_context" type="id" />
+    <item name="norva_tv_player_startup_backdrop" type="id" />
+    <item name="norva_tv_player_startup_poster" type="id" />
+    <item name="norva_tv_player_startup_status" type="id" />
     <item name="norva_tv_player_top_bar" type="id" />
     <item name="norva_tv_player_back_button" type="id" />
     <item name="norva_tv_player_title" type="id" />
     <item name="norva_tv_player_clock" type="id" />
     <item name="norva_tv_player_controls" type="id" />
     <item name="norva_tv_player_seek_bar" type="id" />
+    <item name="norva_tv_player_seek_destination" type="id" />
     <item name="norva_tv_player_time" type="id" />
     <item name="norva_tv_player_transport" type="id" />
     <item name="norva_tv_player_rewind_button" type="id" />
@@ -28,9 +33,21 @@
     <item name="norva_tv_player_variant_button" type="id" />
     <item name="norva_tv_player_next_episode_button" type="id" />
     <item name="norva_tv_player_episodes_button" type="id" />
+    <item name="norva_tv_player_next_play_button" type="id" />
+    <item name="norva_tv_player_next_back_button" type="id" />
+    <item name="norva_tv_player_resume_panel" type="id" />
+    <item name="norva_tv_player_resume_button" type="id" />
+    <item name="norva_tv_player_restart_button" type="id" />
+    <item name="norva_tv_player_choice_panel" type="id" />
+    <item name="norva_tv_player_choice_list" type="id" />
     <item name="norva_tv_player_error_panel" type="id" />
     <item name="norva_tv_player_error_title" type="id" />
     <item name="norva_tv_player_error_message" type="id" />
     <item name="norva_tv_player_retry_button" type="id" />
+    <item name="norva_tv_player_error_change_version_button" type="id" />
     <item name="norva_tv_player_error_back_button" type="id" />
+    <item name="norva_tv_exit_panel" type="id" />
+    <item name="norva_tv_exit_cancel" type="id" />
+    <item name="norva_tv_exit_connection_settings" type="id" />
+    <item name="norva_tv_exit_confirm" type="id" />
 </resources>

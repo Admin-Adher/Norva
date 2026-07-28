@@ -16,6 +16,7 @@ class SourceManager {
         this.originalHiddenSet = new Set(); // Set of hidden item keys (state when loaded)
         this.expandedGroups = new Set(); // Set of expanded group IDs
         this.searchQuery = ''; // Search filter for content browser
+        this.warningModalFlight = null; // one shared confirmation per open modal
 
         this.init();
     }
@@ -49,12 +50,24 @@ class SourceManager {
      * @returns {Promise<boolean>} - Resolves true if user clicks Proceed, false if Cancel
      */
     showWarningModal({ title, message, details = '', proceedText = 'Proceed', cancelText = 'Cancel' }) {
-        return new Promise((resolve) => {
-            const modal = document.getElementById('modal');
-            const modalTitle = document.getElementById('modal-title');
-            const modalBody = document.getElementById('modal-body');
-            const modalFooter = document.getElementById('modal-footer');
+        // A fast double press (touch, Enter or TV OK) must join the confirmation
+        // already on screen. Rebuilding the shared #modal would replace its
+        // handlers and leave the first caller's Promise unresolved.
+        if (this.warningModalFlight) return this.warningModalFlight;
 
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalFooter = document.getElementById('modal-footer');
+        const modalClose = modal?.querySelector('.modal-close');
+        if (!modal || !modalTitle || !modalBody || !modalFooter || !modalClose) {
+            return Promise.resolve(false);
+        }
+
+        let resolveFlight;
+        const flight = new Promise((resolve) => { resolveFlight = resolve; });
+        this.warningModalFlight = flight;
+        try {
             modalTitle.textContent = title;
 
             modalBody.innerHTML = `
@@ -74,28 +87,47 @@ class SourceManager {
                 <button class="btn btn-primary" id="warning-proceed" style="background: var(--color-warning, #f59e0b); border-color: var(--color-warning, #f59e0b);">${proceedText}</button>
             `;
 
-            modal.classList.add('active');
-
-            const cleanup = () => {
+            const cancelButton = document.getElementById('warning-cancel');
+            const proceedButton = document.getElementById('warning-proceed');
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
                 modal.classList.remove('active');
-                modal.querySelector('.modal-close').onclick = null;
+                modalClose.onclick = null;
+                cancelButton.onclick = null;
+                proceedButton.onclick = null;
+                if (this.warningModalFlight === flight) this.warningModalFlight = null;
+                resolveFlight(value);
             };
 
-            document.getElementById('warning-cancel').onclick = () => {
-                cleanup();
-                resolve(false);
+            cancelButton.onclick = () => {
+                finish(false);
             };
 
-            document.getElementById('warning-proceed').onclick = () => {
-                cleanup();
-                resolve(true);
+            proceedButton.onclick = () => {
+                finish(true);
             };
 
-            modal.querySelector('.modal-close').onclick = () => {
-                cleanup();
-                resolve(false);
+            modalClose.onclick = () => {
+                finish(false);
             };
-        });
+            modal.classList.add('active');
+            if (window.NorvaModal?.installHygiene) {
+                NorvaModal.installHygiene(modal, {
+                    onClose: () => finish(false),
+                    initialFocus: document.getElementById('warning-cancel')
+                });
+            } else {
+                cancelButton.focus();
+            }
+        } catch (_) {
+            modal.classList.remove('active');
+            modalClose.onclick = null;
+            if (this.warningModalFlight === flight) this.warningModalFlight = null;
+            resolveFlight(false);
+        }
+        return flight;
     }
 
     /**
@@ -364,7 +396,7 @@ class SourceManager {
             this.bindSourceForm(type);
         } catch (err) {
             console.error('Error loading source:', err);
-            NorvaModal.toast('Could not open this source: ' + (err?.message || err), 'error');
+            NorvaModal.toast('Could not open this source. Try again.', 'error');
         }
     }
 
@@ -619,6 +651,18 @@ class SourceManager {
         return { name, url, username, password };
     }
 
+    sourceFormErrorMessage(error) {
+        const message = String(error?.message || '');
+        const allowed = new Set([
+            'Provider URL is required.',
+            'Username is required. Enter the password too only when repairing the login.',
+            'Provider URL, username and password are required.'
+        ]);
+        return allowed.has(message)
+            ? message
+            : 'Check the service address and credentials, then try again.';
+    }
+
     hostFromUrl(raw) {
         try {
             const value = String(raw || '').trim();
@@ -816,7 +860,7 @@ class SourceManager {
     // copy dédiée, le chiffre figé à 99 se lit comme un plantage.
     catalogSyncingCopy(progress = {}, percent = 0, phase = 'syncing', source = {}) {
         if (phase === 'ready') return 'Your catalog is ready.';
-        if (phase === 'error') return source.sync_error || source.syncError || 'Norva could not finish importing this service.';
+        if (phase === 'error') return 'Norva could not finish importing this service. Try again.';
         const stage = String(progress.stage || '').toLowerCase();
         if (stage === 'finalizing' || percent >= 99) {
             return 'Finishing touches — Norva is unlocking your catalog now.';
@@ -832,13 +876,16 @@ class SourceManager {
         const statusText = {
             syncing: this.catalogSyncingCopy(progress, percent, 'syncing', source),
             ready: 'Your catalog is ready.',
-            error: source.sync_error || source.syncError || 'Norva could not finish importing this service.'
+            error: 'Norva could not finish importing this service. Try again.'
         };
         const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+        const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
+        const progressAnnouncement = `${sourceName}. ${phaseLabel}. ${statusText[phase] || statusText.syncing}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
         const milestones = this.catalogMilestones(progress, counts).map(step => this.renderCatalogMilestone(step)).join('');
 
         return `
       <div class="source-sync-step source-sync-${this.escapeHtml(phase)}" data-phase="${this.escapeHtml(phase)}">
+        <p class="source-sync-announcement" role="${phase === 'error' ? 'alert' : 'status'}" aria-live="${phase === 'error' ? 'assertive' : 'polite'}" aria-atomic="true" data-progress-bucket="${progressBucket}">${this.escapeHtml(progressAnnouncement)}</p>
         <div class="source-sync-hero">
           <span class="source-sync-pill">${this.escapeHtml(phaseLabel)}</span>
           <h3>${this.escapeHtml(sourceName)}</h3>
@@ -922,9 +969,26 @@ class SourceManager {
 
         // Copy du héros (bascule « Finishing touches » quand finalizing/99 %).
         const hero = step.querySelector('.source-sync-hero p');
+        let copyChanged = false;
+        let copy = this.catalogSyncingCopy(progress, percent, phase, source);
         if (hero) {
-            const copy = this.catalogSyncingCopy(progress, percent, phase, source);
-            if (hero.textContent !== copy) hero.textContent = copy;
+            copyChanged = hero.textContent !== copy;
+            if (copyChanged) hero.textContent = copy;
+        }
+
+        // Announce meaningful server progress (at most once per 10-point bucket),
+        // copy changes such as "Finishing touches", and phase rebuilds. The visual
+        // progress bar remains smooth without flooding TalkBack on every animation tick.
+        const announcement = step.querySelector('.source-sync-announcement');
+        if (announcement) {
+            const determinate = percent > 0 || phase === 'ready';
+            const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
+            if (copyChanged || Number(announcement.dataset.progressBucket) !== progressBucket) {
+                const sourceName = source.name || 'TV service';
+                const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+                announcement.dataset.progressBucket = String(progressBucket);
+                announcement.textContent = `${sourceName}. ${phaseLabel}. ${copy}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
+            }
         }
         return true;
     }
@@ -1182,7 +1246,7 @@ class SourceManager {
             form = this.readSourceForm(type);
         } catch (err) {
             if (type === 'xtream') this.openAdvancedSourceLogin();
-            NorvaModal.toast(err.message, 'error');
+            NorvaModal.toast(this.sourceFormErrorMessage(err), 'error');
             return;
         }
         const { name, url, username, password } = form;
@@ -1224,7 +1288,8 @@ class SourceManager {
                     .catch(err => console.warn('[SourceManager] Background channel refresh failed:', err));
             }
         } catch (err) {
-            NorvaModal.toast('Error adding source: ' + err.message, 'error');
+            console.warn('[SourceManager] Source creation failed:', err);
+            NorvaModal.toast('Could not add this source. Check the details and try again.', 'error');
         }
     }
 
@@ -1237,7 +1302,7 @@ class SourceManager {
             form = this.readSourceForm(type, { existing: true });
         } catch (err) {
             if (type === 'xtream') this.openAdvancedSourceLogin();
-            NorvaModal.toast(err.message, 'error');
+            NorvaModal.toast(this.sourceFormErrorMessage(err), 'error');
             return;
         }
         const { name, url, username, password } = form;
@@ -1254,7 +1319,8 @@ class SourceManager {
             await this.loadSources();
             this.notifySourceHealthChanged();
         } catch (err) {
-            NorvaModal.toast('Error updating source: ' + err.message, 'error');
+            console.warn('[SourceManager] Source update failed:', err);
+            NorvaModal.toast('Could not update this source. Try again.', 'error');
         }
     }
 
@@ -1291,7 +1357,8 @@ class SourceManager {
                 await window.app.channelList.loadChannels();
             }
         } catch (err) {
-            NorvaModal.toast('Error deleting source: ' + err.message, 'error');
+            console.warn('[SourceManager] Source removal failed:', err);
+            NorvaModal.toast('Could not remove this source. Try again.', 'error');
         }
     }
 
@@ -1304,7 +1371,8 @@ class SourceManager {
             await this.loadSources();
             this.notifySourceHealthChanged();
         } catch (err) {
-            NorvaModal.toast('Error toggling source: ' + err.message, 'error');
+            console.warn('[SourceManager] Source toggle failed:', err);
+            NorvaModal.toast('Could not change this source right now. Try again.', 'error');
         }
     }
 
@@ -1317,10 +1385,11 @@ class SourceManager {
             if (result.success) {
                 NorvaModal.toast('Connection successful!', 'success');
             } else {
-                NorvaModal.toast('Connection failed: ' + (result.error || result.message), 'error');
+                NorvaModal.toast('Connection failed. Check the service details and try again.', 'error');
             }
         } catch (err) {
-            NorvaModal.toast('Connection failed: ' + err.message, 'error');
+            console.warn('[SourceManager] Connection test failed:', err);
+            NorvaModal.toast('Connection failed. Check the service details and try again.', 'error');
         }
     }
 
@@ -1465,7 +1534,12 @@ class SourceManager {
             this.notifySourceHealthChanged();
         } catch (err) {
             console.error('Error refreshing source:', err);
-            NorvaModal.toast(`${isHardRefresh ? 'Hard refresh' : 'Refresh'} failed: ${err.message}`, 'error');
+            NorvaModal.toast(
+                this.isInvalidDeviceTokenError(err)
+                    ? 'This device session expired. Sign in or pair this device again.'
+                    : `${isHardRefresh ? 'Hard refresh' : 'Refresh'} could not finish. Try again.`,
+                'error'
+            );
         } finally {
             refreshButtons.forEach(button => { button.disabled = false; });
             if (btn) btn.querySelector('.icon')?.classList.remove('spin');
@@ -1706,7 +1780,8 @@ class SourceManager {
             try { API.media.clearRailCache?.(); } catch (_) { /* noop */ }
             this.toast('Saved');
         } catch (e) {
-            this.toast(e?.message || 'Could not save', true);
+            console.warn('[SourceManager] Profile genre preferences could not be saved:', e);
+            this.toast('Could not save these preferences. Try again.', true);
         }
     }
 
@@ -2377,7 +2452,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error setting all visibility:', err);
-            NorvaModal.toast('Failed: ' + err.message, 'error');
+            NorvaModal.toast('Could not update visibility. Try again.', 'error');
             if (saveBtn) {
                 saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;
@@ -2545,7 +2620,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error saving content changes:', err);
-            NorvaModal.toast('Failed to save changes: ' + err.message, 'error');
+            NorvaModal.toast('Could not save these changes. Try again.', 'error');
             if (saveBtn) {
                 saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;

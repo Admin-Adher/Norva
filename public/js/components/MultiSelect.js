@@ -28,29 +28,40 @@ class MultiSelect {
     }
 
     init() {
+        if (this.btn && this.panel) {
+            if (!this.panel.id) this.panel.id = `multi-select-panel-${Math.random().toString(36).slice(2, 9)}`;
+            // The popup is a non-modal group of checkboxes, not one of the ARIA
+            // popup roles accepted by aria-haspopup. aria-expanded + controls
+            // describe this disclosure without announcing the wrong widget type.
+            this.btn.removeAttribute('aria-haspopup');
+            this.btn.setAttribute('aria-controls', this.panel.id);
+            this.panel.setAttribute('role', 'group');
+            this.panel.setAttribute('aria-label', this.allLabel);
+            this.setOpen(!this.panel.classList.contains('hidden'), { moveFocus: false });
+            // TV Back must use the same state transition as Escape/click-outside;
+            // exposing this narrow hook avoids a visual-only class toggle that
+            // leaves aria-expanded/aria-hidden/inert stale.
+            this.panel.__norvaMultiSelectClose = ({ restoreFocus = true } = {}) => {
+                this.setOpen(false, { restoreFocus });
+            };
+        }
         this.btn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.panel?.classList.toggle('hidden');
-            if (!this.panel?.classList.contains('hidden')) {
-                if (document.documentElement.classList.contains('tv-mode')) {
-                    // On Android TV, focusing the search field immediately opens
-                    // the system IME, which captures the D-pad before the web app.
-                    // Enter the panel on "All" instead; Up still reaches Search
-                    // when the user explicitly wants to type.
-                    const firstAction = this.panel.querySelector('[data-action="all"]');
-                    requestAnimationFrame(() => firstAction?.focus({ preventScroll: true }));
-                } else {
-                    this.searchInput?.focus();
-                }
-            }
+            this.setOpen(this.panel?.classList.contains('hidden'));
         });
 
         // Close when clicking outside
         document.addEventListener('click', (e) => {
             if (this.panel && !this.panel.classList.contains('hidden') &&
                 !this.panel.contains(e.target) && e.target !== this.btn) {
-                this.panel.classList.add('hidden');
+                this.setOpen(false, { restoreFocus: false });
             }
+        });
+        this.panel?.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            this.setOpen(false, { restoreFocus: true });
         });
 
         this.searchInput?.addEventListener('input', () => this.renderList());
@@ -70,6 +81,35 @@ class MultiSelect {
                 this.onChange(new Set(this.selected));
             });
         });
+    }
+
+    setOpen(open, { moveFocus = true, restoreFocus = false } = {}) {
+        if (!this.panel || !this.btn) return;
+        this.panel.classList.toggle('hidden', !open);
+        this.panel.setAttribute('aria-hidden', String(!open));
+        this.panel.inert = !open;
+        this.btn.setAttribute('aria-expanded', String(open));
+        if (!open) {
+            if (restoreFocus) requestAnimationFrame(() => this.btn?.focus({ preventScroll: true }));
+            return;
+        }
+        if (!moveFocus) return;
+        const avoidAutomaticIme = document.documentElement.classList.contains('tv-mode')
+            || (
+                window.matchMedia?.('(max-width: 1024px)').matches
+                && this.panel.closest('.filter-bar')?.classList.contains('mobile-open')
+            );
+        if (avoidAutomaticIme) {
+            // TV remotes and touch filter sheets must not open the system
+            // keyboard merely because Category was expanded. Start on a
+            // real list action; Search remains available by explicit tap.
+            const firstAction = this.panel.querySelector(
+                '[data-action="all"], input[type="checkbox"], button'
+            );
+            requestAnimationFrame(() => firstAction?.focus({ preventScroll: true }));
+        } else {
+            requestAnimationFrame(() => this.searchInput?.focus({ preventScroll: true }));
+        }
     }
 
     /** Replace available options; keeps still-valid selections */

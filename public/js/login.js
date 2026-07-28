@@ -9,6 +9,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         localStorage.setItem('sessionToken', response.token);
         window.location.href = '/';
     } catch (err) {
-        document.getElementById('login-error').textContent = 'Login failed: ' + err.message;
+        document.getElementById('login-error').textContent = 'Login failed. Check your details and try again.';
     }
 });

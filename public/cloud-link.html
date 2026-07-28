@@ -108,7 +108,7 @@
         <div class="status info" id="status">Checking sessions...</div>
     </main>
 
-  <script src="/js/api.js?v=74"></script>
+  <script src="/js/api.js?v=75"></script>
     <script src="/js/cloudApi.js?v=50"></script>
     <script src="/js/authApi.js?v=6"></script>
     <script>
@@ -149,7 +149,7 @@
                 const payload = await API.cloud.link({ cloudAccessToken, deviceName: 'Norva Connector' });
                 setStatus('success', `Connector linked as ${payload.deviceName || 'Norva Connector'}.`);
             } catch (error) {
-                setStatus('error', error.message || 'Unable to link connector.');
+                setStatus('error', 'Unable to link this connector. Check the details and try again.');
             } finally {
                 linkButton.disabled = false;
             }
@@ -162,7 +162,7 @@
                 await API.cloud.unlink();
                 setStatus('success', 'Connector unlinked locally.');
             } catch (error) {
-                setStatus('error', error.message || 'Unable to unlink connector.');
+                setStatus('error', 'Unable to unlink this connector. Try again.');
             } finally {
                 unlinkButton.disabled = false;
             }

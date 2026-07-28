@@ -1,12 +1,12 @@
 package tv.norva.tv;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -24,6 +24,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
@@ -51,6 +52,7 @@ import androidx.media3.ui.SubtitleView;
 
 import org.json.JSONObject;
 
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
@@ -100,6 +102,7 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_TRACK_METADATA = "trackMetadata";
     public static final String EXTRA_PREFERENCE_SCOPE = "preferenceScope";
     public static final String EXTRA_PLAYBACK_PREFERENCES = "playbackPreferences";
+    public static final String EXTRA_POSTER_URL = "poster";
     public static final String ACTION_REQUEST_FRESH_STREAM =
             "tv.norva.tv.action.REQUEST_FRESH_STREAM";
     public static final String ACTION_APPLY_FRESH_STREAM =
@@ -126,15 +129,29 @@ public class PlayerActivity extends Activity {
     private ProgressBar spinner;
     private TextView errorView;
     private LinearLayout errorPanel;
+    private LinearLayout errorActions;
     private TextView errorTitleView;
     private TextView errorMessageView;
+    private LinearLayout resumePanel;
+    private LinearLayout resumeActions;
+    private FrameLayout choicePanel;
+    private LinearLayout choiceOptions;
+    private View choiceReturnFocus;
+    private boolean choiceRestoreControls;
+    private boolean choiceRestoreSecondBar;
 
     private FrameLayout root;
     private FrameLayout overlay;
+    private FrameLayout startupContext;
+    private ImageView startupBackdrop;
+    private ImageView startupPoster;
+    private TextView startupStatusView;
     private TextView clockView;
     private TextView titleView;
     private TextView timeView;
+    private TextView seekDestinationView;
     private SeekBar seekBar;
+    private ImageButton topBackButton;
     private ImageButton playPauseBtn;
     private LinearLayout secondBar;
     private ImageButton chevron;
@@ -151,9 +168,11 @@ public class PlayerActivity extends Activity {
     private ImageButton subtitleButton;
     private ImageButton aspectButton;
     private ImageButton moreButton;
+    private View secondBarOrigin;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean controlsVisible = true;
+    private boolean controlsVisibleBeforeError = false;
     private boolean secondBarVisible = false;
     private boolean userSeeking = false;
 
@@ -171,7 +190,10 @@ public class PlayerActivity extends Activity {
     private String itemId;
     private boolean playbackOkReported = false;
     private int resumeSeconds = 0;        // start offset for cross-device resume
-    private boolean resumeApplied = false; // seek to the resume offset only once
+    private long initialStartPositionMs = 0L;
+    private boolean playbackStarted = false;
+    private String mediaTitle;
+    private String posterUrl;
     private String subKey;                 // SharedPreferences key for the subtitle choice
     private boolean subPrefRestored = false; // apply the saved subtitle pref only once
     private String streamHost;               // host of the stream URL, diagnostics only
@@ -232,6 +254,7 @@ public class PlayerActivity extends Activity {
     private boolean playNextChosen = false;   // viewer picked (or countdown chose) next episode
     private boolean openEpisodesChosen = false; // viewer asked for the episode list (fiche)
     private LinearLayout nextPanel;           // the overlay itself, built lazily
+    private LinearLayout nextActions;
     private TextView nextCountdownView;
     private int nextCountdownSecs;
     private final Runnable nextCountdownTick = new Runnable() {
@@ -240,13 +263,15 @@ public class PlayerActivity extends Activity {
             nextCountdownSecs--;
             if (nextCountdownSecs <= 0) { chooseNextEpisode(); return; }
             if (nextCountdownView != null) {
-                nextCountdownView.setText("Playing in " + nextCountdownSecs + "s");
+                nextCountdownView.setText(
+                        getString(R.string.player_playing_in, nextCountdownSecs));
             }
             handler.postDelayed(this, 1000);
         }
     };
 
-    private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM · HH:mm", Locale.ENGLISH);
+    private final SimpleDateFormat clockFmt =
+            new SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault());
 
     // Keyboard scrubbing: arrows adjust a pending target shown live on the bar,
     // and the actual seek is committed shortly after the last press (so holding
@@ -320,6 +345,8 @@ public class PlayerActivity extends Activity {
 
         String url = getIntent().getStringExtra(EXTRA_URL);
         String title = getIntent().getStringExtra(EXTRA_TITLE);
+        mediaTitle = title == null || title.trim().isEmpty() ? getString(R.string.app_name) : title.trim();
+        posterUrl = emptyToNull(getIntent().getStringExtra(EXTRA_POSTER_URL));
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
@@ -356,6 +383,8 @@ public class PlayerActivity extends Activity {
         root.addView(surfaceView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
+        buildStartupContext(mediaTitle, posterUrl);
+
         subtitleView = new SubtitleView(this);
         subtitleView.setId(R.id.norva_tv_player_subtitles);
         subtitleView.setApplyEmbeddedStyles(true);
@@ -369,6 +398,8 @@ public class PlayerActivity extends Activity {
         root.addView(subtitleView, subLp);
 
         spinner = new ProgressBar(this);
+        spinner.setContentDescription(getString(R.string.player_loading_content_description));
+        spinner.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         root.addView(spinner, new FrameLayout.LayoutParams(dp(72), dp(72), Gravity.CENTER));
 
         errorView = new TextView(this);
@@ -379,12 +410,235 @@ public class PlayerActivity extends Activity {
         root.addView(errorView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
 
-        buildOverlay(title);
+        buildOverlay(mediaTitle);
         buildActionableErrorPanel();
-        buildPlayer(url);
+        if (!isLiveContent() && resumeSeconds >= 30) {
+            showResumeChoice();
+        } else {
+            beginInitialPlayback(true);
+        }
 
         handler.post(tick);
-        scheduleHideControls();
+    }
+
+    /**
+     * Keep the launch visually connected to the selected title instead of
+     * dropping the viewer onto a black surface. The artwork is best-effort and
+     * never blocks playback; the bundled Norva artwork remains as the fallback.
+     */
+    private void buildStartupContext(String title, String artworkUrl) {
+        startupContext = new FrameLayout(this);
+        startupContext.setId(R.id.norva_tv_player_startup_context);
+        startupContext.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+
+        startupBackdrop = new ImageView(this);
+        startupBackdrop.setId(R.id.norva_tv_player_startup_backdrop);
+        startupBackdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        startupBackdrop.setImageResource(R.drawable.norva_media_placeholder);
+        startupBackdrop.setAlpha(0.34f);
+        startupContext.addView(startupBackdrop, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        View scrim = new View(this);
+        GradientDrawable scrimBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {
+                        Color.parseColor("#9905050A"),
+                        Color.parseColor("#B305050A"),
+                        Color.parseColor("#F205050A")
+                });
+        scrim.setBackground(scrimBackground);
+        startupContext.addView(scrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout identity = new LinearLayout(this);
+        identity.setOrientation(LinearLayout.HORIZONTAL);
+        identity.setGravity(Gravity.BOTTOM);
+        identity.setPadding(dp(56), dp(36), dp(56), dp(56));
+
+        startupPoster = new ImageView(this);
+        startupPoster.setId(R.id.norva_tv_player_startup_poster);
+        startupPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        startupPoster.setImageResource(R.drawable.norva_media_placeholder);
+        GradientDrawable posterBackground = new GradientDrawable();
+        posterBackground.setColor(Color.parseColor("#171722"));
+        posterBackground.setCornerRadius(dp(12));
+        startupPoster.setBackground(posterBackground);
+        startupPoster.setClipToOutline(true);
+        identity.addView(startupPoster, new LinearLayout.LayoutParams(dp(136), dp(204)));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.BOTTOM);
+        copy.setPadding(dp(24), 0, 0, dp(8));
+
+        TextView startupTitle = new TextView(this);
+        startupTitle.setText(title);
+        startupTitle.setTextColor(Color.WHITE);
+        startupTitle.setTextSize(30);
+        startupTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        startupTitle.setMaxLines(2);
+        startupTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        copy.addView(startupTitle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        startupStatusView = new TextView(this);
+        startupStatusView.setId(R.id.norva_tv_player_startup_status);
+        startupStatusView.setText(isLiveContent()
+                ? R.string.player_loading_live : R.string.player_loading_vod);
+        startupStatusView.setTextColor(SUBTLE);
+        startupStatusView.setTextSize(17);
+        startupStatusView.setPadding(0, dp(10), 0, 0);
+        startupStatusView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        copy.addView(startupStatusView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        identity.addView(copy, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        startupContext.addView(identity, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM));
+        root.addView(startupContext, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        if (artworkUrl != null) loadStartupArtworkAsync(artworkUrl);
+    }
+
+    private void loadStartupArtworkAsync(final String artworkUrl) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                HttpURLConnection connection = null;
+                InputStream stream = null;
+                try {
+                    connection = (HttpURLConnection) new URL(artworkUrl).openConnection();
+                    connection.setConnectTimeout(5_000);
+                    connection.setReadTimeout(8_000);
+                    connection.setInstanceFollowRedirects(true);
+                    connection.connect();
+                    if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) return;
+                    stream = connection.getInputStream();
+                    BitmapFactory.Options options = new BitmapFactory.Options();
+                    options.inSampleSize = 2;
+                    options.inPreferredConfig = Bitmap.Config.RGB_565;
+                    final Bitmap bitmap = BitmapFactory.decodeStream(stream, null, options);
+                    if (bitmap == null) return;
+                    runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (isFinishing() || startupContext == null) return;
+                            startupBackdrop.setImageBitmap(bitmap);
+                            startupPoster.setImageBitmap(bitmap);
+                        }
+                    });
+                } catch (Exception ignored) {
+                    // Artwork is context, never a playback dependency.
+                } finally {
+                    if (stream != null) {
+                        try { stream.close(); } catch (Exception ignored) { }
+                    }
+                    if (connection != null) connection.disconnect();
+                }
+            }
+        }, "norva-tv-player-artwork").start();
+    }
+
+    private void updateStartupStatus(int stringRes, Object... args) {
+        if (startupStatusView == null) return;
+        startupStatusView.setText(args == null || args.length == 0
+                ? getString(stringRes) : getString(stringRes, args));
+    }
+
+    private void hideStartupContext() {
+        if (startupContext == null || startupContext.getVisibility() != View.VISIBLE) return;
+        startupContext.animate()
+                .alpha(0f)
+                .setDuration(240)
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        if (startupContext != null) startupContext.setVisibility(View.GONE);
+                    }
+                })
+                .start();
+    }
+
+    private void showResumeChoice() {
+        hideOverlayNow();
+        spinner.setVisibility(View.GONE);
+        updateStartupStatus(R.string.player_resume_waiting);
+
+        resumePanel = new LinearLayout(this);
+        resumePanel.setId(R.id.norva_tv_player_resume_panel);
+        resumePanel.setOrientation(LinearLayout.VERTICAL);
+        resumePanel.setGravity(Gravity.CENTER);
+        resumePanel.setPadding(dp(44), dp(32), dp(44), dp(32));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.parseColor("#F20A0A0F"));
+        background.setCornerRadius(dp(18));
+        resumePanel.setBackground(background);
+
+        TextView heading = new TextView(this);
+        heading.setText(R.string.player_resume_title);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(27);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        heading.setGravity(Gravity.CENTER);
+        resumePanel.addView(heading);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText(mediaTitle);
+        subtitle.setTextColor(SUBTLE);
+        subtitle.setTextSize(17);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setPadding(0, dp(8), 0, dp(24));
+        resumePanel.addView(subtitle);
+
+        resumeActions = new LinearLayout(this);
+        resumeActions.setOrientation(LinearLayout.HORIZONTAL);
+        resumeActions.setGravity(Gravity.CENTER);
+        TextView resume = modalAction(
+                R.id.norva_tv_player_resume_button,
+                getString(R.string.player_resume_from, formatTime(resumeSeconds * 1000L)),
+                new Runnable() {
+                    @Override public void run() { beginInitialPlayback(true); }
+                });
+        TextView restart = modalAction(
+                R.id.norva_tv_player_restart_button,
+                getString(R.string.player_start_over),
+                new Runnable() {
+                    @Override public void run() { beginInitialPlayback(false); }
+                });
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(250), dp(58));
+        actionLp.leftMargin = dp(8);
+        actionLp.rightMargin = dp(8);
+        resumeActions.addView(resume, new LinearLayout.LayoutParams(actionLp));
+        resumeActions.addView(restart, new LinearLayout.LayoutParams(actionLp));
+        resumePanel.addView(resumeActions);
+
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
+                Math.min(dp(720), getResources().getDisplayMetrics().widthPixels - dp(120)),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
+        root.addView(resumePanel, panelLp);
+        resumePanel.bringToFront();
+        resume.requestFocus();
+    }
+
+    private void beginInitialPlayback(boolean resume) {
+        if (playbackStarted) return;
+        playbackStarted = true;
+        initialStartPositionMs = resume ? Math.max(0L, resumeSeconds * 1000L) : 0L;
+        if (!resume) resumeSeconds = 0;
+
+        if (resumePanel != null) {
+            root.removeView(resumePanel);
+            resumePanel = null;
+            resumeActions = null;
+        }
+        updateStartupStatus(isLiveContent()
+                ? R.string.player_loading_live
+                : (initialStartPositionMs > 0
+                    ? R.string.player_loading_resume : R.string.player_loading_vod));
+        spinner.setVisibility(View.VISIBLE);
+        buildPlayer(originalUrl);
     }
 
     // ==================== ExoPlayer ====================
@@ -412,6 +666,9 @@ public class PlayerActivity extends Activity {
             public void onPlaybackStateChanged(int state) {
                 spinner.setVisibility(state == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
                 if (state == Player.STATE_BUFFERING) {
+                    if (!firstFrameRendered) {
+                        updateStartupStatus(R.string.player_loading_buffering);
+                    }
                     // Arm the "no data" watchdog; cancel it on any other state.
                     handler.removeCallbacks(bufferWatchdog);
                     handler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
@@ -419,6 +676,9 @@ public class PlayerActivity extends Activity {
                     handler.removeCallbacks(bufferWatchdog);
                 }
                 if (state == Player.STATE_READY) {
+                    if (!firstFrameRendered) {
+                        updateStartupStatus(R.string.player_loading_starting);
+                    }
                     everReady = true;
                     liveReconnectAttempts = 0;
                     errorView.setVisibility(View.GONE);
@@ -426,16 +686,6 @@ public class PlayerActivity extends Activity {
                     reportPlaybackStatus("ok", null);
                     if (player.getDuration() > 0) {
                         seekBar.setMax((int) (player.getDuration() / 1000));
-                    }
-                    // Cross-device resume: jump to the saved offset once the
-                    // player is ready (only once, and never past the end).
-                    if (!resumeApplied && resumeSeconds > 0) {
-                        resumeApplied = true;
-                        long target = resumeSeconds * 1000L;
-                        long dur = player.getDuration();
-                        if (dur <= 0 || target < dur - 5000) {
-                            player.seekTo(target);
-                        }
                     }
                     refreshSecondBarValues();
                 }
@@ -473,6 +723,8 @@ public class PlayerActivity extends Activity {
             public void onRenderedFirstFrame() {
                 if (!firstFrameRendered) {
                     firstFrameRendered = true;
+                    hideStartupContext();
+                    if (!controlsVisible) showControls(playPauseBtn);
                     final String authToken = playbackAuthToken;
                     playbackAuthToken = null;
                     NativePlaybackTelemetry.recordFirstFrame(authToken, sourceId, itemType, itemId,
@@ -542,7 +794,11 @@ public class PlayerActivity extends Activity {
         });
 
         playRetries = 0;
-        player.setMediaItem(MediaItem.fromUri(url));
+        if (initialStartPositionMs > 0L) {
+            player.setMediaItem(MediaItem.fromUri(url), initialStartPositionMs);
+        } else {
+            player.setMediaItem(MediaItem.fromUri(url));
+        }
         player.prepare();
         applyPlaybackIntent();
     }
@@ -587,14 +843,13 @@ public class PlayerActivity extends Activity {
         final boolean live = isLiveContent();
         if (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
             return live
-                    ? "This channel is temporarily unavailable.\nNorva will reconnect automatically."
-                    : "This title is temporarily unavailable from the provider.\nTry another version or try again in a moment.";
+                    ? getString(R.string.player_error_live)
+                    : withVersionAdvice(R.string.player_error_provider);
         }
         if (code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                 || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) {
-            return live
-                    ? "Live TV was interrupted.\nNorva will reconnect automatically."
-                    : "The connection was interrupted.\nTry again in a moment.";
+            return getString(live
+                    ? R.string.player_error_live : R.string.player_error_network);
         }
         if (code == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
                 || code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
@@ -602,18 +857,25 @@ public class PlayerActivity extends Activity {
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
             return live
-                    ? "This channel is not sending playable video right now.\nNorva will keep trying automatically."
-                    : "This version is not sending playable video right now.\nTry another available version.";
+                    ? getString(R.string.player_error_no_data_live)
+                    : withVersionAdvice(R.string.player_error_no_data);
         }
         if (code == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) {
             return live
-                    ? "This channel uses a format this TV cannot play.\nTry another version of the channel."
-                    : "This version uses a format this TV cannot play.\nTry another available version.";
+                    ? withVersionAdvice(R.string.player_error_unsupported_live)
+                    : withVersionAdvice(R.string.player_error_unsupported);
         }
         return live
-                ? "This channel cannot be played right now.\nTry another version or try again later."
-                : "Playback was interrupted.\nTry again or choose another version.";
+                ? withVersionAdvice(R.string.player_error_live_generic)
+                : withVersionAdvice(R.string.player_error_generic);
+    }
+
+    private String withVersionAdvice(int messageRes) {
+        String message = getString(messageRes);
+        return hasAlternativeVariants()
+                ? message + "\n" + getString(R.string.player_error_try_another_version)
+                : message;
     }
 
     private void buildActionableErrorPanel() {
@@ -647,15 +909,24 @@ public class PlayerActivity extends Activity {
         errorPanel.addView(errorMessageView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER);
+        errorActions = new LinearLayout(this);
+        errorActions.setOrientation(LinearLayout.HORIZONTAL);
+        errorActions.setGravity(Gravity.CENTER);
         TextView retry = errorAction(
                 R.id.norva_tv_player_retry_button,
                 getString(R.string.player_retry),
                 new Runnable() {
                     @Override public void run() { retryPlayback(); }
                 });
+        TextView changeVersion = null;
+        if (hasAlternativeVariants()) {
+            changeVersion = errorAction(
+                    R.id.norva_tv_player_error_change_version_button,
+                    getString(R.string.player_change_version),
+                    new Runnable() {
+                        @Override public void run() { showVariantDialog(); }
+                    });
+        }
         TextView back = errorAction(
                 R.id.norva_tv_player_error_back_button,
                 getString(R.string.player_error_back),
@@ -665,9 +936,12 @@ public class PlayerActivity extends Activity {
         LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(190), dp(56));
         actionLp.leftMargin = dp(8);
         actionLp.rightMargin = dp(8);
-        actions.addView(retry, new LinearLayout.LayoutParams(actionLp));
-        actions.addView(back, new LinearLayout.LayoutParams(actionLp));
-        errorPanel.addView(actions);
+        errorActions.addView(retry, new LinearLayout.LayoutParams(actionLp));
+        if (changeVersion != null) {
+            errorActions.addView(changeVersion, new LinearLayout.LayoutParams(actionLp));
+        }
+        errorActions.addView(back, new LinearLayout.LayoutParams(actionLp));
+        errorPanel.addView(errorActions);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 Math.min(dp(720), getResources().getDisplayMetrics().widthPixels - dp(120)),
@@ -691,14 +965,31 @@ public class PlayerActivity extends Activity {
         return button;
     }
 
+    private TextView modalAction(int id, String label, final Runnable action) {
+        return errorAction(id, label, action);
+    }
+
     private void showActionableError(String title, String message) {
         spinner.setVisibility(View.GONE);
         errorView.setVisibility(View.GONE);
+        // The artwork/title can remain as useful viewing context behind the
+        // actionable card, but a terminal state must never keep claiming that
+        // playback is still loading.
+        if (startupStatusView != null) {
+            startupStatusView.setVisibility(View.GONE);
+        }
         if (errorPanel == null) return;
+        controlsVisibleBeforeError = controlsVisible
+                && overlay != null && overlay.getVisibility() == View.VISIBLE;
+        hideOverlayNow();
         errorTitleView.setText(title);
         errorMessageView.setText(message);
+        errorMessageView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
         errorPanel.setVisibility(View.VISIBLE);
         errorPanel.bringToFront();
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            errorPanel.setAccessibilityPaneTitle(title);
+        }
         if (errorPanel.getChildCount() > 2) {
             View actions = errorPanel.getChildAt(2);
             if (actions instanceof ViewGroup && ((ViewGroup) actions).getChildCount() > 0) {
@@ -708,9 +999,20 @@ public class PlayerActivity extends Activity {
     }
 
     private void retryPlayback() {
-        boolean restoreControlsFocus = controlsVisible
-                && overlay != null && overlay.getVisibility() == View.VISIBLE;
+        boolean restoreControlsFocus = controlsVisibleBeforeError;
+        controlsVisibleBeforeError = false;
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        spinner.setVisibility(View.VISIBLE);
+        // Before the first frame, Retry reuses the premium startup surface and
+        // explicitly changes its state from terminal error to reconnection.
+        // After playback has already started, the existing in-player recovery
+        // message remains the visible source of truth.
+        if (!firstFrameRendered && startupStatusView != null) {
+            startupStatusView.setVisibility(View.VISIBLE);
+            updateStartupStatus(isLiveContent()
+                    ? R.string.player_live_reconnecting
+                    : R.string.player_reconnecting);
+        }
         if (isLiveContent()) {
             liveReconnectAttempts = 0;
             playRetries = 0;
@@ -723,6 +1025,43 @@ public class PlayerActivity extends Activity {
             showControls(playPauseBtn);
             playPauseBtn.requestFocus();
         }
+    }
+
+    private boolean hasAlternativeVariants() {
+        return variants != null && variants.length() > 1;
+    }
+
+    private boolean dispatchModalKey(int code, ViewGroup actions, Runnable backAction) {
+        if (code == KeyEvent.KEYCODE_BACK) {
+            if (backAction != null) backAction.run();
+            return true;
+        }
+        if (actions == null || actions.getChildCount() == 0) return true;
+        if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            int focused = 0;
+            View current = getCurrentFocus();
+            for (int i = 0; i < actions.getChildCount(); i++) {
+                if (actions.getChildAt(i) == current) {
+                    focused = i;
+                    break;
+                }
+            }
+            int delta = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+            int target = (focused + delta + actions.getChildCount()) % actions.getChildCount();
+            actions.getChildAt(target).requestFocus();
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+            View current = getCurrentFocus();
+            if (current != null && current.getParent() == actions) current.performClick();
+            else actions.getChildAt(0).requestFocus();
+            return true;
+        }
+        // A modal owns every playback/navigation key until it is resolved.
+        return true;
     }
 
     /** Compact, shareable technical detail from a playback failure (code, HTTP status, cause, host). */
@@ -777,7 +1116,7 @@ public class PlayerActivity extends Activity {
         nextPanel.setPadding(dp(28), dp(20), dp(28), dp(20));
 
         TextView kicker = new TextView(this);
-        kicker.setText("Up next");
+        kicker.setText(R.string.player_up_next);
         kicker.setTextColor(SUBTLE);
         kicker.setTextSize(14);
         nextPanel.addView(kicker);
@@ -795,12 +1134,13 @@ public class PlayerActivity extends Activity {
         nextCountdownView.setPadding(0, 0, 0, dp(14));
         nextPanel.addView(nextCountdownView);
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        nextPanel.addView(buttons);
+        nextActions = new LinearLayout(this);
+        nextActions.setOrientation(LinearLayout.HORIZONTAL);
+        nextPanel.addView(nextActions);
 
         android.widget.Button playBtn = new android.widget.Button(this);
-        playBtn.setText("▶  Play now");
+        playBtn.setId(R.id.norva_tv_player_next_play_button);
+        playBtn.setText(R.string.player_play_now);
         playBtn.setTextColor(Color.parseColor("#0A0A0F"));
         playBtn.setBackgroundColor(Color.parseColor("#E4E4F2"));
         playBtn.setOnClickListener(new View.OnClickListener() {
@@ -809,16 +1149,17 @@ public class PlayerActivity extends Activity {
         LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         playLp.rightMargin = dp(12);
-        buttons.addView(playBtn, playLp);
+        nextActions.addView(playBtn, playLp);
 
         android.widget.Button backBtn = new android.widget.Button(this);
-        backBtn.setText("Back");
+        backBtn.setId(R.id.norva_tv_player_next_back_button);
+        backBtn.setText(R.string.player_back);
         backBtn.setTextColor(Color.WHITE);
         backBtn.setBackgroundColor(Color.parseColor("#33FFFFFF"));
         backBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { cancelNextPanel(); }
         });
-        buttons.addView(backBtn);
+        nextActions.addView(backBtn);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -828,7 +1169,12 @@ public class PlayerActivity extends Activity {
         root.addView(nextPanel, lp);
 
         nextCountdownSecs = 10;
-        nextCountdownView.setText("Playing in " + nextCountdownSecs + "s");
+        nextCountdownView.setText(
+                getString(R.string.player_playing_in, nextCountdownSecs));
+        playBtn.setNextFocusLeftId(playBtn.getId());
+        playBtn.setNextFocusRightId(backBtn.getId());
+        backBtn.setNextFocusLeftId(playBtn.getId());
+        backBtn.setNextFocusRightId(backBtn.getId());
         handler.postDelayed(nextCountdownTick, 1000);
         playBtn.requestFocus();
     }
@@ -931,8 +1277,8 @@ public class PlayerActivity extends Activity {
         spinner.setVisibility(View.VISIBLE);
         errorView.setTextColor(Color.WHITE);
         errorView.setText(attempt < 2
-                ? "Reconnecting to live TV…"
-                : "The channel is taking longer to reconnect.\nNorva will keep trying automatically.");
+                ? getString(R.string.player_live_reconnecting)
+                : getString(R.string.player_live_reconnecting_slow));
         errorView.setVisibility(View.VISIBLE);
         reportPlaybackStatus("reconnecting", reason);
 
@@ -1131,27 +1477,34 @@ public class PlayerActivity extends Activity {
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(safe, dp(18), safe, dp(12));
-        top.setBackgroundColor(Color.parseColor("#66000000"));
+        top.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {
+                        Color.parseColor("#E605050A"),
+                        Color.parseColor("#9905050A"),
+                        Color.TRANSPARENT
+                }));
         overlay.addView(top, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP));
 
-        ImageButton back = makePlainIconButton(
+        topBackButton = makePlainIconButton(
                 android.R.drawable.ic_menu_revert,
                 getString(R.string.player_back_content_description),
                 48, 12, Color.WHITE);
-        back.setId(R.id.norva_tv_player_back_button);
-        makeFocusable(back, 0);
-        back.setOnClickListener(new View.OnClickListener() {
+        topBackButton.setId(R.id.norva_tv_player_back_button);
+        makeFocusable(topBackButton, 0);
+        topBackButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { finishWithoutRecovery(); }
         });
-        top.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        top.addView(topBackButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         titleView = new TextView(this);
         titleView.setId(R.id.norva_tv_player_title);
         titleView.setText(title == null ? "" : title);
         titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(20);
+        titleView.setTextSize(24);
+        titleView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         titleView.setSingleLine(true);
         titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams topTitleLp = new LinearLayout.LayoutParams(
@@ -1161,7 +1514,7 @@ public class PlayerActivity extends Activity {
 
         clockView = new TextView(this);
         clockView.setId(R.id.norva_tv_player_clock);
-        clockView.setTextColor(ACCENT);
+        clockView.setTextColor(SUBTLE);
         clockView.setTextSize(16);
         clockView.setPadding(dp(18), 0, 0, 0);
         updateClock();
@@ -1170,13 +1523,32 @@ public class PlayerActivity extends Activity {
         // Bottom panel
         LinearLayout bottom = new LinearLayout(this);
         bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setBackgroundColor(PANEL);
+        bottom.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP,
+                new int[] {
+                        Color.parseColor("#F705050A"),
+                        Color.parseColor("#D905050A"),
+                        Color.parseColor("#8805050A"),
+                        Color.TRANSPARENT
+                }));
         bottom.setPadding(safe, dp(14), safe, Math.max(dp(18), safe / 2));
         overlay.addView(bottom, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
 
+        seekDestinationView = new TextView(this);
+        seekDestinationView.setId(R.id.norva_tv_player_seek_destination);
+        seekDestinationView.setTextColor(Color.WHITE);
+        seekDestinationView.setTextSize(18);
+        seekDestinationView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        seekDestinationView.setGravity(Gravity.CENTER);
+        seekDestinationView.setVisibility(View.GONE);
+        seekDestinationView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        bottom.addView(seekDestinationView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         seekBar = new SeekBar(this);
         seekBar.setId(R.id.norva_tv_player_seek_bar);
+        seekBar.setContentDescription(getString(R.string.player_timeline));
         // Focusable: left/right scrub the timeline ONLY while it holds focus.
         // On the button rows, left/right move between buttons instead.
         seekBar.setFocusable(true);
@@ -1193,7 +1565,15 @@ public class PlayerActivity extends Activity {
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                if (fromUser) timeView.setText(formatTime(progress * 1000L) + " / " + formatTime(player.getDuration()));
+                if (fromUser) {
+                    long target = progress * 1000L;
+                    long duration = player == null ? 0L : player.getDuration();
+                    timeView.setText(getString(
+                            R.string.player_time_progress,
+                            formatTime(target),
+                            formatTime(duration)));
+                    updateTimelineAccessibility(target, duration, true);
+                }
             }
             @Override public void onStartTrackingTouch(SeekBar bar) { userSeeking = true; }
             @Override public void onStopTrackingTouch(SeekBar bar) {
@@ -1256,6 +1636,7 @@ public class PlayerActivity extends Activity {
                 R.id.norva_tv_player_audio_button,
                 R.drawable.ic_player_audio,
                 getString(R.string.player_audio_button),
+                getString(R.string.player_audio_button),
                 new Runnable() {
                     @Override public void run() {
                         showTrackDialog(C.TRACK_TYPE_AUDIO, getString(R.string.player_audio_track));
@@ -1265,6 +1646,7 @@ public class PlayerActivity extends Activity {
                 R.id.norva_tv_player_subtitle_button,
                 R.drawable.ic_player_captions,
                 getString(R.string.player_cc_button),
+                getString(R.string.player_cc_button),
                 new Runnable() {
                     @Override public void run() {
                         showTrackDialog(C.TRACK_TYPE_TEXT, getString(R.string.player_subtitles_button));
@@ -1273,6 +1655,7 @@ public class PlayerActivity extends Activity {
         aspectButton = addDirectAction(
                 R.id.norva_tv_player_aspect_button,
                 R.drawable.ic_player_aspect_ratio,
+                getString(R.string.player_aspect_short),
                 getString(R.string.player_aspect_button),
                 new Runnable() {
                     @Override public void run() { cycleAspect(); }
@@ -1280,6 +1663,7 @@ public class PlayerActivity extends Activity {
         moreButton = addDirectAction(
                 R.id.norva_tv_player_more_button,
                 R.drawable.ic_player_more,
+                getString(R.string.player_more),
                 getString(R.string.player_more_options),
                 new Runnable() {
                     @Override public void run() { toggleSecondBar(); }
@@ -1288,8 +1672,11 @@ public class PlayerActivity extends Activity {
 
         buildSecondBar(bottom);
 
-        playPauseBtn.requestFocus();
-        subtitleView.setBottomPaddingFraction(0.22f);
+        subtitleView.setBottomPaddingFraction(0.08f);
+        topBackButton.setNextFocusDownId(R.id.norva_tv_player_seek_bar);
+        seekBar.setNextFocusUpId(R.id.norva_tv_player_back_button);
+        overlay.setVisibility(View.GONE);
+        controlsVisible = false;
     }
 
     private void buildSecondBar(LinearLayout parent) {
@@ -1315,7 +1702,7 @@ public class PlayerActivity extends Activity {
                 R.drawable.ic_player_quality,
                 getString(R.string.player_quality), "—", new Runnable() {
             @Override public void run() {
-                showTrackDialog(C.TRACK_TYPE_VIDEO, getString(R.string.player_video_track));
+                showTrackDialog(C.TRACK_TYPE_VIDEO, getString(R.string.player_quality));
             }
         });
         if (!isLiveContent()) {
@@ -1369,7 +1756,10 @@ public class PlayerActivity extends Activity {
         item.setId(id);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER);
-        item.setPadding(dp(18), dp(8), dp(18), dp(8));
+        item.setPadding(dp(20), dp(10), dp(20), dp(10));
+        item.setMinimumWidth(dp(132));
+        item.setContentDescription(getString(
+                R.string.player_option_selected_description, caption, value));
         makeFocusable(item, 0);
         final String actionLabel = caption;
         item.setOnClickListener(new View.OnClickListener() {
@@ -1388,21 +1778,33 @@ public class PlayerActivity extends Activity {
         val.setTextSize(13);
         val.setGravity(Gravity.CENTER);
         val.setPadding(0, dp(3), 0, 0);
+        val.setSingleLine(true);
+        val.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        val.setMaxWidth(dp(180));
         item.addView(val);
 
         TextView cap = new TextView(this);
         cap.setText(caption);
         cap.setTextColor(SUBTLE);
-        cap.setTextSize(11);
+        cap.setTextSize(12);
         cap.setGravity(Gravity.CENTER);
+        cap.setSingleLine(true);
         item.addView(cap);
 
-        secondBar.addView(item);
+        LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        itemLp.leftMargin = dp(6);
+        secondBar.addView(item, itemLp);
         return val;
     }
 
     private ImageButton addDirectAction(
-            int id, int iconRes, String description, final Runnable action) {
+            int id, int iconRes, String caption, String description, final Runnable action) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setPadding(dp(5), 0, dp(5), 0);
+
         ImageButton button = makePlainIconButton(iconRes, description, 48, 11, Color.WHITE);
         button.setId(id);
         makeFocusable(button, 0);
@@ -1411,9 +1813,22 @@ public class PlayerActivity extends Activity {
                 runBarAction(String.valueOf(v.getContentDescription()), action);
             }
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        lp.leftMargin = dp(6);
-        primaryActions.addView(button, lp);
+        item.addView(button, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        TextView label = new TextView(this);
+        label.setText(caption);
+        label.setTextColor(SUBTLE);
+        label.setTextSize(12);
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        item.addView(label, new LinearLayout.LayoutParams(
+                Math.max(dp(64), dp(caption.length() * 7)),
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = dp(3);
+        primaryActions.addView(item, lp);
         return button;
     }
 
@@ -1497,7 +1912,7 @@ public class PlayerActivity extends Activity {
             if (action != null) action.run();
         } catch (Throwable t) {
             android.util.Log.e("PlayerActivity", "VOD player option failed: " + label, t);
-            toast(label + " unavailable");
+            toast(getString(R.string.player_option_unavailable, label));
             scheduleHideControls();
         }
     }
@@ -1542,10 +1957,13 @@ public class PlayerActivity extends Activity {
 
     private void updatePlayPauseLabel() {
         if (playPauseBtn != null) {
-            boolean playing = player != null && player.isPlaying();
-            playPauseBtn.setImageResource(playing
+            // Reflect the viewer's intent, not the transient decoder state.
+            // During buffering isPlaying() is false even though activating the
+            // control would pause, which otherwise displays the wrong action.
+            boolean wantsPlayback = userWantsPlayback;
+            playPauseBtn.setImageResource(wantsPlayback
                     ? R.drawable.ic_player_pause : R.drawable.ic_player_play);
-            playPauseBtn.setContentDescription(getString(playing
+            playPauseBtn.setContentDescription(getString(wantsPlayback
                     ? R.string.player_pause : R.string.player_play));
         }
     }
@@ -1569,7 +1987,8 @@ public class PlayerActivity extends Activity {
         // Set both speed and pitch explicitly: setPlaybackSpeed() alone can be
         // a no-op on some builds, setPlaybackParameters always applies.
         player.setPlaybackParameters(new PlaybackParameters(speed, 1.0f));
-        speedValue.setText(formatSpeed(speed));
+        setBarValue(speedValue, formatSpeed(speed),
+                getString(R.string.player_playback_speed_section));
         scheduleHideControls();
     }
 
@@ -1584,9 +2003,12 @@ public class PlayerActivity extends Activity {
         handler.removeCallbacks(sleepRunnable);
         if (sleepMinutes > 0) {
             handler.postDelayed(sleepRunnable, sleepMinutes * 60_000L);
-            sleepValue.setText(sleepMinutes + " min");
+            setBarValue(sleepValue,
+                    getString(R.string.player_sleep_minutes, sleepMinutes),
+                    getString(R.string.player_sleep));
         } else {
-            sleepValue.setText("Off");
+            setBarValue(sleepValue, getString(R.string.player_sleep_off),
+                    getString(R.string.player_sleep));
         }
         scheduleHideControls();
     }
@@ -1624,7 +2046,7 @@ public class PlayerActivity extends Activity {
     private void openEpisodesList() {
         if (!"episode".equals(itemType) || itemId == null || itemId.isEmpty()
                 || sourceId == null || sourceId.isEmpty()) {
-            toast("Episode list unavailable");
+            toast(getString(R.string.player_episode_list_unavailable));
             scheduleHideControls();
             return;
         }
@@ -2103,13 +2525,13 @@ public class PlayerActivity extends Activity {
         int channels = metadata != null && metadata.channels > 0
                 ? metadata.channels : (format == null ? -1 : format.channelCount);
         if (type == C.TRACK_TYPE_AUDIO && channels > 0) {
-            if (channels == 1) details.add("mono");
-            else if (channels == 2) details.add("stereo");
+            if (channels == 1) details.add(getString(R.string.player_audio_mono));
+            else if (channels == 2) details.add(getString(R.string.player_audio_stereo));
             else if (channels == 6) details.add("5.1");
             else if (channels == 8) details.add("7.1");
         }
         if (type == C.TRACK_TYPE_TEXT && metadata != null) {
-            if (metadata.forced) details.add("Forced");
+            if (metadata.forced) details.add(getString(R.string.player_subtitle_forced));
             if (metadata.sdh) details.add("SDH");
         }
         return details.isEmpty()
@@ -2194,6 +2616,268 @@ public class PlayerActivity extends Activity {
         return false;
     }
 
+    private interface ChoiceHandler {
+        void onChoice(int index);
+    }
+
+    private static final class ChoiceRowState {
+        final boolean selected;
+        final TextView label;
+        final TextView badge;
+
+        ChoiceRowState(boolean selected, TextView label, TextView badge) {
+            this.selected = selected;
+            this.label = label;
+            this.badge = badge;
+        }
+    }
+
+    /**
+     * Norva-owned TV choice sheet used for Audio, Subtitles, Quality and
+     * Version. It replaces platform dialogs so every remote has the same
+     * focus, typography and return-to-opener contract.
+     */
+    private void showChoicePanel(
+            String title,
+            final List<String> labels,
+            int selectedIndex,
+            final ChoiceHandler choiceHandler) {
+        if (labels == null || labels.isEmpty() || choicePanel != null) return;
+
+        choiceReturnFocus = getCurrentFocus();
+        choiceRestoreControls = controlsVisible
+                && overlay != null && overlay.getVisibility() == View.VISIBLE;
+        choiceRestoreSecondBar = secondBarVisible;
+        handler.removeCallbacks(hideControlsRunnable);
+        hideOverlayNow();
+
+        choicePanel = new FrameLayout(this);
+        choicePanel.setId(R.id.norva_tv_player_choice_panel);
+        choicePanel.setBackgroundColor(Color.parseColor("#D905050A"));
+        choicePanel.setFocusable(false);
+        choicePanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        if (overlay != null) {
+            overlay.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+        if (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE) {
+            errorPanel.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(30), dp(26), dp(30), dp(28));
+        GradientDrawable cardBackground = new GradientDrawable();
+        cardBackground.setColor(Color.parseColor("#FA111119"));
+        cardBackground.setCornerRadius(dp(20));
+        cardBackground.setStroke(dp(1), Color.parseColor("#3DFFFFFF"));
+        card.setBackground(cardBackground);
+
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextColor(Color.WHITE);
+        heading.setTextSize(27);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        card.addView(heading);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.player_choice_hint);
+        hint.setTextColor(SUBTLE);
+        hint.setTextSize(15);
+        hint.setPadding(0, dp(6), 0, dp(18));
+        card.addView(hint);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setId(R.id.norva_tv_player_choice_list);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setFocusable(false);
+
+        choiceOptions = new LinearLayout(this);
+        choiceOptions.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(choiceOptions, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        int focusIndex = selectedIndex >= 0 && selectedIndex < labels.size()
+                ? selectedIndex : 0;
+        for (int i = 0; i < labels.size(); i++) {
+            final int optionIndex = i;
+            final boolean selected = i == selectedIndex;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(18), dp(8), dp(14), dp(8));
+            row.setMinimumHeight(dp(56));
+            row.setFocusable(true);
+            row.setClickable(true);
+
+            TextView label = new TextView(this);
+            label.setText(labels.get(i));
+            label.setTextSize(17);
+            label.setSingleLine(true);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(label, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView badge = new TextView(this);
+            badge.setText(R.string.player_selected);
+            badge.setTextSize(13);
+            badge.setTextColor(Color.WHITE);
+            badge.setGravity(Gravity.CENTER);
+            badge.setPadding(dp(12), dp(5), dp(12), dp(5));
+            badge.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
+            GradientDrawable badgeBackground = new GradientDrawable();
+            badgeBackground.setColor(Color.parseColor("#5B5FEF"));
+            badgeBackground.setCornerRadius(dp(20));
+            badge.setBackground(badgeBackground);
+            row.addView(badge);
+
+            ChoiceRowState state = new ChoiceRowState(selected, label, badge);
+            row.setTag(state);
+            row.setContentDescription(selected
+                    ? getString(R.string.player_choice_selected_description, labels.get(i))
+                    : labels.get(i));
+            styleChoiceRow(row, state, false);
+            row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+                @Override public void onFocusChange(View view, boolean hasFocus) {
+                    styleChoiceRow(view, (ChoiceRowState) view.getTag(), hasFocus);
+                }
+            });
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    closeChoicePanel(true);
+                    choiceHandler.onChoice(optionIndex);
+                }
+            });
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = dp(6);
+            choiceOptions.addView(row, rowLp);
+        }
+
+        int listHeight = Math.min(dp(310), Math.max(dp(62), labels.size() * dp(62)));
+        card.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                Math.min(dp(590), getResources().getDisplayMetrics().widthPixels - dp(120)),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
+        choicePanel.addView(card, cardLp);
+        root.addView(choicePanel, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        choicePanel.bringToFront();
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            choicePanel.setAccessibilityPaneTitle(title);
+        }
+        final View initial = choiceOptions.getChildAt(focusIndex);
+        choicePanel.post(new Runnable() {
+            @Override public void run() {
+                if (initial != null && initial.isShown()) initial.requestFocus();
+            }
+        });
+    }
+
+    private void styleChoiceRow(View row, ChoiceRowState state, boolean focused) {
+        GradientDrawable background = new GradientDrawable();
+        background.setCornerRadius(dp(12));
+        if (focused) {
+            background.setColor(Color.parseColor("#EEF2FF"));
+            background.setStroke(dp(2), Color.WHITE);
+            state.label.setTextColor(Color.parseColor("#09090F"));
+        } else if (state.selected) {
+            background.setColor(Color.parseColor("#332D2A63"));
+            background.setStroke(dp(2), ACCENT);
+            state.label.setTextColor(Color.WHITE);
+        } else {
+            background.setColor(Color.parseColor("#1A1A24"));
+            background.setStroke(dp(1), Color.parseColor("#26FFFFFF"));
+            state.label.setTextColor(Color.WHITE);
+        }
+        row.setBackground(background);
+        row.animate()
+                .scaleX(focused ? 1.02f : 1f)
+                .scaleY(focused ? 1.02f : 1f)
+                .setDuration(120)
+                .start();
+    }
+
+    private void closeChoicePanel(boolean restoreOrigin) {
+        View returnFocus = choiceReturnFocus;
+        boolean restoreControls = choiceRestoreControls;
+        boolean restoreSecondBar = choiceRestoreSecondBar;
+        if (choicePanel != null) root.removeView(choicePanel);
+        choicePanel = null;
+        choiceOptions = null;
+        choiceReturnFocus = null;
+        choiceRestoreControls = false;
+        choiceRestoreSecondBar = false;
+        if (overlay != null) {
+            overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+        if (errorPanel != null) {
+            errorPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+
+        if (!restoreOrigin) return;
+        if (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE) {
+            errorPanel.bringToFront();
+            if (returnFocus != null && returnFocus.isShown()) returnFocus.requestFocus();
+            else if (errorActions != null && errorActions.getChildCount() > 0) {
+                errorActions.getChildAt(0).requestFocus();
+            }
+            return;
+        }
+        if (restoreControls && overlay != null) {
+            overlay.setVisibility(View.VISIBLE);
+            controlsVisible = true;
+            if (restoreSecondBar && secondBar != null) {
+                secondBarVisible = true;
+                secondBar.setVisibility(View.VISIBLE);
+                refreshSecondBarValues();
+            }
+            if (subtitleView != null) subtitleView.setBottomPaddingFraction(0.22f);
+            if (returnFocus != null && returnFocus.isShown() && returnFocus.isFocusable()) {
+                returnFocus.requestFocus();
+            } else if (playPauseBtn != null) {
+                playPauseBtn.requestFocus();
+            }
+            scheduleHideControls();
+        }
+    }
+
+    private boolean dispatchChoiceKey(int code) {
+        if (code == KeyEvent.KEYCODE_BACK) {
+            closeChoicePanel(true);
+            return true;
+        }
+        if (choiceOptions == null || choiceOptions.getChildCount() == 0) return true;
+        if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+            int focused = 0;
+            View current = getCurrentFocus();
+            for (int i = 0; i < choiceOptions.getChildCount(); i++) {
+                if (choiceOptions.getChildAt(i) == current) {
+                    focused = i;
+                    break;
+                }
+            }
+            int delta = code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
+            int target = (focused + delta + choiceOptions.getChildCount())
+                    % choiceOptions.getChildCount();
+            choiceOptions.getChildAt(target).requestFocus();
+            return true;
+        }
+        if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+            View current = getCurrentFocus();
+            if (current != null && current.getParent() == choiceOptions) current.performClick();
+            else choiceOptions.getChildAt(0).requestFocus();
+            return true;
+        }
+        // Left/Right and transport keys cannot escape or control playback behind the sheet.
+        return true;
+    }
+
     private void showTrackDialog(final int trackType, String title) {
         Tracks tracks = player.getCurrentTracks();
         final List<TrackOption> options = new ArrayList<>();
@@ -2212,48 +2896,42 @@ public class PlayerActivity extends Activity {
         }
 
         if (labels.size() <= (isText ? 1 : 0)) {
-            toast(getString(isText
+            int unavailable = isText
                     ? R.string.player_subtitles_unavailable
-                    : R.string.player_audio_unavailable));
+                    : (trackType == C.TRACK_TYPE_VIDEO
+                        ? R.string.player_video_unavailable
+                        : R.string.player_audio_unavailable);
+            toast(getString(unavailable));
             return;
         }
 
-        new AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                .setTitle(title)
-                .setSingleChoiceItems(labels.toArray(new String[0]), selected,
-                        new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                if (isText && which == 0) {
-                                    pendingTrackSelection = null;
-                                    pendingSubtitleOff = true;
-                                    player.setTrackSelectionParameters(
-                                            player.getTrackSelectionParameters().buildUpon()
-                                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                                    .setTrackTypeDisabled(
-                                                            C.TRACK_TYPE_TEXT, true)
-                                                    .build());
-                                } else {
-                                    int optionIndex = which - (isText ? 1 : 0);
-                                    TrackOption option = options.get(optionIndex);
-                                    pendingTrackSelection = option;
-                                    pendingSubtitleOff = false;
-                                    player.setTrackSelectionParameters(
-                                            player.getTrackSelectionParameters().buildUpon()
-                                                    .setTrackTypeDisabled(trackType, false)
-                                                    .clearOverridesOfType(trackType)
-                                                    .setOverrideForType(
-                                                            new TrackSelectionOverride(
-                                                                    option.group,
-                                                                    option.trackIndex))
-                                                    .build());
-                                }
-                                dialog.dismiss();
-                                refreshSecondBarValues();
-                                scheduleHideControls();
-                            }
-                        })
-                .show();
+        showChoicePanel(title, labels, selected, new ChoiceHandler() {
+            @Override public void onChoice(int which) {
+                if (isText && which == 0) {
+                    pendingTrackSelection = null;
+                    pendingSubtitleOff = true;
+                    player.setTrackSelectionParameters(
+                            player.getTrackSelectionParameters().buildUpon()
+                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                    .build());
+                } else {
+                    int optionIndex = which - (isText ? 1 : 0);
+                    TrackOption option = options.get(optionIndex);
+                    pendingTrackSelection = option;
+                    pendingSubtitleOff = false;
+                    player.setTrackSelectionParameters(
+                            player.getTrackSelectionParameters().buildUpon()
+                                    .setTrackTypeDisabled(trackType, false)
+                                    .clearOverridesOfType(trackType)
+                                    .setOverrideForType(new TrackSelectionOverride(
+                                            option.group, option.trackIndex))
+                                    .build());
+                }
+                refreshSecondBarValues();
+                scheduleHideControls();
+            }
+        });
     }
 
     /** Label of the currently-playing variant (for the bar item's value line). */
@@ -2288,28 +2966,30 @@ public class PlayerActivity extends Activity {
                 if (v == null) continue;
                 String sid = v.optString("streamId", "");
                 if (sid.isEmpty()) continue;
-                labels.add(v.optString("label", "Variant " + (labels.size() + 1)));
+                labels.add(v.optString("label", getString(
+                        R.string.player_version_number, labels.size() + 1)));
                 streamIds.add(sid);
                 sourceIds.add(v.optString("sourceId", ""));
                 if (activeStreamId != null && activeStreamId.equals(sid)) selected = labels.size() - 1;
             }
         } catch (Exception ignored) { }
-        if (labels.size() < 2) { toast("No other version"); return; }
+        if (labels.size() < 2) {
+            toast(getString(R.string.player_no_other_version));
+            return;
+        }
 
-        new AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                .setTitle("Version")
-                .setSingleChoiceItems(labels.toArray(new String[0]), selected,
-                        new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                dialog.dismiss();
-                                if (streamIds.get(which).equals(activeStreamId)) return; // already playing
-                                pendingVariantStreamId = streamIds.get(which);
-                                pendingVariantSourceId = sourceIds.get(which);
-                                finish(); // MainActivity → web re-resolves + relaunches this variant
-                            }
-                        })
-                .show();
+        showChoicePanel(
+                getString(R.string.player_version_title),
+                labels,
+                selected,
+                new ChoiceHandler() {
+                    @Override public void onChoice(int which) {
+                        if (streamIds.get(which).equals(activeStreamId)) return;
+                        pendingVariantStreamId = streamIds.get(which);
+                        pendingVariantSourceId = sourceIds.get(which);
+                        finish();
+                    }
+                });
     }
 
     private void applyTrack(int trackType, Tracks.Group group, int trackIndex) {
@@ -2334,19 +3014,23 @@ public class PlayerActivity extends Activity {
         StringBuilder s = new StringBuilder();
         if (trackType == C.TRACK_TYPE_VIDEO) {
             if (f.width > 0 && f.height > 0) s.append(f.width).append("×").append(f.height);
-            else s.append("Vidéo ").append(ordinal);
+            else s.append(getString(R.string.player_video_track)).append(" ").append(ordinal);
             if (f.frameRate > 0) s.append(" · ").append(Math.round(f.frameRate)).append("fps");
             return s.toString();
         }
         if (f.label != null && !f.label.isEmpty()) s.append(f.label);
         else if (f.language != null && !"und".equals(f.language))
             s.append(new Locale(f.language).getDisplayLanguage(Locale.getDefault()));
-        else s.append(trackType == C.TRACK_TYPE_AUDIO ? "Audio " : "Subtitle ").append(ordinal);
+        else s.append(getString(trackType == C.TRACK_TYPE_AUDIO
+                ? R.string.player_audio_track : R.string.player_subtitles_button))
+                .append(" ").append(ordinal);
         if (f.language != null && !"und".equals(f.language)) s.append(" [").append(f.language).append("]");
         if (trackType == C.TRACK_TYPE_AUDIO) {
             if (f.channelCount == 6) s.append(" · 5.1");
             else if (f.channelCount == 8) s.append(" · 7.1");
-            else if (f.channelCount == 2) s.append(" · stereo");
+            else if (f.channelCount == 2) {
+                s.append(" · ").append(getString(R.string.player_audio_stereo));
+            }
             if (f.codecs != null) s.append(" · ").append(f.codecs);
         }
         return s.toString();
@@ -2438,9 +3122,9 @@ public class PlayerActivity extends Activity {
                 break;
             }
         }
-        if (videoValue != null) videoValue.setText(video);
-        if (audioValue != null) audioValue.setText(audio);
-        if (subValue != null) subValue.setText(sub);
+        setBarValue(videoValue, video, getString(R.string.player_quality));
+        setBarValue(audioValue, audio, getString(R.string.player_audio_button));
+        setBarValue(subValue, sub, getString(R.string.player_subtitles_button));
         if (audioButton != null) {
             audioButton.setContentDescription(getString(
                     R.string.player_audio_selected_description, audio));
@@ -2461,7 +3145,7 @@ public class PlayerActivity extends Activity {
     private String shortLang(Format f) {
         if (f.language != null && !"und".equals(f.language)) return f.language.toUpperCase(Locale.US);
         if (f.label != null && !f.label.isEmpty()) return f.label;
-        return "On";
+        return getString(R.string.player_on);
     }
 
     // ==================== OSD show/hide ====================
@@ -2472,6 +3156,9 @@ public class PlayerActivity extends Activity {
 
     private void openSecondBar() {
         if (!secondBarVisible) {
+            View current = getCurrentFocus();
+            secondBarOrigin = current != null && current != secondBar
+                    ? current : moreButton;
             secondBarVisible = true;
             secondBar.setVisibility(View.VISIBLE);
             refreshSecondBarValues();
@@ -2483,7 +3170,11 @@ public class PlayerActivity extends Activity {
     private void closeSecondBar() {
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
-        playPauseBtn.requestFocus();
+        View restore = secondBarOrigin;
+        secondBarOrigin = null;
+        if (restore != null && restore.isShown() && restore.isFocusable()) restore.requestFocus();
+        else if (moreButton != null && moreButton.isShown()) moreButton.requestFocus();
+        else playPauseBtn.requestFocus();
         scheduleHideControls();
     }
 
@@ -2493,6 +3184,12 @@ public class PlayerActivity extends Activity {
 
     /** Reveal the OSD and park focus on the given control (when freshly shown). */
     private void showControls(View focusTarget) {
+        if ((choicePanel != null && choicePanel.getVisibility() == View.VISIBLE)
+                || (resumePanel != null && resumePanel.getVisibility() == View.VISIBLE)
+                || (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE)
+                || nextPanel != null) {
+            return;
+        }
         boolean wasHidden = !controlsVisible;
         overlay.setVisibility(View.VISIBLE);
         controlsVisible = true;
@@ -2504,12 +3201,18 @@ public class PlayerActivity extends Activity {
     }
 
     private void focusTransport() {
-        if (secondBarVisible) closeSecondBar(); // also focuses play/pause
+        if (secondBarVisible) closeSecondBar();
         else playPauseBtn.requestFocus();
         scheduleHideControls();
     }
 
     private void hideControls() {
+        if ((choicePanel != null && choicePanel.getVisibility() == View.VISIBLE)
+                || (resumePanel != null && resumePanel.getVisibility() == View.VISIBLE)
+                || (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE)
+                || nextPanel != null) {
+            return;
+        }
         if (player != null && !player.isPlaying()) return; // stay visible while paused
         overlay.setVisibility(View.GONE);
         controlsVisible = false;
@@ -2545,9 +3248,14 @@ public class PlayerActivity extends Activity {
         if (dur > 0) {
             seekBar.setMax((int) (dur / 1000));
             seekBar.setProgress((int) (target / 1000));
-            timeView.setText(formatTime(target) + " / " + formatTime(dur));
+            timeView.setText(getString(
+                    R.string.player_time_progress,
+                    formatTime(target),
+                    formatTime(dur)));
+            updateTimelineAccessibility(target, dur, true);
         } else {
             timeView.setText(formatTime(target));
+            updateTimelineAccessibility(target, 0L, true);
         }
         handler.removeCallbacks(commitSeekRunnable);
         handler.postDelayed(commitSeekRunnable, 450);
@@ -2558,6 +3266,7 @@ public class PlayerActivity extends Activity {
             player.seekTo(pendingSeekTarget);
         }
         pendingSeekTarget = -1;
+        if (seekDestinationView != null) seekDestinationView.setVisibility(View.GONE);
     }
 
     private void updateProgress() {
@@ -2568,9 +3277,45 @@ public class PlayerActivity extends Activity {
         if (dur > 0) {
             seekBar.setMax((int) (dur / 1000));
             seekBar.setProgress((int) (pos / 1000));
-            timeView.setText(formatTime(pos) + " / " + formatTime(dur));
+            timeView.setText(getString(
+                    R.string.player_time_progress,
+                    formatTime(pos),
+                    formatTime(dur)));
+            updateTimelineAccessibility(pos, dur, false);
         } else {
             timeView.setText(formatTime(pos));
+            updateTimelineAccessibility(pos, 0L, false);
+        }
+    }
+
+    private void setBarValue(TextView valueView, String value, String caption) {
+        if (valueView == null) return;
+        valueView.setText(value);
+        Object parent = valueView.getParent();
+        if (parent instanceof View) {
+            ((View) parent).setContentDescription(getString(
+                    R.string.player_option_selected_description, caption, value));
+        }
+    }
+
+    private void updateTimelineAccessibility(long positionMs, long durationMs, boolean destination) {
+        String position = formatTime(positionMs);
+        String description;
+        if (durationMs > 0) {
+            description = getString(destination
+                            ? R.string.player_seek_destination
+                            : R.string.player_timeline_position,
+                    position, formatTime(durationMs));
+        } else {
+            description = getString(destination
+                            ? R.string.player_seek_destination_live
+                            : R.string.player_timeline_position_live,
+                    position);
+        }
+        seekBar.setContentDescription(description);
+        if (destination && seekDestinationView != null) {
+            seekDestinationView.setText(description);
+            seekDestinationView.setVisibility(View.VISIBLE);
         }
     }
 
@@ -2582,8 +3327,8 @@ public class PlayerActivity extends Activity {
         if (ms < 0) ms = 0;
         long t = ms / 1000;
         long h = t / 3600, m = (t % 3600) / 60, s = t % 60;
-        if (h > 0) return String.format(Locale.US, "%d:%02d:%02d", h, m, s);
-        return String.format(Locale.US, "%d:%02d", m, s);
+        if (h > 0) return String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s);
+        return String.format(Locale.getDefault(), "%d:%02d", m, s);
     }
 
     private void toast(String msg) {
@@ -2607,19 +3352,28 @@ public class PlayerActivity extends Activity {
             return super.dispatchKeyEvent(event);
         }
 
+        if (choicePanel != null && choicePanel.getVisibility() == View.VISIBLE) {
+            return dispatchChoiceKey(code);
+        }
+
+        if (resumePanel != null && resumePanel.getVisibility() == View.VISIBLE) {
+            return dispatchModalKey(code, resumeActions, new Runnable() {
+                @Override public void run() { finishWithoutRecovery(); }
+            });
+        }
+
         if (errorPanel != null && errorPanel.getVisibility() == View.VISIBLE) {
-            if (code == KeyEvent.KEYCODE_BACK) {
-                finishWithoutRecovery();
-                return true;
-            }
-            return super.dispatchKeyEvent(event);
+            return dispatchModalKey(code, errorActions, new Runnable() {
+                @Override public void run() { finishWithoutRecovery(); }
+            });
         }
 
         // "À suivre" overlay open: BACK closes the player, everything else uses
         // the native focus traversal between the two buttons.
         if (nextPanel != null) {
-            if (code == KeyEvent.KEYCODE_BACK) { cancelNextPanel(); return true; }
-            return super.dispatchKeyEvent(event);
+            return dispatchModalKey(code, nextActions, new Runnable() {
+                @Override public void run() { cancelNextPanel(); }
+            });
         }
 
         if (code == KeyEvent.KEYCODE_BACK) {
@@ -2671,13 +3425,34 @@ public class PlayerActivity extends Activity {
         // --- OSD visible: route by which zone currently holds focus ---
         final boolean onTimeline = seekBar.hasFocus();
         final boolean onOptions = secondBarVisible && secondBar.hasFocus();
+        final boolean onBack = topBackButton != null && topBackButton.hasFocus();
+
+        if (onBack) {
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    seekBar.requestFocus();
+                    scheduleHideControls();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    scheduleHideControls();
+                    return true;
+                default:
+                    scheduleHideControls();
+                    return super.dispatchKeyEvent(event);
+            }
+        }
 
         if (onTimeline) {
             switch (code) {
                 case KeyEvent.KEYCODE_DPAD_LEFT:  scrubBy(-seekStepForRepeat(repeat)); return true;
                 case KeyEvent.KEYCODE_DPAD_RIGHT: scrubBy(seekStepForRepeat(repeat)); return true;
                 case KeyEvent.KEYCODE_DPAD_DOWN:  focusTransport(); return true;   // timeline → transport
-                case KeyEvent.KEYCODE_DPAD_UP:    scheduleHideControls(); return true; // nothing above
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    topBackButton.requestFocus();
+                    scheduleHideControls();
+                    return true;
                 case KeyEvent.KEYCODE_DPAD_CENTER:
                 case KeyEvent.KEYCODE_ENTER:      togglePlay(); return true;
             }
@@ -2710,10 +3485,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void hideOverlayNow() {
-        overlay.setVisibility(View.GONE);
+        if (overlay != null) overlay.setVisibility(View.GONE);
         controlsVisible = false;
         secondBarVisible = false;
-        secondBar.setVisibility(View.GONE);
+        if (secondBar != null) secondBar.setVisibility(View.GONE);
         if (subtitleView != null) subtitleView.setBottomPaddingFraction(0.08f);
     }
 
@@ -2725,7 +3500,7 @@ public class PlayerActivity extends Activity {
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
         if (android.os.Build.VERSION.SDK_INT < 26) return;
-        if (player == null || !player.isPlaying() || nextPanel != null) return;
+        if (player == null || !player.isPlaying() || nextPanel != null || choicePanel != null) return;
         try {
             android.util.Rational ratio = new android.util.Rational(16, 9);
             if (videoW > 0 && videoH > 0) {

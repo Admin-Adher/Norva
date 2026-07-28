@@ -549,7 +549,7 @@
                 pollHandle = setInterval(pollPairing, 2500);
                 timerHandle = setInterval(updateTimer, 1000);
             } catch (error) {
-                setStatus('error', error.message || 'Unable to create pairing code.');
+                setStatus('error', 'Unable to create a pairing code. Check your connection and try again.');
             }
         }
 
@@ -581,7 +581,7 @@
                 // Only surface it after several consecutive failures; a later success
                 // silently clears it (pollFailStreak resets above).
                 if (++pollFailStreak >= 4) {
-                    setStatus('error', (error.message || 'Pairing check failed') + ' — retrying…');
+                    setStatus('error', 'Pairing check failed — retrying…');
                 }
             }
         }

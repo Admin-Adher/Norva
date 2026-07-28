@@ -177,6 +177,23 @@ class SeriesPage {
             const card = event.target.closest?.('.series-card');
             if (card?.isConnected) this.previewCard(card);
         });
+        this.container?.addEventListener('click', (event) => {
+            if (!event.target.closest('[data-series-retry]')) return;
+            this.loadSeries();
+        });
+        this.seasonsContainer?.addEventListener('click', (event) => {
+            const action = event.target.closest?.('[data-series-info-action]')?.dataset?.seriesInfoAction;
+            if (!action) return;
+            if (action === 'retry') {
+                this.retryCurrentSeriesInfo();
+            } else if (action === 'versions') {
+                this.focusSeriesVersions();
+            } else if (action === 'settings') {
+                this.app?.navigateTo?.('settings');
+            } else if (action === 'back') {
+                this.hideDetails();
+            }
+        });
 
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
@@ -1199,7 +1216,7 @@ class SeriesPage {
             this.filterAndRender();
         } catch (err) {
             console.error('Error loading series:', err);
-            this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
+            this.renderLoadError();
         } finally {
             this.isLoading = false;
         }
@@ -1353,7 +1370,7 @@ class SeriesPage {
                 requestId !== this.cloudRequestId || this._tvPendingCloudReset
             )) return;
             if (reset && !paintedFromCache) {
-                this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
+                this.renderLoadError();
             }
         } finally {
             if (reset && (!this._isTvMode() || requestId === this.cloudRequestId)) {
@@ -1609,8 +1626,8 @@ class SeriesPage {
             if (this._isTvMode()) this._clearTvPreview();
             const filtered = this.hasActiveFilters();
             this.container.innerHTML = `
-                <div class="empty-state rich-empty">
-                    <div class="empty-icon">📺</div>
+                <div class="empty-state rich-empty premium-state">
+                    <span class="premium-state-kicker">Series</span>
                     <h3>${filtered ? 'No series match these filters' : 'No series here yet'}</h3>
                     <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Series appear as soon as Norva finishes preparing your catalog.'}</p>
                     ${filtered ? '<button class="btn btn-primary" id="series-empty-reset">Clear filters</button>' : ''}
@@ -1791,13 +1808,14 @@ class SeriesPage {
             '/img/norva-media-placeholder.png'
         );
         const year = this.getItemYear(series) || '';
-        const rating = series.rating ? `${Icons.star} ${series.rating}` : '';
+        const rating = this.getSeriesRatingText(series);
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
         const started = this.isGroupStarted(group.items);
         const versionCount = group.items.length;
         const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : MediaUtils.cleanReleaseName(series.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
-        const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
+        const languageBadge = this.displayLanguageStatus(
+            MediaUtils.versionLanguageBadge(series, this.getPreferences()));
         // "New" corner badge for series added in the last two weeks (not started).
         const isNew = !started && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -1823,7 +1841,7 @@ class SeriesPage {
                 <div class="series-title">${MediaUtils.escapeHtml(displayName)}</div>
                 <div class="series-meta">
                     ${year ? `<span>${year}</span>` : ''}
-                    ${rating ? `<span>${rating}</span>` : ''}
+                    ${rating ? `<span>${Icons.star} ${MediaUtils.escapeHtml(rating)}</span>` : ''}
                     ${series.tmdb?.number_of_seasons ? `<span>${series.tmdb.number_of_seasons} seasons</span>` : ''}
                 </div>
             </div>
@@ -1856,7 +1874,7 @@ class SeriesPage {
         card.__norvaHover = () => ({
             title: displayName,
             meta: [year, series.tmdb?.number_of_seasons ? `${series.tmdb.number_of_seasons} seasons` : '',
-                series.rating ? `★ ${series.rating}` : ''].filter(Boolean).join(' · '),
+                rating ? `★ ${rating}` : ''].filter(Boolean).join(' · '),
             poster,
             backdrop: MediaUtils.safeImageUrl(this.getSeriesBackdrop(series), '') || null,
             onPlay: () => {
@@ -2311,6 +2329,18 @@ class SeriesPage {
             </div>`;
     }
 
+    renderLoadError() {
+        if (!this.container) return;
+        this.container.innerHTML = `
+            <div class="premium-state premium-state-error" role="alert">
+                <span class="premium-state-kicker">Series</span>
+                <h3>Series could not be refreshed</h3>
+                <p>Your catalogue is still connected. Try loading this view again.</p>
+                <button class="btn btn-primary" type="button" data-series-retry>Try again</button>
+            </div>`;
+        if (this._isTvMode()) this._clearTvPreview();
+    }
+
     previewCard(card) {
         if (!this._isTvMode() || this.pageEl?.classList.contains('series-detail-open')) return;
         const group = card?.__seriesGroup;
@@ -2341,15 +2371,15 @@ class SeriesPage {
         const art = this.getSeriesBackdrop(display) || this.getSeriesPoster(display);
         const plot = display?.tmdb?.overview || display?.overview || display?.description ||
             display?.plot || 'No summary available yet.';
-        const rating = parseFloat(display?.rating || display?.tmdb?.vote_average);
+        const rating = this.getSeriesRatingText(display);
         const version = MediaUtils.parseVersionInfo(selected?.name || '');
         const meta = [
             this.getSeriesYear(display),
             display?.tmdb?.number_of_seasons ? `${display.tmdb.number_of_seasons} seasons` : '',
             ...this.getSeriesGenres(display).slice(0, 2),
-            Number.isFinite(rating) && rating > 0 ? `★ ${rating.toFixed(1).replace('.0', '')}` : '',
+            rating ? `★ ${rating}` : '',
             version.quality,
-            MediaUtils.versionLanguageBadge(selected, this.getPreferences())
+            this.displayLanguageStatus(MediaUtils.versionLanguageBadge(selected, this.getPreferences()))
         ].filter(Boolean);
         const history = this._tvPreviewProgress(group);
         const ratio = history?.duration > 0
@@ -2396,13 +2426,19 @@ class SeriesPage {
             </div>`;
     }
 
-    async _openTvSeriesDetails(group, { focusVersions = false, originCard = null } = {}) {
+    async _openTvSeriesDetails(group, {
+        focusVersions = false,
+        originCard = null,
+        intentToken = null
+    } = {}) {
         if (!group?.items?.length) return;
+        const token = intentToken ?? this.beginFicheIntent();
+        if (!this.isFicheIntentCurrent(token)) return;
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const selected = this.getRememberedVersion(group) || ordered[0] || group.representative;
         this._tvDetailOriginCard = originCard?.isConnected ? originCard : this._tvPreviewCard;
         this.currentSeriesGroup = group;
-        await this.showSeriesDetailsV2(selected, group, { focusVersions });
+        await this.showSeriesDetailsV2(selected, group, { focusVersions, intentToken: token });
     }
 
     _ensureTvEpisodeCount() {
@@ -2430,17 +2466,36 @@ class SeriesPage {
         };
     }
 
-    openGroup(group, { focusVersions = false } = {}) {
+    beginFicheIntent() {
+        this._ficheIntentToken = (this._ficheIntentToken || 0) + 1;
+        return this._ficheIntentToken;
+    }
+
+    isFicheIntentCurrent(token) {
+        return token == null || token === this._ficheIntentToken;
+    }
+
+    openGroup(group, { focusVersions = false, intentToken = null } = {}) {
+        const token = intentToken ?? this.beginFicheIntent();
+        if (!this.isFicheIntentCurrent(token)) return false;
         if (this._isTvMode()) {
-            this._openTvSeriesDetails(group, { focusVersions, originCard: this._tvPreviewCard });
-            return;
+            this._openTvSeriesDetails(group, {
+                focusVersions,
+                originCard: this._tvPreviewCard,
+                intentToken: token
+            });
+            return true;
         }
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         // Restore the version the user last chose for this title (across grid / search /
         // rails / restore), falling back to the best auto-picked one.
         const remembered = this.getRememberedVersion(group);
         this.currentSeriesGroup = group;
-        this.showSeriesDetailsV2(remembered || ordered[0], group, { focusVersions });
+        this.showSeriesDetailsV2(remembered || ordered[0], group, {
+            focusVersions,
+            intentToken: token
+        });
+        return true;
     }
 
     // === In-fiche version switcher (parity with the movie fiche) ===
@@ -2528,9 +2583,10 @@ class SeriesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
+            const headline = this.displayLanguageStatus(desc.headline) || `Version ${index + 1}`;
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
-                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
+                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
                     ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan">Unavailable</span>' : ''}
                 </button>`;
@@ -2554,7 +2610,13 @@ class SeriesPage {
     // safe when the preferred version is DEFINITIVELY unusable (no episodes) — a TRANSIENT
     // fetch error must NOT durably degrade the choice, or every future open reopens the
     // worse version even after the preferred one is healthy again.
-    tryNextHealthyVersion(current, tried, focusVersions = false, remember = true) {
+    tryNextHealthyVersion(
+        current,
+        tried,
+        focusVersions = false,
+        remember = true,
+        intentToken = null
+    ) {
         const group = this.currentSeriesGroup;
         if (!group || (group.items?.length || 0) <= 1) return false;
         const triedSet = tried || new Set();
@@ -2563,7 +2625,13 @@ class SeriesPage {
         const next = ordered.find(i => !triedSet.has(this._versionSig(i)) && !this.isBrokenItem(i))
             || ordered.find(i => !triedSet.has(this._versionSig(i)));
         if (!next) return false;
-        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet, focusVersions, rememberOnSuccess: remember });
+        this.showSeriesDetailsV2(next, group, {
+            isVersionSwitch: true,
+            triedVersions: triedSet,
+            focusVersions,
+            rememberOnSuccess: remember,
+            intentToken
+        });
         return true;
     }
 
@@ -2578,6 +2646,18 @@ class SeriesPage {
 
     getSeriesDisplayTitle(series = this.currentSeries) {
         return series?.tmdb?.title || series?.tmdb?.name || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
+    }
+
+    getSeriesRatingText(series = this.currentSeries) {
+        const rating = [series?.rating, series?.tmdb?.vote_average]
+            .map(value => Number.parseFloat(value))
+            .find(value => Number.isFinite(value) && value > 0);
+        return rating == null ? '' : rating.toFixed(1).replace(/\.0$/, '');
+    }
+
+    displayLanguageStatus(value) {
+        const text = String(value || '').trim();
+        return /^(?:Audio pending|Identifying audio)$/i.test(text) ? '' : text;
     }
 
     getSeriesPoster(series = this.currentSeries) {
@@ -3238,7 +3318,8 @@ class SeriesPage {
     // sibling versions, group them like the grid, and open the matching group.
     // Falls back to a single-item group; returns false on failure so the caller
     // can fall back to its own path.
-    async openByItem(item) {
+    async openByItem(item, { intentToken = null } = {}) {
+        const token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.series_id == null) return false;
             const title = item.tmdb?.name || item.tmdb?.title || item.name || '';
@@ -3251,19 +3332,30 @@ class SeriesPage {
                     if (!seen.has(k)) { seen.add(k); items.push(s); }
                 }
             } catch (_) { /* best-effort: keep just the tapped item */ }
+            if (!this.isFicheIntentCurrent(token)) return false;
             const inGroup = (g) => g.items.some(i =>
                 String(i.series_id) === String(item.series_id) && String(i.sourceId) === String(item.sourceId));
             const group = MediaUtils.groupItems(items, { idField: 'series_id' }).find(inGroup)
                 || { key: 'search', items: [item], representative: item };
             const series = group.items.find(i => String(i.series_id) === String(item.series_id)) || group.representative || item;
-            await this.showSeriesDetailsV2(series, group);
-            return true;
+            await this.showSeriesDetailsV2(series, group, { intentToken: token });
+            return this.isFicheIntentCurrent(token);
         } catch (_) {
             return false;
         }
     }
 
-    async showSeriesDetailsV2(series, group = null, { focusVersions = false, isVersionSwitch = false, triedVersions = null, manualPick = false, rememberOnSuccess = false } = {}) {
+    async showSeriesDetailsV2(series, group = null, {
+        focusVersions = false,
+        isVersionSwitch = false,
+        triedVersions = null,
+        manualPick = false,
+        rememberOnSuccess = false,
+        focusStatusAction = false,
+        intentToken = null
+    } = {}) {
+        const ficheIntentToken = intentToken ?? this.beginFicheIntent();
+        if (!this.isFicheIntentCurrent(ficheIntentToken)) return false;
         this.currentSeries = series;
         this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };
         // Guard rapid version switches: a slow older seriesInfo must not paint over a newer one.
@@ -3352,7 +3444,11 @@ class SeriesPage {
             document.getElementById('series-versions-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
-        this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        this.seasonsContainer.innerHTML = `
+            <div class="loading series-episode-loading" role="status" aria-live="polite" aria-label="Loading episodes">
+                <div class="loading-spinner" aria-hidden="true"></div>
+                <span class="hint">Loading episodes...</span>
+            </div>`;
         const tvEpisodeCount = this._ensureTvEpisodeCount();
         if (tvEpisodeCount) tvEpisodeCount.textContent = '';
         if (this.primaryActionBtn) {
@@ -3379,7 +3475,8 @@ class SeriesPage {
 
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
-            if (detailToken !== this._detailToken) return; // a newer switch superseded this one
+            if (detailToken !== this._detailToken
+                || !this.isFicheIntentCurrent(ficheIntentToken)) return false; // superseded
             // A present-but-EMPTY episodes collection ({} / []) is truthy, so `!info.episodes`
             // missed it — the fiche then rendered a blank episode area AND skipped the failover
             // to a healthy sibling version. Treat "no season actually has episodes" as empty.
@@ -3389,8 +3486,25 @@ class SeriesPage {
                 // Auto-pick landed on an empty version → jump to a healthy sibling. But an
                 // EXPLICIT pick (manualPick) is respected: show "No episodes" for that very
                 // version, with the switcher still visible so the user can choose another.
-                if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
-                this.seasonsContainer.innerHTML = '<p class="hint">No episodes found</p>';
+                if (!manualPick && this.tryNextHealthyVersion(
+                    series,
+                    triedVersions,
+                    focusVersions,
+                    true,
+                    ficheIntentToken
+                )) return;
+                const hasAlternate = this.hasAlternateSeriesVersion();
+                this.seasonsContainer.innerHTML = `
+                    <div class="series-info-state empty-state" role="status" aria-live="polite" aria-atomic="true">
+                        <h3>No episodes in this version</h3>
+                        <p class="hint">${hasAlternate
+                            ? 'Choose another version to keep watching.'
+                            : 'Episodes are not available for this title yet.'}</p>
+                        ${hasAlternate ? `
+                            <div class="series-info-state-actions">
+                                <button class="btn btn-primary" type="button" data-series-info-action="versions">Choose another version</button>
+                            </div>` : ''}
+                    </div>`;
                 if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'No episodes';
                 return;
             }
@@ -3409,10 +3523,8 @@ class SeriesPage {
                 tvEpisodeCount.textContent = `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`;
             }
             const genres = this.getSeriesGenres(series).slice(0, 3);
-            const rating = parseFloat(series.rating || series.tmdb?.vote_average);
-            const ratingLabel = Number.isFinite(rating) && rating > 0
-                ? `★ ${rating.toFixed(1).replace('.0', '')}`
-                : '';
+            const rating = this.getSeriesRatingText(series);
+            const ratingLabel = rating ? `★ ${rating}` : '';
             const version = MediaUtils.parseVersionInfo(series.name);
             const metaParts = [
                 this.getSeriesYear(series),
@@ -3422,7 +3534,7 @@ class SeriesPage {
                 (this.currentSeriesGroup?.items?.length > 1) ? `${this.currentSeriesGroup.items.length} versions` : '',
                 ...genres,
                 version.quality,
-                MediaUtils.versionLanguageBadge(series, this.getPreferences())
+                this.displayLanguageStatus(MediaUtils.versionLanguageBadge(series, this.getPreferences()))
             ].filter(Boolean);
 
             const metaEl = document.getElementById('series-meta');
@@ -3536,59 +3648,201 @@ class SeriesPage {
             this.applySelectedSeason();
             this.enrichSeasonWithTmdb(this._activeSeason);
         } catch (err) {
-            if (detailToken !== this._detailToken) return; // superseded — don't stomp the newer fiche
+            if (detailToken !== this._detailToken
+                || !this.isFicheIntentCurrent(ficheIntentToken)) return false; // superseded
             // A failed fetch on the auto-picked version → try a healthy sibling first
             // (but respect an explicit manual pick: surface its error rather than redirect).
             // remember=false: a fetch error may be transient, so DON'T durably switch the
             // remembered version — the next open should retry the preferred one.
-            if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions, false)) return;
-            const { friendly, detail } = this.getSeriesInfoError(err);
-            console.error('Error loading series info:', err);
-            this.seasonsContainer.innerHTML = `
-                <div class="series-error" style="color: var(--color-error);">
-                    <p class="hint">${MediaUtils.escapeHtml(friendly)}</p>
-                    ${detail ? `<p class="hint" style="opacity: .75;">${MediaUtils.escapeHtml(detail.slice(0, 240))}</p>` : ''}
-                </div>`;
+            if (!manualPick && this.tryNextHealthyVersion(
+                series,
+                triedVersions,
+                focusVersions,
+                false,
+                ficheIntentToken
+            )) return;
+            const errorState = this.getSeriesInfoError(err);
+            // Keep logs useful without copying a provider response, URL, account
+            // identifier or credential into a user-inspectable WebView console.
+            console.warn('[Series] Episode details unavailable:', errorState.kind);
+            this.renderSeriesInfoError(errorState, { focusAction: focusStatusAction });
             // Put the primary button in a terminal state — it was left disabled on
             // "Loading..." at the top, and the catch never reset it.
             if (this.primaryActionBtn) { this.primaryActionBtn.disabled = true; this.primaryActionBtn.textContent = 'Unavailable'; }
         }
     }
 
-    sanitizeErrorMessage(message) {
-        return String(message || '')
-            .replace(/https?:\/\/[^\s'"<>]+/gi, '[stream URL]')
-            .replace(/([?&](?:username|password|pass)=)[^&\s]+/gi, '$1[redacted]')
-            .replace(/\/(live|movie|series)\/[^/\s]+\/[^/\s]+\//gi, '/$1/[user]/[password]/')
-            .trim();
+    hasAlternateSeriesVersion() {
+        return (this.currentSeriesGroup?.items || []).some(
+            item => !this.isSameSeriesVersion(item, this.currentSeries)
+        );
+    }
+
+    _seriesErrorSignal(err) {
+        const parts = [];
+        const seen = new Set();
+        const visit = (value, depth = 0) => {
+            if (value == null || depth > 5 || parts.length >= 160) return;
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                parts.push(String(value));
+                return;
+            }
+            if (typeof value !== 'object' || seen.has(value)) return;
+            seen.add(value);
+            for (const key of ['name', 'message', 'code', 'status', 'statusCode', 'upstreamStatus']) {
+                let nested;
+                try { nested = value[key]; } catch (_) { continue; }
+                if (nested == null || nested === '') continue;
+                parts.push(key);
+                visit(nested, depth + 1);
+            }
+            let entries = [];
+            try { entries = Object.entries(value); } catch (_) { return; }
+            for (const [key, nested] of entries.slice(0, 80)) {
+                parts.push(String(key));
+                visit(nested, depth + 1);
+            }
+        };
+        visit(err);
+        return parts.join(' ');
     }
 
     getSeriesInfoError(err) {
-        const payload = err?.payload || {};
-        const raw = [
-            payload.error,
-            payload.details,
-            err?.code,
-            err?.upstreamStatus,
-            err?.message
-        ].filter(Boolean).join(' ');
-        const detail = this.sanitizeErrorMessage(raw);
+        const signal = this._seriesErrorSignal(err);
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+        let kind = 'generic';
 
-        let friendly = payload.error && !/^Upstream error$/i.test(payload.error)
-            ? payload.error
-            : 'Unable to load episodes from the provider.';
-
-        if (/429|Too Many Requests|Many Requests|rate limit/i.test(detail)) {
-            friendly = 'The provider is rate limiting episode data right now. Close other players, wait a bit, then try again.';
-        } else if (/401|Unauthorized/i.test(detail)) {
-            friendly = 'The provider refused episode data (401 Unauthorized). Your IPTV account may be blocked, expired, or limited to one connection.';
-        } else if (/403|Forbidden/i.test(detail)) {
-            friendly = 'Access denied by the provider while loading episodes (403).';
-        } else if (/404|not found/i.test(detail)) {
-            friendly = 'Episodes were not found on the provider (404).';
+        // A relay can use 429 for a one-screen account lock. Classify the
+        // actionable reason before the transport status so the guidance is right.
+        if (offline || /\b(?:offline|err_internet_disconnected|err_network|network is unreachable|network request failed|networkerror|failed to fetch|no internet|dns)\b/i.test(signal)) {
+            kind = 'offline';
+        } else if (/(?:account[_\s:-]*sharing|account[_\s-]*busy|max(?:imum)?[_\s-]*connections?|connection[_\s-]*limit|limited to one connection|already in use|concurren(?:cy|t)|slot[_\s-]*busy|\b458\b)/i.test(signal)) {
+            kind = 'account-busy';
+        } else if (/(?:\b401\b|\b403\b|unauthori[sz]ed|forbidden|authentication|auth[_\s-]*(?:failed|expired|required)|invalid[_\s-]*(?:credential|token)|credential|subscription[_\s-]*expired)/i.test(signal)) {
+            kind = 'authentication';
+        } else if (/(?:\b429\b|too many requests|rate[_\s-]*limit(?:ed|ing)?)/i.test(signal)) {
+            kind = 'rate-limited';
+        } else if (/(?:circuit[_\s-]*open|open[_\s-]*circuit|circuit breaker|breaker[_\s-]*open)/i.test(signal)) {
+            kind = 'circuit-open';
+        } else if (/(?:unsupported|not[_\s-]*supported|incompatible|unknown[_\s-]*provider|provider[_\s-]*type)/i.test(signal)) {
+            kind = 'unsupported';
+        } else if (/(?:provider[_\s-]*unavailable|upstream[_\s-]*unavailable|service unavailable|temporarily unavailable|\b5\d\d\b|\b404\b|not found|timeout|timed out|econn(?:refused|reset)|relay refused|provider request failed|upstream error|bad gateway|gateway timeout|failed to fetch|networkerror)/i.test(signal)) {
+            kind = 'provider-unavailable';
         }
 
-        return { friendly, detail };
+        const hasAlternate = this.hasAlternateSeriesVersion();
+        const states = {
+            offline: {
+                title: "You're offline",
+                message: 'Reconnect to the internet, then try loading the episodes again.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: false,
+            },
+            'account-busy': {
+                title: 'This TV service is already in use',
+                message: 'Stop playback on the other screen, then try again.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: true,
+            },
+            authentication: {
+                title: 'Your TV service needs attention',
+                message: 'Review your TV service access in Settings before trying again.',
+                action: 'settings',
+                actionLabel: 'Open Settings',
+                allowVersionChoice: true,
+            },
+            'rate-limited': {
+                title: 'Episodes need a moment',
+                message: 'Wait a moment, then try loading this version again.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: true,
+            },
+            'circuit-open': {
+                title: 'This TV service is recovering',
+                message: 'Norva has paused requests briefly. Try again in a moment.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: true,
+            },
+            unsupported: {
+                title: 'This version is not supported',
+                message: hasAlternate
+                    ? 'Choose another version to continue.'
+                    : 'This title does not have another compatible version yet.',
+                action: hasAlternate ? 'versions' : 'back',
+                actionLabel: hasAlternate ? 'Choose another version' : 'Back to Series',
+                allowVersionChoice: false,
+            },
+            'provider-unavailable': {
+                title: 'This version is unavailable right now',
+                message: hasAlternate
+                    ? 'Try loading it again, or choose another version.'
+                    : 'Try loading this version again in a moment.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: true,
+            },
+            generic: {
+                title: "Episodes couldn't be loaded",
+                message: hasAlternate
+                    ? 'Try loading this version again, or choose another version.'
+                    : 'Try loading this version again.',
+                action: 'retry',
+                actionLabel: 'Try again',
+                allowVersionChoice: true,
+            },
+        };
+
+        return { kind, ...states[kind] };
+    }
+
+    renderSeriesInfoError(state, { focusAction = false } = {}) {
+        if (!this.seasonsContainer) return;
+        const showVersionAction = Boolean(
+            state.allowVersionChoice &&
+            state.action !== 'versions' &&
+            this.hasAlternateSeriesVersion()
+        );
+        this.seasonsContainer.innerHTML = `
+            <div class="series-error series-info-state empty-state" role="status" aria-live="polite" aria-atomic="true">
+                <h3>${MediaUtils.escapeHtml(state.title)}</h3>
+                <p class="hint">${MediaUtils.escapeHtml(state.message)}</p>
+                <div class="series-info-state-actions">
+                    <button class="btn btn-primary" type="button" data-series-info-action="${MediaUtils.escapeHtml(state.action)}">${MediaUtils.escapeHtml(state.actionLabel)}</button>
+                    ${showVersionAction
+                        ? '<button class="btn btn-secondary" type="button" data-series-info-action="versions">Choose another version</button>'
+                        : ''}
+                </div>
+            </div>`;
+        if (focusAction) {
+            requestAnimationFrame(() => {
+                this.seasonsContainer?.querySelector?.('[data-series-info-action]')?.focus?.({ preventScroll: true });
+            });
+        }
+    }
+
+    retryCurrentSeriesInfo() {
+        if (!this.currentSeries) return;
+        return this.showSeriesDetailsV2(this.currentSeries, this.currentSeriesGroup, {
+            isVersionSwitch: true,
+            manualPick: true,
+            focusStatusAction: true,
+        });
+    }
+
+    focusSeriesVersions() {
+        const section = document.getElementById('series-versions-section');
+        if (!section || section.classList.contains('single-version')) return;
+        section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        requestAnimationFrame(() => {
+            const candidates = [...(this.versionsList?.querySelectorAll?.('.series-version-item') || [])];
+            const target = candidates.find(button => !button.classList.contains('active') && !button.classList.contains('is-broken'))
+                || candidates.find(button => !button.classList.contains('active'));
+            target?.focus?.({ preventScroll: true });
+        });
     }
 
     // Live TMDB extras on the fiche: trailer button + cast/creator credits.
@@ -3710,6 +3964,7 @@ class SeriesPage {
     }
 
     hideDetails() {
+        this.beginFicheIntent();
         const restoreTvGrid = this._isTvMode() &&
             this.pageEl?.classList.contains('series-detail-open');
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }

@@ -29,6 +29,7 @@
     <string name="player_audio_unknown">Audio track %1$d · language not identified</string>
     <string name="player_subtitle_unknown">Subtitle track %1$d · language not identified</string>
     <string name="player_audio_unavailable">No audio track available</string>
+    <string name="player_video_unavailable">No selectable video quality</string>
     <string name="player_subtitles_unavailable">No selectable subtitles</string>
 
     <!-- Display, playback and episode options. -->
@@ -62,4 +63,46 @@
     <string name="player_error_no_data">The provider accepted the connection but isn’t sending a playable stream.</string>
     <string name="player_error_unsupported">This video format cannot be played on this device.</string>
     <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
+    <!-- Premium TV player launch, focus, accessibility and recovery copy. -->
+    <string name="player_aspect_short">Size</string>
+    <string name="player_option_selected_description">%1$s, %2$s selected</string>
+    <string name="player_option_unavailable">%1$s is unavailable</string>
+    <string name="player_loading_content_description">Loading playback</string>
+    <string name="player_loading_live">Connecting to live TV…</string>
+    <string name="player_loading_vod">Preparing playback…</string>
+    <string name="player_loading_resume">Preparing your saved position…</string>
+    <string name="player_loading_buffering">Loading the best available stream…</string>
+    <string name="player_loading_starting">Starting playback…</string>
+    <string name="player_resume_waiting">Choose where to start</string>
+    <string name="player_resume_title">Continue watching?</string>
+    <string name="player_resume_from">Resume from %1$s</string>
+    <string name="player_start_over">Start from beginning</string>
+    <string name="player_timeline">Playback timeline</string>
+    <string name="player_time_progress">%1$s / %2$s</string>
+    <string name="player_timeline_position">%1$s of %2$s</string>
+    <string name="player_timeline_position_live">Position %1$s</string>
+    <string name="player_seek_destination">Go to %1$s of %2$s</string>
+    <string name="player_seek_destination_live">Go to %1$s</string>
+    <string name="player_audio_mono">mono</string>
+    <string name="player_audio_stereo">stereo</string>
+    <string name="player_on">On</string>
+    <string name="player_subtitle_forced">Forced</string>
+    <string name="player_episode_list_unavailable">Episode list unavailable</string>
+    <string name="player_version_number">Version %1$d</string>
+    <string name="player_no_other_version">No other version is available</string>
+    <string name="player_live_reconnecting">Reconnecting to live TV…</string>
+    <string name="player_live_reconnecting_slow">The channel is taking longer to reconnect. Norva will keep trying automatically.</string>
+    <string name="player_error_live_generic">This channel cannot be played right now.</string>
+    <string name="player_error_provider">This title is temporarily unavailable from the provider.</string>
+    <string name="player_error_no_data_live">This channel is not sending playable video right now. Norva will keep trying automatically.</string>
+    <string name="player_error_unsupported_live">This channel uses a format this TV cannot play.</string>
+    <string name="player_error_try_another_version">Choose another version or try again.</string>
+    <string name="player_choice_selected_description">%1$s, selected</string>
+    <string name="player_choice_hint">Use Up and Down to choose. Press Back to cancel.</string>
+    <string name="player_selected">Selected</string>
+    <string name="tv_exit_title">Exit Norva?</string>
+    <string name="tv_exit_message">You can return anytime. Your profiles and watch progress stay synced.</string>
+    <string name="tv_exit_cancel">Stay in Norva</string>
+    <string name="tv_connection_settings">Connection settings</string>
+    <string name="tv_exit_confirm">Exit Norva</string>
 </resources>

@@ -487,7 +487,7 @@
                 await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' });
                 setStatus(profileStatus, 'success', 'Profile saved.');
             } catch (error) {
-                setStatus(profileStatus, 'error', error.message || 'Unable to save profile.');
+                setStatus(profileStatus, 'error', 'Unable to save this profile. Try again.');
             }
         }
 
@@ -504,7 +504,7 @@
                 pairCodeInput.value = '';
                 await loadDevices();
             } catch (error) {
-                setStatus(pairStatus, 'error', error.message || 'Unable to approve this code.');
+                setStatus(pairStatus, 'error', 'Unable to approve this code. Check it and try again.');
             }
         }
 
@@ -533,12 +533,12 @@
                             setStatus(devicesStatus, 'success', 'Screen revoked.');
                         } catch (error) {
                             button.disabled = false;
-                            setStatus(devicesStatus, 'error', error.message || 'Unable to revoke this screen.');
+                            setStatus(devicesStatus, 'error', 'Unable to revoke this screen. Try again.');
                         }
                     });
                 });
             } catch (error) {
-                setStatus(devicesStatus, 'error', error.message || 'Unable to load devices.');
+                setStatus(devicesStatus, 'error', 'Unable to load devices. Check your connection and try again.');
             }
         }
 
@@ -653,7 +653,7 @@
                 await loadSources();
                 setTimeout(loadSources, 5000);
             } catch (error) {
-                setStatus(sourceStatus, 'error', error.message || 'Unable to add this provider.');
+                setStatus(sourceStatus, 'error', 'Unable to add this provider. Check the details and try again.');
             }
         }
 
@@ -736,7 +736,7 @@
                 });
                 setStatus(commandStatus, 'success', 'Command sent.');
             } catch (error) {
-                setStatus(commandStatus, 'error', error.message || 'Unable to send command.');
+                setStatus(commandStatus, 'error', 'Unable to send this command. Try again.');
             }
         }
 

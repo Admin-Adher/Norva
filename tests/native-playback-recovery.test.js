@@ -119,17 +119,30 @@ for (const target of nativeTargets) {
     );
 
     assert.match(resultFlow, /data\.getBooleanExtra\("retryPlayback", false\)/);
-    assert.match(resultFlow, /data\.getStringExtra\("retryReason"\)/);
     const retryCall = resultFlow.indexOf('window.__norvaNative.retryPlayback');
     const endedCall = resultFlow.indexOf('window.__norvaNative.onEnded');
-    assert.ok(retryCall >= 0, 'retry callback is missing');
     assert.ok(endedCall >= 0, 'ended callback is missing');
-    assert.ok(retryCall < endedCall, 'retry must be handled before the natural-ended flow');
-    assert.match(
-      resultFlow.slice(retryCall, endedCall),
-      /return;/,
-      'retry branch must return before onEnded/autoplay handling',
-    );
+    if (target.name === 'Android phone') {
+      assert.doesNotMatch(
+        resultFlow,
+        /data\.getStringExtra\("retryReason"\)|window\.__norvaNative\.retryPlayback/,
+        'phone recovery is token-bound and in-place; a closed player must not be relaunched',
+      );
+      assert.match(
+        resultFlow,
+        /if \(retryPlayback && sourceId != null && itemId != null\) \{[\s\S]*?return;/,
+        'a closed phone retry is consumed as cancellation before onEnded',
+      );
+    } else {
+      assert.match(resultFlow, /data\.getStringExtra\("retryReason"\)/);
+      assert.ok(retryCall >= 0, 'retry callback is missing');
+      assert.ok(retryCall < endedCall, 'retry must be handled before the natural-ended flow');
+      assert.match(
+        resultFlow.slice(retryCall, endedCall),
+        /return;/,
+        'retry branch must return before onEnded/autoplay handling',
+      );
+    }
   });
 
   test(`${target.name}: a newer recovery action invalidates an older delayed reconnect`, () => {
@@ -142,11 +155,24 @@ for (const target of nativeTargets) {
 
     assert.match(source, /private int recoveryGeneration = 0;/);
     assert.match(recovery, /final int scheduledGeneration = \+\+recoveryGeneration;/);
-    assert.match(
-      recovery,
-      /player == null \|\| freshStreamRequested\s*\|\| scheduledGeneration != recoveryGeneration/,
-      'the delayed Runnable must reject a stale recovery generation',
-    );
+    if (target.name === 'Android phone') {
+      assert.match(
+        source,
+        /private final Runnable delayedRecovery[\s\S]*?player == null \|\| freshStreamRequested\s*\|\| scheduledGeneration != recoveryGeneration/,
+        'the route-bound delayed Runnable must reject a stale recovery generation',
+      );
+      assert.match(
+        recovery,
+        /scheduleDelayedRecovery\(item, position, scheduledGeneration\);/,
+        'phone recovery must use the cancellable delayed-recovery task',
+      );
+    } else {
+      assert.match(
+        recovery,
+        /player == null \|\| freshStreamRequested\s*\|\| scheduledGeneration != recoveryGeneration/,
+        'the delayed Runnable must reject a stale recovery generation',
+      );
+    }
     assert.match(
       source,
       /private void requestFreshStream\(String reason\) \{[\s\S]*?recoveryGeneration\+\+;[\s\S]*?private void switchToFallback\(\)/,
@@ -159,6 +185,87 @@ for (const target of nativeTargets) {
     );
   });
 }
+
+test('Android phone backgrounding cancels recovery work and cannot restart playback', () => {
+  const source = read('clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java');
+  const background = section(
+    source,
+    'private void deactivatePlaybackForBackground()',
+    'private void resumePlaybackAfterForegroundReturn()',
+  );
+  const preparation = section(
+    source,
+    'private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state)',
+    'private void showPlaybackFailure(',
+  );
+  const foreground = section(
+    source,
+    'private void resumePlaybackAfterForegroundReturn()',
+    '@Override\n    protected void onResume()',
+  );
+  const pause = section(source, 'protected void onPause()', '// Picture-in-Picture:');
+
+  assert.match(background, /playbackActive = false;/);
+  assert.match(background, /recoveryGeneration\+\+;/);
+  assert.match(background, /removeCallbacks\(bufferWatchdog\)/);
+  assert.match(background, /removeCallbacks\(delayedRecovery\)/);
+  assert.match(background, /removeCallbacks\(freshStreamTimeout\)/);
+  assert.match(background, /player\.pause\(\);/);
+  assert.match(pause, /deactivatePlaybackForBackground\(\);/);
+  assert.match(preparation, /boolean mayPlay = shouldAllowPlayback\(playbackActive, isInPipMode\(\)\);/);
+  assert.match(preparation, /player\.setPlayWhenReady\(mayPlay\);/);
+  assert.match(preparation, /if \(!mayPlay\) resumePlaybackOnResume = true;/);
+  assert.match(
+    foreground,
+    /else if \(freshStreamRequested\) \{[\s\S]*?resumePlaybackOnResume = false;[\s\S]*?\} else if \(resumePlaybackOnResume/,
+    'foreground return must wait for the token-bound replacement instead of reopening a stopped stale URL',
+  );
+});
+
+test('Android phone accepts first-frame evidence only for the active media route', () => {
+  const source = read('clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java');
+  const preparation = section(
+    source,
+    'private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state)',
+    'private void showPlaybackFailure(',
+  );
+
+  assert.match(source, /player\.addAnalyticsListener\(new AnalyticsListener\(\)/);
+  assert.match(source, /String eventRouteId = routeIdForEvent\(eventTime\);/);
+  assert.match(
+    source,
+    /isFirstFrameForActiveRoute\(\s*eventRouteId,\s*activePlaybackRouteId,\s*currentRouteId\)/,
+  );
+  assert.doesNotMatch(source, /public void onRenderedFirstFrame\(\)/);
+  assert.match(preparation, /String routeId = "norva-route-" \+ \(\+\+playbackRouteGeneration\);/);
+  assert.match(preparation, /\.setMediaId\(routeId\)\.build\(\);/);
+});
+
+test('Android phone instrumentation and PiP actions are API- and locale-safe', () => {
+  const player = read('clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java');
+  const firstFrameTest = read(
+    'clients/android-phone/app/src/androidTest/java/tv/norva/phone/FirstFrameFixtureInstrumentedTest.java',
+  );
+  const downloadsTest = read(
+    'clients/android-phone/app/src/androidTest/java/tv/norva/phone/DownloadsActivityInstrumentedTest.java',
+  );
+  const english = read('clients/android-phone/app/src/main/res/values/strings.xml');
+  const french = read('clients/android-phone/app/src/main/res/values-fr/strings.xml');
+
+  assert.match(firstFrameTest, /ContextCompat\.registerReceiver\(/);
+  assert.match(firstFrameTest, /ContextCompat\.RECEIVER_NOT_EXPORTED/);
+  assert.doesNotMatch(firstFrameTest, /Context\.RECEIVER_NOT_EXPORTED/);
+  assert.match(downloadsTest, /target\.getString\(R\.string\.downloads_clear_all\)/);
+  assert.doesNotMatch(downloadsTest, /findText\(root, "Clear all"\)/);
+  for (const name of ['player_pip_pause', 'player_pip_play', 'player_pip_play_pause']) {
+    assert.match(english, new RegExp(`<string name="${name}">`));
+    assert.match(french, new RegExp(`<string name="${name}">`));
+  }
+  assert.match(player, /R\.string\.player_pip_pause/);
+  assert.match(player, /R\.string\.player_pip_play/);
+  assert.match(player, /R\.string\.player_pip_play_pause/);
+  assert.doesNotMatch(player, /new RemoteAction\(icon, playing \? "Pause" : "Play"/);
+});
 
 test('Android phone network Retry preserves the cloud native-player bridge', () => {
   const source = read('clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java');

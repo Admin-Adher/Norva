@@ -184,6 +184,10 @@ class MoviesPage {
         this.detailsPanel?.addEventListener('focusin', () => {
             if (this._isTvMode()) this._loadPanelExtras();
         });
+        this.container?.addEventListener('click', (event) => {
+            if (!event.target.closest('[data-movies-retry]')) return;
+            this.loadMovies();
+        });
 
         // Lazy loading
         this.observer = new IntersectionObserver((entries) => {
@@ -1198,7 +1202,7 @@ class MoviesPage {
             this.filterAndRender();
         } catch (err) {
             console.error('Error loading movies:', err);
-            this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
+            this.renderLoadError();
         } finally {
             this.isLoading = false;
         }
@@ -1371,7 +1375,7 @@ class MoviesPage {
             )) return;
             // Keep the cached paint on error; only show an error with nothing shown.
             if (reset && !paintedFromCache) {
-                this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
+                this.renderLoadError();
             }
         } finally {
             if (reset && (!this._isTvMode() || requestId === this.cloudRequestId)) {
@@ -1637,8 +1641,8 @@ class MoviesPage {
         if (cards.length === 0) {
             const filtered = this.hasActiveFilters();
             this.container.innerHTML = `
-                <div class="empty-state rich-empty">
-                    <div class="empty-icon">🎬</div>
+                <div class="empty-state rich-empty premium-state">
+                    <span class="premium-state-kicker">Movies</span>
                     <h3>${filtered ? 'No movies match these filters' : 'No movies here yet'}</h3>
                     <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Movies appear as soon as Norva finishes preparing your catalog.'}</p>
                     ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
@@ -1829,21 +1833,24 @@ class MoviesPage {
             '/img/norva-media-placeholder.png'
         );
         const year = this.getItemYear(movie) || '';
-        const rating = movie.rating ? `${Icons.star} ${movie.rating}` : '';
+        const rating = this.getMovieRatingText(movie);
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
         const watch = this.getWatchStatus(group.items);
         const versionCount = group.items.length;
         // cleanReleaseName: grid cards render the provider's raw stream name ("[ Torrent911.cc ] …")
         // straight from the client catalog cache — display-clean it (the raw value stays in the
         // data for the version/quality parsers).
-        const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
+        const displayName = this.cleanMovieTitle(
+            (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : movie.name
+        );
         if (this._isTvMode()) {
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
             card.setAttribute('aria-label', displayName || 'Movie');
         }
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
-        const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
+        const languageBadge = this.displayLanguageStatus(
+            MediaUtils.versionLanguageBadge(movie, this.getPreferences()));
         // "New" corner badge for titles added in the last two weeks (unwatched).
         const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -1870,7 +1877,7 @@ class MoviesPage {
                 <div class="movie-title">${MediaUtils.escapeHtml(displayName)}</div>
                 <div class="movie-meta">
                     ${year ? `<span>${year}</span>` : ''}
-                    ${rating ? `<span>${rating}</span>` : ''}
+                    ${rating ? `<span>${Icons.star} ${MediaUtils.escapeHtml(rating)}</span>` : ''}
                     ${movie.tmdb?.runtime ? `<span>${movie.tmdb.runtime} min</span>` : ''}
                 </div>
             </div>
@@ -1913,7 +1920,7 @@ class MoviesPage {
         // Hover preview (desktop): bigger art + instant Play / Details.
         card.__norvaHover = () => ({
             title: displayName,
-            meta: [year, movie.tmdb?.runtime ? `${movie.tmdb.runtime} min` : '', movie.rating ? `★ ${movie.rating}` : '']
+            meta: [year, movie.tmdb?.runtime ? `${movie.tmdb.runtime} min` : '', rating ? `★ ${rating}` : '']
                 .filter(Boolean).join(' · '),
             poster,
             backdrop: MediaUtils.safeImageUrl(this.getMovieBackdrop(movie), '') || null,
@@ -2017,20 +2024,34 @@ class MoviesPage {
 
     // === Movie detail destination ===
 
-    openGroup(group, { focusVersions = false, selectedMovie = null } = {}) {
+    beginFicheIntent() {
+        this._ficheIntentToken = (this._ficheIntentToken || 0) + 1;
+        return this._ficheIntentToken;
+    }
+
+    isFicheIntentCurrent(token) {
+        return token == null || token === this._ficheIntentToken;
+    }
+
+    openGroup(group, { focusVersions = false, selectedMovie = null, intentToken = null } = {}) {
+        const token = intentToken ?? this.beginFicheIntent();
+        if (!this.isFicheIntentCurrent(token)) return false;
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const resumeVersion = this._selectInProgressVersion(ordered);
         this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
             versions: ordered,
-            focusVersions
+            focusVersions,
+            intentToken: token
         });
+        return true;
     }
 
     // Open a movie's detail directly from a search result: best-effort fetch its
     // sibling versions, group them exactly like the grid, and open the matching
     // group (so the version picker is complete). Falls back to a single-item group,
     // and returns false on any failure so the caller can fall back to its own path.
-    async openByItem(item) {
+    async openByItem(item, { intentToken = null } = {}) {
+        const token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.stream_id == null) return false;
             const title = item.tmdb?.title || item.name || '';
@@ -2044,20 +2065,36 @@ class MoviesPage {
                     if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
                 }
             } catch (_) { /* best-effort: keep just the tapped item */ }
+            if (!this.isFicheIntentCurrent(token)) return false;
             const inGroup = (g) => g.items.some(i =>
                 String(i.stream_id) === String(item.stream_id) && String(i.sourceId) === String(item.sourceId));
             const group = MediaUtils.groupItems(items, { idField: 'stream_id' }).find(inGroup)
                 || { key: 'search', items: [tapped], representative: tapped };
             const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)) || null;
-            this.openGroup(group, { selectedMovie: selected });
-            return true;
+            return this.openGroup(group, { selectedMovie: selected, intentToken: token });
         } catch (_) {
             return false;
         }
     }
 
     getMovieDisplayTitle(movie = this.currentMovie) {
-        return movie?.tmdb?.title || MediaUtils.cleanReleaseName(movie?.title || movie?.name || '') || 'Movie';
+        return this.cleanMovieTitle(movie?.tmdb?.title || movie?.title || movie?.name || '') || 'Movie';
+    }
+
+    cleanMovieTitle(value) {
+        return String(MediaUtils.cleanReleaseName(String(value || '')) || '').trim();
+    }
+
+    getMovieRatingText(movie = this.currentMovie) {
+        const rating = [movie?.rating, movie?.tmdb?.vote_average]
+            .map(value => Number.parseFloat(value))
+            .find(value => Number.isFinite(value) && value > 0);
+        return rating == null ? '' : rating.toFixed(1).replace(/\.0$/, '');
+    }
+
+    displayLanguageStatus(value) {
+        const text = String(value || '').trim();
+        return /^(?:Audio pending|Identifying audio)$/i.test(text) ? '' : text;
     }
 
     getMoviePoster(movie = this.currentMovie) {
@@ -2309,7 +2346,7 @@ class MoviesPage {
                 sourceId: String(movie.sourceId),
                 itemId: String(movie.stream_id),
                 itemType: 'movie',
-                title: movie.tmdb?.title || movie.name || 'Movie',
+                title: this.getMovieDisplayTitle(movie),
                 subtitle: '',
                 posterUrl: MediaUtils.downloadablePosterUrl(movie),
                 container,
@@ -2356,9 +2393,10 @@ class MoviesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
+            const headline = this.displayLanguageStatus(desc.headline) || `Version ${index + 1}`;
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
-                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
+                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress">Watched</span>' : ''}
@@ -2479,10 +2517,50 @@ class MoviesPage {
         page.insertBefore(secondary, anchor);
         page.insertBefore(catalogHead, anchor);
         page.classList.add('tv-movies-layout-ready');
+        if (!this.currentMovie) this._clearTvPreview();
     }
 
     _movieKey(movie) {
         return movie ? `${movie.sourceId}:${movie.stream_id}` : '';
+    }
+
+    renderLoadError() {
+        if (!this.container) return;
+        this.container.innerHTML = `
+            <div class="premium-state premium-state-error" role="alert">
+                <span class="premium-state-kicker">Movies</span>
+                <h3>Movies could not be refreshed</h3>
+                <p>Your catalogue is still connected. Try loading this view again.</p>
+                <button class="btn btn-primary" type="button" data-movies-retry>Try again</button>
+            </div>`;
+        if (this._isTvMode()) this._clearTvPreview();
+    }
+
+    _clearTvPreview() {
+        if (!this._isTvMode() || !this.detailsPanel) return;
+        this._lastPreviewCard = null;
+        this.detailsPanel.classList.add('tv-preview-empty');
+        this.detailsPanel.classList.remove('hidden');
+        const poster = document.getElementById('movie-detail-poster');
+        if (poster) {
+            poster.onerror = null;
+            poster.removeAttribute('srcset');
+            poster.src = '/img/norva-media-placeholder.png';
+            poster.alt = '';
+        }
+        const title = document.getElementById('movie-detail-title');
+        const plot = document.getElementById('movie-detail-plot');
+        const meta = document.getElementById('movie-detail-meta');
+        if (title) title.textContent = 'Select a movie';
+        if (plot) plot.textContent = 'Move through the catalogue to see artwork, metadata and available versions.';
+        if (meta) meta.innerHTML = '<span>Your catalogue</span>';
+        if (this.primaryActionBtn) {
+            this.primaryActionBtn.disabled = true;
+            this.primaryActionBtn.textContent = 'Select a movie';
+        }
+        if (this.detailFavoriteBtn) this.detailFavoriteBtn.disabled = true;
+        if (this.versionSummary) this.versionSummary.textContent = 'Versions appear after you select a title.';
+        if (this.versionsList) this.versionsList.innerHTML = '';
     }
 
     // TV split-view: render the D-pad-focused card into the docked panel as a light
@@ -2510,6 +2588,7 @@ class MoviesPage {
     _previewFirstCard() {
         const first = this.container?.querySelector('.movie-card');
         if (first) this.previewCard(first);
+        else this._clearTvPreview();
     }
 
     // Committing a card on TV (Enter/click): a single healthy version plays straight
@@ -2575,8 +2654,15 @@ class MoviesPage {
         this.renderFicheExtras(this.currentMovieGroup?.representative || movie);
     }
 
-    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false, isVersionSwitch = false, isTvPreview = false } = {}) {
-        if (!group?.items?.length || !this.detailsPanel) return;
+    showMovieDetails(group, selectedMovie = null, {
+        versions = null,
+        focusVersions = false,
+        isVersionSwitch = false,
+        isTvPreview = false,
+        intentToken = null
+    } = {}) {
+        const token = intentToken ?? this.beginFicheIntent();
+        if (!this.isFicheIntentCurrent(token) || !group?.items?.length || !this.detailsPanel) return false;
         const isTv = this._isTvMode();
         const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const movie = selectedMovie || ordered[0] || group.representative;
@@ -2609,6 +2695,11 @@ class MoviesPage {
             this.container.classList.remove('hidden');
         }
         this.detailsPanel.classList.remove('hidden');
+        this.detailsPanel.classList.remove('tv-preview-empty');
+        if (this.detailFavoriteBtn) {
+            this.detailFavoriteBtn.disabled = false;
+            this.detailFavoriteBtn.removeAttribute('aria-disabled');
+        }
         // A version switch re-renders in place while the user is scrolled down at the
         // versions list — don't yank them back to the hero. On a fresh TV preview,
         // reset to the top and drop any stale extras from the previously-focused card.
@@ -2687,15 +2778,15 @@ class MoviesPage {
         if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.overview || displayMovie.description || displayMovie.plot || 'No summary available yet.';
 
         const version = MediaUtils.parseVersionInfo(movie.name);
-        const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);
-        const ratingLabel = Number.isFinite(rating) && rating > 0 ? `★ ${rating.toFixed(1).replace('.0', '')}` : '';
+        const rating = this.getMovieRatingText(displayMovie);
+        const ratingLabel = rating ? `★ ${rating}` : '';
         const metaParts = [
             this.getItemYear(displayMovie),
             this.getMovieDuration(displayMovie),
             ratingLabel,
             ...this.getMovieGenres(displayMovie).slice(0, 3),
             version.quality,
-            MediaUtils.versionLanguageBadge(movie, this.getPreferences()),
+            this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
             ordered.length > 1 ? `${ordered.length} versions` : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);
@@ -2759,6 +2850,7 @@ class MoviesPage {
                 else this._focusPanelPrimary();
             }
         }
+        return true;
     }
 
     // Live TMDB extras on the fiche: trailer button + cast/director credits.
@@ -2850,6 +2942,7 @@ class MoviesPage {
     }
 
     hideDetails() {
+        this.beginFicheIntent();
         // On TV the panel is persistent (split-view) — there is nothing to close.
         if (this._isTvMode()) return;
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
@@ -2925,7 +3018,7 @@ class MoviesPage {
         if (!modal || !body) return;
 
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        title.textContent = group.representative.tmdb?.title || group.representative.name;
+        title.textContent = this.getMovieDisplayTitle(group.representative);
 
         body.innerHTML = `
             <p class="hint" style="margin-bottom: 8px;">Choose a version to play:</p>
@@ -3039,7 +3132,7 @@ class MoviesPage {
         const content = {
             type: 'movie',
             id: movie.stream_id,
-            title: movie.tmdb?.title || movie.name,
+            title: this.getMovieDisplayTitle(movie),
             poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
             description: movie.plot || movie.tmdb?.overview || '',
             year: this.getItemYear(movie),

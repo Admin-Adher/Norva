@@ -1,5 +1,6 @@
 package tv.norva.phone;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
@@ -8,10 +9,19 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Rect;
 import android.graphics.drawable.Icon;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -28,7 +38,9 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.SeekBar;
 import android.widget.ScrollView;
@@ -47,10 +59,12 @@ import androidx.media3.common.Player;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
@@ -60,10 +74,18 @@ import androidx.media3.ui.PlayerView;
 
 import com.google.firebase.analytics.FirebaseAnalytics;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Norva phone/tablet native player (ExoPlayer / media3).
@@ -113,6 +135,21 @@ public class PlayerActivity extends Activity {
     // Ephemeral bearer (user session or paired-device token) used once to post
     // authoritative first-frame truth. PlayerActivity is non-exported.
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
+    /**
+     * Debug-only first-frame fixture hook. Instrumentation supplies an opaque
+     * token and listens for {@link #ACTION_FIRST_FRAME_TEST_RESULT}. Success is
+     * emitted only from Media3's real onRenderedFirstFrame callback and includes
+     * the actually selected video/audio MIME types.
+     */
+    public static final String EXTRA_FIRST_FRAME_TEST_TOKEN = "firstFrameTestToken";
+    public static final String ACTION_FIRST_FRAME_TEST_RESULT =
+            "tv.norva.phone.action.FIRST_FRAME_TEST_RESULT";
+    public static final String EXTRA_FIRST_FRAME_TEST_OUTCOME = "outcome";
+    public static final String EXTRA_FIRST_FRAME_TEST_VIDEO_MIME = "videoMime";
+    public static final String EXTRA_FIRST_FRAME_TEST_AUDIO_MIME = "audioMime";
+    public static final String EXTRA_FIRST_FRAME_TEST_CONTRACT_OK = "contractSatisfied";
+    public static final String FIRST_FRAME_FIXTURE_VIDEO_MIME = "video/avc";
+    public static final String FIRST_FRAME_FIXTURE_AUDIO_MIME = "audio/mp4a-latm";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -122,8 +159,35 @@ public class PlayerActivity extends Activity {
     private ExoPlayer player;
     private MediaSession mediaSession;   // lock-screen / media-button transport controls
     private PlayerView playerView;
+    enum PlaybackUiState {
+        PREPARING,
+        INITIAL_BUFFERING,
+        RECOVERING,
+        PLAYING,
+        REBUFFERING,
+        TERMINAL,
+        OFFLINE
+    }
+    private PlaybackUiState playbackUiState = PlaybackUiState.PREPARING;
+    private boolean engineReady = false;
+    private boolean firstFrameForCurrentRoute = false;
+    private boolean recoveryInProgress = false;
+    private boolean longStartShown = false;
+    private boolean longStartScheduled = false;
+    private FrameLayout stateOverlay;
+    private LinearLayout stateContent;
+    private ImageView statePoster;
+    private TextView stateTitleView;
+    private TextView stateMessageView;
+    private ProgressBar stateProgress;
+    private TextView errorTitleView;
     private LinearLayout errorPanel;     // recoverable error UI (message + Retry + Back)
     private TextView errorView;          // the diagnostic detail line inside errorPanel
+    private Button retryButton;
+    private Button changeVersionButton;
+    private Button errorBackButton;
+    private final ExecutorService posterExecutor = Executors.newSingleThreadExecutor();
+    private int posterLoadGeneration = 0;
     private String streamHost;           // host of the stream URL, included in the error text
     private String originalUrl;          // the first URL we tried, used to re-prepare on Retry
     private MediaItem originalMediaItem; // built once, replayed on Retry (carries the local MIME hint)
@@ -132,10 +196,18 @@ public class PlayerActivity extends Activity {
     private boolean fallbackTried = false;
     private int playRetries = 0;          // one in-place reconnect before asking JS for a fresh session
     private int recoveryGeneration = 0;   // invalidates delayed reconnects after a newer recovery action
+    private int playbackRouteGeneration = 0;
+    private String activePlaybackRouteId;
+    private MediaItem pendingDelayedRecoveryItem;
+    private long pendingDelayedRecoveryPositionMs;
+    private boolean pendingDelayedRecovery;
+    private int pendingDelayedRecoveryGeneration;
     private boolean everReady = false;    // direct or fallback reached STATE_READY at least once
     private boolean firstFrameRendered = false;
     private long playbackLaunchElapsedMs;
     private String playbackAuthToken;
+    private String firstFrameTestToken;
+    private boolean firstFrameTestResultEmitted;
     private boolean freshStreamRequested = false;
     private String freshStreamReason;
     private String recoveryToken;
@@ -143,6 +215,10 @@ public class PlayerActivity extends Activity {
     private String sourceId;
     private String itemType;
     private String itemId;
+    private boolean playbackActive = false;
+    private boolean resumePlaybackOnResume = false;
+    private boolean freshStreamTimeoutDeferred = false;
+    private boolean pipAutoEnterArmed = false;
     private String subKey; // SharedPreferences key for the per-title subtitle choice
     // H1 fix: the native player otherwise reports position only on a graceful
     // online finish(), so backgrounding/standby/kill (and ALL offline playback,
@@ -154,6 +230,7 @@ public class PlayerActivity extends Activity {
     private boolean resumeApplied = false;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
     private TextView seekBubble;         // transient "+10s" / "🔆 60%" gesture feedback
+    private View gestureTouchLayer;
     private final Runnable hideSeekBubble = new Runnable() {
         @Override public void run() { if (seekBubble != null) seekBubble.setVisibility(View.GONE); }
     };
@@ -230,6 +307,7 @@ public class PlayerActivity extends Activity {
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+    private static final long LONG_START_MS = 8_000L;
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
     private final Runnable healthyRecoveryReset = new Runnable() {
         @Override public void run() { playRetries = 0; }
@@ -245,12 +323,54 @@ public class PlayerActivity extends Activity {
             recoverPlayback("no_data_timeout");
         }
     };
+    private final Runnable longStartNotice = new Runnable() {
+        @Override public void run() {
+            longStartScheduled = false;
+            if (!shouldAllowPlayback(playbackActive, isInPipMode())) return;
+            if (playbackUiState != PlaybackUiState.PREPARING
+                    && playbackUiState != PlaybackUiState.INITIAL_BUFFERING
+                    && playbackUiState != PlaybackUiState.RECOVERING) return;
+            longStartShown = true;
+            renderPlaybackUiState(true);
+        }
+    };
     private final Runnable freshStreamTimeout = new Runnable() {
         @Override public void run() {
             if (!freshStreamRequested) return;
+            if (!shouldAllowPlayback(playbackActive, isInPipMode())) {
+                freshStreamTimeoutDeferred = true;
+                return;
+            }
             freshStreamRequested = false;
+            freshStreamTimeoutDeferred = false;
             recoveryToken = null;
-            showStreamError(getString(R.string.player_reconnect_failed));
+            boolean formatFailure = isFormatRecoveryReason(freshStreamReason);
+            boolean deviceOffline = !hasUsableNetwork();
+            showPlaybackFailure(
+                    formatFailure ? PlaybackUiState.TERMINAL : PlaybackUiState.OFFLINE,
+                    formatFailure
+                            ? R.string.player_state_terminal_title
+                            : (deviceOffline
+                                    ? R.string.player_state_offline_title
+                                    : R.string.player_error_title),
+                    formatFailure
+                            ? getString(R.string.player_state_format_message)
+                            : (deviceOffline
+                                    ? getString(R.string.player_state_offline_message)
+                                    : getString(R.string.player_reconnect_failed)),
+                    formatFailure);
+        }
+    };
+    private final Runnable delayedRecovery = new Runnable() {
+        @Override public void run() {
+            if (!pendingDelayedRecovery) return;
+            final MediaItem item = pendingDelayedRecoveryItem;
+            final long positionMs = pendingDelayedRecoveryPositionMs;
+            final int scheduledGeneration = pendingDelayedRecoveryGeneration;
+            clearPendingDelayedRecovery();
+            if (player == null || freshStreamRequested
+                    || scheduledGeneration != recoveryGeneration) return;
+            prepareMediaItem(item, positionMs, PlaybackUiState.RECOVERING);
         }
     };
 
@@ -277,6 +397,10 @@ public class PlayerActivity extends Activity {
         nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
         playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        if (BuildConfig.DEBUG) {
+            firstFrameTestToken = getIntent().getStringExtra(EXTRA_FIRST_FRAME_TEST_TOKEN);
+        }
+        getIntent().removeExtra(EXTRA_FIRST_FRAME_TEST_TOKEN);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
@@ -298,73 +422,27 @@ public class PlayerActivity extends Activity {
 
         playerView = new PlayerView(this);
         playerView.setId(R.id.norva_player_view);
-        // Black everywhere behind the video so letterbox/pillarbox and any
-        // cutout-safe insets read as clean black bars, never the theme's grey.
-        getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
-        playerView.setBackgroundColor(Color.BLACK);
-        playerView.setShutterBackgroundColor(Color.BLACK);
+        // The poster/status layer owns startup. Media3 remains fully inert until
+        // a real first frame, so viewers never see a false Pause affordance or
+        // a fabricated 00:00 timeline over a black surface.
+        getWindow().setBackgroundDrawable(new ColorDrawable(color(R.color.norva_bg_primary)));
+        playerView.setBackgroundColor(color(R.color.norva_bg_primary));
+        playerView.setShutterBackgroundColor(color(R.color.norva_bg_primary));
+        playerView.setUseController(false);
+        playerView.hideController();
 
-        // Root = player + a centered error overlay, so a failed stream shows the
-        // real reason on screen instead of hanging silently at 00:00.
         FrameLayout root = new FrameLayout(this);
         playerRoot = root;
         root.setId(R.id.norva_player_root);
-        root.setContentDescription(getString(R.string.player_show_controls));
-        root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        root.setBackgroundColor(Color.BLACK);
+        root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        root.setBackgroundColor(color(R.color.norva_bg_primary));
         root.addView(playerView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        // Recoverable error panel: a headline + the diagnostic detail + Retry/Back,
-        // so a failed stream is a recoverable moment instead of a silent 00:00 hang.
-        errorPanel = new LinearLayout(this);
-        errorPanel.setId(R.id.norva_player_error_panel);
-        errorPanel.setOrientation(LinearLayout.VERTICAL);
-        errorPanel.setGravity(Gravity.CENTER);
-        errorPanel.setPadding(dp(32), dp(32), dp(32), dp(32));
-        errorPanel.setVisibility(View.GONE);
-
-        TextView errorTitle = new TextView(this);
-        errorTitle.setId(R.id.norva_player_error_title);
-        if (Build.VERSION.SDK_INT >= 28) errorTitle.setAccessibilityHeading(true);
-        errorTitle.setText(getString(R.string.player_error_title));
-        errorTitle.setTextColor(Color.WHITE);
-        errorTitle.setTextSize(20);
-        errorTitle.setGravity(Gravity.CENTER);
-        errorTitle.setPadding(0, 0, 0, dp(12));
-        errorPanel.addView(errorTitle);
-
-        errorView = new TextView(this);
-        errorView.setId(R.id.norva_player_error_message);
-        errorView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        errorView.setTextColor(Color.parseColor("#cbd5e1"));
-        errorView.setTextSize(13);
-        errorView.setGravity(Gravity.CENTER);
-        errorView.setPadding(0, 0, 0, dp(24));
-        errorPanel.addView(errorView);
-
-        Button retryBtn = new Button(this);
-        retryBtn.setId(R.id.norva_player_retry_button);
-        retryBtn.setText(getString(R.string.player_retry));
-        retryBtn.setTextColor(Color.WHITE);
-        retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
-        retryBtn.setOnClickListener(v -> retryPlayback());
-        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(dp(220),
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        retryLp.bottomMargin = dp(12);
-        errorPanel.addView(retryBtn, retryLp);
-
-        Button backBtn = new Button(this);
-        backBtn.setId(R.id.norva_player_error_back_button);
-        backBtn.setText(getString(R.string.player_back));
-        backBtn.setTextColor(Color.WHITE);
-        backBtn.setBackgroundColor(Color.parseColor("#272d3a"));
-        backBtn.setOnClickListener(v -> finishWithoutRecovery());
-        errorPanel.addView(backBtn, new LinearLayout.LayoutParams(dp(220),
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        root.addView(errorPanel, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        installPlaybackStateOverlay(root);
+        installPlaybackErrorPanel(root);
         setContentView(root);
+        loadPosterAsync();
+        transitionTo(PlaybackUiState.PREPARING, false);
 
         // Fullscreen video that respects display cutouts (notches): draw
         // edge-to-edge under the cutout, hide the system bars, but pad the
@@ -422,8 +500,12 @@ public class PlayerActivity extends Activity {
                 byte[] mediaIv = DownloadCrypto.unb64(getIntent().getStringExtra(EXTRA_MEDIA_IV));
                 dataSourceFactory = new EncryptedFileDataSource.Factory(dataKey, mediaIv);
             } catch (Exception e) {
-                Toast.makeText(this, "Cannot open download", Toast.LENGTH_LONG).show();
-                finish();
+                showPlaybackFailure(
+                        PlaybackUiState.TERMINAL,
+                        R.string.player_error_title,
+                        getString(R.string.player_state_generic_terminal_message),
+                        false,
+                        false);
                 return;
             }
         } else {
@@ -466,7 +548,9 @@ public class PlayerActivity extends Activity {
         // PiP transport: the mini window's play/pause button broadcasts back here.
         pipReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent intent) {
-                if (!ACTION_PIP_CONTROL.equals(intent.getAction()) || player == null) return;
+                if (!ACTION_PIP_CONTROL.equals(intent.getAction()) || player == null
+                        || !isControllerState(playbackUiState)
+                        || !firstFrameForCurrentRoute) return;
                 if ("pause".equals(intent.getStringExtra(EXTRA_PIP_ACTION))) player.pause();
                 else player.play();
                 refreshPipActions();
@@ -499,15 +583,26 @@ public class PlayerActivity extends Activity {
             @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_BUFFERING) {
+                    engineReady = false;
                     // Arm the "no data" watchdog: a stream that connects but never
-                    // delivers playable bytes would otherwise sit at 00:00 forever.
+                    // delivers playable bytes would otherwise wait forever.
                     errHandler.removeCallbacks(bufferWatchdog);
-                    errHandler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+                    if (shouldAllowPlayback(playbackActive, isInPipMode())) {
+                        errHandler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+                    }
+                    transitionTo(stateForBuffering(
+                            recoveryInProgress, firstFrameRendered), false);
                 }
                 if (state == Player.STATE_READY) {
-                    errHandler.removeCallbacks(bufferWatchdog);
+                    engineReady = true;
                     everReady = true;
-                    if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+                    if (firstFrameForCurrentRoute) {
+                        // A normal rebuffer can return to READY without another
+                        // onRenderedFirstFrame callback. Once this route has
+                        // already painted, READY is sufficient evidence to
+                        // retire the no-data watchdog.
+                        errHandler.removeCallbacks(bufferWatchdog);
+                    }
                     if (!resumeApplied && resumeSeconds > 0) {
                         resumeApplied = true;
                         long target = resumeSeconds * 1000L;
@@ -516,9 +611,19 @@ public class PlayerActivity extends Activity {
                             player.seekTo(target);
                         }
                     }
+                    // READY means the decoder can start, not that a picture has
+                    // actually reached the display. Keep the honest poster/status
+                    // layer until onRenderedFirstFrame proves the route.
+                    PlaybackUiState readyState = stateAfterReady(
+                            recoveryInProgress, firstFrameForCurrentRoute);
+                    if (readyState == PlaybackUiState.PLAYING) {
+                        recoveryInProgress = false;
+                    }
+                    transitionTo(readyState, false);
                 }
                 if (state == Player.STATE_ENDED) {
                     errHandler.removeCallbacks(bufferWatchdog);
+                    errHandler.removeCallbacks(longStartNotice);
                     if (isPrematureEnd()) {
                         recoverPlayback(isLiveContent() ? "live_eof" : "premature_eof");
                     } else {
@@ -531,6 +636,8 @@ public class PlayerActivity extends Activity {
             @Override
             public void onPlayerError(PlaybackException error) {
                 errHandler.removeCallbacks(bufferWatchdog);
+                errHandler.removeCallbacks(longStartNotice);
+                engineReady = false;
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
                 // accepted. A single-slot panel can also answer "busy" with a non-media
@@ -546,24 +653,32 @@ public class PlayerActivity extends Activity {
                 // Viewer-facing copy stays concise and actionable. Detailed
                 // diagnostics remain available to support in Logcat.
                 android.util.Log.w("NorvaPlayer", diagnose(error), error);
-                showStreamError(friendlyPlaybackError(error));
+                boolean formatFailure = isFormatFailure(error);
+                showPlaybackFailure(
+                        PlaybackUiState.TERMINAL,
+                        formatFailure
+                                ? R.string.player_state_terminal_title
+                                : R.string.player_error_title,
+                        formatFailure
+                                ? getString(R.string.player_state_format_message)
+                                : friendlyPlaybackError(error),
+                        formatFailure);
             }
 
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
                 errHandler.removeCallbacks(healthyRecoveryReset);
                 if (isPlaying) {
+                    if (firstFrameForCurrentRoute) {
+                        errHandler.removeCallbacks(bufferWatchdog);
+                    }
                     errHandler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
                 }
-                refreshPipActions(); // keep the PiP button icon in sync
-            }
-
-            @Override
-            public void onRenderedFirstFrame() {
-                if (!firstFrameRendered) {
-                    firstFrameRendered = true;
-                    recordNativeFirstFrame();
+                if (firstFrameForCurrentRoute && engineReady) {
+                    recoveryInProgress = false;
+                    transitionTo(PlaybackUiState.PLAYING, false);
                 }
+                refreshPipActions(); // keep the PiP button icon in sync
             }
 
             @Override
@@ -579,6 +694,24 @@ public class PlayerActivity extends Activity {
                 refreshTrackControl(tracks);
             }
         });
+        player.addAnalyticsListener(new AnalyticsListener() {
+            @Override
+            public void onRenderedFirstFrame(
+                    EventTime eventTime,
+                    Object output,
+                    long renderTimeMs
+            ) {
+                String eventRouteId = routeIdForEvent(eventTime);
+                String currentRouteId = player == null || player.getCurrentMediaItem() == null
+                        ? null
+                        : player.getCurrentMediaItem().mediaId;
+                if (!isFirstFrameForActiveRoute(
+                        eventRouteId,
+                        activePlaybackRouteId,
+                        currentRouteId)) return;
+                handleRenderedFirstFrame();
+            }
+        });
 
         MediaItem.Builder mediaItem = new MediaItem.Builder().setUri(url);
         if (isLocal) {
@@ -588,9 +721,578 @@ public class PlayerActivity extends Activity {
             if (mime != null) mediaItem.setMimeType(mime);
         }
         originalMediaItem = mediaItem.build();
-        player.setMediaItem(originalMediaItem);
+        if (!isLocal && !hasUsableNetwork()) {
+            showPlaybackFailure(
+                    PlaybackUiState.OFFLINE,
+                    R.string.player_state_offline_title,
+                    getString(R.string.player_state_offline_message),
+                    false);
+        } else {
+            prepareMediaItem(originalMediaItem, 0L, PlaybackUiState.PREPARING);
+        }
+    }
+
+    private void installPlaybackStateOverlay(FrameLayout root) {
+        stateOverlay = new FrameLayout(this);
+        stateOverlay.setId(R.id.norva_player_state_overlay);
+        stateOverlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        stateOverlay.setBackgroundColor(color(R.color.norva_bg_primary));
+
+        statePoster = new ImageView(this);
+        statePoster.setId(R.id.norva_player_state_poster);
+        statePoster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        statePoster.setAlpha(0.58f);
+        statePoster.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        statePoster.setBackgroundColor(color(R.color.norva_bg_secondary));
+        stateOverlay.addView(statePoster, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        View scrim = new View(this);
+        GradientDrawable gradient = new GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP,
+                new int[] {
+                        Color.parseColor("#FA080B12"),
+                        Color.parseColor("#C7080B12"),
+                        Color.parseColor("#40080B12")
+                });
+        scrim.setBackground(gradient);
+        scrim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        stateOverlay.addView(scrim, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        stateContent = new LinearLayout(this);
+        stateContent.setId(R.id.norva_player_state_content);
+        stateContent.setOrientation(LinearLayout.VERTICAL);
+        stateContent.setGravity(Gravity.START);
+        stateContent.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+
+        stateTitleView = new TextView(this);
+        stateTitleView.setId(R.id.norva_player_state_title);
+        stateTitleView.setText(emptyToNull(mediaTitle) == null ? getString(R.string.app_name) : mediaTitle);
+        stateTitleView.setTextColor(color(R.color.norva_text_primary));
+        stateTitleView.setTextSize(24);
+        stateTitleView.setMaxLines(2);
+        stateTitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if (Build.VERSION.SDK_INT >= 28) stateTitleView.setAccessibilityHeading(true);
+        stateContent.addView(stateTitleView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams statusRowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        statusRowLp.topMargin = dp(12);
+        stateContent.addView(statusRow, statusRowLp);
+
+        stateProgress = new ProgressBar(this);
+        stateProgress.setId(R.id.norva_player_state_progress);
+        stateProgress.setIndeterminate(true);
+        stateProgress.setIndeterminateTintList(
+                ColorStateList.valueOf(color(R.color.norva_accent)));
+        statusRow.addView(stateProgress, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+        stateMessageView = new TextView(this);
+        stateMessageView.setId(R.id.norva_player_state_message);
+        stateMessageView.setTextColor(color(R.color.norva_text_secondary));
+        stateMessageView.setTextSize(15);
+        stateMessageView.setMaxWidth(dp(620));
+        stateMessageView.setMaxLines(3);
+        LinearLayout.LayoutParams messageLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        messageLp.leftMargin = dp(12);
+        statusRow.addView(stateMessageView, messageLp);
+
+        FrameLayout.LayoutParams stateContentLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.START);
+        stateOverlay.addView(stateContent, stateContentLp);
+        root.addView(stateOverlay, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void installPlaybackErrorPanel(FrameLayout root) {
+        errorPanel = new LinearLayout(this);
+        errorPanel.setId(R.id.norva_player_error_panel);
+        errorPanel.setOrientation(LinearLayout.VERTICAL);
+        errorPanel.setGravity(Gravity.CENTER);
+        errorPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        errorPanel.setVisibility(View.GONE);
+
+        errorTitleView = new TextView(this);
+        errorTitleView.setId(R.id.norva_player_error_title);
+        if (Build.VERSION.SDK_INT >= 28) errorTitleView.setAccessibilityHeading(true);
+        errorTitleView.setText(getString(R.string.player_error_title));
+        errorTitleView.setTextColor(color(R.color.norva_text_primary));
+        errorTitleView.setTextSize(22);
+        errorTitleView.setGravity(Gravity.CENTER);
+        errorTitleView.setMaxLines(2);
+        errorTitleView.setPadding(0, 0, 0, dp(12));
+        errorPanel.addView(errorTitleView);
+
+        errorView = new TextView(this);
+        errorView.setId(R.id.norva_player_error_message);
+        errorView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        errorView.setTextColor(color(R.color.norva_text_secondary));
+        errorView.setTextSize(15);
+        errorView.setGravity(Gravity.CENTER);
+        errorView.setMaxWidth(dp(560));
+        errorView.setPadding(0, 0, 0, dp(24));
+        errorPanel.addView(errorView);
+
+        retryButton = playbackActionButton(
+                R.id.norva_player_retry_button,
+                R.string.player_retry,
+                true,
+                v -> retryPlayback());
+        LinearLayout.LayoutParams retryLp = playbackActionLayoutParams();
+        retryLp.bottomMargin = dp(12);
+        errorPanel.addView(retryButton, retryLp);
+
+        changeVersionButton = playbackActionButton(
+                R.id.norva_player_change_version_button,
+                R.string.player_change_version,
+                true,
+                v -> showVariantDialog());
+        changeVersionButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams changeLp = playbackActionLayoutParams();
+        changeLp.bottomMargin = dp(12);
+        errorPanel.addView(changeVersionButton, changeLp);
+
+        errorBackButton = playbackActionButton(
+                R.id.norva_player_error_back_button,
+                R.string.player_back,
+                false,
+                v -> finishWithoutRecovery());
+        errorPanel.addView(errorBackButton, playbackActionLayoutParams());
+
+        root.addView(errorPanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private Button playbackActionButton(
+            int id,
+            int label,
+            boolean primary,
+            View.OnClickListener listener
+    ) {
+        Button button = new Button(this);
+        button.setId(id);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(15);
+        button.setMinHeight(dp(48));
+        button.setMinWidth(dp(220));
+        button.setPadding(dp(20), 0, dp(20), 0);
+        button.setTextColor(color(primary
+                ? R.color.norva_bg_primary
+                : R.color.norva_text_primary));
+        button.setBackground(buttonBackground(
+                color(primary ? R.color.norva_accent : R.color.norva_bg_tertiary),
+                color(primary ? R.color.norva_accent_pressed : R.color.norva_border)));
+        button.setOnClickListener(listener);
+        return button;
+    }
+
+    private LinearLayout.LayoutParams playbackActionLayoutParams() {
+        return new LinearLayout.LayoutParams(dp(240), dp(48));
+    }
+
+    private StateListDrawable buttonBackground(int normalColor, int pressedColor) {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(
+                new int[] { android.R.attr.state_pressed },
+                roundedBackground(pressedColor, dp(10)));
+        states.addState(new int[0], roundedBackground(normalColor, dp(10)));
+        return states;
+    }
+
+    private GradientDrawable roundedBackground(int backgroundColor, int radiusPx) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(backgroundColor);
+        drawable.setCornerRadius(radiusPx);
+        return drawable;
+    }
+
+    private void transitionTo(PlaybackUiState next, boolean announce) {
+        if (next == null) return;
+        PlaybackUiState previous = playbackUiState;
+        playbackUiState = next;
+
+        boolean waiting = next == PlaybackUiState.PREPARING
+                || next == PlaybackUiState.INITIAL_BUFFERING
+                || next == PlaybackUiState.RECOVERING;
+        if (waiting && !longStartShown && !longStartScheduled) {
+            longStartScheduled = true;
+            errHandler.postDelayed(longStartNotice, LONG_START_MS);
+        } else if (!waiting) {
+            errHandler.removeCallbacks(longStartNotice);
+            longStartScheduled = false;
+        }
+
+        renderPlaybackUiState(announce || previous != next);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && (next == PlaybackUiState.PLAYING
+                || previous == PlaybackUiState.PLAYING)) {
+            refreshPipActions();
+        }
+        if (next == PlaybackUiState.PLAYING && previous != PlaybackUiState.PLAYING
+                && playerView != null && !controlsLocked
+                && !isInPipMode()) {
+            playerView.showController();
+        }
+    }
+
+    private void renderPlaybackUiState(boolean announce) {
+        if (stateOverlay == null || playerView == null) return;
+        boolean playable = isControllerState(playbackUiState);
+        boolean failure = playbackUiState == PlaybackUiState.TERMINAL
+                || playbackUiState == PlaybackUiState.OFFLINE;
+
+        if (playbackUiState == PlaybackUiState.PLAYING) {
+            stateOverlay.setVisibility(View.GONE);
+            if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        } else {
+            stateOverlay.setVisibility(View.VISIBLE);
+            stateOverlay.bringToFront();
+            if (statePoster != null) {
+                statePoster.setVisibility(
+                        playbackUiState == PlaybackUiState.REBUFFERING && firstFrameRendered
+                                ? View.GONE
+                                : View.VISIBLE);
+            }
+            if (stateContent != null) stateContent.setVisibility(failure ? View.GONE : View.VISIBLE);
+            if (stateProgress != null) stateProgress.setVisibility(failure ? View.GONE : View.VISIBLE);
+            if (errorPanel != null) {
+                errorPanel.setVisibility(failure ? View.VISIBLE : View.GONE);
+                if (failure) errorPanel.bringToFront();
+            }
+        }
+
+        String message = messageForPlaybackUiState(playbackUiState);
+        if (stateMessageView != null && !failure) stateMessageView.setText(message);
+        if (stateTitleView != null) {
+            stateTitleView.setText(emptyToNull(mediaTitle) == null
+                    ? getString(R.string.app_name)
+                    : mediaTitle);
+        }
+
+        boolean controllerEnabled = playable && !controlsLocked && !isInPipMode();
+        playerView.setUseController(controllerEnabled);
+        playerView.setImportantForAccessibility(playable
+                ? View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                : View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        if (!controllerEnabled) {
+            playerView.hideController();
+            updateTrackButtonVisibility(false);
+            updateTopBarVisibility(false);
+            updateCompactControlVisibility(false);
+        }
+        if (gestureTouchLayer != null) {
+            gestureTouchLayer.setEnabled(playable);
+            gestureTouchLayer.setImportantForAccessibility(playable
+                    ? View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                    : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        if (announce && !failure && stateMessageView != null) {
+            CharSequence title = emptyToNull(mediaTitle) == null
+                    ? getString(R.string.app_name)
+                    : mediaTitle;
+            stateMessageView.announceForAccessibility(
+                    getString(R.string.player_state_accessibility, title, message));
+        }
+    }
+
+    private String messageForPlaybackUiState(PlaybackUiState state) {
+        if (longStartShown && (state == PlaybackUiState.PREPARING
+                || state == PlaybackUiState.INITIAL_BUFFERING
+                || state == PlaybackUiState.RECOVERING)) {
+            return getString(R.string.player_state_long_start);
+        }
+        switch (state) {
+            case PREPARING:
+                return getString(R.string.player_state_preparing);
+            case INITIAL_BUFFERING:
+                return getString(R.string.player_state_initial_buffering);
+            case RECOVERING:
+                return getString(R.string.player_state_recovering);
+            case REBUFFERING:
+                return getString(R.string.player_state_rebuffering);
+            default:
+                return "";
+        }
+    }
+
+    static boolean isControllerState(PlaybackUiState state) {
+        return state == PlaybackUiState.PLAYING || state == PlaybackUiState.REBUFFERING;
+    }
+
+    static PlaybackUiState stateForBuffering(
+            boolean recovering,
+            boolean anyFirstFrameRendered
+    ) {
+        if (recovering) return PlaybackUiState.RECOVERING;
+        return anyFirstFrameRendered
+                ? PlaybackUiState.REBUFFERING
+                : PlaybackUiState.INITIAL_BUFFERING;
+    }
+
+    static PlaybackUiState stateAfterReady(
+            boolean recovering,
+            boolean firstFrameForRoute
+    ) {
+        if (firstFrameForRoute) return PlaybackUiState.PLAYING;
+        return recovering
+                ? PlaybackUiState.RECOVERING
+                : PlaybackUiState.INITIAL_BUFFERING;
+    }
+
+    static boolean isFirstFrameForActiveRoute(
+            String eventRouteId,
+            String activeRouteId,
+            String currentRouteId
+    ) {
+        return activeRouteId != null
+                && activeRouteId.equals(eventRouteId)
+                && activeRouteId.equals(currentRouteId);
+    }
+
+    static boolean shouldAllowPlayback(boolean playbackActive, boolean inPictureInPicture) {
+        return playbackActive || inPictureInPicture;
+    }
+
+    private String routeIdForEvent(AnalyticsListener.EventTime eventTime) {
+        if (eventTime == null || eventTime.timeline == null
+                || eventTime.timeline.isEmpty()
+                || eventTime.windowIndex < 0
+                || eventTime.windowIndex >= eventTime.timeline.getWindowCount()) return null;
+        try {
+            Timeline.Window window = eventTime.timeline.getWindow(
+                    eventTime.windowIndex,
+                    new Timeline.Window());
+            return window.mediaItem == null ? null : window.mediaItem.mediaId;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void handleRenderedFirstFrame() {
+        firstFrameForCurrentRoute = true;
+        recoveryInProgress = false;
+        errHandler.removeCallbacks(bufferWatchdog);
+        errHandler.removeCallbacks(longStartNotice);
+        transitionTo(PlaybackUiState.PLAYING, false);
+        if (!firstFrameRendered) {
+            firstFrameRendered = true;
+            recordNativeFirstFrame();
+        }
+    }
+
+    private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state) {
+        if (player == null || item == null) return;
+        clearPendingDelayedRecovery();
+        engineReady = false;
+        firstFrameForCurrentRoute = false;
+        recoveryInProgress = state == PlaybackUiState.RECOVERING;
+        longStartShown = false;
+        longStartScheduled = false;
+        errHandler.removeCallbacks(longStartNotice);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        transitionTo(state, false);
+        String routeId = "norva-route-" + (++playbackRouteGeneration);
+        activePlaybackRouteId = routeId;
+        MediaItem routedItem = item.buildUpon().setMediaId(routeId).build();
+        player.setMediaItem(routedItem, Math.max(0L, positionMs));
         player.prepare();
-        player.setPlayWhenReady(true);
+        boolean mayPlay = shouldAllowPlayback(playbackActive, isInPipMode());
+        player.setPlayWhenReady(mayPlay);
+        if (!mayPlay) resumePlaybackOnResume = true;
+    }
+
+    private void showPlaybackFailure(
+            PlaybackUiState state,
+            int titleRes,
+            String message,
+            boolean recommendVersion
+    ) {
+        showPlaybackFailure(state, titleRes, message, recommendVersion, !recommendVersion);
+    }
+
+    private void showPlaybackFailure(
+            PlaybackUiState state,
+            int titleRes,
+            String message,
+            boolean recommendVersion,
+            boolean retryAllowed
+    ) {
+        // A terminal/offline surface is authoritative. Invalidate every delayed
+        // reconnect and recovery token so no stale runnable can restart playback
+        // behind the error panel.
+        recoveryGeneration++;
+        freshStreamRequested = false;
+        freshStreamTimeoutDeferred = false;
+        recoveryToken = null;
+        recoveryInProgress = false;
+        engineReady = false;
+        clearPendingDelayedRecovery();
+        errHandler.removeCallbacks(bufferWatchdog);
+        errHandler.removeCallbacks(longStartNotice);
+        errHandler.removeCallbacks(freshStreamTimeout);
+        longStartScheduled = false;
+        if (player != null) {
+            try { player.stop(); } catch (Exception ignored) { }
+        }
+        if (errorTitleView != null) errorTitleView.setText(titleRes);
+        if (errorView != null) errorView.setText(message);
+        boolean canChangeVersion = recommendVersion && variants != null && variants.length() > 1;
+        if (retryButton != null) {
+            retryButton.setVisibility(retryAllowed ? View.VISIBLE : View.GONE);
+        }
+        if (changeVersionButton != null) {
+            changeVersionButton.setVisibility(canChangeVersion ? View.VISIBLE : View.GONE);
+        }
+        transitionTo(state, true);
+        View focusTarget = canChangeVersion
+                ? changeVersionButton
+                : (retryAllowed ? retryButton : errorBackButton);
+        if (focusTarget != null) {
+            focusTarget.requestFocus();
+            focusTarget.announceForAccessibility(
+                    getString(R.string.player_state_accessibility,
+                            getString(titleRes), message));
+        }
+        emitFirstFrameTestResult(
+                state == PlaybackUiState.OFFLINE ? "offline" : "terminal",
+                false);
+        NativePlayerUiTelemetry.log(
+                this,
+                "player_error_action",
+                "show",
+                "error",
+                state.name().toLowerCase(Locale.ROOT));
+    }
+
+    private boolean hasUsableNetwork() {
+        if (isLocal) return true;
+        try {
+            ConnectivityManager cm =
+                    (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            NetworkCapabilities capabilities = cm.getNetworkCapabilities(network);
+            return capabilities == null
+                    || capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Throwable ignored) {
+            // A platform capability lookup must not reject a stream when the
+            // provider URL itself can still prove connectivity.
+            return true;
+        }
+    }
+
+    private void loadPosterAsync() {
+        if (statePoster == null) return;
+        final int generation = ++posterLoadGeneration;
+        final String remotePoster = emptyToNull(posterUrl);
+        if (!isLocal && remotePoster == null) return;
+        posterExecutor.execute(() -> {
+            Bitmap bitmap = null;
+            try {
+                String localPoster = localPosterPath();
+                if (localPoster != null) {
+                    try (InputStream in = new FileInputStream(localPoster)) {
+                        bitmap = decodePoster(readPosterBytes(in, 10 * 1024 * 1024));
+                    }
+                } else if (remotePoster.startsWith("https://")
+                        || remotePoster.startsWith("http://")) {
+                    HttpURLConnection connection = null;
+                    try {
+                        connection = (HttpURLConnection) new URL(remotePoster).openConnection();
+                        connection.setConnectTimeout(5_000);
+                        connection.setReadTimeout(7_000);
+                        connection.setInstanceFollowRedirects(true);
+                        connection.setRequestProperty("User-Agent", UA);
+                        if (connection.getResponseCode() >= 200
+                                && connection.getResponseCode() < 300) {
+                            int length = connection.getContentLength();
+                            if (length <= 10 * 1024 * 1024L) {
+                                try (InputStream in = connection.getInputStream()) {
+                                    bitmap = decodePoster(
+                                            readPosterBytes(in, 10 * 1024 * 1024));
+                                }
+                            }
+                        }
+                    } finally {
+                        if (connection != null) connection.disconnect();
+                    }
+                }
+            } catch (Throwable ignored) {
+                // The title/status fallback is complete without artwork.
+            }
+            final Bitmap loaded = bitmap;
+            if (loaded == null) return;
+            runOnUiThread(() -> {
+                if (isFinishing() || generation != posterLoadGeneration
+                        || statePoster == null) {
+                    loaded.recycle();
+                    return;
+                }
+                statePoster.setImageBitmap(loaded);
+            });
+        });
+    }
+
+    private String localPosterPath() {
+        if (!isLocal || itemId == null || itemId.isEmpty()) return null;
+        try {
+            String id = (sourceId == null ? "" : sourceId) + ":" + itemId;
+            DownloadStore.Item item = DownloadStore.get(this, id);
+            if (item == null || emptyToNull(item.posterFile) == null) return null;
+            File file = new File(item.posterFile);
+            return file.isFile() ? file.getAbsolutePath() : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static byte[] readPosterBytes(InputStream input, int maxBytes) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(maxBytes, 64 * 1024));
+        byte[] buffer = new byte[16 * 1024];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) throw new IllegalArgumentException("poster too large");
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    private static Bitmap decodePoster(byte[] encoded) {
+        if (encoded == null || encoded.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(encoded, 0, encoded.length, bounds);
+        int largest = Math.max(bounds.outWidth, bounds.outHeight);
+        int sample = 1;
+        while (largest / sample > 1600) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        options.inPreferredConfig = Bitmap.Config.RGB_565;
+        return BitmapFactory.decodeByteArray(encoded, 0, encoded.length, options);
+    }
+
+    private int color(int colorRes) {
+        return ContextCompat.getColor(this, colorRes);
     }
 
     /** Device-side truth that media actually rendered, emitted once per launch. */
@@ -612,6 +1314,52 @@ public class PlayerActivity extends Activity {
         } catch (Throwable ignored) {
             // Measurement must never affect playback.
         }
+        emitFirstFrameTestResult("first_frame", true);
+    }
+
+    private void emitFirstFrameTestResult(String outcome, boolean rendered) {
+        if (!BuildConfig.DEBUG || firstFrameTestResultEmitted
+                || emptyToNull(firstFrameTestToken) == null) return;
+        String videoMime = selectedMimeType(C.TRACK_TYPE_VIDEO);
+        String audioMime = selectedMimeType(C.TRACK_TYPE_AUDIO);
+        boolean contractSatisfied = isKnownGoodH264AacFirstFrameEvidence(
+                rendered, videoMime, audioMime);
+        firstFrameTestResultEmitted = true;
+        Intent result = new Intent(ACTION_FIRST_FRAME_TEST_RESULT)
+                .setPackage(getPackageName())
+                .putExtra(EXTRA_FIRST_FRAME_TEST_TOKEN, firstFrameTestToken)
+                .putExtra(EXTRA_FIRST_FRAME_TEST_OUTCOME, outcome)
+                .putExtra(EXTRA_FIRST_FRAME_TEST_VIDEO_MIME, videoMime)
+                .putExtra(EXTRA_FIRST_FRAME_TEST_AUDIO_MIME, audioMime)
+                .putExtra(EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, contractSatisfied)
+                .putExtra("elapsedMs", Math.max(
+                        0L, SystemClock.elapsedRealtime() - playbackLaunchElapsedMs));
+        sendBroadcast(result);
+    }
+
+    private String selectedMimeType(int trackType) {
+        if (player == null) return "";
+        try {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != trackType) continue;
+                for (int i = 0; i < group.length; i++) {
+                    if (!group.isTrackSelected(i)) continue;
+                    String mime = group.getTrackFormat(i).sampleMimeType;
+                    return mime == null ? "" : mime;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return "";
+    }
+
+    static boolean isKnownGoodH264AacFirstFrameEvidence(
+            boolean rendered,
+            String videoMime,
+            String audioMime
+    ) {
+        return rendered
+                && FIRST_FRAME_FIXTURE_VIDEO_MIME.equals(videoMime)
+                && FIRST_FRAME_FIXTURE_AUDIO_MIME.equals(audioMime);
     }
 
     /** Map a download's container extension to a MIME type for the extractor. */
@@ -1389,7 +2137,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void updateCompactControlVisibility(boolean controllerVisible) {
-        boolean visible = controllerVisible && !controlsLocked;
+        boolean visible = controllerVisible && !controlsLocked
+                && isControllerState(playbackUiState);
         int availableWidthDp = getResources().getConfiguration().screenWidthDp;
         if (audioButton != null) {
             audioButton.setVisibility(visible && hasAudioChoices ? View.VISIBLE : View.GONE);
@@ -1772,11 +2521,25 @@ public class PlayerActivity extends Activity {
                     dp(32) + safeInsetRight,
                     dp(32) + safeInsetBottom);
         }
+        if (stateContent != null) {
+            stateContent.setPadding(
+                    dp(32) + safeInsetLeft,
+                    dp(24) + safeInsetTop,
+                    dp(32) + safeInsetRight,
+                    dp(32) + safeInsetBottom);
+        }
+        if (unlockBtn != null && unlockBtn.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams unlockLp =
+                    (FrameLayout.LayoutParams) unlockBtn.getLayoutParams();
+            unlockLp.topMargin = dp(16) + safeInsetTop;
+            unlockBtn.setLayoutParams(unlockLp);
+        }
     }
 
     private void updateTopBarVisibility(boolean controllerVisible) {
         if (topBar != null) {
-            topBar.setVisibility(controllerVisible && !controlsLocked ? View.VISIBLE : View.GONE);
+            topBar.setVisibility(controllerVisible && !controlsLocked
+                    && isControllerState(playbackUiState) ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -1812,7 +2575,9 @@ public class PlayerActivity extends Activity {
 
             errHandler.removeCallbacks(freshStreamTimeout);
             freshStreamRequested = false;
+            freshStreamTimeoutDeferred = false;
             recoveryToken = null;
+            clearPendingDelayedRecovery();
             originalUrl = nextUrl;
             fallbackUrl = emptyToNull(payload.optString("fallbackUrl", ""));
             streamHost = hostOf(nextUrl);
@@ -1826,17 +2591,22 @@ public class PlayerActivity extends Activity {
             org.json.JSONObject preferences = payload.optJSONObject("playbackPreferences");
             if (preferences != null) cloudPlaybackPreferencesJson = preferences.toString();
             long requestedPosition = Math.max(0L, payload.optLong("resumeSeconds", 0L) * 1000L);
-            if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-            showSeekFeedback(getString(R.string.player_reconnecting));
             originalMediaItem = new MediaItem.Builder().setUri(nextUrl).build();
-            player.setMediaItem(originalMediaItem, requestedPosition);
-            player.prepare();
-            player.setPlayWhenReady(true);
+            prepareMediaItem(
+                    originalMediaItem,
+                    requestedPosition,
+                    PlaybackUiState.RECOVERING);
         } catch (Exception ignored) {
             freshStreamRequested = false;
+            freshStreamTimeoutDeferred = false;
             recoveryToken = null;
+            clearPendingDelayedRecovery();
             errHandler.removeCallbacks(freshStreamTimeout);
-            showStreamError(getString(R.string.player_reconnect_failed));
+            showPlaybackFailure(
+                    PlaybackUiState.TERMINAL,
+                    R.string.player_error_title,
+                    getString(R.string.player_reconnect_failed),
+                    false);
         }
     }
 
@@ -1846,7 +2616,9 @@ public class PlayerActivity extends Activity {
 
     private void finishWithoutRecovery() {
         freshStreamRequested = false;
+        freshStreamTimeoutDeferred = false;
         recoveryToken = null;
+        clearPendingDelayedRecovery();
         errHandler.removeCallbacks(freshStreamTimeout);
         finish();
     }
@@ -1896,18 +2668,27 @@ public class PlayerActivity extends Activity {
 
     // ==================== Error display ====================
 
-    private void showStreamError(String message) {
-        if (errorView == null || errorPanel == null) return;
-        errorView.setText(message);
-        errorPanel.setVisibility(View.VISIBLE);
-        errorPanel.bringToFront();
-        errorPanel.requestFocus();
-        NativePlayerUiTelemetry.log(this, "player_error_action", "show", "error", "visible");
-    }
-
     /** A manual retry must resolve a new provider/Gateway session, not reuse a stale signed URL. */
     private void retryPlayback() {
         NativePlayerUiTelemetry.log(this, "player_error_action", "retry", "error", "manual");
+        if (!isLocal && !hasUsableNetwork()) {
+            showPlaybackFailure(
+                    PlaybackUiState.OFFLINE,
+                    R.string.player_state_offline_title,
+                    getString(R.string.player_state_offline_message),
+                    false);
+            return;
+        }
+        if (isLocal || sourceId == null || sourceId.isEmpty()
+                || itemId == null || itemId.isEmpty()) {
+            if (originalMediaItem != null) {
+                prepareMediaItem(
+                        originalMediaItem,
+                        recoverPositionMs(),
+                        PlaybackUiState.RECOVERING);
+            }
+            return;
+        }
         requestFreshStream("manual_retry");
     }
 
@@ -1941,6 +2722,27 @@ public class PlayerActivity extends Activity {
                 : position;
     }
 
+    private void clearPendingDelayedRecovery() {
+        errHandler.removeCallbacks(delayedRecovery);
+        pendingDelayedRecovery = false;
+        pendingDelayedRecoveryItem = null;
+        pendingDelayedRecoveryPositionMs = 0L;
+        pendingDelayedRecoveryGeneration = 0;
+    }
+
+    private void scheduleDelayedRecovery(
+            MediaItem item,
+            long positionMs,
+            int scheduledGeneration
+    ) {
+        clearPendingDelayedRecovery();
+        pendingDelayedRecovery = true;
+        pendingDelayedRecoveryItem = item;
+        pendingDelayedRecoveryPositionMs = Math.max(0L, positionMs);
+        pendingDelayedRecoveryGeneration = scheduledGeneration;
+        errHandler.postDelayed(delayedRecovery, 1_500L);
+    }
+
     /**
      * Recover without ejecting the viewer: retry the proven current route once,
      * then try the Gateway fallback, then ask the web layer to resolve a brand-new
@@ -1950,9 +2752,25 @@ public class PlayerActivity extends Activity {
     private void recoverPlayback(final String reason) {
         if (player == null || freshStreamRequested) return;
         final int scheduledGeneration = ++recoveryGeneration;
+        recoveryInProgress = true;
+        engineReady = false;
         errHandler.removeCallbacks(bufferWatchdog);
         errHandler.removeCallbacks(healthyRecoveryReset);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        transitionTo(PlaybackUiState.RECOVERING, true);
+
+        if (!shouldAllowPlayback(playbackActive, isInPipMode())) {
+            resumePlaybackOnResume = true;
+            MediaItem current = player.getCurrentMediaItem();
+            scheduleDelayedRecovery(
+                    current != null ? current : originalMediaItem,
+                    recoverPositionMs(),
+                    scheduledGeneration);
+            // Background lifecycle removes the runnable but deliberately keeps
+            // this exact route/position for a foreground-only resume.
+            errHandler.removeCallbacks(delayedRecovery);
+            return;
+        }
 
         // A startup failure never proved the residential route healthy, so move
         // to the supplied Gateway fallback immediately. Mid-stream, reconnect the
@@ -1965,18 +2783,10 @@ public class PlayerActivity extends Activity {
             playRetries++;
             final MediaItem current = player.getCurrentMediaItem();
             final long position = recoverPositionMs();
-            errHandler.postDelayed(new Runnable() {
-                @Override public void run() {
-                    if (player == null || freshStreamRequested
-                            || scheduledGeneration != recoveryGeneration) return;
-                    MediaItem item = current != null ? current : new MediaItem.Builder()
-                            .setUri(fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl)
-                            .build();
-                    player.setMediaItem(item, position);
-                    player.prepare();
-                    player.setPlayWhenReady(true);
-                }
-            }, 1_500L);
+            MediaItem item = current != null ? current : new MediaItem.Builder()
+                    .setUri(fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl)
+                    .build();
+            scheduleDelayedRecovery(item, position, scheduledGeneration);
             return;
         }
         if (!fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
@@ -1990,18 +2800,35 @@ public class PlayerActivity extends Activity {
     private void requestFreshStream(String reason) {
         if (freshStreamRequested) return;
         recoveryGeneration++;
+        clearPendingDelayedRecovery();
+        if (!isLocal && !hasUsableNetwork()) {
+            showPlaybackFailure(
+                    PlaybackUiState.OFFLINE,
+                    R.string.player_state_offline_title,
+                    getString(R.string.player_state_offline_message),
+                    false);
+            return;
+        }
         if (isLocal || sourceId == null || sourceId.isEmpty()
                 || itemId == null || itemId.isEmpty()) {
-            showStreamError(getString(R.string.player_error_network));
+            showPlaybackFailure(
+                    PlaybackUiState.TERMINAL,
+                    R.string.player_error_title,
+                    getString(R.string.player_state_generic_terminal_message),
+                    false);
             return;
         }
         freshStreamRequested = true;
+        freshStreamTimeoutDeferred = false;
+        recoveryInProgress = true;
+        engineReady = false;
+        firstFrameForCurrentRoute = false;
         freshStreamReason = reason == null ? "playback_interrupted" : reason;
         recoveryToken = UUID.randomUUID().toString();
         long position = recoverPositionMs();
         long duration = player != null && player.getDuration() > 0
                 ? player.getDuration() : 0L;
-        showStreamError(getString(R.string.player_reconnecting));
+        transitionTo(PlaybackUiState.RECOVERING, true);
         // Release the active provider socket before resolving its replacement.
         // This protects one-slot IPTV accounts while the Activity stays open.
         if (player != null) player.stop();
@@ -2016,21 +2843,28 @@ public class PlayerActivity extends Activity {
                 .putExtra("retryReason", freshStreamReason);
         sendBroadcast(request);
         errHandler.removeCallbacks(freshStreamTimeout);
-        errHandler.postDelayed(freshStreamTimeout, 25_000L);
+        if (shouldAllowPlayback(playbackActive, isInPipMode())) {
+            errHandler.postDelayed(freshStreamTimeout, 25_000L);
+        } else {
+            freshStreamTimeoutDeferred = true;
+            resumePlaybackOnResume = true;
+        }
     }
 
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
     private void switchToFallback() {
         recoveryGeneration++;
+        clearPendingDelayedRecovery();
         fallbackTried = true;
         playRetries = 0;              // one fresh in-place retry budget for the fallback URL
         trackPreferencesApplied = false;
         streamHost = hostOf(fallbackUrl);
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
-        player.setMediaItem(new MediaItem.Builder().setUri(fallbackUrl).build(), recoverPositionMs());
-        player.prepare();
-        player.setPlayWhenReady(true);
+        prepareMediaItem(
+                new MediaItem.Builder().setUri(fallbackUrl).build(),
+                recoverPositionMs(),
+                PlaybackUiState.RECOVERING);
     }
 
     /**
@@ -2044,6 +2878,21 @@ public class PlayerActivity extends Activity {
         int code = e.errorCode;
         return code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
                 && code <= PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED;
+    }
+
+    private static boolean isFormatFailure(PlaybackException e) {
+        if (e == null) return false;
+        int code = e.errorCode;
+        return code >= PlaybackException.ERROR_CODE_DECODING_FAILED
+                && code <= PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES;
+    }
+
+    static boolean isFormatRecoveryReason(String reason) {
+        if (reason == null) return false;
+        return reason.contains("PARSING_CONTAINER_UNSUPPORTED")
+                || reason.contains("PARSING_MANIFEST_UNSUPPORTED")
+                || reason.contains("DECODING_FORMAT_UNSUPPORTED")
+                || reason.contains("DECODING_FORMAT_EXCEEDS_CAPABILITIES");
     }
 
     private String friendlyPlaybackError(PlaybackException error) {
@@ -2104,6 +2953,7 @@ public class PlayerActivity extends Activity {
      * touches normally — the overlay only handles taps while the controls are hidden.
      */
     @OptIn(markerClass = UnstableApi.class)
+    @SuppressLint("ClickableViewAccessibility")
     private void installGestureOverlay() {
         final FrameLayout overlay = playerView.getOverlayFrameLayout();
         if (overlay == null) return;
@@ -2123,6 +2973,7 @@ public class PlayerActivity extends Activity {
         final GestureDetector detector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) {
+                if (!isControllerState(playbackUiState)) return false;
                 // Anchor the drag: current brightness/volume become the baseline.
                 gestureStartBrightness = getWindow().getAttributes().screenBrightness;
                 if (gestureStartBrightness < 0) {
@@ -2143,14 +2994,15 @@ public class PlayerActivity extends Activity {
             }
 
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (!isControllerState(playbackUiState)) return true;
                 if (controlsLocked) { flashUnlockButton(); return true; }
-                if (playerView.isControllerFullyVisible()) playerView.hideController();
-                else playerView.showController();
+                if (gestureTouchLayer != null) gestureTouchLayer.performClick();
                 return true;
             }
 
             @Override public boolean onDoubleTap(MotionEvent e) {
-                if (player == null || controlsLocked) return false;
+                if (player == null || controlsLocked
+                        || !isControllerState(playbackUiState)) return false;
                 boolean forward = e.getX() > overlay.getWidth() / 2f;
                 player.seekTo(Math.max(0, player.getCurrentPosition() + (forward ? 10_000 : -10_000)));
                 showSeekFeedback(getString(forward
@@ -2168,7 +3020,8 @@ public class PlayerActivity extends Activity {
                 float totalDx = Math.abs(e2.getX() - e1.getX());
                 // Engage only on a clearly vertical drag, and never over the
                 // controller (its buttons/seek bar own touches when visible).
-                if (controlsLocked || (scaleDetector != null && scaleDetector.isInProgress())) return false;
+                if (controlsLocked || !isControllerState(playbackUiState)
+                        || (scaleDetector != null && scaleDetector.isInProgress())) return false;
                 if (verticalDragMode == 0) {
                     if (Math.abs(totalDy) < dp(24) || totalDx > Math.abs(totalDy)) return false;
                     if (playerView.isControllerFullyVisible()) return false;
@@ -2203,7 +3056,7 @@ public class PlayerActivity extends Activity {
         scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScale(ScaleGestureDetector d) { pinchAccum *= d.getScaleFactor(); return true; }
             @Override public void onScaleEnd(ScaleGestureDetector d) {
-                if (!controlsLocked) {
+                if (!controlsLocked && isControllerState(playbackUiState)) {
                     if (pinchAccum > 1.15f) {
                         playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
                         if (resizeButton != null) {
@@ -2232,19 +3085,28 @@ public class PlayerActivity extends Activity {
             }
         });
 
-        View touchLayer = new View(this);
-        touchLayer.setId(R.id.norva_player_controls);
-        touchLayer.setContentDescription(getString(R.string.player_show_controls));
-        touchLayer.setOnTouchListener((v, ev) -> {
+        gestureTouchLayer = new View(this);
+        gestureTouchLayer.setId(R.id.norva_player_controls);
+        gestureTouchLayer.setContentDescription(getString(R.string.player_show_controls));
+        gestureTouchLayer.setEnabled(isControllerState(playbackUiState));
+        gestureTouchLayer.setImportantForAccessibility(isControllerState(playbackUiState)
+                ? View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        gestureTouchLayer.setOnClickListener(v -> {
+            // Accessibility services activate this surface as a normal click.
+            if (!isControllerState(playbackUiState) || controlsLocked) return;
+            if (playerView.isControllerFullyVisible()) playerView.hideController();
+            else playerView.showController();
+        });
+        gestureTouchLayer.setOnTouchListener((v, ev) -> {
             scaleDetector.onTouchEvent(ev);
             boolean handled = detector.onTouchEvent(ev);
             if (ev.getAction() == MotionEvent.ACTION_UP) {
                 verticalDragMode = 0;
-                v.performClick();
             }
             return handled;
         });
-        overlay.addView(touchLayer, new FrameLayout.LayoutParams(
+        overlay.addView(gestureTouchLayer, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         overlay.addView(seekBubble, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
@@ -2260,20 +3122,26 @@ public class PlayerActivity extends Activity {
         unlockBtn = new Button(this);
         unlockBtn.setId(R.id.norva_player_unlock_button);
         unlockBtn.setText(getString(R.string.player_unlock));
-        unlockBtn.setTextColor(Color.WHITE);
-        unlockBtn.setBackgroundColor(Color.parseColor("#99000000"));
+        unlockBtn.setAllCaps(false);
+        unlockBtn.setMinHeight(dp(48));
+        unlockBtn.setPadding(dp(20), 0, dp(20), 0);
+        unlockBtn.setTextColor(color(R.color.norva_text_primary));
+        unlockBtn.setBackground(buttonBackground(
+                Color.parseColor("#E612121A"),
+                color(R.color.norva_bg_tertiary)));
         unlockBtn.setVisibility(View.GONE);
         unlockBtn.setOnClickListener(v -> setControlsLocked(false));
         FrameLayout.LayoutParams unlockLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        unlockLp.topMargin = dp(28);
+        unlockLp.topMargin = dp(16) + safeInsetTop;
         overlay.addView(unlockBtn, unlockLp);
     }
 
     private void setControlsLocked(boolean locked) {
+        if (locked && !isControllerState(playbackUiState)) return;
         controlsLocked = locked;
-        playerView.setUseController(!locked);
+        playerView.setUseController(!locked && isControllerState(playbackUiState));
         if (locked) {
             playerView.hideController();
             if (lockBtn != null) lockBtn.setVisibility(View.GONE);
@@ -2282,18 +3150,25 @@ public class PlayerActivity extends Activity {
             updateCompactControlVisibility(false);
             flashUnlockButton();
         } else {
-            unlockBtn.removeCallbacks(hideUnlockBtn);
-            unlockBtn.setVisibility(View.GONE);
-            playerView.showController();
-            updateTrackButtonVisibility(true);
-            updateTopBarVisibility(true);
-            updateCompactControlVisibility(true);
+            if (unlockBtn != null) {
+                unlockBtn.removeCallbacks(hideUnlockBtn);
+                unlockBtn.setVisibility(View.GONE);
+            }
+            if (isControllerState(playbackUiState)) {
+                playerView.showController();
+                updateTrackButtonVisibility(true);
+                updateTopBarVisibility(true);
+                updateCompactControlVisibility(true);
+            }
         }
+        playerView.announceForAccessibility(getString(locked
+                ? R.string.player_controls_locked
+                : R.string.player_controls_unlocked));
     }
 
     /** While locked, a tap reveals the unlock pill for a few seconds. */
     private void flashUnlockButton() {
-        if (unlockBtn == null) return;
+        if (unlockBtn == null || !controlsLocked || !isControllerState(playbackUiState)) return;
         unlockBtn.setVisibility(View.VISIBLE);
         unlockBtn.removeCallbacks(hideUnlockBtn);
         unlockBtn.postDelayed(hideUnlockBtn, 3000);
@@ -2485,11 +3360,11 @@ public class PlayerActivity extends Activity {
                         String localUrl = fallbackTried && fallbackUrl != null
                                 ? fallbackUrl : originalUrl;
                         trackPreferencesApplied = false;
-                        player.setMediaItem(new MediaItem.Builder().setUri(localUrl).build(),
+                        prepareMediaItem(
+                                new MediaItem.Builder().setUri(localUrl).build(),
                                 resumePositionMs > 0 && !"channel".equals(itemType)
-                                        ? resumePositionMs : 0L);
-                        player.prepare();
-                        player.setPlayWhenReady(true);
+                                        ? resumePositionMs : 0L,
+                                PlaybackUiState.RECOVERING);
                     }
                 });
             }
@@ -2533,9 +3408,77 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    private void deactivatePlaybackForBackground() {
+        boolean wasActive = playbackActive;
+        playbackActive = false;
+        pipAutoEnterArmed = false;
+        if (player != null) {
+            resumePlaybackOnResume = resumePlaybackOnResume
+                    || player.getPlayWhenReady()
+                    || recoveryInProgress
+                    || pendingDelayedRecovery
+                    || freshStreamRequested;
+        }
+        if (wasActive) recoveryGeneration++;
+        errHandler.removeCallbacks(bufferWatchdog);
+        errHandler.removeCallbacks(delayedRecovery);
+        errHandler.removeCallbacks(healthyRecoveryReset);
+        errHandler.removeCallbacks(longStartNotice);
+        errHandler.removeCallbacks(freshStreamTimeout);
+        freshStreamTimeoutDeferred = freshStreamRequested;
+        longStartScheduled = false;
+        if (player != null) player.pause();
+    }
+
+    private void resumePlaybackAfterForegroundReturn() {
+        if (player == null) return;
+        if (pendingDelayedRecovery) {
+            MediaItem deferredItem = pendingDelayedRecoveryItem;
+            long deferredPositionMs = pendingDelayedRecoveryPositionMs;
+            clearPendingDelayedRecovery();
+            resumePlaybackOnResume = false;
+            if (deferredItem != null) {
+                prepareMediaItem(
+                        deferredItem,
+                        deferredPositionMs,
+                        PlaybackUiState.RECOVERING);
+            }
+        } else if (freshStreamRequested) {
+            // The provider socket was deliberately stopped while a token-bound
+            // replacement is being resolved. Never reopen that stale URL merely
+            // because the Activity returned to the foreground.
+            resumePlaybackOnResume = false;
+        } else if (resumePlaybackOnResume
+                && playbackUiState != PlaybackUiState.TERMINAL
+                && playbackUiState != PlaybackUiState.OFFLINE) {
+            resumePlaybackOnResume = false;
+            player.play();
+        }
+
+        if (freshStreamRequested && freshStreamTimeoutDeferred) {
+            freshStreamTimeoutDeferred = false;
+            errHandler.removeCallbacks(freshStreamTimeout);
+            errHandler.postDelayed(freshStreamTimeout, 25_000L);
+        }
+        if (player.getPlaybackState() == Player.STATE_BUFFERING) {
+            errHandler.removeCallbacks(bufferWatchdog);
+            errHandler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+        }
+        boolean waiting = playbackUiState == PlaybackUiState.PREPARING
+                || playbackUiState == PlaybackUiState.INITIAL_BUFFERING
+                || playbackUiState == PlaybackUiState.RECOVERING;
+        if (waiting && !longStartShown) {
+            longStartScheduled = false;
+            transitionTo(playbackUiState, false);
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        playbackActive = true;
+        pipAutoEnterArmed = false;
+        resumePlaybackAfterForegroundReturn();
         applyImmersive();
         if (playerRoot != null) playerRoot.requestApplyInsets();
     }
@@ -2566,6 +3509,13 @@ public class PlayerActivity extends Activity {
     private void handleBackPressed() {
         if (trackDialog != null) {
             trackDialog.dismiss();
+            return;
+        }
+        // A locked player consumes Back once to restore controls. Exiting while
+        // the viewer is explicitly locked is surprising and makes the lock feel
+        // unreliable; a second Back still leaves normally.
+        if (controlsLocked) {
+            setControlsLocked(false);
             return;
         }
         finishWithoutRecovery();
@@ -2610,6 +3560,7 @@ public class PlayerActivity extends Activity {
     protected void onStop() {
         super.onStop();
         persistPendingProgress();
+        if (!isInPipMode()) deactivatePlaybackForBackground();
     }
 
     /**
@@ -2681,9 +3632,13 @@ public class PlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         persistPendingProgress();
-        // Keep playing while in Picture-in-Picture; only pause when truly backgrounded.
-        boolean inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
-        if (player != null && !inPip) player.pause();
+        // Android 12 auto-enter reports onPause immediately before PiP becomes
+        // observable. Keep that one transition alive; every other background
+        // path cancels recovery work and cannot restart playback.
+        boolean inPip = isInPipMode();
+        boolean enteringAutoPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && pipAutoEnterArmed;
+        if (!inPip && !enteringAutoPip) deactivatePlaybackForBackground();
     }
 
     // Picture-in-Picture: when the user leaves (Home / recents) while a video is
@@ -2693,8 +3648,20 @@ public class PlayerActivity extends Activity {
         super.onUserLeaveHint();
         persistPendingProgress();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        if (player == null || !player.isPlaying()) return;
-        try { enterPictureInPictureMode(buildPipParams()); } catch (Exception ignored) { }
+        if (player == null || !player.isPlaying()
+                || playbackUiState != PlaybackUiState.PLAYING
+                || !firstFrameForCurrentRoute) return;
+        try {
+            PictureInPictureParams params = buildPipParams();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Android 12+ enters automatically with a continuous animation.
+                // The params are also refreshed whenever play state changes.
+                pipAutoEnterArmed = true;
+                setPictureInPictureParams(params);
+            } else {
+                enterPictureInPictureMode(params);
+            }
+        } catch (Exception ignored) { }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -2710,6 +3677,18 @@ public class PlayerActivity extends Activity {
             }
         } catch (Exception ignored) { }
         PictureInPictureParams.Builder b = new PictureInPictureParams.Builder().setAspectRatio(ratio);
+        if (playerView != null) {
+            Rect sourceRect = new Rect();
+            if (playerView.getGlobalVisibleRect(sourceRect) && !sourceRect.isEmpty()) {
+                b.setSourceRectHint(sourceRect);
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            b.setAutoEnterEnabled(player != null
+                    && player.isPlaying()
+                    && playbackUiState == PlaybackUiState.PLAYING
+                    && firstFrameForCurrentRoute);
+        }
         // Transport control on the mini window (Netflix PiP shows play/pause).
         try {
             boolean playing = player != null && player.isPlaying();
@@ -2721,7 +3700,13 @@ public class PlayerActivity extends Activity {
             Icon icon = Icon.createWithResource(this,
                     playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
             b.setActions(java.util.Collections.singletonList(
-                    new RemoteAction(icon, playing ? "Pause" : "Play", "Play/Pause", pi)));
+                    new RemoteAction(
+                            icon,
+                            getString(playing
+                                    ? R.string.player_pip_pause
+                                    : R.string.player_pip_play),
+                            getString(R.string.player_pip_play_pause),
+                            pi)));
         } catch (Exception ignored) { /* actions are optional */ }
         return b.build();
     }
@@ -2730,23 +3715,42 @@ public class PlayerActivity extends Activity {
     private void refreshPipActions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         try {
-            if (isInPictureInPictureMode()) setPictureInPictureParams(buildPipParams());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || isInPipMode()) {
+                setPictureInPictureParams(buildPipParams());
+            }
         } catch (Exception ignored) { }
+    }
+
+    private boolean isInPipMode() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                && isInPictureInPictureMode();
     }
 
     @Override
     public void onPictureInPictureModeChanged(boolean isInPip, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPip, newConfig);
+        pipAutoEnterArmed = false;
+        if (isInPip) playbackActive = true;
         if (playerView != null) {
             // No transport UI inside the tiny PiP window.
-            playerView.setUseController(!isInPip);
+            playerView.setUseController(!isInPip && !controlsLocked
+                    && isControllerState(playbackUiState));
             if (isInPip) playerView.hideController();
+            else renderPlaybackUiState(false);
         }
     }
 
     @Override
     protected void onDestroy() {
         playbackAuthToken = null;
+        firstFrameTestToken = null;
+        playbackActive = false;
+        pipAutoEnterArmed = false;
+        resumePlaybackOnResume = false;
+        freshStreamTimeoutDeferred = false;
+        clearPendingDelayedRecovery();
+        posterLoadGeneration++;
+        posterExecutor.shutdownNow();
         errHandler.removeCallbacksAndMessages(null);
         if (freshStreamReceiver != null) {
             try { unregisterReceiver(freshStreamReceiver); } catch (Exception ignored) { }
@@ -2757,6 +3761,10 @@ public class PlayerActivity extends Activity {
         if (castSupport != null) { castSupport.stop(); castSupport = null; }
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }
+        if (statePoster != null) {
+            statePoster.setImageDrawable(null);
+            statePoster = null;
+        }
         super.onDestroy();
     }
 }

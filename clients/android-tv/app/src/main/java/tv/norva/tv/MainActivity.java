@@ -8,11 +8,15 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
@@ -67,6 +71,9 @@ public class MainActivity extends Activity {
     private LinearLayout errorPanel;
     private TextView errorText;
     private Button errorRetryBtn;
+    private FrameLayout exitPanel;
+    private LinearLayout exitActions;
+    private View exitReturnFocus;
     private String lastLoadedUrl;
     private boolean cloudBridgeAdded;
     private boolean nativeBridgeAdded;
@@ -122,6 +129,7 @@ public class MainActivity extends Activity {
         buildSetupPanel();
         buildErrorPanel();
         buildSplash();
+        buildExitPanel();
         showSplash();
         registerPlayerRecoveryBridge();
 
@@ -331,10 +339,6 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setUserAgentString(s.getUserAgentString() + UA_SUFFIX);
-        if (debugBundledDpadAssets) {
-            webView.addJavascriptInterface(new DpadAuditBridge(), "__norvaDpadAudit");
-        }
-
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
@@ -370,10 +374,6 @@ public class MainActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 configureWebSecurity(url);
-                if (debugBundledDpadAssets) {
-                    view.postDelayed(() -> installDpadAuditProbe(view), 4_000);
-                    view.postDelayed(() -> installDpadAuditProbe(view), 12_000);
-                }
                 // Honest readiness: navigating away (pairing screen, error page, redirect)
                 // means the bridge is gone until the next app-shell finishes loading.
                 webAppReady = false;
@@ -383,7 +383,6 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 hideSplash();
                 webAppReady = isAppShellUrl(url);
-                if (debugBundledDpadAssets) installDpadAuditProbe(view);
                 if (!webAppReady) return; // no bridge on this page — nothing to flush against
                 // Flush any position the native player persisted before a non-graceful
                 // exit (power-off/standby/crash). Small delay lets standalone.js install
@@ -437,12 +436,51 @@ public class MainActivity extends Activity {
         if ("/js/utils/tvNavigation.js".equals(path)) {
             assetPath = "www/js/utils/tvNavigation.js";
             mimeType = "application/javascript";
+        } else if ("/js/utils/standalone.js".equals(path)) {
+            assetPath = "www/js/utils/standalone.js";
+            mimeType = "application/javascript";
+        } else if ("/js/api.js".equals(path)) {
+            assetPath = "www/js/api.js";
+            mimeType = "application/javascript";
+        } else if ("/js/app.js".equals(path)) {
+            assetPath = "www/js/app.js";
+            mimeType = "application/javascript";
+        } else if ("/js/profiles.js".equals(path)) {
+            assetPath = "www/js/profiles.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/HomePage.js".equals(path)) {
+            assetPath = "www/js/pages/HomePage.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/LivePage.js".equals(path)) {
+            assetPath = "www/js/pages/LivePage.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/WatchPage.js".equals(path)) {
+            assetPath = "www/js/pages/WatchPage.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/MoviesPage.js".equals(path)) {
+            assetPath = "www/js/pages/MoviesPage.js";
+            mimeType = "application/javascript";
         } else if ("/js/pages/SeriesPage.js".equals(path)) {
             assetPath = "www/js/pages/SeriesPage.js";
+            mimeType = "application/javascript";
+        } else if ("/js/pages/Settings.js".equals(path)) {
+            assetPath = "www/js/pages/Settings.js";
+            mimeType = "application/javascript";
+        } else if ("/js/components/ChannelList.js".equals(path)) {
+            assetPath = "www/js/components/ChannelList.js";
+            mimeType = "application/javascript";
+        } else if ("/js/components/VideoPlayer.js".equals(path)) {
+            assetPath = "www/js/components/VideoPlayer.js";
+            mimeType = "application/javascript";
+        } else if ("/js/components/LiveGuideFusion.js".equals(path)) {
+            assetPath = "www/js/components/LiveGuideFusion.js";
             mimeType = "application/javascript";
         } else if ("/js/components/MultiSelect.js".equals(path)) {
             assetPath = "www/js/components/MultiSelect.js";
             mimeType = "application/javascript";
+        } else if ("/app".equals(path) || "/app.html".equals(path)) {
+            assetPath = "www/app.html";
+            mimeType = "text/html";
         } else if ("/css/main.css".equals(path)) {
             assetPath = "www/css/main.css";
             mimeType = "text/css";
@@ -462,38 +500,17 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void installDpadAuditProbe(WebView view) {
-        if (view == null) return;
-        view.evaluateJavascript(
-                "(function(){"
-                        + "if(window.__norvaDpadAuditProbe)return;"
-                        + "window.__norvaDpadAuditProbe=true;"
-                        + "function l(m){"
-                        + "if(window.__norvaDpadAudit&&window.__norvaDpadAudit.log)"
-                        + "window.__norvaDpadAudit.log(m);"
-                        + "else console.log('[TV-AUDIT] '+m);"
-                        + "}"
-                        + "function d(e){"
-                        + "if(!e)return 'none';"
-                        + "var p=e.closest?e.closest('.page'):null;"
-                        + "return 'id='+(e.id||'-')"
-                        + "+' class='+String(e.className||'-').replace(/\\s+/g,'.')"
-                        + "+' text='+String(e.textContent||'').trim().replace(/\\s+/g,' ').slice(0,60)"
-                        + "+' page='+(p?p.id:'-');"
-                        + "}"
-                        + "document.addEventListener('focusin',function(e){"
-                        + "l('focus '+d(e.target));"
-                        + "},true);"
-                        + "l('ready '+d(document.activeElement));"
-                        + "})();",
-                null
-        );
-    }
-
-    private final class DpadAuditBridge {
-        @android.webkit.JavascriptInterface
-        public void log(String message) {
-            android.util.Log.i("NorvaTV", "[TV-AUDIT] " + String.valueOf(message));
+    private static String markRendererRecovery(String url) {
+        if (url == null || url.isEmpty()) return url;
+        try {
+            Uri uri = Uri.parse(url);
+            if ("1".equals(uri.getQueryParameter("_rendererRecovery"))) return url;
+            return uri.buildUpon()
+                    .appendQueryParameter("_rendererRecovery", "1")
+                    .build()
+                    .toString();
+        } catch (Exception ignored) {
+            return url;
         }
     }
 
@@ -540,7 +557,7 @@ public class MainActivity extends Activity {
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
         webViewVisible = true;
-        webView.loadUrl(withShellCacheBust(recoveryUrl));
+        webView.loadUrl(withShellCacheBust(markRendererRecovery(recoveryUrl)));
         webView.requestFocus();
     }
 
@@ -724,24 +741,23 @@ public class MainActivity extends Activity {
     /**
      * Cache-bust the norva.tv app shell on every load.
      *
-     * The shell (cloud-pair.html / app.html) is served no-store so its freshly
+     * The cloud-pair and app HTML shells are served no-store so their freshly
      * hashed /css + /js references are always current — but that header is recent,
      * and a WebView that cached the shell under the previous must-revalidate policy
      * can cling to an OLD shell (and thus an OLD /css/main.css hash it holds
      * `immutable` for a year), stranding the TV on stale UI even after a clean
      * deploy. Appending a per-launch `_cb` param gives the shell a URL the WebView
      * cache has never seen, forcing a real refetch of the shell and, through its new
-     * hashes, the current CSS/JS. Scoped to norva.tv *.html only: the LAN "server"
-     * mode URL, media/stream URLs and deep links to non-html paths are left
+     * hashes, the current CSS/JS. Scoped to norva.tv HTML documents plus the
+     * extensionless /app route: LAN mode, media URLs and other paths are left
      * untouched, and the immutable hashed assets still cache forever — only the tiny
      * shell document is refetched. (Ported from the phone client, which fixed this
-     * exact staleness.) The cloud-pair.html shell also re-appends `_cb` to its
-     * returnTo app.html redirect, so the second hop is refetched too.
+     * exact staleness.)
      */
     /**
-     * The SPA shell — the only pages where standalone.js installs __norvaNative: norva.tv (or a
-     * custom server's) /app.html, or the embedded/LAN server root. cloud-pair.html, the landing
-     * page and error documents do NOT count: flushing progress against them silently no-ops.
+     * The SPA shell — norva.tv /app or /app.html, plus the embedded/LAN server root.
+     * Pairing, landing and error documents do NOT count: flushing progress against
+     * them silently no-ops.
      */
     private static boolean isAppShellUrl(String url) {
         if (url == null) return false;
@@ -749,11 +765,16 @@ public class MainActivity extends Activity {
             Uri u = Uri.parse(url);
             String path = u.getPath();
             if (path == null || path.isEmpty()) path = "/";
-            if (path.endsWith("/app.html")) return true;
             String host = u.getHost();
             boolean norva = "norva.tv".equalsIgnoreCase(host);
-            // Embedded (127.0.0.1) and LAN "server" mode serve the app at their root.
-            if (!norva && ("/".equals(path) || path.endsWith("/index.html"))) return true;
+            if (norva) {
+                return "/app".equals(path) || "/app.html".equals(path);
+            }
+            // Embedded (127.0.0.1) and authorized LAN "server" mode may serve
+            // the app at their root, index.html or a nested app.html path.
+            if ("/".equals(path)
+                    || path.endsWith("/app.html")
+                    || path.endsWith("/index.html")) return true;
         } catch (Exception ignored) { /* fall through */ }
         return false;
     }
@@ -764,7 +785,9 @@ public class MainActivity extends Activity {
             Uri u = Uri.parse(url);
             if (!"norva.tv".equalsIgnoreCase(u.getHost())) return url;
             String path = u.getPath();
-            if (path == null || !path.endsWith(".html")) return url;
+            boolean shellDocument = path != null
+                    && (path.endsWith(".html") || "/app".equals(path));
+            if (!shellDocument) return url;
             String frag = u.getFragment();
             String out = u.buildUpon()
                     .fragment(null)
@@ -1037,6 +1060,7 @@ public class MainActivity extends Activity {
                 if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
                 if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
                 if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
+                if (poster != null && !poster.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_POSTER_URL, poster);
                 if (nextTitle != null && !nextTitle.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
                 if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
                 if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
@@ -1500,6 +1524,210 @@ public class MainActivity extends Activity {
         if (errorRetryBtn != null) errorRetryBtn.requestFocus();
     }
 
+    /**
+     * Branded TV confirmation shown over the app shell. It deliberately lives
+     * in our view hierarchy instead of a system dialog so focus and Back are
+     * deterministic on every TV launcher.
+     */
+    private void buildExitPanel() {
+        exitPanel = new FrameLayout(this);
+        exitPanel.setId(R.id.norva_tv_exit_panel);
+        exitPanel.setBackgroundColor(Color.parseColor("#D905050A"));
+        exitPanel.setVisibility(View.GONE);
+        exitPanel.setFocusable(false);
+        exitPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        card.setPadding(dp(34), dp(30), dp(34), dp(32));
+        GradientDrawable cardBackground = new GradientDrawable();
+        cardBackground.setColor(Color.parseColor("#FA111119"));
+        cardBackground.setCornerRadius(dp(20));
+        cardBackground.setStroke(dp(1), Color.parseColor("#3DFFFFFF"));
+        card.setBackground(cardBackground);
+
+        TextView title = new TextView(this);
+        title.setText(R.string.tv_exit_title);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(28);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        card.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView message = new TextView(this);
+        message.setText(R.string.tv_exit_message);
+        message.setTextColor(Color.parseColor("#B4B4BF"));
+        message.setTextSize(17);
+        message.setGravity(Gravity.CENTER);
+        message.setPadding(dp(24), dp(10), dp(24), dp(26));
+        card.addView(message, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        exitActions = new LinearLayout(this);
+        exitActions.setOrientation(LinearLayout.HORIZONTAL);
+        exitActions.setGravity(Gravity.CENTER);
+
+        TextView cancel = exitAction(
+                R.id.norva_tv_exit_cancel,
+                getString(R.string.tv_exit_cancel),
+                new Runnable() {
+                    @Override public void run() { closeExitDialog(true); }
+                });
+        TextView settings = exitAction(
+                R.id.norva_tv_exit_connection_settings,
+                getString(R.string.tv_connection_settings),
+                new Runnable() {
+                    @Override public void run() {
+                        closeExitDialog(false);
+                        if (advancedPanel != null) advancedPanel.setVisibility(View.VISIBLE);
+                        showSetup(null);
+                        if (urlInput != null) urlInput.requestFocus();
+                    }
+                });
+        TextView confirm = exitAction(
+                R.id.norva_tv_exit_confirm,
+                getString(R.string.tv_exit_confirm),
+                new Runnable() {
+                    @Override public void run() {
+                        closeExitDialog(false);
+                        finish();
+                    }
+                });
+
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(240), dp(60));
+        actionLp.leftMargin = dp(8);
+        actionLp.rightMargin = dp(8);
+        exitActions.addView(cancel, new LinearLayout.LayoutParams(actionLp));
+        exitActions.addView(settings, new LinearLayout.LayoutParams(actionLp));
+        exitActions.addView(confirm, new LinearLayout.LayoutParams(actionLp));
+
+        // Explicit links complement the dispatcher and keep OEM focus engines
+        // and accessibility services inside the three-action loop.
+        cancel.setNextFocusLeftId(R.id.norva_tv_exit_confirm);
+        cancel.setNextFocusRightId(R.id.norva_tv_exit_connection_settings);
+        settings.setNextFocusLeftId(R.id.norva_tv_exit_cancel);
+        settings.setNextFocusRightId(R.id.norva_tv_exit_confirm);
+        confirm.setNextFocusLeftId(R.id.norva_tv_exit_connection_settings);
+        confirm.setNextFocusRightId(R.id.norva_tv_exit_cancel);
+        cancel.setNextFocusUpId(R.id.norva_tv_exit_cancel);
+        cancel.setNextFocusDownId(R.id.norva_tv_exit_cancel);
+        settings.setNextFocusUpId(R.id.norva_tv_exit_connection_settings);
+        settings.setNextFocusDownId(R.id.norva_tv_exit_connection_settings);
+        confirm.setNextFocusUpId(R.id.norva_tv_exit_confirm);
+        confirm.setNextFocusDownId(R.id.norva_tv_exit_confirm);
+
+        card.addView(exitActions);
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                Math.min(dp(930), getResources().getDisplayMetrics().widthPixels - dp(120)),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
+        exitPanel.addView(card, cardLp);
+        root.addView(exitPanel, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private TextView exitAction(int id, String label, final Runnable action) {
+        final TextView button = new TextView(this);
+        button.setId(id);
+        button.setText(label);
+        button.setTextSize(17);
+        button.setGravity(Gravity.CENTER);
+        button.setSingleLine(true);
+        button.setFocusable(true);
+        button.setClickable(true);
+        button.setContentDescription(label);
+        styleExitAction(button, false);
+        button.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View view, boolean hasFocus) {
+                styleExitAction((TextView) view, hasFocus);
+            }
+        });
+        button.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { action.run(); }
+        });
+        return button;
+    }
+
+    private void styleExitAction(TextView button, boolean focused) {
+        GradientDrawable background = new GradientDrawable();
+        background.setCornerRadius(dp(11));
+        if (focused) {
+            background.setColor(Color.parseColor("#F4F4F7"));
+            background.setStroke(dp(2), Color.WHITE);
+            button.setTextColor(Color.parseColor("#09090F"));
+        } else {
+            background.setColor(Color.parseColor("#1A1A24"));
+            background.setStroke(dp(1), Color.parseColor("#32FFFFFF"));
+            button.setTextColor(button.getId() == R.id.norva_tv_exit_confirm
+                    ? Color.parseColor("#FCA5A5") : Color.WHITE);
+        }
+        button.setBackground(background);
+        button.animate()
+                .scaleX(focused ? 1.04f : 1f)
+                .scaleY(focused ? 1.04f : 1f)
+                .setDuration(120)
+                .start();
+    }
+
+    private boolean isExitDialogVisible() {
+        return exitPanel != null && exitPanel.getVisibility() == View.VISIBLE;
+    }
+
+    private static boolean isExitModalKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_BACK
+                || keyCode == KeyEvent.KEYCODE_ESCAPE
+                || keyCode == KeyEvent.KEYCODE_MENU
+                || keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                || keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
+    }
+
+    private boolean dispatchExitModalKey(int keyCode) {
+        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            closeExitDialog(true);
+            return true;
+        }
+        if (exitActions == null || exitActions.getChildCount() == 0) return true;
+
+        View current = getCurrentFocus();
+        int index = exitActions.indexOfChild(current);
+        if (index < 0) index = 0;
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            int delta = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+            int next = (index + delta + exitActions.getChildCount())
+                    % exitActions.getChildCount();
+            exitActions.getChildAt(next).requestFocus();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            View action = exitActions.getChildAt(index);
+            if (action != null) action.performClick();
+            return true;
+        }
+        // Up, Down and MENU stay inside the modal instead of reaching the app.
+        return true;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isExitDialogVisible() && isExitModalKey(event.getKeyCode())) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                return dispatchExitModalKey(event.getKeyCode());
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_MENU && webViewVisible) {
@@ -1514,6 +1742,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (isExitDialogVisible()) {
+            closeExitDialog(true);
+            return;
+        }
         if (!webViewVisible || webView == null) {
             super.onBackPressed();
             return;
@@ -1555,25 +1787,70 @@ public class MainActivity extends Activity {
      * no MENU key, and this dialog is one BACK press away from anywhere.
      */
     private void showExitDialog() {
-        try {
-            new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                    .setTitle("Exit Norva?")
-                    .setPositiveButton("Exit", new android.content.DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(android.content.DialogInterface dialog, int which) { finish(); }
-                    })
-                    .setNeutralButton("Connection settings", new android.content.DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(android.content.DialogInterface dialog, int which) {
-                            showSetup(null);
-                            if (advancedPanel != null) advancedPanel.setVisibility(View.VISIBLE);
-                        }
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        } catch (Exception e) {
-            finish();
+        if (exitPanel == null || isExitDialogVisible()) return;
+        exitReturnFocus = getCurrentFocus();
+        if (webView != null) {
+            webView.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         }
+        if (setupPanel != null) {
+            setupPanel.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+        if (errorPanel != null) {
+            errorPanel.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+        if (splashPanel != null) {
+            splashPanel.setImportantForAccessibility(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        }
+        exitPanel.setVisibility(View.VISIBLE);
+        exitPanel.bringToFront();
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            exitPanel.setAccessibilityPaneTitle(getString(R.string.tv_exit_title));
+        }
+        final View safeAction = exitActions == null ? null
+                : exitActions.findViewById(R.id.norva_tv_exit_cancel);
+        exitPanel.post(new Runnable() {
+            @Override public void run() {
+                if (safeAction != null && safeAction.isShown()) safeAction.requestFocus();
+            }
+        });
+    }
+
+    /** Closes the sheet; Back/Cancel return to the exact previously focused view. */
+    private void closeExitDialog(boolean restoreOrigin) {
+        if (!isExitDialogVisible()) return;
+        final View returnFocus = exitReturnFocus;
+        exitReturnFocus = null;
+        exitPanel.setVisibility(View.GONE);
+        if (webView != null) {
+            webView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+        if (setupPanel != null) {
+            setupPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+        if (errorPanel != null) {
+            errorPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+        if (splashPanel != null) {
+            splashPanel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+        if (!restoreOrigin || root == null) return;
+        root.post(new Runnable() {
+            @Override public void run() {
+                if (returnFocus != null
+                        && returnFocus.isShown()
+                        && returnFocus.isFocusable()
+                        && returnFocus.requestFocus()) {
+                    return;
+                }
+                if (webViewVisible && webView != null && webView.isShown()) {
+                    webView.requestFocus();
+                }
+            }
+        });
     }
 
     @Override

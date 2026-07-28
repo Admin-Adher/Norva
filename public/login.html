@@ -337,7 +337,7 @@
                 window.location.replace(window.__norvaLoginReturnTo || '/');
 
             } catch (err) {
-                errorMessage.textContent = err.message;
+                errorMessage.textContent = 'Sign-in could not be completed. Check your details and try again.';
                 errorMessage.classList.add('show');
                 submitBtn.disabled = false;
                 submitBtn.textContent = isSetupMode ? 'Create account' : 'Sign in';

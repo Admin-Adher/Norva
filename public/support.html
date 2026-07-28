@@ -118,7 +118,7 @@
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=1"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=21"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=29"></script>
 </head>
 <body>
   <script>
@@ -273,10 +273,10 @@
         } catch (e) {
           // Non-destructive on a post-action refresh: keep whatever is on screen, surface a note.
           if (el.children.length && !el.querySelector('.skeleton')) {
-            const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Could not refresh your tickets: ' + e.message;
+            const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Could not refresh your tickets. Check your connection and try again.';
             el.appendChild(n);
           } else {
-            el.innerHTML = '<div class="empty">Could not load your tickets — ' + esc(e.message) + '</div>';
+            el.innerHTML = '<div class="empty">Could not load your tickets. Check your connection and try again.</div>';
           }
         }
       }
@@ -342,7 +342,7 @@
               await loadTickets({ expandIds: currentOpenIds() });
             } catch (e) {
               b.disabled = false; b.dataset.arm = '';
-              b.textContent = 'Could not close: ' + e.message;
+              b.textContent = 'Could not close this ticket. Try again.';
             }
           });
         });
@@ -377,7 +377,7 @@
           await loadTickets({ expandIds: openIds, scrollId: id });
         } catch (e) {
           b.disabled = false; b.textContent = 'Send';
-          if (fb) fb.textContent = 'Could not send: ' + e.message;
+          if (fb) fb.textContent = 'Could not send your reply. Try again.';
         }
       }
 
@@ -404,7 +404,7 @@
           fb.focus();
           await loadTickets({ scrollId: res && res.ticket_id });
         } catch (e) {
-          errEl.textContent = 'Could not send: ' + e.message;
+          errEl.textContent = 'Could not send your message. Check your connection and try again.';
         }
         btn.disabled = false; btn.textContent = 'Send to support';
       });

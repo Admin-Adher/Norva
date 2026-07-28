@@ -221,6 +221,21 @@
         .status.info { display: block; background: rgba(79, 125, 243, 0.11); color: #bfdbfe; }
         .status.success { display: block; background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
         .status.error { display: block; background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
+        .account-confirm {
+            width: min(420px, calc(100vw - 32px));
+            color: var(--text);
+            background: #121823;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 22px;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, .56);
+        }
+        .account-confirm::backdrop { background: rgba(3, 6, 12, .78); backdrop-filter: blur(6px); }
+        .account-confirm h2 { margin: 0 0 8px; font-size: 21px; }
+        .account-confirm p { margin: 0 0 18px; color: var(--muted); line-height: 1.5; }
+        .account-confirm-actions { display: grid; gap: 10px; }
+        .account-confirm-actions button { min-height: 48px; }
+        .account-confirm-signout { color: #fff; background: #b91c1c; }
         .fine {
             color: var(--quiet);
             font-size: 12px;
@@ -416,12 +431,14 @@
         </section>
 
         <section class="panel" aria-label="Account">
-            <div class="tabs" id="tabs">
-                <button class="tab active" type="button" data-tab="signin">Sign in</button>
-                <button class="tab" type="button" data-tab="signup">Create account</button>
+            <div class="tabs" id="tabs" role="tablist" aria-label="Account access">
+                <button class="tab active" id="signin-tab" type="button" data-tab="signin"
+                        role="tab" aria-selected="true" aria-controls="signin-form">Sign in</button>
+                <button class="tab" id="signup-tab" type="button" data-tab="signup"
+                        role="tab" aria-selected="false" aria-controls="signup-form" tabindex="-1">Create account</button>
             </div>
 
-            <form class="form active" id="signin-form">
+            <form class="form active" id="signin-form" role="tabpanel" aria-labelledby="signin-tab">
                 <div class="auth-lead" data-passwordless>
                     <span class="auth-badge">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18 7 3.11V11c0 4.52-3.05 8.79-7 9.93V3.18z"/></svg>
@@ -450,7 +467,7 @@
                 <button class="ghost" type="button" id="forgot-button">Forgot password</button>
             </form>
 
-            <form class="form" id="signup-form">
+            <form class="form" id="signup-form" role="tabpanel" aria-labelledby="signup-tab" hidden>
                 <div class="auth-lead" data-passwordless>
                     <span class="auth-badge">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18 7 3.11V11c0 4.52-3.05 8.79-7 9.93V3.18z"/></svg>
@@ -519,7 +536,7 @@
                 </button>
             </div>
 
-            <form class="form" id="recover-form">
+            <form class="form" id="recover-form" hidden>
                 <p class="recovery-title">Reset password</p>
                 <p class="recovery-copy">Enter your email and Norva will send a secure recovery link.</p>
                 <div class="field">
@@ -530,7 +547,7 @@
                 <button class="secondary" type="button" id="back-to-signin">Back to sign in</button>
             </form>
 
-            <form class="form" id="password-form">
+            <form class="form" id="password-form" hidden>
                 <p class="recovery-title">Choose a new password</p>
                 <p class="recovery-copy">Set a new password for your Norva Account.</p>
                 <!-- Hidden username field paired with the new-password input: lets
@@ -546,7 +563,7 @@
                 <button class="primary" type="submit">Update password</button>
             </form>
 
-            <div class="status" id="status"></div>
+            <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true"></div>
             <p class="fine fine-collapse">Norva keeps your account session attached to your trusted screens.</p>
             <p class="fine">Norva is a media player and includes no content. You connect a compatible
               source you own and are authorized to use.</p>
@@ -578,10 +595,19 @@
             password: document.getElementById('password-form')
         };
 
-        boot();
-
-        document.querySelectorAll('.tab').forEach(button => {
+        const authTabs = [...document.querySelectorAll('#tabs [role="tab"]')];
+        authTabs.forEach(button => {
             button.addEventListener('click', () => showForm(button.dataset.tab));
+        });
+        tabs.addEventListener('keydown', (event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            const current = Math.max(0, authTabs.indexOf(document.activeElement));
+            const next = event.key === 'Home' ? 0
+                : event.key === 'End' ? authTabs.length - 1
+                    : (current + (event.key === 'ArrowRight' ? 1 : -1) + authTabs.length) % authTabs.length;
+            event.preventDefault();
+            authTabs[next].focus();
+            showForm(authTabs[next].dataset.tab);
         });
         document.getElementById('forgot-button').addEventListener('click', () => {
             document.getElementById('recover-email').value = document.getElementById('signin-email').value.trim();
@@ -608,6 +634,13 @@
             document.getElementById('signup-passwordless').hidden = on;
             const lead = forms.signup.querySelector('.auth-lead');
             if (lead) lead.hidden = on;
+            if (on) {
+                setTimeout(() => {
+                    const target = document.getElementById('signup-name')
+                        || document.getElementById('signup-email');
+                    try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                }, 0);
+            }
         }
         document.getElementById('use-password-toggle').addEventListener('click', () => setSigninPasswordMode(true));
         if (isNativeApp) {
@@ -718,8 +751,7 @@
             if (!idToken) {
                 if (error === 'google_not_configured') setStatus('error', 'Google sign-in isn’t available yet.');
                 else if (!error || /cancel/i.test(error)) setStatus('error', 'Google sign-in was cancelled.');
-                // Surface the real reason (config/propagation) so it can be acted on.
-                else setStatus('error', 'Google sign-in failed: ' + error);
+                else setStatus('error', 'Google sign-in couldn’t be completed. Try again, or use email sign-in.');
                 return;
             }
             try {
@@ -729,7 +761,7 @@
                 setStatus('success', 'Signed in. Opening Norva…');
                 location.replace(returnTo);
             } catch (e) {
-                setStatus('error', (e && e.message) || 'Google sign-in failed.');
+                setStatus('error', 'Google sign-in couldn’t be completed. Try again, or use email sign-in.');
             }
         };
 
@@ -864,12 +896,11 @@
                 const hp = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
                 const oauthError = hp.get('error') || params.get('error');
                 if (oauthError) {
-                    const desc = hp.get('error_description') || params.get('error_description') || '';
                     try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* noop */ }
                     showForm('signin');
                     setStatus('error', oauthError === 'access_denied'
                         ? 'Google sign-in was cancelled. Try again, or sign in with your email below.'
-                        : ('Google sign-in couldn’t be completed' + (desc ? ' (' + desc.replace(/\+/g, ' ') + ')' : '') + '. Sign in with your email below.'));
+                        : 'Google sign-in couldn’t be completed. Sign in with your email below.');
                     if (typeof showAuthHelp === 'function') showAuthHelp();
                     return;
                 }
@@ -976,8 +1007,16 @@
                 out.className = 'ghost';
                 out.textContent = 'Sign out';
                 out.addEventListener('click', async () => {
-                    try { await NorvaAuth.signOut(); } catch (_) { /* ignore */ }
-                    location.replace('/account.html');
+                    if (!await confirmAccountSignOut(out)) return;
+                    out.disabled = true;
+                    setStatus('info', 'Signing out…');
+                    try {
+                        await NorvaAuth.signOut();
+                        location.replace('/account.html');
+                    } catch (_) {
+                        out.disabled = false;
+                        setStatus('error', 'Couldn’t sign out. Check your connection and try again.');
+                    }
                 });
                 form.appendChild(out);
             }
@@ -993,11 +1032,23 @@
 
         function showForm(name) {
             clearAuthHelp();
-            Object.entries(forms).forEach(([key, form]) => form.classList.toggle('active', key === name));
-            document.querySelectorAll('.tab').forEach(button => {
-                button.classList.toggle('active', button.dataset.tab === name);
+            const activeBefore = document.activeElement;
+            const activeForm = Object.entries(forms).find(([, form]) => form.contains(activeBefore));
+            const focusNeedsMove = Boolean(activeForm && activeForm[0] !== name);
+            Object.entries(forms).forEach(([key, form]) => {
+                const active = key === name;
+                form.classList.toggle('active', active);
+                form.hidden = !active;
             });
-            tabs.style.display = name === 'recover' || name === 'password' ? 'none' : 'grid';
+            authTabs.forEach(button => {
+                const selected = button.dataset.tab === name;
+                button.classList.toggle('active', selected);
+                button.setAttribute('aria-selected', String(selected));
+                button.tabIndex = selected ? 0 : -1;
+            });
+            const tabsVisible = name !== 'recover' && name !== 'password';
+            tabs.style.display = tabsVisible ? 'grid' : 'none';
+            tabs.setAttribute('aria-hidden', String(!tabsVisible));
             if (socialEl) {
                 socialEl.style.display = socialEl.dataset.enabled && (name === 'signin' || name === 'signup') ? 'block' : 'none';
             }
@@ -1021,6 +1072,23 @@
                     username.value = email || params.get('email') || '';
                 }
             }
+            if (focusNeedsMove) {
+                requestAnimationFrame(() => {
+                    const preferred = {
+                        signin: 'signin-email',
+                        signup: 'signup-name',
+                        recover: 'recover-email',
+                        password: 'new-password'
+                    };
+                    let target = document.getElementById(preferred[name]);
+                    if (!target || target.hidden || target.closest('[hidden]')) {
+                        target = [...(forms[name]?.querySelectorAll(
+                            'input:not([type="hidden"]):not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+                        ) || [])].find(element => !element.hidden && !element.closest('[hidden]'));
+                    }
+                    try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                });
+            }
         }
 
         async function withBusy(form, action) {
@@ -1029,14 +1097,95 @@
             try {
                 await action();
             } catch (error) {
-                setStatus('error', error.message || 'Something went wrong.');
+                setStatus('error', authErrorMessage(error));
             } finally {
                 buttons.forEach(button => button.disabled = false);
             }
         }
 
+        function authErrorMessage(error) {
+            const code = String(error?.code || error?.payload?.code || '').toLowerCase();
+            const diagnostic = String(error?.message || '').toLowerCase();
+            if (code.includes('rate') || /too many|rate.?limit/.test(diagnostic)) {
+                return 'Too many attempts. Wait a moment, then try again.';
+            }
+            if (/network|fetch|offline|timeout/.test(diagnostic)) {
+                return 'Norva couldn’t reach the service. Check your connection and try again.';
+            }
+            if (/invalid.*credential|invalid.*login|password/.test(diagnostic)) {
+                return 'Those sign-in details didn’t work. Check them and try again.';
+            }
+            return 'Something went wrong. Try again.';
+        }
+
+        function confirmAccountSignOut(opener) {
+            return new Promise(resolve => {
+                document.getElementById('account-signout-confirm')?.remove();
+                const dialog = document.createElement('dialog');
+                dialog.id = 'account-signout-confirm';
+                dialog.className = 'account-confirm';
+                dialog.setAttribute('aria-labelledby', 'account-signout-title');
+                dialog.setAttribute('aria-describedby', 'account-signout-copy');
+                dialog.innerHTML = `
+                    <h2 id="account-signout-title">Sign out of Norva?</h2>
+                    <p id="account-signout-copy">Your downloads stay on this device. You can sign in again at any time.</p>
+                    <div class="account-confirm-actions">
+                        <button type="button" class="account-confirm-cancel secondary">Stay signed in</button>
+                        <button type="button" class="account-confirm-signout">Sign out</button>
+                    </div>`;
+                document.body.appendChild(dialog);
+                let settled = false;
+                const finish = confirmed => {
+                    if (settled) return;
+                    settled = true;
+                    try { dialog.close(); } catch (_) { /* already closed */ }
+                    dialog.remove();
+                    if (!confirmed && opener?.isConnected) {
+                        requestAnimationFrame(() => opener.focus({ preventScroll: true }));
+                    }
+                    resolve(confirmed);
+                };
+                dialog.querySelector('.account-confirm-cancel').addEventListener('click', () => finish(false));
+                dialog.querySelector('.account-confirm-signout').addEventListener('click', () => finish(true));
+                dialog.addEventListener('cancel', event => {
+                    event.preventDefault();
+                    finish(false);
+                });
+                if (typeof dialog.showModal === 'function') {
+                    dialog.showModal();
+                    requestAnimationFrame(() => dialog.querySelector('.account-confirm-cancel')?.focus());
+                } else {
+                    finish(false);
+                }
+            });
+        }
+
+        function dismissAccountDialogForBack() {
+            const dialog = document.getElementById('account-signout-confirm');
+            if (!dialog?.open) return false;
+            dialog.querySelector('.account-confirm-cancel')?.click();
+            return true;
+        }
+
+        // The native shells consume Android Back before WebView can synthesize a
+        // <dialog> cancel event. Give both phone and TV hosts an explicit first
+        // chance to dismiss this dialog before either calls goBack()/exit.
+        const previousPhoneBack = window.__norvaHandleBack;
+        window.__norvaHandleBack = function () {
+            if (dismissAccountDialogForBack()) return 'handled';
+            return typeof previousPhoneBack === 'function' ? previousPhoneBack() : 'none';
+        };
+        const tvBackHost = window.__norvaTV = window.__norvaTV || {};
+        const previousTvBack = tvBackHost.handleBack;
+        tvBackHost.handleBack = function () {
+            if (dismissAccountDialogForBack()) return 'modal';
+            return typeof previousTvBack === 'function' ? previousTvBack() : 'none';
+        };
+
         function setStatus(type, message) {
             statusEl.className = 'status ' + type;
+            statusEl.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            statusEl.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
             statusEl.textContent = message;
         }
 
@@ -1131,6 +1280,10 @@
                 return '';
             }
         }
+
+        // Start only after tabs, status regions and every recovery action are wired.
+        // boot() can synchronously route OAuth errors before its first await.
+        boot();
     </script>
     <script>
       // Advantages carousel (native app only): dot sync, swipe, auto-advance.

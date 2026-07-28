@@ -61,3 +61,9 @@ test('group details and Play select the actually in-progress provider version', 
 
   assert.equal(page._selectInProgressVersion([preferred, older, latest]), latest);
 });
+
+test('pending audio metadata stays out of the consumer catalogue', () => {
+  assert.equal(page.displayLanguageStatus('Audio pending'), '');
+  assert.equal(page.displayLanguageStatus('Identifying audio'), '');
+  assert.equal(page.displayLanguageStatus('French'), 'French');
+});

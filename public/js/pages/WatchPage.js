@@ -2899,20 +2899,6 @@ class WatchPage {
         return 'Playback failed.';
     }
 
-    escapePlaybackDetail(message) {
-        const text = this.sanitizePlaybackMessage(message).slice(0, 240);
-        if (typeof MediaUtils !== 'undefined' && MediaUtils.escapeHtml) {
-            return MediaUtils.escapeHtml(text);
-        }
-        return text.replace(/[&<>"']/g, char => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        }[char]));
-    }
-
     escapeHtml(text) {
         if (typeof MediaUtils !== 'undefined' && MediaUtils.escapeHtml) {
             return MediaUtils.escapeHtml(text || '');
@@ -5841,7 +5827,6 @@ class WatchPage {
         }
 
         const friendly = this.getFriendlyPlaybackError(safeMessage);
-        const detail = this.escapePlaybackDetail(safeMessage);
         // A provider auth / rate-limit block (401/403/429) does not clear on a
         // reload — auto-refreshing just spins on the same blocked path. Skip it
         // and point the user to a residential path (native app / local hub).
@@ -5870,7 +5855,6 @@ class WatchPage {
                 <p class="watch-error-msg">${friendly}</p>
                 <p class="watch-error-refresh">${refreshHint}</p>
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${refreshBtnLabel}</button>
-                ${detail ? `<p class="watch-error-detail">${detail}</p>` : ''}
             </div>`;
         errorEl.classList.remove('hidden');
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {

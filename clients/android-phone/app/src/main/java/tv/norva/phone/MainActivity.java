@@ -89,6 +89,7 @@ public class MainActivity extends Activity {
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
     private static final String PREF_NOTIF_ASKED = "notificationPermissionAsked";
     private static final String PREF_NOTIF_MIGRATED_V18 = "notificationPermissionMigrationV18";
+    private static final String STATE_CLOUD_ROUTE = "norva.cloudRoute";
     private static final String CLOUD_ACCOUNT_URL = "https://norva.tv/account.html?returnTo=%2Fapp.html%3Fmobile%3D1%23home";
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String SUPABASE_USER_URL = "https://api.norva.tv/auth/v1/user";
@@ -127,6 +128,9 @@ public class MainActivity extends Activity {
     private BroadcastReceiver playerRecoveryReceiver;
     private String pendingPlayerRecoveryToken;
     private String pendingPlayerRecoveryKey;
+    private long pendingPlayerRecoveryExpiresAtElapsedMs;
+    private final Object playerRecoveryLock = new Object();
+    private static final long PLAYER_RECOVERY_TTL_MS = 30_000L;
 
     // Cold-start watchdog: if a page neither finishes nor errors within the timeout
     // (a silently hung load), surface the friendly error screen instead of stranding
@@ -180,12 +184,17 @@ public class MainActivity extends Activity {
         showSplash();
         registerPlayerRecoveryBridge();
 
-        // Handle norva://pair and https://norva.tv/... deep links
+        // Explicit links win over a recreated Activity's previous route.
         if (handleDeepLink(getIntent())) return;
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
-        if ("cloud".equals(mode)) {
+        if ("cloud".equals(mode) && restoreCloudContinuity(savedInstanceState)) {
+            // Activity recreation (font/navigation-mode/configuration change):
+            // the WebView reloads the exact SPA route with a one-shot recovery
+            // marker. Auth/profile/filter state remains in the trusted origin's
+            // storage; no bearer or provider URL is copied into Android prefs.
+        } else if ("cloud".equals(mode)) {
             connectCloud(CLOUD_WATCH_URL);
         } else if (saved != null && !saved.isEmpty()) {
             connect(saved);
@@ -203,6 +212,65 @@ public class MainActivity extends Activity {
         // Push: ask for notification permission and cache the FCM token so the web
         // bridge (getPushToken) can hand it to the backend for "catalog ready" pushes.
         setupPush();
+    }
+
+    /**
+     * Persist only the bounded SPA fragment needed to rebuild navigation. The
+     * authenticated session remains in WebView origin storage and media URLs
+     * (which may contain short-lived credentials) never enter the Bundle.
+     */
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        if ("cloud".equals(prefs().getString(PREF_MODE, null)) && webView != null) {
+            try {
+                String fragment = safeCloudFragment(webView.getUrl());
+                if (fragment != null) outState.putString(STATE_CLOUD_ROUTE, fragment);
+                webView.evaluateJavascript(
+                        "window.app&&window.app.persistNativeContinuity&&"
+                                + "window.app.persistNativeContinuity();",
+                        null);
+            } catch (Exception ignored) {
+                // A renderer may disappear during a configuration change. The
+                // default Home route remains a safe fallback.
+            }
+        }
+        super.onSaveInstanceState(outState);
+    }
+
+    private boolean restoreCloudContinuity(Bundle savedInstanceState) {
+        if (savedInstanceState == null) return false;
+        String fragment = savedInstanceState.getString(STATE_CLOUD_ROUTE);
+        if (fragment == null) return false;
+        connectCloud(cloudContinuityUrl(fragment));
+        return true;
+    }
+
+    private static String safeCloudFragment(String url) {
+        if (url == null || url.isEmpty()) return null;
+        try {
+            Uri uri = Uri.parse(url);
+            if (!"https".equalsIgnoreCase(uri.getScheme())
+                    || !"norva.tv".equalsIgnoreCase(uri.getHost())) return null;
+            String fragment = uri.getEncodedFragment();
+            if (fragment == null || fragment.isEmpty()) return "home";
+            if (fragment.length() > 2_048) return "home";
+            String page = fragment.split("/", 2)[0];
+            if (!("home".equals(page) || "live".equals(page)
+                    || "movies".equals(page) || "series".equals(page)
+                    || "settings".equals(page))) return "home";
+            return fragment;
+        } catch (Exception ignored) {
+            return "home";
+        }
+    }
+
+    private static String cloudContinuityUrl(String fragment) {
+        String safe = fragment == null || fragment.isEmpty() ? "home" : fragment;
+        return Uri.parse(CLOUD_WATCH_URL).buildUpon()
+                .appendQueryParameter("_nativeRecovery", "1")
+                .fragment(safe)
+                .build()
+                .toString();
     }
 
     /**
@@ -224,9 +292,11 @@ public class MainActivity extends Activity {
             return false;
         }
         if ("https".equals(data.getScheme()) && "norva.tv".equals(data.getHost())) {
-            // A shared title/app link: open it in the cloud shell (the web app's
-            // deep-link router reads the #fragment and opens the right fiche).
-            String url = data.toString();
+            // Public /t/* links are canonical web URLs, not SPA documents. Convert
+            // their bounded title identity into the existing movies/series route
+            // so the signed-in user lands on the exact fiche.
+            String url = appLinkDestination(data);
+            if (url == null) url = data.toString();
             if (!url.contains("mobile=1")) {
                 int hash = url.indexOf('#');
                 String base = hash >= 0 ? url.substring(0, hash) : url;
@@ -238,6 +308,63 @@ public class MainActivity extends Activity {
             return true;
         }
         return false;
+    }
+
+    private static String appLinkDestination(Uri data) {
+        if (data == null || data.getPath() == null
+                || !data.getPath().startsWith("/t/")) return null;
+        java.util.List<String> segments = data.getPathSegments();
+        String kind = segments.size() > 1 ? segments.get(1) : data.getQueryParameter("type");
+        String page = titlePage(kind);
+        if (page == null) return CLOUD_WATCH_URL;
+
+        String sourceId = firstNonEmpty(
+                segments.size() > 2 ? segments.get(2) : null,
+                data.getQueryParameter("sourceId"),
+                data.getQueryParameter("source"));
+        String itemId = firstNonEmpty(
+                segments.size() > 3 ? segments.get(3) : null,
+                data.getQueryParameter("itemId"),
+                data.getQueryParameter("streamId"),
+                data.getQueryParameter("seriesId"),
+                data.getQueryParameter("id"));
+        String title = firstNonEmpty(
+                segments.size() > 4
+                        ? android.text.TextUtils.join(" ", segments.subList(4, segments.size()))
+                        : null,
+                data.getQueryParameter("title"),
+                data.getQueryParameter("name"));
+
+        if (!boundedLinkPart(sourceId, 200) || !boundedLinkPart(itemId, 200)) {
+            return Uri.parse(CLOUD_WATCH_URL).buildUpon().fragment(page).build().toString();
+        }
+        String route = page + "/open:"
+                + Uri.encode(sourceId) + ":"
+                + Uri.encode(itemId) + ":"
+                + Uri.encode(title == null ? "" : title);
+        return Uri.parse(CLOUD_WATCH_URL).buildUpon().fragment(route).build().toString();
+    }
+
+    private static String titlePage(String kind) {
+        if (kind == null) return null;
+        String normalized = kind.trim().toLowerCase(Locale.ROOT);
+        if ("movie".equals(normalized) || "movies".equals(normalized)
+                || "film".equals(normalized) || "films".equals(normalized)) return "movies";
+        if ("series".equals(normalized) || "show".equals(normalized)
+                || "shows".equals(normalized) || "tv".equals(normalized)) return "series";
+        return null;
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) return value.trim();
+        }
+        return null;
+    }
+
+    private static boolean boundedLinkPart(String value, int maxLength) {
+        return value != null && !value.isEmpty() && value.length() <= maxLength;
     }
 
     /** App Link / pairing link tapped while the app is already running. */
@@ -269,6 +396,10 @@ public class MainActivity extends Activity {
     }
 
     private void handleBackPressed() {
+        // Back abandons any in-flight WebView resolution. A late tokened JSON
+        // response is consumed by deliverRecoveredStreamToPlayer and can no
+        // longer resurrect playback after the viewer leaves.
+        clearPendingPlayerRecovery(null);
         if (!webViewVisible || webView == null) {
             finish();
             return;
@@ -306,6 +437,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         loadHandler.removeCallbacks(loadTimeout);
+        clearPendingPlayerRecovery(null);
         if (playerRecoveryReceiver != null) {
             try { unregisterReceiver(playerRecoveryReceiver); } catch (Exception ignored) { }
             playerRecoveryReceiver = null;
@@ -317,6 +449,15 @@ public class MainActivity extends Activity {
 
     private static String recoveryKey(String sourceId, String itemType, String itemId) {
         return String.valueOf(sourceId) + "|" + String.valueOf(itemType) + "|" + String.valueOf(itemId);
+    }
+
+    private void clearPendingPlayerRecovery(String token) {
+        synchronized (playerRecoveryLock) {
+            if (token != null && !token.equals(pendingPlayerRecoveryToken)) return;
+            pendingPlayerRecoveryToken = null;
+            pendingPlayerRecoveryKey = null;
+            pendingPlayerRecoveryExpiresAtElapsedMs = 0L;
+        }
     }
 
     /**
@@ -336,8 +477,12 @@ public class MainActivity extends Activity {
                 if (token == null || token.length() < 16 || token.length() > 160
                         || sourceId == null || sourceId.isEmpty()
                         || itemId == null || itemId.isEmpty()) return;
-                pendingPlayerRecoveryToken = token;
-                pendingPlayerRecoveryKey = recoveryKey(sourceId, itemType, itemId);
+                synchronized (playerRecoveryLock) {
+                    pendingPlayerRecoveryToken = token;
+                    pendingPlayerRecoveryKey = recoveryKey(sourceId, itemType, itemId);
+                    pendingPlayerRecoveryExpiresAtElapsedMs =
+                            android.os.SystemClock.elapsedRealtime() + PLAYER_RECOVERY_TTL_MS;
+                }
                 long position = Math.max(0L, intent.getLongExtra("positionSeconds", 0L));
                 long duration = Math.max(0L, intent.getLongExtra("durationSeconds", 0L));
                 String reason = intent.getStringExtra("retryReason");
@@ -351,10 +496,19 @@ public class MainActivity extends Activity {
                         + "window.__norvaNative&&window.__norvaNative.retryPlayback&&"
                         + "window.__norvaNative.retryPlayback("
                         + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
-                        + "," + position + "," + jsStr(reason) + ");";
+                        + "," + position + "," + jsStr(reason) + "," + jsStr(token) + ");";
                 runOnUiThread(() -> {
                     try { webView.evaluateJavascript(retry, null); } catch (Exception ignored) { }
                 });
+                loadHandler.postDelayed(() -> {
+                    synchronized (playerRecoveryLock) {
+                        if (token.equals(pendingPlayerRecoveryToken)
+                                && android.os.SystemClock.elapsedRealtime()
+                                >= pendingPlayerRecoveryExpiresAtElapsedMs) {
+                            clearPendingPlayerRecovery(token);
+                        }
+                    }
+                }, PLAYER_RECOVERY_TTL_MS + 250L);
             }
         };
         ContextCompat.registerReceiver(
@@ -369,15 +523,32 @@ public class MainActivity extends Activity {
      * Normal taps still create a new PlayerActivity.
      */
     private boolean deliverRecoveredStreamToPlayer(JSONObject payload) {
-        String token = pendingPlayerRecoveryToken;
-        String expectedKey = pendingPlayerRecoveryKey;
-        if (token == null || expectedKey == null || payload == null) return false;
-        String sourceId = emptyToNull(payload.optString("sourceId"));
-        String itemType = emptyToNull(payload.optString("itemType"));
-        String itemId = emptyToNull(payload.optString("itemId"));
-        if (!expectedKey.equals(recoveryKey(sourceId, itemType, itemId))) return false;
-        pendingPlayerRecoveryToken = null;
-        pendingPlayerRecoveryKey = null;
+        if (payload == null) return false;
+        String responseToken = emptyToNull(payload.optString("recoveryToken"));
+        // Untokened JSON is a normal viewer action. Tokened JSON is recovery-only:
+        // consume stale/expired replies so they never open another Activity.
+        if (responseToken == null) return false;
+
+        final String token;
+        synchronized (playerRecoveryLock) {
+            token = pendingPlayerRecoveryToken;
+            String expectedKey = pendingPlayerRecoveryKey;
+            if (token == null || expectedKey == null) return true;
+            if (!token.equals(responseToken)) return true;
+            if (pendingPlayerRecoveryExpiresAtElapsedMs <= 0L
+                    || android.os.SystemClock.elapsedRealtime()
+                    > pendingPlayerRecoveryExpiresAtElapsedMs) {
+                clearPendingPlayerRecovery(token);
+                return true;
+            }
+            String sourceId = emptyToNull(payload.optString("sourceId"));
+            String itemType = emptyToNull(payload.optString("itemType"));
+            String itemId = emptyToNull(payload.optString("itemId"));
+            if (!expectedKey.equals(recoveryKey(sourceId, itemType, itemId))) return true;
+            // Claim atomically before leaving the lock. A second JS callback
+            // for this token is therefore stale and can never replace it.
+            clearPendingPlayerRecovery(token);
+        }
         Intent response = new Intent(PlayerActivity.ACTION_APPLY_FRESH_STREAM)
                 .setPackage(getPackageName())
                 .putExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN, token)
@@ -471,7 +642,7 @@ public class MainActivity extends Activity {
                                         WebResourceError error) {
                 if (request.isForMainFrame()) {
                     hideSplash();
-                    showNetworkError(String.valueOf(error.getDescription()));
+                    showNetworkError(null);
                 }
             }
 
@@ -1448,6 +1619,9 @@ public class MainActivity extends Activity {
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds,
                             final String fallbackUrl) {
+        // A new viewer launch supersedes any automatic recovery that was still
+        // resolving in the background.
+        clearPendingPlayerRecovery(null);
         runOnUiThread(() -> {
             Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
             intent.putExtra(PlayerActivity.EXTRA_URL, url);
@@ -1469,6 +1643,9 @@ public class MainActivity extends Activity {
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson, final String posterUrl,
                             final String nextTitle) {
+        // Variant picks and explicit Play actions are new intents. Retire the
+        // previous retry token before the new Activity is launched.
+        clearPendingPlayerRecovery(null);
         runOnUiThread(() -> {
             Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
             intent.putExtra(PlayerActivity.EXTRA_URL, url);
@@ -1558,7 +1735,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        if (requestCode != REQ_PLAYER) return;
+        // Returning from PlayerActivity means Back, a terminal close, or a
+        // deliberate variant change. All three explicitly retire the active
+        // recovery; a late tokened resolver reply will be consumed, not launched.
+        String returnedRecoveryToken = data == null
+                ? null : data.getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN);
+        if (returnedRecoveryToken != null) clearPendingPlayerRecovery(returnedRecoveryToken);
+        clearPendingPlayerRecovery(null);
+        if (data == null || webView == null) return;
         final String sourceId = data.getStringExtra("sourceId");
         final String itemType = data.getStringExtra("itemType");
         final String itemId = data.getStringExtra("itemId");
@@ -1601,14 +1786,9 @@ public class MainActivity extends Activity {
         }
         final boolean retryPlayback = data.getBooleanExtra("retryPlayback", false);
         if (retryPlayback && sourceId != null && itemId != null) {
-            final String retryReason = data.getStringExtra("retryReason");
-            final String jsRetry = "window.__norvaNative && window.__norvaNative.retryPlayback"
-                    + " && window.__norvaNative.retryPlayback("
-                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
-                    + "," + pos + "," + jsStr(retryReason) + ")";
-            runOnUiThread(() -> {
-                try { webView.evaluateJavascript(jsRetry, null); } catch (Exception ignored) { }
-            });
+            // The current player now resolves fresh URLs in-place. If it closes
+            // while a request is outstanding, that is a viewer cancellation;
+            // never relaunch it behind Back with an unbound legacy retry.
             return;
         }
         // Natural end → ask the web to autoplay the next episode (a no-op for movies).
@@ -1900,9 +2080,7 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.GONE);
         if (errorText != null) {
-            errorText.setText(detail == null || detail.isEmpty()
-                    ? "Please check your internet connection and try again."
-                    : "Please check your internet connection and try again.\n\n" + detail);
+            errorText.setText("Please check your internet connection and try again.");
         }
         if (errorPanel != null) {
             errorPanel.bringToFront();

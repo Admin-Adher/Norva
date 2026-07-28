@@ -20,6 +20,18 @@
     <string name="player_error_unsupported">This video format cannot be played on this device.</string>
     <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
     <string name="player_show_controls">Show playback controls</string>
+    <string name="player_state_preparing">Preparing playback…</string>
+    <string name="player_state_initial_buffering">Starting playback…</string>
+    <string name="player_state_recovering">Restoring playback…</string>
+    <string name="player_state_rebuffering">Optimizing playback…</string>
+    <string name="player_state_long_start">This is taking longer than usual. Norva is still trying this version.</string>
+    <string name="player_state_offline_title">You’re offline</string>
+    <string name="player_state_offline_message">Reconnect to the internet, then try again.</string>
+    <string name="player_state_terminal_title">This version can’t be played</string>
+    <string name="player_state_format_message">This version uses a format your device can’t decode. Try another version if one is available.</string>
+    <string name="player_state_generic_terminal_message">Playback stopped unexpectedly. Try again or return to the title.</string>
+    <string name="player_change_version">Change version</string>
+    <string name="player_state_accessibility">%1$s. %2$s</string>
 
     <!-- Unified native track selector. These labels stay deliberately neutral
          when exact-file language evidence is unavailable. -->
@@ -88,4 +100,122 @@
     <string name="player_cast_stop">Stop</string>
     <string name="player_cast_connected_to">Casting to %1$s</string>
     <string name="player_cast_controls_description">Casting controls for %1$s</string>
+    <string name="player_pip_pause">Pause</string>
+    <string name="player_pip_play">Play</string>
+    <string name="player_pip_play_pause">Play or pause</string>
+
+    <!-- Native Downloads library. -->
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_close">Close</string>
+    <string name="downloads_wifi_only">Wi-Fi only</string>
+    <string name="downloads_wifi_only_subtitle">Only download over Wi-Fi — saves mobile data</string>
+    <string name="downloads_wifi_only_description">Only download over Wi-Fi; saves mobile data</string>
+    <string name="downloads_wifi_only_on">Wi-Fi only on</string>
+    <string name="downloads_wifi_only_off">Wi-Fi only off</string>
+    <string name="downloads_smart">Smart downloads</string>
+    <string name="downloads_smart_subtitle">When an episode finishes, queue the next one automatically</string>
+    <string name="downloads_smart_description">Queue the next episode automatically</string>
+    <string name="downloads_smart_on">Smart downloads on</string>
+    <string name="downloads_smart_off">Smart downloads off</string>
+    <string name="downloads_state_on">On</string>
+    <string name="downloads_state_off">Off</string>
+    <string name="downloads_toggle_description">%1$s. %2$s</string>
+    <string name="downloads_toggle_description_with_state">%1$s. %2$s. %3$s</string>
+    <string name="downloads_turn_on">Turn on %1$s</string>
+    <string name="downloads_turn_off">Turn off %1$s</string>
+    <string name="downloads_clear_all">Clear all</string>
+    <string name="downloads_clear_all_description">Clear all downloads</string>
+    <string name="downloads_clear_all_disabled_description">Clear all downloads. Disabled because there are no downloads</string>
+    <string name="downloads_empty">No downloads yet.\nTap Download on a movie or episode to watch it offline.</string>
+
+    <plurals name="downloads_summary_titles">
+        <item quantity="one">%1$d title · %2$s used · %3$s free</item>
+        <item quantity="other">%1$d titles · %2$s used · %3$s free</item>
+    </plurals>
+    <string name="downloads_active">Downloading %1$s — %2$d%%</string>
+    <plurals name="downloads_active_with_queue">
+        <item quantity="one">Downloading %1$s — %2$d%% · %3$d in queue</item>
+        <item quantity="other">Downloading %1$s — %2$d%% · %3$d in queue</item>
+    </plurals>
+    <plurals name="downloads_in_queue">
+        <item quantity="one">%1$d in queue</item>
+        <item quantity="other">%1$d in queue</item>
+    </plurals>
+    <string name="downloads_queue_waiting_wifi">%1$s · waiting for Wi-Fi</string>
+    <string name="downloads_refresh_failed">Downloads could not refresh. Try again.</string>
+    <plurals name="downloads_a11y_progress">
+        <item quantity="one">%1$s download %2$d percent</item>
+        <item quantity="other">%1$s download %2$d percent</item>
+    </plurals>
+    <string name="downloads_a11y_ready_offline">%1$s is ready offline</string>
+    <string name="downloads_a11y_failed">%1$s download failed. Check your connection and try again.</string>
+    <string name="downloads_fallback_title">Title</string>
+
+    <plurals name="downloads_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="downloads_season_number">Season %1$d</string>
+    <string name="downloads_episodes">Episodes</string>
+    <string name="downloads_episode">Episode</string>
+    <string name="downloads_episode_number">Episode %1$d</string>
+    <string name="downloads_episode_short_title">E%1$d · %2$s</string>
+    <string name="downloads_state_collapsed">Collapsed</string>
+    <string name="downloads_state_expanded">Expanded</string>
+    <string name="downloads_expand">expand</string>
+    <string name="downloads_collapse">collapse</string>
+    <string name="downloads_section_description">%1$s. %2$s. %3$s. Double tap to %4$s</string>
+    <string name="downloads_section_expanded">%1$s expanded</string>
+    <string name="downloads_section_collapsed">%1$s collapsed</string>
+
+    <string name="downloads_action_play">Play</string>
+    <string name="downloads_action_delete">Delete</string>
+    <string name="downloads_action_pause">Pause</string>
+    <string name="downloads_action_cancel">Cancel</string>
+    <string name="downloads_action_resume">Resume</string>
+    <string name="downloads_action_mobile_data">Mobile data</string>
+    <string name="downloads_action_allow_mobile_data">Allow mobile data for</string>
+    <string name="downloads_action_move_earlier">Move earlier</string>
+    <string name="downloads_action_move_later">Move later</string>
+    <string name="downloads_action_retry">Retry</string>
+    <string name="downloads_action_for_title">%1$s %2$s</string>
+    <string name="downloads_action_cancel_download">Cancel download</string>
+    <string name="downloads_action_delete_all">Delete all</string>
+    <string name="downloads_action_keep">Keep</string>
+    <string name="downloads_action_keep_description">Keep downloads</string>
+
+    <string name="downloads_mutation_paused">Download paused</string>
+    <string name="downloads_mutation_resumed">Download resumed</string>
+    <string name="downloads_mutation_mobile_data_allowed">Mobile data allowed for this download</string>
+    <string name="downloads_mutation_moved_earlier">Moved earlier in the queue</string>
+    <string name="downloads_mutation_moved_later">Moved later in the queue</string>
+    <string name="downloads_mutation_retry_queued">Download queued to retry</string>
+    <string name="downloads_mutation_removal_requested">Removal requested</string>
+    <string name="downloads_mutation_removing_all">Removing all downloads</string>
+    <string name="downloads_mutation_failed">Could not update this download. Try again.</string>
+
+    <string name="downloads_status_saved">%1$s · Saved</string>
+    <string name="downloads_status_downloading_progress">Downloading %1$d%% · %2$s / %3$s</string>
+    <string name="downloads_status_downloading">Downloading…</string>
+    <string name="downloads_status_paused_progress">Paused · %1$s / %2$s</string>
+    <string name="downloads_status_paused">Paused · %1$s</string>
+    <string name="downloads_status_queued">Queued</string>
+    <string name="downloads_status_failed">Failed · Check your connection and try again</string>
+    <string name="downloads_status_unavailable">Unavailable</string>
+    <string name="downloads_file_unavailable">This download is unavailable. Download it again.</string>
+    <string name="downloads_title_with_subtitle">%1$s — %2$s</string>
+
+    <string name="downloads_confirm_delete_title">Delete download?</string>
+    <string name="downloads_confirm_cancel_title">Cancel download?</string>
+    <string name="downloads_confirm_delete_message">Delete “%1$s”? This frees the storage it uses.</string>
+    <string name="downloads_confirm_cancel_message">Cancel and remove “%1$s”? This frees the storage it uses.</string>
+    <string name="downloads_confirm_delete_all_title">Delete all downloads?</string>
+    <plurals name="downloads_confirm_delete_all_message">
+        <item quantity="one">Remove %1$d download and free its storage?</item>
+        <item quantity="other">Remove all %1$d downloads and free their storage?</item>
+    </plurals>
+
+    <string name="downloads_size_zero">0 MB</string>
+    <string name="downloads_size_mb">%1$s MB</string>
+    <string name="downloads_size_gb">%1$s GB</string>
 </resources>

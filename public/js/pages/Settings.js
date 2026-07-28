@@ -14,18 +14,6 @@ function isNativeShell() {
         || /[?&]mobile=1\b/.test(window.location.search || '');
 }
 
-// TRUE only inside the Android TV APK (UA tag `NorvaTV-AndroidTV`). Must NOT
-// match the phone (`NorvaTV-AndroidPhone`) or the standalone APK — the TV is the
-// one shell that authenticates by device pairing (QR), never by email/password,
-// so logging out on TV returns to the pairing screen, not the login form.
-function isTvShell() {
-    return /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
-}
-
-// The pairing entry the TV APK boots into (mirrors CLOUD_PAIR_URL in the TV
-// MainActivity): re-pair via QR, then land back on the app once approved.
-const TV_PAIR_URL = '/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home';
-
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
@@ -37,16 +25,19 @@ function nativeBillingReady() {
 class SettingsPage {
     constructor(app) {
         this.app = app;
-        this.tabs = document.querySelectorAll('.tabs .tab');
-        this.tabContents = document.querySelectorAll('.tab-content');
+        const settingsRoot = document.getElementById('page-settings');
+        this.tabs = settingsRoot?.querySelectorAll('.tabs .tab') || [];
+        this.tabContents = settingsRoot?.querySelectorAll('.tab-content') || [];
 
         this.init();
     }
 
     init() {
+        this.initTabSemantics();
         // Tab switching
         this.tabs.forEach(tab => {
             tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
+            tab.addEventListener('keydown', (event) => this.handleSettingsTabKeydown(event, tab));
         });
 
         // Phone-only "Advanced" toggle: reveals the collapsed IPTV-technical tabs.
@@ -71,6 +62,50 @@ class SettingsPage {
 
         // User management (admin only)
         this.initUserManagement();
+    }
+
+    initTabSemantics() {
+        const tabList = document.querySelector('#page-settings .settings-container > .tabs');
+        if (tabList) {
+            tabList.setAttribute('role', 'tablist');
+            tabList.setAttribute('aria-label', 'Settings sections');
+            tabList.setAttribute('aria-orientation', 'horizontal');
+        }
+        this.tabs.forEach((tab) => {
+            const name = tab.dataset.tab;
+            const panel = document.getElementById(`tab-${name}`);
+            if (!name || !panel) return;
+            if (!tab.id) tab.id = `settings-tab-${name}`;
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-controls', panel.id);
+            const selected = tab.classList.contains('active');
+            tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+            tab.tabIndex = selected ? 0 : -1;
+            panel.setAttribute('role', 'tabpanel');
+            panel.setAttribute('aria-labelledby', tab.id);
+            panel.setAttribute('aria-hidden', selected ? 'false' : 'true');
+            panel.tabIndex = 0;
+            panel.hidden = !selected;
+        });
+    }
+
+    handleSettingsTabKeydown(event, currentTab) {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const available = [...this.tabs].filter((tab) => !tab.disabled
+            && !tab.hidden
+            && tab.style.display !== 'none'
+            && tab.getAttribute('aria-hidden') !== 'true');
+        if (!available.length) return;
+        const currentIndex = Math.max(0, available.indexOf(currentTab));
+        let nextIndex = currentIndex;
+        if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = available.length - 1;
+        else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % available.length;
+        else nextIndex = (currentIndex - 1 + available.length) % available.length;
+        event.preventDefault();
+        const next = available[nextIndex];
+        this.switchTab(next.dataset.tab);
+        next.focus();
     }
 
     initAccountSettings() {
@@ -185,7 +220,7 @@ class SettingsPage {
                 <label class="setting-label" for="ss-confirm" style="display:block;margin-bottom:6px">Confirm new password</label>
                 <input id="ss-confirm" type="password" autocomplete="new-password" minlength="6" style="${inputStyle}">
               </div>
-              <p id="ss-status" class="setting-hint" style="min-height:18px;margin:0"></p>
+              <p id="ss-status" class="setting-hint" role="status" aria-live="polite" aria-atomic="true" style="min-height:18px;margin:0"></p>
               <p class="setting-hint" style="margin:0"><a id="ss-reset" href="#" style="color:#5b7cfa">Send a password reset email instead</a></p>
               <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
                 <button class="btn btn-secondary" id="ss-cancel" type="button">Close</button>
@@ -207,6 +242,8 @@ class SettingsPage {
         const setStatus = (msg, isError) => {
             if (!status) return;
             status.textContent = msg;
+            status.setAttribute('role', isError ? 'alert' : 'status');
+            status.setAttribute('aria-live', isError ? 'assertive' : 'polite');
             status.style.color = isError ? '#fb7185' : '#34d399';
         };
 
@@ -246,7 +283,8 @@ class SettingsPage {
                 this.populateSignInMethods(); // reflect that email+password is now a method
                 setTimeout(close, 900);
             } catch (e) {
-                setStatus((e && e.message) || 'Could not update the password.', true);
+                console.warn('[Settings] Password update failed.', e);
+                setStatus('Could not update the password. Check your connection and try again.', true);
                 if (btn) btn.disabled = false;
             }
         });
@@ -257,7 +295,8 @@ class SettingsPage {
                 await window.NorvaAuth.recover(email);
                 setStatus('Reset email sent — check your inbox.', false);
             } catch (err) {
-                setStatus((err && err.message) || 'Could not send the reset email.', true);
+                console.warn('[Settings] Password reset email failed.', err);
+                setStatus('Could not send the reset email. Try again in a moment.', true);
             }
         });
 
@@ -328,39 +367,11 @@ class SettingsPage {
     }
 
     async signOut() {
-        // TV = a device-paired screen. A plain session sign-out leaves the device
-        // token in place, so the pairing screen silently resumes the SAME account
-        // (the "QR flashes then reconnects" bug). Unpair server-side (the account
-        // drops this screen) AND clear the local device token/id, then return to a
-        // fresh QR pairing. Order matters: unpair while the token still exists.
-        if (isTvShell()) {
-            try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort; still clear locally */ }
-            try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
-            try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
-            try { if (window.NorvaAuth) await window.NorvaAuth.signOut(); } catch (_) { /* noop */ }
-            window.location.replace(TV_PAIR_URL);
-            return;
+        if (this.app && typeof this.app.signOut === 'function') {
+            return this.app.signOut();
         }
-
-        const token = localStorage.getItem('authToken');
-
-        if (this.app.currentUser?.cloud && window.NorvaAuth) {
-            await window.NorvaAuth.signOut();
-            window.location.replace('/account.html');
-            return;
-        }
-
-        if (token) {
-            try {
-                await fetch('/api/auth/logout', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-            } catch (_) { }
-        }
-
-        localStorage.removeItem('authToken');
-        window.location.replace('/login.html');
+        console.warn('[Settings] Sign-out controller is unavailable; keeping the session active.');
+        return false;
     }
 
     async refreshAccountSettings() {
@@ -675,6 +686,12 @@ class SettingsPage {
         const statusHint = document.getElementById('tmdb-status-hint');
         const resetBrokenBtn = document.getElementById('reset-broken-btn');
         const resetBrokenHint = document.getElementById('reset-broken-hint');
+        [statusHint, resetBrokenHint].forEach((hint) => {
+            if (!hint) return;
+            hint.setAttribute('role', 'status');
+            hint.setAttribute('aria-live', 'polite');
+            hint.setAttribute('aria-atomic', 'true');
+        });
 
         let s = {};
         let loadOk = true;
@@ -828,12 +845,18 @@ class SettingsPage {
         }
 
         const formatStatus = (st) => {
+            st = st && typeof st === 'object' ? st : {};
+            const metric = (value) => {
+                const number = Number(value);
+                return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
+            };
             if (st.running) {
-                return `Enriching… ${st.processed}/${st.total} titles (${st.matched} matched)`;
+                return `Enriching… ${metric(st.processed)}/${metric(st.total)} titles (${metric(st.matched)} matched)`;
             }
             if (st.finishedAt) {
-                const errors = st.failed ? `, ${st.failed} errors` : '';
-                return `Last run: ${st.matched}/${st.total || 0} matched${errors}.`;
+                const failed = metric(st.failed);
+                const errors = failed ? `, ${failed} errors` : '';
+                return `Last run: ${metric(st.matched)}/${metric(st.total)} matched${errors}.`;
             }
             return 'Runs automatically after each sync when a TMDB key is set.';
         };
@@ -864,6 +887,8 @@ class SettingsPage {
 
         resetBrokenBtn?.addEventListener('click', async () => {
             try {
+                resetBrokenHint?.setAttribute('role', 'status');
+                resetBrokenHint?.setAttribute('aria-live', 'polite');
                 resetBrokenBtn.disabled = true;
                 resetBrokenBtn.textContent = 'Restoring…';
                 const res = await fetch('/api/playback-status/reset-connection-errors', { method: 'POST' });
@@ -875,12 +900,22 @@ class SettingsPage {
                         : 'No incorrectly hidden titles found — nothing to restore.';
                     resetBrokenBtn.textContent = 'Done';
                 } else {
-                    if (resetBrokenHint) resetBrokenHint.textContent = 'Error: ' + (data.error || 'unknown');
+                    console.warn('[Settings] Restore hidden titles was rejected.', data?.error);
+                    if (resetBrokenHint) {
+                        resetBrokenHint.setAttribute('role', 'alert');
+                        resetBrokenHint.setAttribute('aria-live', 'assertive');
+                        resetBrokenHint.textContent = 'Could not restore hidden titles. Try again.';
+                    }
                     resetBrokenBtn.textContent = 'Restore titles';
                     resetBrokenBtn.disabled = false;
                 }
             } catch (err) {
-                if (resetBrokenHint) resetBrokenHint.textContent = 'Error: ' + err.message;
+                console.warn('[Settings] Restore hidden titles failed.', err);
+                if (resetBrokenHint) {
+                    resetBrokenHint.setAttribute('role', 'alert');
+                    resetBrokenHint.setAttribute('aria-live', 'assertive');
+                    resetBrokenHint.textContent = 'Could not restore hidden titles. Check your connection and try again.';
+                }
                 resetBrokenBtn.textContent = 'Restore titles';
                 resetBrokenBtn.disabled = false;
             }
@@ -888,6 +923,8 @@ class SettingsPage {
 
         enrichBtn?.addEventListener('click', async () => {
             try {
+                statusHint?.setAttribute('role', 'status');
+                statusHint?.setAttribute('aria-live', 'polite');
                 // Make sure the latest key is saved before starting
                 if (tmdbKeyInput) {
                     await API.settings.update({ tmdbApiKey: tmdbKeyInput.value.trim() });
@@ -903,7 +940,12 @@ class SettingsPage {
                     pollStatus();
                 }
             } catch (err) {
-                if (statusHint) statusHint.textContent = `Error: ${err.message}`;
+                console.warn('[Settings] TMDB enrichment failed.', err);
+                if (statusHint) {
+                    statusHint.setAttribute('role', 'alert');
+                    statusHint.setAttribute('aria-live', 'assertive');
+                    statusHint.textContent = 'Could not start enrichment. Check the API key and try again.';
+                }
             }
         });
     }
@@ -1264,7 +1306,8 @@ class SettingsPage {
                     addUserForm.reset();
                     this.loadUsers();
                 } catch (err) {
-                    NorvaModal.toast('Error creating user: ' + err.message, 'error');
+                    console.warn('[Settings] Local user creation failed.', err);
+                    NorvaModal.toast('Could not create the user. Review the fields and try again.', 'error');
                 } finally {
                     if (btn) btn.disabled = false;
                 }
@@ -1391,7 +1434,7 @@ class SettingsPage {
             console.log('Modal should now be visible!');
         } catch (err) {
             console.error('Error populating modal:', err);
-            NorvaModal.toast('Error opening edit modal: ' + err.message, 'error');
+            NorvaModal.toast('Could not open the user editor. Refresh the page and try again.', 'error');
         }
     }
 
@@ -1440,7 +1483,8 @@ class SettingsPage {
                 closeModal();
                 this.loadUsers();
             } catch (err) {
-                NorvaModal.toast('Error updating user: ' + err.message, 'error');
+                console.warn('[Settings] Local user update failed.', err);
+                NorvaModal.toast('Could not update the user. Try again.', 'error');
             } finally {
                 saveBtn.disabled = false;
             }
@@ -1486,7 +1530,8 @@ class SettingsPage {
             await API.users.delete(userId);
             this.loadUsers();
         } catch (err) {
-            NorvaModal.toast('Error deleting user: ' + err.message, 'error');
+            console.warn('[Settings] Local user deletion failed.', err);
+            NorvaModal.toast('Could not delete the user. Try again.', 'error');
         }
     }
 
@@ -1509,6 +1554,9 @@ class SettingsPage {
     setScreensStatus(el, type, message) {
         if (!el) return;
         el.textContent = message || '';
+        el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+        el.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+        el.setAttribute('aria-atomic', 'true');
         el.style.color = type === 'success' ? '#34d399' : type === 'error' ? '#fb7185' : '#a8b3c7';
     }
 
@@ -1533,7 +1581,8 @@ class SettingsPage {
             await window.NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'en-US' });
             this.setScreensStatus(status, 'success', 'Saved.');
         } catch (e) {
-            this.setScreensStatus(status, 'error', e?.message || 'Unable to save.');
+            console.warn('[Settings] Screen profile save failed.', e);
+            this.setScreensStatus(status, 'error', 'Could not save the screen profile. Try again.');
         }
     }
 
@@ -1549,7 +1598,8 @@ class SettingsPage {
             if (input) input.value = '';
             this.loadTrustedDevices();
         } catch (e) {
-            this.setScreensStatus(status, 'error', e?.message || 'Unable to approve this code.');
+            console.warn('[Settings] Pairing approval failed.', e);
+            this.setScreensStatus(status, 'error', 'Could not approve this code. Check it and try again.');
         }
     }
 
@@ -1593,12 +1643,14 @@ class SettingsPage {
                         this.setScreensStatus(status, 'success', 'Screen revoked.');
                     } catch (e) {
                         btn.disabled = false;
-                        this.setScreensStatus(status, 'error', e?.message || 'Unable to revoke.');
+                        console.warn('[Settings] Screen revocation failed.', e);
+                        this.setScreensStatus(status, 'error', 'Could not remove this screen. Try again.');
                     }
                 });
             });
         } catch (e) {
-            this.setScreensStatus(status, 'error', e?.message || 'Unable to load devices.');
+            console.warn('[Settings] Trusted screens load failed.', e);
+            this.setScreensStatus(status, 'error', 'Could not load your screens. Check your connection and try again.');
         }
     }
 
@@ -1679,13 +1731,39 @@ class SettingsPage {
             });
             this.setScreensStatus(status, 'success', 'Command sent.');
         } catch (e) {
-            this.setScreensStatus(status, 'error', e?.message || 'Unable to send command.');
+            console.warn('[Settings] Screen command failed.', e);
+            this.setScreensStatus(status, 'error', 'Could not send the command. Check that the screen is online and try again.');
         }
     }
 
     switchTab(tabName) {
-        this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
-        this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
+        this.tabs.forEach(t => {
+            const selected = t.dataset.tab === tabName;
+            t.classList.toggle('active', selected);
+            t.setAttribute('aria-selected', selected ? 'true' : 'false');
+            t.tabIndex = selected ? 0 : -1;
+        });
+        this.tabContents.forEach(c => {
+            const selected = c.id === `tab-${tabName}`;
+            c.classList.toggle('active', selected);
+            c.setAttribute('aria-hidden', selected ? 'false' : 'true');
+            c.hidden = !selected;
+            if (selected) c.scrollTop = 0;
+        });
+
+        // Each tab owns its own reading position. Entering a different tab must
+        // never inherit the previous panel's scroll (on either mobile or TV),
+        // otherwise its heading and primary controls can open off-screen.
+        const settingsPage = document.getElementById('page-settings');
+        const settingsContainer = settingsPage?.querySelector('.settings-container');
+        const activePanel = settingsContainer?.querySelector('.tab-content.active');
+        const resetTabScroll = () => {
+            if (settingsPage) settingsPage.scrollTop = 0;
+            if (settingsContainer) settingsContainer.scrollTop = 0;
+            if (activePanel) activePanel.scrollTop = 0;
+        };
+        resetTabScroll();
+        requestAnimationFrame(resetTabScroll);
 
         // If an "advanced" tab is activated (e.g. programmatically) while collapsed
         // on phone, reveal the advanced group so the active tab is visible.
@@ -1719,6 +1797,18 @@ class SettingsPage {
     }
 
     async show() {
+        // TV Settings uses a fixed header/tab shell with only the active panel
+        // scrolling. Reset synchronously before any network request so entry can
+        // never reveal a clipped title or a stale lower section.
+        if (document.documentElement.classList.contains('tv-mode')) {
+            const page = document.getElementById('page-settings');
+            const container = page?.querySelector('.settings-container');
+            if (page) page.scrollTop = 0;
+            if (container) container.scrollTop = 0;
+            const activePanel = container?.querySelector('.tab-content.active');
+            if (activePanel) activePanel.scrollTop = 0;
+        }
+
         // Local hub user management stays available to local admins only.
         const usersTab = document.getElementById('users-tab');
         const canManageLocalUsers = this.app.currentUser?.role === 'admin' && !this.app.currentUser?.cloud;

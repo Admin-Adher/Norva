@@ -56,6 +56,10 @@ class LiveGuideFusion {
                 return;
             }
             if (action === 'show-more') { this.showMoreRows(); return; }
+            if (action === 'open-source-sheet') {
+                this.openSourceSheet(event.target.closest('[data-action="open-source-sheet"]'));
+                return;
+            }
             if (action === 'reload-live') {
                 const btn = event.target.closest('[data-action="reload-live"]');
                 if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
@@ -132,15 +136,6 @@ class LiveGuideFusion {
             // Parity with the desktop sidebar: also fan out an all-sources server query so the
             // guide isn't limited to the lazily-hydrated in-memory set (the "1/1"-badge symptom).
             this.scheduleRemoteSearch(this.searchQuery);
-        });
-
-        // Source proxy (only shown with >1 source): forward to the real,
-        // now-hidden #source-select so existing load/filter logic stays the source
-        // of truth.
-        this.container.addEventListener('change', (event) => {
-            if (!event.target.classList.contains('live-guide-source')) return;
-            const sel = document.getElementById('source-select');
-            if (sel) { sel.value = event.target.value; sel.dispatchEvent(new Event('change')); }
         });
 
         window.addEventListener('channelChanged', (event) => {
@@ -920,9 +915,200 @@ class LiveGuideFusion {
     renderSourcePicker() {
         const sel = document.getElementById('source-select');
         if (!sel) return '';
-        const realOpts = Array.from(sel.querySelectorAll('option')).filter(o => o.value);
-        if (realOpts.length <= 1) return '';
-        return `<select class="live-guide-source" aria-label="Source">${sel.innerHTML}</select>`;
+        const sourceOptions = Array.from(sel.querySelectorAll('option')).filter(option => option.value);
+        if (sourceOptions.length <= 1) return '';
+        const selected = Array.from(sel.querySelectorAll('option'))
+            .find(option => option.value === sel.value)
+            || sel.querySelector('option');
+        const label = selected?.textContent?.trim() || 'All Sources';
+        return `
+            <button type="button" class="live-guide-source-trigger"
+                    data-action="open-source-sheet"
+                    aria-haspopup="dialog" aria-expanded="false"
+                    aria-label="Source, ${this.escapeHtml(label)}">
+                <span>Source</span>
+                <strong>${this.escapeHtml(label)}</strong>
+                <span class="live-guide-source-icon" aria-hidden="true">${Icons.chevronDown}</span>
+            </button>
+            <span class="sr-only live-guide-source-announcement" aria-live="polite"></span>
+        `;
+    }
+
+    closeSourceSheet({ restoreFocus = true } = {}) {
+        if (typeof this._sourceSheetClose === 'function') {
+            this._sourceSheetClose({ restoreFocus });
+        }
+    }
+
+    openSourceSheet(trigger) {
+        const sel = document.getElementById('source-select');
+        if (!sel || !trigger) return;
+        const options = Array.from(sel.querySelectorAll('option'));
+        if (options.length <= 1) return;
+
+        this.closeSourceSheet({ restoreFocus: false });
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active live-source-overlay';
+        overlay.setAttribute('aria-hidden', 'false');
+
+        const sheet = document.createElement('section');
+        sheet.className = 'live-source-sheet';
+        sheet.setAttribute('role', 'dialog');
+        sheet.setAttribute('aria-modal', 'true');
+        sheet.setAttribute('aria-labelledby', 'live-source-sheet-title');
+
+        const header = document.createElement('header');
+        header.className = 'live-source-sheet-header';
+        const headingWrap = document.createElement('div');
+        const kicker = document.createElement('span');
+        kicker.className = 'live-source-sheet-kicker';
+        kicker.textContent = 'Live TV';
+        const heading = document.createElement('h2');
+        heading.id = 'live-source-sheet-title';
+        heading.textContent = 'Choose a source';
+        headingWrap.append(kicker, heading);
+
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'modal-close live-source-close';
+        closeButton.setAttribute('aria-label', 'Close source chooser');
+        closeButton.textContent = 'Done';
+        header.append(headingWrap, closeButton);
+
+        const helper = document.createElement('p');
+        helper.className = 'live-source-sheet-help';
+        helper.textContent = 'Show every connected service, or focus the guide on one source.';
+
+        const list = document.createElement('div');
+        list.className = 'live-source-options';
+        list.setAttribute('role', 'listbox');
+        list.setAttribute('aria-label', 'Live TV source');
+
+        options.forEach(option => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'live-source-option';
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', option.value === sel.value ? 'true' : 'false');
+            item.dataset.sourceValue = option.value;
+
+            const copy = document.createElement('span');
+            copy.className = 'live-source-option-copy';
+            const title = document.createElement('strong');
+            title.textContent = option.textContent?.trim() || 'All Sources';
+            copy.appendChild(title);
+            const group = option.closest('optgroup')?.label;
+            if (group) {
+                const meta = document.createElement('small');
+                meta.textContent = group;
+                copy.appendChild(meta);
+            }
+            const check = document.createElement('span');
+            check.className = 'live-source-option-check';
+            check.setAttribute('aria-hidden', 'true');
+            check.innerHTML = Icons.check;
+            item.append(copy, check);
+            list.appendChild(item);
+        });
+
+        sheet.append(header, helper, list);
+        overlay.appendChild(sheet);
+        document.body.appendChild(overlay);
+
+        const background = [
+            document.querySelector('.navbar'),
+            document.querySelector('.main-content'),
+            document.querySelector('.bottom-nav')
+        ].filter(Boolean);
+        const inertSnapshot = background.map(element => ({ element, inert: Boolean(element.inert) }));
+        inertSnapshot.forEach(({ element }) => { element.inert = true; });
+        trigger.setAttribute('aria-expanded', 'true');
+
+        let closed = false;
+        const focusable = () => Array.from(
+            sheet.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
+        ).filter(element => element.offsetParent !== null);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener('keydown', onKey, true);
+            inertSnapshot.forEach(({ element, inert }) => { element.inert = inert; });
+            overlay.classList.remove('active');
+            overlay.remove();
+            this._sourceSheetClose = null;
+            const currentTrigger = trigger.isConnected
+                ? trigger
+                : this.container?.querySelector('.live-guide-source-trigger');
+            currentTrigger?.setAttribute('aria-expanded', 'false');
+            if (restoreFocus && currentTrigger) {
+                requestAnimationFrame(() => currentTrigger.focus({ preventScroll: true }));
+            }
+        };
+        const optionButtons = () => Array.from(list.querySelectorAll('.live-source-option'));
+        const onKey = event => {
+            if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
+                event.preventDefault();
+                event.stopPropagation();
+                close();
+                return;
+            }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp'
+                || event.key === 'Home' || event.key === 'End') {
+                const items = optionButtons();
+                const current = items.indexOf(document.activeElement);
+                if (!items.length || current < 0) return;
+                event.preventDefault();
+                let next = current;
+                if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+                if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+                if (event.key === 'Home') next = 0;
+                if (event.key === 'End') next = items.length - 1;
+                items[next].focus({ preventScroll: true });
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const items = focusable();
+            if (!items.length) return;
+            const first = items[0];
+            const last = items[items.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus({ preventScroll: true });
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus({ preventScroll: true });
+            }
+        };
+
+        this._sourceSheetClose = close;
+        // Native phone Back looks for .modal-overlay.active and invokes this
+        // button's onclick before removing the class.
+        closeButton.onclick = () => close();
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) close();
+        });
+        list.addEventListener('click', event => {
+            const item = event.target.closest('.live-source-option');
+            if (!item) return;
+            const value = item.dataset.sourceValue || '';
+            const title = item.querySelector('strong')?.textContent || 'All Sources';
+            close({ restoreFocus: false });
+            sel.value = value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            setTimeout(() => {
+                const currentTrigger = this.container?.querySelector('.live-guide-source-trigger');
+                currentTrigger?.focus({ preventScroll: true });
+                const announcement = this.container?.querySelector('.live-guide-source-announcement');
+                if (announcement) announcement.textContent = `${title} selected`;
+            }, 0);
+        });
+        document.addEventListener('keydown', onKey, true);
+
+        requestAnimationFrame(() => {
+            const selected = list.querySelector('[aria-selected="true"]');
+            (selected || optionButtons()[0] || closeButton).focus({ preventScroll: true });
+        });
     }
 
     /** Re-render only the rows (search keystroke) — leaves the toolbar focused. */
@@ -1225,20 +1411,32 @@ class LiveGuideFusion {
      */
     renderStatusPanel() {
         const cl = this.app.channelList || {};
-        if (cl.isLoading && !cl.hasLoadedOnce) {
-            return `<div class="live-guide-status"><div class="loading"></div>
-                <div class="live-guide-status-msg">Loading your channels…</div></div>`;
+        if (cl.isLoading) {
+            return `<div class="live-guide-status is-loading" role="status" aria-live="polite">
+                <img class="live-guide-status-mark" src="/img/norva-app-icon.png" alt="">
+                <div class="live-guide-status-copy">
+                    <span class="live-guide-status-kicker">Live TV</span>
+                    <div class="live-guide-status-title">Preparing your channel guide</div>
+                    <div class="live-guide-status-msg">Loading channels from your connected sources. You can keep using the menu.</div>
+                </div>
+                <div class="live-guide-status-rows" aria-hidden="true">${'<i></i>'.repeat(5)}</div>
+            </div>`;
         }
         if (cl.loadError) {
-            return `<div class="live-guide-status is-error">
-                <div class="live-guide-status-title">Couldn't load your channels</div>
-                <div class="live-guide-status-msg">The channel list didn't come back. This is usually a busy provider connection — give it a moment and try again.</div>
+            const sourceFailure = Boolean(cl.sourceDiscoveryError);
+            return `<div class="live-guide-status is-error" role="alert">
+                <span class="live-guide-status-kicker">Live TV</span>
+                <div class="live-guide-status-title">${sourceFailure ? "Couldn't reach your sources" : "Couldn't load your channels"}</div>
+                <div class="live-guide-status-msg">${sourceFailure
+                    ? "Norva couldn't check your connected services. Nothing was changed, so try again when the connection returns."
+                    : 'Your sources are still connected. The channel list did not respond this time, so try the request again.'}</div>
                 <button type="button" class="lg-btn lg-btn-primary" data-action="reload-live">Try again</button>
             </div>`;
         }
-        return `<div class="live-guide-status">
+        return `<div class="live-guide-status is-empty">
+            <span class="live-guide-status-kicker">Live TV</span>
             <div class="live-guide-status-title">No channels yet</div>
-            <div class="live-guide-status-msg">We didn't find any live channels on your sources. If you just added one, its catalogue may still be syncing.</div>
+            <div class="live-guide-status-msg">No live channels are available in the current sources. A newly connected catalogue may still be preparing.</div>
             <button type="button" class="lg-btn" data-action="reload-live">Refresh</button>
         </div>`;
     }

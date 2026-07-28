@@ -9,8 +9,10 @@ class HomePage {
         this.container = null;
         this.isLoading = false;
         this.loadPromise = null;
+        this.loadGeneration = 0;
         this.lastLoadedAt = 0;
         this.dashboardTtlMs = 60000;
+        this.homeRequestTimeoutMs = 10000;
         this.homeRailDisplayLimit = 18;
         this.homeRailFetchLimit = 60;
         this.railItems = [];
@@ -161,6 +163,18 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
+                <section id="home-loading-state" class="home-loading-state tv-home-loading-state" role="status" aria-live="polite">
+                    <div class="tv-home-loading-copy">
+                        <span>Norva Home</span>
+                        <strong>Building your screen</strong>
+                        <p>Loading your picks, progress and connected catalogue.</p>
+                    </div>
+                    <div class="tv-home-loading-visual" aria-hidden="true">
+                        <i class="tv-home-loading-hero"></i>
+                        <i class="tv-home-loading-title"></i>
+                        <span>${'<i></i>'.repeat(6)}</span>
+                    </div>
+                </section>
                 <section id="home-service-health" class="dashboard-section hidden"></section>
 
                 <section class="home-hero-section hidden" id="home-hero"></section>
@@ -252,6 +266,40 @@ class HomePage {
         }
     }
 
+    setHomeLoadingState(active, {
+        title = 'Building your screen',
+        message = 'Loading your picks, progress and connected catalogue.'
+    } = {}) {
+        const state = document.getElementById('home-loading-state');
+        if (!state) return;
+        this.container?.classList.toggle('is-home-loading', active);
+        state.classList.toggle('is-hidden', !active);
+        state.setAttribute('aria-hidden', active ? 'false' : 'true');
+        state.setAttribute('aria-busy', active ? 'true' : 'false');
+        const titleEl = state.querySelector('strong');
+        const messageEl = state.querySelector('p');
+        if (titleEl) titleEl.textContent = title;
+        if (messageEl) messageEl.textContent = message;
+    }
+
+    renderHomeLoadError() {
+        this.setHomeLoadingState(false);
+        const rails = document.getElementById('home-rails');
+        if (!rails || this._paintedFromCache) {
+            if (this._paintedFromCache) this._railsErrorNotice();
+            return;
+        }
+        rails.innerHTML = `
+            <section class="dashboard-section">
+                <div class="premium-state premium-state-error" role="alert" data-home-state-panel="error">
+                    <span class="premium-state-kicker">Norva Home</span>
+                    <h3>Home needs another moment</h3>
+                    <p>Your catalogue is still connected. We could not refresh this screen just now.</p>
+                    <button class="btn btn-primary" data-home-retry type="button">Try again</button>
+                </div>
+            </section>`;
+    }
+
     scrollSection(id, loadingText, extraClass = '', content = '') {
         // Skeleton cards instead of a bare spinner+text, so every rail matches the
         // main "Selection" rail's loading treatment (no layout jump on swap-in).
@@ -338,7 +386,10 @@ class HomePage {
     async refreshContentPreferences() {
         if (!window.API?.settings?.get) return false;
         try {
-            const settings = await window.API.settings.get();
+            const settings = await this.boundedHomeTask(
+                window.API.settings.get(),
+                'content preferences'
+            );
             return this.setContentPreferences(settings || {});
         } catch (err) {
             console.warn('[Dashboard] Unable to refresh content preferences:', err);
@@ -362,9 +413,39 @@ class HomePage {
         return 'home-dashboard:' + (pid || 'default') + ':' + lang;
     }
 
+    boundedHomeTask(task, label, timeoutMs = this.homeRequestTimeoutMs) {
+        let timer = null;
+        const timeout = new Promise((_, reject) => {
+            timer = window.setTimeout(() => {
+                const error = new Error(`Home ${label || 'request'} timed out`);
+                error.code = 'HOME_REQUEST_TIMEOUT';
+                reject(error);
+            }, timeoutMs);
+        });
+        return Promise.race([Promise.resolve(task), timeout])
+            .finally(() => {
+                if (timer !== null) window.clearTimeout(timer);
+            });
+    }
+
+    cancelPendingLoad() {
+        // Profile selection can happen while the locked background Home is still
+        // waiting on requests made without the selected profile. Retire that
+        // generation so it can neither block nor repaint the newly selected one.
+        this.loadGeneration += 1;
+        this.isLoading = false;
+        this.loadPromise = null;
+    }
+
+    isCurrentLoad(generation) {
+        return generation === this.loadGeneration;
+    }
+
     async loadDashboardData() {
         if (this.isLoading) return this.loadPromise;
+        const generation = ++this.loadGeneration;
         this.isLoading = true;
+        this.setHomeLoadingState(true);
 
         this.loadPromise = (async () => {
             try {
@@ -385,6 +466,7 @@ class HomePage {
                         this.renderCloudRails(cached.data.rails);
                         this.renderHero(ch, this.railItems);
                         this._paintedFromCache = true;
+                        this.setHomeLoadingState(false);
                     }
                 } catch (_) { /* cache paint is best-effort */ }
 
@@ -396,13 +478,23 @@ class HomePage {
                 // limit=60 (not 18): finished/too-short rows are filtered CLIENT-side, so a
                 // user who recently completed a dozen titles used to get an under-filled (or
                 // empty) Continue Watching while resumable older titles sat beyond the window.
-                const historyP = window.API.request('GET', '/history?limit=60');
-                const railsP = window.API.request('GET', `/home/rails?limit=${railFetchLimit}`);
+                const historyP = this.boundedHomeTask(
+                    window.API.request('GET', '/history?limit=60'),
+                    'history'
+                );
+                const railsP = this.boundedHomeTask(
+                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
+                    'rails'
+                );
 
                 const [healthResult, settingsResult] = await Promise.allSettled([
-                    this.app?.refreshSourceHealth?.() || window.NorvaSourceHealth?.loadSummary?.(),
-                    window.API.settings.get()
+                    this.boundedHomeTask(
+                        this.app?.refreshSourceHealth?.() || window.NorvaSourceHealth?.loadSummary?.(),
+                        'source health'
+                    ),
+                    this.boundedHomeTask(window.API.settings.get(), 'settings')
                 ]);
+                if (!this.isCurrentLoad(generation)) return;
 
                 if (settingsResult.status === 'fulfilled') {
                     this.setContentPreferences(settingsResult.value || {});
@@ -432,8 +524,9 @@ class HomePage {
                 const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
                     historyP,
                     railsP,
-                    this.renderFavoriteChannels()
+                    this.boundedHomeTask(this.renderFavoriteChannels(), 'favorite channels')
                 ]);
+                if (!this.isCurrentLoad(generation)) return;
                 this.renderMyList();
 
                 const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
@@ -460,7 +553,8 @@ class HomePage {
                         // service-health banner carry the "temporarily unavailable" message.
                         this._railsErrorNotice();
                     } else {
-                        await this.renderFallbackRails();
+                        await this.boundedHomeTask(this.renderFallbackRails(), 'fallback rails');
+                        if (!this.isCurrentLoad(generation)) return;
                         this.renderHero(history, this.railItems);
                     }
                 }
@@ -471,10 +565,15 @@ class HomePage {
 
                 this.lastLoadedAt = Date.now();
             } catch (err) {
+                if (!this.isCurrentLoad(generation)) return;
                 console.error('[Dashboard] Error loading data:', err);
+                this.renderHomeLoadError();
             } finally {
-                this.isLoading = false;
-                this.loadPromise = null;
+                if (this.isCurrentLoad(generation)) {
+                    this.setHomeLoadingState(false);
+                    this.isLoading = false;
+                    this.loadPromise = null;
+                }
             }
         })();
 
@@ -512,7 +611,7 @@ class HomePage {
             }
             return `
                 <section class="dashboard-section">
-                    <div class="empty-state hint home-sync-hint">
+                    <div class="empty-state hint home-sync-hint home-state-panel" role="status" aria-live="polite">
                         <strong>Preparing your Home${percent ? ` — ${percent}%` : ''}</strong>
                         <p>${this.escapeHtml(readyLine)}</p>
                     </div>
@@ -525,13 +624,13 @@ class HomePage {
         if (summary.state === 'not_configured' || !summary.state) {
             return `
                 <section class="dashboard-section">
-                    <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
+                    <div class="empty-state hint home-state-panel" role="status">Add a TV service from Settings to build your Home.</div>
                 </section>
             `;
         }
         return `
             <section class="dashboard-section">
-                <div class="empty-state hint">
+                <div class="empty-state hint home-state-panel home-state-panel-error" role="alert">
                     <strong>We couldn't load your Home right now</strong>
                     <p>Your services are fine — this is a temporary hiccup.</p>
                     <button class="btn btn-secondary" data-home-retry type="button">Retry</button>
@@ -546,7 +645,7 @@ class HomePage {
         if (!container || container.querySelector('[data-rails-stale-notice]')) return;
         const note = document.createElement('div');
         note.setAttribute('data-rails-stale-notice', '');
-        note.className = 'empty-state hint';
+        note.className = 'empty-state hint home-state-inline';
         note.textContent = "Showing your last Home — we couldn't refresh it just now.";
         container.prepend(note);
         setTimeout(() => { try { note.remove(); } catch (_) { /* gone */ } }, 8000);
@@ -1057,7 +1156,12 @@ class HomePage {
                 payload = this.readSetupConnectionForm(container);
             } catch (err) {
                 if (error) {
-                    error.textContent = err.message;
+                    const hasAddress = Boolean(
+                        container.querySelector('#home-source-url')?.value.trim()
+                    );
+                    error.textContent = hasAddress
+                        ? 'Username and password are required.'
+                        : 'Provider URL is required.';
                     error.classList.remove('hidden');
                 }
                 advancedLogin.open = true;
@@ -1077,7 +1181,7 @@ class HomePage {
             } catch (err) {
                 console.error('[Dashboard] TV service connection failed:', err);
                 if (error) {
-                    error.textContent = err.message || 'Unable to connect this TV service.';
+                    error.textContent = 'Unable to connect this TV service. Check the details and try again.';
                     error.classList.remove('hidden');
                 }
                 submit.disabled = false;
@@ -2050,46 +2154,65 @@ class HomePage {
         if (!list || !section) return;
 
         try {
-            const favorites = await window.API.request('GET', '/favorites?itemType=channel');
+            const payload = await window.API.request('GET', '/favorites?itemType=channel');
+            const favorites = Array.isArray(payload) ? payload : (payload?.favorites || []);
 
-            if (!favorites || favorites.length === 0) {
+            if (favorites.length === 0) {
+                this._favoriteChannelRows = [];
                 section.classList.add('hidden');
                 return;
             }
 
-            const channelList = this.app.channelList;
-            if (!channelList.channels || channelList.channels.length === 0) {
-                await channelList.loadSources();
-                await channelList.loadChannels();
-            }
-
-            const channels = [];
-            for (const fav of favorites) {
-                const channel = channelList.channels.find(ch =>
-                    String(ch.sourceId) === String(fav.source_id) &&
-                    (String(ch.id) === String(fav.item_id) || String(ch.streamId) === String(fav.item_id))
-                );
-                if (channel) channels.push({ ...channel, favoriteId: fav.id });
-            }
+            // The Home rail must stay independent from the Live catalogue. Loading
+            // ChannelList here used to parse tens of thousands of logical channels
+            // merely to paint a handful of favorites, eventually exhausting the TV
+            // WebView heap. Favorite rows already carry enough display metadata; old
+            // rows remain visible with an honest fallback until they are refreshed.
+            const channels = favorites
+                .map(fav => {
+                    const meta = fav.item_meta || fav.itemMeta || {};
+                    const itemId = String(fav.item_id ?? fav.itemId ?? '');
+                    const sourceId = fav.source_id ?? fav.sourceId;
+                    if (!itemId || sourceId == null) return null;
+                    return {
+                        id: String(meta.channelId || itemId),
+                        streamId: String(meta.streamId || ''),
+                        sourceId,
+                        sourceType: meta.sourceType || 'xtream',
+                        name: fav.item_name || fav.itemName || meta.name || 'Favorite channel',
+                        tvgLogo: meta.poster || meta.logo || '',
+                        favoriteId: fav.id || '',
+                        favoriteItemId: itemId
+                    };
+                })
+                .filter(Boolean);
 
             if (!channels.length) {
+                this._favoriteChannelRows = [];
                 section.classList.add('hidden');
                 return;
             }
 
+            this._favoriteChannelRows = channels;
             section.classList.remove('hidden');
             list.innerHTML = channels.map(ch => this.createChannelTile(ch)).join('');
 
             list.querySelectorAll('.channel-tile').forEach(tile => {
                 tile.addEventListener('click', () => {
-                    this.playChannel(tile.dataset.channelId, tile.dataset.sourceId);
+                    const channel = this._favoriteChannelRows.find(row =>
+                        String(row.id) === String(tile.dataset.channelId)
+                        && String(row.sourceId) === String(tile.dataset.sourceId)
+                    );
+                    this.playChannel(tile.dataset.channelId, tile.dataset.sourceId, channel || {});
                 });
             });
 
             this.updateScrollArrows();
         } catch (err) {
             console.error('[Dashboard] Error loading favorite channels:', err);
-            section.classList.add('hidden');
+            // A transient favorites outage must not make an already-painted rail
+            // disappear and read as "you have no favorites".
+            if (!this._favoriteChannelRows?.length) section.classList.add('hidden');
         }
     }
 
@@ -2155,27 +2278,25 @@ class HomePage {
         return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     }
 
-    playChannel(channelId, sourceId) {
-        // Resolve BEFORE navigating: a channel that vanished (source removed, list
-        // re-filtered) used to dump the user on an empty Live page with no explanation.
+    playChannel(channelId, sourceId, metadata = {}) {
         const channelList = this.app.channelList;
-        const channel = channelList?.channels?.find(ch =>
-            String(ch.id) === String(channelId) && String(ch.sourceId) === String(sourceId)
-        );
-        if (!channel) {
+        if (!channelList?.queueChannelSelection) {
             this.app?.showToast?.('This channel is no longer available');
             return;
         }
+
+        // Queue before changing route: Live owns the bounded lookup and consumes
+        // this intent after its first lightweight page is ready. Home never
+        // bootstraps, hydrates or waits on the full channel catalogue.
+        channelList.queueChannelSelection({
+            channelId,
+            itemId: metadata.favoriteItemId || channelId,
+            streamId: metadata.streamId || '',
+            sourceId,
+            sourceType: metadata.sourceType || 'xtream',
+            name: metadata.name || ''
+        });
         this.app.navigateTo('live');
-        setTimeout(() => {
-            channelList.selectChannel({
-                channelId: channel.id,
-                sourceId: channel.sourceId,
-                sourceType: channel.sourceType,
-                streamId: channel.streamId || '',
-                url: channel.url || ''
-            });
-        }, 100);
     }
 
     homeVariantToMediaItem(variant, parent, type) {
@@ -2364,8 +2485,13 @@ class HomePage {
         const group = this.buildHomeMediaGroup(item, 'series');
 
         this.app.navigateTo('series');
+        const intentPage = this.app.pages.series;
+        const intentToken = intentPage.beginFicheIntent?.();
         setTimeout(async () => {
             const page = this.app.pages.series;
+            const isCurrent = () => intentToken == null
+                || page.isFicheIntentCurrent?.(intentToken) !== false;
+            if (!isCurrent()) return;
             if (this._isSkinnyRailItem(item)) {
                 const data = item.data || {};
                 const mapped = {
@@ -2376,12 +2502,15 @@ class HomePage {
                     stream_icon: item.poster || item.stream_icon || item.poster_url,
                     poster_url: item.poster || item.poster_url,
                 };
-                try { if (await page.openByItem(mapped)) return; } catch (_) { /* fall back below */ }
+                try {
+                    if (await page.openByItem(mapped, { intentToken })) return;
+                } catch (_) { /* fall back below */ }
+                if (!isCurrent()) return;
             }
             const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
             const series = versions[0] || group.representative;
             page.currentSeriesGroup = group;
-            page.showSeriesDetailsV2(series, group);
+            page.showSeriesDetailsV2(series, group, { intentToken });
         }, 100);
     }
 
@@ -2390,8 +2519,13 @@ class HomePage {
         const group = this.buildHomeMediaGroup(item, 'movie');
 
         this.app.navigateTo('movies');
+        const intentPage = this.app.pages.movies;
+        const intentToken = intentPage.beginFicheIntent?.();
         setTimeout(async () => {
             const page = this.app.pages.movies;
+            const isCurrent = () => intentToken == null
+                || page.isFicheIntentCurrent?.(intentToken) !== false;
+            if (!isCurrent()) return;
             if (this._isSkinnyRailItem(item)) {
                 const data = item.data || {};
                 const mapped = {
@@ -2402,11 +2536,14 @@ class HomePage {
                     stream_icon: item.poster || item.stream_icon || item.poster_url,
                     poster_url: item.poster || item.poster_url,
                 };
-                try { if (await page.openByItem(mapped)) return; } catch (_) { /* fall back below */ }
+                try {
+                    if (await page.openByItem(mapped, { intentToken })) return;
+                } catch (_) { /* fall back below */ }
+                if (!isCurrent()) return;
             }
             const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
             const selected = versions[0] || group.representative;
-            page.showMovieDetails(group, selected, { versions });
+            page.showMovieDetails(group, selected, { versions, intentToken });
         }, 100);
     }
 

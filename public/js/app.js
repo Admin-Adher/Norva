@@ -24,6 +24,10 @@ const NORVA_DEVICE_APPS = [
     },
 ];
 
+const NORVA_NATIVE_CONTINUITY_KEY = 'norva-native-continuity-v1';
+const NORVA_NATIVE_FICHE_KEY = 'norva-native-fiche-v1';
+const NORVA_NATIVE_CONTINUITY_TTL_MS = 12 * 60 * 60 * 1000;
+
 class App {
     constructor() {
         // The phone APK plays everything in the native fullscreen player, so the
@@ -35,6 +39,9 @@ class App {
         this.currentPage = 'home';
         this.pages = {};
         this.currentUser = null;
+        this._nativeRecovery = this.isNativeContinuityRecovery();
+        this._nativeContinuity = this.readNativeContinuity();
+        this._pageScroll = { ...(this._nativeContinuity?.pageScroll || {}) };
 
         // Initialize components
         this.player = new VideoPlayer();
@@ -56,8 +63,121 @@ class App {
         this.entitlement = null;
         this.sourceHealthSummary = null;
         this.catalogPages = new Set(['live', 'movies', 'series']);
+        for (const page of ['movies', 'series']) {
+            const top = Number(this._nativeContinuity?.gridScroll?.[page]) || 0;
+            if (top > 0 && this.pages[page]) this.pages[page]._savedScrollTop = top;
+        }
+        this.installNativeContinuityListeners();
 
         this.init();
+    }
+
+    isNativePhoneShell() {
+        return /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
+    }
+
+    isNativeContinuityRecovery() {
+        if (!this.isNativePhoneShell()) return false;
+        try {
+            return new URLSearchParams(window.location.search).get('_nativeRecovery') === '1';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    readNativeContinuity() {
+        if (!this._nativeRecovery) return null;
+        try {
+            const parsed = JSON.parse(localStorage.getItem(NORVA_NATIVE_CONTINUITY_KEY) || 'null');
+            if (!parsed || Date.now() - Number(parsed.updatedAt || 0) > NORVA_NATIVE_CONTINUITY_TTL_MS) {
+                return null;
+            }
+            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings']);
+            const page = allowed.has(parsed.page) ? parsed.page : 'home';
+            const boundedScrollMap = (value) => Object.fromEntries(
+                Object.entries(value && typeof value === 'object' ? value : {})
+                    .filter(([key]) => allowed.has(key))
+                    .map(([key, top]) => [
+                        key,
+                        Math.max(0, Math.min(10_000_000, Math.floor(Number(top) || 0)))
+                    ])
+            );
+            return {
+                page,
+                pageScroll: boundedScrollMap(parsed.pageScroll),
+                gridScroll: boundedScrollMap(parsed.gridScroll),
+                updatedAt: Number(parsed.updatedAt) || 0,
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    persistNativeContinuity() {
+        if (!this.isNativePhoneShell()) return;
+        try {
+            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings']);
+            const page = allowed.has(this.currentPage) ? this.currentPage : 'home';
+            const currentPage = document.getElementById(`page-${page}`);
+            this._pageScroll = this._pageScroll || {};
+            if (currentPage) this._pageScroll[page] = currentPage.scrollTop || 0;
+            const bounded = (value) => Math.max(
+                0,
+                Math.min(10_000_000, Math.floor(Number(value) || 0))
+            );
+            const pageScroll = {};
+            const gridScroll = {};
+            for (const key of allowed) {
+                if (this._pageScroll[key] != null) pageScroll[key] = bounded(this._pageScroll[key]);
+                const container = this.pages?.[key]?.container;
+                if (container) gridScroll[key] = bounded(container.scrollTop);
+            }
+            const snapshot = { page, pageScroll, gridScroll, updatedAt: Date.now() };
+            localStorage.setItem(NORVA_NATIVE_CONTINUITY_KEY, JSON.stringify(snapshot));
+            this._nativeContinuity = snapshot;
+        } catch (_) {
+            // Private/low-storage mode remains usable; continuity is best-effort.
+        }
+    }
+
+    installNativeContinuityListeners() {
+        if (!this.isNativePhoneShell() || this._nativeContinuityListenersInstalled) return;
+        this._nativeContinuityListenersInstalled = true;
+        let scheduled = false;
+        const schedule = () => {
+            if (scheduled) return;
+            scheduled = true;
+            requestAnimationFrame(() => {
+                scheduled = false;
+                this.persistNativeContinuity();
+            });
+        };
+        document.querySelectorAll('.page').forEach((page) => {
+            page.addEventListener('scroll', schedule, { passive: true });
+        });
+        for (const pageName of ['movies', 'series']) {
+            this.pages?.[pageName]?.container?.addEventListener('scroll', schedule, { passive: true });
+        }
+        window.addEventListener('pagehide', () => this.persistNativeContinuity());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') this.persistNativeContinuity();
+        });
+    }
+
+    restoreNativeGridScroll(pageName) {
+        if (!this._nativeRecovery || !['movies', 'series'].includes(pageName)) return;
+        const top = Number(this._nativeContinuity?.gridScroll?.[pageName]) || 0;
+        if (top <= 0) return;
+        const restore = () => {
+            const container = this.pages?.[pageName]?.container;
+            if (this.currentPage === pageName && container
+                    && container.scrollHeight > top
+                    && Math.abs(container.scrollTop - top) > 4) {
+                container.scrollTop = top;
+            }
+        };
+        requestAnimationFrame(restore);
+        window.setTimeout(restore, 350);
     }
 
     finishTvLaunchScreen() {
@@ -68,6 +188,95 @@ class App {
             root.classList.remove('tv-launching', 'tv-launch-ready');
             document.getElementById('tv-launch-screen')?.setAttribute('hidden', '');
         }, 420);
+    }
+
+    isTvMode() {
+        return document.documentElement.classList.contains('tv-mode');
+    }
+
+    setTvLaunchPhase(title, detail) {
+        if (!this.isTvMode()) return;
+        const splash = document.getElementById('tv-launch-screen');
+        if (!splash) return;
+        const heading = splash.querySelector('h1');
+        const copy = splash.querySelector('.tv-launch-copy p:not(.tv-launch-kicker)');
+        if (heading && title) heading.textContent = title;
+        if (copy && detail) copy.textContent = detail;
+    }
+
+    /**
+     * Keep every TV route visually deterministic while its controller prepares.
+     * The layer is intentionally non-interactive: D-pad ownership stays with the
+     * destination page and the skeleton disappears as soon as show() settles.
+     */
+    beginTvRouteTransition(pageName) {
+        if (!this.isTvMode() || pageName === 'watch') return 0;
+        const main = document.querySelector('.main-content');
+        if (!main) return 0;
+
+        const labels = {
+            home: ['Opening Home', 'Bringing back your picks and progress.'],
+            live: ['Preparing Live TV', 'Loading channels and guide information.'],
+            movies: ['Opening Movies', 'Restoring your catalogue and filters.'],
+            series: ['Opening Series', 'Restoring your catalogue and filters.'],
+            settings: ['Opening Settings', 'Loading this screen without moving your place.'],
+        };
+        const [title, detail] = labels[pageName] || ['Opening Norva', 'Preparing this screen.'];
+        let stage = document.getElementById('tv-route-stage');
+        if (!stage) {
+            stage = document.createElement('div');
+            stage.id = 'tv-route-stage';
+            stage.className = 'tv-route-stage';
+            stage.setAttribute('role', 'status');
+            stage.setAttribute('aria-live', 'polite');
+            stage.setAttribute('aria-atomic', 'true');
+            main.appendChild(stage);
+        }
+
+        const token = (this._tvRouteToken || 0) + 1;
+        this._tvRouteToken = token;
+        this._tvRouteStartedAt = performance.now();
+        clearTimeout(this._tvRouteFailsafe);
+        stage.dataset.page = pageName;
+        stage.innerHTML = `
+            <div class="tv-route-stage-copy">
+                <span class="tv-route-stage-kicker">Norva TV</span>
+                <strong>${title}</strong>
+                <span>${detail}</span>
+            </div>
+            <div class="tv-route-stage-rails" aria-hidden="true">
+                <span class="tv-route-stage-hero"></span>
+                <span class="tv-route-stage-line"></span>
+                <span class="tv-route-stage-cards">${'<i></i>'.repeat(6)}</span>
+                <span class="tv-route-stage-line is-short"></span>
+                <span class="tv-route-stage-cards">${'<i></i>'.repeat(6)}</span>
+            </div>`;
+        stage.hidden = false;
+        stage.classList.remove('is-leaving');
+        main.setAttribute('aria-busy', 'true');
+        requestAnimationFrame(() => stage.classList.add('is-visible'));
+        // A page with a stalled request must still hand control back. Its own
+        // explicit loading/error state remains underneath this short transition.
+        this._tvRouteFailsafe = window.setTimeout(() => this.endTvRouteTransition(token), 6500);
+        return token;
+    }
+
+    endTvRouteTransition(token) {
+        if (!token || token !== this._tvRouteToken) return;
+        const stage = document.getElementById('tv-route-stage');
+        if (!stage || stage.hidden) return;
+        const elapsed = performance.now() - (this._tvRouteStartedAt || 0);
+        const finish = () => {
+            if (token !== this._tvRouteToken) return;
+            clearTimeout(this._tvRouteFailsafe);
+            stage.classList.add('is-leaving');
+            stage.classList.remove('is-visible');
+            document.querySelector('.main-content')?.removeAttribute('aria-busy');
+            window.setTimeout(() => {
+                if (token === this._tvRouteToken) stage.hidden = true;
+            }, 220);
+        };
+        window.setTimeout(finish, Math.max(0, 360 - elapsed));
     }
 
     async init() {
@@ -86,6 +295,7 @@ class App {
         }
 
         // Check authentication first
+        this.setTvLaunchPhase('Connecting your screen', 'Checking your secure Norva session.');
         window.NorvaTrace?.log?.('checkAuth() — validates the session with GoTrue (network /auth/v1/user, blocking)');
         await this.checkAuth();
         window.NorvaTrace?.log?.('checkAuth() done', this.currentUser ? (this.currentUser.email || (this.currentUser.device ? 'paired device' : 'user')) : 'no user → redirect');
@@ -101,19 +311,38 @@ class App {
             window.NorvaTrace?.log?.('boot() fired — one /boot call seeds the caches the lines below read');
             try { window.NorvaCloud?.boot?.(); } catch (_) { /* best-effort speedup */ }
         }
+        this.setTvLaunchPhase('Checking your access', 'Keeping your paired screen and catalogue in sync.');
         window.NorvaTrace?.log?.('checkCloudAccess() — entitlements (served from boot cache if seeded)');
         if (!await this.checkCloudAccess()) return;
         window.NorvaTrace?.log?.('checkCloudAccess() done');
-        // Drop the TV launch splash BEFORE the profile step. The "who's watching?" /
-        // profile-setup overlay would otherwise render UNDER the launch splash (which
-        // has a near-max z-index), so on Android TV the viewer can't see or pick a
-        // profile, ensureSelected()'s promise never resolves, and the splash sticks
-        // forever on "Preparing your cinema" (browsers have no TV splash, so they were
-        // unaffected). The picker is a real interactive screen, not the auth flicker the
-        // splash hides. finishTvLaunchScreen() schedules its own fade and returns at once.
-        this.finishTvLaunchScreen();
-        // Netflix-style "who's watching": pick a profile before entering the app.
-        try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
+        // Keep the premium launch surface UNDER the profile overlay. The overlay has a
+        // deliberately higher z-index, so it stays interactive, while dismissing it can
+        // never expose the empty app shell that used to sit between profile and Home.
+        this.setTvLaunchPhase('Choose your profile', 'Your personal picks and progress are ready.');
+        const launchParams = new URLSearchParams(window.location.search);
+        const rendererRecovery = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '')
+            && launchParams.get('_rendererRecovery') === '1';
+        const continuityRecovery = rendererRecovery || this._nativeRecovery;
+        if (!this._profileGateComplete) {
+            try {
+                if (window.NorvaProfiles?.ensureSelected) {
+                    await window.NorvaProfiles.ensureSelected({ resumeActive: continuityRecovery });
+                }
+            } catch (_) { }
+            this._profileGateComplete = true;
+        }
+        if (continuityRecovery) {
+            try {
+                const cleanUrl = new URL(window.location.href);
+                cleanUrl.searchParams.delete('_rendererRecovery');
+                cleanUrl.searchParams.delete('_nativeRecovery');
+                window.history.replaceState(
+                    window.history.state,
+                    '',
+                    cleanUrl.pathname + cleanUrl.search + cleanUrl.hash
+                );
+            } catch (_) { /* recovery marker cleanup is best-effort */ }
+        }
         // Surface the always-visible navbar profile avatar (one-tap switcher).
         try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
         window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
@@ -369,7 +598,16 @@ class App {
             ? hash.slice(hashKey.length + 1) : '';
         // `in` (not truthiness): lazy pages register as null until loaded (this.pages.admin),
         // which used to send a refresh on #admin back to home.
-        const requestedInitialPage = hashKey && (hashKey in this.pages) ? hashKey : 'home';
+        const persistedPage = this._nativeRecovery
+            && this._nativeContinuity
+            && (this._nativeContinuity.page in this.pages)
+            ? this._nativeContinuity.page
+            : '';
+        const requestedInitialPage = hashKey && (hashKey in this.pages)
+            ? ((hashKey === 'home' && persistedPage && persistedPage !== 'home')
+                ? persistedPage
+                : hashKey)
+            : (persistedPage || 'home');
         if (requestedInitialPage !== 'home') await healthReady;
         const initialPage = this.guardCatalogPage(requestedInitialPage);
         // Capture any fiche open before a refresh BEFORE navigating (applyPage may clear
@@ -378,6 +616,9 @@ class App {
         this.navigateTo(initialPage, true); // true = replace history (don't add)
         this.restoreOpenFiche(initialPage, pendingFiche);
         this.openFicheFromRoute(initialPage);
+        // The destination controller has synchronously painted either real content or
+        // its route skeleton by now. Fade the launch surface only at this point.
+        requestAnimationFrame(() => this.finishTvLaunchScreen());
 
         // Defer the trial / billing nudges AND the region prompt until source
         // health is known. None of them belong on the pre-catalog onboarding
@@ -515,12 +756,30 @@ class App {
 
     toggleNotifications() {
         const open = document.getElementById('norva-notif-panel');
-        if (open) { open.remove(); document.getElementById('nav-bell')?.setAttribute('aria-expanded', 'false'); return; }
+        if (open) {
+            if (this._closeNotifications) this._closeNotifications();
+            else open.remove();
+            document.getElementById('nav-bell')?.setAttribute('aria-expanded', 'false');
+            return;
+        }
         const bell = document.getElementById('nav-bell');
+        const tv = this.isTvMode();
         const panel = document.createElement('div');
         panel.id = 'norva-notif-panel';
-        panel.className = 'norva-notif-panel';
-        panel.setAttribute('role', 'dialog');
+        const surface = tv ? document.createElement('section') : panel;
+        if (tv) {
+            // `modal-overlay active` is an intentional contract with tvNavigation:
+            // arrows stay inside this panel and hardware Back clicks `.modal-close`.
+            panel.className = 'modal-overlay active norva-notif-tv-overlay';
+            panel.setAttribute('role', 'dialog');
+            panel.setAttribute('aria-modal', 'true');
+            panel.dataset.restoreFocus = 'nav-bell';
+            surface.className = 'norva-notif-panel norva-notif-tv-surface';
+            panel.appendChild(surface);
+        } else {
+            panel.className = 'norva-notif-panel';
+            panel.setAttribute('role', 'dialog');
+        }
         panel.setAttribute('aria-label', 'Notifications');
         const events = this._notifEvents || [];
         const timeAgo = (iso) => {
@@ -541,44 +800,83 @@ class App {
         };
         const item = (e) => e.kind === 'support'
             ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/support.html?ticket=${encodeURIComponent(e.ticket_id)}&returnTo=${encodeURIComponent(here)}">
-                    <div class="norva-notif-summary">💬 ${esc(e.summary || 'Support replied')}</div>
-                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · tap to open the ticket</div>
+                    <span class="norva-notif-kind">Support</span>
+                    <div class="norva-notif-summary">${esc(e.summary || 'Support replied')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · Open conversation</div>
                 </a>`
             : watchRoute(e)
                 ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/app.html#${esc(watchRoute(e))}" data-watch="${esc(watchRoute(e))}">
-                    <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
-                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · tap to open</div>
+                    <span class="norva-notif-kind">New</span>
+                    <div class="norva-notif-summary">${esc(e.summary || 'New content')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · View details</div>
                 </a>`
-                : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
-                    <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
+                : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}" role="article" tabindex="0">
+                    <span class="norva-notif-kind">Update</span>
+                    <div class="norva-notif-summary">${esc(e.summary || 'New content')}</div>
                     <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
                 </div>`;
-        panel.innerHTML = `
-            <div class="norva-notif-head">Notifications</div>
+        surface.innerHTML = `
+            <div class="norva-notif-head">
+                <div class="norva-notif-heading">
+                    <strong>Notifications</strong>
+                    <span>${events.length ? `${events.length} recent update${events.length === 1 ? '' : 's'}` : 'You are all caught up'}</span>
+                </div>
+                <button type="button" class="norva-notif-close modal-close" data-notif-close>Close</button>
+            </div>
             <div class="norva-notif-list">
-                ${events.length ? events.map(item).join('') : '<div class="norva-notif-empty">No notifications yet.</div>'}
+                ${events.length ? events.map(item).join('') : `
+                    <div class="norva-notif-empty">
+                        <strong>Nothing new right now</strong>
+                        <span>Support replies and catalogue updates will appear here.</span>
+                    </div>`}
             </div>`;
         document.body.appendChild(panel);
+        let closed = false;
+        const closePanel = ({ restoreFocus = true } = {}) => {
+            if (closed) return;
+            closed = true;
+            panel.remove();
+            bell?.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', closeOnOutside, true);
+            document.removeEventListener('keydown', closeOnOutside, true);
+            this._closeNotifications = null;
+            if (restoreFocus && bell?.isConnected) {
+                requestAnimationFrame(() => {
+                    try { bell.focus({ preventScroll: true }); } catch (_) { bell.focus?.(); }
+                });
+            }
+        };
+        this._closeNotifications = closePanel;
+        surface.querySelector('[data-notif-close]')?.addEventListener('click', () => closePanel());
         // Watch deep links navigate IN-APP (a hash-only href would not reload the SPA): route to
         // the catalogue page and reuse the same openFicheFromRoute the boot deep link goes through.
-        panel.querySelectorAll('[data-watch]').forEach((a) => a.addEventListener('click', (ev) => {
+        surface.querySelectorAll('[data-watch]').forEach((a) => a.addEventListener('click', (ev) => {
             ev.preventDefault();
             const w = a.getAttribute('data-watch') || '';
             const page = w.split('/')[0];
             if (!this.pages?.[page]) return;
             this._openFicheRoute = w.slice(page.length + 1);
-            panel.remove();
-            bell?.setAttribute('aria-expanded', 'false');
+            closePanel({ restoreFocus: false });
             this.navigateTo(page);
             this.openFicheFromRoute(page);
         }));
-        // Position under the bell.
-        try {
-            const r = bell.getBoundingClientRect();
-            panel.style.top = `${Math.round(r.bottom + 8)}px`;
-            panel.style.right = `${Math.round(window.innerWidth - r.right)}px`;
-        } catch (_) { /* default CSS position */ }
+        // Desktop/web remains a compact anchored popover. TV uses the viewport-safe
+        // overlay CSS instead, because its bell sits at the bottom of the left rail.
+        if (!tv) {
+            try {
+                const r = bell.getBoundingClientRect();
+                const maxTop = Math.max(16, window.innerHeight - panel.offsetHeight - 16);
+                panel.style.top = `${Math.max(16, Math.min(Math.round(r.bottom + 8), maxTop))}px`;
+                panel.style.right = `${Math.max(16, Math.round(window.innerWidth - r.right))}px`;
+            } catch (_) { /* default CSS position */ }
+        }
         bell?.setAttribute('aria-expanded', 'true');
+        // Focus is moved into the panel after layout. Combined with the TV modal scope
+        // above, no D-pad move can leak behind it; close always restores the bell.
+        requestAnimationFrame(() => {
+            const first = surface.querySelector('a.norva-notif-item, .norva-notif-item[tabindex="0"], [data-notif-close]');
+            try { first?.focus({ preventScroll: true }); } catch (_) { first?.focus?.(); }
+        });
         // Opening the inbox marks the unseen entries read — each feed via its own mechanism:
         // catalog ids → contentEvents.markSeen (NEVER send it the synthetic support ids),
         // support → advance the shared 'norva-support-seen' watermark (server timestamps).
@@ -595,18 +893,31 @@ class App {
             if (dot) { dot.textContent = ''; dot.setAttribute('hidden', ''); }
             events.forEach(e => { e.seen_at = e.seen_at || new Date().toISOString(); });
         }
-        // Dismiss on outside click / Escape.
-        const close = (ev) => {
+        // Dismiss on outside click / Escape. Tab is explicitly trapped for keyboard
+        // parity; D-pad confinement comes from the modal scope above.
+        const closeOnOutside = (ev) => {
+            if (ev.type === 'keydown' && ev.key === 'Tab') {
+                const focusable = [...surface.querySelectorAll('a[href], button:not([disabled]), [tabindex="0"]')]
+                    .filter(el => el.offsetParent || el.getClientRects().length);
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (ev.shiftKey && document.activeElement === first) {
+                    ev.preventDefault();
+                    last.focus();
+                } else if (!ev.shiftKey && document.activeElement === last) {
+                    ev.preventDefault();
+                    first.focus();
+                }
+                return;
+            }
             if (ev.type === 'keydown' && ev.key !== 'Escape') return;
-            if (ev.type === 'click' && (panel.contains(ev.target) || bell?.contains(ev.target))) return;
-            panel.remove();
-            bell?.setAttribute('aria-expanded', 'false');
-            document.removeEventListener('click', close, true);
-            document.removeEventListener('keydown', close, true);
+            if (ev.type === 'click' && (surface.contains(ev.target) || bell?.contains(ev.target))) return;
+            closePanel();
         };
         setTimeout(() => {
-            document.addEventListener('click', close, true);
-            document.addEventListener('keydown', close, true);
+            document.addEventListener('click', closeOnOutside, true);
+            document.addEventListener('keydown', closeOnOutside, true);
         }, 0);
     }
 
@@ -1378,39 +1689,7 @@ class App {
 
         logoutLink.addEventListener('click', async (e) => {
             e.preventDefault();
-
-            // TV = a device-paired screen. It must unpair (server-side revoke +
-            // clear the local device token) so the pairing screen starts fresh
-            // instead of silently resuming the SAME account. Detected strictly by
-            // the TV user agent so phone/web are untouched. Mirrors Settings.js
-            // signOut(); this is the top-nav Logout button, the one used on TV.
-            if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
-                try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort */ }
-                try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
-                try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
-                try { if (window.NorvaAuth) await window.NorvaAuth.signOut(); } catch (_) { /* noop */ }
-                window.location.replace('/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home');
-                return;
-            }
-
-            const token = localStorage.getItem('authToken');
-            if (this.currentUser?.cloud && window.NorvaAuth) {
-                await window.NorvaAuth.signOut();
-                window.location.replace('/account.html');
-                return;
-            }
-
-            if (token) {
-                await fetch('/api/auth/logout', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-            }
-
-            localStorage.removeItem('authToken');
-            window.location.replace('/login.html');
+            await this.signOut();
         });
 
         navbar.appendChild(logoutLink);
@@ -1541,13 +1820,41 @@ class App {
         backdrop.id = `${config.key}-mobile-filter-backdrop`;
         backdrop.className = 'mobile-filter-backdrop';
         filterBar.before(backdrop);
-        filterBar.setAttribute('aria-label', config.title);
+        const originalFilterSemantics = {
+            ariaLabel: filterBar.getAttribute('aria-label'),
+            role: filterBar.getAttribute('role'),
+            ariaModal: filterBar.getAttribute('aria-modal'),
+            ariaHidden: filterBar.getAttribute('aria-hidden'),
+            tabIndex: filterBar.getAttribute('tabindex'),
+            inert: filterBar.inert,
+        };
+        const restoreAttribute = (name, value) => {
+            if (value == null) filterBar.removeAttribute(name);
+            else filterBar.setAttribute(name, value);
+        };
+        const applyMobileSemantics = () => {
+            filterBar.setAttribute('aria-label', config.title);
+            filterBar.setAttribute('role', 'dialog');
+            filterBar.setAttribute('aria-modal', 'true');
+            filterBar.setAttribute('aria-hidden', 'true');
+            filterBar.tabIndex = -1;
+            filterBar.inert = true;
+        };
+        const restoreDesktopSemantics = () => {
+            restoreAttribute('aria-label', originalFilterSemantics.ariaLabel);
+            restoreAttribute('role', originalFilterSemantics.role);
+            restoreAttribute('aria-modal', originalFilterSemantics.ariaModal);
+            restoreAttribute('aria-hidden', originalFilterSemantics.ariaHidden);
+            restoreAttribute('tabindex', originalFilterSemantics.tabIndex);
+            filterBar.inert = originalFilterSemantics.inert;
+        };
+        applyMobileSemantics();
 
         const sheetHeader = document.createElement('div');
         sheetHeader.className = 'mobile-filter-sheet-header';
         sheetHeader.innerHTML = `
             <span class="mobile-filter-sheet-title">${config.title}</span>
-            <button type="button" class="btn btn-sm btn-ghost mobile-filter-close" aria-label="Close filters">&times;</button>
+            <button type="button" class="btn btn-sm btn-ghost mobile-filter-close">Done</button>
         `;
 
         const sheetBody = document.createElement('div');
@@ -1583,24 +1890,97 @@ class App {
         ['audio', 'subtitle'].forEach(name => addField(languageSection.body, name));
         ['group', 'hide', 'favorite', 'reset'].forEach(name => addField(displaySection.body, name));
 
-        const close = () => {
+        let previousFocus = null;
+        let inertSnapshot = [];
+        const setBackgroundInert = (active) => {
+            if (!active) {
+                inertSnapshot.forEach(({ element, inert }) => {
+                    if (element?.isConnected) element.inert = inert;
+                });
+                inertSnapshot = [];
+                return;
+            }
+            if (inertSnapshot.length) return;
+            const candidates = new Set();
+            let node = filterBar;
+            while (node?.parentElement) {
+                const parent = node.parentElement;
+                [...parent.children].forEach((sibling) => {
+                    if (sibling !== node && sibling !== backdrop) candidates.add(sibling);
+                });
+                if (parent === document.body) break;
+                node = parent;
+            }
+            inertSnapshot = [...candidates].map(element => ({ element, inert: element.inert }));
+            inertSnapshot.forEach(({ element }) => { element.inert = true; });
+        };
+        const focusable = () => [...filterBar.querySelectorAll(
+            'button:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), '
+            + 'input:not([disabled]):not([hidden]), [href]:not([hidden]), '
+            + '[tabindex]:not([tabindex="-1"]):not([hidden])'
+        )].filter(element => element.offsetParent !== null);
+        const close = ({ restoreFocus = true } = {}) => {
+            const wasOpen = filterBar.classList.contains('mobile-open');
+            const focusTarget = wasOpen && restoreFocus && previousFocus?.isConnected ? previousFocus : null;
+            setBackgroundInert(false);
+            if (focusTarget) {
+                try { focusTarget.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            }
             filterBar.classList.remove('mobile-open');
             backdrop.classList.remove('mobile-open');
             filterBtn.setAttribute('aria-expanded', 'false');
+            filterBar.setAttribute('aria-hidden', 'true');
+            filterBar.inert = true;
             document.body.classList.remove('catalog-filter-open');
+            previousFocus = null;
         };
         const open = () => {
+            document.querySelectorAll('.filter-bar.mobile-open').forEach(openSheet => {
+                if (openSheet !== filterBar) {
+                    openSheet.querySelector('.mobile-filter-close')?.click();
+                }
+            });
+            previousFocus = document.activeElement;
             filterBar.classList.add('mobile-open');
             backdrop.classList.add('mobile-open');
             filterBtn.setAttribute('aria-expanded', 'true');
+            filterBar.setAttribute('aria-hidden', 'false');
+            filterBar.inert = false;
             document.body.classList.add('catalog-filter-open');
+            const first = focusable()[0] || filterBar;
+            try { first.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            setBackgroundInert(true);
+            requestAnimationFrame(() => {
+                if (!filterBar.contains(document.activeElement)) first.focus({ preventScroll: true });
+            });
         };
 
         filterBtn.addEventListener('click', open);
         backdrop.addEventListener('click', close);
         sheetHeader.querySelector('.mobile-filter-close')?.addEventListener('click', close);
-        document.addEventListener('keydown', event => {
-            if (event.key === 'Escape') close();
+        filterBar.addEventListener('keydown', event => {
+            if (!filterBar.classList.contains('mobile-open')) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                close();
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const items = focusable();
+            if (!items.length) {
+                event.preventDefault();
+                filterBar.focus({ preventScroll: true });
+                return;
+            }
+            const first = items[0];
+            const last = items[items.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus({ preventScroll: true });
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus({ preventScroll: true });
+            }
         });
 
         const updateHiddenFields = () => {
@@ -1639,21 +2019,53 @@ class App {
         };
 
         const restore = () => {
+            const activeBefore = document.activeElement;
+            const focusWasInside = Boolean(activeBefore && filterBar.contains(activeBefore));
+            close({ restoreFocus: false });
             moveNames.forEach(name => {
                 const marker = markers.get(name);
                 const el = elements[name];
                 if (marker?.parentNode && el) marker.parentNode.insertBefore(el, marker.nextSibling);
             });
             filterBtn.remove();
-            close();
+            restoreDesktopSemantics();
             updateBadge();
+            if (focusWasInside) {
+                requestAnimationFrame(() => {
+                    const restored = moveNames.map(name => elements[name]).filter(Boolean);
+                    const activeStillUsable = activeBefore?.isConnected
+                        && activeBefore.matches?.('button, select, input, textarea, [href], [tabindex]:not([tabindex="-1"])')
+                        && activeBefore.offsetParent !== null;
+                    const target = activeStillUsable
+                        ? activeBefore
+                        : restored.find(element => !element.disabled && element.offsetParent !== null);
+                    try { target?.focus?.({ preventScroll: true }); } catch (_) { /* noop */ }
+                });
+            }
         };
 
         const apply = () => {
+            const activeBefore = document.activeElement;
+            const focusWillBeHidden = [...fieldWrappers.keys()].some(name => {
+                const element = elements[name];
+                return Boolean(element && activeBefore
+                    && (element === activeBefore || element.contains?.(activeBefore)));
+            });
+            applyMobileSemantics();
+            fieldWrappers.forEach((field, name) => {
+                const element = elements[name];
+                if (element && element.parentElement !== field) field.append(element);
+            });
             if (!filterBtn.isConnected) controls.append(filterBtn);
             if (elements.sort) controls.append(elements.sort);
             if (elements.random) controls.append(elements.random);
             updateBadge();
+            if (focusWillBeHidden) {
+                requestAnimationFrame(() => {
+                    if (!filterBtn.isConnected || filterBtn.offsetParent === null) return;
+                    try { filterBtn.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                });
+            }
         };
 
         const watched = [...moveNames.map(name => elements[name]), document.getElementById(`${config.key}-category-btn`)]
@@ -1664,9 +2076,16 @@ class App {
             new MutationObserver(updateBadge).observe(el, { attributes: true, attributeFilter: ['class'] });
         });
 
+        let layoutMode = null;
         return {
             sync: () => {
-                if (window.matchMedia('(max-width: 1024px)').matches) apply();
+                const nextMode = window.matchMedia('(max-width: 1024px)').matches ? 'mobile' : 'desktop';
+                // Android fires resize when the IME opens. Re-applying mobile
+                // semantics while the sheet is already open would make the visible
+                // dialog inert/aria-hidden, so mutate only on a real breakpoint.
+                if (nextMode === layoutMode) return;
+                layoutMode = nextMode;
+                if (nextMode === 'mobile') apply();
                 else restore();
             }
         };
@@ -1736,12 +2155,107 @@ class App {
 
     openAccountSheet() {
         const sheet = document.getElementById('account-sheet') || this.buildAccountSheet();
+        if (sheet.classList.contains('active')) {
+            try { sheet.querySelector('.account-close')?.focus(); } catch (_) { /* noop */ }
+            return;
+        }
+        this._accountSheetOpener = (document.activeElement && document.activeElement !== document.body)
+            ? document.activeElement
+            : document.getElementById('nav-account');
         this.refreshAccountSheet(sheet);
+        sheet.inert = false;
+        sheet.removeAttribute('inert');
+        sheet.setAttribute('aria-hidden', 'false');
         sheet.classList.add('active');
+        const initialFocus = sheet.querySelector('.account-close')
+            || sheet.querySelector('.account-row:not([style*="display: none"])');
+        try { initialFocus?.focus(); } catch (_) { /* noop */ }
+        this._setAccountSheetBackgroundInert(sheet, true);
+        this._accountSheetKeydown = (event) => this._handleAccountSheetKeydown(event, sheet);
+        document.addEventListener('keydown', this._accountSheetKeydown, true);
     }
 
     closeAccountSheet() {
-        document.getElementById('account-sheet')?.classList.remove('active');
+        const sheet = document.getElementById('account-sheet');
+        if (!sheet) return;
+        sheet.classList.remove('active');
+        sheet.setAttribute('aria-hidden', 'true');
+        sheet.setAttribute('inert', '');
+        sheet.inert = true;
+        if (this._accountSheetKeydown) {
+            document.removeEventListener('keydown', this._accountSheetKeydown, true);
+            this._accountSheetKeydown = null;
+        }
+        this._setAccountSheetBackgroundInert(sheet, false);
+        const opener = this._accountSheetOpener;
+        this._accountSheetOpener = null;
+        const fallback = document.getElementById('nav-account');
+        const target = opener?.isConnected ? opener : fallback;
+        try { target?.focus(); } catch (_) { /* noop */ }
+    }
+
+    _setAccountSheetBackgroundInert(sheet, active) {
+        if (active) {
+            this._accountSheetBackgroundState = [];
+            [...document.body.children].forEach((node) => {
+                if (node === sheet || node.matches?.('script, style, link')) return;
+                this._accountSheetBackgroundState.push({
+                    node,
+                    hadInert: node.hasAttribute('inert'),
+                    ariaHidden: node.getAttribute('aria-hidden')
+                });
+                node.setAttribute('inert', '');
+                node.inert = true;
+                node.setAttribute('aria-hidden', 'true');
+            });
+            return;
+        }
+        (this._accountSheetBackgroundState || []).forEach(({ node, hadInert, ariaHidden }) => {
+            if (!node?.isConnected) return;
+            if (hadInert) {
+                node.setAttribute('inert', '');
+                node.inert = true;
+            } else {
+                node.removeAttribute('inert');
+                node.inert = false;
+            }
+            if (ariaHidden == null) node.removeAttribute('aria-hidden');
+            else node.setAttribute('aria-hidden', ariaHidden);
+        });
+        this._accountSheetBackgroundState = [];
+    }
+
+    _accountSheetFocusables(sheet) {
+        return [...sheet.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )].filter((node) => node.getAttribute('aria-hidden') !== 'true'
+            && node.style.display !== 'none'
+            && !node.closest('[inert]'));
+    }
+
+    _handleAccountSheetKeydown(event, sheet) {
+        if (!sheet.classList.contains('active')) return;
+        if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
+            event.preventDefault();
+            event.stopPropagation();
+            this.closeAccountSheet();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusables = this._accountSheetFocusables(sheet);
+        if (!focusables.length) {
+            event.preventDefault();
+            return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (event.shiftKey && (document.activeElement === first || !sheet.contains(document.activeElement))) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !sheet.contains(document.activeElement))) {
+            event.preventDefault();
+            first.focus();
+        }
     }
 
     openScreensSettings() {
@@ -1758,15 +2272,18 @@ class App {
         const overlay = document.createElement('div');
         overlay.id = 'account-sheet';
         overlay.className = 'modal-overlay account-sheet';
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.setAttribute('inert', '');
+        overlay.inert = true;
         overlay.innerHTML = `
-            <div class="account-panel" role="dialog" aria-modal="true" aria-label="Account">
+            <div class="account-panel" role="dialog" aria-modal="true" aria-labelledby="account-sheet-title">
                 <div class="account-head">
                     <img id="account-avatar" class="account-avatar" src="/img/avatars/placeholder.svg" alt="">
                     <div class="account-id">
-                        <div id="account-name" class="account-name">Profile</div>
+                        <div id="account-sheet-title" class="account-name">Profile</div>
                         <div id="account-email" class="account-email"></div>
                     </div>
-                    <button type="button" class="account-close" aria-label="Close">&times;</button>
+                    <button type="button" class="account-close modal-close" aria-label="Close">&times;</button>
                 </div>
                 <button type="button" class="account-row" data-act="switch">
                     <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
@@ -1806,7 +2323,7 @@ class App {
         const cur = (window.NorvaProfiles?.current?.()) || {};
         const avatar = sheet.querySelector('#account-avatar');
         const switchIc = sheet.querySelector('[data-act="switch"] .account-ic');
-        const name = sheet.querySelector('#account-name');
+        const name = sheet.querySelector('#account-sheet-title');
         const email = sheet.querySelector('#account-email');
         const switchRow = sheet.querySelector('[data-act="switch"]');
         const screensRow = sheet.querySelector('[data-act="screens"]');
@@ -1824,11 +2341,40 @@ class App {
 
     // Canonical sign-out (cloud → Supabase + /account.html, else local token).
     async signOut() {
+        if (this._signOutInFlight) return false;
+        if (!window.NorvaModal || typeof window.NorvaModal.confirm !== 'function') {
+            console.warn('[Norva] Sign-out confirmation is unavailable; keeping the session active.');
+            return false;
+        }
+        const tv = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+        const confirmed = await window.NorvaModal.confirm(
+            tv
+                ? 'This TV will be unpaired. You will need to scan a new pairing code to use it again.'
+                : 'You will need to sign in again to use Norva on this device.',
+            {
+                title: 'Log out of Norva?',
+                confirmLabel: 'Log out',
+                cancelLabel: 'Stay signed in',
+                danger: true
+            }
+        );
+        if (!confirmed) return false;
+
+        this._signOutInFlight = true;
+        if (tv) {
+            try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort */ }
+            try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
+            try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
+            try { if (window.NorvaAuth) await window.NorvaAuth.signOut(); } catch (_) { /* noop */ }
+            window.location.replace('/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home');
+            return true;
+        }
+
         const token = localStorage.getItem('authToken');
         if (this.currentUser?.cloud && window.NorvaAuth) {
             try { await window.NorvaAuth.signOut(); } catch (_) { /* best effort */ }
             window.location.replace('/account.html');
-            return;
+            return true;
         }
         if (token) {
             try {
@@ -1837,6 +2383,7 @@ class App {
         }
         localStorage.removeItem('authToken');
         window.location.replace('/login.html');
+        return true;
     }
 
     // ---- Global catalogue search (movies + series) -----------------------
@@ -1846,17 +2393,27 @@ class App {
 
     openSearch() {
         const ov = document.getElementById('gsearch-overlay') || this.buildSearchOverlay();
-        ov.classList.add('active');
-        const input = ov.querySelector('#gsearch-input');
-        // Stash the opener so closeSearch()/hardware-BACK can return the D-pad ring to it (TV).
+        // Stash the opener before the background becomes inert so every input mode
+        // (touch, keyboard, screen reader and D-pad) returns to the invoking control.
         this._searchOpener = (document.activeElement && document.activeElement !== document.body)
             ? document.activeElement : document.getElementById('nav-search');
         if (this._searchOpener?.id) ov.dataset.restoreFocus = this._searchOpener.id;
+        const wasOpen = ov.classList.contains('active');
+        ov.inert = false;
+        ov.setAttribute('aria-hidden', 'false');
+        ov.classList.add('active');
+        const input = ov.querySelector('#gsearch-input');
         // Focus SYNCHRONOUSLY inside the opening gesture: Android TV WebViews raise the
         // leanback keyboard only for a gesture-synchronous focus. A deferred (setTimeout)
         // focus is outside the gesture, so the IME then often never rises — an empty,
         // untypeable box, the #1 reason menu search felt broken on TV. Re-assert after paint.
         try { input.focus(); input.select(); } catch (_) { /* noop */ }
+        if (!wasOpen) {
+            this._searchInertSnapshot = [...document.body.children]
+                .filter(element => element !== ov)
+                .map(element => ({ element, inert: element.inert }));
+            this._searchInertSnapshot.forEach(({ element }) => { element.inert = true; });
+        }
         setTimeout(() => {
             try { if (document.activeElement !== input) { input.focus(); input.select(); } } catch (_) { /* noop */ }
         }, 50);
@@ -1866,25 +2423,33 @@ class App {
         const ov = document.getElementById('gsearch-overlay');
         if (!ov) return;
         ov.classList.remove('active');
+        (this._searchInertSnapshot || []).forEach(({ element, inert }) => {
+            if (element?.isConnected) element.inert = inert;
+        });
+        this._searchInertSnapshot = [];
         const opener = this._searchOpener;
         this._searchOpener = null;
-        // TV: return the ring to the Search icon so no arrow press is wasted and re-open
-        // is one press away. Skipped when navigating to a result (focus lands on the fiche).
-        if (restoreFocus && opener && document.documentElement.classList.contains('tv-mode')) {
-            try { opener.focus(); } catch (_) { /* noop */ }
+        if (restoreFocus && opener?.isConnected) {
+            try { opener.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        } else if (ov.contains(document.activeElement)) {
+            try { document.activeElement.blur(); } catch (_) { /* noop */ }
         }
+        ov.setAttribute('aria-hidden', 'true');
+        ov.inert = true;
     }
 
     buildSearchOverlay() {
         const ov = document.createElement('div');
         ov.id = 'gsearch-overlay';
         ov.className = 'modal-overlay gsearch-overlay';
+        ov.setAttribute('aria-hidden', 'true');
+        ov.inert = true;
         ov.innerHTML = `
-            <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search">
+            <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search" tabindex="-1">
                 <div class="gsearch-bar">
                     <span class="gsearch-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
                     <input id="gsearch-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…">
-                    <button type="button" class="gsearch-cancel">Cancel</button>
+                    <button type="button" class="gsearch-cancel modal-close">Cancel</button>
                 </div>
                 <div class="gsearch-results" id="gsearch-results">
                     <div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>
@@ -1892,13 +2457,39 @@ class App {
             </div>`;
         ov.addEventListener('click', (e) => { if (e.target === ov) this.closeSearch(); });
         ov.querySelector('.gsearch-cancel').addEventListener('click', () => this.closeSearch());
+        ov.addEventListener('keydown', (event) => {
+            if (!ov.classList.contains('active')) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                this.closeSearch();
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const focusable = [...ov.querySelectorAll(
+                'button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), '
+                + '[href]:not([hidden]), [tabindex]:not([tabindex="-1"]):not([hidden])'
+            )].filter(element => element.offsetParent !== null);
+            if (!focusable.length) {
+                event.preventDefault();
+                ov.querySelector('.gsearch-panel')?.focus?.({ preventScroll: true });
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus({ preventScroll: true });
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus({ preventScroll: true });
+            }
+        });
         const input = ov.querySelector('#gsearch-input');
         input.addEventListener('input', () => {
             clearTimeout(this._searchDebounce);
             this._searchDebounce = setTimeout(() => this.runSearch(input.value.trim()), 250);
         });
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') { this.closeSearch(); return; }
             if (e.key === 'Enter') {
                 e.preventDefault();
                 // On TV, the remote's OK/Enter (and the leanback keyboard's Search/Done
@@ -1942,15 +2533,28 @@ class App {
         }
         const reqId = (this._searchReq = (this._searchReq || 0) + 1);
         box.innerHTML = '<div class="gsearch-hint"><div class="loading-spinner"></div></div>';
-        const empty = { items: [] };
         // dedup=1 → the search RPC collapses to one representative row per film SERVER-SIDE
         // (grid parity, durable across clients), so 48 rows ≈ 48 distinct films. openByItem's
         // sibling re-fetch deliberately OMITS the flag — the version picker needs raw rows.
-        const [mv, sr] = await Promise.all([
-            window.API.media.page({ type: 'movie', q, limit: 48, dedup: 1 }).catch(() => empty),
-            window.API.media.page({ type: 'series', q, limit: 48, dedup: 1 }).catch(() => empty),
+        const [mvResult, srResult] = await Promise.allSettled([
+            Promise.resolve().then(() => window.API.media.page({ type: 'movie', q, limit: 48, dedup: 1 })),
+            Promise.resolve().then(() => window.API.media.page({ type: 'series', q, limit: 48, dedup: 1 })),
         ]);
         if (reqId !== this._searchReq) return; // a newer keystroke superseded this
+        const failedCount = Number(mvResult.status === 'rejected') + Number(srResult.status === 'rejected');
+        if (failedCount === 2) {
+            this._gsMovies = [];
+            this._gsSeries = [];
+            box.innerHTML = `
+                <div class="gsearch-hint gsearch-error" role="alert">
+                    Search is temporarily unavailable.
+                    <button type="button" class="btn btn-sm gsearch-retry">Try again</button>
+                </div>`;
+            box.querySelector('.gsearch-retry')?.addEventListener('click', () => this.runSearch(q));
+            return;
+        }
+        const mv = mvResult.status === 'fulfilled' ? mvResult.value : { items: [] };
+        const sr = srResult.status === 'fulfilled' ? srResult.value : { items: [] };
         // Re-group client-side on top of the server dedup. Still load-bearing for two cases:
         // (1) tmdb-split duplicates — same film under different dedup_keys (one tmdb-keyed, one
         // norm-keyed) survive the server's DISTINCT ON exactly like on the grid, and the
@@ -1975,11 +2579,33 @@ class App {
                 ? M.groupItems(prepped, { idField })
                 : prepped.map((it) => ({ representative: it, items: [it] }));
         };
-        const gMovies = grp(mv.items, 'stream_id');
-        const gSeries = grp(sr.items, 'series_id'); // series dedup by series_id, mirroring SeriesPage
+        const rankGroups = (groups) => {
+            const needle = M?.searchableText?.(q)?.trim() || String(q).toLowerCase();
+            const score = (group) => {
+                const item = group?.representative || group || {};
+                const rawTitle = item.tmdb?.title || item.tmdb?.name || item.name || '';
+                const cleanTitle = M?.cleanReleaseName?.(rawTitle) || rawTitle;
+                const title = M?.searchableText?.(cleanTitle)?.trim() || String(cleanTitle).toLowerCase();
+                if (title === needle) return 0;
+                if (title.startsWith(`${needle} `) || title.startsWith(needle)) return 1;
+                if (title.split(/\s+/).includes(needle)) return 2;
+                if (title.includes(needle)) return 3;
+                return 4;
+            };
+            return groups
+                .map((group, index) => ({ group, index, score: score(group) }))
+                .sort((a, b) => a.score - b.score || a.index - b.index)
+                .map(entry => entry.group);
+        };
+        const gMovies = rankGroups(grp(mv.items, 'stream_id'));
+        const gSeries = rankGroups(grp(sr.items, 'series_id')); // series dedup by series_id, mirroring SeriesPage
         this._gsMovies = gMovies.map((g) => g.representative);
         this._gsSeries = gSeries.map((g) => g.representative);
         this.renderSearchResults(box, q, gMovies, gSeries);
+        if (failedCount === 1) {
+            box.insertAdjacentHTML('afterbegin',
+                '<div class="gsearch-hint gsearch-partial" role="status">Some results could not be loaded. You can retry the search.</div>');
+        }
     }
 
     renderSearchResults(box, q, movies, series) {
@@ -2018,30 +2644,53 @@ class App {
         }
         box.innerHTML = html;
         box.querySelectorAll('.gsearch-result').forEach((el) => {
-            el.addEventListener('click', () => this.openSearchResult(el.dataset.type, parseInt(el.dataset.idx, 10)));
+            el.addEventListener('click', (event) => this.openSearchResult(
+                el.dataset.type,
+                parseInt(el.dataset.idx, 10),
+                { moveFocus: event.detail === 0 }
+            ));
         });
         box.querySelectorAll('.gsearch-seeall').forEach((el) => {
-            el.addEventListener('click', () => this.seeAllInPage(el.dataset.seeall, q));
+            el.addEventListener('click', (event) => this.seeAllInPage(
+                el.dataset.seeall,
+                q,
+                { moveFocus: event.detail === 0 }
+            ));
         });
     }
 
     // "See all in Movies/Series": land on the fully-paged in-page grid, pre-searched to the same
     // query — the same navigate+prefill path openSearchResult() falls back to (race-safe via the
     // page's cloudRequestId guard). Removes the overlay's 48-row ceiling as the limiting factor.
-    seeAllInPage(type, q) {
+    seeAllInPage(type, q, { moveFocus = true } = {}) {
         this.closeSearch(false);
         const page = type === 'series' ? 'series' : 'movies';
         this.navigateTo(page);
+        const navigationToken = this._navigationToken;
+        const pageObj = type === 'series' ? this.pages?.series : this.pages?.movies;
+        // "See all" is itself a same-page intent. Invalidate a delayed fiche
+        // restore/deep-link/search even when navigateTo() is a no-op here.
+        pageObj?.beginFicheIntent?.();
+        const isCurrent = () => navigationToken === this._navigationToken && this.currentPage === page;
         setTimeout(() => {
+            if (!isCurrent()) return;
             const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
             if (input) { input.value = q; input.dispatchEvent(new Event('input', { bubbles: true })); }
             // TV: once the searched grid re-renders, land the D-pad ring on the first card
             // so the first arrow press isn't wasted waking focus onto <body>.
             if (document.documentElement.classList.contains('tv-mode')) {
                 setTimeout(() => {
+                    if (!isCurrent()) return;
                     const card = document.querySelector(`#${page}-grid .${type === 'series' ? 'series' : 'movie'}-card`);
                     try { card?.focus?.(); card?.scrollIntoView?.({ block: 'nearest' }); } catch (_) { /* noop */ }
                 }, 450);
+            } else if (moveFocus && input) {
+                // Keyboard/TalkBack activation must not fall back to <body> once
+                // the search dialog becomes inert.
+                requestAnimationFrame(() => {
+                    if (!isCurrent()) return;
+                    try { input.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                });
             }
         }, 140);
     }
@@ -2050,16 +2699,35 @@ class App {
     // that can't resolve a detail (page not ready, fetch failed), fall back to
     // landing on the page pre-searched to the title — the page's cloudRequestId
     // guard makes that prefill race-safe.
-    openSearchResult(type, idx) {
+    openSearchResult(type, idx, { moveFocus = true } = {}) {
         const item = (type === 'series' ? this._gsSeries : this._gsMovies)?.[idx];
         this.closeSearch(false);
         const page = type === 'series' ? 'series' : 'movies';
         this.navigateTo(page);
+        const navigationToken = this._navigationToken;
         const pageObj = type === 'series' ? this.pages?.series : this.pages?.movies;
+        const ficheIntentToken = pageObj?.beginFicheIntent?.();
+        const isRouteCurrent = () => navigationToken === this._navigationToken && this.currentPage === page;
+        const isIntentCurrent = () => ficheIntentToken == null
+            || pageObj?.isFicheIntentCurrent?.(ficheIntentToken) !== false;
+        const isCurrent = () => isRouteCurrent() && isIntentCurrent();
         const title = item ? (item.tmdb?.title || item.tmdb?.name || item.name || '') : '';
         setTimeout(async () => {
+            if (!isCurrent()) return;
             let opened = false;
-            try { if (item && pageObj?.openByItem) opened = await pageObj.openByItem(item); } catch (_) { opened = false; }
+            try {
+                if (item && pageObj?.openByItem) {
+                    opened = await pageObj.openByItem(item, { intentToken: ficheIntentToken });
+                }
+            } catch (_) { opened = false; }
+            if (!isRouteCurrent()) {
+                if (opened) pageObj?.hideDetails?.();
+                this.forgetOpenFiche();
+                return;
+            }
+            // A newer card/rail/fiche intent on this same route owns the visible
+            // detail and its continuity state; never hide or clear it.
+            if (!isIntentCurrent()) return;
             if (opened) {
                 // TV: land the D-pad ring on the opened fiche's primary action (Play/Voir),
                 // mirroring the in-page card-commit focus — otherwise focus falls to <body>
@@ -2071,6 +2739,18 @@ class App {
                             if (btn && !btn.disabled && btn.offsetParent) { btn.focus(); btn.scrollIntoView({ block: 'nearest' }); }
                         } catch (_) { /* noop */ }
                     });
+                } else if (moveFocus) {
+                    requestAnimationFrame(() => {
+                        if (!isCurrent()) return;
+                        const panel = pageObj?.detailsPanel;
+                        const primary = pageObj?.primaryActionBtn;
+                        const target = (primary && !primary.disabled && primary.offsetParent !== null)
+                            ? primary
+                            : panel?.querySelector?.(
+                                '.movie-back-btn, .series-back-btn, button:not([disabled]), [href], [tabindex="0"]'
+                            );
+                        try { target?.focus?.({ preventScroll: true }); } catch (_) { /* noop */ }
+                    });
                 }
                 return;
             }
@@ -2078,6 +2758,12 @@ class App {
             if (input && title) {
                 input.value = title;
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (moveFocus && input) {
+                requestAnimationFrame(() => {
+                    if (!isCurrent()) return;
+                    try { input.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                });
             }
         }, 140);
     }
@@ -2092,14 +2778,55 @@ class App {
             if (!fiche || fiche.id == null || fiche.sourceId == null) return;
             sessionStorage.setItem('norva-open-fiche', JSON.stringify(fiche));
         } catch (_) { /* private mode: sessionStorage may throw */ }
+        // The full version group can contain provider-only fields, so it remains
+        // session-scoped. Native Activity recreation gets only the bounded title
+        // identity needed to resolve the exact fiche again after a WebView reload.
+        if (this.isNativePhoneShell()) {
+            try {
+                const type = fiche.type === 'series' ? 'series' : 'movie';
+                const sourceId = String(fiche.sourceId || '').slice(0, 200);
+                const id = String(fiche.id || '').slice(0, 200);
+                if (!sourceId || !id) return;
+                localStorage.setItem(NORVA_NATIVE_FICHE_KEY, JSON.stringify({
+                    type,
+                    sourceId,
+                    id,
+                    title: String(fiche.title || '').slice(0, 240),
+                    updatedAt: Date.now(),
+                }));
+            } catch (_) { /* best-effort, never blocks opening the fiche */ }
+        }
     }
 
     forgetOpenFiche() {
         try { sessionStorage.removeItem('norva-open-fiche'); } catch (_) { /* noop */ }
+        try { localStorage.removeItem(NORVA_NATIVE_FICHE_KEY); } catch (_) { /* noop */ }
     }
 
     readOpenFiche() {
-        try { return JSON.parse(sessionStorage.getItem('norva-open-fiche') || 'null'); } catch (_) { return null; }
+        try {
+            const live = JSON.parse(sessionStorage.getItem('norva-open-fiche') || 'null');
+            if (live) return live;
+        } catch (_) { /* fall through to the bounded native snapshot */ }
+        if (!this._nativeRecovery) return null;
+        try {
+            const saved = JSON.parse(localStorage.getItem(NORVA_NATIVE_FICHE_KEY) || 'null');
+            if (!saved || Date.now() - Number(saved.updatedAt || 0) > NORVA_NATIVE_CONTINUITY_TTL_MS) {
+                return null;
+            }
+            if (!['movie', 'series'].includes(saved.type)) return null;
+            const sourceId = String(saved.sourceId || '').slice(0, 200);
+            const id = String(saved.id || '').slice(0, 200);
+            if (!sourceId || !id) return null;
+            return {
+                type: saved.type,
+                sourceId,
+                id,
+                title: String(saved.title || '').slice(0, 240),
+            };
+        } catch (_) {
+            return null;
+        }
     }
 
     fichePageFor(fiche) {
@@ -2119,14 +2846,31 @@ class App {
         const [rawSourceId, id, title] = route.slice('open:'.length).split(':').map(dec);
         const pageObj = this.pages?.[pageName];
         if (!rawSourceId || !id || typeof pageObj?.openByItem !== 'function') return;
+        const navigationToken = this._navigationToken;
+        const ficheIntentToken = pageObj.beginFicheIntent?.();
+        const isRouteCurrent = () => navigationToken === this._navigationToken && this.currentPage === pageName;
+        const isIntentCurrent = () => ficheIntentToken == null
+            || pageObj.isFicheIntentCurrent?.(ficheIntentToken) !== false;
+        const isCurrent = () => isRouteCurrent() && isIntentCurrent();
         // The link carries the CLOUD source UUID; the catalog pages key on the LOCAL alias.
         const sourceId = window.API?.localSourceIdFor ? window.API.localSourceIdFor(rawSourceId) : rawSourceId;
         // Defer so the page's show()/DOM has settled (mirrors restoreOpenFiche).
-        setTimeout(() => {
+        setTimeout(async () => {
+            if (!isCurrent()) return;
             const item = pageName === 'series'
                 ? { sourceId, series_id: id, name: title, ...(title ? { tmdb: { name: title } } : {}) }
                 : { sourceId, stream_id: id, name: title, ...(title ? { tmdb: { title } } : {}) };
-            Promise.resolve(pageObj.openByItem(item)).catch(() => {});
+            let opened = false;
+            try {
+                opened = Boolean(await pageObj.openByItem(item, { intentToken: ficheIntentToken }));
+            } catch (_) { opened = false; }
+            if (!isRouteCurrent()) {
+                if (opened) pageObj.hideDetails?.();
+                this.forgetOpenFiche();
+            } else if (!isIntentCurrent()) {
+                // A newer same-page intent owns the fiche and its persisted state.
+                return;
+            }
         }, 200);
     }
 
@@ -2135,25 +2879,52 @@ class App {
         if (!fiche || this.fichePageFor(fiche) !== pageName) return;
         const pageObj = this.pages?.[pageName];
         if (!pageObj) return;
+        const navigationToken = this._navigationToken;
+        const ficheIntentToken = pageObj.beginFicheIntent?.();
+        const isRouteCurrent = () => navigationToken === this._navigationToken && this.currentPage === pageName;
+        const isIntentCurrent = () => ficheIntentToken == null
+            || pageObj.isFicheIntentCurrent?.(ficheIntentToken) !== false;
+        const isCurrent = () => isRouteCurrent() && isIntentCurrent();
         // Defer so the page's show()/DOM has settled (mirrors openSearchResult).
         setTimeout(async () => {
+            if (!isCurrent()) return;
             try {
                 // Rebuild the EXACT fiche from the stashed version group (all versions, no
                 // re-search). Fall back to openByItem for older id-only stashes.
                 if (fiche.type === 'series' && fiche.series && pageObj.showSeriesDetailsV2) {
-                    await pageObj.showSeriesDetailsV2(fiche.series, fiche.group || null);
+                    await pageObj.showSeriesDetailsV2(
+                        fiche.series,
+                        fiche.group || null,
+                        { intentToken: ficheIntentToken }
+                    );
+                    if (!isRouteCurrent()) {
+                        pageObj.hideDetails?.();
+                        this.forgetOpenFiche();
+                    }
                     return;
                 }
                 if (fiche.type === 'movie' && fiche.group?.items?.length && pageObj.showMovieDetails) {
                     const selected = fiche.group.items.find(i => String(i.stream_id) === String(fiche.id)) || null;
-                    pageObj.showMovieDetails(fiche.group, selected, {});
+                    pageObj.showMovieDetails(fiche.group, selected, { intentToken: ficheIntentToken });
+                    if (!isRouteCurrent()) {
+                        pageObj.hideDetails?.();
+                        this.forgetOpenFiche();
+                    }
                     return;
                 }
                 if (pageObj.openByItem) {
                     const item = fiche.item || (fiche.type === 'series'
                         ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
                         : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } });
-                    if (!(await pageObj.openByItem(item))) this.forgetOpenFiche();
+                    const opened = await pageObj.openByItem(item, { intentToken: ficheIntentToken });
+                    if (!isRouteCurrent()) {
+                        if (opened) pageObj.hideDetails?.();
+                        this.forgetOpenFiche();
+                    } else if (!isIntentCurrent()) {
+                        return;
+                    } else if (!opened) {
+                        this.forgetOpenFiche();
+                    }
                 }
             } catch (_) { this.forgetOpenFiche(); }
         }, 150);
@@ -2355,6 +3126,12 @@ class App {
      */
     applyPage(pageName) {
         pageName = this.guardCatalogPage(pageName);
+        const navigationToken = (this._navigationToken || 0) + 1;
+        this._navigationToken = navigationToken;
+        if (this.currentPage && this.currentPage !== pageName) {
+            this.pages?.[this.currentPage]?.beginFicheIntent?.();
+        }
+        const tvRouteToken = this.beginTvRouteTransition(pageName);
 
         // Navigating to a page that doesn't own the open fiche abandons it — drop the
         // saved-fiche token so a later refresh doesn't resurrect a detail you closed.
@@ -2389,10 +3166,11 @@ class App {
         // Playback pages want hls.js in flight before any stream resolves.
         if (pageName === 'live' || pageName === 'watch') window.ensureHls?.();
 
+        let showResult = null;
         if (pageName === 'admin' && !this.pages.admin) {
             // Lazy web-only route: re-verify the admin claim server-side BEFORE
             // even downloading AdminPage.js; APK shells and non-admins bounce home.
-            this.checkIsAdmin()
+            showResult = this.checkIsAdmin()
                 .then((ok) => {
                     if (!ok) { this.navigateTo('home'); return null; }
                     return this.ensureAdminPage();
@@ -2400,8 +3178,20 @@ class App {
                 .then((page) => { if (page && this.currentPage === 'admin') page.show?.(); })
                 .catch((err) => console.error('[App] AdminPage load failed:', err));
         } else if (this.pages[pageName]?.show) {
-            this.pages[pageName].show();
+            try {
+                showResult = this.pages[pageName].show();
+            } catch (err) {
+                console.error(`[App] ${pageName} page failed to open:`, err);
+            }
         }
+        Promise.resolve(showResult)
+            .catch((err) => console.error(`[App] ${pageName} page preparation failed:`, err))
+            .finally(() => {
+                if (navigationToken !== this._navigationToken) return;
+                this.endTvRouteTransition(tvRouteToken);
+                this.restoreNativeGridScroll(pageName);
+                this.persistNativeContinuity();
+            });
 
         // Restore the incoming page's position (two passes: instant, and once
         // async content has had a beat to paint back at full height).
@@ -2536,7 +3326,10 @@ class App {
      */
     async applyProfileSwitch(profileName) {
         try {
-            if (this.pages.home) this.pages.home.lastLoadedAt = 0; // force a refetch
+            if (this.pages.home) {
+                this.pages.home.cancelPendingLoad?.();
+                this.pages.home.lastLoadedAt = 0; // force a refetch
+            }
             if (this.currentPage === 'watch') {
                 // Don't interrupt playback — Home refetches when next opened.
             } else if (this.currentPage === 'home') {

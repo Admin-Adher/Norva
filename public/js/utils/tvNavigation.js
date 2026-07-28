@@ -26,9 +26,42 @@
         '.search-group-chip', '.watch-episode-item', '.watch-season-header',
         '.season-header', '.tab', '.watch-recommended-card', '.context-item',
         '.live-guide-group', '.live-guide-row',
+        // Native <summary> is actionable but absent from the generic button/link
+        // selectors. Keep Settings' Advanced sections reachable with D-pad Center.
+        '.settings-advanced-summary',
         // Home page cards (dashboard)
         '.channel-tile', '.dashboard-card', '.tv-more-like-card'
     ].join(',');
+    // MoviesPage's cloud genre/category bucket deliberately reuses
+    // GenreRails.appendCards(), whose cards are `.dashboard-card` rather than the
+    // flat catalogue's `.movie-card`. Treat both renderers as the same semantic
+    // grid so changing a filter cannot sever the D-pad graph at the toolbar.
+    const MOVIE_CATALOG_CARD_SELECTOR =
+        '.movie-card, .genre-bucket-grid .dashboard-card';
+    const CATALOG_CARD_SELECTOR =
+        `${MOVIE_CATALOG_CARD_SELECTOR}, .series-card`;
+    const CATALOG_TILE_SELECTOR =
+        `${CATALOG_CARD_SELECTOR}, .continue-card`;
+
+    const MODAL_SELECTOR = [
+        '#modal.active',
+        '#edit-user-modal.active',
+        '.modal-overlay.active',
+        '.np-overlay',
+        '#norva-region-prompt',
+        '.norva-modal-overlay',
+        '.trailer-lightbox'
+    ].join(',');
+
+    // One remembered content stop per page. A premium 10-foot interface returns
+    // viewers to the exact row/control they left when they briefly open the rail;
+    // relying on geometry here caused Settings -> Transcoding and Series -> Movies
+    // jumps whenever two controls happened to share a screen y-coordinate.
+    const pageFocusMemory = new Map();
+    // Returning from the single catalogue search field should land on the exact
+    // primary filter that opened it, not whichever control happens to be closest
+    // to the search box's wide visual centre.
+    const catalogHeaderOrigins = new WeakMap();
 
     // Optional native audit bridge, present only in the opt-in debug APK used by
     // the emulator matrix. It has zero effect in release/cloud browsers.
@@ -57,6 +90,16 @@
         return isVisibleRect(el.getBoundingClientRect());
     }
 
+    // Rendering test without a viewport constraint. Explicit focus graphs may
+    // target the row just outside the viewport; focusElement() then scrolls it in.
+    // This is intentionally different from isVisible(), which keeps spatial scans
+    // bounded for performance.
+    function isRendered(el) {
+        if (!el || el.disabled || !el.isConnected) return false;
+        if (el.closest('.hidden, [hidden]')) return false;
+        return Boolean(el.offsetParent || el.offsetWidth || el.offsetHeight);
+    }
+
     // The currently open modal, if any. While one is open, navigation is
     // confined to it so the D-pad can't escape to the dimmed page behind.
     function openModal() {
@@ -73,7 +116,7 @@
         // shown by presence (no .active) and sits OVER an open fiche, so listing it here
         // traps the D-pad inside it and lets closeTopModal()/Back dismiss the trailer
         // instead of the fiche behind it.
-        const modals = document.querySelectorAll('#modal.active, #edit-user-modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay, .trailer-lightbox');
+        const modals = document.querySelectorAll(MODAL_SELECTOR);
         return modals[modals.length - 1] || null;
     }
 
@@ -213,10 +256,97 @@
         // Guarded to a VISIBLE card so an open detail panel (grid hidden) or empty grid
         // falls back to the caller's default.
         if (page && (page.id === 'page-movies' || page.id === 'page-series')) {
-            return [...page.querySelectorAll('.movies-grid .movie-card, .series-grid .series-card')]
+            return [...page.querySelectorAll(CATALOG_CARD_SELECTOR)]
                 .find(isVisible) || null;
         }
+        // Settings always enters through its first logical tab. Spatial scoring
+        // previously selected the far-right Transcoding tab because it happened
+        // to align with the rail item, then scrolled the page header off-screen.
+        if (page && page.id === 'page-settings') {
+            return [...page.querySelectorAll('.settings-container .tabs .tab')]
+                .find((el) => el.dataset.tab === 'account' && isRendered(el))
+                || [...page.querySelectorAll('.settings-container .tabs .tab')]
+                    .find(isRendered)
+                || null;
+        }
         return null;
+    }
+
+    function rememberedPageTarget(page) {
+        if (!page) return null;
+        const remembered = pageFocusMemory.get(page.id);
+        if (!remembered) return null;
+        if (remembered.element && page.contains(remembered.element) &&
+            isRendered(remembered.element)) {
+            return remembered.element;
+        }
+        if (!remembered.key) return null;
+        for (const candidate of page.querySelectorAll(INTERACTIVE_SELECTOR)) {
+            if (isRendered(candidate) && cardKey(candidate) === remembered.key) {
+                remembered.element = candidate;
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    // Deterministic rail -> page transition. Settings deliberately ignores
+    // memory so every fresh entry starts at Account; catalogue/live pages resume
+    // the viewer's last content stop and otherwise use their semantic default.
+    function pageEntryTarget(page) {
+        if (!page) return null;
+        if (page.id === 'page-settings') {
+            // Rail -> Settings may happen without a page class mutation. Activate
+            // Account first, then resolve/focus its tab so focus and visible panel
+            // can never describe two different destinations.
+            preparePageEntry(page);
+            return pageDefaultTarget(page);
+        }
+        const semanticDefault = pageDefaultTarget(page);
+        return rememberedPageTarget(page)
+            || semanticDefault
+            || firstNonTextCandidate(getPageCandidates());
+    }
+
+    function preparePageEntry(page) {
+        if (!page || page.id !== 'page-settings') return null;
+        const account = page.querySelector('.settings-container .tabs .tab[data-tab="account"]');
+        const accountPanel = page.querySelector('#tab-account.tab-content');
+        if (!account || !accountPanel || !isRendered(account)) return null;
+
+        const isCoherent = () =>
+            account.classList.contains('active') &&
+            accountPanel.classList.contains('active');
+        if (!isCoherent()) {
+            const settingsController = window.app?.pages?.settings;
+            if (typeof settingsController?.switchTab === 'function') {
+                settingsController.switchTab('account');
+            } else {
+                account.click();
+            }
+        }
+
+        // Defensive pre-controller fallback for very early key input. Normal app
+        // flow uses SettingsPage.switchTab above; this mirrors its accessible state
+        // only when no handler made Account coherent synchronously.
+        if (!isCoherent()) {
+            page.querySelectorAll('.settings-container .tabs .tab').forEach((tab) => {
+                const selected = tab === account;
+                tab.classList.toggle('active', selected);
+                tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+            });
+            page.querySelectorAll('.settings-container .tab-content').forEach((panel) => {
+                const selected = panel === accountPanel;
+                panel.classList.toggle('active', selected);
+                panel.setAttribute('aria-hidden', selected ? 'false' : 'true');
+            });
+        }
+
+        page.scrollTop = 0;
+        const container = page.querySelector('.settings-container');
+        if (container) container.scrollTop = 0;
+        accountPanel.scrollTop = 0;
+        return isCoherent() ? account : null;
     }
 
     // Stable entry point for the docked Movies/Series preview. Generic geometry
@@ -291,12 +421,12 @@
     let lastNavDirection = null;
     let lastNavDirectionReleased = true;
     const NAV_BURST_MS = 250;
-    // Held-key rate cap: while a direction is held the OS repeats keydown ~25-40x/s, and
-    // the full pipeline (candidate scan + geometry reads + scroll) ran on every repeat,
-    // pegging a weak TV CPU and letting focus lag behind the keys. Drop burst repeats that
-    // arrive < this interval after the last processed move (~12 moves/s max) — smoother to
-    // track by eye AND far cheaper. Isolated presses are never throttled.
+    // Held-key rate cap: while a direction is held the OS repeats keydown ~25-40x/s.
+    // The full pipeline is bounded to ~12 moves/s; over-fast repeats are replayed
+    // once at the trailing edge instead of being silently lost.
     const NAV_THROTTLE_MS = 80;
+    let queuedNavRepeat = null;
+    let queuedNavRepeatTimer = null;
     function navScrollBehavior() { return navBurst ? 'auto' : 'smooth'; }
 
     // A fast change of direction is a distinct command, not a held-key repeat.
@@ -304,6 +434,35 @@
     // absence of an intervening keyup plus the same direction as the repeat signal.
     function isHeldNavRepeat(direction, previousDirection, previousReleased, burst) {
         return burst && direction === previousDirection && !previousReleased;
+    }
+
+    // Coalesce an over-fast held-key burst into one trailing command rather than
+    // dropping it. Weak TV hardware keeps a bounded layout rate while the final
+    // viewer intent is still applied after the current frame budget clears.
+    function queueHeldNavRepeat(direction, delayMs) {
+        if (queuedNavRepeat === direction && queuedNavRepeatTimer) return;
+        if (queuedNavRepeatTimer) clearTimeout(queuedNavRepeatTimer);
+        queuedNavRepeat = direction;
+        queuedNavRepeatTimer = setTimeout(() => {
+            const key = queuedNavRepeat;
+            queuedNavRepeat = null;
+            queuedNavRepeatTimer = null;
+            if (!key) return;
+            const replay = new KeyboardEvent('keydown', {
+                key,
+                bubbles: true,
+                cancelable: true
+            });
+            Object.defineProperty(replay, '__norvaQueuedNav', { value: true });
+            document.dispatchEvent(replay);
+        }, Math.max(0, delayMs));
+    }
+
+    function cancelQueuedNavRepeat(exceptDirection = null) {
+        if (!queuedNavRepeatTimer || queuedNavRepeat === exceptDirection) return;
+        clearTimeout(queuedNavRepeatTimer);
+        queuedNavRepeatTimer = null;
+        queuedNavRepeat = null;
     }
 
     function scrollActivePage(direction, focused = null) {
@@ -322,36 +481,14 @@
         );
     }
 
-    // Movies/Series TV grid UP nav state. Discriminating a HELD Up (fast-scroll) from a DOUBLE-tap
-    // Up (escape to filters) via KeyboardEvent.repeat is UNRELIABLE on Android TV WebView (held keys
-    // often arrive as discrete keydowns with repeat=false). Instead we mirror the DOWN path — every
-    // Up keydown walks/scrolls the grid — and detect a genuine second press via a KEYUP between
-    // presses (a continuous hold emits no interleaved keyup). A long gap (>600ms) also counts as a
-    // fresh press, so it degrades gracefully even if keyup isn't delivered on the device.
-    let upReleased = true;      // an ArrowUp keyup was seen since the last ArrowUp keydown
-    let prevUpDownAt = 0;       // timestamp of the previous ArrowUp keydown
-    let upFreshCount = 0;       // consecutive FRESH (released-between) Up presses within the window
-    let lastUpFreshAt = 0;
-    const UP_DOUBLE_TAP_MS = 400;
-    const UP_FRESH_GAP_MS = 600;
+    // Catalogue Up is conventional and deterministic: it walks the grid, then
+    // enters the immediately preceding semantic band in one command.
 
-    // The Movies filter row nearest the card's column (bottom row = closest to the grid) — the
-    // EXPLICIT escape target so a mid-list double-tap Up lands on the filters, not another grid card.
+    // The Movies/Series filter row nearest the card's column, used as a safe
+    // fallback when optional toolbar/Continue bands are absent.
     function catalogFilterTarget(fromEl) {
-        const page = activePage();
-        const rows = [...(page?.querySelectorAll('.tv-movies-filter-row, .tv-series-filter-row') || [])]
-            .filter(isVisible);
-        const regionName = page?.id === 'page-series' ? 'series-filters' : 'movies-filters';
-        const region = rows[rows.length - 1] ||
-            page?.querySelector(`[data-tv-nav-region="${regionName}"]`);
-        if (!region) return null;
-        const fromX = centerOf(fromEl).x;
-        const cands = getCandidates().filter((el) => region.contains(el) && isVisible(el));
-        if (!cands.length) return null;
-        return cands.reduce((b, el) => {
-            const d = Math.abs(centerOf(el).x - fromX);
-            return d < b.d ? { el, d } : b;
-        }, { el: cands[0], d: Infinity }).el;
+        const rows = catalogFilterRows();
+        return nearestCatalogFilterItem(rows[rows.length - 1]?.items || [], fromEl);
     }
 
     // Nearest VISIBLE card above `card` within its grid — lets UP walk up the visible rows before
@@ -367,11 +504,11 @@
             ? '.tv-series-filter-row'
             : '.tv-movies-filter-row';
         return [...page.querySelectorAll(selector)]
-            .filter(isVisible)
+            .filter(isRendered)
             .map((row) => ({
                 row,
                 items: [...row.querySelectorAll(INTERACTIVE_SELECTOR)].filter((el) =>
-                    !el.disabled && !el.closest('.hidden, [hidden]') && isVisible(el))
+                    isRendered(el))
             }))
             .filter(({ items }) => items.length);
     }
@@ -408,12 +545,158 @@
         return null;
     }
 
+    function catalogRegionItems(container, selector = INTERACTIVE_SELECTOR) {
+        if (!container || !isRendered(container)) return [];
+        return [...container.querySelectorAll(selector)].filter(isRendered);
+    }
+
+    // Semantic Movies/Series bands in their visual order. Controls are moved
+    // into these hosts by the catalogue pages, so the graph remains stable when
+    // chips appear/disappear or Continue Watching is temporarily empty.
+    function catalogGraphRegions() {
+        const page = activePage();
+        if (!page || (page.id !== 'page-movies' && page.id !== 'page-series')) return [];
+        const kind = page.id === 'page-series' ? 'series' : 'movies';
+        const filterRows = catalogFilterRows();
+        const search = page.querySelector(`#${kind}-search`);
+        const toolbar = page.querySelector(`#${kind}-tv-catalog-head`);
+        const continueRow = page.querySelector(`#${kind}-continue`);
+        const grid = page.querySelector(`#${kind}-grid`);
+        const cardSelector = kind === 'series'
+            ? '.series-card'
+            : MOVIE_CATALOG_CARD_SELECTOR;
+        const stateSelector = kind === 'series'
+            ? '[data-series-retry], #series-empty-reset'
+            : '[data-movies-retry], #movies-empty-reset';
+        const gridItems = catalogRegionItems(grid, cardSelector);
+        // Error/empty CTAs replace the grid as a real semantic band. Never add
+        // this stop while cards are available, even if a stale state node is
+        // still mounted during a catalogue refresh.
+        const stateItems = gridItems.length ? [] : catalogRegionItems(grid, stateSelector);
+
+        return [
+            { name: 'header', items: search && isRendered(search) ? [search] : [] },
+            { name: 'primary', items: filterRows[0]?.items || [] },
+            { name: 'secondary', items: filterRows[1]?.items || [] },
+            { name: 'continue', items: catalogRegionItems(continueRow, '.continue-card') },
+            // Continue Watching is visually above the catalogue heading. Keeping
+            // this same order in the semantic graph prevents Down from jumping
+            // past the rail to a chip below it, then back upward on the next press.
+            { name: 'toolbar', items: catalogRegionItems(toolbar) },
+            { name: 'state', items: stateItems },
+            { name: 'grid', items: gridItems }
+        ].filter(({ items }) => items.length);
+    }
+
+    // Pure ordered-band step used by the DOM adapter below and by behavioural
+    // contract tests. Vertical moves preserve the nearest x-coordinate; horizontal
+    // moves follow the visual DOM order inside one semantic band.
+    function catalogRegionStep(regions, focused, direction) {
+        if (!focused || !Array.isArray(regions)) return null;
+        const regionIndex = regions.findIndex(({ items }) => items.includes(focused));
+        if (regionIndex < 0) return null;
+        const region = regions[regionIndex];
+        const itemIndex = region.items.indexOf(focused);
+
+        if (direction === 'ArrowLeft') {
+            return region.items[itemIndex - 1] || null;
+        }
+        if (direction === 'ArrowRight') {
+            return region.items[itemIndex + 1] || null;
+        }
+        const step = direction === 'ArrowUp' ? -1 : direction === 'ArrowDown' ? 1 : 0;
+        if (!step) return null;
+        const destination = regions[regionIndex + step];
+        return destination
+            ? nearestCatalogFilterItem(destination.items, focused)
+            : null;
+    }
+
+    function catalogGraphMove(focused, direction) {
+        const regions = catalogGraphRegions();
+        const region = regions.find(({ items }) => items.includes(focused));
+        if (!region) return { handled: false, target: null };
+
+        // Filter-row Left/Right and their direct inter-row moves are owned by
+        // catalogFilterStep so Sources <-> Categories remains an explicit pair.
+        if ((region.name === 'primary' || region.name === 'secondary') &&
+            (direction === 'ArrowLeft' || direction === 'ArrowRight')) {
+            return { handled: false, target: null };
+        }
+
+        if (region.name === 'grid') {
+            if (direction === 'ArrowUp') {
+                return {
+                    handled: true,
+                    target: gridCardAbove(focused)
+                        || catalogRegionStep(regions, focused, direction)
+                        || catalogFilterTarget(focused)
+                };
+            }
+            if (direction === 'ArrowDown') {
+                return { handled: true, target: gridCardBelow(focused) };
+            }
+            return { handled: false, target: null };
+        }
+
+        if (region.name === 'primary' && direction === 'ArrowUp') {
+            const target = catalogRegionStep(regions, focused, direction);
+            if (target) catalogHeaderOrigins.set(target, focused);
+            return { handled: true, target };
+        }
+
+        if (region.name === 'header' && direction === 'ArrowDown') {
+            const primary = regions.find(({ name }) => name === 'primary');
+            const origin = catalogHeaderOrigins.get(focused);
+            return {
+                handled: true,
+                target: origin && primary?.items.includes(origin)
+                    ? origin
+                    : primary?.items[0] || catalogRegionStep(regions, focused, direction)
+            };
+        }
+
+        if (direction === 'ArrowUp' || direction === 'ArrowDown') {
+            // A missing destination is an intentional boundary no-op. Do not let
+            // generic geometry leak Up from the primary filters into the menu.
+            return { handled: true, target: catalogRegionStep(regions, focused, direction) };
+        }
+
+        // A degraded catalogue has one deliberate action. Keep horizontal
+        // presses stable instead of allowing geometry to escape to the rail or
+        // another unrelated control.
+        if (region.name === 'header' || region.name === 'state') {
+            return { handled: true, target: null };
+        }
+
+        if (region.name === 'toolbar' || region.name === 'continue') {
+            const target = catalogRegionStep(regions, focused, direction);
+            if (target) return { handled: true, target };
+            // End of a horizontal Continue Watching rail is a stable no-op.
+            if (region.name === 'continue' && direction === 'ArrowRight') {
+                return { handled: true, target: null };
+            }
+            return { handled: false, target: null };
+        }
+        return { handled: false, target: null };
+    }
+
+    function catalogSearchVerticalTarget(focused, direction) {
+        const page = activePage();
+        const isSearch = (page?.id === 'page-movies' && focused?.id === 'movies-search') ||
+            (page?.id === 'page-series' && focused?.id === 'series-search');
+        if (!isSearch) return null;
+        if (direction === 'ArrowUp') return activeNavbarTarget();
+        if (direction === 'ArrowDown') return catalogGraphMove(focused, direction).target;
+        return null;
+    }
+
     function gridCardAbove(card) {
         const grid = card?.closest?.('.movies-grid, .series-grid');
         if (!grid) return null;
         const from = centerOf(card);
         let best = null, bestScore = Infinity;
-        for (const c of grid.querySelectorAll('.movie-card, .series-card')) {
+        for (const c of grid.querySelectorAll(CATALOG_CARD_SELECTOR)) {
             if (c === card) continue;
             // One rect per card: derive BOTH the visibility test and the center from a
             // single getBoundingClientRect, instead of isVisible()+centerOf() each
@@ -431,6 +714,73 @@
         return best;
     }
 
+    function gridCardBelow(card) {
+        const grid = card?.closest?.('.movies-grid, .series-grid');
+        if (!grid) return null;
+        const from = centerOf(card);
+        let best = null, bestScore = Infinity;
+        for (const candidate of grid.querySelectorAll(CATALOG_CARD_SELECTOR)) {
+            if (candidate === card) continue;
+            if (!candidate.offsetParent && candidate.offsetWidth === 0 && candidate.offsetHeight === 0) continue;
+            const rect = candidate.getBoundingClientRect();
+            if (!isVisibleRect(rect)) continue;
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            const dy = y - from.y;
+            if (dy <= 4) continue;
+            const score = dy + Math.abs(x - from.x) * 3;
+            if (score < bestScore) { bestScore = score; best = candidate; }
+        }
+        return best;
+    }
+
+    const modalFocusOrigins = new WeakMap();
+
+    function scopeEntryTarget(scope) {
+        if (!scope) return null;
+        const safeCancel = scope.querySelector('.norva-modal-cancel:not([disabled])');
+        return (safeCancel && isRendered(safeCancel) ? safeCancel : null)
+            || [...scope.querySelectorAll(
+                '#movie-primary-action:not([disabled]), #series-primary-action:not([disabled]), ' +
+                '.tv-select-option.selected, .multi-select-actions [data-action="all"]'
+            )].find(isRendered)
+            || [...scope.querySelectorAll(
+                'input:not([type="hidden"]), textarea, select, button:not([disabled]), a[href], [tabindex]'
+            )].find(isRendered)
+            || null;
+    }
+
+    function rememberModalOrigin(modal, origin = document.activeElement) {
+        if (!modal || modalFocusOrigins.has(modal)) return;
+        if (!origin || origin === document.body || modal.contains(origin)) {
+            origin = pageFocusMemory.get(activePage()?.id)?.element || null;
+        }
+        if (origin && origin !== document.body && !modal.contains(origin)) {
+            modalFocusOrigins.set(modal, origin);
+        }
+    }
+
+    function scheduleModalFocusRestore(modal) {
+        if (!modal) return;
+        const restoreId = modal.dataset?.restoreFocus;
+        const declared = restoreId ? document.getElementById(restoreId) : null;
+        const origin = declared || modalFocusOrigins.get(modal) || null;
+        setTimeout(() => {
+            const top = openModal();
+            const active = currentFocus();
+            // Respect focus explicitly restored by the modal's own close handler.
+            if (active && (!top || top.contains(active)) && !modal.contains(active)) return;
+            const target = origin && isRendered(origin) && (!top || top.contains(origin))
+                ? origin
+                : null;
+            if (target) {
+                focusElement(target);
+            } else if (!top) {
+                ensurePageFocus();
+            }
+        }, 0);
+    }
+
     /** Close the topmost open modal, running the app's own close handler. */
     function closeTopModal() {
         const modal = openModal();
@@ -439,6 +789,7 @@
         if (modal.classList.contains('trailer-lightbox')) {
             const x = modal.querySelector('.trailer-lightbox-close');
             if (x) { x.click(); } else { modal.remove(); }
+            scheduleModalFocusRestore(modal);
             return true;
         }
         // NorvaModal dialogs (.norva-modal-overlay) are promise-based: their buttons are
@@ -448,19 +799,31 @@
         // overlay tears itself down. Stripping a class here would orphan a full-screen veil.
         if (modal.classList.contains('norva-modal-overlay')) {
             const btn = modal.querySelector('.norva-modal-cancel') || modal.querySelector('.norva-modal-confirm');
-            if (btn) { btn.click(); return true; }
+            if (btn) {
+                btn.click();
+                scheduleModalFocusRestore(modal);
+                return true;
+            }
         }
         const closeBtn = modal.querySelector('.modal-close, #modal-cancel');
-        if (closeBtn && typeof closeBtn.onclick === 'function') {
-            try { closeBtn.onclick(); } catch (e) { /* fall through to class removal */ }
+        if (closeBtn) {
+            try { closeBtn.click(); } catch (e) { /* fall through only if it stayed open */ }
+            // addEventListener-based close handlers commonly remove the overlay or
+            // deactivate it synchronously. Never mutate that already-closed node:
+            // doing so bypassed cleanup bookkeeping and could leave display:grid
+            // notification overlays visible but outside navScope.
+            if (!modal.isConnected || !modal.matches(MODAL_SELECTOR)) {
+                scheduleModalFocusRestore(modal);
+                return true;
+            }
         }
-        modal.classList.remove('active');
-        // Return the D-pad ring to whatever opened the modal, if it declared an opener via
-        // data-restore-focus (the global-search overlay stores #nav-search) — else focus
-        // falls to <body> and the next arrow press is wasted re-anchoring a grid card.
-        const restoreId = modal.dataset?.restoreFocus;
-        const opener = restoreId && document.getElementById(restoreId);
-        if (opener && isVisible(opener)) focusElement(opener);
+        // Legacy overlays without a close handler still use the active-class
+        // fallback. It is safe only while the same node remains an open scope.
+        if (modal.isConnected && modal.matches(MODAL_SELECTOR)) {
+            modal.classList.remove('active');
+        }
+        // Prefer an explicit data-restore-focus target, then the captured opener.
+        scheduleModalFocusRestore(modal);
         return true;
     }
 
@@ -472,8 +835,17 @@
     function closeTransient() {
         const panel = lastVisible('.multi-select-panel:not(.hidden)');
         if (panel) {
-            panel.classList.add('hidden');
             const btn = panel.closest('.multi-select')?.querySelector('.multi-select-btn');
+            if (typeof panel.__norvaMultiSelectClose === 'function') {
+                panel.__norvaMultiSelectClose({ restoreFocus: false });
+            } else {
+                // Legacy/fallback panels still need the complete disclosure state,
+                // not just the visual class.
+                panel.classList.add('hidden');
+                panel.setAttribute('aria-hidden', 'true');
+                panel.inert = true;
+                btn?.setAttribute('aria-expanded', 'false');
+            }
             if (btn) focusElement(btn);
             return true;
         }
@@ -486,7 +858,7 @@
         if (tvPanel && active && tvPanel.contains(active)) {
             const page = tvPanel.closest('.page');
             const grid = page?.querySelector('.movies-grid, .series-grid');
-            const cards = [...(grid?.querySelectorAll('.movie-card, .series-card') || [])];
+            const cards = [...(grid?.querySelectorAll(CATALOG_CARD_SELECTOR) || [])];
             const usable = card => Boolean(
                 card?.isConnected &&
                 !card.closest('.hidden, [hidden]') &&
@@ -573,6 +945,197 @@
             if (top > fromBottom - 4 && top < bestTop) { bestTop = top; best = els[i]; }
         }
         return best;
+    }
+
+    function activeNavbarTarget() {
+        const active = document.querySelector('.navbar .nav-link.active');
+        if (active && isRendered(active)) return active;
+        return [...document.querySelectorAll('.navbar .nav-link')].find(isRendered) || null;
+    }
+
+    // Settings is a fixed tab strip above a separately scrolling panel. Treating
+    // those controls as one all-page geometry cloud lets a Down press at the end
+    // of Account jump to the bell/profile in the rail, and can skip horizontally
+    // adjacent actions. Keep a small semantic graph scoped to the active panel:
+    // vertical presses change visual rows, horizontal presses stay in their row,
+    // and only Left at a row boundary intentionally opens the rail.
+    function settingsPanelCandidates(panel, anchor = null) {
+        if (!panel) return [];
+        const all = [...panel.querySelectorAll(INTERACTIVE_SELECTOR)];
+        const anchorIndex = anchor ? all.indexOf(anchor) : -1;
+        // Manage Content can render a large tree. A bounded DOM window around
+        // the current stop keeps each keypress cheap while still covering many
+        // rows above/below; panel entry scans the first 400 candidates.
+        const start = anchorIndex >= 0 ? Math.max(0, anchorIndex - 240) : 0;
+        const end = anchorIndex >= 0
+            ? Math.min(all.length, anchorIndex + 241)
+            : Math.min(all.length, 400);
+        return all.slice(start, end).filter((el) => {
+            if (!isRendered(el)) return false;
+            const style = getComputedStyle(el);
+            return style.opacity !== '0' && style.visibility !== 'hidden';
+        });
+    }
+
+    function settingsHorizontalTarget(current, candidates, direction) {
+        if (!current || (direction !== 'ArrowLeft' && direction !== 'ArrowRight')) return null;
+        const from = centerOf(current);
+        let best = null;
+        let bestScore = Infinity;
+        for (const candidate of candidates) {
+            if (candidate === current || !hasMeaningfulVerticalOverlap(current, candidate, 0.2)) continue;
+            const point = centerOf(candidate);
+            const forward = direction === 'ArrowRight'
+                ? point.x - from.x
+                : from.x - point.x;
+            if (forward <= 4) continue;
+            const score = forward + Math.abs(point.y - from.y) * 2.5;
+            if (score < bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    function settingsVerticalTarget(current, candidates, direction) {
+        if (!current || (direction !== 'ArrowUp' && direction !== 'ArrowDown')) return null;
+        const down = direction === 'ArrowDown';
+        const fromRect = current.getBoundingClientRect();
+        const fromX = fromRect.left + fromRect.width / 2;
+        const eligible = [];
+
+        for (let index = 0; index < candidates.length; index++) {
+            const candidate = candidates[index];
+            if (candidate === current) continue;
+            const rect = candidate.getBoundingClientRect();
+            // A vertical command changes ROWS. Controls whose rectangles overlap
+            // belong to the same action row and are reached with Left/Right.
+            const inDirection = down
+                ? rect.top >= fromRect.bottom - 2
+                : rect.bottom <= fromRect.top + 2;
+            if (!inDirection) continue;
+            eligible.push({ candidate, rect, index });
+        }
+        if (!eligible.length) return null;
+
+        let nearestEdge = down ? Infinity : -Infinity;
+        for (const { rect } of eligible) {
+            nearestEdge = down
+                ? Math.min(nearestEdge, rect.top)
+                : Math.max(nearestEdge, rect.bottom);
+        }
+        // Real Settings rows can be a few pixels misaligned because buttons,
+        // inline links and form controls have different heights. Keep those small
+        // offsets in one row, then preserve the viewer's horizontal column.
+        const row = eligible.filter(({ rect }) =>
+            Math.abs((down ? rect.top : rect.bottom) - nearestEdge) <= 28);
+        row.sort((a, b) => {
+            const ax = a.rect.left + a.rect.width / 2;
+            const bx = b.rect.left + b.rect.width / 2;
+            return Math.abs(ax - fromX) - Math.abs(bx - fromX) || a.index - b.index;
+        });
+        return row[0]?.candidate || null;
+    }
+
+    function settingsGraphMove(focused, direction) {
+        const page = activePage();
+        if (!focused || page?.id !== 'page-settings' || !page.contains(focused)) {
+            return { handled: false, target: null, selectTab: false, scroll: false };
+        }
+
+        const tabsHost = page.querySelector('.settings-container > .tabs');
+        const tabs = tabsHost
+            ? [...tabsHost.querySelectorAll('.tab')].filter(isRendered)
+            : [];
+        const focusedTab = focused.closest?.('.settings-container > .tabs .tab');
+        if (focusedTab && tabsHost?.contains(focusedTab)) {
+            const index = tabs.indexOf(focusedTab);
+            if (direction === 'ArrowLeft') {
+                if (index > 0) {
+                    return { handled: true, target: tabs[index - 1], selectTab: true, scroll: false };
+                }
+                return {
+                    handled: true,
+                    target: activeNavbarTarget(),
+                    selectTab: false,
+                    scroll: false
+                };
+            }
+            if (direction === 'ArrowRight') {
+                return {
+                    handled: true,
+                    target: index >= 0 && index < tabs.length - 1 ? tabs[index + 1] : null,
+                    selectTab: index >= 0 && index < tabs.length - 1,
+                    scroll: false
+                };
+            }
+            if (direction === 'ArrowUp') {
+                return { handled: true, target: null, selectTab: false, scroll: false };
+            }
+            if (direction === 'ArrowDown') {
+                // A focused-but-not-selected tab can only occur after external DOM
+                // focus. Select it first so the tab label and panel never disagree.
+                if (!focusedTab.classList.contains('active')) {
+                    return { handled: true, target: focusedTab, selectTab: true, scroll: false };
+                }
+                const panel = page.querySelector('.tab-content.active');
+                return {
+                    handled: true,
+                    target: settingsPanelCandidates(panel)[0] || null,
+                    selectTab: false,
+                    scroll: true
+                };
+            }
+        }
+
+        const panel = page.querySelector('.tab-content.active');
+        if (!panel?.contains(focused)) {
+            return { handled: false, target: null, selectTab: false, scroll: false };
+        }
+        const candidates = settingsPanelCandidates(panel, focused);
+
+        if (direction === 'ArrowLeft' || direction === 'ArrowRight') {
+            const target = settingsHorizontalTarget(focused, candidates, direction);
+            if (target) {
+                return { handled: true, target, selectTab: false, scroll: false };
+            }
+            if (direction === 'ArrowLeft') {
+                return {
+                    handled: true,
+                    target: activeNavbarTarget(),
+                    selectTab: false,
+                    scroll: false
+                };
+            }
+            // Right at the end of an action row is a stable no-op, never a
+            // diagonal jump into another Settings row.
+            return { handled: true, target: null, selectTab: false, scroll: false };
+        }
+
+        if (direction === 'ArrowUp' || direction === 'ArrowDown') {
+            const target = settingsVerticalTarget(focused, candidates, direction);
+            if (target) {
+                return { handled: true, target, selectTab: false, scroll: false };
+            }
+            if (direction === 'ArrowUp') {
+                const activeTab = tabs.find((tab) => tab.classList.contains('active')) || tabs[0] || null;
+                return { handled: true, target: activeTab, selectTab: false, scroll: false };
+            }
+            // At the last visible row, remain inside Settings. scrollActivePage()
+            // will advance the panel when more content exists; at the true end it
+            // becomes a deliberate no-op instead of escaping to rail utilities.
+            return { handled: true, target: null, selectTab: false, scroll: true };
+        }
+
+        return { handled: false, target: null, selectTab: false, scroll: false };
+    }
+
+    function focusActiveNavbar() {
+        const target = activeNavbarTarget();
+        if (!target) return false;
+        focusElement(target);
+        return true;
     }
 
     function focusElement(el) {
@@ -680,6 +1243,7 @@
         const arrows = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
         const isArrow = arrows.includes(e.key);
         const isEnter = e.key === 'Enter';
+        const queuedReplay = e.__norvaQueuedNav === true;
         if (!isArrow && !isEnter) return;
 
         let heldNavRepeat = false;
@@ -688,14 +1252,19 @@
         // scrollActivePage) is instant when presses are coming fast, smooth when
         // isolated. Only arrows drive scrolling, so only they update the cadence.
         if (isArrow) {
+            if (!queuedReplay) {
+                cancelQueuedNavRepeat(lastNavDirectionReleased ? null : e.key);
+            }
             const now = e.timeStamp || (typeof performance !== 'undefined' ? performance.now() : 0);
             navBurst = (now - lastNavKeyAt) < NAV_BURST_MS;
-            heldNavRepeat = isHeldNavRepeat(
+            heldNavRepeat = !queuedReplay && isHeldNavRepeat(
                 e.key, lastNavDirection, lastNavDirectionReleased, navBurst
             );
             lastNavKeyAt = now;
             lastNavDirection = e.key;
-            lastNavDirectionReleased = false;
+            // A queued trailing replay has no physical keyup of its own. Keep the
+            // direction released so the viewer's next real press is always distinct.
+            lastNavDirectionReleased = queuedReplay;
         }
 
         // Start this keydown with a fresh candidate scan, and guarantee the memo is
@@ -708,13 +1277,30 @@
         const focused = currentFocus();
         auditDpad(`key ${e.key}`, focused);
 
+        // A newly opened web modal can exist for one frame before its component
+        // assigns focus. Never let that timing window activate or navigate the
+        // dimmed page: the first D-pad command anchors inside the topmost scope.
+        const scope = navScope();
+        if (scope !== document && (!focused || !scope.contains(focused))) {
+            e.preventDefault();
+            e.stopPropagation();
+            const target = scopeEntryTarget(scope);
+            if (target) focusElement(target);
+            return;
+        }
+
         // Held-key throttle (spatial nav only — text-field caret stays fully responsive).
         // A burst repeat that lands too soon after the last processed move is dropped; the
         // NEXT repeat still moves, so held-scroll keeps flowing without running the whole
         // navigation pipeline 30-40x/s on a weak TV.
         if (isArrow && heldNavRepeat && !isTextField(focused)) {
             const nowMs = (typeof performance !== 'undefined' ? performance.now() : (e.timeStamp || 0));
-            if (nowMs - lastNavMoveAt < NAV_THROTTLE_MS) { e.preventDefault(); return; }
+            if (nowMs - lastNavMoveAt < NAV_THROTTLE_MS) {
+                queueHeldNavRepeat(e.key, NAV_THROTTLE_MS - (nowMs - lastNavMoveAt));
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             lastNavMoveAt = nowMs;
         } else if (isArrow) {
             lastNavMoveAt = (typeof performance !== 'undefined' ? performance.now() : (e.timeStamp || 0));
@@ -727,6 +1313,17 @@
             // IME composition uses synthetic arrow events (keyCode 229). Those
             // belong to the keyboard and must never trigger spatial navigation.
             if (e.isComposing || e.keyCode === 229) return;
+
+            // Live search has an explicit rail boundary: Left at the beginning
+            // always opens the menu, including while the guide is still loading.
+            if (focused.id === 'channel-search' && e.key === 'ArrowLeft' &&
+                (focused.selectionStart ?? 0) === 0 &&
+                (focused.selectionEnd ?? 0) === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                focusActiveNavbar();
+                return;
+            }
 
             // This module is TV-only. Down from the channel search box always steps to
             // the controls row (All Sources first, else Hide unavailable, else the
@@ -815,21 +1412,27 @@
                 (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                 e.preventDefault();
                 e.stopPropagation();
-                let target = null;
+                let target = catalogSearchVerticalTarget(focused, e.key);
                 if (e.key === 'ArrowDown') {
-                    const series = focused.id === 'series-search';
-                    const row = document.getElementById(series
-                        ? 'series-tv-primary-filters'
-                        : 'movies-tv-primary-filters');
-                    target = [...(row?.querySelectorAll(INTERACTIVE_SELECTOR) || [])]
-                        .find(el => !el.disabled && isVisible(el));
+                    // Before the TV page finishes arranging its semantic bands,
+                    // retain a safe first-filter/card fallback. Once ready, the
+                    // graph restores the exact primary filter that opened Search.
                     if (!target) {
+                        const series = focused.id === 'series-search';
+                        const row = document.getElementById(series
+                            ? 'series-tv-primary-filters'
+                            : 'movies-tv-primary-filters');
+                        target = [...(row?.querySelectorAll(INTERACTIVE_SELECTOR) || [])]
+                            .find(el => !el.disabled && isVisible(el));
+                    }
+                    if (!target) {
+                        const series = focused.id === 'series-search';
                         target = [...document.querySelectorAll(series
                             ? '#series-grid .series-card'
                             : '#movies-grid .movie-card')]
                             .find(isVisible);
                     }
-                } else {
+                } else if (!target) {
                     const activeNav = document.querySelector('.navbar .nav-link.active');
                     target = (activeNav && isVisible(activeNav))
                         ? activeNav
@@ -900,8 +1503,24 @@
             const anchored = lastFocusedPageId === page?.id ? nearestToLastRect(pageCandidates) : null;
             const first = anchored || (e.key === 'ArrowUp'
                 ? pageCandidates[pageCandidates.length - 1]
-                : (pageDefaultTarget(page) || firstNonTextCandidate(pageCandidates)));
+                : pageEntryTarget(page));
             focusElement(first || firstNonTextCandidate(getCandidates()) || null);
+            return;
+        }
+
+        // Settings owns a fixed tab strip + one scrolling panel. Keep all four
+        // directions inside that semantic graph once focus has entered the page;
+        // rail traversal remains unchanged while focus is still in .navbar.
+        const settingsMove = settingsGraphMove(focused, e.key);
+        if (settingsMove.handled) {
+            if (settingsMove.selectTab && settingsMove.target) {
+                settingsMove.target.click();
+            }
+            if (settingsMove.target) {
+                focusElement(settingsMove.target);
+            } else if (settingsMove.scroll) {
+                scrollActivePage(e.key, focused);
+            }
             return;
         }
 
@@ -914,6 +1533,16 @@
             const filterStep = catalogFilterStep(focused, e.key);
             if (filterStep) {
                 focusElement(filterStep);
+                return;
+            }
+            const graphMove = catalogGraphMove(focused, e.key);
+            if (graphMove.handled) {
+                if (graphMove.target) {
+                    focusElement(graphMove.target);
+                } else if (focused.matches?.(CATALOG_CARD_SELECTOR) &&
+                    (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                    scrollActivePage(e.key, focused);
+                }
                 return;
             }
         }
@@ -930,11 +1559,20 @@
                 focusElement(belowInNav);
                 return;
             }
-            const firstPageCandidate = pageDefaultTarget(activePage()) || firstNonTextCandidate(getPageCandidates());
+            const firstPageCandidate = pageEntryTarget(activePage());
             if (firstPageCandidate) {
                 focusElement(firstPageCandidate);
                 return;
             }
+        }
+
+        // The navbar is the physical left edge of the TV interface. A Settings
+        // tab strip can be horizontally scrolled after visiting an advanced tab,
+        // leaving an off-screen tab geometrically "left" of the rail. Without an
+        // explicit boundary, another Left press re-entered that hidden strip.
+        // Keep Left on the rail as a stable no-op; Right is the sole page entry.
+        if (e.key === 'ArrowLeft' && focused.closest('.navbar')) {
+            return;
         }
 
         // Right from the rail crosses into the page content. findNext normally finds a
@@ -943,12 +1581,22 @@
         // Up/Down). Fall back to the page's default target so Right is never dead —
         // mirroring the ArrowDown dive above.
         if (e.key === 'ArrowRight' && focused.closest('.navbar')) {
+            // Returning from the active section's rail restores its exact content
+            // stop. This precedes geometry so an aligned far-right control cannot
+            // steal entry (the Settings -> Transcoding regression).
+            if (focused.matches?.('.nav-link.active')) {
+                const entry = pageEntryTarget(activePage());
+                if (entry) {
+                    focusElement(entry);
+                    return;
+                }
+            }
             const rightNext = findNext(focused, 'ArrowRight');
             if (rightNext) {
                 focusElement(rightNext);
                 return;
             }
-            const target = pageDefaultTarget(activePage()) || firstNonTextCandidate(getPageCandidates());
+            const target = pageEntryTarget(activePage());
             if (target) {
                 focusElement(target);
                 return;
@@ -1021,6 +1669,21 @@
             }
         }
 
+        // Live TV loading/empty states still expose a guaranteed path to the rail.
+        // From a full-width list row, or from the first available header control,
+        // Left is semantic "open menu" rather than a diagonal geometry move.
+        if (e.key === 'ArrowLeft' && focused.closest('#page-live .channel-sidebar')) {
+            const controls = [
+                document.getElementById('source-select'),
+                document.getElementById('toggle-groups'),
+                document.getElementById('live-hide-broken-btn')
+            ].filter(isRendered);
+            const listRow = focused.matches?.('.group-header, .channel-item, .search-result');
+            if (listRow || focused === controls[0]) {
+                if (focusActiveNavbar()) return;
+            }
+        }
+
         // Catalogue split-view is 3 columns: rail | grid | preview panel. ArrowLeft
         // from INSIDE the panel returns to the grid — the card that
         // opened the preview (marked .tv-preview-active) if it's still on screen, else
@@ -1041,7 +1704,7 @@
                     if (!target || !isVisible(target)) {
                         const origin = centerOf(focused);
                         const y = origin.y;
-                        const cards = [...grid.querySelectorAll('.movie-card, .series-card')].filter(isVisible);
+                        const cards = [...grid.querySelectorAll(CATALOG_CARD_SELECTOR)].filter(isVisible);
                         target = cards.length
                             ? cards.reduce((b, c) => {
                                 const cc = centerOf(c);
@@ -1060,10 +1723,9 @@
         // diagonally up to a filter control (the first filter <select> sits above-and-
         // left of the first card). A tile that DOES have a left neighbour on its row
         // falls through to the generic handler below, which steps to that neighbour.
-        const TILE = '.movie-card, .series-card, .continue-card';
-        if (e.key === 'ArrowLeft' && focused.matches?.(TILE)) {
+        if (e.key === 'ArrowLeft' && focused.matches?.(CATALOG_TILE_SELECTOR)) {
             const leftCard = findNext(focused, 'ArrowLeft');
-            const sameRow = leftCard && leftCard.matches?.(TILE) &&
+            const sameRow = leftCard && leftCard.matches?.(CATALOG_TILE_SELECTOR) &&
                 hasMeaningfulVerticalOverlap(focused, leftCard, 0.5);
             if (!sameRow) {
                 const active = document.querySelector('.navbar .nav-link.active');
@@ -1156,42 +1818,6 @@
             }
         }
 
-        // Movies/Series grid (TV): UP walks up WITHIN the grid (nearest card above), and once the top
-        // visible row is reached it scrolls the grid up (scrollActivePage, focus stays) — exactly
-        // mirroring how DOWN scrolls the list down, so a HELD Up fast-scrolls up and NEVER escapes.
-        // Reaching the filters: a FRESH Up press at the very top, OR a deliberate DOUBLE-tap Up from
-        // anywhere (two presses with a key RELEASE between them, within 400ms). A continuous hold has
-        // no interleaved keyup (see the keyup listener), so it can never trip the escape — robust to
-        // the Android TV WebView key model where e.repeat is unreliable.
-        if (e.key === 'ArrowUp' &&
-            focused.matches?.('.movies-grid .movie-card, .series-grid .series-card')) {
-            const now = Date.now();
-            const fresh = upReleased || (now - prevUpDownAt > UP_FRESH_GAP_MS);   // a distinct new press
-            prevUpDownAt = now;
-            upReleased = false;
-            if (fresh) {
-                upFreshCount = (now - lastUpFreshAt < UP_DOUBLE_TAP_MS) ? upFreshCount + 1 : 1;
-                lastUpFreshAt = now;
-            }
-            // Deliberate double-tap (two fresh presses) from ANYWHERE in the list → the filters.
-            if (fresh && upFreshCount >= 2) {
-                upFreshCount = 0;
-                const f = catalogFilterTarget(focused) || findNext(focused, 'ArrowUp');
-                if (f) { focusElement(f); return; }
-            }
-            // Otherwise walk/scroll up within the grid.
-            const above = gridCardAbove(focused);
-            if (above) { focusElement(above); return; }
-            if (scrollActivePage('ArrowUp', focused)) return;         // reveal cards above; focus stays
-            // At the very top (can't scroll up): a FRESH single Up escapes to the filters (natural);
-            // a held repeat swallows so a fast-scroll to the top never overshoots into the filters.
-            if (fresh) {
-                const f = catalogFilterTarget(focused) || findNext(focused, 'ArrowUp');
-                if (f) { focusElement(f); return; }
-            }
-            return;
-        }
-
         let next = findNext(focused, e.key);
         // Confine a horizontal press to its own rail row: inside a .horizontal-scroll rail,
         // a Left/Right target MUST live in the same rail. Otherwise Right at the true end of
@@ -1214,31 +1840,38 @@
         }
     }, true); // capture: runs before the app's own arrow-key handlers
 
-    // Powers the Movies/Series grid double-tap-Up detector: a key RELEASE between two Up keydowns
-    // marks a genuine second press (a continuous hold emits keydowns with no interleaved keyup).
+    // A physical key release guarantees the next command is never mistaken for
+    // a held repeat, even when Android WebView does not populate event.repeat.
+    // It also cancels the trailing coalesced move: once the viewer releases the
+    // remote, focus must stop immediately instead of advancing one extra item.
     document.addEventListener('keyup', (e) => {
-        if (e.key === 'ArrowUp') upReleased = true;
-        if (e.key === lastNavDirection) lastNavDirectionReleased = true;
+        if (e.key !== lastNavDirection) return;
+        lastNavDirectionReleased = true;
+        cancelQueuedNavRepeat();
     }, true);
 
-    // Auto-focus the first field/button when a modal opens, so the remote
-    // lands inside it immediately instead of on the dimmed page behind.
+    // Capture the opener before a modal component moves focus into its panel.
+    document.addEventListener('focusin', (event) => {
+        const modal = event.target?.closest?.(MODAL_SELECTOR);
+        if (modal) rememberModalOrigin(modal, event.relatedTarget);
+    }, true);
+
     let lastModal = null;
     const modalObserver = new MutationObserver(() => {
         const modal = openModal();
-        // NorvaModal dialogs (.norva-modal-overlay) manage their own initial focus
-        // (Cancel-first for destructive confirms) and are never revealed via a class
-        // mutation this observer watches — don't second-guess or steal their focus.
-        if (modal && modal !== lastModal && !modal.classList.contains('norva-modal-overlay')) {
+        const closed = lastModal && lastModal !== modal &&
+            (!lastModal.isConnected || !lastModal.matches(MODAL_SELECTOR));
+        if (closed) scheduleModalFocusRestore(lastModal);
+        // Respect a component's own initial focus; only anchor when it left the
+        // active element outside the topmost scope.
+        if (modal && modal !== lastModal) {
+            rememberModalOrigin(modal);
             lastModal = modal;
             setTimeout(() => {
-                // Prefer the first form field (full-width, so vertical nav flows
-                // cleanly through the fields then down to the footer buttons);
-                // fall back to any focusable for button-only modals.
-                const first = modal.querySelector(
-                        '#modal-body input:not([type="hidden"]), #modal-body textarea, #modal-body select')
-                    || modal.querySelector(
-                        'input:not([type="hidden"]), textarea, select, button, a[href], [tabindex]');
+                if (openModal() !== modal) return;
+                const focused = currentFocus();
+                if (focused && modal.contains(focused)) return;
+                const first = scopeEntryTarget(modal);
                 if (first) focusElement(first);
             }, 60);
         } else if (!modal) {
@@ -1246,7 +1879,10 @@
         }
     });
     modalObserver.observe(document.body, {
-        attributes: true, subtree: true, attributeFilter: ['class']
+        attributes: true,
+        childList: true,
+        subtree: true,
+        attributeFilter: ['class']
     });
 
     // Land the ring on a just-opened fiche's primary action (Play/Resume). On the
@@ -1376,11 +2012,18 @@
 
     document.addEventListener('focusin', () => {
         const el = document.activeElement;
-        if (el && el !== document.body && el.matches?.(INTERACTIVE_SELECTOR)) {
+        const page = activePage();
+        if (el && el !== document.body && page?.contains(el) &&
+            el.matches?.(INTERACTIVE_SELECTOR)) {
             lastFocusedCard = el;
-            lastFocusedPageId = activePage()?.id || null;
+            lastFocusedPageId = page.id;
             lastFocusedKey = cardKey(el);
             try { lastFocusRect = el.getBoundingClientRect(); } catch (_) { lastFocusRect = null; }
+            pageFocusMemory.set(page.id, {
+                element: el,
+                key: lastFocusedKey,
+                rect: lastFocusRect
+            });
         }
     });
 
@@ -1424,7 +2067,7 @@
         const candidates = getPageCandidates();
         const target = lastFocusedPageId === page.id
             ? nearestToLastRect(candidates)
-            : (pageDefaultTarget(page) || firstNonTextCandidate(candidates));
+            : pageEntryTarget(page);
         if (target) focusElement(target);
     }
 
@@ -1439,6 +2082,7 @@
     const pageObserver = new MutationObserver((mutations) => {
         for (const m of mutations) {
             if (m.target.classList?.contains('page') && m.target.classList.contains('active')) {
+                preparePageEntry(m.target);
                 scheduleEnsureFocus(350);
                 return;
             }
@@ -1508,9 +2152,16 @@
             return 'nav';
         }
 
+        // On Live TV, the first hardware Back is always a safe escape to the
+        // active rail item, even when the guide is still loading or empty.
+        const page = activePage();
+        if (page?.id === 'page-live' && !document.activeElement?.closest?.('.navbar')) {
+            if (focusActiveNavbar()) return 'nav';
+        }
+
         // Not on the home page → navigate home instead of exiting
-        const activePage = document.querySelector('.page.active')?.id;
-        if (activePage && activePage !== 'page-home') {
+        const activePageId = document.querySelector('.page.active')?.id;
+        if (activePageId && activePageId !== 'page-home') {
             document.querySelector('.nav-link[data-page="home"]')?.click();
             return 'nav';
         }

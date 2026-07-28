@@ -1044,7 +1044,7 @@
           } else if (e && (e.code === 'not_configured' || e.code === 'unavailable')) {
             setStatus('Billing is not available on this platform yet.', true);
           } else {
-            setStatus('Something went wrong starting the purchase' + (e && e.message ? ': ' + e.message : '') + '.', true);
+            setStatus('Something went wrong starting the purchase. Try again.', true);
           }
           button.disabled = false;
           button.textContent = original;
@@ -1065,7 +1065,7 @@
           setStatus('Purchases restored. If you have an active plan it\'s back now.', false);
           setTimeout(function () { window.location.href = returnTo; }, 900);
         } catch (e) {
-          setStatus('Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.', true);
+          setStatus('Could not restore purchases. Check your connection and try again.', true);
         } finally {
           restoreBtn.disabled = false;
           restoreBtn.textContent = original;

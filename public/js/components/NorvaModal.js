@@ -21,6 +21,38 @@
             .filter(el => !el.disabled && el.offsetParent !== null);
     }
 
+    function isolateBackground(modalEl) {
+        const candidates = new Set();
+        let node = modalEl;
+        while (node?.parentElement) {
+            const parent = node.parentElement;
+            [...parent.children].forEach((sibling) => {
+                if (sibling !== node && !sibling.matches?.('script, style, link')) candidates.add(sibling);
+            });
+            if (parent === document.body) break;
+            node = parent;
+        }
+        const snapshot = [...candidates].map(element => ({
+            element,
+            inert: element.inert,
+            ariaHidden: element.getAttribute('aria-hidden')
+        }));
+        snapshot.forEach(({ element }) => {
+            element.inert = true;
+            element.setAttribute('aria-hidden', 'true');
+        });
+        return snapshot;
+    }
+
+    function restoreBackground(snapshot) {
+        (snapshot || []).forEach(({ element, inert, ariaHidden }) => {
+            if (!element?.isConnected) return;
+            element.inert = inert;
+            if (ariaHidden == null) element.removeAttribute('aria-hidden');
+            else element.setAttribute('aria-hidden', ariaHidden);
+        });
+    }
+
     function open(opts) {
         const {
             title = '',
@@ -32,11 +64,13 @@
 
         return new Promise((resolve) => {
             const prevFocus = document.activeElement;
+            let backgroundSnapshot = [];
 
             const overlay = document.createElement('div');
             overlay.className = 'norva-modal-overlay';
             overlay.setAttribute('role', 'dialog');
             overlay.setAttribute('aria-modal', 'true');
+            overlay.tabIndex = -1;
 
             const card = document.createElement('div');
             card.className = 'norva-modal' + (danger ? ' is-danger' : '');
@@ -80,6 +114,7 @@
                 settled = true;
                 document.removeEventListener('keydown', onKey, true);
                 overlay.remove();
+                restoreBackground(backgroundSnapshot);
                 // Restore focus to whatever opened the dialog (keyboard/TV continuity).
                 try { if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus(); } catch (_) { /* noop */ }
                 resolve(result);
@@ -108,6 +143,8 @@
             overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(false); });
 
             document.body.appendChild(overlay);
+            try { overlay.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            backgroundSnapshot = isolateBackground(overlay);
             document.addEventListener('keydown', onKey, true);
 
             // Default focus: for a destructive confirm, land on Cancel so a stray
@@ -138,6 +175,9 @@
         if (!modalEl || modalEl.__hygieneOn) return;
         modalEl.__hygieneOn = true;
         const prevFocus = document.activeElement;
+        const immediateTarget = opts.initialFocus || focusablesIn(modalEl)[0];
+        try { immediateTarget?.focus?.({ preventScroll: true }); } catch (_) { /* noop */ }
+        const backgroundSnapshot = isolateBackground(modalEl);
         const requestClose = () => {
             if (typeof opts.onClose === 'function') opts.onClose();
             else modalEl.classList.remove('active');
@@ -160,6 +200,7 @@
             modalEl.removeEventListener('mousedown', onBackdrop);
             classObserver.disconnect();
             modalEl.__hygieneOn = false;
+            restoreBackground(backgroundSnapshot);
             if (opts.restoreFocus !== false) {
                 try { if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus(); } catch (_) { /* noop */ }
             }

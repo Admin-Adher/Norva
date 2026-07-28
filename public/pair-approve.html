@@ -291,7 +291,7 @@
       }, 2000);
 
     } catch (err) {
-      setStatus('error', err.message);
+      setStatus('error', 'Pairing could not be completed. Check the code and try again.');
       document.getElementById('btn-approve').disabled = false;
       document.getElementById('btn-deny').disabled    = false;
     }

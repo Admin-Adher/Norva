@@ -21,6 +21,7 @@ android {
         targetSdk 36
         versionCode 18
         versionName "1.3.5"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
@@ -32,6 +33,14 @@ android {
 
     buildFeatures {
         buildConfig true
+    }
+
+    // Reuse the repository's deterministic codec matrix as test-only assets.
+    // None of these fixtures enter the production APK.
+    sourceSets {
+        androidTest {
+            assets.srcDir "../../../public/webengine/media"
+        }
     }
 
     signingConfigs {
@@ -110,6 +119,9 @@ dependencies {
     implementation "androidx.credentials:credentials:1.3.0"
     implementation "androidx.credentials:credentials-play-services-auth:1.3.0"
     implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
+
+    androidTestImplementation "androidx.test:runner:1.6.2"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
 }
 
 // Apply the Firebase google-services plugin ONLY when the config file is present. CI debug builds

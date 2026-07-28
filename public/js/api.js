@@ -572,7 +572,7 @@ const CloudAdapter = (() => {
             q: q || '',
             limit: limit || '',
             offset: offset || '',
-            includeVariants: includeVariants ? '1' : ''
+            includeVariants: includeVariants ? '1' : '0'
         });
         liveCatalogCache.set(cacheKey, {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
@@ -592,10 +592,28 @@ const CloudAdapter = (() => {
         }));
     }
 
-    async function listLiveLogicalChannels({ sourceId, categoryId, country = '', q = '', limit = '', offset = '' } = {}) {
+    async function listLiveLogicalChannels({
+        sourceId,
+        categoryId,
+        country = '',
+        q = '',
+        limit = '',
+        offset = '',
+        includeVariants = true
+    } = {}) {
         country = String(country || activeContentRegion()).toUpperCase();
-        const payload = await getLiveLogicalCatalog({ sourceId, categoryId, country, q, limit, offset, includeVariants: true });
-        return (payload.channels || []).map(channel => normalizeLogicalLiveChannel(channel, sourceId));
+        const payload = await getLiveLogicalCatalog({
+            sourceId,
+            categoryId,
+            country,
+            q,
+            limit,
+            offset,
+            includeVariants
+        });
+        return (payload.channels || []).map(channel =>
+            normalizeLogicalLiveChannel(channel, sourceId, { includeVariants })
+        );
     }
 
     async function getHomeRails({ type = '', limit = 12 } = {}) {
@@ -682,13 +700,19 @@ const CloudAdapter = (() => {
         return pool[0] || null;
     }
 
-    function normalizeLogicalLiveChannel(channel, requestedSourceId) {
+    function normalizeLogicalLiveChannel(channel, requestedSourceId, { includeVariants = true } = {}) {
         const cloudSourceId = channel.source_id || channel.sourceId || '';
         const localId = requestedSourceId || localSourceId(cloudSourceId);
         const defaultVariantRaw = channel.default_variant || channel.defaultVariant || {};
-        const rawVariants = Array.isArray(channel.variants) && channel.variants.length
+        let rawVariants = includeVariants && Array.isArray(channel.variants) && channel.variants.length
             ? channel.variants
-            : (channel.variant_preview || channel.variantPreview || (defaultVariantRaw.stream_id || defaultVariantRaw.streamId ? [defaultVariantRaw] : []));
+            : (includeVariants
+                ? (channel.variant_preview || channel.variantPreview || [])
+                : []);
+        if (!Array.isArray(rawVariants)) rawVariants = [];
+        if (!rawVariants.length && (defaultVariantRaw.stream_id || defaultVariantRaw.streamId)) {
+            rawVariants.push(defaultVariantRaw);
+        }
         const variants = rawVariants
             .map(variant => normalizeLiveVariant(variant, localId, cloudSourceId))
             .filter(variant => variant.streamId);
@@ -699,8 +723,19 @@ const CloudAdapter = (() => {
         const categoryId = String(channel.category_id || channel.group_id || channel.section || 'uncategorized');
         const categoryName = channel.category_name || channel.group_name || (categoryId === 'uncategorized' ? 'Uncategorized' : categoryId);
         const poster = channel.stream_icon || channel.poster_url || defaultVariant.streamIcon || defaultVariant.posterUrl || '';
+        // Retain the compact logical summary, not the raw variant arrays that were
+        // already normalized above. Keeping both copies was the main retained-heap
+        // multiplier on Android TV.
+        const {
+            variants: _rawVariantRows,
+            variant_preview: _rawVariantPreview,
+            variantPreview: _rawVariantPreviewCamel,
+            default_variant: _rawDefaultVariant,
+            defaultVariant: _rawDefaultVariantCamel,
+            ...channelSummary
+        } = channel;
         const base = {
-            ...channel,
+            ...channelSummary,
             id: `xtream_${localId}_${streamId}`,
             stream_id: streamId,
             streamId,
@@ -718,11 +753,11 @@ const CloudAdapter = (() => {
             cloudLogicalId: channel.id || channel.logical_id || '',
             playback_status: channel.playback_status || 'unknown',
             playback_mode: channel.playback_mode || 'unknown',
-            qualityGroup: {
+            qualityGroup: includeVariants ? {
                 name: channel.name || channel.title || defaultVariant.raw || 'Norva',
                 variants,
                 defaultVariant
-            },
+            } : null,
             currentVariant: defaultVariant,
             _logicalChannel: true,
             _logicalKind: channel.section || 'cloud',
@@ -730,6 +765,8 @@ const CloudAdapter = (() => {
             _sourceGroupTitle: categoryName,
             _displayGroupTitle: categoryName
         };
+        if (!includeVariants) return base;
+
         base.qualityGroup.variants = variants.map(variant => ({
             ...variant,
             channel: {
@@ -1427,7 +1464,10 @@ const CloudAdapter = (() => {
                             categoryId,
                             q: query.get('q') || '',
                             limit: query.get('limit') || '',
-                            offset: query.get('offset') || ''
+                            offset: query.get('offset') || '',
+                            includeVariants: !['0', 'false'].includes(
+                                String(query.get('includeVariants') ?? 'true').toLowerCase()
+                            )
                         });
                     } catch (err) {
                         console.warn('[Cloud] Logical live catalog unavailable, falling back to raw media items:', err);
@@ -2549,7 +2589,15 @@ const API = {
                 // Persist name + poster so the unified "My List" rail can render
                 // directly from the favorite row (no per-item catalog lookup).
                 ...(meta && meta.name ? { itemName: meta.name } : {}),
-                ...(meta && (meta.poster || meta.type) ? { itemMeta: { poster: meta.poster || '', type: meta.type || itemType } } : {})
+                ...(meta ? {
+                    itemMeta: {
+                        poster: meta.poster || '',
+                        type: meta.type || itemType,
+                        ...(meta.sourceType ? { sourceType: meta.sourceType } : {}),
+                        ...(meta.streamId ? { streamId: String(meta.streamId) } : {}),
+                        ...(meta.channelId ? { channelId: String(meta.channelId) } : {})
+                    }
+                } : {})
             }),
         remove: (sourceId, itemId, itemType = 'channel') =>
             API.request('DELETE', '/favorites', { sourceId, itemId, itemType }),
@@ -2573,6 +2621,8 @@ const API = {
                 if (options.q) params.push(`q=${encodeURIComponent(options.q)}`);
                 if (options.limit) params.push(`limit=${encodeURIComponent(options.limit)}`);
                 if (options.offset) params.push(`offset=${encodeURIComponent(options.offset)}`);
+                if (options.includeVariants === false) params.push('includeVariants=false');
+                if (options.includeVariants === true) params.push('includeVariants=true');
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/live_streams${query}`);
             },

@@ -25,8 +25,28 @@
   let resolveSelect = null;
   let fitRO = null;          // ResizeObserver that re-fits the panel
   let fitOnResize = null;    // window resize/orientation handler (IME show/hide, etc.)
+  let inertSiblings = [];
+  let nestedDialogOpen = false;
+  let operationPending = false;
+  // All public profile entries share one flight. This is more than click
+  // debouncing: ensureSelected() can stay pending while the forced picker is
+  // visible, so a concurrent switch/manage request must join that same promise
+  // instead of closing the picker or replacing its resolver.
+  let profileEntryFlight = null;
+  let loadFailureFlight = null;
+  let settleLoadFailure = null;
 
-  const state = { profiles: [], limit: 1, canCreate: false, mode: 'select', editing: null, pickedAvatar: 'avatar-01', cameFrom: 'select' };
+  const state = {
+    profiles: [],
+    limit: 1,
+    canCreate: false,
+    mode: 'select',
+    editing: null,
+    pickedAvatar: 'avatar-01',
+    cameFrom: 'select',
+    focusReturnProfileId: null,
+    focusReturnAction: null
+  };
 
   function profilesApi() { return window.NorvaCloud && window.NorvaCloud.profiles; }
   function isCloud() {
@@ -54,6 +74,85 @@
 
   function avatarIdAt(index) {
     return 'avatar-' + String((index % AVATAR_COUNT) + 1).padStart(2, '0');
+  }
+
+  function setBackgroundInert(active) {
+    if (active) {
+      inertSiblings = [];
+      [...document.body.children].forEach((node) => {
+        if (node === overlayEl || node.matches?.('script, style, link')) return;
+        inertSiblings.push({
+          node,
+          hadInert: node.hasAttribute('inert'),
+          ariaHidden: node.getAttribute('aria-hidden')
+        });
+        node.setAttribute('inert', '');
+        node.inert = true;
+        node.setAttribute('aria-hidden', 'true');
+      });
+      return;
+    }
+    inertSiblings.forEach(({ node, hadInert, ariaHidden }) => {
+      if (!node?.isConnected) return;
+      if (hadInert) {
+        node.setAttribute('inert', '');
+        node.inert = true;
+      } else {
+        node.removeAttribute('inert');
+        node.inert = false;
+      }
+      if (ariaHidden == null) node.removeAttribute('aria-hidden');
+      else node.setAttribute('aria-hidden', ariaHidden);
+    });
+    inertSiblings = [];
+  }
+
+  function bindDialogTitle(title) {
+    if (!overlayEl || !title) return;
+    title.id = 'np-dialog-title';
+    overlayEl.setAttribute('aria-labelledby', title.id);
+  }
+
+  function setProfileStatus(status, message, isError) {
+    if (!status) return;
+    status.textContent = message || '';
+    status.setAttribute('role', isError ? 'alert' : 'status');
+    status.setAttribute('aria-live', isError ? 'assertive' : 'polite');
+    status.setAttribute('aria-atomic', 'true');
+  }
+
+  function setPanelBusy(panel, busy) {
+    operationPending = busy;
+    panel?.setAttribute('aria-busy', busy ? 'true' : 'false');
+    const controls = [
+      ...(panel ? panel.querySelectorAll('button, input, select, textarea') : []),
+      ...(overlayEl?.querySelector('.np-close') ? [overlayEl.querySelector('.np-close')] : [])
+    ];
+    controls.forEach((control) => {
+      if (busy) {
+        control.dataset.npBusyWasDisabled = control.disabled ? 'true' : 'false';
+        control.disabled = true;
+      } else if (Object.prototype.hasOwnProperty.call(control.dataset, 'npBusyWasDisabled')) {
+        control.disabled = control.dataset.npBusyWasDisabled === 'true';
+        delete control.dataset.npBusyWasDisabled;
+      }
+    });
+  }
+
+  function focusNewestNorvaModal() {
+    const dialogs = document.querySelectorAll('.norva-modal-overlay');
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return;
+    dialog.tabIndex = -1;
+    try { dialog.focus(); } catch (_) { /* noop */ }
+  }
+
+  function setAvatarChoiceState(avatars, selectedChoice) {
+    avatars.querySelectorAll('.np-avatar-choice').forEach((choice) => {
+      const picked = choice === selectedChoice;
+      choice.classList.toggle('np-picked', picked);
+      choice.setAttribute('aria-pressed', picked ? 'true' : 'false');
+    });
   }
 
   // Netflix-style gating is per browser session: once a profile is chosen we
@@ -114,6 +213,7 @@
 .np-btn-ghost{background:transparent;letter-spacing:.06em;text-transform:uppercase;font-size:13px;color:#9aa6bd}
 .np-btn-ghost:hover{border-color:#5a6b86;color:#fff}
 .np-btn:focus-visible{outline:3px solid #b579ff;outline-offset:2px}
+.np-field-label{display:block;max-width:360px;margin:0 auto 7px;color:#cdd6e6;font-size:14px;font-weight:700;text-align:left}
 .np-input{width:100%;max-width:360px;margin:0 auto 18px;display:block;padding:12px 14px;border-radius:8px;border:1px solid #344158;background:#11151d;color:#f8fafc;font:inherit;font-size:16px;text-align:center}
 .np-avatars-label{color:#a8b3c7;font-size:13px;margin-bottom:10px}
 .np-avatars{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:18px}
@@ -183,8 +283,12 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
   }
 
   function close() {
+    const hadOverlay = Boolean(overlayEl);
     if (overlayEl) { overlayEl.remove(); overlayEl = null; }
-    document.removeEventListener('keydown', onKeydown);
+    document.removeEventListener('keydown', onKeydown, true);
+    setBackgroundInert(false);
+    nestedDialogOpen = false;
+    operationPending = false;
     if (fitRO) { fitRO.disconnect(); fitRO = null; }
     if (fitOnResize) {
       window.removeEventListener('resize', fitOnResize);
@@ -195,7 +299,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     // so keyboard & Android TV D-pad users aren't dumped on <body>.
     const toFocus = previouslyFocused;
     previouslyFocused = null;
-    if (toFocus && typeof toFocus.focus === 'function') { try { toFocus.focus(); } catch (_) { /* noop */ } }
+    if (hadOverlay) {
+      const fallback = document.getElementById('nav-account') || document.getElementById('nav-profile');
+      const target = toFocus?.isConnected ? toFocus : fallback;
+      if (target && typeof target.focus === 'function') { try { target.focus(); } catch (_) { /* noop */ } }
+    }
   }
 
   async function loadProfiles() {
@@ -206,6 +314,77 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     return state.profiles;
   }
 
+  function promptProfileLoadRetry(continueLabel = 'Continue for now') {
+    if (loadFailureFlight) return loadFailureFlight;
+
+    injectStyles();
+    close();
+    previouslyFocused = document.activeElement;
+    state.mode = 'load-error';
+    overlayEl = el('div', 'np-overlay');
+    overlayEl.setAttribute('role', 'dialog');
+    overlayEl.setAttribute('aria-modal', 'true');
+    overlayEl.tabIndex = -1;
+
+    const panel = el('div', 'np-panel');
+    panel.setAttribute('aria-busy', 'false');
+    const brand = el('div', 'np-brand');
+    const logo = el('img');
+    logo.src = '/img/norva-app-icon.png';
+    logo.alt = '';
+    brand.appendChild(logo);
+    brand.appendChild(el('span', null, 'Norva'));
+    panel.appendChild(brand);
+    const title = el('h1', 'np-title', 'Profiles are temporarily unavailable');
+    panel.appendChild(title);
+    panel.appendChild(el('div', 'np-subtitle',
+      'Check your connection and try again. Your existing profile data is safe.'));
+    const status = el('div', 'np-status', '');
+    setProfileStatus(status, '', false);
+    panel.appendChild(status);
+    const actions = el('div', 'np-actions');
+    const retry = el('button', 'np-btn np-btn-primary', 'Try again');
+    retry.type = 'button';
+    const continueButton = el('button', 'np-btn np-btn-ghost', continueLabel);
+    continueButton.type = 'button';
+    actions.append(retry, continueButton);
+    panel.appendChild(actions);
+    overlayEl.appendChild(panel);
+    document.body.appendChild(overlayEl);
+    bindDialogTitle(title);
+    try { overlayEl.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+    setBackgroundInert(true);
+    document.addEventListener('keydown', onKeydown, true);
+
+    let resolveFlight;
+    const flight = new Promise((resolve) => { resolveFlight = resolve; });
+    loadFailureFlight = flight;
+    const finish = (value) => {
+      if (settleLoadFailure !== finish) return;
+      settleLoadFailure = null;
+      if (loadFailureFlight === flight) loadFailureFlight = null;
+      close();
+      resolveFlight(value);
+    };
+    settleLoadFailure = finish;
+    retry.addEventListener('click', async () => {
+      setPanelBusy(panel, true);
+      setProfileStatus(status, 'Loading profiles…', false);
+      try {
+        const profiles = await loadProfiles();
+        finish(profiles);
+      } catch (_) {
+        setPanelBusy(panel, false);
+        setProfileStatus(status, 'Profiles still could not be loaded. Check your connection and try again.', true);
+        try { retry.focus(); } catch (_) { /* noop */ }
+      }
+    });
+    continueButton.addEventListener('click', () => finish(null));
+    requestAnimationFrame(() => retry.focus());
+
+    return flight;
+  }
+
   function buildOverlay() {
     injectStyles();
     close();
@@ -213,8 +392,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     overlayEl = el('div', 'np-overlay');
     overlayEl.setAttribute('role', 'dialog');
     overlayEl.setAttribute('aria-modal', 'true');
+    overlayEl.tabIndex = -1;
     document.body.appendChild(overlayEl);
-    document.addEventListener('keydown', onKeydown);
+    try { overlayEl.focus(); } catch (_) { /* noop */ }
+    setBackgroundInert(true);
+    document.addEventListener('keydown', onKeydown, true);
     // Re-fit on any viewport change (e.g. the on-screen keyboard showing/hiding
     // shrinks the visible area) so the panel is always fully on-screen.
     if (IS_TV && !fitOnResize) {
@@ -276,13 +458,14 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
 
   // Land focus inside the overlay so a D-pad remote is immediately useful:
   // the name field when editing, otherwise the first profile card.
-  function focusFirst() {
+  function focusFirst(preferred) {
     setTimeout(() => {
       if (!overlayEl) return;
       // On TV, never land on the name <input> first — focusing it summons the
       // on-screen keyboard that covers half the 480px screen. Prefer a card /
       // picked avatar / primary button; the user opts into the IME by pressing OK.
-      const target = (!IS_TV && overlayEl.querySelector('.np-input')) ||
+      const target = (preferred?.isConnected ? preferred : null) ||
+        (!IS_TV && overlayEl.querySelector('.np-input')) ||
         overlayEl.querySelector('.np-current') ||
         overlayEl.querySelector('.np-card') ||
         overlayEl.querySelector('.np-avatar-choice.np-picked') ||
@@ -295,12 +478,19 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
   // Step back one screen: add/edit → where we came from, manage → select,
   // select → close (unless this is the forced login pick, which has no exit).
   function handleOverlayBack() {
+    if (state.mode === 'load-error') {
+      settleLoadFailure?.(null);
+      return;
+    }
     if (state.mode === 'add' || state.mode === 'edit') {
+      if (state.mode === 'edit') state.focusReturnProfileId = state.editing?.id || null;
+      else state.focusReturnAction = 'add';
       state.mode = state.cameFrom || 'select';
       render();
       return;
     }
     if (state.mode === 'manage') {
+      state.focusReturnAction = 'manage';
       state.mode = 'select';
       render();
       return;
@@ -323,10 +513,36 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
   // Web fallback for Escape (on TV the capture-phase handler in tvNavigation.js
   // gets there first and stops propagation, so this never double-fires).
   function onKeydown(e) {
-    if (e.key !== 'Escape') return;
-    if (state.mode === 'select' && resolveSelect) return;
-    e.preventDefault();
-    handleOverlayBack();
+    if (nestedDialogOpen || !overlayEl) return;
+    if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') {
+      if (operationPending) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (state.mode === 'select' && resolveSelect) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleOverlayBack();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusables = [...overlayEl.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((node) => node.style.display !== 'none' && node.getAttribute('aria-hidden') !== 'true');
+    if (!focusables.length) {
+      e.preventDefault();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !overlayEl.contains(document.activeElement))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !overlayEl.contains(document.activeElement))) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   function renderGrid() {
@@ -342,7 +558,9 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       brand.appendChild(el('span', null, 'Norva'));
       panel.appendChild(brand);
     }
-    panel.appendChild(el('h1', 'np-title', manage ? 'Manage profiles' : "Who's watching?"));
+    const title = el('h1', 'np-title', manage ? 'Manage profiles' : "Who's watching?");
+    bindDialogTitle(title);
+    panel.appendChild(title);
 
     const activeId = profilesApi().getActiveId();
     const grid = el('div', 'np-grid');
@@ -355,11 +573,18 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
         + (showLock ? ' np-locked' : '')
         + (!manage && !showLock && p.id === activeId ? ' np-current' : ''));
       card.type = 'button';
+      card.dataset.profileId = String(p.id);
+      card.setAttribute('aria-label', manage
+        ? `Edit profile ${p.name}`
+        : (showLock ? `${p.name}, profile locked` : `Watch as ${p.name}`));
+      if (!manage && !showLock && p.id === activeId) card.setAttribute('aria-current', 'true');
       const av = el('div', 'np-avatar');
-      av.appendChild(avatarImg(p.avatar_id, p.name));
+      av.appendChild(avatarImg(p.avatar_id, ''));
       if (manage) av.appendChild(el('span', 'np-edit-badge', '✎'));
       else if (showLock) av.appendChild(el('span', 'np-lock-badge', '🔒'));
       card.appendChild(av);
+      av.querySelectorAll('.np-edit-badge, .np-lock-badge')
+        .forEach((badge) => badge.setAttribute('aria-hidden', 'true'));
       card.appendChild(el('span', 'np-name', p.name));
       card.addEventListener('click', () => {
         if (manage) { openEdit(p); return; }
@@ -372,6 +597,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     if (!manage && state.canCreate) {
       const add = el('button', 'np-card np-add');
       add.type = 'button';
+      add.setAttribute('aria-label', 'Add profile');
       add.appendChild(el('div', 'np-avatar np-avatar-add', '+'));
       add.appendChild(el('span', 'np-name', 'Add profile'));
       add.addEventListener('click', openAdd);
@@ -382,13 +608,29 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     const actions = el('div', 'np-actions');
     const manageBtn = el('button', 'np-btn np-btn-ghost', manage ? 'Done' : 'Manage profiles');
     manageBtn.type = 'button';
-    manageBtn.addEventListener('click', () => { state.mode = manage ? 'select' : 'manage'; render(); });
+    manageBtn.dataset.action = 'manage';
+    manageBtn.addEventListener('click', () => {
+      state.focusReturnAction = 'manage';
+      state.mode = manage ? 'select' : 'manage';
+      render();
+    });
     actions.appendChild(manageBtn);
     panel.appendChild(actions);
 
     overlayEl.appendChild(panel);
     addCloseButton();
-    focusFirst();
+    let preferred = null;
+    if (state.focusReturnProfileId) {
+      preferred = [...overlayEl.querySelectorAll('[data-profile-id]')]
+        .find((card) => card.dataset.profileId === String(state.focusReturnProfileId)) || null;
+    } else if (state.focusReturnAction === 'add') {
+      preferred = overlayEl.querySelector('.np-add');
+    } else if (state.focusReturnAction === 'manage') {
+      preferred = overlayEl.querySelector('[data-action="manage"]');
+    }
+    state.focusReturnProfileId = null;
+    state.focusReturnAction = null;
+    focusFirst(preferred);
   }
 
   function openAdd() {
@@ -410,38 +652,52 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     const isEdit = state.mode === 'edit';
     overlayEl.innerHTML = '';
     const panel = el('div', 'np-panel np-panel-edit');
-    panel.appendChild(el('h1', 'np-title', isEdit ? 'Edit profile' : 'Add profile'));
+    panel.setAttribute('aria-busy', 'false');
+    const title = el('h1', 'np-title', isEdit ? 'Edit profile' : 'Add profile');
+    bindDialogTitle(title);
+    panel.appendChild(title);
 
     const preview = el('div', 'np-avatar np-avatar-lg');
+    preview.setAttribute('aria-hidden', 'true');
     const previewImg = avatarImg(state.pickedAvatar, '');
     preview.appendChild(previewImg);
     panel.appendChild(preview);
 
     const nameInput = el('input', 'np-input');
+    nameInput.id = 'np-profile-name';
     nameInput.type = 'text';
     nameInput.maxLength = 40;
     nameInput.placeholder = 'Profile name';
     nameInput.value = isEdit ? (state.editing.name || '') : '';
+    const nameLabel = el('label', 'np-field-label', 'Profile name');
+    nameLabel.htmlFor = nameInput.id;
+    panel.appendChild(nameLabel);
     panel.appendChild(nameInput);
 
-    panel.appendChild(el('div', 'np-avatars-label', 'Choose an avatar'));
+    const avatarsLabel = el('div', 'np-avatars-label', 'Choose an avatar');
+    avatarsLabel.id = 'np-avatar-label';
+    panel.appendChild(avatarsLabel);
     const avatars = el('div', 'np-avatars');
+    avatars.setAttribute('role', 'group');
+    avatars.setAttribute('aria-labelledby', avatarsLabel.id);
     for (let i = 0; i < AVATAR_COUNT; i++) {
       const id = avatarIdAt(i);
       const choice = el('button', 'np-avatar-choice' + (id === state.pickedAvatar ? ' np-picked' : ''));
       choice.type = 'button';
-      choice.appendChild(avatarImg(id, id));
+      choice.setAttribute('aria-label', `Choose avatar ${i + 1}`);
+      choice.setAttribute('aria-pressed', id === state.pickedAvatar ? 'true' : 'false');
+      choice.appendChild(avatarImg(id, ''));
       choice.addEventListener('click', () => {
         state.pickedAvatar = id;
         previewImg.src = avatarSrc(id);
-        avatars.querySelectorAll('.np-avatar-choice').forEach((c) => c.classList.remove('np-picked'));
-        choice.classList.add('np-picked');
+        setAvatarChoiceState(avatars, choice);
       });
       avatars.appendChild(choice);
     }
     panel.appendChild(avatars);
 
     const status = el('div', 'np-status', '');
+    setProfileStatus(status, '', false);
     panel.appendChild(status);
 
     const actions = el('div', 'np-actions');
@@ -450,17 +706,23 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     save.type = 'button';
     save.addEventListener('click', async () => {
       const name = (nameInput.value || '').trim();
-      if (!name) { status.textContent = 'Please enter a name.'; nameInput.focus(); return; }
-      save.disabled = true; status.textContent = 'Saving…';
+      if (!name) { setProfileStatus(status, 'Please enter a name.', true); nameInput.focus(); return; }
+      setPanelBusy(panel, true);
+      setProfileStatus(status, 'Saving…', false);
       try {
         if (isEdit) await profilesApi().update(state.editing.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
         else await profilesApi().create({ name, avatarId: state.pickedAvatar });
         await loadProfiles();
+        setPanelBusy(panel, false);
+        if (isEdit) state.focusReturnProfileId = state.editing.id;
+        else state.focusReturnAction = 'add';
         state.mode = isEdit ? 'manage' : 'select';
         render();
       } catch (e) {
-        status.textContent = (e && e.message) || 'Could not save the profile.';
-        save.disabled = false;
+        console.warn('[Profiles] Profile save failed.', e);
+        setProfileStatus(status, 'Could not save the profile. Check your connection and try again.', true);
+        setPanelBusy(panel, false);
+        try { save.focus(); } catch (_) { /* noop */ }
       }
     });
     actions.appendChild(save);
@@ -468,25 +730,50 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     if (isEdit && state.profiles.length > 1) {
       const del = el('button', 'np-btn np-btn-danger', 'Delete');
       del.type = 'button';
+      del.setAttribute('aria-label', `Delete profile ${state.editing.name || ''}`.trim());
       del.addEventListener('click', async () => {
-        // Native window.confirm() is a dead-end on a D-pad remote (its buttons
-        // aren't reliably focusable and it sits outside the modal trap). On TV use
-        // NorvaModal (focus-trapped, Back→cancel). Web keeps window.confirm — zero
-        // change off-TV.
-        let ok;
-        if (IS_TV && window.NorvaModal && typeof window.NorvaModal.confirm === 'function') {
-          ok = await window.NorvaModal.confirm('Its history and favorites will be removed.', {
-            title: 'Delete this profile?', confirmLabel: 'Delete', cancelLabel: 'Cancel', danger: true,
-          });
-        } else {
-          ok = window.confirm('Delete this profile? Its history and favorites will be removed.');
+        // Use the shared focus-trapped confirmation on every platform. The profile
+        // dialog becomes inert while the nested destructive decision is open.
+        if (!window.NorvaModal || typeof window.NorvaModal.confirm !== 'function') {
+          setProfileStatus(status, 'Confirmation is unavailable. The profile was not deleted.', true);
+          return;
         }
-        if (!ok) return;
-        del.disabled = true; status.textContent = 'Deleting…';
+        nestedDialogOpen = true;
+        const pendingConfirmation = window.NorvaModal.confirm(
+          'Its history, favorites and viewing progress will be removed.',
+          {
+            title: 'Delete this profile?',
+            confirmLabel: 'Delete',
+            cancelLabel: 'Keep profile',
+            danger: true
+          }
+        );
+        focusNewestNorvaModal();
+        overlayEl.setAttribute('aria-hidden', 'true');
+        overlayEl.setAttribute('inert', '');
+        overlayEl.inert = true;
+        let ok = false;
+        try {
+          ok = await pendingConfirmation;
+        } finally {
+          if (overlayEl) {
+            overlayEl.removeAttribute('inert');
+            overlayEl.inert = false;
+            overlayEl.setAttribute('aria-hidden', 'false');
+          }
+          nestedDialogOpen = false;
+        }
+        if (!ok) {
+          try { del.focus(); } catch (_) { /* noop */ }
+          return;
+        }
+        setPanelBusy(panel, true);
+        setProfileStatus(status, 'Deleting…', false);
         try {
           const wasActive = profilesApi().getActiveId() === state.editing.id;
           await profilesApi().remove(state.editing.id);
           await loadProfiles();
+          setPanelBusy(panel, false);
           if (wasActive) {
             // Deleting the ACTIVE profile leaves no scoped identity. Switch to a remaining
             // profile (reloads home / favorites / history under it + closes the overlay)
@@ -499,8 +786,10 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
           state.mode = 'manage';
           render();
         } catch (e) {
-          status.textContent = (e && e.message) || 'Could not delete the profile.';
-          del.disabled = false;
+          console.warn('[Profiles] Profile deletion failed.', e);
+          setProfileStatus(status, 'Could not delete the profile. Check your connection and try again.', true);
+          setPanelBusy(panel, false);
+          try { del.focus(); } catch (_) { /* noop */ }
         }
       });
       actions.appendChild(del);
@@ -508,7 +797,12 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
 
     const cancel = el('button', 'np-btn np-btn-ghost', 'Cancel');
     cancel.type = 'button';
-    cancel.addEventListener('click', () => { state.mode = isEdit ? 'manage' : 'select'; render(); });
+    cancel.addEventListener('click', () => {
+      if (isEdit) state.focusReturnProfileId = state.editing?.id || null;
+      else state.focusReturnAction = 'add';
+      state.mode = isEdit ? 'manage' : 'select';
+      render();
+    });
     actions.appendChild(cancel);
 
     panel.appendChild(actions);
@@ -530,6 +824,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     const p = state.editing || {};
     overlayEl.innerHTML = '';
     const panel = el('div', 'np-panel np-panel-edit');
+    panel.setAttribute('aria-busy', 'false');
 
     const brand = el('div', 'np-brand');
     const brandLogo = el('img');
@@ -539,39 +834,52 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     brand.appendChild(el('span', null, 'Norva'));
     panel.appendChild(brand);
 
-    panel.appendChild(el('h1', 'np-title', 'Set up your profile'));
+    const title = el('h1', 'np-title', 'Set up your profile');
+    bindDialogTitle(title);
+    panel.appendChild(title);
     panel.appendChild(el('div', 'np-subtitle', 'Pick a name and an avatar — you can change them anytime.'));
 
     const preview = el('div', 'np-avatar np-avatar-lg');
+    preview.setAttribute('aria-hidden', 'true');
     const previewImg = avatarImg(state.pickedAvatar, '');
     preview.appendChild(previewImg);
     panel.appendChild(preview);
 
     const nameInput = el('input', 'np-input');
+    nameInput.id = 'np-profile-name';
     nameInput.type = 'text';
     nameInput.maxLength = 40;
     nameInput.placeholder = 'Profile name';
     nameInput.value = p.name || '';
+    const nameLabel = el('label', 'np-field-label', 'Profile name');
+    nameLabel.htmlFor = nameInput.id;
+    panel.appendChild(nameLabel);
     panel.appendChild(nameInput);
 
-    panel.appendChild(el('div', 'np-avatars-label', 'Choose an avatar'));
+    const avatarsLabel = el('div', 'np-avatars-label', 'Choose an avatar');
+    avatarsLabel.id = 'np-avatar-label';
+    panel.appendChild(avatarsLabel);
     const avatars = el('div', 'np-avatars');
+    avatars.setAttribute('role', 'group');
+    avatars.setAttribute('aria-labelledby', avatarsLabel.id);
     for (let i = 0; i < AVATAR_COUNT; i++) {
       const id = avatarIdAt(i);
       const choice = el('button', 'np-avatar-choice' + (id === state.pickedAvatar ? ' np-picked' : ''));
       choice.type = 'button';
-      choice.appendChild(avatarImg(id, id));
+      choice.setAttribute('aria-label', `Choose avatar ${i + 1}`);
+      choice.setAttribute('aria-pressed', id === state.pickedAvatar ? 'true' : 'false');
+      choice.appendChild(avatarImg(id, ''));
       choice.addEventListener('click', () => {
         state.pickedAvatar = id;
         previewImg.src = avatarSrc(id);
-        avatars.querySelectorAll('.np-avatar-choice').forEach((c) => c.classList.remove('np-picked'));
-        choice.classList.add('np-picked');
+        setAvatarChoiceState(avatars, choice);
       });
       avatars.appendChild(choice);
     }
     panel.appendChild(avatars);
 
     const status = el('div', 'np-status', '');
+    setProfileStatus(status, '', false);
     panel.appendChild(status);
 
     const actions = el('div', 'np-actions');
@@ -582,21 +890,26 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
 
     save.addEventListener('click', async () => {
       const name = (nameInput.value || '').trim();
-      if (!name) { status.textContent = 'Please enter a name.'; nameInput.focus(); return; }
-      save.disabled = true; skip.disabled = true; status.textContent = 'Saving…';
+      if (!name) { setProfileStatus(status, 'Please enter a name.', true); nameInput.focus(); return; }
+      setPanelBusy(panel, true);
+      setProfileStatus(status, 'Saving…', false);
       try {
         await profilesApi().update(p.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
+        setPanelBusy(panel, false);
         finishSetup(p.id);
       } catch (e) {
-        status.textContent = (e && e.message) || 'Could not save your profile.';
-        save.disabled = false; skip.disabled = false;
+        console.warn('[Profiles] Initial profile setup failed.', e);
+        setProfileStatus(status, 'Could not save your profile. Check your connection and try again.', true);
+        setPanelBusy(panel, false);
+        try { save.focus(); } catch (_) { /* noop */ }
       }
     });
     actions.appendChild(save);
 
     skip.addEventListener('click', async () => {
-      save.disabled = true; skip.disabled = true;
+      setPanelBusy(panel, true);
       try { await profilesApi().update(p.id, { setupCompleted: true }); } catch (_) { /* enter anyway */ }
+      setPanelBusy(panel, false);
       finishSetup(p.id);
     });
     actions.appendChild(skip);
@@ -629,7 +942,24 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     if (IS_TV) {
       const msg = 'This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then.';
       if (window.NorvaModal && typeof window.NorvaModal.alert === 'function') {
-        window.NorvaModal.alert(msg, { title: 'Profile locked' });
+        const opener = document.activeElement;
+        nestedDialogOpen = true;
+        const pendingNotice = window.NorvaModal.alert(msg, { title: 'Profile locked' });
+        focusNewestNorvaModal();
+        if (overlayEl) {
+          overlayEl.setAttribute('aria-hidden', 'true');
+          overlayEl.setAttribute('inert', '');
+          overlayEl.inert = true;
+        }
+        pendingNotice.finally(() => {
+          if (overlayEl) {
+            overlayEl.removeAttribute('inert');
+            overlayEl.inert = false;
+            overlayEl.setAttribute('aria-hidden', 'false');
+          }
+          nestedDialogOpen = false;
+          try { if (opener?.isConnected) opener.focus(); } catch (_) { /* noop */ }
+        });
       }
       return;
     }
@@ -663,11 +993,27 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     }
   }
 
-  // Public: ensure a profile is active before entering the app (login flow).
-  async function ensureSelected() {
+  function runProfileEntry(task) {
+    if (profileEntryFlight) return profileEntryFlight;
+    const work = Promise.resolve().then(task);
+    const flight = work.finally(() => {
+      if (profileEntryFlight === flight) profileEntryFlight = null;
+    });
+    profileEntryFlight = flight;
+    return flight;
+  }
+
+  // Internal login flow. The public wrapper below makes this single-flight with
+  // the switcher/manage entries so only one forced-selection resolver can exist.
+  async function ensureSelected(options = {}) {
     if (!isCloud()) return true;
     let list;
-    try { list = await loadProfiles(); } catch (_) { return true; } // fail open — never lock the app
+    try {
+      list = await loadProfiles();
+    } catch (_) {
+      list = await promptProfileLoadRetry('Continue for now');
+      if (!list) return true;
+    }
 
     // First run: the lone auto-provisioned profile hasn't been personalised yet
     // → one-time "Set up your profile" screen (name + avatar), with Skip.
@@ -694,7 +1040,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     // — a Family→Plus downgrade can turn the last-used profile into a locked one, in
     // which case we must re-show "Who's watching?" so the user picks an active profile.
     const activeId = profilesApi().getActiveId();
-    if (pickedThisSession() && activeId && list.some((p) => p.id === activeId && !p.locked)) return true;
+    const activeIsUsable = activeId && list.some((p) => p.id === activeId && !p.locked);
+    if ((pickedThisSession() || options.resumeActive === true) && activeIsUsable) {
+      if (options.resumeActive === true) markPickedThisSession();
+      return true;
+    }
 
     state.mode = 'select';
     return new Promise((resolve) => {
@@ -703,20 +1053,42 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     });
   }
 
-  async function openSwitcher() {
+  async function openSwitcherFlow() {
     if (!isCloud()) return;
-    try { await loadProfiles(); } catch (_) { return; }
+    try {
+      await loadProfiles();
+    } catch (_) {
+      if (!await promptProfileLoadRetry('Cancel')) return;
+    }
     resolveSelect = null; // switcher reloads on pick
     state.mode = 'select';
     buildOverlay();
   }
 
-  async function openManage() {
+  async function openManageFlow() {
     if (!isCloud()) return;
-    try { await loadProfiles(); } catch (_) { return; }
+    try {
+      await loadProfiles();
+    } catch (_) {
+      if (!await promptProfileLoadRetry('Cancel')) return;
+    }
     resolveSelect = null;
     state.mode = 'manage';
     buildOverlay();
+  }
+
+  // Public entries intentionally use normal (non-async) wrappers so concurrent
+  // callers receive the exact same Promise and cannot supersede one another.
+  function ensureSelectedEntry(options = {}) {
+    return runProfileEntry(() => ensureSelected(options));
+  }
+
+  function openSwitcher() {
+    return runProfileEntry(openSwitcherFlow);
+  }
+
+  function openManage() {
+    return runProfileEntry(openManageFlow);
   }
 
   // The active profile object (by stored active id, else the first profile).
@@ -765,5 +1137,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     };
   }
 
-  window.NorvaProfiles = { ensureSelected, openSwitcher, openManage, refreshNavAvatar, current };
+  window.NorvaProfiles = {
+    ensureSelected: ensureSelectedEntry,
+    openSwitcher,
+    openManage,
+    refreshNavAvatar,
+    current
+  };
 })();

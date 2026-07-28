@@ -104,26 +104,47 @@ class LivePage {
 
     async show() {
         document.addEventListener('keydown', this.handleKeydown);
+        const livePage = document.getElementById('page-live');
+        livePage?.setAttribute('aria-busy', 'true');
 
-        // Returning to Live TV: pull the player back out of the floating mini
-        // (if it was docked there) before re-rendering, so the inline surface is whole.
-        this.app.exitLiveMini?.({ restore: true });
+        try {
+            // Returning to Live TV: pull the player back out of the floating mini
+            // (if it was docked there) before re-rendering, so the inline surface is whole.
+            this.app.exitLiveMini?.({ restore: true });
 
-        // Only reload if channels aren't already loaded
-        if (this.app.channelList.channels.length === 0) {
-            await this.app.channelList.loadSources();
-            await this.app.channelList.loadChannels();
-        }
-        this.app.liveGuideFusion?.render();
-        // Phone/tablet APK + Android TV: no auto-launch on open (see init()).
-        if (!document.body.classList.contains('norva-phone-apk')
-            && !document.documentElement.classList.contains('tv-mode')) {
-            this.app.channelList.resumeLivePlayback();
+            // Only reload if channels aren't already loaded
+            if (this.app.channelList.channels.length === 0) {
+                // Source discovery used to run before any Live state was painted, leaving
+                // the static "Loading guide" shell frozen. Paint an honest phase first.
+                this.app.channelList.isLoading = true;
+                this.app.channelList.loadError = null;
+                this.app.liveGuideFusion?.render();
+                await this.app.channelList.loadSources();
+                this.app.channelList.isLoading = false;
+                await this.app.channelList.loadChannels();
+            }
+            if (!livePage?.classList.contains('active')) return;
+            this.app.liveGuideFusion?.render();
+            await this.app.channelList.consumePendingChannelSelection();
+            // Phone/tablet APK + Android TV: no auto-launch on open (see init()).
+            if (!document.body.classList.contains('norva-phone-apk')
+                && !document.documentElement.classList.contains('tv-mode')) {
+                this.app.channelList.resumeLivePlayback();
+            }
+        } catch (err) {
+            console.warn('[LivePage] Live view could not be prepared:', err);
+            this.app.channelList.isLoading = false;
+            this.app.channelList.loadError = 'live-unavailable';
+            this.app.liveGuideFusion?.render();
+        } finally {
+            livePage?.removeAttribute('aria-busy');
         }
     }
 
     hide() {
         document.removeEventListener('keydown', this.handleKeydown);
+        this.app.liveGuideFusion?.closeSourceSheet?.({ restoreFocus: false });
+        this.app.channelList.pauseLiveHydration();
         // Leaving Live TV while a channel plays: dock the inline player into a
         // floating mini-player (YouTube-style) so it keeps playing while the
         // viewer browses, instead of a hidden ghost stream. No-op if nothing is

@@ -49,6 +49,7 @@ class ChannelList {
         // a failed load (busy provider / network) offers "Try again", a clean-but-empty
         // catalogue says "No channels yet" — instead of both looking identically broken.
         this.loadError = null;
+        this.sourceDiscoveryError = false;
         this.hasLoadedOnce = false;
         this.renderedChannels = [];
         this._lastPlaybackRefreshAt = new Map();
@@ -58,6 +59,8 @@ class ChannelList {
         this.remoteSearchInFlight = null;
         this.liveHydrationRunId = 0;
         this.liveCacheDbPromise = null;
+        this.pendingChannelSelection = null;
+        this.pendingChannelSelectionSeq = 0;
         this.pendingLiveResume = false;
         this.liveResumeInFlight = null;
         this._selectRequestSeq = 0;
@@ -1555,10 +1558,17 @@ class ChannelList {
             const key = `${source.type}:${source.id}:${this.normalizeSearchText(term)}`;
             let streams = this.remoteSearchCache.get(key);
             if (!streams) {
-                streams = await API.proxy.xtream.liveStreams(source.id, null, {
-                    q: term,
-                    limit: 80
-                });
+                streams = this._isTvMode()
+                    ? await API.proxy.xtream.liveStreams(source.id, null, {
+                        q: term,
+                        limit: 80,
+                        includeVariants: false
+                    })
+                    : await API.proxy.xtream.liveStreams(source.id, null, {
+                        q: term,
+                        limit: 80,
+                        includeVariants: true
+                    });
                 this.remoteSearchCache.set(key, streams || []);
             }
             if (seq !== this.remoteSearchSeq || this.searchInput.value.trim() !== term) return;
@@ -2019,6 +2029,7 @@ class ChannelList {
      * Load sources into dropdown
      */
     async loadSources() {
+        this.sourceDiscoveryError = false;
         try {
             this.sources = await API.sources.getAll();
             console.log('[ChannelList] loadSources: Got', this.sources?.length || 0, 'sources');
@@ -2052,6 +2063,11 @@ class ChannelList {
             }
         } catch (err) {
             console.error('Error loading sources:', err);
+            this.sources = [];
+            this.sourceDiscoveryError = true;
+            this.loadError = 'sources-unavailable';
+            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            window.app?.liveGuideFusion?.render();
         }
     }
 
@@ -2060,8 +2076,21 @@ class ChannelList {
      */
     async loadChannels() {
         if (this.isLoading) return;
+        if (this.sourceDiscoveryError) {
+            this.channels = [];
+            this.loadError = 'sources-unavailable';
+            this.hasLoadedOnce = true;
+            this.container?.removeAttribute('aria-busy');
+            window.app?.liveGuideFusion?.render();
+            return;
+        }
         this.isLoading = true;
         this.loadError = null;
+        this.container?.setAttribute('aria-busy', 'true');
+        // Paint the explicit Live loading state before the first provider request.
+        // Without this synchronous render the old guide stayed visually frozen (or
+        // blank) for the whole network wait.
+        window.app?.liveGuideFusion?.render();
         const loadRunId = ++this.liveHydrationRunId;
         this.currentRenderId = null; // Reset render tracking
 
@@ -2070,8 +2099,15 @@ class ChannelList {
 
         if (!sourceValue) {
             // Load from all sources
-            await this.loadAllChannels();
+            await this.loadAllChannels(loadRunId);
+            if (!this.isLiveLoadCurrent(loadRunId)) {
+                this.isLoading = false;
+                this.container?.removeAttribute('aria-busy');
+                return;
+            }
             this.isLoading = false;
+            this.container?.removeAttribute('aria-busy');
+            window.app?.liveGuideFusion?.render();
             return;
         }
 
@@ -2081,23 +2117,29 @@ class ChannelList {
             this.container.innerHTML = '<div class="loading"></div>';
 
             if (type === 'xtream') {
-                await this.loadXtreamChannels(parseInt(id), false, loadRunId);
+                if (!(await this.loadXtreamChannels(parseInt(id), false, loadRunId))) return;
             } else if (type === 'm3u') {
-                await this.loadM3uChannels(parseInt(id), false, loadRunId);
+                if (!(await this.loadM3uChannels(parseInt(id), false, loadRunId))) return;
             }
 
+            if (!this.isLiveLoadCurrent(loadRunId)) return;
             this.render();
             this.loadLiveDecorationsAndRefresh(loadRunId);
         } catch (err) {
+            if (!this.isLiveLoadCurrent(loadRunId)) return;
             console.error('Error loading channels:', err);
-            this.loadError = err?.message || 'Channels failed to load';
-            this.container.innerHTML = `<div class="empty-state"><p>Error loading channels</p><p class="hint">${err.message}</p></div>`;
+            this.loadError = 'channels-unavailable';
+            this.container.innerHTML = '<div class="empty-state"><p>Channels could not be loaded</p><p class="hint">Try the request again.</p></div>';
             // Surface the failure in the inline guide too (its render is gated on
             // channels, which stay empty here) so the phone/tablet shows Try again.
             window.app?.liveGuideFusion?.render();
         } finally {
             this.isLoading = false;
-            this.hasLoadedOnce = true;
+            this.container?.removeAttribute('aria-busy');
+            if (this.isLiveLoadCurrent(loadRunId)) {
+                this.hasLoadedOnce = true;
+                window.app?.liveGuideFusion?.render();
+            }
             // Pull cloud recent channels into the local mirror (TTL-gated + refocus + slow
             // interval — no longer once per session). Fire-and-forget.
             this.maybeSyncRecentsFromCloud();
@@ -2107,8 +2149,8 @@ class ChannelList {
     /**
      * Load channels from all enabled sources
      */
-    async loadAllChannels() {
-        const loadRunId = ++this.liveHydrationRunId;
+    async loadAllChannels(loadRunId = ++this.liveHydrationRunId) {
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         this.channels = [];
         this.groups = [];
         this.loadError = null;
@@ -2121,23 +2163,31 @@ class ChannelList {
             console.log('[ChannelList] loadAllChannels: xtream=', xtreamSources.length, 'm3u=', m3uSources.length);
 
             for (const source of xtreamSources) {
-                await this.loadXtreamChannels(source.id, true, loadRunId);
+                if (!this.isLiveLoadCurrent(loadRunId)) return false;
+                if (this.channels.length >= this.liveResidentCap()) break;
+                if (!(await this.loadXtreamChannels(source.id, true, loadRunId))) return false;
             }
 
             for (const source of m3uSources) {
-                await this.loadM3uChannels(source.id, true, loadRunId);
+                if (!this.isLiveLoadCurrent(loadRunId)) return false;
+                if (this.channels.length >= this.liveResidentCap()) break;
+                if (!(await this.loadM3uChannels(source.id, true, loadRunId))) return false;
             }
 
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
             this.render();
             this.hasLoadedOnce = true;
             this.loadLiveDecorationsAndRefresh(loadRunId);
+            return true;
         } catch (err) {
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
             console.error('Error loading all channels:', err);
-            this.loadError = err?.message || 'Channels failed to load';
+            this.loadError = 'channels-unavailable';
             this.hasLoadedOnce = true;
             // The inline guide's render is gated on loaded channels (still empty on a
             // failed load), so trigger it here to show the Try again panel.
             window.app?.liveGuideFusion?.render();
+            return true;
         }
     }
 
@@ -2146,8 +2196,11 @@ class ChannelList {
      * button; routes to the single-source or all-sources path exactly like the
      * initial load (which one depends on the current source selection).
      */
-    reloadLive() {
+    async reloadLive() {
         this.loadError = null;
+        if (this.sourceDiscoveryError || !this.sources?.length) {
+            await this.loadSources();
+        }
         return this.loadChannels();
     }
 
@@ -2169,13 +2222,50 @@ class ChannelList {
     /**
      * Load Xtream channels
      */
+    livePageSize() {
+        return this._isTvMode() ? 400 : 1000;
+    }
+
+    liveResidentCap() {
+        // Lightweight rows keep every enabled provider represented in All Sources,
+        // while staying far below the Android WebView heap ceiling. Remote search
+        // makes the rest of the catalogue discoverable without resident hydration.
+        return this._isTvMode() ? 4000 : 80000;
+    }
+
+    isLiveLoadCurrent(loadRunId) {
+        return loadRunId === this.liveHydrationRunId;
+    }
+
+    pauseLiveHydration() {
+        this.liveHydrationRunId += 1;
+        // Leaving Live invalidates both a Home-favorite lookup that has not resolved
+        // yet and a selectChannel resolver already queued behind the anti-hammer
+        // debounce. Returning to Live must never launch that abandoned intent.
+        this.pendingChannelSelectionSeq = (this.pendingChannelSelectionSeq || 0) + 1;
+        this._selectRequestSeq = (this._selectRequestSeq || 0) + 1;
+        clearTimeout(this.remoteSearchInFlight);
+        this.remoteSearchInFlight = null;
+    }
+
     async loadFirstLivePage(sourceId) {
-        const pageSize = 1000;
-        return API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset: 0 });
+        const pageSize = this.livePageSize();
+        if (this._isTvMode()) {
+            return API.proxy.xtream.liveStreams(sourceId, null, {
+                limit: pageSize,
+                offset: 0,
+                includeVariants: false
+            });
+        }
+        return API.proxy.xtream.liveStreams(sourceId, null, {
+            limit: pageSize,
+            offset: 0,
+            includeVariants: true
+        });
     }
 
     liveCacheKey(sourceId, sourceType) {
-        return `norva-live:${sourceType}:${sourceId}:v4`;
+        return `norva-live:${sourceType}:${sourceId}:v5`;
     }
 
     openLiveCacheDb() {
@@ -2212,10 +2302,14 @@ class ChannelList {
         });
     }
 
-    async writeLiveCatalogCache(sourceId, sourceType) {
-        if (!window.API?.isCloudMode?.()) return;
+    async writeLiveCatalogCache(
+        sourceId,
+        sourceType,
+        loadRunId = this.liveHydrationRunId
+    ) {
+        if (!window.API?.isCloudMode?.() || !this.isLiveLoadCurrent(loadRunId)) return false;
         const db = await this.openLiveCacheDb();
-        if (!db) return;
+        if (!db || !this.isLiveLoadCurrent(loadRunId)) return false;
         const sourceKey = String(sourceId);
         const entry = {
             key: this.liveCacheKey(sourceId, sourceType),
@@ -2225,11 +2319,13 @@ class ChannelList {
             groups: this.groups.filter(group =>
                 String(group.sourceId) === sourceKey && group.sourceType === sourceType
             ),
-            channels: this.channels.filter(channel =>
-                String(channel.sourceId) === sourceKey && channel.sourceType === sourceType
-            )
+            channels: this.channels
+                .filter(channel =>
+                    String(channel.sourceId) === sourceKey && channel.sourceType === sourceType
+                )
+                .slice(0, this.liveResidentCap())
         };
-        if (!entry.channels.length) return;
+        if (!entry.channels.length || !this.isLiveLoadCurrent(loadRunId)) return false;
         await new Promise((resolve) => {
             const tx = db.transaction('catalogs', 'readwrite');
             tx.objectStore('catalogs').put(entry);
@@ -2237,18 +2333,30 @@ class ChannelList {
             tx.onerror = () => resolve();
             tx.onabort = () => resolve();
         });
+        return this.isLiveLoadCurrent(loadRunId);
     }
 
-    async loadLiveCatalogFromCache(sourceId, sourceType) {
+    async loadLiveCatalogFromCache(sourceId, sourceType, options = {}) {
+        const {
+            append = false,
+            loadRunId = this.liveHydrationRunId
+        } = options || {};
         const entry = await this.readLiveCatalogCache(sourceId, sourceType);
-        if (!entry) return false;
+        if (!this.isLiveLoadCurrent(loadRunId) || !entry) return false;
+        const remaining = Math.max(0, this.liveResidentCap() - this.channels.length);
+        // A selected provider may reuse its complete resident cache. "All Sources"
+        // must retain the same one-page-per-provider budget as the network path on
+        // every shell; otherwise one previously hydrated cache hides later sources.
+        const cacheLimit = append
+            ? Math.min(remaining, this.livePageSize())
+            : remaining;
         this.groups = this.groups.concat(entry.groups || []);
-        this.channels = this.channels.concat(entry.channels || []);
+        this.channels = this.channels.concat((entry.channels || []).slice(0, cacheLimit));
         return true;
     }
 
     // Wipe the device-side live catalog cache and in-memory channels. The cache
-    // key (norva-live:type:id:v4) is region-agnostic, so after a content-region
+    // key (norva-live:type:id:v5) is region-agnostic, so after a content-region
     // change the previous region's channels would otherwise reload straight from
     // IndexedDB. Called on norva:content-region-changed so the next load re-fetches
     // the region-organized catalog fresh. (The api.js page cache is keyed by
@@ -2274,21 +2382,40 @@ class ChannelList {
 
     hydrateRemainingLivePages(sourceId, categories, sourceType, loadRunId) {
         if (!window.API?.isCloudMode?.()) return;
-        const pageSize = 1000;
+        const pageSize = this.livePageSize();
+        const residentCap = this.liveResidentCap();
 
         (async () => {
             let addedSinceHydrationStart = 0;
-            for (let offset = pageSize; offset < 80000; offset += pageSize) {
+            for (let offset = pageSize; offset < residentCap; offset += pageSize) {
                 if (loadRunId !== this.liveHydrationRunId) return;
-                const streams = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset });
+                if (this._isTvMode()
+                    && !document.getElementById('page-live')?.classList.contains('active')) return;
+                const room = residentCap - this.channels.length;
+                if (room <= 0) break;
+                const requestLimit = Math.min(pageSize, room);
+                const streams = this._isTvMode()
+                    ? await API.proxy.xtream.liveStreams(sourceId, null, {
+                        limit: requestLimit,
+                        offset,
+                        includeVariants: false
+                    })
+                    : await API.proxy.xtream.liveStreams(sourceId, null, {
+                        limit: requestLimit,
+                        offset,
+                        includeVariants: true
+                    });
                 if (loadRunId !== this.liveHydrationRunId) return;
                 if (!Array.isArray(streams) || !streams.length) break;
 
                 const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, sourceType);
-                const added = this.addChannelsUnique(channelList);
+                const added = this.addChannelsUnique(channelList.slice(0, room));
                 addedSinceHydrationStart += added;
 
-                if (streams.length < pageSize) break;
+                if (streams.length < requestLimit || this.channels.length >= residentCap) break;
+                // Yield between pages so D-pad events and focus paint are never
+                // starved by consecutive JSON normalization passes.
+                await new Promise(resolve => setTimeout(resolve, 0));
             }
 
             if (addedSinceHydrationStart > 0 && loadRunId === this.liveHydrationRunId) {
@@ -2298,7 +2425,7 @@ class ChannelList {
                 this.resumeLivePlaybackIfPending();
             }
             if (loadRunId === this.liveHydrationRunId) {
-                await this.writeLiveCatalogCache(sourceId, sourceType);
+                await this.writeLiveCatalogCache(sourceId, sourceType, loadRunId);
             }
         })().catch(err => {
             console.warn('[ChannelList] Background live hydration failed:', err);
@@ -2437,6 +2564,105 @@ class ChannelList {
         this.resumeLivePlayback();
     }
 
+    isPendingChannelSelectionCurrent(selectionSeq) {
+        return selectionSeq === this.pendingChannelSelectionSeq
+            && Boolean(document.getElementById('page-live')?.classList.contains('active'));
+    }
+
+    queueChannelSelection(selection = {}) {
+        const sourceId = selection.sourceId;
+        const channelId = String(selection.channelId || selection.itemId || '');
+        if (sourceId == null || !channelId) return false;
+        const selectionSeq = (this.pendingChannelSelectionSeq || 0) + 1;
+        this.pendingChannelSelectionSeq = selectionSeq;
+        this.pendingChannelSelection = {
+            selectionSeq,
+            channelId,
+            itemId: String(selection.itemId || channelId),
+            streamId: String(selection.streamId || ''),
+            sourceId,
+            sourceType: selection.sourceType || 'xtream',
+            name: String(selection.name || '').trim()
+        };
+        return true;
+    }
+
+    async consumePendingChannelSelection() {
+        const pending = this.pendingChannelSelection;
+        if (!pending) return false;
+        this.pendingChannelSelection = null;
+        const selectionSeq = pending.selectionSeq;
+        if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
+
+        const sourceMatches = channel =>
+            String(channel?.sourceId) === String(pending.sourceId);
+        const targetIds = new Set([
+            pending.channelId,
+            pending.itemId,
+            pending.streamId
+        ].filter(Boolean).map(String));
+        const findExact = () => this.channels.find(channel =>
+            sourceMatches(channel)
+            && [
+                channel.id,
+                channel.streamId,
+                channel.stream_id,
+                channel.cloudLogicalId
+            ].some(value => value != null && targetIds.has(String(value)))
+        );
+
+        let channel = findExact();
+        if (!channel) {
+            const term = pending.name || pending.streamId || pending.itemId || pending.channelId;
+            try {
+                const streams = await API.proxy.xtream.liveStreams(pending.sourceId, null, {
+                    q: term,
+                    limit: 24,
+                    includeVariants: false
+                });
+                if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
+                const mapped = this.mapLiveStreamsToChannels(
+                    pending.sourceId,
+                    [],
+                    streams || [],
+                    pending.sourceType
+                );
+                this.addChannelsUnique(mapped);
+                channel = findExact();
+                if (!channel && pending.name) {
+                    const family = this.getChannelFamilyKey(pending.name);
+                    channel = this.channels.find(candidate =>
+                        sourceMatches(candidate)
+                        && family
+                        && this.getChannelFamilyKey(candidate) === family
+                    );
+                }
+            } catch (err) {
+                if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
+                console.warn('[ChannelList] Favorite channel lookup failed:', err);
+            }
+        }
+
+        if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
+        if (!channel) {
+            window.app?.showToast?.('This channel is temporarily unavailable');
+            return false;
+        }
+
+        this._indexedChannels = null;
+        this.renderBrowsePreservingFocus();
+        window.app?.liveGuideFusion?.render();
+        if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
+        await this.selectChannel({
+            channelId: channel.id,
+            sourceId: channel.sourceId,
+            sourceType: channel.sourceType,
+            streamId: channel.streamId || '',
+            url: channel.url || ''
+        });
+        return true;
+    }
+
     mapLiveStreamsToChannels(sourceId, categories, streams, sourceType = 'xtream') {
         const categoryById = new Map(categories.map(c => [String(c.category_id), c.category_name]));
 
@@ -2505,15 +2731,23 @@ class ChannelList {
      * Load Xtream channels
      */
     async loadXtreamChannels(sourceId, append = false, loadRunId = this.liveHydrationRunId) {
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         if (!append) {
             this.channels = [];
             this.groups = [];
         }
 
-        if (await this.loadLiveCatalogFromCache(sourceId, 'xtream')) return;
+        const cacheLoaded = await this.loadLiveCatalogFromCache(sourceId, 'xtream', {
+            append,
+            loadRunId
+        });
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        if (cacheLoaded) return true;
 
         const categories = await API.proxy.xtream.liveCategories(sourceId);
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         const streams = await this.loadFirstLivePage(sourceId);
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
 
         // Map categories to groups
         const categoryGroups = categories.map(cat => ({
@@ -2523,12 +2757,23 @@ class ChannelList {
             sourceType: 'xtream'
         }));
 
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         this.groups = this.groups.concat(categoryGroups);
 
         const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'xtream');
-        this.channels = this.channels.concat(channelList);
-        this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId);
-        if ((streams || []).length < 1000) await this.writeLiveCatalogCache(sourceId, 'xtream');
+        const room = Math.max(0, this.liveResidentCap() - this.channels.length);
+        this.channels = this.channels.concat(channelList.slice(0, room));
+        // In All Sources, keep one fair first page per provider on TV. A selected
+        // provider may hydrate further up to the resident cap.
+        if (!this._isTvMode() || !append) {
+            this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId);
+        }
+        if ((streams || []).length < this.livePageSize()) {
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
+            await this.writeLiveCatalogCache(sourceId, 'xtream', loadRunId);
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        }
+        return true;
     }
 
     /**
@@ -2536,16 +2781,24 @@ class ChannelList {
      * Now uses unified Xtream-style API endpoints (backend supports both source types)
      */
     async loadM3uChannels(sourceId, append = false, loadRunId = this.liveHydrationRunId) {
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         if (!append) {
             this.channels = [];
             this.groups = [];
         }
 
         // Use Xtream API endpoints - backend now supports M3U sources too
-        if (await this.loadLiveCatalogFromCache(sourceId, 'm3u')) return;
+        const cacheLoaded = await this.loadLiveCatalogFromCache(sourceId, 'm3u', {
+            append,
+            loadRunId
+        });
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        if (cacheLoaded) return true;
 
         const categories = await API.proxy.xtream.liveCategories(sourceId);
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         const streams = await this.loadFirstLivePage(sourceId);
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
 
         // Map categories to groups (keeping m3u sourceType for downstream compatibility)
         const m3uGroups = categories.map(cat => ({
@@ -2555,12 +2808,21 @@ class ChannelList {
             sourceType: 'm3u'
         }));
 
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
         this.groups = this.groups.concat(m3uGroups);
 
         const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'm3u');
-        this.channels = this.channels.concat(channelList);
-        this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId);
-        if ((streams || []).length < 1000) await this.writeLiveCatalogCache(sourceId, 'm3u');
+        const room = Math.max(0, this.liveResidentCap() - this.channels.length);
+        this.channels = this.channels.concat(channelList.slice(0, room));
+        if (!this._isTvMode() || !append) {
+            this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId);
+        }
+        if ((streams || []).length < this.livePageSize()) {
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
+            await this.writeLiveCatalogCache(sourceId, 'm3u', loadRunId);
+            if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        }
+        return true;
     }
 
     /**
@@ -2854,7 +3116,10 @@ class ChannelList {
             }
 
             // Updates Favorites Group DOM
-            const channel = this.channels.find(c => c.sourceId == sourceId && c.id == channelId);
+            const channel = this.channels.find(c =>
+                String(c.sourceId) === String(sourceId)
+                && [c.id, c.streamId, c.stream_id].some(id => String(id) === String(channelId))
+            );
             if (channel) {
                 this.updateFavoritesGroup(channel, !wasFavorite);
             }
@@ -2864,7 +3129,19 @@ class ChannelList {
             if (wasFavorite) {
                 await API.favorites.remove(sourceId, channelId, 'channel');
             } else {
-                await API.favorites.add(sourceId, channelId, 'channel');
+                const rawPoster = channel?.tvgLogo
+                    || channel?.stream_icon
+                    || channel?.poster_url
+                    || channel?.logo
+                    || '';
+                await API.favorites.add(sourceId, channelId, 'channel', {
+                    name: channel?.name || channel?.title || '',
+                    poster: /^data:/i.test(String(rawPoster)) ? '' : rawPoster,
+                    type: 'channel',
+                    sourceType: channel?.sourceType || 'xtream',
+                    streamId: channel?.streamId || channel?.stream_id || '',
+                    channelId: channel?.id || String(channelId)
+                });
             }
 
             // Sync to EPG Guide

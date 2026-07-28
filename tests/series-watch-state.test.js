@@ -158,3 +158,19 @@ test('marking an episode unwatched never deletes the same numeric id on another 
   assert.equal(removals[0].options.itemType, 'episode');
   assert.equal(removals[0].options.itemId, '42');
 });
+
+test('series ratings suppress zero and fall back to a verified TMDB score', () => {
+  const page = makePage();
+
+  assert.equal(page.getSeriesRatingText({ rating: 0 }), '');
+  assert.equal(page.getSeriesRatingText({ rating: '0', tmdb: { vote_average: 8.2 } }), '8.2');
+  assert.equal(page.getSeriesRatingText({ rating: '7.0' }), '7');
+});
+
+test('pending audio metadata stays out of the consumer catalogue', () => {
+  const page = makePage();
+
+  assert.equal(page.displayLanguageStatus('Audio pending'), '');
+  assert.equal(page.displayLanguageStatus('Identifying audio'), '');
+  assert.equal(page.displayLanguageStatus('French'), 'French');
+});

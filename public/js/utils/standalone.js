@@ -232,8 +232,14 @@
             const modal = document.querySelector('#modal.active, .modal-overlay.active');
             if (modal) {
                 const closeBtn = modal.querySelector('.modal-close, #modal-cancel');
-                if (closeBtn && typeof closeBtn.onclick === 'function') {
-                    try { closeBtn.onclick(); } catch (_) { /* fall through */ }
+                if (closeBtn) {
+                    // HTMLElement.click() runs both an `onclick` property and
+                    // listeners registered with addEventListener. Those
+                    // listeners own focus restoration and inert cleanup.
+                    try {
+                        closeBtn.click();
+                        return 'handled';
+                    } catch (_) { /* use the legacy visual fallback below */ }
                 }
                 modal.classList.remove('active');
                 return 'handled';

@@ -371,6 +371,7 @@ test('Android TV remains direct-first and only activates Gateway as fallback', (
 
 test('Android TV D-pad reveals hidden controls without pausing and preserves system volume keys', () => {
   const dispatch = javaMethod(player, 'public boolean dispatchKeyEvent(KeyEvent event)');
+  const playPauseLabel = javaMethod(player, 'private void updatePlayPauseLabel()');
 
   const hiddenStart = dispatch.indexOf('if (!controlsVisible)');
   const visibleStart = dispatch.indexOf('// --- OSD visible', hiddenStart);
@@ -400,6 +401,12 @@ test('Android TV D-pad reveals hidden controls without pausing and preserves sys
     dispatch,
     /KEYCODE_MEDIA_PLAY \|\| code == KeyEvent\.KEYCODE_MEDIA_PAUSE[\s\S]{0,180}userWantsPlayback\s*=\s*code == KeyEvent\.KEYCODE_MEDIA_PLAY[\s\S]{0,180}applyPlaybackIntent\(\)/,
     'dedicated Play and Pause keys must be idempotent instead of toggling state',
+  );
+  assert.match(playPauseLabel, /boolean wantsPlayback\s*=\s*userWantsPlayback/);
+  assert.doesNotMatch(
+    playPauseLabel,
+    /\.isPlaying\(\)/,
+    'buffering must not relabel a pending Pause action as Play',
   );
 });
 
@@ -505,6 +512,11 @@ test('Android TV exposes stable safe-area controls with Audio, CC, Aspect and Mo
 
 test('Android TV offers Fit/Zoom only and keeps playback speed out of Live TV', () => {
   const resources = read('clients/android-tv/app/src/main/res/values/strings.xml');
+  const secondBar = javaMethod(player, 'private void buildSecondBar(LinearLayout parent)');
+  const tracks = javaMethod(
+    player,
+    'private void showTrackDialog(final int trackType, String title)',
+  );
 
   assert.match(resources, /name="player_resize_fit"/);
   assert.match(resources, /name="player_resize_zoom"/);
@@ -519,6 +531,17 @@ test('Android TV offers Fit/Zoom only and keeps playback speed out of Live TV', 
     player,
     /if\s*\(\s*!isLiveContent\(\)\s*\)[\s\S]{0,600}(?:speedButton|norva_tv_player_speed_button|cycleSpeed)/,
     'speed must only be created or exposed for on-demand playback',
+  );
+  assert.match(
+    secondBar,
+    /showTrackDialog\(C\.TRACK_TYPE_VIDEO,\s*getString\(R\.string\.player_quality\)\)/,
+    'the viewer-facing video chooser must be titled Quality',
+  );
+  assert.match(resources, /name="player_video_unavailable"/);
+  assert.match(
+    tracks,
+    /C\.TRACK_TYPE_VIDEO[\s\S]{0,120}R\.string\.player_video_unavailable/,
+    'an unavailable quality list must never report an audio error',
   );
 });
 
@@ -550,6 +573,8 @@ test('Android TV has complete EN/FR viewer copy and actionable Retry/Back errors
     'player_more_options',
     'player_resize_fit',
     'player_resize_zoom',
+    'player_time_progress',
+    'player_video_unavailable',
     'player_error_title',
     'player_retry',
     'player_error_back',
@@ -575,4 +600,279 @@ test('Android TV has complete EN/FR viewer copy and actionable Retry/Back errors
   assert.match(errorPanel, /R\.id\.norva_tv_player_error_back_button[\s\S]{0,240}finishWithoutRecovery\(\)/);
   assert.match(errorAction, /makeFocusable\(/);
   assert.match(errorAction, /\.setOnClickListener\(/);
+});
+
+test('Android TV transports artwork and keeps a titled launch surface until the first frame', () => {
+  const create = javaMethod(player, 'protected void onCreate(Bundle savedInstanceState)');
+  const firstFrame = player.slice(
+    player.indexOf('public void onRenderedFirstFrame()'),
+    player.indexOf('public void onPlayerError(', player.indexOf('public void onRenderedFirstFrame()')),
+  );
+
+  assert.match(main, /putExtra\(PlayerActivity\.EXTRA_POSTER_URL,\s*poster\)/);
+  assert.match(player, /public static final String EXTRA_POSTER_URL\s*=\s*"poster"/);
+  assert.match(create, /posterUrl\s*=\s*emptyToNull\(getIntent\(\)\.getStringExtra\(EXTRA_POSTER_URL\)\)/);
+  assert.match(create, /buildStartupContext\(mediaTitle,\s*posterUrl\)/);
+  assert.match(player, /R\.drawable\.norva_media_placeholder/);
+  assert.match(player, /loadStartupArtworkAsync\(/);
+  assert.match(firstFrame, /hideStartupContext\(\)/);
+});
+
+test('Android TV chooses Resume or Start over before prepare and never seeks after READY', () => {
+  const create = javaMethod(player, 'protected void onCreate(Bundle savedInstanceState)');
+  const begin = javaMethod(player, 'private void beginInitialPlayback(boolean resume)');
+  const build = javaMethod(player, 'private void buildPlayer(String url)');
+  const resumePanel = javaMethod(player, 'private void showResumeChoice()');
+
+  assert.match(create, /resumeSeconds\s*>=\s*30[\s\S]{0,120}showResumeChoice\(\)/);
+  assert.match(resumePanel, /R\.id\.norva_tv_player_resume_button/);
+  assert.match(resumePanel, /R\.id\.norva_tv_player_restart_button/);
+  assert.match(begin, /initialStartPositionMs\s*=\s*resume\s*\?/);
+  assertAppearsBefore(
+    begin,
+    /initialStartPositionMs\s*=/,
+    /buildPlayer\(originalUrl\)/,
+    'the chosen start position must be known before the player is prepared',
+  );
+  assert.match(build, /setMediaItem\(MediaItem\.fromUri\(url\),\s*initialStartPositionMs\)/);
+  assert.doesNotMatch(
+    build,
+    /STATE_READY[\s\S]{0,600}seekTo\(target\)/,
+    'resume must not flash frame zero and seek again after READY',
+  );
+});
+
+test('Android TV error, resume and Up Next overlays own a closed D-pad focus loop', () => {
+  const dispatch = javaMethod(player, 'public boolean dispatchKeyEvent(KeyEvent event)');
+  const modal = javaMethod(player, 'private boolean dispatchModalKey(');
+  const error = javaMethod(player, 'private void showActionableError(String title, String message)');
+  const errorPanel = javaMethod(player, 'private void buildActionableErrorPanel()');
+
+  assert.match(dispatch, /resumePanel[\s\S]{0,180}dispatchModalKey\(code,\s*resumeActions/);
+  assert.match(dispatch, /errorPanel[\s\S]{0,180}dispatchModalKey\(code,\s*errorActions/);
+  assert.match(dispatch, /nextPanel[\s\S]{0,180}dispatchModalKey\(code,\s*nextActions/);
+  assert.match(modal, /KEYCODE_DPAD_LEFT[\s\S]{0,160}KEYCODE_DPAD_RIGHT/);
+  assert.match(modal, /%\s*actions\.getChildCount\(\)/, 'modal focus must wrap at both edges');
+  assert.match(modal, /KEYCODE_DPAD_CENTER[\s\S]{0,160}performClick\(\)/);
+  assert.match(modal, /return true;\s*\}/, 'unhandled playback keys must stay inside the modal');
+  assert.match(error, /hideOverlayNow\(\)/, 'the OSD must be hidden while the error is actionable');
+  assert.match(errorPanel, /hasAlternativeVariants\(\)[\s\S]{0,300}player_change_version/);
+  assert.match(errorPanel, /norva_tv_player_error_change_version_button/);
+});
+
+test('Android TV terminal error and Retry expose one honest playback state', () => {
+  const error = javaMethod(player, 'private void showActionableError(String title, String message)');
+  const retry = javaMethod(player, 'private void retryPlayback()');
+
+  assert.match(
+    error,
+    /spinner\.setVisibility\(View\.GONE\)[\s\S]{0,420}startupStatusView\.setVisibility\(View\.GONE\)/,
+    'a terminal error must retire the stale startup loading claim',
+  );
+  assertAppearsBefore(
+    error,
+    /startupStatusView\.setVisibility\(View\.GONE\)/,
+    /errorPanel\.setVisibility\(View\.VISIBLE\)/,
+    'the stale loading copy must disappear before the terminal card is shown',
+  );
+  assert.match(
+    retry,
+    /spinner\.setVisibility\(View\.VISIBLE\)[\s\S]{0,420}!firstFrameRendered[\s\S]{0,220}startupStatusView\.setVisibility\(View\.VISIBLE\)/,
+    'Retry before first frame must restore an explicit in-progress state',
+  );
+  assert.match(
+    retry,
+    /updateStartupStatus\(isLiveContent\(\)[\s\S]{0,180}R\.string\.player_live_reconnecting[\s\S]{0,120}R\.string\.player_reconnecting\)/,
+    'Retry copy must distinguish live reconnection from VOD reconnection',
+  );
+  assertAppearsBefore(
+    retry,
+    /updateStartupStatus\(isLiveContent\(\)/,
+    /requestFreshStream\("manual_retry"\)/,
+    'the reconnect state must be painted before the asynchronous refresh starts',
+  );
+});
+
+test('Android TV exposes a deterministic Back path and an accessible seek destination', () => {
+  const dispatch = javaMethod(player, 'public boolean dispatchKeyEvent(KeyEvent event)');
+  const scrub = javaMethod(player, 'private void scrubBy(long delta)');
+  const accessibility = javaMethod(
+    player,
+    'private void updateTimelineAccessibility(long positionMs, long durationMs, boolean destination)',
+  );
+
+  assert.match(
+    dispatch,
+    /if \(onTimeline\)[\s\S]{0,450}KEYCODE_DPAD_UP[\s\S]{0,120}topBackButton\.requestFocus\(\)/,
+  );
+  assert.match(
+    dispatch,
+    /if \(onBack\)[\s\S]{0,260}KEYCODE_DPAD_DOWN[\s\S]{0,100}seekBar\.requestFocus\(\)/,
+  );
+  assert.match(player, /seekBar\.setContentDescription\(getString\(R\.string\.player_timeline\)\)/);
+  assert.match(scrub, /updateTimelineAccessibility\(target,\s*dur,\s*true\)/);
+  assert.match(accessibility, /R\.string\.player_seek_destination/);
+  assert.match(accessibility, /seekDestinationView\.setVisibility\(View\.VISIBLE\)/);
+});
+
+test('Android TV restores focus to More and serves the full debug audit bundle only when opted in', () => {
+  const open = javaMethod(player, 'private void openSecondBar()');
+  const close = javaMethod(player, 'private void closeSecondBar()');
+  const bundled = javaMethod(main, 'private WebResourceResponse bundledDpadAssetForAudit(');
+
+  assert.match(open, /secondBarOrigin\s*=\s*current/);
+  assert.match(close, /View restore\s*=\s*secondBarOrigin/);
+  assert.match(close, /restore\.requestFocus\(\)/);
+  assert.match(bundled, /if \(!debugBundledDpadAssets/);
+  for (const asset of [
+    '/js/api.js',
+    '/js/app.js',
+    '/js/utils/standalone.js',
+    '/js/pages/HomePage.js',
+    '/js/pages/LivePage.js',
+    '/js/pages/WatchPage.js',
+    '/js/pages/MoviesPage.js',
+    '/js/pages/SeriesPage.js',
+    '/js/pages/Settings.js',
+    '/js/components/ChannelList.js',
+    '/js/components/VideoPlayer.js',
+    '/js/components/LiveGuideFusion.js',
+    '/app.html',
+    '/css/main.css',
+  ]) {
+    assert.ok(bundled.includes(`"${asset}"`), `debug audit mapping is missing ${asset}`);
+  }
+  assert.match(
+    bundled,
+    /"\/app"\.equals\(path\)\s*\|\|\s*"\/app\.html"\.equals\(path\)[\s\S]{0,100}assetPath\s*=\s*"www\/app\.html"/,
+    'the emulator cloud route /app and the canonical /app.html must share the bundled audit shell',
+  );
+});
+
+test('Android TV keeps readiness strict while cache-busting pairing HTML and /app', () => {
+  const ready = javaMethod(main, 'private static boolean isAppShellUrl(String url)');
+  const cacheBust = javaMethod(main, 'private static String withShellCacheBust(String url)');
+
+  assert.match(ready, /"norva\.tv"\.equalsIgnoreCase\(host\)/);
+  assert.match(
+    ready,
+    /if \(norva\)\s*\{\s*return "\/app"\.equals\(path\)\s*\|\|\s*"\/app\.html"\.equals\(path\)/,
+  );
+  assert.match(
+    ready,
+    /if \(norva\)\s*\{\s*return "\/app"\.equals\(path\)\s*\|\|\s*"\/app\.html"\.equals\(path\);\s*\}[\s\S]{0,260}path\.endsWith\("\/app\.html"\)[\s\S]{0,120}path\.endsWith\("\/index\.html"\)/,
+    'an authorized non-Norva server may install its bridge below a nested /norva/app.html path',
+  );
+  assert.doesNotMatch(
+    ready,
+    /cloud-pair\.html/,
+    'a LAN pairing document must never mark the native bridge ready',
+  );
+
+  assert.match(cacheBust, /"norva\.tv"\.equalsIgnoreCase\(u\.getHost\(\)\)/);
+  assert.match(
+    cacheBust,
+    /path\.endsWith\("\.html"\)\s*\|\|\s*"\/app"\.equals\(path\)/,
+  );
+  assert.match(
+    cacheBust,
+    /boolean shellDocument[\s\S]{0,160}if \(!shellDocument\) return url/,
+  );
+  assert.match(cacheBust, /appendQueryParameter\("_cb"/);
+  assert.match(cacheBust, /\.fragment\(null\)[\s\S]{0,260}if \(frag != null/);
+});
+
+test('Android TV uses a Norva focus-closed choice sheet for tracks and versions', () => {
+  const trackDialog = javaMethod(player, 'private void showTrackDialog(final int trackType, String title)');
+  const versionDialog = javaMethod(player, 'private void showVariantDialog()');
+  const showChoice = javaMethod(player, 'private void showChoicePanel(');
+  const closeChoice = javaMethod(player, 'private void closeChoicePanel(boolean restoreOrigin)');
+  const choiceKeys = javaMethod(player, 'private boolean dispatchChoiceKey(int code)');
+  const dispatch = javaMethod(player, 'public boolean dispatchKeyEvent(KeyEvent event)');
+  const ids = resourceNames(
+    read('clients/android-tv/app/src/main/res/values/ids.xml'),
+    'item',
+  );
+
+  assert.doesNotMatch(player, /\bAlertDialog\b|\bDialogInterface\b/);
+  assert.match(trackDialog, /showChoicePanel\(title,\s*labels,\s*selected/);
+  assert.match(trackDialog, /setTrackSelectionParameters\(/);
+  assert.match(versionDialog, /showChoicePanel\(/);
+  assert.match(versionDialog, /pendingVariantStreamId\s*=\s*streamIds\.get\(which\)/);
+  assert.match(showChoice, /choiceReturnFocus\s*=\s*getCurrentFocus\(\)/);
+  assert.match(showChoice, /choiceRestoreSecondBar\s*=\s*secondBarVisible/);
+  assert.match(showChoice, /R\.string\.player_selected/);
+  assert.match(showChoice, /selectedIndex/);
+  assert.match(closeChoice, /returnFocus\.requestFocus\(\)/);
+  assert.match(closeChoice, /secondBarVisible\s*=\s*true/);
+  assert.match(choiceKeys, /KEYCODE_DPAD_UP[\s\S]{0,160}KEYCODE_DPAD_DOWN/);
+  assert.match(choiceKeys, /%\s*choiceOptions\.getChildCount\(\)/);
+  assert.match(choiceKeys, /KEYCODE_DPAD_CENTER[\s\S]{0,180}performClick\(\)/);
+  assert.match(
+    dispatch,
+    /choicePanel[\s\S]{0,160}dispatchChoiceKey\(code\)[\s\S]{0,240}resumePanel/,
+    'the choice sheet must own D-pad input before underlying playback modals',
+  );
+  for (const id of [
+    'norva_tv_player_choice_panel',
+    'norva_tv_player_choice_list',
+  ]) {
+    assert.ok(ids.has(id), `missing stable choice-sheet ID: ${id}`);
+    assert.match(player, new RegExp(`R\\.id\\.${id}`));
+  }
+});
+
+test('Android TV uses a localized Norva exit sheet with a closed D-pad focus loop', () => {
+  const build = javaMethod(main, 'private void buildExitPanel()');
+  const show = javaMethod(main, 'private void showExitDialog()');
+  const close = javaMethod(main, 'private void closeExitDialog(boolean restoreOrigin)');
+  const keys = javaMethod(main, 'private boolean dispatchExitModalKey(int keyCode)');
+  const dispatch = javaMethod(main, 'public boolean dispatchKeyEvent(KeyEvent event)');
+  const ids = resourceNames(
+    read('clients/android-tv/app/src/main/res/values/ids.xml'),
+    'item',
+  );
+  const english = resourceNames(
+    read('clients/android-tv/app/src/main/res/values/strings.xml'),
+    'string',
+  );
+  const french = resourceNames(
+    read('clients/android-tv/app/src/main/res/values-fr/strings.xml'),
+    'string',
+  );
+
+  assert.doesNotMatch(main, /\bAlertDialog\b|\bDialogInterface\b/);
+  for (const id of [
+    'norva_tv_exit_panel',
+    'norva_tv_exit_cancel',
+    'norva_tv_exit_connection_settings',
+    'norva_tv_exit_confirm',
+  ]) {
+    assert.ok(ids.has(id), `missing stable exit-sheet ID: ${id}`);
+    assert.match(build, new RegExp(`R\\.id\\.${id}`));
+  }
+  for (const stringName of [
+    'tv_exit_title',
+    'tv_exit_message',
+    'tv_exit_cancel',
+    'tv_connection_settings',
+    'tv_exit_confirm',
+  ]) {
+    assert.ok(english.has(stringName), `missing English exit-sheet string: ${stringName}`);
+    assert.ok(french.has(stringName), `missing French exit-sheet string: ${stringName}`);
+    assert.match(main, new RegExp(`R\\.string\\.${stringName}`));
+  }
+
+  assert.match(show, /exitReturnFocus\s*=\s*getCurrentFocus\(\)/);
+  assert.match(show, /norva_tv_exit_cancel/);
+  assert.match(close, /returnFocus\.requestFocus\(\)/);
+  assert.match(keys, /KEYCODE_BACK[\s\S]{0,180}closeExitDialog\(true\)/);
+  assert.match(keys, /KEYCODE_DPAD_LEFT[\s\S]{0,180}KEYCODE_DPAD_RIGHT/);
+  assert.match(keys, /%\s*exitActions\.getChildCount\(\)/);
+  assert.match(keys, /KEYCODE_DPAD_CENTER[\s\S]{0,220}performClick\(\)/);
+  assert.match(
+    dispatch,
+    /isExitDialogVisible\(\)[\s\S]{0,180}dispatchExitModalKey\(event\.getKeyCode\(\)\)/,
+    'the native exit sheet must own remote input before the WebView',
+  );
 });

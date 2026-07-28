@@ -22,6 +22,8 @@
 
   --color-accent: #3B82F6;
   --color-accent-hover: #60A5FA;
+  --color-accent-action: #2563EB;
+  --color-accent-action-hover: #1D4ED8;
   --color-accent-dim: rgba(59, 130, 246, 0.2);
   --color-accent-secondary: #8B5CF6;
 
@@ -3530,6 +3532,18 @@ video::cue {
   gap: var(--space-lg);
 }
 
+.source-sync-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .source-sync-hero {
   padding: var(--space-lg);
   border: 1px solid var(--color-border);
@@ -4099,12 +4113,12 @@ kbd {
 }
 
 .btn-primary {
-  background: var(--color-accent);
+  background: var(--color-accent-action);
   color: white;
 }
 
 .btn-primary:hover {
-  background: var(--color-accent-hover);
+  background: var(--color-accent-action-hover);
   box-shadow: var(--shadow-glow);
 }
 
@@ -7769,6 +7783,61 @@ kbd {
   padding: clamp(22px, 4vw, 44px) 0 clamp(40px, 6vw, 80px);
 }
 
+.series-info-state {
+  width: 100%;
+  min-height: 220px;
+  height: auto;
+  align-items: flex-start;
+  padding: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.series-info-state h3 {
+  margin: 0 0 var(--space-sm);
+  font-size: clamp(1.2rem, 2vw, 1.6rem);
+}
+
+.series-info-state .hint {
+  max-width: 620px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.series-info-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.series-info-state-actions .btn {
+  min-height: 44px;
+}
+
+.series-episode-loading {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-sm);
+}
+
+@media (max-width: 640px) {
+  .series-info-state {
+    padding: var(--space-lg);
+  }
+
+  .series-info-state-actions,
+  .series-info-state-actions .btn {
+    width: 100%;
+  }
+}
+
 .series-episodes-toolbar {
   position: sticky;
   top: 0;
@@ -10770,7 +10839,7 @@ html.tv-mode .multi-select-item:focus {
   align-items: center;
   justify-content: center;
   background: var(--color-success);
-  color: #fff;
+  color: #07100c;
   font-size: 0.75rem;
   border-radius: var(--radius-full);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
@@ -11122,10 +11191,11 @@ html.tv-mode .multi-select-item:focus {
   }
 
   .mobile-filter-close {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    font-size: 1.25rem;
+    min-width: 64px;
+    min-height: 48px;
+    padding: 0 14px;
+    font-size: 0.82rem;
+    font-weight: 750;
     justify-content: center;
   }
 
@@ -11199,7 +11269,7 @@ html.tv-mode .multi-select-item:focus {
     width: 100%;
     min-width: 0;
     max-width: none;
-    height: 38px;
+    height: 48px;
     font-size: 0.82rem;
   }
 
@@ -11231,7 +11301,7 @@ html.tv-mode .multi-select-item:focus {
   #page-movies .movies-controls .search-input,
   #page-series .series-controls .search-input {
     min-width: 0;
-    height: 36px;
+    height: 48px;
     padding-top: 0;
     padding-bottom: 0;
   }
@@ -11242,8 +11312,8 @@ html.tv-mode .multi-select-item:focus {
   #page-series .filter-toggle,
   #page-movies .filter-reset,
   #page-series .filter-reset {
-    min-height: 38px;
-    height: 38px;
+    min-height: 48px;
+    height: 48px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -11272,7 +11342,7 @@ html.tv-mode .multi-select-item:focus {
     height: 18px;
     padding: 0 5px;
     border-radius: var(--radius-full);
-    background: var(--color-accent);
+    background: var(--color-accent-action);
     color: #fff;
     font-size: 0.68rem;
     font-weight: 800;
@@ -13470,6 +13540,9 @@ html.tv-mode #page-live .search-clear {
     line-height: 1;
     font-weight: 600;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .bottom-nav .nav-link.active { opacity: 1; color: var(--primary-blue); }
   .bottom-nav .nav-link:active { transform: scale(0.92); }
@@ -13490,6 +13563,46 @@ html.tv-mode #page-live .search-clear {
 
   /* A phone IS the mobile device — no room (or point) for the Devices teaser. */
   #nav-devices { display: none !important; }
+}
+
+/* Seven destinations cannot keep seven enlarged labels legible on a narrow
+   Android phone. Use the selected-label pattern instead of letting text
+   collide: every destination keeps its accessible name, while the active page
+   receives extra width and the sole visible label. */
+@media (max-width: 420px) {
+  .bottom-nav .nav-link {
+    flex-grow: 0.9;
+    gap: 0;
+  }
+
+  .bottom-nav .nav-link span:not(.nav-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .bottom-nav .nav-link.active {
+    flex-grow: 1.45;
+    flex-direction: row;
+    gap: 5px;
+  }
+
+  .bottom-nav .nav-link.active span:not(.nav-icon) {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: hidden;
+    clip: auto;
+    font-size: 10px;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ============================================================
@@ -13517,7 +13630,7 @@ html.tv-mode #page-live .search-clear {
 .account-id { flex: 1 1 auto; min-width: 0; }
 .account-name { color: #f8fafc; font-weight: 700; font-size: 16px; line-height: 1.2; }
 .account-email { color: #8b95a9; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-close { width: 36px; height: 36px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--color-border, #1f2733); background: transparent; color: #cbd5e1; font-size: 22px; line-height: 1; cursor: pointer; }
+.account-close { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--color-border, #1f2733); background: transparent; color: #cbd5e1; font-size: 22px; line-height: 1; cursor: pointer; }
 .account-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 12px 16px; background: transparent; border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #e7ecf5; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
 .account-row:active { background: rgba(255, 255, 255, 0.06); }
 .account-ic { width: 22px; height: 22px; flex: 0 0 auto; opacity: 0.9; }
@@ -13627,8 +13740,8 @@ html.tv .nav-search-btn { display: none; }
 .live-guide-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
 .live-guide-search {
   width: 100%;
-  height: 38px;
-  padding: 0 34px 0 12px;
+  height: 48px;
+  padding: 0 46px 0 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
@@ -13641,8 +13754,8 @@ html.tv .nav-search-btn { display: none; }
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
+  width: 40px;
+  height: 40px;
   border: 0;
   background: transparent;
   color: rgba(255, 255, 255, 0.5);
@@ -13653,7 +13766,7 @@ html.tv .nav-search-btn { display: none; }
 .live-guide-search-clear:hover { color: rgba(255, 255, 255, 0.85); }
 .live-guide-hidebroken {
   flex: 0 0 auto;
-  height: 38px;
+  min-height: 48px;
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -16617,5 +16730,1129 @@ html.tv-mode :is(.movie-card, .series-card, .dashboard-card, .channel-tile):focu
   #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
     grid-template-columns: minmax(0, 1fr);
     overflow: visible;
+  }
+}
+
+/* ============================================================================
+   Android TV premium state system
+   ----------------------------------------------------------------------------
+   Route transitions, loading, empty and recoverable-error surfaces share one
+   stable 10-foot vocabulary. These overrides are deliberately last so they win
+   over the historical TV experiments above without changing phone or web.
+   ============================================================================ */
+
+.tv-route-stage,
+.tv-home-loading-state {
+  display: none;
+}
+
+html.tv-mode .main-content {
+  position: relative;
+}
+
+html.tv-mode .tv-route-stage {
+  position: fixed;
+  inset: 0 0 0 var(--tv-nav-compact-width, 104px);
+  z-index: 140;
+  display: grid;
+  grid-template-columns: minmax(250px, 0.42fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(28px, 5vw, 72px);
+  padding: clamp(34px, 6vh, 72px) clamp(38px, 6vw, 96px);
+  overflow: hidden;
+  color: #f8fbff;
+  background:
+    radial-gradient(circle at 78% 20%, rgba(47, 119, 255, 0.18), transparent 34%),
+    linear-gradient(135deg, #070b13 0%, #0a1322 52%, #060910 100%);
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+  transition: opacity 180ms ease, transform 180ms ease;
+  pointer-events: none;
+}
+
+html.tv-mode .tv-route-stage[hidden] {
+  display: none !important;
+}
+
+html.tv-mode .tv-route-stage.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+html.tv-mode .tv-route-stage.is-leaving {
+  opacity: 0;
+}
+
+html.tv-mode .tv-route-stage-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 520px;
+}
+
+html.tv-mode .tv-route-stage-kicker,
+html.tv-mode .premium-state-kicker,
+html.tv-mode .live-guide-status-kicker {
+  color: #8fb9ff;
+  font-size: clamp(0.68rem, 1.5vw, 0.86rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+html.tv-mode .tv-route-stage-copy strong {
+  max-width: 12ch;
+  font-size: clamp(2rem, 5.4vw, 4.4rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+
+html.tv-mode .tv-route-stage-copy > span:last-child {
+  max-width: 38ch;
+  color: #aebbd0;
+  font-size: clamp(0.92rem, 1.8vw, 1.22rem);
+  line-height: 1.45;
+}
+
+html.tv-mode .tv-route-stage-rails {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(8px, 1.2vw, 16px);
+  min-width: 0;
+  padding: clamp(16px, 2.8vw, 30px);
+  overflow: hidden;
+  border: 1px solid rgba(148, 184, 255, 0.14);
+  border-radius: 22px;
+  background: rgba(11, 20, 36, 0.92);
+}
+
+html.tv-mode .tv-route-stage-rails::after,
+html.tv-mode .tv-home-loading-visual::after,
+html.tv-mode .live-guide-status-rows::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.07) 50%, transparent 65%);
+  transform: translate3d(-120%, 0, 0);
+  animation: norvaTvStateSweep 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+html.tv-mode .tv-route-stage-hero {
+  grid-column: 1 / -1;
+  height: clamp(98px, 22vh, 230px);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #17233a, #101a2c);
+}
+
+html.tv-mode .tv-route-stage-line {
+  grid-column: 1 / 5;
+  width: 72%;
+  height: 12px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #1f2b40;
+}
+
+html.tv-mode .tv-route-stage-line.is-short {
+  grid-column: 1 / 4;
+  width: 54%;
+}
+
+html.tv-mode .tv-route-stage-cards {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: inherit;
+}
+
+html.tv-mode .tv-route-stage-cards i {
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  background: #152137;
+}
+
+/* Home is never a blank page while cache/cloud data settles. */
+html.tv-mode .tv-home-loading-state {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(230px, 0.38fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(26px, 5vw, 64px);
+  width: 100%;
+  min-height: calc(100vh - 30px);
+  padding: clamp(28px, 5vh, 58px) clamp(30px, 5vw, 72px);
+  overflow: hidden;
+  border: 1px solid rgba(106, 153, 241, 0.16);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 74% 26%, rgba(54, 122, 255, 0.18), transparent 32%),
+    linear-gradient(145deg, #080d17, #0b1627);
+}
+
+html.tv-mode .tv-home-loading-state.is-hidden {
+  display: none !important;
+}
+
+html.tv-mode #home-content.is-home-loading > :not(.tv-home-loading-state) {
+  display: none !important;
+}
+
+html.tv-mode .tv-home-loading-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+html.tv-mode .tv-home-loading-copy > span {
+  color: #8fb9ff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+html.tv-mode .tv-home-loading-copy strong {
+  max-width: 12ch;
+  color: #f7faff;
+  font-size: clamp(1.9rem, 4.5vw, 3.8rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+html.tv-mode .tv-home-loading-copy p {
+  max-width: 38ch;
+  margin: 0;
+  color: #a8b6cb;
+  font-size: clamp(0.9rem, 1.7vw, 1.15rem);
+  line-height: 1.5;
+}
+
+html.tv-mode .tv-home-loading-visual {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: clamp(14px, 2.4vw, 26px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: rgba(8, 17, 31, 0.82);
+}
+
+html.tv-mode .tv-home-loading-visual > i {
+  display: block;
+  border-radius: 9px;
+  background: #17243a;
+}
+
+html.tv-mode .tv-home-loading-hero {
+  grid-column: 1 / -1;
+  height: clamp(120px, 25vh, 250px);
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #1b2b46, #111d30) !important;
+}
+
+html.tv-mode .tv-home-loading-title {
+  grid-column: 1 / 4;
+  height: 12px;
+  margin: 5px 0;
+}
+
+html.tv-mode .tv-home-loading-visual > span {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  min-width: 0;
+}
+
+html.tv-mode .tv-home-loading-visual > span > i {
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  background: #17243a;
+}
+
+/* Shared readable empty/error treatment for Home, Movies and Series. */
+html.tv-mode .premium-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: clamp(220px, 52vh, 520px);
+  padding: clamp(28px, 5vw, 62px);
+  border: 1px solid rgba(107, 148, 225, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(48, 119, 255, 0.16), transparent 36%),
+    linear-gradient(145deg, rgba(12, 24, 43, 0.98), rgba(7, 13, 24, 0.99));
+  color: #f6f9ff;
+  text-align: left;
+}
+
+html.tv-mode .premium-state h3 {
+  max-width: 22ch;
+  margin: 0;
+  font-size: clamp(1.45rem, 3.2vw, 2.65rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+html.tv-mode .premium-state p {
+  max-width: 52ch;
+  margin: 0 0 8px;
+  color: #aebbd0;
+  font-size: clamp(0.86rem, 1.55vw, 1.04rem);
+  line-height: 1.5;
+}
+
+html.tv-mode .premium-state-error {
+  border-color: rgba(255, 167, 92, 0.28);
+  background:
+    radial-gradient(circle at 82% 18%, rgba(255, 140, 65, 0.12), transparent 36%),
+    linear-gradient(145deg, rgba(31, 21, 20, 0.98), rgba(9, 13, 22, 0.99));
+}
+
+/* Live keeps a stable, explanatory screen for loading, empty and error states. */
+html.tv-mode #page-live .live-guide-status {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.55fr) minmax(260px, 1fr);
+  grid-template-areas:
+    "mark copy"
+    "rows rows";
+  align-content: center;
+  align-items: center;
+  gap: clamp(18px, 3vw, 34px);
+  width: 100%;
+  height: 100%;
+  min-height: min(68vh, 620px);
+  padding: clamp(28px, 5vw, 64px);
+  overflow: hidden;
+  border: 1px solid rgba(105, 151, 235, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 22% 20%, rgba(47, 119, 255, 0.17), transparent 32%),
+    linear-gradient(145deg, #0a1425, #070c15);
+  text-align: left;
+}
+
+html.tv-mode #page-live .live-guide-status-mark {
+  grid-area: mark;
+  width: clamp(62px, 9vw, 98px);
+  height: clamp(62px, 9vw, 98px);
+  justify-self: center;
+  border-radius: 22%;
+  box-shadow: 0 18px 52px rgba(20, 83, 196, 0.28);
+}
+
+html.tv-mode #page-live .live-guide-status-copy {
+  grid-area: copy;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+html.tv-mode #page-live .live-guide-status-title {
+  color: #f7faff;
+  font-size: clamp(1.45rem, 3vw, 2.6rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+html.tv-mode #page-live .live-guide-status-msg {
+  max-width: 52ch;
+  color: #aebbd0;
+  font-size: clamp(0.84rem, 1.45vw, 1.02rem);
+  line-height: 1.5;
+}
+
+html.tv-mode #page-live .live-guide-status-rows {
+  position: relative;
+  grid-area: rows;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  overflow: hidden;
+}
+
+html.tv-mode #page-live .live-guide-status-rows i {
+  display: block;
+  height: clamp(48px, 8vh, 78px);
+  border-radius: 10px;
+  background: #17253c;
+}
+
+html.tv-mode #page-live .live-guide-status:not(.is-loading) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: none;
+  justify-items: center;
+  text-align: center;
+}
+
+html.tv-mode #page-live .live-guide-status:not(.is-loading) > * {
+  max-width: 620px;
+}
+
+html.tv-mode #page-live .live-guide-status.is-error {
+  border-color: rgba(255, 165, 88, 0.3);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 140, 65, 0.1), transparent 34%),
+    linear-gradient(145deg, #191416, #080d17);
+}
+
+html.tv-mode #page-live .live-guide-status.is-error .live-guide-status-title {
+  color: #fff5eb;
+}
+
+/* Notifications become a viewport-safe TV dialog; the left rail stays visible
+   behind a dim layer and D-pad focus cannot escape the modal scope. */
+.norva-notif-heading,
+.norva-notif-empty {
+  display: flex;
+  flex-direction: column;
+}
+
+.norva-notif-heading {
+  gap: 3px;
+}
+
+.norva-notif-heading > span {
+  color: var(--color-text-muted, #8994a7);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.norva-notif-close {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eaf1ff;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.norva-notif-kind {
+  display: inline-flex;
+  margin-bottom: 5px;
+  color: #8fb9ff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.norva-notif-empty {
+  align-items: center;
+  gap: 6px;
+}
+
+.norva-notif-empty > span {
+  max-width: 34ch;
+  line-height: 1.45;
+}
+
+html.tv-mode #norva-notif-panel.norva-notif-tv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: grid !important;
+  place-items: center;
+  padding: clamp(22px, 4vh, 48px) clamp(22px, 4vw, 64px)
+    clamp(22px, 4vh, 48px) calc(var(--tv-nav-compact-width, 104px) + clamp(22px, 4vw, 64px));
+  overflow: hidden;
+  background: rgba(3, 7, 13, 0.76);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-tv-surface {
+  position: relative;
+  inset: auto;
+  width: min(620px, 100%);
+  max-width: 100%;
+  max-height: calc(100vh - clamp(44px, 8vh, 96px));
+  overflow: hidden;
+  border: 1px solid rgba(113, 157, 241, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #121c2d, #0b111d);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.68);
+  transform: none;
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 70px;
+  padding: 14px 16px 14px 20px;
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-heading strong {
+  font-size: clamp(1rem, 2vw, 1.3rem);
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-list {
+  min-height: 0;
+  max-height: calc(100vh - clamp(122px, 20vh, 188px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 10px;
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-item {
+  min-height: 76px;
+  padding: 13px 20px;
+  border-left: 3px solid transparent;
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-item.unread {
+  border-left-color: #4d8dff;
+  background: rgba(60, 124, 244, 0.11);
+}
+
+html.tv-mode #norva-notif-panel .norva-notif-empty {
+  min-height: 190px;
+  justify-content: center;
+  padding: 32px 24px;
+}
+
+/* Settings keeps its title and category strip fixed; only the selected panel
+   scrolls. Entry and tab changes therefore cannot jump or crop the viewport. */
+html.tv-mode #page-settings {
+  height: 100%;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+html.tv-mode #page-settings .settings-container {
+  display: grid;
+  grid-template-rows: max-content max-content minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: stretch;
+  gap: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: clamp(16px, 2.7vh, 28px) clamp(20px, 3.5vw, 44px) clamp(14px, 2.3vh, 24px);
+  overflow: hidden;
+}
+
+html.tv-mode #page-settings .settings-container > h2 {
+  grid-row: 1;
+  margin: 0 0 10px;
+  color: #f7faff;
+  font-size: clamp(1.35rem, 2.7vw, 2.15rem);
+  line-height: 1.05;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs {
+  grid-row: 2;
+  display: flex;
+  flex-flow: row nowrap;
+  gap: 6px;
+  min-width: 0;
+  min-height: 48px;
+  margin: 0 0 12px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  scroll-padding-inline: 8px;
+  scrollbar-width: none;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs::-webkit-scrollbar {
+  display: none;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab,
+html.tv-mode #page-settings .settings-advanced-toggle {
+  flex: 0 0 auto;
+  min-width: max-content;
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: clamp(0.72rem, 1.2vw, 0.88rem);
+  white-space: nowrap;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab.active {
+  border-color: rgba(92, 146, 255, 0.48);
+  border-bottom-color: rgba(92, 146, 255, 0.48);
+  background: rgba(45, 108, 228, 0.16);
+  color: #b9d2ff;
+}
+
+html.tv-mode #page-settings .settings-container > .tab-content {
+  grid-row: 3;
+  grid-column: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 8px 28px 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 16px 42px;
+}
+
+html.tv-mode #page-settings .settings-container > .tab-content:not(.active) {
+  display: none !important;
+}
+
+/* Persistent catalogue preview never exposes a broken image or raw processing
+   label before the first card is selected. */
+html.tv-mode #page-movies #movie-details.tv-preview-empty {
+  border-color: rgba(97, 145, 231, 0.18);
+  background:
+    radial-gradient(circle at 50% 12%, rgba(69, 127, 232, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(10, 28, 54, 0.99), rgba(7, 17, 34, 0.99));
+}
+
+html.tv-mode #page-movies #movie-details.tv-preview-empty .movie-detail-poster {
+  object-fit: cover;
+  filter: saturate(0.62) brightness(0.72);
+}
+
+html.tv-mode #page-movies #movie-details.tv-preview-empty .movie-detail-info {
+  opacity: 0.94;
+}
+
+html.tv-mode #page-movies #movie-details.tv-preview-empty .movie-versions-list,
+html.tv-mode #page-movies #movie-details.tv-preview-empty .more-like-this {
+  display: none !important;
+}
+
+html.tv-mode #page-movies #movie-details.tv-preview-empty button:disabled {
+  opacity: 0.52;
+  color: #9da9bb;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Premium focus: high contrast from the couch without the harsh full-white
+   selection blocks and oversized card zoom used by the earlier TV rules. */
+html.tv-mode :focus {
+  outline: 3px solid #b9d2ff !important;
+  outline-offset: 2px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px #07101e;
+  scroll-margin: 72px;
+}
+
+html.tv-mode .navbar-menu .nav-link:focus {
+  outline: none !important;
+  color: #ffffff;
+  background: linear-gradient(90deg, rgba(26, 87, 202, 0.98), rgba(35, 72, 159, 0.96));
+  box-shadow:
+    inset 4px 0 0 #8fc0ff,
+    inset 0 0 0 2px rgba(223, 237, 255, 0.86) !important;
+  border-radius: 0;
+  transform: none;
+}
+
+html.tv-mode .navbar-menu .nav-link:focus .norva-ui-icon {
+  filter: none;
+  opacity: 1;
+}
+
+html.tv-mode .nav-search-btn:focus,
+html.tv-mode .nav-bell-btn:focus,
+html.tv-mode .nav-profile:focus,
+html.tv-mode .navbar-brand:focus {
+  outline: 3px solid #9bc3ff !important;
+  outline-offset: 2px;
+  background: rgba(39, 102, 220, 0.28);
+  box-shadow: 0 0 0 2px #07101e !important;
+  transform: scale(1.025);
+}
+
+html.tv-mode .movie-card:focus,
+html.tv-mode .series-card:focus,
+html.tv-mode .continue-card:focus,
+html.tv-mode .dashboard-card:focus,
+html.tv-mode .channel-tile:focus,
+html.tv-mode #page-movies #movies-grid .movie-card:focus,
+html.tv-mode #page-series #series-grid .series-card:focus,
+html.tv-mode #page-movies .genre-bucket-grid .dashboard-card:focus,
+html.tv-mode #page-series .genre-bucket-grid .series-card:focus {
+  outline: none !important;
+  border-color: #7db4ff !important;
+  box-shadow:
+    inset 0 0 0 2px #f7fbff,
+    0 0 0 3px #2f77ff !important;
+  transform: translateY(-1px) scale(1.045);
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms ease;
+  z-index: 4;
+}
+
+html.tv-mode #page-movies .movie-detail-actions button:focus,
+html.tv-mode #page-series .series-detail-actions button:focus,
+html.tv-mode #page-settings .tab:focus,
+html.tv-mode #page-live .lg-btn:focus,
+html.tv-mode #norva-notif-panel :is(.norva-notif-item, .norva-notif-close):focus {
+  outline: none !important;
+  color: #ffffff;
+  border-color: #a8cdff;
+  background: linear-gradient(180deg, #2778e9, #1754bd);
+  box-shadow:
+    inset 0 0 0 2px rgba(241, 247, 255, 0.92),
+    0 0 0 2px #2f77ff !important;
+  transform: none;
+}
+
+@keyframes norvaTvStateSweep {
+  from { transform: translate3d(-120%, 0, 0); }
+  to { transform: translate3d(120%, 0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.tv-mode .tv-route-stage,
+  html.tv-mode .movie-card,
+  html.tv-mode .series-card,
+  html.tv-mode .dashboard-card,
+  html.tv-mode .channel-tile {
+    transition: none !important;
+  }
+
+  html.tv-mode .tv-route-stage-rails::after,
+  html.tv-mode .tv-home-loading-visual::after,
+  html.tv-mode .live-guide-status-rows::after {
+    animation: none !important;
+  }
+}
+
+/* ============================================================================
+   Android phone premium states and source chooser
+   ----------------------------------------------------------------------------
+   Kept after the TV overrides so the phone state system cannot be hidden by the
+   historical .tv-home-loading-state default. All colors resolve through Norva's
+   canonical semantic tokens.
+   ============================================================================ */
+
+html:not(.tv-mode) .home-state-panel,
+html:not(.tv-mode) [data-home-state-panel] {
+  width: 100%;
+  min-height: 220px;
+  height: auto;
+  padding: clamp(24px, 7vw, 40px);
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 88% 10%,
+      color-mix(in srgb, var(--color-accent) 16%, transparent),
+      transparent 42%),
+    var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+html:not(.tv-mode) .home-state-panel h3,
+html:not(.tv-mode) .home-state-panel strong,
+html:not(.tv-mode) [data-home-state-panel] h3,
+html:not(.tv-mode) [data-home-state-panel] strong {
+  color: var(--color-text-primary);
+}
+
+html:not(.tv-mode) .home-state-panel p,
+html:not(.tv-mode) [data-home-state-panel] p {
+  max-width: 44ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+html:not(.tv-mode) .home-state-panel-error {
+  border-color: color-mix(in srgb, var(--color-error) 44%, var(--color-border));
+}
+
+html:not(.tv-mode) [data-home-state-panel="error"] {
+  border-color: color-mix(in srgb, var(--color-error) 44%, var(--color-border));
+}
+
+html:not(.tv-mode) .home-state-inline {
+  height: auto;
+  min-height: 48px;
+  margin-bottom: var(--space-md);
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+@media (max-width: 1024px) {
+  html:not(.tv-mode) #page-home {
+    scroll-padding-block-end: calc(var(--space-xl) + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior-y: contain;
+  }
+
+  html:not(.tv-mode) #page-home .dashboard-content {
+    min-height: 100%;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  }
+
+  html:not(.tv-mode) #home-ecosystem {
+    scroll-margin-block-end: calc(var(--bottom-nav-h) + var(--space-lg));
+  }
+
+  html:not(.tv-mode) #page-home .home-loading-state {
+    position: relative;
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    min-height: min(68dvh, 560px);
+    padding: clamp(24px, 7vw, 40px);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(circle at 82% 12%,
+        color-mix(in srgb, var(--color-accent) 20%, transparent),
+        transparent 40%),
+      var(--color-bg-secondary);
+  }
+
+  html:not(.tv-mode) #page-home .home-loading-state.is-hidden {
+    display: none !important;
+  }
+
+  html:not(.tv-mode) #home-content.is-home-loading > :not(.home-loading-state) {
+    display: none !important;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-copy {
+    display: grid;
+    gap: 8px;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-copy > span {
+    color: var(--color-accent);
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-copy strong {
+    max-width: 14ch;
+    color: var(--color-text-primary);
+    font-family: 'Outfit', sans-serif;
+    font-size: clamp(1.8rem, 8vw, 2.7rem);
+    line-height: 1.02;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-copy p {
+    max-width: 38ch;
+    margin: 0;
+    color: var(--color-text-secondary);
+    line-height: 1.55;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-visual {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-hero,
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-title,
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-visual span {
+    grid-column: 1 / -1;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-hero {
+    display: block;
+    min-height: 112px;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-tertiary);
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-title {
+    display: block;
+    width: 54%;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--color-bg-tertiary);
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-visual span {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-visual span i {
+    display: block;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-tertiary);
+  }
+
+  html:not(.tv-mode) .home-loading-state .tv-home-loading-visual span i:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+.live-guide-source-trigger {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  flex: 0 1 172px;
+  min-width: 132px;
+  max-width: 190px;
+  min-height: 48px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.live-guide-source-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.live-guide-source-trigger > span {
+  grid-column: 1;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.live-guide-source-trigger > strong {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.82rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-guide-source-trigger > .live-guide-source-icon {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.live-guide-source-icon .icon,
+.live-source-option-check .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.live-guide-source-trigger:focus-visible,
+.live-source-close:focus-visible,
+.live-source-option:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.live-source-overlay {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.live-source-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 680px);
+  max-height: min(82dvh, 680px);
+  margin: 0 auto;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--color-bg-secondary);
+  box-shadow: var(--shadow-lg);
+}
+
+.live-source-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 18px 18px 10px;
+}
+
+.live-source-sheet-header > div {
+  min-width: 0;
+}
+
+.live-source-sheet-kicker {
+  color: var(--color-accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.live-source-sheet-header h2 {
+  margin: 3px 0 0;
+  color: var(--color-text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.45rem;
+}
+
+.live-source-close {
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 700;
+}
+
+.live-source-sheet-help {
+  margin: 0;
+  padding: 0 18px 14px;
+  color: var(--color-text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.live-source-options {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.live-source-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+}
+
+.live-source-option[aria-selected="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-dim);
+}
+
+.live-source-option-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.live-source-option-copy strong {
+  overflow: hidden;
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-source-option-copy small {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+}
+
+.live-source-option-check {
+  flex: 0 0 auto;
+  color: transparent;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.live-source-option[aria-selected="true"] .live-source-option-check {
+  color: var(--color-accent);
+}
+
+.norva-phone-apk .live-guide-status {
+  min-height: min(58dvh, 520px);
+  height: auto;
+  margin: 12px;
+  padding: clamp(28px, 8vw, 44px) 22px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 84% 12%,
+      color-mix(in srgb, var(--color-accent) 16%, transparent),
+      transparent 42%),
+    var(--color-bg-secondary);
+}
+
+.norva-phone-apk .live-guide-status .lg-btn {
+  min-height: 48px;
+}
+
+@media (max-width: 480px) {
+  .norva-phone-apk .live-guide-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .norva-phone-apk .live-guide-search-wrap {
+    grid-column: 1 / -1;
+  }
+
+  .norva-phone-apk .live-guide-source-trigger {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.tv-mode) .home-loading-state *,
+  .live-source-sheet {
+    animation: none !important;
+    transition: none !important;
   }
 }
