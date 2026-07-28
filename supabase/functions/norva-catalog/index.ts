@@ -8,6 +8,7 @@ import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_sha
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -84,7 +85,7 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && isHomeRailsRoute(segments)) {
       const userId = await requireUserId(req);
-      return jsonCached(req, await listHomeRails(url, userId), 60);
+      return jsonCached(req, await listHomeRails(req, url, userId), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
@@ -1028,12 +1029,87 @@ async function listMediaCategories(url: URL, userId: string) {
   };
 }
 
-async function listHomeRails(url: URL, userId: string) {
+function activeCatalogProfileIds(
+  profiles: Array<{ id: string; is_default?: boolean | null; created_at?: string | null }>,
+  limit: number,
+): Set<string> | null {
+  const cap = Math.max(1, Number(limit) || 1);
+  if (profiles.length <= cap) return null;
+  const ordered = [...profiles].sort((left, right) =>
+    (right.is_default ? 1 : 0) - (left.is_default ? 1 : 0) ||
+    String(left.created_at || "").localeCompare(String(right.created_at || "")));
+  return new Set(ordered.slice(0, cap).map((profile) => profile.id));
+}
+
+async function resolveCatalogProfileId(req: Request, userId: string): Promise<string | null> {
+  const requestedProfileId = stringOrNull(req.headers.get("x-norva-profile-id"));
+  if (requestedProfileId) {
+    const { data, error } = await db
+      .from("cloud_account_profiles")
+      .select("id,is_default,created_at")
+      .eq("user_id", userId);
+    if (error) throwDb(error, "Unable to resolve active catalogue profile");
+    const profiles = (data ?? []) as Array<{
+      id: string;
+      is_default?: boolean | null;
+      created_at?: string | null;
+    }>;
+    const requested = profiles.find((profile) => profile.id === requestedProfileId);
+    if (requested) {
+      if (profiles.length <= 1) return requestedProfileId;
+      const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
+      const activeIds = activeCatalogProfileIds(
+        profiles,
+        limitNumber(decision.limits, "profiles", 1),
+      );
+      if (!activeIds || activeIds.has(requestedProfileId)) return requestedProfileId;
+    }
+  }
+
+  const { data, error } = await db
+    .from("cloud_account_profiles")
+    .select("id")
+    .eq("user_id", userId)
+    .order("is_default", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to resolve default catalogue profile");
+  return stringOrNull(data?.id);
+}
+
+async function listHomeRails(req: Request, url: URL, userId: string) {
   const limit = boundedInt(url.searchParams.get("limit"), 24, 1, 50);
   const lang = railLang(url);
   const type = url.searchParams.get("type");
   const includeSeries = !type || type === "series";
   const includeMovies = !type || type === "movie";
+  const profilePromise = resolveCatalogProfileId(req, userId);
+  const candidatePromises = new Map<"movie" | "series", Promise<JsonRecord[]>>();
+  const candidatesFor = (itemType: "movie" | "series") => {
+    let promise = candidatePromises.get(itemType);
+    if (!promise) {
+      promise = listVerifiedTitleCandidates(userId, itemType);
+      candidatePromises.set(itemType, promise);
+    }
+    return promise;
+  };
+  const optionalRail = async (
+    label: string,
+    load: () => Promise<JsonRecord | null>,
+  ): Promise<JsonRecord | null> => {
+    try {
+      return await load();
+    } catch (error) {
+      // Personalization is additive. A transient ratings/schema failure must
+      // never take the whole Home experience down with it.
+      console.warn("optional_home_rail_failed", {
+        rail: label,
+        code: publicErrorCode(error),
+      });
+      return null;
+    }
+  };
 
   // Fire every rail query in PARALLEL — they are independent reads. They used to run
   // as ~6 sequential awaits, so the endpoint's latency was the SUM of all rails; on a
@@ -1046,22 +1122,39 @@ async function listHomeRails(url: URL, userId: string) {
   const [
     recentMovies,
     actionMovies,
+    likedRail,
     watchedRail,
     popularMovies,
     popularSeries,
     recentSeries,
   ] = await Promise.all([
     when(includeMovies, () => listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit, lang)),
-    when(includeMovies, () => listGenreRail(userId, "movie", "Action", "action-movies", "Action Movies", limit, lang)),
-    listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit, lang }),
-    when(includeMovies, () => listPopularTitleRail(userId, "movie", "popular-movies", "Popular Movies", limit, lang)),
-    when(includeSeries, () => listPopularTitleRail(userId, "series", "popular-series", "Popular Series", limit, lang)),
+    when(includeMovies, () => listGenreRail(userId, "movie", "Action", "action-movies", "Action Movies", limit, lang, candidatesFor)),
+    optionalRail("because_you_liked", async () => {
+      const profileId = await profilePromise;
+      return await listBecauseYouLikedRail(
+        userId,
+        profileId,
+        { includeMovies, includeSeries, limit, lang, candidatesFor },
+      );
+    }),
+    optionalRail("because_you_watched", async () => {
+      const profileId = await profilePromise;
+      return await listBecauseYouWatchedRail(
+        userId,
+        profileId,
+        { includeMovies, includeSeries, limit, lang, candidatesFor },
+      );
+    }),
+    when(includeMovies, () => listPopularTitleRail(userId, "movie", "popular-movies", "Popular Movies", limit, lang, candidatesFor)),
+    when(includeSeries, () => listPopularTitleRail(userId, "series", "popular-series", "Popular Series", limit, lang, candidatesFor)),
     when(includeSeries, () => listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit, lang)),
   ]);
 
   // Assemble in the intended display order.
   const rails: Array<JsonRecord | null> = [
     recentMovies,
+    likedRail,
     actionMovies,
     watchedRail ?? popularMovies, // because-you-watched, else popular movies
     popularSeries,
@@ -2047,6 +2140,8 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
   }
 }
 
+type TitleCandidatesFor = (itemType: "movie" | "series") => Promise<JsonRecord[]>;
+
 async function listGenreRail(
   userId: string,
   itemType: "movie" | "series",
@@ -2055,9 +2150,10 @@ async function listGenreRail(
   title: string,
   limit: number,
   lang: string | null,
+  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidates(userId, type),
 ) {
   try {
-    const candidates = await listVerifiedTitleCandidates(userId, itemType);
+    const candidates = await candidatesFor(itemType);
     const titles = candidates
       .filter((row) => titleGenres(row).some((value: string) => sameGenre(value, genre)))
       .sort((a, b) => String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? "")))
@@ -2085,9 +2181,10 @@ async function listPopularTitleRail(
   title: string,
   limit: number,
   lang: string | null,
+  candidatesFor: TitleCandidatesFor = (type) => listVerifiedTitleCandidates(userId, type),
 ) {
   try {
-    const candidates = await listVerifiedTitleCandidates(userId, itemType);
+    const candidates = await candidatesFor(itemType);
     // Real-views signal: distinct users who have watched each title (global), so the
     // Top 10 reflects actual viewing. TMDB rating is the tiebreak, so it still reads as
     // a sensible ranking while views are sparse and self-improves as they accumulate.
@@ -2124,10 +2221,162 @@ async function listPopularTitleRail(
   }
 }
 
+function rankBecauseYouLikedCandidates(
+  candidates: JsonRecord[],
+  anchorTitle: JsonRecord,
+  ratedTitleIds: Set<string>,
+  limit: number,
+) {
+  const anchorId = String(anchorTitle.id);
+  const anchorGenres = titleGenres(anchorTitle);
+  const sharedGenreCount = (row: JsonRecord) => titleGenres(row).reduce(
+    (count, candidateGenre) => count + (
+      anchorGenres.some((anchorGenre) => sameGenre(candidateGenre, anchorGenre)) ? 1 : 0
+    ),
+    0,
+  );
+  return candidates
+    .filter((row) => String(row.id) !== anchorId)
+    .filter((row) => !ratedTitleIds.has(String(row.id)))
+    .filter((row) => sharedGenreCount(row) > 0)
+    .sort((a, b) =>
+      sharedGenreCount(b) - sharedGenreCount(a) ||
+      numberOr(titleTmdb(b).vote_average, 0) - numberOr(titleTmdb(a).vote_average, 0) ||
+      numberOr(b.variant_count, 0) - numberOr(a.variant_count, 0) ||
+      String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
+    )
+    .slice(0, limit);
+}
+
+async function listRatedCandidateTitleIds(
+  userId: string,
+  profileId: string,
+  titleIds: string[],
+) {
+  const rated = new Set<string>();
+  for (let index = 0; index < titleIds.length; index += 100) {
+    const batch = titleIds.slice(index, index + 100);
+    if (!batch.length) continue;
+    const { data, error } = await db
+      .from("cloud_title_ratings")
+      .select("title_id")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .in("rating", [-1, 1])
+      .in("title_id", batch);
+    if (error) throwDb(error, "Unable to exclude rated recommendations");
+    for (const row of (data ?? []) as JsonRecord[]) {
+      const titleId = stringOrNull(row.title_id);
+      if (titleId) rated.add(titleId);
+    }
+  }
+  return rated;
+}
+
+async function listBecauseYouLikedRail(
+  userId: string,
+  profileId: string | null,
+  options: {
+    includeMovies: boolean;
+    includeSeries: boolean;
+    limit: number;
+    lang: string | null;
+    candidatesFor: TitleCandidatesFor;
+  },
+) {
+  if (!profileId) return null;
+
+  const itemTypes = [
+    ...(options.includeMovies ? ["movie"] : []),
+    ...(options.includeSeries ? ["series"] : []),
+  ];
+  if (!itemTypes.length) return null;
+
+  try {
+    const { data: likes, error } = await db
+      .from("cloud_title_ratings")
+      .select("title_id,item_type,updated_at")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .in("item_type", itemTypes)
+      .eq("rating", 1)
+      .not("title_id", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(24);
+    if (error) throwDb(error, "Unable to list liked titles for home rail");
+
+    let anchorId: string | null = null;
+    let anchorTitle: JsonRecord | null = null;
+    for (const like of (likes ?? []) as JsonRecord[]) {
+      const candidateAnchorId = stringOrNull(like.title_id);
+      if (!candidateAnchorId) continue;
+      const candidateAnchor = await loadTitleById(userId, candidateAnchorId);
+      if (!candidateAnchor || !titleGenres(candidateAnchor).length) continue;
+      anchorId = candidateAnchorId;
+      anchorTitle = candidateAnchor;
+      break;
+    }
+
+    if (!anchorId || !anchorTitle) return null;
+    const itemType: "movie" | "series" = String(anchorTitle.item_type) === "series" ? "series" : "movie";
+    if ((itemType === "movie" && !options.includeMovies) || (itemType === "series" && !options.includeSeries)) return null;
+
+    const candidates = await options.candidatesFor(itemType);
+    const ratedTitleIds = await listRatedCandidateTitleIds(
+      userId,
+      profileId,
+      [anchorId, ...candidates.map((row) => String(row.id))],
+    );
+    ratedTitleIds.add(anchorId);
+    const rankedTitles = rankBecauseYouLikedCandidates(
+      candidates,
+      anchorTitle,
+      ratedTitleIds,
+      Math.min(candidates.length, Math.max(options.limit * 4, options.limit)),
+    );
+    if (!rankedTitles.length) return null;
+
+    const variantsByTitle = await listVariantsByTitleIds(
+      rankedTitles.map((row) => String(row.id)),
+      userId,
+    );
+    const titles = rankedTitles
+      .filter((row) => (variantsByTitle.get(String(row.id)) ?? []).length > 0)
+      .slice(0, options.limit);
+    if (!titles.length) return null;
+    await applyCatalogOverlay(titles, itemType, options.lang);
+    const anchorName = stringOrNull(anchorTitle.title ?? anchorTitle.original_title);
+    return {
+      id: `because-you-liked-${anchorId}`,
+      title: anchorName ? `Because You Liked ${anchorName}` : "Because You Liked",
+      itemType,
+      source: "titles",
+      curation: {
+        kind: "because_you_liked",
+        anchorTitleId: anchorId,
+        anchorTitle: anchorName,
+        genres: titleGenres(anchorTitle),
+      },
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], options.lang)),
+    };
+  } catch (error) {
+    if (isMissingRatingsExpansion(error)) return null;
+    throw error;
+  }
+}
+
 async function listBecauseYouWatchedRail(
   userId: string,
-  options: { includeMovies: boolean; includeSeries: boolean; limit: number; lang: string | null },
+  profileId: string | null,
+  options: {
+    includeMovies: boolean;
+    includeSeries: boolean;
+    limit: number;
+    lang: string | null;
+    candidatesFor: TitleCandidatesFor;
+  },
 ) {
+  if (!profileId) return null;
   const lang = options.lang;
   const itemTypes = [
     ...(options.includeMovies ? ["movie"] : []),
@@ -2140,19 +2389,12 @@ async function listBecauseYouWatchedRail(
       .from("cloud_watch_history")
       .select("source_id,item_type,item_id,item_name,data,updated_at")
       .eq("user_id", userId)
+      .eq("profile_id", profileId)
       .in("item_type", itemTypes)
       .order("updated_at", { ascending: false })
       .limit(40);
     if (error) throwDb(error, "Unable to list watch history for home rail");
 
-    // The candidate pool is identical for every history entry of the same type — memoize it
-    // instead of re-fetching 300 rows per loop iteration (up to 40×) inside an endpoint that
-    // has already 504'd on big catalogs (home audit 2026-07-04).
-    const candidatePool = new Map<string, JsonRecord[]>();
-    const candidatesFor = async (t: "movie" | "series") => {
-      if (!candidatePool.has(t)) candidatePool.set(t, await listVerifiedTitleCandidates(userId, t));
-      return candidatePool.get(t) ?? [];
-    };
     for (const entry of history ?? []) {
       const watchedTitle = await resolveWatchedTitle(userId, entry);
       if (!watchedTitle) continue;
@@ -2160,7 +2402,7 @@ async function listBecauseYouWatchedRail(
       if (!genres.length) continue;
 
       const itemType = String(watchedTitle.item_type) === "series" ? "series" : "movie";
-      const candidates = await candidatesFor(itemType);
+      const candidates = await options.candidatesFor(itemType);
       const watchedId = String(watchedTitle.id);
       const titles = candidates
         .filter((row) => String(row.id) !== watchedId)
@@ -3569,6 +3811,20 @@ function isMissingMaterialization(error: unknown) {
   return record.code === "42P01" || message.includes("cloud_live_") || message.includes("cloud_title");
 }
 
+function isMissingRatingsExpansion(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const code = String((error as { code?: unknown }).code ?? "");
+  return code === "42P01" || code === "42703" || code === "PGRST204";
+}
+
+function publicErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return "unknown";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z0-9_]{2,32}$/i.test(code)
+    ? code
+    : "unknown";
+}
+
 function bearer(req: Request) {
   return (req.headers.get("Authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
 }
@@ -3636,7 +3892,7 @@ function jsonCached(req: Request, data: unknown, cacheSeconds: number, status = 
       ...corsHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": s > 0 ? `private, max-age=${s}, stale-while-revalidate=${s * 2}` : "no-store",
-      "Vary": "Authorization, x-norva-profile-id",
+      "Vary": "Origin, Authorization, x-norva-profile-id",
     },
   });
 }

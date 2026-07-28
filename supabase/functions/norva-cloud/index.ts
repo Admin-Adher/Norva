@@ -740,7 +740,10 @@ async function route(
 
   if (scope === "ratings") {
     // Thumbs up/down on a title. GET ?itemType[&itemId] → current rating(s);
-    // POST {itemId,itemType,rating} sets (1/-1) or clears (0); per profile.
+    // POST {sourceId,itemId,itemType,rating,expectedRevision,operationId} writes
+    // one logical reaction per profile with strict compare-and-set semantics.
+    // Clients that omit BOTH causal fields temporarily use the measured EXPAND
+    // compatibility path; clientRevision is not accepted as a CAS substitute.
     if (req.method === "GET" && !id) return { body: await getRating(req, url, user.id, db) };
     if (req.method === "POST" && !id) return { body: await setRating(req, user.id, db) };
   }
@@ -957,13 +960,19 @@ const lockedProfileFallbacks = new WeakSet<Request>();
 // account AND is not LOCKED by the plan limit. A locked profile (over the cap after a
 // downgrade) is refused even if the client forces the header — it falls back to the
 // default profile, so a stale "active profile" can't keep reading locked data.
-async function resolveProfileId(req: Request, userId: string, db: SupabaseClient): Promise<string> {
+async function resolveProfileId(
+  req: Request,
+  userId: string,
+  db: SupabaseClient,
+  options: { mutation?: boolean } = {},
+): Promise<string> {
   const headerId = stringOrNull(req.headers.get(PROFILE_HEADER));
   if (headerId) {
-    const { data } = await db
+    const { data, error } = await db
       .from("cloud_account_profiles")
       .select("id, is_default, created_at")
       .eq("user_id", userId);
+    if (error) throwDb(error, "Unable to resolve active profile");
     const rows = data ?? [];
     const target = rows.find((p) => p.id === headerId);
     if (target) {
@@ -974,11 +983,27 @@ async function resolveProfileId(req: Request, userId: string, db: SupabaseClient
         const limit = limitNumber(decision.limits, "profiles", 1);
         const activeSet = activeProfileIdSet(rows, limit);
         if (activeSet && !activeSet.has(headerId)) {
+          if (options.mutation) {
+            throw new HttpError(
+              409,
+              "Active profile is locked by the current plan",
+              { code: "profile_locked" },
+            );
+          }
           lockedProfileFallbacks.add(req); // surfaced as x-norva-profile-fallback: locked
           return await getOrCreateDefaultProfileId(userId, db);
         }
       }
       return headerId;
+    }
+    // Reads retain the historical default-profile fallback for stale local
+    // state. Mutations must never silently write another profile.
+    if (options.mutation) {
+      throw new HttpError(
+        409,
+        "Active profile is no longer available",
+        { code: "profile_unavailable" },
+      );
     }
   }
   return await getOrCreateDefaultProfileId(userId, db);
@@ -2751,49 +2776,501 @@ async function deleteHistoryByKeys(req: Request, url: URL, userId: string, db: S
   return { success: true };
 }
 
-async function getRating(req: Request, url: URL, userId: string, db: SupabaseClient) {
-  const profileId = await resolveProfileId(req, userId, db);
-  const itemType = stringOr(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"), "");
-  const itemId = stringOrNull(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"));
-  let query = db.from("cloud_title_ratings")
-    .select("source_id,item_type,item_id,rating")
-    .eq("user_id", userId).eq("profile_id", profileId);
-  if (itemType) query = query.eq("item_type", itemType);
-  if (itemId) query = query.eq("item_id", itemId);
-  const { data, error } = await query;
-  if (error) throwDb(error, "Unable to read ratings");
-  if (itemId) {
-    const row = (data ?? [])[0] as { rating?: number } | undefined;
-    return { rating: row?.rating ?? 0 };
+type RatingItemType = "movie" | "series";
+type RatingTitleIdentity = {
+  titleId: string;
+  itemType: RatingItemType;
+};
+type RatingRow = {
+  id?: string | null;
+  title_id?: string | null;
+  source_id?: string | null;
+  item_type?: string | null;
+  item_id?: string | null;
+  rating?: number | string | null;
+  server_revision?: number | string | null;
+  updated_at?: string | null;
+};
+
+const RATING_CONTRACT_VERSION = 2;
+const RATING_LIST_DEFAULT_LIMIT = 250;
+const RATING_LIST_MAX_LIMIT = 500;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function ratingItemType(value: unknown): RatingItemType;
+function ratingItemType(value: unknown, options: { required: false }): RatingItemType | "";
+function ratingItemType(
+  value: unknown,
+  { required = true }: { required?: boolean } = {},
+): RatingItemType | "" {
+  const normalized = stringOr(value, "").trim().toLowerCase();
+  if (!normalized && !required) return "";
+  if (normalized !== "movie" && normalized !== "series") {
+    throw new HttpError(400, "itemType must be movie or series");
   }
-  return { ratings: data ?? [] };
+  return normalized;
+}
+
+function ratingPublicError(
+  status: number,
+  message: string,
+  code: string,
+  correlationId: string,
+): HttpError {
+  return new HttpError(status, message, { code, correlationId });
+}
+
+function ratingErrorCode(error: unknown): string {
+  if (error instanceof HttpError && isRecord(error.details)) {
+    return stringOr(error.details.code, "");
+  }
+  if (isRecord(error)) return stringOr(error.code, "");
+  return "";
+}
+
+function rethrowSanitizedRatingError(
+  error: unknown,
+  correlationId: string,
+  operation: "read" | "write",
+): never {
+  const databaseCode = ratingErrorCode(error);
+  console.error("[norva-cloud][ratings]", {
+    correlationId,
+    operation,
+    databaseCode: databaseCode || undefined,
+    message: error instanceof Error ? error.message : String(error),
+    details: error instanceof HttpError ? error.details : undefined,
+  });
+
+  if (databaseCode === "23503") {
+    throw ratingPublicError(
+      409,
+      "The rating target is no longer available",
+      "rating_identity_invalid",
+      correlationId,
+    );
+  }
+  if (databaseCode === "22023") {
+    throw ratingPublicError(
+      400,
+      "The rating request is invalid",
+      "rating_request_invalid",
+      correlationId,
+    );
+  }
+  if (databaseCode.toUpperCase().startsWith("PGRST")) {
+    throw ratingPublicError(
+      503,
+      "Ratings are temporarily unavailable",
+      "rating_service_unavailable",
+      correlationId,
+    );
+  }
+
+  if (error instanceof HttpError && error.status < 500) {
+    const safeCodes = new Set([
+      "ambiguous_title_identity",
+      "profile_locked",
+      "profile_unavailable",
+      "rating_request_invalid",
+      "rating_source_not_found",
+      "title_identity_unavailable",
+    ]);
+    throw ratingPublicError(
+      error.status,
+      error.message,
+      safeCodes.has(databaseCode) ? databaseCode : "rating_request_invalid",
+      correlationId,
+    );
+  }
+
+  throw ratingPublicError(
+    503,
+    "Ratings are temporarily unavailable",
+    "rating_storage_unavailable",
+    correlationId,
+  );
+}
+
+function requireRatingUuid(
+  value: unknown,
+  field: string,
+  correlationId: string,
+): string {
+  const normalized = stringOr(value, "");
+  if (!UUID_PATTERN.test(normalized)) {
+    throw ratingPublicError(
+      400,
+      `${field} must be a valid UUID`,
+      "rating_request_invalid",
+      correlationId,
+    );
+  }
+  return normalized;
+}
+
+function ratingRevision(row: RatingRow | null | undefined): number {
+  const revision = Number(row?.server_revision);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
+}
+
+function ratingValue(row: RatingRow | null | undefined): -1 | 0 | 1 {
+  const value = Number(row?.rating);
+  return value === 1 || value === -1 ? value : 0;
+}
+
+function ratingTimestamp(row: RatingRow | null | undefined): number {
+  const timestamp = Date.parse(stringOr(row?.updated_at, ""));
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+// server_revision is the causal authority. updated_at only resolves equal
+// revisions (including pre-EXPAND revision-zero rows).
+function authoritativeRatingRow(rows: RatingRow[]): RatingRow | null {
+  if (!rows.length) return null;
+  return [...rows].sort((left, right) =>
+    ratingRevision(right) - ratingRevision(left) ||
+    ratingTimestamp(right) - ratingTimestamp(left) ||
+    stringOr(right.id, "").localeCompare(stringOr(left.id, ""))
+  )[0] ?? null;
+}
+
+// Resolve a provider alias to Norva's existing logical VOD projection. Several
+// source variants of the same work share cloud_titles.id, so the reaction
+// follows the title when the selected provider/version changes.
+async function resolveRatingTitleIdentity(
+  db: SupabaseClient,
+  userId: string,
+  itemType: RatingItemType,
+  itemId: string,
+  sourceId: string | null,
+): Promise<RatingTitleIdentity | null> {
+  let query = db
+    .from("cloud_title_variants")
+    .select("title_id,item_type,source_id")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("external_id", itemId);
+  if (sourceId) query = query.eq("source_id", sourceId);
+
+  const { data, error } = await query.limit(sourceId ? 2 : 50);
+  if (error) throwDb(error, "Unable to resolve logical title");
+
+  const candidates = (data ?? []) as Array<{
+    title_id?: string | null;
+    item_type?: string | null;
+  }>;
+  const titleIds = [...new Set(candidates
+    .map((candidate) => stringOrNull(candidate.title_id))
+    .filter((id): id is string => Boolean(id)))];
+
+  if (!titleIds.length) return null;
+  if (titleIds.length > 1 || (!sourceId && candidates.length >= 50)) {
+    // Provider external IDs are not globally unique. Never borrow another
+    // source's reaction when a legacy GET omitted sourceId. A saturated capped
+    // lookup is conservatively ambiguous because it cannot prove uniqueness.
+    throw new HttpError(
+      409,
+      "sourceId is required because this item id is ambiguous",
+      { code: "ambiguous_title_identity" },
+    );
+  }
+  return { titleId: titleIds[0], itemType };
+}
+
+async function readExactRating(
+  db: SupabaseClient,
+  userId: string,
+  profileId: string,
+  itemType: RatingItemType,
+  itemId: string,
+  sourceId: string | null,
+) {
+  const identity = await resolveRatingTitleIdentity(
+    db,
+    userId,
+    itemType,
+    itemId,
+    sourceId,
+  );
+
+  const canonicalPromise = identity
+    ? db
+      .from("cloud_title_ratings")
+      .select("id,title_id,source_id,item_type,item_id,rating,server_revision,updated_at")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .eq("title_id", identity.titleId)
+      .order("server_revision", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(200)
+    : Promise.resolve({ data: [] as RatingRow[], error: null });
+
+  const legacyPromise = sourceId
+    ? db
+      .from("cloud_title_ratings")
+      .select("id,title_id,source_id,item_type,item_id,rating,server_revision,updated_at")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .eq("source_id", sourceId)
+      .eq("item_type", itemType)
+      .eq("item_id", itemId)
+      .maybeSingle()
+    : Promise.resolve({ data: null as RatingRow | null, error: null });
+
+  const [canonicalResult, legacyResult] = await Promise.all([
+    canonicalPromise,
+    legacyPromise,
+  ]);
+  if (canonicalResult.error) {
+    throwDb(canonicalResult.error, "Unable to read logical rating");
+  }
+  if (legacyResult.error) {
+    throwDb(legacyResult.error, "Unable to read provider rating");
+  }
+
+  const deduplicated = new Map<string, RatingRow>();
+  for (const row of (canonicalResult.data ?? []) as RatingRow[]) {
+    deduplicated.set(stringOr(row.id, crypto.randomUUID()), row);
+  }
+  const legacyRow = legacyResult.data as RatingRow | null;
+  if (legacyRow) {
+    deduplicated.set(stringOr(legacyRow.id, "legacy-exact"), legacyRow);
+  }
+
+  return {
+    identity,
+    row: authoritativeRatingRow([...deduplicated.values()]),
+  };
+}
+
+async function getRating(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const correlationId = crypto.randomUUID();
+  try {
+    const profileId = await resolveProfileId(req, userId, db);
+    const itemType = ratingItemType(
+      url.searchParams.get("itemType") ?? url.searchParams.get("item_type"),
+      { required: false },
+    );
+    const itemId = stringOrNull(
+      url.searchParams.get("itemId") ?? url.searchParams.get("item_id"),
+    );
+    const rawSourceId = stringOrNull(
+      url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"),
+    );
+    const sourceId = rawSourceId
+      ? requireRatingUuid(rawSourceId, "sourceId", correlationId)
+      : null;
+
+    if (itemId) {
+      if (!itemType) throw new HttpError(400, "itemType is required with itemId");
+      const { identity, row } = await readExactRating(
+        db,
+        userId,
+        profileId,
+        itemType,
+        itemId,
+        sourceId,
+      );
+      return {
+        contractVersion: RATING_CONTRACT_VERSION,
+        rating: ratingValue(row),
+        revision: ratingRevision(row),
+        titleId: identity?.titleId ?? stringOrNull(row?.title_id),
+        sourceId,
+        itemType,
+        itemId,
+        correlationId,
+      };
+    }
+
+    const limit = boundedInt(
+      url.searchParams.get("limit"),
+      RATING_LIST_DEFAULT_LIMIT,
+      1,
+      RATING_LIST_MAX_LIMIT,
+    );
+    let query = db
+      .from("cloud_title_ratings")
+      .select("id,title_id,source_id,item_type,item_id,rating,server_revision,updated_at")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .order("updated_at", { ascending: false })
+      .limit(limit + 1);
+    if (itemType) query = query.eq("item_type", itemType);
+    const { data, error } = await query;
+    if (error) throwDb(error, "Unable to read ratings");
+
+    const rawRows = (data ?? []) as RatingRow[];
+    const truncated = rawRows.length > limit;
+    const groups = new Map<string, RatingRow[]>();
+    for (const row of rawRows.slice(0, limit)) {
+      const key = stringOrNull(row.title_id)
+        ? `title:${row.title_id}`
+        : `legacy:${stringOr(row.source_id, "")}:${stringOr(row.item_type, "")}:${stringOr(row.item_id, "")}`;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(row);
+      groups.set(key, bucket);
+    }
+
+    const ratings = [...groups.values()]
+      .map((rows) => authoritativeRatingRow(rows))
+      .filter((row): row is RatingRow => Boolean(row))
+      .filter((row) => ratingValue(row) !== 0)
+      .sort((left, right) => ratingTimestamp(right) - ratingTimestamp(left))
+      .map((row) => ({
+        titleId: stringOrNull(row.title_id),
+        sourceId: stringOrNull(row.source_id),
+        itemType: stringOr(row.item_type, ""),
+        itemId: stringOr(row.item_id, ""),
+        rating: ratingValue(row),
+        revision: ratingRevision(row),
+        updatedAt: stringOrNull(row.updated_at),
+      }));
+
+    return {
+      contractVersion: RATING_CONTRACT_VERSION,
+      ratings,
+      truncated,
+      limit,
+      correlationId,
+    };
+  } catch (error) {
+    rethrowSanitizedRatingError(error, correlationId, "read");
+  }
 }
 
 async function setRating(req: Request, userId: string, db: SupabaseClient) {
-  const body = await readJson(req);
-  const sourceId = stringOr(body.sourceId ?? body.source_id, "");
-  const itemType = stringOr(body.itemType ?? body.item_type, "movie");
-  const itemId = stringOr(body.itemId ?? body.item_id, "");
-  const rating = Number(body.rating);
-  if (!sourceId || !itemId) throw new HttpError(400, "sourceId and itemId are required");
-  if (![1, -1, 0].includes(rating)) throw new HttpError(400, "rating must be 1, -1 or 0");
-  await assertOwnedSource(sourceId, userId, db);
-  const profileId = await resolveProfileId(req, userId, db);
+  const correlationId = crypto.randomUUID();
+  try {
+    const body = await readJson(req);
+    const sourceId = requireRatingUuid(
+      body.sourceId ?? body.source_id,
+      "sourceId",
+      correlationId,
+    );
+    const itemType = ratingItemType(body.itemType ?? body.item_type);
+    const itemId = stringOr(body.itemId ?? body.item_id, "");
+    const requestedRating = Number(body.rating);
+    if (!itemId) throw new HttpError(400, "itemId is required");
+    if (![1, -1, 0].includes(requestedRating)) {
+      throw new HttpError(400, "rating must be 1, -1 or 0");
+    }
 
-  // 0 clears the rating (untoggle); 1/-1 upsert the like/dislike.
-  if (rating === 0) {
-    const { error } = await db.from("cloud_title_ratings").delete()
-      .eq("user_id", userId).eq("profile_id", profileId)
-      .eq("source_id", sourceId).eq("item_type", itemType).eq("item_id", itemId);
-    if (error) throwDb(error, "Unable to clear rating");
-    return { rating: 0 };
+    const hasExpectedRevision =
+      Object.prototype.hasOwnProperty.call(body, "expectedRevision") ||
+      Object.prototype.hasOwnProperty.call(body, "expected_revision");
+    const hasOperationId =
+      Object.prototype.hasOwnProperty.call(body, "operationId") ||
+      Object.prototype.hasOwnProperty.call(body, "operation_id");
+    if (hasExpectedRevision !== hasOperationId) {
+      throw new HttpError(
+        400,
+        "expectedRevision and operationId must be provided together",
+      );
+    }
+
+    const compatibilityMode = !hasExpectedRevision;
+    const rawExpectedRevision = body.expectedRevision ?? body.expected_revision;
+    const expectedRevision = compatibilityMode ? null : Number(rawExpectedRevision);
+    if (
+      !compatibilityMode &&
+      (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 0)
+    ) {
+      throw new HttpError(
+        400,
+        "expectedRevision must be a non-negative safe integer",
+      );
+    }
+    const operationId = compatibilityMode
+      ? crypto.randomUUID()
+      : requireRatingUuid(
+        body.operationId ?? body.operation_id,
+        "operationId",
+        correlationId,
+      );
+
+    const { data: source, error: sourceError } = await db
+      .from("cloud_sources")
+      .select("id")
+      .eq("id", sourceId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (sourceError) throwDb(sourceError, "Unable to verify rating source");
+    if (!source) {
+      throw new HttpError(
+        404,
+        "Rating source not found",
+        { code: "rating_source_not_found" },
+      );
+    }
+
+    const profileId = await resolveProfileId(req, userId, db, { mutation: true });
+    const identity = await resolveRatingTitleIdentity(
+      db,
+      userId,
+      itemType,
+      itemId,
+      sourceId,
+    );
+    if (!identity) {
+      throw new HttpError(
+        409,
+        "Logical title identity is not ready; refresh the catalogue and retry",
+        { code: "title_identity_unavailable" },
+      );
+    }
+
+    // A neutral rating remains a revision tombstone. Deleting it would let a
+    // delayed older intent resurrect a cleared reaction.
+    const { data, error } = await db.rpc("upsert_cloud_title_rating_cas", {
+      p_user_id: userId,
+      p_profile_id: profileId,
+      p_title_id: identity.titleId,
+      p_source_id: sourceId,
+      p_item_type: identity.itemType,
+      p_item_id: itemId,
+      p_rating: requestedRating,
+      p_operation_id: operationId,
+      p_expected_revision: expectedRevision,
+      p_compatibility_mode: compatibilityMode,
+    });
+    if (error) throwDb(error, "Unable to save rating");
+    const row = (Array.isArray(data) ? data[0] : data) as {
+      rating?: number | string;
+      revision?: number | string;
+      applied?: boolean;
+      conflict?: boolean;
+      idempotent?: boolean;
+      compatibility_mode?: boolean;
+    } | null;
+    const revision = Number(row?.revision);
+    if (
+      !row ||
+      ![1, -1, 0].includes(Number(row.rating)) ||
+      !Number.isSafeInteger(revision) ||
+      revision < 0
+    ) {
+      throw new HttpError(503, "Invalid rating storage response");
+    }
+
+    return {
+      contractVersion: RATING_CONTRACT_VERSION,
+      rating: Number(row.rating),
+      revision,
+      applied: row.applied === true,
+      conflict: row.conflict === true,
+      idempotent: row.idempotent === true,
+      compatibilityMode: row.compatibility_mode === true,
+      operationId,
+      titleId: identity.titleId,
+      correlationId,
+    };
+  } catch (error) {
+    rethrowSanitizedRatingError(error, correlationId, "write");
   }
-  const { error } = await db.from("cloud_title_ratings").upsert({
-    user_id: userId, profile_id: profileId, source_id: sourceId,
-    item_type: itemType, item_id: itemId, rating, updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id,profile_id,source_id,item_type,item_id" });
-  if (error) throwDb(error, "Unable to save rating");
-  return { rating };
 }
 
 async function getHistoryItem(req: Request, url: URL, userId: string, db: SupabaseClient) {
