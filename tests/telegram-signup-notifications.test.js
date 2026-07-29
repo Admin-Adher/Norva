@@ -81,10 +81,14 @@ test('every user-controlled Telegram field is bounded and HTML escaped', () => {
   assert.match(message, /clipped\(claim\.user_email, 320\)/);
   assert.match(message, /clipped\(claim\.display_name, 160\)/);
   assert.match(message, /clipped\(claim\.auth_provider, 50\)/);
-  assert.match(message, /tgEscape\(email\)/);
+  assert.match(message, /tgEscape\(maskedEmail\(email\)\)/);
+  assert.doesNotMatch(message, /tgEscape\(email\)/);
   assert.match(message, /tgEscape\(name\)/);
   assert.match(message, /tgEscape\(provider\)/);
-  assert.match(message, /tgEscape\(claim\.user_id\.slice\(0, 36\)\)/);
+  assert.match(message, /clipped\(claim\.region_name, 120\)/);
+  assert.match(message, /tgEscape\(location\)/);
+  assert.match(message, /\.test\(rawUserId\)/);
+  assert.match(message, /encodeURIComponent\(rawUserId\)/);
   assert.match(message, /tgEscape\(timestamp\)/);
   assert.match(telegram, /replace\(\/&\/g, "&amp;"\).*replace\(\/<\/g, "&lt;"\).*replace\(\/>\/g, "&gt;"\)/);
 });

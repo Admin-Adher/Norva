@@ -10,12 +10,34 @@ export function tgEscape(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Minimize an email address before it crosses the Telegram boundary. */
+export function maskedEmail(value: string): string {
+  const clean = String(value ?? "").trim();
+  const at = clean.lastIndexOf("@");
+  if (at <= 0 || at === clean.length - 1) return "Adresse e-mail masquée";
+
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}••••@${domain}`;
+}
+
 export interface TelegramSendResult {
   accepted: boolean;
   status: number | null;
   messageId: number | null;
   retryAfterSeconds: number | null;
   error: string;
+}
+
+export interface TelegramInlineKeyboardButton {
+  text: string;
+  url: string;
+}
+
+export interface TelegramSendOptions {
+  protectContent?: boolean;
+  inlineKeyboard?: TelegramInlineKeyboardButton[][];
 }
 
 export function telegramConfigured(): boolean {
@@ -25,7 +47,10 @@ export function telegramConfigured(): boolean {
 }
 
 /** Detailed result for durable workers. Never returns Telegram response text or credentials. */
-export async function sendTelegramDetailed(text: string): Promise<TelegramSendResult> {
+export async function sendTelegramDetailed(
+  text: string,
+  options: TelegramSendOptions = {},
+): Promise<TelegramSendResult> {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
   const chatId = Deno.env.get("TELEGRAM_CHAT_ID") ?? "";
   if (!token || !chatId || !text) {
@@ -38,11 +63,21 @@ export async function sendTelegramDetailed(text: string): Promise<TelegramSendRe
     };
   }
   try {
+    const replyMarkup = options.inlineKeyboard?.length
+      ? { inline_keyboard: options.inlineKeyboard }
+      : undefined;
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // 4096 = Telegram hard cap per message; truncate rather than 400.
-      body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4000), parse_mode: "HTML", disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text.slice(0, 4000),
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...(options.protectContent === true ? { protect_content: true } : {}),
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
       signal: AbortSignal.timeout(6000),
     });
     const raw = (await res.text()).slice(0, 4000);
