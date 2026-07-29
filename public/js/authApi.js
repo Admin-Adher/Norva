@@ -78,14 +78,16 @@
         return payload;
     }
 
-    async function signUp({ email, password, displayName }) {
-        const redirectTo = `${location.origin}/account.html`;
-        const payload = await request(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo)}`, {
+    async function signUp({ email, password, displayName, signupContext, redirectTo }) {
+        const verificationReturn = redirectTo || `${location.origin}/account.html`;
+        const context = signupContext && typeof signupContext === 'object' ? signupContext : {};
+        const payload = await request(`/auth/v1/signup?redirect_to=${encodeURIComponent(verificationReturn)}`, {
             method: 'POST',
             body: {
                 email,
                 password,
                 data: {
+                    ...context,
                     display_name: displayName || ''
                 }
             }

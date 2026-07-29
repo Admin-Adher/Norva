@@ -575,10 +575,11 @@
     </main>
 
     <script src="/js/cloudApi.js?v=50"></script>
-    <script src="/js/authApi.js?v=6"></script>
+    <script src="/js/authApi.js?v=7"></script>
     <script>
         const params = new URLSearchParams(location.search);
-      const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/app#home';
+        const rawReturnTo = params.get('returnTo') || '';
+        const returnTo = sanitizeReturnTo(rawReturnTo) || '/app#home';
         const statusEl = document.getElementById('status');
         const socialEl = document.getElementById('social-auth');
         const nativeOnboardingEl = document.querySelector('.native-onboarding');
@@ -588,12 +589,197 @@
         // the app. Both are web/PWA-only; native uses email+password (and, from
         // step 2, native Google Sign-In).
         const isNativeApp = document.documentElement.classList.contains('native-app');
+        const SIGNUP_ATTRIBUTION_KEY = 'norva-signup-attribution-pending-v1';
+        const signupGeoPromise = loadSignupGeoContext();
         const forms = {
             signin: document.getElementById('signin-form'),
             signup: document.getElementById('signup-form'),
             recover: document.getElementById('recover-form'),
             password: document.getElementById('password-form')
         };
+
+        function compactSignupFields(values) {
+            return Object.fromEntries(Object.entries(values || {}).filter(([, value]) =>
+                value !== undefined && value !== null && value !== ''));
+        }
+
+        function cleanSignupText(value, limit) {
+            if (typeof value !== 'string') return '';
+            return value.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, limit);
+        }
+
+        function signupPlatform() {
+            const ua = navigator.userAgent || '';
+            if (/NorvaTV-AndroidTV/i.test(ua)) return 'unknown';
+            if (/NorvaTV-AndroidPhone/i.test(ua)
+                || (window.NorvaTVCloud && typeof window.NorvaTVCloud === 'object')) {
+                return 'mobile_android';
+            }
+            return 'web';
+        }
+
+        function signupSurface() {
+            if (!rawReturnTo || !rawReturnTo.startsWith('/') || rawReturnTo.startsWith('//')) return 'account';
+            try {
+                const target = new URL(rawReturnTo, location.origin);
+                if (target.origin !== location.origin) return 'account';
+                if (target.pathname === '/cloud.html'
+                    && /^[A-HJ-NP-Z2-9]{6}$/.test((target.searchParams.get('pair') || '').toUpperCase())) {
+                    return 'tv_pairing';
+                }
+                if (/^\/(?:subscribe|subscription|paywall|checkout(?:-revolut)?)\.html$/.test(target.pathname)) {
+                    return 'subscription';
+                }
+            } catch (_) { /* fall back to the account journey */ }
+            return 'account';
+        }
+
+        function authEmailRedirectUrl() {
+            const url = new URL('/account.html', location.origin);
+            url.searchParams.set('returnTo', returnTo);
+            return url.toString();
+        }
+
+        async function loadSignupGeoContext() {
+            const fallback = {
+                countryCode: '',
+                regionCode: '',
+                regionName: '',
+                city: ''
+            };
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = controller ? setTimeout(() => controller.abort(), 1500) : null;
+            try {
+                const response = await fetch('/api/signup-context', {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers: { Accept: 'application/json' },
+                    signal: controller?.signal
+                });
+                if (!response.ok) return fallback;
+                const data = await response.json();
+                const countryCode = cleanSignupText(data.countryCode, 2).toUpperCase();
+                return {
+                    countryCode: /^[A-Z]{2}$/.test(countryCode) ? countryCode : '',
+                    regionCode: /^[A-Za-z0-9-]{1,16}$/.test(cleanSignupText(data.regionCode, 16))
+                        ? cleanSignupText(data.regionCode, 16) : '',
+                    regionName: cleanSignupText(data.regionName, 96),
+                    city: cleanSignupText(data.city, 96)
+                };
+            } catch (_) {
+                return fallback;
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        }
+
+        async function buildSignupAttribution(method, persist) {
+            const geo = await signupGeoPromise.catch(() => ({}));
+            const context = {
+                platform: signupPlatform(),
+                surface: signupSurface(),
+                method,
+                countryCode: geo.countryCode || '',
+                regionCode: geo.regionCode || '',
+                regionName: geo.regionName || '',
+                city: geo.city || '',
+                locationSource: (geo.countryCode || geo.regionName || geo.city) ? 'cloudflare_edge' : 'none',
+                storedAt: Date.now()
+            };
+            if (persist) {
+                try { sessionStorage.setItem(SIGNUP_ATTRIBUTION_KEY, JSON.stringify(context)); } catch (_) { /* best effort */ }
+            }
+            return context;
+        }
+
+        function signupMetadata(context) {
+            return compactSignupFields({
+                norva_signup_platform: context?.platform,
+                norva_signup_surface: context?.surface,
+                norva_signup_method: context?.method
+            });
+        }
+
+        function storedSignupAttribution() {
+            try {
+                const value = JSON.parse(sessionStorage.getItem(SIGNUP_ATTRIBUTION_KEY) || 'null');
+                if (!value || Date.now() - Number(value.storedAt || 0) > 2 * 60 * 60 * 1000) {
+                    clearStoredSignupAttribution();
+                    return null;
+                }
+                return value;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function clearStoredSignupAttribution() {
+            try { sessionStorage.removeItem(SIGNUP_ATTRIBUTION_KEY); } catch (_) { /* best effort */ }
+        }
+
+        function persistSignupAttribution(context) {
+            try {
+                sessionStorage.setItem(SIGNUP_ATTRIBUTION_KEY, JSON.stringify({
+                    ...context,
+                    storedAt: Number(context?.storedAt) || Date.now()
+                }));
+            } catch (_) { /* best effort */ }
+        }
+
+        async function refreshSignupLocation(context) {
+            if (context?.locationSource === 'cloudflare_edge'
+                && (context.countryCode || context.regionCode || context.regionName || context.city)) {
+                return context;
+            }
+            const geo = await loadSignupGeoContext();
+            const hasLocation = Boolean(geo.countryCode || geo.regionCode || geo.regionName || geo.city);
+            return {
+                ...context,
+                countryCode: geo.countryCode || '',
+                regionCode: geo.regionCode || '',
+                regionName: geo.regionName || '',
+                city: geo.city || '',
+                locationSource: hasLocation ? 'cloudflare_edge' : 'none'
+            };
+        }
+
+        async function capturePendingSignupAttribution(context) {
+            let pending = context || storedSignupAttribution();
+            if (!pending) return null;
+            try {
+                let result = null;
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                    pending = await refreshSignupLocation(pending);
+                    result = await NorvaAuth.rpc('capture_signup_attribution', {
+                        p_signup_platform: pending.platform || null,
+                        p_signup_surface: pending.surface || null,
+                        p_signup_method: pending.method || null,
+                        p_country_code: pending.countryCode || null,
+                        p_region_code: pending.regionCode || null,
+                        p_region_name: pending.regionName || null,
+                        p_city: pending.city || null,
+                        p_location_source: pending.locationSource || null
+                    });
+                    const retryable = ['partial_pending_location', 'no_new_context'].includes(result?.reason)
+                        && pending.locationSource !== 'cloudflare_edge';
+                    if (!retryable) {
+                        clearStoredSignupAttribution();
+                        return result;
+                    }
+                    if (attempt === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                    }
+                }
+                persistSignupAttribution(pending);
+                return result;
+            } catch (_) {
+                // Attribution must never block authentication. Keep a persisted OAuth
+                // context for a same-tab retry, but continue into Norva.
+                persistSignupAttribution(pending);
+                return null;
+            }
+        }
 
         const authTabs = [...document.querySelectorAll('#tabs [role="tab"]')];
         authTabs.forEach(button => {
@@ -684,6 +870,51 @@
         const nativeGoogle = isNativeApp
             && window.NorvaTVCloud && typeof window.NorvaTVCloud.googleSignIn === 'function';
         let nativeGoogleTimer = null;
+        let socialAuthStarting = false;
+        function setSocialAuthBusy(busy) {
+            socialAuthStarting = Boolean(busy);
+            document.querySelectorAll('.social-btn, .auth-help-google').forEach(button => {
+                button.disabled = socialAuthStarting;
+                button.setAttribute('aria-busy', socialAuthStarting ? 'true' : 'false');
+            });
+        }
+        async function startSocialAuth(provider = 'google') {
+            if (socialAuthStarting) return;
+            setSocialAuthBusy(true);
+            setStatus('info', 'Preparing secure sign-in...');
+            try {
+                await buildSignupAttribution(provider, true);
+            } catch (_) {
+                clearStoredSignupAttribution();
+                setSocialAuthBusy(false);
+                setStatus('error', 'Google sign-in is unavailable. Try again.');
+                return;
+            }
+            if (nativeGoogle && provider === 'google') {
+                setStatus('info', 'Opening Google…');
+                // Never hang on "Opening Google…": if the native bridge doesn't
+                // call back (misconfigured client / cancelled picker), recover.
+                clearTimeout(nativeGoogleTimer);
+                nativeGoogleTimer = setTimeout(() => {
+                    clearStoredSignupAttribution();
+                    setSocialAuthBusy(false);
+                    setStatus('error', 'Google sign-in didn’t complete. Try again, or sign in with your email.');
+                }, 30000);
+                try { window.NorvaTVCloud.googleSignIn(); }
+                catch (_) {
+                    clearTimeout(nativeGoogleTimer);
+                    clearStoredSignupAttribution();
+                    setSocialAuthBusy(false);
+                    setStatus('error', 'Google sign-in is unavailable.');
+                }
+                return;
+            }
+            setStatus('info', 'Redirecting…');
+            NorvaAuth.signInWithOAuth(
+                provider,
+                `${location.origin}/account.html?returnTo=${encodeURIComponent(returnTo)}`
+            );
+        }
         (function initSocial() {
             if (!socialEl) return;
             // On native WITHOUT the native Google bridge (older app build), social
@@ -701,25 +932,7 @@
                     btn.remove();
                     return;
                 }
-                btn.addEventListener('click', () => {
-                    if (nativeGoogle && btn.dataset.provider === 'google') {
-                        setStatus('info', 'Opening Google…');
-                        // Never hang on "Opening Google…": if the native bridge doesn't
-                        // call back (misconfigured client / cancelled picker), recover.
-                        clearTimeout(nativeGoogleTimer);
-                        nativeGoogleTimer = setTimeout(() => {
-                            setStatus('error', 'Google sign-in didn’t complete. Try again, or sign in with your email.');
-                        }, 30000);
-                        try { window.NorvaTVCloud.googleSignIn(); }
-                        catch (_) { clearTimeout(nativeGoogleTimer); setStatus('error', 'Google sign-in is unavailable.'); }
-                        return;
-                    }
-                    setStatus('info', 'Redirecting…');
-                    NorvaAuth.signInWithOAuth(
-                        btn.dataset.provider,
-                        `${location.origin}/account.html?returnTo=${encodeURIComponent(returnTo)}`
-                    );
-                });
+                btn.addEventListener('click', () => startSocialAuth(btn.dataset.provider));
             });
             socialEl.dataset.enabled = socialEl.querySelector('.social-btn') ? '1' : '';
             if (socialEl.dataset.enabled) socialEl.style.display = 'block'; // default form is signin
@@ -749,6 +962,8 @@
         window.onNorvaGoogleIdToken = async function (idToken, error) {
             clearTimeout(nativeGoogleTimer);
             if (!idToken) {
+                clearStoredSignupAttribution();
+                setSocialAuthBusy(false);
                 if (error === 'google_not_configured') setStatus('error', 'Google sign-in isn’t available yet.');
                 else if (!error || /cancel/i.test(error)) setStatus('error', 'Google sign-in was cancelled.');
                 else setStatus('error', 'Google sign-in couldn’t be completed. Try again, or use email sign-in.');
@@ -758,9 +973,12 @@
                 setStatus('info', 'Signing in…');
                 await NorvaAuth.signInWithIdToken({ provider: 'google', token: idToken });
                 await ensureProfile();
+                await capturePendingSignupAttribution();
                 setStatus('success', 'Signed in. Opening Norva…');
                 location.replace(returnTo);
             } catch (e) {
+                clearStoredSignupAttribution();
+                setSocialAuthBusy(false);
                 setStatus('error', 'Google sign-in couldn’t be completed. Try again, or use email sign-in.');
             }
         };
@@ -796,20 +1014,24 @@
             // Passwordless sign-up (default on web): email a secure link that creates
             // the account (create_user:true). No password collected.
             if (document.getElementById('signup-password-wrap').hidden) {
-                requestMagicLink(document.getElementById('signup-email').value.trim(), { createUser: true, signup: true });
+                await requestMagicLink(document.getElementById('signup-email').value.trim(), { createUser: true, signup: true });
                 return;
             }
             await withBusy(forms.signup, async () => {
                 const displayName = document.getElementById('signup-name').value.trim();
                 setStatus('info', 'Creating your account...');
+                const attribution = await buildSignupAttribution('email_password', false);
                 const payload = await NorvaAuth.signUp({
                     displayName,
                     email: document.getElementById('signup-email').value.trim(),
-                    password: document.getElementById('signup-password').value
+                    password: document.getElementById('signup-password').value,
+                    signupContext: signupMetadata(attribution),
+                    redirectTo: authEmailRedirectUrl()
                 });
 
                 if (NorvaAuth.getSession()) {
                     await ensureProfile(displayName);
+                    await capturePendingSignupAttribution(attribution);
                     setStatus('success', 'Account created. Opening Norva...');
                     location.replace(returnTo);
                     return;
@@ -884,6 +1106,14 @@
                     setStatus('info', 'Verified — choose a new password.');
                     return;
                 }
+                const confirmationMethod = otpType === 'magiclink'
+                    ? 'email_magic_link'
+                    : (otpType === 'signup' || otpType === 'email')
+                        ? 'email_password'
+                        : 'unknown';
+                const confirmationContext = storedSignupAttribution()
+                    || await buildSignupAttribution(confirmationMethod, false);
+                await capturePendingSignupAttribution(confirmationContext);
                 location.replace(returnTo);
                 return;
             }
@@ -896,6 +1126,7 @@
                 const hp = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
                 const oauthError = hp.get('error') || params.get('error');
                 if (oauthError) {
+                    clearStoredSignupAttribution();
                     try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* noop */ }
                     showForm('signin');
                     setStatus('error', oauthError === 'access_denied'
@@ -936,6 +1167,7 @@
                     return;
                 }
                 await ensureProfile();
+                await capturePendingSignupAttribution();
                 // If the account now carries both a Google and an email identity,
                 // Google was just linked onto a pre-existing account — reassure the
                 // user rather than showing a generic "Signed in".
@@ -961,6 +1193,7 @@
                 const cached = NorvaAuth.getSession && NorvaAuth.getSession();
                 if (!err?.definitive && cached?.user?.id && cached?.refresh_token) {
                     if (params.get('manage') === '1') { showManage(cached.user); return; }
+                    await capturePendingSignupAttribution();
                     setStatus('success', 'Signed in. Opening Norva...');
                     location.replace(returnTo);
                     return;
@@ -971,6 +1204,7 @@
                 // "Sign-in settings" entry) get an account-management view instead of
                 // being bounced straight back — otherwise that button looks like a no-op.
                 if (params.get('manage') === '1') { showManage(user); return; }
+                await capturePendingSignupAttribution();
                 location.replace(returnTo);
                 return;
             }
@@ -1214,12 +1448,11 @@
             if (opts.google !== false && socialEl && socialEl.dataset.enabled) {
                 const g = document.createElement('button');
                 g.type = 'button';
-                g.className = 'secondary';
+                g.className = 'secondary auth-help-google';
                 g.textContent = 'Continue with Google';
-                g.addEventListener('click', () => {
-                    setStatus('info', 'Redirecting…');
-                    NorvaAuth.signInWithOAuth('google', `${location.origin}/account.html?returnTo=${encodeURIComponent(returnTo)}`);
-                });
+                g.disabled = socialAuthStarting;
+                g.setAttribute('aria-busy', socialAuthStarting ? 'true' : 'false');
+                g.addEventListener('click', () => startSocialAuth('google'));
                 wrap.appendChild(g);
             }
             if (opts.magic !== false && !isNativeApp) {
@@ -1262,7 +1495,15 @@
             setStatus('info', 'Sending your secure link…');
             // createUser:true for sign-up (the link provisions the account); false for
             // sign-in. Stay neutral on the result for anti-enumeration.
-            try { await NorvaAuth.signInWithOtp(email, undefined, { createUser: opts.createUser === true }); } catch (_) { /* neutral */ }
+            const attribution = opts.signup
+                ? await buildSignupAttribution('email_magic_link', false)
+                : null;
+            try {
+                await NorvaAuth.signInWithOtp(email, authEmailRedirectUrl(), {
+                    createUser: opts.createUser === true,
+                    data: attribution ? signupMetadata(attribution) : undefined
+                });
+            } catch (_) { /* neutral */ }
             setStatus('success', opts.signup
                 ? 'Check your email for a secure link to finish creating your account.'
                 : 'If that email has a Norva account, we sent a sign-in link. Check your inbox.');
@@ -1275,7 +1516,13 @@
                 const url = new URL(value, location.origin);
                 if (url.origin !== location.origin) return '';
                 const target = `${url.pathname}${url.search}${url.hash}`;
-        return url.pathname === '/cloud.html' ? '/app#home' : target;
+                if (url.pathname === '/cloud.html') {
+                    const pair = (url.searchParams.get('pair') || '').toUpperCase();
+                    return /^[A-HJ-NP-Z2-9]{6}$/.test(pair)
+                        ? `/cloud.html?pair=${encodeURIComponent(pair)}`
+                        : '/app#home';
+                }
+                return target;
             } catch (_) {
                 return '';
             }

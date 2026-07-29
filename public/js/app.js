@@ -1682,9 +1682,10 @@ class App {
         logoutLink.href = '#';
         logoutLink.className = 'nav-link';
         logoutLink.id = 'logout-btn';
+        logoutLink.setAttribute('aria-label', 'Log out');
         logoutLink.innerHTML = `
-            <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-logout.svg" alt=""></span>
-            <span>Logout</span>
+            <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""></span>
+            <span>Log out</span>
         `;
 
         logoutLink.addEventListener('click', async (e) => {
@@ -2296,10 +2297,10 @@ class App {
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="settings">
-                    <img class="account-ic" src="/img/icons/norva-settings.svg" alt=""><span>Settings</span>
+                    <img class="account-ic" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt=""><span>Settings</span>
                 </button>
                 <button type="button" class="account-row account-row-danger" data-act="logout">
-                    <img class="account-ic" src="/img/icons/norva-logout.svg" alt=""><span>Log out</span>
+                    <img class="account-ic" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""><span>Log out</span>
                 </button>
             </div>`;
         // Tapping the dimmed backdrop (not the panel) closes the sheet.
@@ -3146,7 +3147,14 @@ class App {
 
         // Update nav
         document.querySelectorAll('.nav-link').forEach(link => {
-            link.classList.toggle('active', link.dataset.page === pageName);
+            const isCurrent = Boolean(link.dataset.page)
+                && link.dataset.page === pageName;
+            link.classList.toggle('active', isCurrent);
+            if (isCurrent) {
+                link.setAttribute('aria-current', 'page');
+            } else {
+                link.removeAttribute('aria-current');
+            }
         });
 
         // Update pages
@@ -3276,7 +3284,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=88';
+                s.src = '/js/pages/AdminPage.js?v=89';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

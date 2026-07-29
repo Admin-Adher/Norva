@@ -397,6 +397,8 @@ h4 {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  min-width: 48px;
+  min-height: 48px;
   padding: var(--space-sm) var(--space-md);
   color: var(--color-text-secondary);
   text-decoration: none;
@@ -8340,17 +8342,25 @@ kbd {
 }
 
 .nav-link .norva-ui-icon {
-  width: 1.65em;
-  height: 1.65em;
-  opacity: 0.78;
-  transition: opacity var(--transition-fast), filter var(--transition-fast), transform var(--transition-fast);
+  width: 26px;
+  height: 26px;
+  opacity: 0.9;
+  filter: none;
+  transform: none;
+  transition: opacity var(--transition-fast), filter var(--transition-fast);
 }
 
-.nav-link:hover .norva-ui-icon,
-.nav-link.active .norva-ui-icon {
+html:not(.tv-mode) .nav-link:hover .norva-ui-icon,
+html:not(.tv-mode) .nav-link:focus-visible .norva-ui-icon,
+html:not(.tv-mode) .nav-link.active .norva-ui-icon {
   opacity: 1;
-  filter: drop-shadow(0 0 12px rgba(91, 147, 255, 0.52)) drop-shadow(0 0 18px rgba(203, 91, 255, 0.28));
-  transform: translateY(-1px);
+  filter: drop-shadow(0 0 4px var(--color-accent-dim));
+  transform: none;
+}
+
+html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
+  opacity: 1;
+  filter: none;
 }
 
 .btn .norva-ui-icon {

@@ -497,6 +497,11 @@ class AdminPage {
 #page-admin .users-pager span{color:var(--color-text-secondary,#9aa);font-size:13px;font-variant-numeric:tabular-nums;}
 #page-admin tr.user-row{cursor:pointer;}
 #page-admin tr.user-row:hover{background:#ffffff0d;}
+#page-admin .signup-origin{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:178px;white-space:normal;line-height:1.35;}
+#page-admin .signup-origin-main{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--adm-tx);font-weight:600;}
+#page-admin .signup-origin-loc{font-size:11.5px;color:var(--adm-tx2);}
+#page-admin .signup-origin-note{font-size:10.5px;color:var(--adm-tx3);}
+#page-admin .acq-note{margin-top:11px;padding:9px 11px;border-radius:10px;background:rgba(91,124,250,.08);border:1px solid rgba(91,124,250,.16);color:var(--adm-tx2);font-size:11.5px;line-height:1.5;}
 #page-admin .crm-back{display:inline-flex;align-items:center;gap:7px;background:none;border:0;color:#a9bcff;cursor:pointer;font-size:13px;padding:0;margin-bottom:12px;transition:color .12s ease;}
 #page-admin .crm-back::before{content:"";width:9px;height:9px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .12s ease;}
 #page-admin .crm-back:hover{color:#cfd9ff;}
@@ -3163,7 +3168,7 @@ class AdminPage {
                   <option value="expired">Expirés</option>
                   <option value="free">Sans abonnement</option>
                 </select>
-                <select id="admin-users-country" title="Pays du client (storefront Play ou pays d'émission de la carte)"><option value="">Tous les pays</option><option value="??">Pays inconnu</option></select>
+                <select id="admin-users-country" title="Pays de paiement (storefront Play ou pays d'émission de la carte)"><option value="">Tous les pays de paiement</option><option value="??">Pays paiement inconnu</option></select>
                 <select id="admin-users-tag"><option value="">Tous les segments</option></select>
                 <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ Exporter CSV</button>
               </div>
@@ -3327,10 +3332,30 @@ class AdminPage {
             }
             if (seq !== this._usersSeq) return; // superseded by a newer load
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
+            let attributionError = null;
+            if (rows.length) {
+                let attribution = [];
+                try {
+                    attribution = await this._rpc('admin_signup_attribution_batch', {
+                        p_user_ids: rows.map(row => row.user_id)
+                    });
+                } catch (error) {
+                    attributionError = error;
+                }
+                if (seq !== this._usersSeq) return;
+                const byUser = new Map((Array.isArray(attribution) ? attribution : [])
+                    .map(row => [row.user_id, row]));
+                rows.forEach(row => {
+                    row.signup_attribution = attributionError
+                        ? { capture_stage: 'unavailable' }
+                        : (byUser.get(row.user_id) || null);
+                });
+            }
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
             if (res && Array.isArray(res.countries)) { this._countries = res.countries; this._fillCountryOptions(document.getElementById('admin-users-country')); }
-            this._renderUsers(rows);
+            this._renderUsers(rows, attributionError);
+            document.getElementById('admin-users-attribution-retry')?.addEventListener('click', () => this._loadUsers());
             this._renderBulkBar();
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
@@ -3364,9 +3389,9 @@ class AdminPage {
             const s = String(cc || '').toUpperCase();
             return /^[A-Z]{2}$/.test(s) ? String.fromCodePoint(...[...s].map(c => 0x1F1A5 + c.charCodeAt(0))) + ' ' + s : s;
         };
-        sel.innerHTML = '<option value="">Tous les pays</option>' +
+        sel.innerHTML = '<option value="">Tous les pays de paiement</option>' +
             list.map(c => `<option value="${AdminPage.esc(c.country_code)}">${AdminPage.esc(flagTxt(c.country_code))} (${AdminPage.n(c.n)})</option>`).join('') +
-            '<option value="??">Pays inconnu</option>';
+            '<option value="??">Pays paiement inconnu</option>';
         sel.value = cur;
         // A stale saved filter (country no longer present) must not silently stick.
         if (sel.value !== cur) { sel.value = ''; this._users.country = ''; }
@@ -3379,11 +3404,11 @@ class AdminPage {
             c.classList.toggle('active', (c.dataset.billing || '') === cur));
     }
 
-    _renderUsers(rows) {
+    _renderUsers(rows, attributionError = null) {
         const el = document.getElementById('admin-users');
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
-        const head = `<tr><th>Email</th><th>Abonnement</th><th>Pays</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
+        const head = `<tr><th>Email</th><th>Abonnement</th><th>Pays paiement</th><th>Inscription</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
         const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
@@ -3401,6 +3426,7 @@ class AdminPage {
                 <td>${AdminPage.esc(r.email || '—')}${driver}${internal}${banned}</td>
                 <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
                 <td${ccTip ? ` title="${AdminPage.esc(ccTip)}"` : ''}>${AdminPage.flag(r.country_code)}</td>
+                <td>${AdminPage.signupOriginHtml(r.signup_attribution)}</td>
                 <td>${role}</td>
                 <td>${tags}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -3409,7 +3435,10 @@ class AdminPage {
                 <td>${conf}</td>
             </tr>`;
         }).join('');
-        el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+        const warning = attributionError
+            ? `<div class="admin-err" role="alert">Les données d’inscription sont momentanément indisponibles. Les autres colonnes restent fiables. <button class="mini-btn" id="admin-users-attribution-retry" type="button">Réessayer</button></div>`
+            : '';
+        el.innerHTML = `${warning}<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
     // Bulk segment actions — only shown when a segment filter is active. Applies to EVERY client
@@ -3480,6 +3509,14 @@ class AdminPage {
                 });
             }
             const list = Array.isArray(rows) ? rows : [];
+            const attribution = list.length
+                ? await this._rpc('admin_signup_attribution_batch', {
+                    p_user_ids: list.map(row => row.user_id)
+                })
+                : [];
+            const acquisitionByUser = new Map((Array.isArray(attribution) ? attribution : [])
+                .map(row => [row.user_id, row]));
+            list.forEach(row => { row.signup_attribution = acquisitionByUser.get(row.user_id) || null; });
             // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
             // A leading =/+/-/@ is neutralized with a single quote so Excel/Sheets can't evaluate
             // an attacker-controlled email/tag as a formula.
@@ -3488,10 +3525,17 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'pays', 'source_pays', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
+            const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'pays_paiement', 'source_pays_paiement',
+                'app_inscription', 'parcours_inscription', 'methode_inscription', 'pays_inscription', 'region_inscription',
+                'source_localisation', 'integrite_attribution', 'etape_capture', 'role', 'suspendu', 'email_verifie',
+                'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
             const lines = [header.map(q).join(',')].concat(list.map(r => [
                 r.email, r.billing_status || 'free', r.plan_code || '', r.billing_period || '', r.amount_cents == null ? '' : r.amount_cents,
                 r.country_code || '', r.country_source || '',
+                r.signup_attribution?.signup_platform || '', r.signup_attribution?.signup_surface || '',
+                r.signup_attribution?.signup_method || '', r.signup_attribution?.country_code || '',
+                r.signup_attribution?.region_name || '', r.signup_attribution?.location_source || '',
+                r.signup_attribution?.attribution_integrity || '', r.signup_attribution?.capture_stage || '',
                 r.role, r.banned ? 'oui' : 'non', r.email_confirmed ? 'oui' : 'non',
                 r.created_at || '', r.last_sign_in_at || '', r.sources_count, r.tags || '', r.user_id
             ].map(q).join(',')));
@@ -3527,6 +3571,7 @@ class AdminPage {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
             if (this._crmUser !== userId) return; // navigated to another client mid-fetch
             this._renderFiche(d);
+            this._loadAcquisition(userId);   // signup app, journey and coarse edge location
             this._loadCrm(userId);         // relational panels (tags/notes/timeline), non-blocking
             this._loadBilling(userId);     // subscription & payments panel, non-blocking
             this._loadUserTickets(userId); // support tickets panel, non-blocking
@@ -3538,6 +3583,65 @@ class AdminPage {
     }
 
     // ── Fiche: subscription & payments panel (billing rail) ──
+    // Signup acquisition is intentionally separate from billing country and the
+    // user-selected catalogue region. It is coarse analytics only: Cloudflare edge
+    // country/region/city, with no raw IP retained.
+    async _loadAcquisition(userId) {
+        const el = document.getElementById('fiche-acquisition');
+        if (!el) return;
+        try {
+            const a = await this._rpc('admin_signup_attribution_detail', { p_user_id: userId });
+            if (this._crmUser !== userId || !el.isConnected) return;
+            if (!a || a.capture_stage === 'historical_backfill') {
+                this._setFicheChip('fs-origin', '🧭', 'Non capturé', 'Origine inscription', 'warn');
+                el.innerHTML = `<div class="ssub">Cette information n’existait pas encore au moment de cette inscription.</div>
+                    <div class="acq-note">Norva ne reconstruit pas l’origine depuis un appareil utilisé plus tard et ne transforme pas la langue ou la région de catalogue en localisation.</div>`;
+                return;
+            }
+            const pendingActive = a.capture_stage === 'pending'
+                && Date.now() - new Date(a.signed_up_at || 0).getTime() <= 24 * 60 * 60 * 1000;
+            if (a.capture_stage === 'pending' && !pendingActive) {
+                this._setFicheChip('fs-origin', '🧭', 'Non capturé', 'Origine inscription', 'warn');
+                el.innerHTML = `<div class="ssub">La fenêtre de capture s’est terminée sans contexte exploitable.</div>
+                    <div class="acq-note">L’origine reste inconnue : Norva ne la reconstruit pas depuis une connexion ou un appareil utilisé plus tard.</div>`;
+                return;
+            }
+
+            const platform = AdminPage.signupPlatformLabel(a.signup_platform);
+            const surface = AdminPage.signupSurfaceLabel(a.signup_surface);
+            const method = AdminPage.signupMethodLabel(a.signup_method);
+            const location = AdminPage.signupLocationText(a);
+            const row = (label, value) => `<div class="kv-row"><span class="kv-l">${AdminPage.esc(label)}</span><span class="kv-v">${value}</span></div>`;
+            const platformClass = a.signup_platform === 'mobile_android' ? 'green'
+                : a.signup_platform === 'web' ? 'blue' : 'gray';
+            const originSummary = a.signup_platform === 'mobile_android' ? 'Android mobile'
+                : a.signup_platform === 'web' ? 'Web' : 'Inconnu';
+            this._setFicheChip('fs-origin', '🧭', AdminPage.esc(originSummary), 'Origine inscription',
+                a.capture_stage === 'pending' ? 'warn' : 'ok');
+
+            let html = row('App d’inscription', `<span class="badge ${platformClass}">${AdminPage.esc(platform)}</span>`);
+            html += row('Parcours', `${AdminPage.esc(surface)}${a.signup_surface === 'tv_pairing' ? ' <span class="badge amber">écran compagnon</span>' : ''}`);
+            html += row('Méthode', AdminPage.esc(method));
+            html += row('Localisation réseau', location ? AdminPage.esc(location) : '<span class="ssub">Non disponible</span>');
+            if (location) html += row('Précision', AdminPage.esc(AdminPage.signupLocationPrecision(a)));
+            html += row('Fiabilité', a.attribution_integrity === 'client_handoff'
+                ? '<span class="badge amber">signal analytique indicatif</span>'
+                : '<span class="badge gray">non qualifiée</span>');
+            if (a.captured_at) {
+                html += row('Capturé le', AdminPage.esc(new Date(a.captured_at).toLocaleString('fr-FR')));
+            }
+            html += `<div class="acq-note">${a.location_source === 'cloudflare_edge'
+                ? 'Estimation réseau approximative fournie par Cloudflare puis transmise par le client Norva. Elle n’est pas attestée comme une preuve. Aucune adresse IP brute n’est conservée ; ville et région sont masquées à 90 jours puis purgées sous 15 minutes.'
+                : 'Aucune localisation réseau exploitable n’a été reçue.'}
+                Ces données ne sont utilisées ni pour les droits, ni pour la facturation, ni comme preuve de résidence ou fiscale.</div>`;
+            el.innerHTML = html;
+        } catch (e) {
+            if (this._crmUser !== userId || !el.isConnected) return;
+            el.innerHTML = '<div class="ssub">Attribution d’inscription indisponible.</div>';
+            this._setFicheChip('fs-origin', '🧭', '—', 'Origine inscription', 'warn');
+        }
+    }
+
     async _loadBilling(userId) {
         const el = document.getElementById('fiche-billing');
         if (!el) return;
@@ -3877,6 +3981,7 @@ class AdminPage {
         const chip = (id, ic, val, l, cls) => `<div class="cs-item ${cls || ''}"${id ? ` id="${id}"` : ''}><div class="cs-ic">${ic}</div><div class="cs-tx"><div class="cs-v">${val}</div><div class="cs-l">${l}</div></div></div>`;
         const summary = `<div class="cockpit-summary fiche-summary">
             ${chip('fs-sub', '💳', '<span class="ssub">…</span>', 'Abonnement', '')}
+            ${chip('fs-origin', '🧭', '<span class="ssub">…</span>', 'Origine inscription', '')}
             ${chip('', '🕐', AdminPage.esc(actAgo), 'Dernière activité', u.last_sign_in_at ? '' : 'warn')}
             ${chip('', '📡', AdminPage.n(srcTotal) + (srcBad ? ` <span class="pacct">· ${AdminPage.n(srcBad)} ⚠</span>` : ''), 'Sources', srcCls)}
             ${chip('fs-tickets', '🎫', '<span class="ssub">…</span>', 'Tickets ouverts', '')}
@@ -3934,6 +4039,7 @@ class AdminPage {
             ${summary}
             <div class="fiche-cols">
               <div class="fiche-col">
+                <div class="admin-block"><h2>🧭 Inscription & localisation</h2><div id="fiche-acquisition" class="card"><div class="ssub">Chargement…</div></div></div>
                 <div class="admin-block"><h2>💳 Abonnement & paiements</h2><div id="fiche-billing" class="card"><div class="ssub">Chargement…</div></div></div>
                 <div class="admin-block"><h2>🎫 Tickets support</h2><div id="fiche-tickets" class="card"><div class="ssub">Chargement…</div></div></div>
                 <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
@@ -5319,6 +5425,69 @@ class AdminPage {
         if (!/^[A-Z]{2}$/.test(s)) return '<span class="ssub">—</span>';
         const emoji = String.fromCodePoint(...[...s].map(c => 0x1F1A5 + c.charCodeAt(0)));
         return `${emoji} ${s}`;
+    }
+    static signupPlatformLabel(value) {
+        return ({ web: 'Navigateur web', mobile_android: 'App Android mobile' }[value] || 'Origine inconnue');
+    }
+    static signupSurfaceLabel(value) {
+        return ({
+            account: 'Compte',
+            subscription: 'Abonnement',
+            tv_pairing: 'Pairing TV'
+        }[value] || 'Parcours inconnu');
+    }
+    static signupMethodLabel(value) {
+        return ({
+            email_password: 'Email + mot de passe',
+            email_magic_link: 'Lien sécurisé par email',
+            google: 'Google'
+        }[value] || 'Méthode inconnue');
+    }
+    static signupLocationText(attribution) {
+        const a = attribution || {};
+        const cc = String(a.country_code || '').toUpperCase();
+        let country = '';
+        if (/^[A-Z]{2}$/.test(cc)) {
+            const emoji = String.fromCodePoint(...[...cc].map(c => 0x1F1A5 + c.charCodeAt(0)));
+            let name = cc;
+            try { name = new Intl.DisplayNames(['fr'], { type: 'region' }).of(cc) || cc; } catch (_) { /* ISO fallback */ }
+            country = `${emoji} ${name}`;
+        }
+        const parts = [a.city, a.region_name, country].map(v => String(v || '').trim()).filter(Boolean);
+        return [...new Set(parts)].join(' · ');
+    }
+    static signupLocationPrecision(attribution) {
+        const a = attribution || {};
+        if (a.city) return 'Ville indicative · précision faible';
+        if (a.region_name || a.region_code) return 'Région indicative';
+        if (a.country_code) return 'Pays indicatif';
+        return 'Non disponible';
+    }
+    static signupOriginHtml(attribution) {
+        const a = attribution || {};
+        if (a.capture_stage === 'unavailable') {
+            return '<div class="signup-origin"><span class="badge red">Indisponible</span><span class="signup-origin-note">Réessayer le chargement</span></div>';
+        }
+        const historical = a.capture_stage === 'historical_backfill';
+        if (historical) {
+            return '<div class="signup-origin"><span class="badge gray">Non capturé</span><span class="signup-origin-note">Compte antérieur au suivi</span></div>';
+        }
+        const pending = a.capture_stage === 'pending';
+        const pendingActive = pending
+            && Date.now() - new Date(a.signed_up_at || 0).getTime() <= 24 * 60 * 60 * 1000;
+        if (pending && !pendingActive) {
+            return '<div class="signup-origin"><span class="badge gray">Non capturé</span><span class="signup-origin-note">Fenêtre de capture terminée</span></div>';
+        }
+        const platform = AdminPage.signupPlatformLabel(a.signup_platform);
+        const platformClass = a.signup_platform === 'mobile_android' ? 'green'
+            : a.signup_platform === 'web' ? 'blue' : 'gray';
+        const location = AdminPage.signupLocationText(a);
+        const surface = AdminPage.signupSurfaceLabel(a.signup_surface);
+        return `<div class="signup-origin">
+            <div class="signup-origin-main"><span class="badge ${platformClass}">${AdminPage.esc(platform)}</span>${a.signup_surface === 'tv_pairing' ? '<span class="badge amber">Pairing TV</span>' : ''}</div>
+            ${location ? `<div class="signup-origin-loc">${AdminPage.esc(location)}</div>` : `<div class="signup-origin-loc">${pendingActive ? 'Capture en attente' : 'Localisation non disponible'}</div>`}
+            <div class="signup-origin-note">${AdminPage.esc(surface)}${a.location_source === 'cloudflare_edge' ? ' · réseau indicatif' : ''}</div>
+        </div>`;
     }
     // Deterministic decorative provider icon (varies by name, like the mockup).
     static provIcon(name) {

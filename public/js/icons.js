@@ -4,7 +4,7 @@
  */
 
 const norvaIcon = (name, extraClass = '') =>
-    `<img src="/img/icons/norva-${name}.svg" alt="" class="icon norva-ui-icon${extraClass ? ` ${extraClass}` : ''}">`;
+    `<img src="/img/icons/norva-${name}.svg?v=sharp-core-1" alt="" class="icon norva-ui-icon${extraClass ? ` ${extraClass}` : ''}">`;
 
 const Icons = {
     home: norvaIcon('home'),
