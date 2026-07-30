@@ -6,17 +6,69 @@
 -- is fail-closed: schema drift aborts the migration instead of silently leaving
 -- an unsafe body installed.
 
--- `norva_backfill_media_identity` creates and consumes a session-local temp
--- table. plpgsql_check explicitly cannot validate that pattern; exempt only
--- this exact routine while keeping its runtime implementation unchanged.
-alter function public.norva_backfill_media_identity(uuid, integer)
-  set plpgsql.enable_check = false;
+-- plpgsql_check cannot infer the row type of a table created at runtime. Its
+-- documented safe pattern is a permanently empty, DML-blocked template with
+-- the same row type; pg_temp still has precedence during real executions.
+create table if not exists public._dp_upd (
+  user_id uuid,
+  item_type text,
+  new_key text,
+  old_key text
+);
+
+alter table public._dp_upd enable row level security;
+revoke all on table public._dp_upd
+  from public, anon, authenticated, service_role;
+
+create or replace function public.norva_reject_lint_template_dml()
+returns trigger
+language plpgsql
+volatile
+set search_path = pg_catalog
+as $function$
+begin
+  raise exception 'lint template tables do not accept data'
+    using errcode = '55000';
+end
+$function$;
+
+drop trigger if exists norva_reject_lint_template_dml on public._dp_upd;
+create trigger norva_reject_lint_template_dml
+before insert or update or delete or truncate on public._dp_upd
+for each statement execute function public.norva_reject_lint_template_dml();
+
+revoke all on function public.norva_reject_lint_template_dml()
+  from public, anon, authenticated, service_role;
+
+comment on table public._dp_upd is
+  'Always-empty row-type template for static analysis of the pg_temp table '
+  'created by norva_backfill_media_identity; all DML and client access denied.';
 
 do $migration$
 declare
   v_definition text;
   v_fixed text;
 begin
+  -- Schema-qualifying both cleanup statements ensures a privileged runtime can
+  -- never remove the permanent lint template before creating its temp table.
+  select pg_get_functiondef(
+    'public.norva_backfill_media_identity(uuid,integer)'::regprocedure
+  ) into v_definition;
+  v_fixed := replace(
+    v_definition,
+    'drop table if exists _dp_upd;',
+    'drop table if exists pg_temp._dp_upd;'
+  );
+  if v_fixed = v_definition
+     or (
+       length(v_definition)
+       - length(replace(v_definition, 'drop table if exists _dp_upd;', ''))
+     ) / length('drop table if exists _dp_upd;') <> 2
+     or strpos(v_fixed, 'drop table if exists _dp_upd;') > 0 then
+    raise exception 'norva_backfill_media_identity cleanup definition drifted';
+  end if;
+  execute v_fixed;
+
   -- PostgreSQL cannot plan FULL JOIN with IS NOT DISTINCT FROM. Country codes
   -- are either ISO codes or NULL, so an empty-string sentinel makes both
   -- predicates hash-joinable without changing NULL grouping semantics.

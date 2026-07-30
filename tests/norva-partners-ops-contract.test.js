@@ -32,18 +32,23 @@ test('every Supabase migration has a unique version identifier', () => {
   );
 });
 
-test('SQL lint exception is limited to the runtime temp-table routine', () => {
+test('SQL lint temp-table template is empty, DML-blocked and private', () => {
   const migration = read(
     'supabase/migrations/20260730084500_sql_lint_runtime_fixes.sql',
   );
-  const exemptions = migration.match(/set\s+plpgsql\.enable_check\s*=\s*false/gi) || [];
 
-  assert.equal(exemptions.length, 1);
+  assert.doesNotMatch(migration, /plpgsql\.enable_check/i);
+  assert.match(migration, /create table if not exists public\._dp_upd/);
+  assert.match(migration, /alter table public\._dp_upd enable row level security/);
+  assert.match(migration, /revoke all on table public\._dp_upd[\s\S]*service_role/);
   assert.match(
     migration,
-    /alter function public\.norva_backfill_media_identity\(uuid,\s*integer\)[\s\S]*set plpgsql\.enable_check = false/,
+    /before insert or update or delete or truncate on public\._dp_upd/,
   );
-  assert.doesNotMatch(migration, /execute \$dedup\$|pg_temp\._dp_upd/);
+  assert.match(
+    migration,
+    /replace\([\s\S]*'drop table if exists _dp_upd;'[\s\S]*'drop table if exists pg_temp\._dp_upd;'/,
+  );
 });
 
 test('every logical application backup includes the private Partners schema and data', () => {
@@ -70,7 +75,15 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   const verifier = read('ops/hetzner/backup/verify-partners-restore.sql');
 
   assert.match(migrationRestore, /PARTNERS_VERIFY=.*verify-partners-restore\.sql/);
-  assert.match(migrationRestore, /psql "\$TARGET" -v ON_ERROR_STOP=1 -f "\$PARTNERS_VERIFY"/);
+  assert.match(
+    migrationRestore,
+    /psql "\$\{PSQL_TARGET\[@\]\}" -v ON_ERROR_STOP=1 -f "\$PARTNERS_VERIFY"/,
+  );
+  assert.match(
+    migrationRestore,
+    /PSQL_TARGET=\([\s\S]*-h 127\.0\.0\.1[\s\S]*-U postgres/,
+  );
+  assert.doesNotMatch(migrationRestore, /postgresql:\/\/postgres:\$\{POSTGRES_PASSWORD\}/);
   assert.match(disasterRestore, /affiliate_private\.affiliate_accounts/);
   assert.match(disasterRestore, /affiliate_private\.affiliate_events/);
   assert.match(disasterRestore, /verify-partners-restore\.sql/);
