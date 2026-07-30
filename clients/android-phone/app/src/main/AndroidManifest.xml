@@ -65,6 +65,16 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="norva.tv" android:pathPrefix="/t/" />
             </intent-filter>
+            <!-- Norva Partners referral links stay on the trusted Norva origin.
+                 MainActivity loads the canonical /r/{opaque-code} URL in the
+                 cloud WebView so its server-side HttpOnly attribution cookie
+                 survives native Google sign-in and the following auth route. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="norva.tv" android:pathPrefix="/r/" />
+            </intent-filter>
 
         </activity>
 

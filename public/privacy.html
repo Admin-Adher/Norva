@@ -66,6 +66,9 @@
       <tr><td>Devices &amp; pairing</td><td>Trusted-device records, device tokens, pairing codes</td><td>Let your TV and phone share one account and sync playback</td></tr>
       <tr><td>Sign-up context</td><td>Whether sign-up was completed in a web browser or the Android mobile app, the Norva journey used (account, subscription or TV pairing), sign-in method, and an approximate country/region/city supplied by Cloudflare at the network edge and handed on by the Norva client. This is an indicative analytics signal, not proof of residence. Norva does not retain the raw IP address in this record.</td><td>Understand onboarding, provide support and improve the multi-device experience</td></tr>
       <tr><td>Entitlement / subscription</td><td>Subscription status and the store/provider that granted it (e.g. Google Play, Apple, Stripe)</td><td>Verify Norva access; we do <em>not</em> store card numbers</td></tr>
+      <tr id="partners"><td>Norva Partners</td><td>Partner account status, opaque referral code and claim, pseudonymized attribution, accepted programme terms, and the minimum normalized identity result needed to confirm age, country and legal capacity. Norva does not store identity-document images, biometric captures or the full KYC provider response.</td><td>Operate the individual referral programme, prevent abuse and meet eligibility obligations</td></tr>
+      <tr><td>Partner finance &amp; payout</td><td>Hashed transaction references, exact normalized amount paid, tax, currency/exponent, commission and reversal ledger, payout status, tax profile fields required for the applicable country, and tokenized payout-provider references. The Partners ledger does not retain a raw Google Play purchase token, buyer address, full provider payload, bank credentials or card number.</td><td>Calculate, mature, reconcile and pay valid individual commissions; handle refunds, chargebacks, tax and accounting duties</td></tr>
+      <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
       <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
       <tr><td>Analytics &amp; advertising (web, with consent)</td><td>Cookies and identifiers set by Google Analytics, Google Ads and Meta Pixel when you accept them</td><td>Measure how the Service is used and how our ads perform</td></tr>
       <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
@@ -77,6 +80,7 @@
       <li>To connect the Service to the compatible source you choose to add.</li>
       <li>To sync playback progress, history and preferences across your devices.</li>
       <li>To verify your Norva access/subscription status.</li>
+      <li>When you choose to join Norva Partners, to verify individual eligibility, attribute valid referrals, calculate and reconcile commissions, prevent fraud and administer payouts.</li>
       <li>To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
       <li>To diagnose problems and improve reliability.</li>
       <li>With your consent, to measure audience and the performance of our advertising (web app only).</li>
@@ -114,6 +118,7 @@
     <ul>
       <li><strong>Supabase</strong> — authentication and cloud database hosting.</li>
       <li><strong>Cloudflare</strong> — web hosting and content delivery.</li>
+      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification for Norva Partners, only when that programme and provider are enabled for your jurisdiction. Didit receives the information and captures needed to perform the verification under its own hosted flow. Norva retains only the minimum normalized outcome and provider reference needed for audit and does not copy identity-document images or biometric captures into the Norva database.</li>
       <li><strong>Telegram</strong> — delivery of operational new-sign-up notifications to a
         restricted administrator chat. These notifications may include a display name, masked email,
         sign-in method, whether sign-up used the web browser or Android mobile app, the Norva journey
@@ -123,13 +128,22 @@
         screenshots or manual copying and does not delete a delivered message.</li>
       <li><strong>Google</strong> (Analytics, Ads) and <strong>Meta</strong> (Pixel) — audience
         measurement and advertising performance on the web app, only after you consent (see section 3).</li>
-      <li><strong>Payment/store providers</strong> (e.g. Google Play, Apple, Stripe) — to confirm
-        your subscription entitlement. Payments are handled by them, not by Norva.</li>
+      <li><strong>Google Play</strong> — Android subscription entitlement and, only for an
+        attributed Partners account, the Orders API fields needed to record the exact paid total,
+        tax, currency and refund state. Norva hashes transaction references and does not copy the
+        raw purchase token or buyer address into the Partners ledger.</li>
+      <li><strong>RevenueCat</strong> — delivery and normalization of subscription lifecycle
+        events used to maintain entitlement and initiate server-side financial reconciliation.</li>
+      <li><strong>Revolut</strong> — web subscription checkout and authoritative settled,
+        refund and chargeback events where that payment rail is used.</li>
       <li>Your <strong>media source</strong> — when you ask the Service to connect, requests are made
         to the host you configured. You are responsible for that source and its terms.</li>
     </ul>
     <p>We may disclose information if required by law or to protect the rights, safety and security
       of users and the Service.</p>
+    <p>No individual payout provider is enabled for the Partners pilot yet. Before one is enabled,
+      this policy and the applicable Partners Terms will identify the provider, data categories,
+      transfer safeguards and retention needed for onboarding and payment.</p>
 
     <h2>5. Data retention</h2>
     <p>We keep account and usage data while your account is active. When you delete your account (see
@@ -145,6 +159,13 @@
       Telegram-side retention depends on that chat's settings. Norva recommends a short automatic
       deletion period and restricted chat membership, but does not claim that a delivered message
       is erased by the account-deletion flow.</p>
+    <p>Partners referral claims expire if they are not consumed within the published attribution
+      window. Attribution, commission, reversal and payout records may be retained for the period
+      required by tax, accounting, anti-fraud and dispute-resolution law even after a Norva account
+      is closed. KYC provider references and normalized outcomes are retained only for as long as
+      necessary for those obligations. Identity-document images and biometric captures are not
+      copied into Norva's database; deletion inside the hosted verification provider follows the
+      configured provider retention policy and applicable legal holds.</p>
 
     <h2>6. Your rights &amp; deleting your account</h2>
     <p>You can access or update your information in the app, and you can request deletion of your
@@ -185,6 +206,7 @@
 
     <footer>
       <a href="/terms.html">Terms of Service</a>
+      <a href="/partners-terms.html">Partners Terms</a>
       <a href="/mentions-legales.html">Legal notice</a>
       <a href="/delete-account.html">Delete account</a>
       <a href="/">Home</a>

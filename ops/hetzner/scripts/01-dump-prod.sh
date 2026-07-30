@@ -55,16 +55,17 @@ pg_dumpall --dbname="$MANAGED_DB_URL" --globals-only --no-role-passwords \
 # 2) Schema only (tables, RLS policies, functions, triggers, views, indexes).
 #    Exclude Supabase-managed internal schemas that the self-host stack recreates
 #    itself (auth/storage/realtime/vault/cron are provided by the images/extensions).
-echo "   [2/3] schema (public + app schemas)"
+echo "   [2/3] schema (public + affiliate_private)"
 pg_dump --dbname="$MANAGED_DB_URL" --schema-only --no-owner --no-privileges \
   --schema='public' \
+  --schema='affiliate_private' \
   --file="$OUT/01-schema.sql"
 
-# 3) Data only for public schema (the catalogue, users' cloud_* rows, etc.).
+# 3) Data only for application schemas (including the private Partners ledger).
 #    --disable-triggers so FK/trigger order doesn't block the restore.
-echo "   [3/3] data (public schema)"
+echo "   [3/3] data (public + affiliate_private)"
 pg_dump --dbname="$MANAGED_DB_URL" --data-only --no-owner --no-privileges \
-  --schema='public' --disable-triggers \
+  --schema='public' --schema='affiliate_private' --disable-triggers \
   --file="$OUT/02-data.sql"
 
 # 4) Reference exports — current cron jobs + extensions.

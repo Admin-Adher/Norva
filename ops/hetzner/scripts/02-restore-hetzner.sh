@@ -43,14 +43,22 @@ SQL
 echo ">> 1) globals (roles + role GUCs). Non-fatal if some roles already exist."
 psql "$TARGET" -f "$DUMP/00-globals.sql" || echo "   (some globals pre-existed — OK)"
 
-echo ">> 2) schema (public)"
+echo ">> 2) schema (public + affiliate_private)"
 psql "$TARGET" -v ON_ERROR_STOP=1 -f "$DUMP/01-schema.sql"
 
-echo ">> 3) data (public) — this is the big one (~5 GB); grab a coffee"
+echo ">> 3) data (public + affiliate_private) — this is the big one (~5 GB); grab a coffee"
 psql "$TARGET" -v ON_ERROR_STOP=1 -f "$DUMP/02-data.sql"
 
 echo ">> 4) ANALYZE so the planner has fresh stats before traffic"
 psql "$TARGET" -c "vacuum analyze;"
+
+echo ">> 5) Partners private-schema parity"
+PARTNERS_VERIFY="$HERE/backup/verify-partners-restore.sql"
+[[ -f "$PARTNERS_VERIFY" ]] || {
+  echo "ERROR: $PARTNERS_VERIFY missing" >&2
+  exit 1
+}
+psql "$TARGET" -v ON_ERROR_STOP=1 -f "$PARTNERS_VERIFY"
 
 echo ">> Restore complete."
 echo "NEXT: psql \"$TARGET\" -f scripts/03-recreate-cron-guc.sql  (GUCs, vault, crons)"

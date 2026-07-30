@@ -1,0 +1,52 @@
+name: Offsite DB backup to R2
+
+on:
+  schedule:
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offsite-db-backup-r2
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Read-only logical backup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Install PostgreSQL 17, age and AWS CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            age \
+            awscli \
+            ca-certificates \
+            curl \
+            postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install --yes postgresql-client-17
+          pg_dump --version
+          aws --version
+          age --version
+
+      - name: Create and upload the snapshot
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          BACKUP_AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_RECIPIENT }}
+          BACKUP_ENCRYPTION_REQUIRED: 'true'
+          R2_PREFIX: db
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: bash ops/backup/backup-to-r2.sh

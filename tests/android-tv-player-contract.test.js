@@ -872,7 +872,11 @@ test('Android TV uses a localized Norva exit sheet with a closed D-pad focus loo
   assert.match(close, /returnFocus\.requestFocus\(\)/);
   assert.match(keys, /KEYCODE_BACK[\s\S]{0,180}closeExitDialog\(true\)/);
   assert.match(keys, /KEYCODE_DPAD_LEFT[\s\S]{0,180}KEYCODE_DPAD_RIGHT/);
-  assert.match(keys, /%\s*exitActions\.getChildCount\(\)/);
+  assert.match(
+    keys,
+    /PartnersTvContract\.nextHorizontalIndex\([\s\S]{0,160}exitActions\.getChildCount\(\)[\s\S]{0,80}delta\)/,
+    'the modal must use the unit-tested circular focus helper',
+  );
   assert.match(keys, /KEYCODE_DPAD_CENTER[\s\S]{0,220}performClick\(\)/);
   assert.match(
     dispatch,

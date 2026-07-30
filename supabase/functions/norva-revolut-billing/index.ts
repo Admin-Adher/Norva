@@ -31,6 +31,11 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { latestPaywallAttribution, type PaywallAttribution } from "../_shared/paywall-experiments.ts";
 import { renderReceipt } from "../_shared/lifecycle-email.ts";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
+import {
+  ingestPartnerFinancialFact,
+  revolutEnvironment,
+  revolutPartnerObservation,
+} from "../_shared/partners-finance.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -38,6 +43,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
 const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
+const PARTNERS_ENVIRONMENT = revolutEnvironment(REVOLUT_API_BASE);
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
 const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
@@ -1122,6 +1128,21 @@ async function chargeUser(
         commercial_terms_source: "revolut_billing_mapping",
       }, { onConflict: "pi_id", ignoreDuplicates: true });
       if (ledgerError) throw new Error(`billing_ledger_write_failed:${ledgerError.message}`);
+      if (!result.orderId) throw new Error("captured_payment_missing_order_id");
+      const partnersObservation = revolutPartnerObservation({
+        order: {
+          id: result.orderId,
+          state: "COMPLETED",
+          amount: billedAmount,
+          currency: "USD",
+          updated_at: new Date().toISOString(),
+        },
+        referredUserId: row.user_id,
+        kind,
+        environment: PARTNERS_ENVIRONMENT,
+      });
+      if (!partnersObservation) throw new Error("captured_payment_missing_financial_observation");
+      await ingestPartnerFinancialFact(db, partnersObservation);
       const applied = await applyBillingSuccess(db, identity.cycleKey, leaseToken, nextEnd);
       if (!applied.applied && !applied.alreadyApplied) throw new Error("billing_success_not_applied");
       if (applied.warning) reportBillingError(errors, row.user_id, identity.cycleKey, applied.warning);

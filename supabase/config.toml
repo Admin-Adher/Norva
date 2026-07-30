@@ -102,3 +102,38 @@ verify_jwt = false
 # secret, so the platform JWT gate must let both request classes reach it.
 [functions.norva-support]
 verify_jwt = false
+
+# Norva Partners member API (bootstrap, application, terms/activation, links
+# and dashboard). The gateway JWT check is disabled only so exact-allowlist
+# OPTIONS preflights can reach the handler. Every non-OPTIONS request
+# prevalidates the Supabase user JWT with verifyUserJwtLocally and confirms it
+# through GoTrue;
+# device/service tokens are never accepted by this user boundary.
+[functions.norva-partners]
+verify_jwt = false
+
+# Didit calls this endpoint without a Supabase JWT. The handler verifies the
+# exact raw-body HMAC and five-minute timestamp before accepting only the
+# configured KYC application's status.updated events.
+[functions.norva-partners-kyc-webhook]
+verify_jwt = false
+
+# Browser referral resolution is terminated by Cloudflare Pages. Only signed,
+# short-lived server-to-server requests from that boundary may reach this
+# service-role resolver; it is not a public anonymous API despite verify_jwt.
+[functions.norva-partners-referral]
+verify_jwt = false
+
+# Paired Android TV devices authenticate with the existing opaque nv_dev_
+# credential. The handler hashes it, requires a trusted non-revoked TV row and
+# exposes only relay availability/create/status. It cannot call KYC, finance
+# or attribution RPCs. User consumption stays on norva-partners.
+[functions.norva-partners-device]
+verify_jwt = false
+
+# Partners financial queue worker. pg_cron sends NORVA_CRON_SHARED_SECRET to
+# /cron/run; the function verifies it with norva_verify_cron_secret before any
+# lease. Monetary arithmetic, J+45 eligibility and immutable ledger writes stay
+# inside the database RPCs. No payout provider is called by this boundary.
+[functions.norva-partners-worker]
+verify_jwt = false

@@ -13,6 +13,14 @@
 >
 > _Créé : 2026-07-06._
 
+> **Statut supersédant — 2026-07-29.** Les deux fiches Norva sont publiques sur
+> Google Play et `https://norva.tv/.well-known/assetlinks.json` est déployé avec
+> les empreintes autorisées de `tv.norva.phone`. Les passages « à faire » qui
+> suivent décrivent le walkthrough historique du premier déploiement. Pour
+> l'état courant, utiliser `clients/PLAY_STORE_RELEASE_STATUS.md`. Le seul
+> contrôle App Links encore ouvert est un replay de `/r/{code}` depuis une
+> installation signée par Google Play.
+
 ---
 
 ## ⚠️ Correction importante vs les anciens docs — le rail WEB a changé
@@ -37,7 +45,7 @@ Le reste de `billing-setup.md` (entitlement `pro`, produits `norva_plus` /
 
 ---
 
-## Où on en est (2026-07-06)
+## Où on en est (snapshot historique du 2026-07-06)
 
 | Étape | État |
 |---|---|
@@ -45,8 +53,8 @@ Le reste de `billing-setup.md` (entitlement `pro`, produits `norva_plus` /
 | Keystore + secrets GitHub + build AAB signés | ✅ fait (run #3 vert) |
 | Pages légales (privacy / terms / delete-account) en ligne | ✅ |
 | E-mail de support `support@norva.tv` | ✅ |
-| **Créer les 2 apps + uploader les AAB** | ⏳ **à faire (toi, maintenant)** |
-| SHA-256 → `assetlinks.json` | ⏳ bloqué par l'upload |
+| **Créer les 2 apps + uploader les AAB** | ✅ fait depuis ce snapshot ; fiches publiques vérifiées le 2026-07-29 |
+| SHA-256 → `assetlinks.json` | ✅ publié et sans placeholder ; replay Play-signed `/r/{code}` restant |
 | Fiche magasin + classification + Data Safety | ⏳ à faire |
 | Abonnements Play + RevenueCat | ⏳ à faire |
 | Bascule prod (`NORVA_BILLING_MODE=revenuecat`) | ⏳ tout à la fin |
@@ -126,9 +134,10 @@ un versionCode ne se réutilise jamais).
   Configuration → Intégrité de l'app → Clé de signature de l'application → SHA-256**.
 - ⚠️ **La clé de SIGNATURE (générée par Google), PAS la clé d'upload.** Piège
   classique : le SHA-256 que `keytool -list` affiche est celui de l'upload → faux.
-- Remplace `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` → commit → push
-  → déploiement Cloudflare Pages. Les liens `norva.tv` ouvriront alors l'app sans
-  la boîte de dialogue Android.
+- État courant : les empreintes de signature autorisées sont déjà publiées. Pour
+  une nouvelle clé de signature, mettre à jour la liste, déployer, puis rejouer
+  le lien sur une installation distribuée par Google Play. Le certificat debug
+  local ne doit pas être ajouté pour faire passer un test de développement.
 
 ## 4. Fiche magasin — contenu prêt à coller (EN)
 
@@ -326,7 +335,8 @@ Ne **jamais** flipper avant que l'achat sandbox marche de bout en bout
 
 - [ ] App phone créée + AAB uploadé (Test interne) + **Play App Signing accepté**
 - [ ] App TV créée + **form factor Android TV** activé + AAB uploadé
-- [ ] SHA-256 (clé de **signature** Google) → `assetlinks.json` → commit + deploy
+- [x] SHA-256 (clé de **signature** Google) → `assetlinks.json` → deploy
+- [ ] Rejouer `/r/{code}` avec une installation signée et distribuée par Google Play
 - [ ] Fiche magasin phone (EN) : titre + short + full + icône + feature graphic + captures
 - [ ] Fiche magasin TV : bannière 1280×720 + captures TV 1920×1080
 - [ ] Classification du contenu (IARC) — « contenu internet non filtré » = **Oui**

@@ -3,7 +3,7 @@
 > Snapshot opérationnel daté. Le référentiel exhaustif est `clients/PLAY_STORE.md`.
 > Ce fichier dit **où on en est** et **quoi faire ensuite**, pas à pas.
 >
-> **Dernière mise à jour : 2026-07-03.**
+> **Dernière mise à jour : 2026-07-29.**
 
 ## Où on en est (résumé)
 
@@ -11,13 +11,15 @@
 |---|---|
 | 0. Compte Google Play Console developer | ✅ **obtenu** |
 | 1. Keystore + secrets + build des AAB signés | ✅ **fait** (build run #3 vert) |
-| 2. Créer les 2 apps + uploader les AAB (Test interne) | ⏳ à faire |
-| 3. Récupérer le SHA-256 (clé de signature Google) → `assetlinks.json` | ⏳ à faire (bloqué par l'étape 2) |
-| 4. Fiche magasin + Data Safety + assets | ⏳ à faire |
+| 2. Créer les 2 apps + publier leurs fiches | ✅ **fait** — les deux URLs Play répondent 200 |
+| 3. Publier les SHA-256 autorisés dans `assetlinks.json` | ✅ **fait** — fichier live valide le 2026-07-29 |
+| 4. Fiche magasin + Data Safety + assets | ✅ **publiées** — contenu Console à revalider à chaque release |
 
-**Dépendance en boucle importante** : le SHA-256 nécessaire à `assetlinks.json` n'existe
-qu'**après** avoir uploadé un premier AAB et activé Play App Signing. Ordre : **build → upload →
-récupérer l'empreinte → commit assetlinks → fiche magasin**.
+Les deux fiches publiques et `https://norva.tv/.well-known/assetlinks.json` ont été
+revérifiés le 29 juillet 2026. Le fichier live répond 200, cible uniquement
+`tv.norva.phone` et contient deux empreintes SHA-256 de forme valide. Ne jamais
+remplacer ces empreintes sans comparer la clé Play App Signing et la clé
+d'upload dans la Console.
 
 ---
 
@@ -67,34 +69,27 @@ récupérer l'empreinte → commit assetlinks → fiche magasin**.
 
 ---
 
-## 3. À FAIRE — Créer les apps + uploader (Play Console)
+## 3. FAIT — Apps et fiches Play
 
-1. **Créer l'app phone** : Play Console → *Créer une application* → nom `Norva`, langue FR,
-   Application, Gratuite → cocher les déclarations.
-2. **Uploader l'AAB phone** : dans l'app → *Tests → Tests internes → Créer une release* →
-   au 1er upload, **accepter Play App Signing** (« clé générée par Google ») → glisser
-   `Norva-AndroidPhone-release-aab` (9,3 Mo, package `tv.norva.phone`) → Enregistrer.
-3. **Créer l'app TV** (2ᵉ app, package `tv.norva.tv`) et uploader l'AAB TV (19,9 Mo) de la même
-   façon.
-4. Pas besoin de « publier » la release tout de suite : le simple **upload** suffit à faire
-   générer la clé de signature Google (nécessaire à l'étape suivante).
+Les fiches `tv.norva.phone` et `tv.norva.tv` répondent actuellement en HTTP 200
+sur Google Play. Pour chaque nouvelle release, incrémenter `versionCode`,
+uploader les AAB signés puis revalider les déclarations Store/Data Safety avant
+la mise en production.
 
 ---
 
-## 4. À FAIRE — `assetlinks.json` (empreinte SHA-256)
+## 4. FAIT — `assetlinks.json` (empreintes SHA-256)
 
 - Fichier : `public/.well-known/assetlinks.json`. Ne liste **que** `tv.norva.phone` — c'est la
-  seule app qui déclare des App Links https `norva.tv` (`autoVerify` sur `/app.html` et `/t/`).
+  seule app qui déclare des App Links https `norva.tv` (`autoVerify` sur `/app.html`, `/t/`
+  et `/r/`).
   La TV utilise le schéma custom `norva://open` → **aucune entrée nécessaire** pour elle.
-- Placeholder actuel à remplacer :
-  `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE`.
-- **La bonne empreinte** = la **clé de signature de l'application** générée par Google, pas la clé
-  d'upload. Play Console (app **phone**) → *Test et publication → Configuration → Intégrité de
-  l'application → Clé de signature de l'application → SHA-256*.
-- ⚠️ Ne PAS utiliser le SHA-256 de la clé d'upload (celui que `keytool -list` affiche) — c'est un
-  piège courant.
-- Une fois collé + commit + push → déploiement Cloudflare Pages → les liens `norva.tv` ouvrent
-  l'app sans confirmation Android.
+- Le fichier du dépôt et le fichier live contiennent deux empreintes SHA-256 de
+  forme valide. La valeur exacte reste volontairement dans le JSON, pas dans ce
+  document.
+- Le build debug de l'émulateur ne doit pas être déclaré sur le domaine public :
+  valider l'association finale avec une installation signée par Google Play,
+  puis `adb shell pm verify-app-links --re-verify tv.norva.phone`.
 
 ---
 

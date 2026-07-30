@@ -7,7 +7,8 @@
 
 > Deux couches, complémentaires :
 > 1. **Dump logique nightly → R2** (03:40 UTC) : `norva-selfhost-<stamp>.tar.gz`
->    (globals + public schéma/data + **auth** + storage + crons rejouables + manifest).
+>    (globals + `public` + `affiliate_private` schéma/data + **auth** + storage +
+>    crons rejouables + manifest).
 >    Simple, portable, restauration prouvée (c'est le format du cutover). RPO ≤ 24 h.
 > 2. **PITR** : archivage **WAL** (5 min max, `archive_timeout=300`) syncé sur R2
 >    + **base backup physique hebdo** (dimanche 04:10 UTC). RPO ≈ 5 min,

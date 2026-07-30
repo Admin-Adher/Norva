@@ -3,7 +3,7 @@
 # backup-to-r2.sh — offsite logical backup of the managed Supabase DB → Cloudflare R2
 # =============================================================================
 # Produces the SAME logical snapshot as ops/hetzner/scripts/01-dump-prod.sh
-# (globals + public schema + public data + reference exports), bundles it into a
+# (globals + public/affiliate_private schema and data + reference exports), bundles it into a
 # single compressed (optionally age-encrypted) archive, and uploads it to an R2
 # bucket via the S3-compatible API.
 #
@@ -33,6 +33,10 @@
 #   BACKUP_AGE_RECIPIENT   age public key (age1...). If set, the archive is
 #                          encrypted with age before upload (belt-and-suspenders
 #                          on top of R2's private-bucket access control).
+#   BACKUP_ENCRYPTION_REQUIRED
+#                          true/false (default false for legacy manual runs).
+#                          The scheduled workflow sets true and fails closed when
+#                          BACKUP_AGE_RECIPIENT is absent.
 #   BACKUP_STAMP           Override the timestamp used in the object key (for
 #                          reproducible runs / tests). Default: UTC now.
 #   PG_DUMP / PG_DUMPALL   Override the binaries (e.g. /usr/lib/postgresql/17/bin).
@@ -54,6 +58,18 @@ DB_URL="${SUPABASE_DB_URL:-${MANAGED_DB_URL:-}}"
 : "${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY}"
 : "${R2_BUCKET:?Set R2_BUCKET}"
 R2_PREFIX="${R2_PREFIX:-db}"
+BACKUP_ENCRYPTION_REQUIRED="${BACKUP_ENCRYPTION_REQUIRED:-false}"
+case "$BACKUP_ENCRYPTION_REQUIRED" in
+  true|false) ;;
+  *)
+    echo "ERROR: BACKUP_ENCRYPTION_REQUIRED must be true or false" >&2
+    exit 1
+    ;;
+esac
+if [[ "$BACKUP_ENCRYPTION_REQUIRED" == "true" && -z "${BACKUP_AGE_RECIPIENT:-}" ]]; then
+  echo "ERROR: BACKUP_AGE_RECIPIENT is required for this backup" >&2
+  exit 1
+fi
 
 STAMP="${BACKUP_STAMP:-$(date -u +%Y%m%d-%H%M%S)}"
 BASENAME="norva-db-${STAMP}"
@@ -69,14 +85,14 @@ echo ">> [1/5] Dumping managed DB (globals + schema + data) — read-only"
 # stack sets its own. We keep the ROLE definitions + their SET GUCs.
 "$PG_DUMPALL" --dbname="$DB_URL" --globals-only --no-role-passwords \
   > "$STAGE/00-globals.sql"
-# Schema of the app (public). Supabase-managed schemas (auth/storage/realtime/
+# Schema of the app (public + private Partners). Supabase-managed schemas (auth/storage/realtime/
 # vault/cron) are provided by the self-host images/extensions on restore.
 "$PG_DUMP" --dbname="$DB_URL" --schema-only --no-owner --no-privileges \
-  --schema='public' --file="$STAGE/01-schema.sql"
-# Data of public (catalogue + users' cloud_* rows). --disable-triggers so FK/
+  --schema='public' --schema='affiliate_private' --file="$STAGE/01-schema.sql"
+# Data of application schemas. --disable-triggers so FK/
 # trigger order doesn't block a restore.
 "$PG_DUMP" --dbname="$DB_URL" --data-only --no-owner --no-privileges \
-  --schema='public' --disable-triggers --file="$STAGE/02-data.sql"
+  --schema='public' --schema='affiliate_private' --disable-triggers --file="$STAGE/02-data.sql"
 # Reference exports (for transcription during migration — crons point at the
 # managed project and get rewritten by 03-recreate-cron-guc.sql).
 psql "$DB_URL" -At -F $'\t' \

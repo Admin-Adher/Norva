@@ -73,7 +73,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -90,10 +92,22 @@ public class MainActivity extends Activity {
     private static final String PREF_NOTIF_ASKED = "notificationPermissionAsked";
     private static final String PREF_NOTIF_MIGRATED_V18 = "notificationPermissionMigrationV18";
     private static final String STATE_CLOUD_ROUTE = "norva.cloudRoute";
+    private static final String STATE_PENDING_REFERRAL_URL = "norva.pendingReferralUrl";
     private static final String CLOUD_ACCOUNT_URL = "https://norva.tv/account.html?returnTo=%2Fapp.html%3Fmobile%3D1%23home";
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String SUPABASE_USER_URL = "https://api.norva.tv/auth/v1/user";
     private static final long BILLING_SESSION_CACHE_MS = 60_000L;
+    private static final int PARTNER_SHARE_PROTOCOL_VERSION =
+            PartnersContract.SHARE_PROTOCOL_VERSION;
+    private static final int MAX_PARTNER_SHARE_MESSAGE_CHARS =
+            PartnersContract.MAX_SHARE_MESSAGE_CHARS;
+    private static final int MAX_PARTNER_SHARE_TEXT_CHARS =
+            PartnersContract.MAX_SHARE_TEXT_CHARS;
+    private static final int MAX_PARTNER_DISCLOSURE_CHARS =
+            PartnersContract.MAX_DISCLOSURE_CHARS;
+    private static final int MAX_PARTNER_CHOOSER_TITLE_CHARS =
+            PartnersContract.MAX_CHOOSER_TITLE_CHARS;
+    private static final int MAX_HANDLED_SHARE_REQUEST_IDS = 64;
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
     private static final int    REQ_PLAYER      = 1001;
     private static final int    REQ_NOTIF_PERM  = 1002;
@@ -106,6 +120,10 @@ public class MainActivity extends Activity {
     private String cachedBillingUserId;
     private String cachedBillingTokenHash;
     private long cachedBillingVerifiedAt;
+    // Activity-scoped replay protection. The native share sheet has no reliable
+    // cancellation result, so one request id is presented at most once. Returning
+    // to the WebView can therefore never reopen a duplicate chooser.
+    private final Set<String> handledShareRequestIds = new LinkedHashSet<>();
 
     private FrameLayout  root;
     private WebView      webView;
@@ -223,8 +241,17 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         if ("cloud".equals(prefs().getString(PREF_MODE, null)) && webView != null) {
             try {
-                String fragment = safeCloudFragment(webView.getUrl());
-                if (fragment != null) outState.putString(STATE_CLOUD_ROUTE, fragment);
+                String referralUrl = canonicalReferralUrl(webView.getUrl());
+                if (referralUrl != null) {
+                    // A public opaque referral URL is safe to keep in Android's
+                    // recreation Bundle. The server-issued attribution claim
+                    // remains only in its HttpOnly WebView cookie and is never
+                    // copied into a Bundle, SharedPreferences, JavaScript or logs.
+                    outState.putString(STATE_PENDING_REFERRAL_URL, referralUrl);
+                } else {
+                    String fragment = safeCloudFragment(webView.getUrl());
+                    if (fragment != null) outState.putString(STATE_CLOUD_ROUTE, fragment);
+                }
                 webView.evaluateJavascript(
                         "window.app&&window.app.persistNativeContinuity&&"
                                 + "window.app.persistNativeContinuity();",
@@ -239,6 +266,12 @@ public class MainActivity extends Activity {
 
     private boolean restoreCloudContinuity(Bundle savedInstanceState) {
         if (savedInstanceState == null) return false;
+        String referralUrl = canonicalReferralUrl(
+                savedInstanceState.getString(STATE_PENDING_REFERRAL_URL));
+        if (referralUrl != null) {
+            connectCloud(referralUrl);
+            return true;
+        }
         String fragment = savedInstanceState.getString(STATE_CLOUD_ROUTE);
         if (fragment == null) return false;
         connectCloud(cloudContinuityUrl(fragment));
@@ -257,7 +290,7 @@ public class MainActivity extends Activity {
             String page = fragment.split("/", 2)[0];
             if (!("home".equals(page) || "live".equals(page)
                     || "movies".equals(page) || "series".equals(page)
-                    || "settings".equals(page))) return "home";
+                    || "settings".equals(page) || "partners".equals(page))) return "home";
             return fragment;
         } catch (Exception ignored) {
             return "home";
@@ -292,6 +325,29 @@ public class MainActivity extends Activity {
             return false;
         }
         if ("https".equals(data.getScheme()) && "norva.tv".equals(data.getHost())) {
+            String partnersRelayUrl = partnersRelayAppLinkDestination(data);
+            if (partnersRelayUrl != null) {
+                // The relay fragment is a short-lived bearer-like value. Consume
+                // the external VIEW action once and let app.js move it into
+                // sessionStorage before any authentication redirect.
+                intent.setAction(null);
+                prefs().edit().putString(PREF_MODE, "cloud").apply();
+                connectCloud(partnersRelayUrl);
+                return true;
+            }
+            String referralUrl = referralAppLinkDestination(data);
+            if (isReferralPath(data)) {
+                // Consume the VIEW action before loading. Activity recreation
+                // must rely on the bounded Bundle URL above, not replay the
+                // original external Intent and its untrusted query/fragment.
+                intent.setAction(null);
+                prefs().edit().putString(PREF_MODE, "cloud").apply();
+                connectCloud(referralUrl == null
+                        ? Uri.parse(CLOUD_WATCH_URL).buildUpon()
+                                .fragment("partners").build().toString()
+                        : referralUrl);
+                return true;
+            }
             // Public /t/* links are canonical web URLs, not SPA documents. Convert
             // their bounded title identity into the existing movies/series route
             // so the signed-in user lands on the exact fiche.
@@ -308,6 +364,75 @@ public class MainActivity extends Activity {
             return true;
         }
         return false;
+    }
+
+    private static boolean isReferralPath(Uri data) {
+        return data != null && data.getPath() != null
+                && data.getPath().startsWith("/r/");
+    }
+
+    /**
+     * Canonicalize a Partners App Link without copying arbitrary query values,
+     * fragments or credentials into the WebView. The 32-character code mirrors
+     * the server's opaque public-code contract; it is not the HttpOnly claim.
+     */
+    private static String referralAppLinkDestination(Uri data) {
+        if (data == null
+                || !"https".equalsIgnoreCase(data.getScheme())
+                || !"norva.tv".equalsIgnoreCase(data.getHost())
+                || (data.getPort() != -1 && data.getPort() != 443)) return null;
+        java.util.List<String> segments = data.getPathSegments();
+        if (segments.size() != 2 || !"r".equals(segments.get(0))) return null;
+        String code = segments.get(1);
+        if (!isOpaqueReferralCode(code)) return null;
+        String destination = new Uri.Builder()
+                .scheme("https")
+                .authority("norva.tv")
+                .appendPath("r")
+                .appendPath(code)
+                .appendQueryParameter("mobile", "1")
+                .build()
+                .toString();
+        String pureDestination = PartnersContract.canonicalReferralDestination(data.toString());
+        return destination.equals(pureDestination) ? destination : null;
+    }
+
+    private static String canonicalReferralUrl(String value) {
+        if (value == null || value.isEmpty()) return null;
+        try {
+            String destination = referralAppLinkDestination(Uri.parse(value));
+            String pureDestination = PartnersContract.canonicalReferralDestination(value);
+            return destination != null && destination.equals(pureDestination)
+                    ? destination
+                    : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isOpaqueReferralCode(String code) {
+        return PartnersContract.isOpaqueReferralCode(code)
+                && code != null && code.matches("^[A-Za-z0-9_-]{32}$");
+    }
+
+    private static String partnersRelayAppLinkDestination(Uri data) {
+        if (data == null
+                || !"https".equalsIgnoreCase(data.getScheme())
+                || !"norva.tv".equalsIgnoreCase(data.getHost())
+                || (data.getPort() != -1 && data.getPort() != 443)
+                || !"/app.html".equals(data.getPath())
+                || data.getQuery() != null) return null;
+        String fragment = data.getFragment();
+        if (fragment == null
+                || !fragment.matches("^relay=v1\\.[A-Za-z0-9_-]{43}\\.[0-9a-f]{64}$")) {
+            return null;
+        }
+        String destination = Uri.parse(CLOUD_WATCH_URL).buildUpon()
+                .encodedFragment(Uri.encode(fragment, "=._-"))
+                .build()
+                .toString();
+        String pureDestination = PartnersContract.canonicalRelayDestination(data.toString());
+        return destination.equals(pureDestination) ? destination : null;
     }
 
     private static String appLinkDestination(Uri data) {
@@ -407,7 +532,7 @@ public class MainActivity extends Activity {
         // Let the web app consume Back first (close a menu, modal, channel drawer,
         // or step back to Home). Only fall back to history / exit when it doesn't.
         webView.evaluateJavascript(
-                "(window.__norvaHandleBack ? window.__norvaHandleBack() : 'none')",
+                PartnersContract.nativeBackScript(),
                 new ValueCallback<String>() {
                     @Override
                     public void onReceiveValue(String value) {
@@ -656,6 +781,7 @@ public class MainActivity extends Activity {
         });
 
         installOriginScopedBillingChannel();
+        installOriginScopedPartnerShareChannel();
 
         root.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1103,6 +1229,254 @@ public class MainActivity extends Activity {
     private interface VerifiedBillingUserCallback {
         void onVerified(String userId, String accessToken);
         void onError(String error);
+    }
+
+    /**
+     * A dedicated, origin-scoped Partners bridge. Unlike the legacy player
+     * bridge, this object is never installed with addJavascriptInterface:
+     * AndroidX WebKit supplies both the source origin and main-frame identity.
+     */
+    private void installOriginScopedPartnerShareChannel() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        WebViewCompat.addWebMessageListener(webView, "NorvaShareNative",
+                Collections.singleton("https://norva.tv"),
+                new WebViewCompat.WebMessageListener() {
+                    @Override
+                    public void onPostMessage(WebView view, WebMessageCompat message,
+                                              Uri sourceOrigin, boolean isMainFrame,
+                                              JavaScriptReplyProxy replyProxy) {
+                        if (!isMainFrame || sourceOrigin == null
+                                || !isTrustedCloudUrl(sourceOrigin.toString())
+                                || view == null || !isTrustedPartnersPage(view.getUrl())) return;
+                        dispatchPartnerShareMessage(
+                                message == null ? null : message.getData(),
+                                replyProxy);
+                    }
+                });
+    }
+
+    private void dispatchPartnerShareMessage(String raw, JavaScriptReplyProxy replyProxy) {
+        if (replyProxy == null || raw == null
+                || raw.isEmpty() || raw.length() > MAX_PARTNER_SHARE_MESSAGE_CHARS) {
+            return;
+        }
+
+        final JSONObject request;
+        final JSONObject payload;
+        final String method;
+        final String requestId;
+        try {
+            request = new JSONObject(raw);
+            if (!hasExactKeys(request, "version", "requestId", "method", "payload")
+                    || request.optInt("version", -1) != PARTNER_SHARE_PROTOCOL_VERSION) {
+                throw new IllegalArgumentException();
+            }
+            requestId = request.optString("requestId", "");
+            method = request.optString("method", "");
+            payload = request.optJSONObject("payload");
+            if (!isValidPartnerShareRequestId(requestId) || payload == null) {
+                throw new IllegalArgumentException();
+            }
+        } catch (Exception ignored) {
+            sendPartnerShareReply(replyProxy, "", "error", "invalid_request", null);
+            return;
+        }
+
+        if ("getCapabilities".equals(method)) {
+            if (!hasExactKeys(payload)) {
+                sendPartnerShareReply(
+                        replyProxy, requestId, "error", "invalid_request", null);
+                return;
+            }
+            JSONObject capabilities = new JSONObject();
+            try {
+                capabilities.put("shareReferral", true);
+                // A bitmap supplied by JavaScript cannot be proven to encode the
+                // validated referral URL without adding a barcode decoder. Keep
+                // the native export fail-closed; the Web can offer its ordinary
+                // download fallback without granting Android storage access.
+                capabilities.put(
+                        "exportReferralQr",
+                        PartnersContract.canExportReferralQr());
+                capabilities.put(
+                        "exportReferralQrReason",
+                        "semantic_qr_validation_unavailable");
+            } catch (Exception ignored) {
+                sendPartnerShareReply(
+                        replyProxy, requestId, "error", "native_unavailable", null);
+                return;
+            }
+            sendPartnerShareReply(replyProxy, requestId, "ok", null, capabilities);
+            return;
+        }
+
+        if ("exportReferralQr".equals(method)) {
+            if (!hasExactKeys(payload)) {
+                sendPartnerShareReply(
+                        replyProxy, requestId, "error", "invalid_request", null);
+                return;
+            }
+            sendPartnerShareReply(
+                    replyProxy,
+                    requestId,
+                    "unavailable",
+                    "semantic_qr_validation_unavailable",
+                    null);
+            return;
+        }
+
+        if (!"shareReferral".equals(method)
+                || !hasExactKeys(
+                        payload, "url", "message", "disclosure", "chooserTitle")) {
+            sendPartnerShareReply(
+                    replyProxy, requestId, "error", "unsupported_request", null);
+            return;
+        }
+
+        String url = canonicalShareReferralUrl(payload.optString("url", ""));
+        String message = strictPartnerShareText(
+                payload.optString("message", ""), MAX_PARTNER_SHARE_TEXT_CHARS);
+        String disclosure = strictPartnerShareText(
+                payload.optString("disclosure", ""), MAX_PARTNER_DISCLOSURE_CHARS);
+        String chooserTitle = strictPartnerShareText(
+                payload.optString("chooserTitle", ""), MAX_PARTNER_CHOOSER_TITLE_CHARS);
+        if (url == null || message == null || disclosure == null || chooserTitle == null) {
+            sendPartnerShareReply(
+                    replyProxy, requestId, "error", "invalid_share_payload", null);
+            return;
+        }
+        if (!consumePartnerShareRequestId(requestId)) {
+            sendPartnerShareReply(
+                    replyProxy, requestId, "duplicate", "request_already_presented", null);
+            return;
+        }
+
+        // The disclosure and destination are appended by native code, not passed
+        // as separable chooser fields. No caller can silently share the sales copy
+        // while dropping the partner disclosure.
+        final String shareText = message + "\n\n" + disclosure + "\n" + url;
+        if (!shareText.equals(PartnersContract.buildShareText(
+                url, message, disclosure, chooserTitle))) {
+            sendPartnerShareReply(
+                    replyProxy, requestId, "error", "invalid_share_payload", null);
+            return;
+        }
+        try {
+            Intent sendIntent = new Intent(Intent.ACTION_SEND);
+            sendIntent.setType("text/plain");
+            sendIntent.putExtra(Intent.EXTRA_SUBJECT, chooserTitle);
+            sendIntent.putExtra(Intent.EXTRA_TEXT, shareText);
+            Intent chooser = Intent.createChooser(sendIntent, chooserTitle);
+            if (chooser.resolveActivity(getPackageManager()) == null) {
+                sendPartnerShareReply(
+                        replyProxy, requestId, "unavailable", "no_share_target", null);
+                return;
+            }
+            startActivity(chooser);
+            // Android does not expose a reliable chooser-cancel result here.
+            // "presented" is deliberately honest and never claims a completed share.
+            sendPartnerShareReply(replyProxy, requestId, "presented", null, null);
+        } catch (Exception ignored) {
+            sendPartnerShareReply(
+                    replyProxy, requestId, "unavailable", "native_share_failed", null);
+        }
+    }
+
+    private boolean consumePartnerShareRequestId(String requestId) {
+        synchronized (handledShareRequestIds) {
+            if (handledShareRequestIds.contains(requestId)) return false;
+            while (handledShareRequestIds.size() >= MAX_HANDLED_SHARE_REQUEST_IDS) {
+                String oldest = handledShareRequestIds.iterator().next();
+                handledShareRequestIds.remove(oldest);
+            }
+            handledShareRequestIds.add(requestId);
+            return true;
+        }
+    }
+
+    private static boolean hasExactKeys(JSONObject value, String... expectedKeys) {
+        if (value == null || expectedKeys == null || value.length() != expectedKeys.length) {
+            return false;
+        }
+        for (String key : expectedKeys) {
+            if (key == null || !value.has(key)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidPartnerShareRequestId(String requestId) {
+        return PartnersContract.isValidShareRequestId(requestId)
+                && requestId != null
+                && requestId.matches("^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$");
+    }
+
+    private static String strictPartnerShareText(String value, int maxLength) {
+        String pure = PartnersContract.strictShareText(value, maxLength);
+        if (pure == null) return null;
+        if (value == null || value.isEmpty() || value.length() > maxLength
+                || !value.equals(value.trim())) return null;
+        for (int index = 0; index < value.length(); index += 1) {
+            if (Character.isISOControl(value.charAt(index))) return null;
+        }
+        return pure;
+    }
+
+    private static String canonicalShareReferralUrl(String value) {
+        String canonical = canonicalReferralUrl(value);
+        if (canonical == null) return null;
+        // Sharing uses the public canonical URL. The mobile query parameter is
+        // transport-only and must never leak into copied partner messages.
+        Uri uri = Uri.parse(canonical);
+        String shareUrl = new Uri.Builder()
+                .scheme("https")
+                .authority("norva.tv")
+                .appendPath("r")
+                .appendPath(uri.getLastPathSegment())
+                .build()
+                .toString();
+        String pureShareUrl = PartnersContract.canonicalShareReferralUrl(value);
+        return shareUrl.equals(pureShareUrl) ? shareUrl : null;
+    }
+
+    private static boolean isTrustedPartnersPage(String value) {
+        if (!isTrustedCloudUrl(value)
+                || !PartnersContract.isTrustedPartnersPage(value)) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            String path = uri.getPath();
+            if (!("/app.html".equals(path) || "/app".equals(path))) return false;
+            String fragment = uri.getFragment();
+            if (fragment == null) return false;
+            String route = fragment.split("/", 2)[0];
+            return "partners".equals(route);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static void sendPartnerShareReply(
+            JavaScriptReplyProxy replyProxy,
+            String requestId,
+            String status,
+            String error,
+            JSONObject capabilities) {
+        if (replyProxy == null) return;
+        // JavaScriptReplyProxy exists only inside the guarded
+        // WEB_MESSAGE_LISTENER callback, but this second feature check keeps the
+        // call site valid for OEM WebView implementations and satisfies lint
+        // without a broad RequiresFeature suppression.
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        try {
+            JSONObject reply = new JSONObject();
+            reply.put("version", PARTNER_SHARE_PROTOCOL_VERSION);
+            reply.put("requestId", requestId == null ? "" : requestId);
+            reply.put("status", status == null ? "error" : status);
+            if (error != null && !error.isEmpty()) reply.put("error", error);
+            if (capabilities != null) reply.put("capabilities", capabilities);
+            replyProxy.postMessage(reply.toString());
+        } catch (Exception ignored) {
+            // The native boundary never forwards exception messages or stack data.
+        }
     }
 
     /**

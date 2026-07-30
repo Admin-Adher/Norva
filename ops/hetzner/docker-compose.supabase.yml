@@ -388,6 +388,35 @@ services:
       NORVA_REVENUECAT_WEBHOOK_AUTH: ${NORVA_REVENUECAT_WEBHOOK_AUTH:-}
       NORVA_RC_ACCEPT_SANDBOX: ${NORVA_RC_ACCEPT_SANDBOX:-false}
       NORVA_RC_UNKNOWN_PRODUCT_POLICY: ${NORVA_RC_UNKNOWN_PRODUCT_POLICY:-error}
+      # Partners-only authoritative enrichment. Keep both empty until the
+      # dedicated Play service account is granted Orders read access.
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_PLAY_PACKAGE_NAME: ${GOOGLE_PLAY_PACKAGE_NAME:-}
+      # Norva Partners remains fail-closed until every required secret and
+      # server-side release gate is configured. Keep the two HMAC secrets
+      # independent and never expose the cookie secret to Cloudflare Pages.
+      NORVA_PARTNERS_ALLOWED_ORIGINS: ${NORVA_PARTNERS_ALLOWED_ORIGINS:-https://norva.tv,https://www.norva.tv}
+      NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS: ${NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS:-}
+      NORVA_REFERRAL_EDGE_HMAC_SECRET: ${NORVA_REFERRAL_EDGE_HMAC_SECRET:-}
+      NORVA_REFERRAL_COOKIE_SECRET: ${NORVA_REFERRAL_COOKIE_SECRET:-}
+      NORVA_PARTNERS_TV_RELAY_SECRET: ${NORVA_PARTNERS_TV_RELAY_SECRET:-}
+      NORVA_PARTNERS_TV_RELAY_HANDOFF_URL: ${NORVA_PARTNERS_TV_RELAY_HANDOFF_URL:-https://norva.tv/app.html}
+      NORVA_PARTNERS_TV_RELAY_TTL_SECONDS: ${NORVA_PARTNERS_TV_RELAY_TTL_SECONDS:-300}
+      NORVA_PARTNERS_WORKER_BATCH: ${NORVA_PARTNERS_WORKER_BATCH:-25}
+      NORVA_PARTNERS_WORKER_MAX_BATCHES: ${NORVA_PARTNERS_WORKER_MAX_BATCHES:-4}
+      NORVA_PARTNERS_WORKER_LEASE_SECONDS: ${NORVA_PARTNERS_WORKER_LEASE_SECONDS:-120}
+      NORVA_PARTNERS_SHADOW_WINDOW_HOURS: ${NORVA_PARTNERS_SHADOW_WINDOW_HOURS:-48}
+      # Didit KYC: all fields are required together. An incomplete set keeps
+      # session creation and webhook processing unavailable.
+      DIDIT_API_KEY: ${DIDIT_API_KEY:-}
+      DIDIT_WORKFLOW_ID: ${DIDIT_WORKFLOW_ID:-}
+      DIDIT_APPLICATION_ID: ${DIDIT_APPLICATION_ID:-}
+      DIDIT_ENVIRONMENT: ${DIDIT_ENVIRONMENT:-sandbox}
+      DIDIT_WEBHOOK_SECRET: ${DIDIT_WEBHOOK_SECRET:-}
+      DIDIT_CALLBACK_URL: ${DIDIT_CALLBACK_URL:-}
+      DIDIT_ID_VERIFICATION_NODE_ID: ${DIDIT_ID_VERIFICATION_NODE_ID:-}
+      DIDIT_LIVENESS_NODE_ID: ${DIDIT_LIVENESS_NODE_ID:-}
+      DIDIT_FACE_MATCH_NODE_ID: ${DIDIT_FACE_MATCH_NODE_ID:-}
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
       # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
       # WITHOUT these the edge silently falls back to enforce+legacy — a migrated

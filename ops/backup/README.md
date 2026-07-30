@@ -15,7 +15,9 @@ it works **today**, before the Hetzner box exists.
    `ops/hetzner/scripts/01-dump-prod.sh`.)
 
 Files:
-- `backup-to-r2.sh` — the dump + compress + (optional) encrypt + upload script.
+- `backup-to-r2.sh` — the dump + compress + encrypt + upload script. Encryption
+  remains optional only for explicit legacy/manual invocations; the scheduled
+  workflow sets `BACKUP_ENCRYPTION_REQUIRED=true` and fails closed.
 - `../../.github/workflows/backup-db-to-r2.yml` — daily 03:15 UTC + manual run.
 
 ---
@@ -33,7 +35,7 @@ R2 → **Manage R2 API Tokens** → *Create API token*
 - Create → copy the **Access Key ID** and **Secret Access Key** (shown once).
 - Note your **Account ID** (R2 overview page, or the S3 endpoint host prefix).
 
-### 3. (Optional but recommended) Create an age key for encryption
+### 3. Create an age key for encryption (required by the scheduled workflow)
 Belt-and-suspenders on top of the private bucket, so even a misconfigured ACL
 never exposes plaintext DB rows.
 ```bash
@@ -53,7 +55,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `R2_ACCESS_KEY_ID` | from step 2 |
 | `R2_SECRET_ACCESS_KEY` | from step 2 |
 | `R2_BUCKET` | `norva-db-backups` |
-| `BACKUP_AGE_RECIPIENT` | *(optional)* the `age1…` public key from step 3 |
+| `BACKUP_AGE_RECIPIENT` | **required** `age1…` public key from step 3 |
 
 > **Use the Session pooler URI**, not the direct connection. Supabase dashboard →
 > *Project Settings → Database → Connection string → **Session pooler***. It looks
@@ -89,14 +91,20 @@ sha256sum -c SHA256SUMS       # integrity check
 psql "$TARGET_DB_URL" -f 00-globals.sql
 psql "$TARGET_DB_URL" -f 01-schema.sql
 psql "$TARGET_DB_URL" -f 02-data.sql
+psql "$TARGET_DB_URL" -v ON_ERROR_STOP=1 \
+  -f ops/hetzner/backup/verify-partners-restore.sql
 ```
+
+Run the verifier from a checked-out copy of the same Norva release. It checks
+the private schema, RLS and privilege boundary, append-only triggers and ledger
+balance before the restored database can be considered usable.
 
 ## Notes / scope
 
 - **Read-only**: the script only runs `pg_dump`/`pg_dumpall`/`psql -c select`. It
   never writes to the source DB.
-- **Scope**: globals (roles + role GUCs) + `public` schema + `public` data +
-  reference exports (cron jobs, extensions). Supabase-managed schemas
+- **Scope**: globals (roles + role GUCs) + `public` and `affiliate_private`
+  schemas and data + reference exports (cron jobs, extensions). Supabase-managed schemas
   (`auth`/`storage`/`realtime`/`vault`/`cron`) are recreated by the self-host
   images/extensions on restore, exactly as in the migration runbook — this is a
   *logical app* backup, not a byte-for-byte cluster clone.

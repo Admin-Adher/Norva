@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260721235200_account_deletion_email_outbox.sql');
 const hardening = read('supabase/migrations/20260721235300_account_deletion_email_delivery_hardening.sql');
+const partners = read('supabase/migrations/20260729201447_partners_tv_admin_analytics.sql');
 const source = read('supabase/functions/norva-account-delete/index.ts');
 const config = read('supabase/config.toml');
 const deletePage = read('public/delete-account.html');
@@ -46,9 +47,15 @@ test('a prepared confirmation becomes deliverable only with the real auth deleti
 
 test('Edge freezes the exact request before deletion and activates it only after success', () => {
   const prepare = source.indexOf('prepare_account_deletion_email');
+  const partnersPrepare = source.indexOf('partners_service_prepare_account_deletion');
   const deletion = source.indexOf('admin.auth.admin.deleteUser(user.id)');
   const confirm = source.indexOf('confirm_account_deletion_email');
-  assert.ok(prepare >= 0 && prepare < deletion && deletion < confirm);
+  assert.ok(
+    prepare >= 0
+    && prepare < partnersPrepare
+    && partnersPrepare < deletion
+    && deletion < confirm,
+  );
   assert.match(source, /p_request_html: rendered\.html/);
   assert.match(source, /p_request_text: rendered\.text/);
   assert.match(source, /p_request_tags: rendered\.tags/);
@@ -56,6 +63,70 @@ test('Edge freezes the exact request before deletion and activates it only after
   assert.match(source, /cancel_prepared_account_deletion_email/);
   assert.match(source, /p_deleted_user_id: user\.id/);
   assert.doesNotMatch(source, /email is best-effort|Best-effort closure email/);
+});
+
+test('Partners deletion preparation is service-only, idempotent and fail-closed', () => {
+  const rpc = partners.slice(
+    partners.indexOf(
+      'affiliate_private.partners_service_prepare_account_deletion(p_user_id uuid)',
+    ),
+    partners.indexOf(
+      'create or replace function\naffiliate_private.guard_affiliate_auth_user_transition()',
+    ),
+  );
+  assert.match(rpc, /pg_advisory_xact_lock/);
+  assert.match(rpc, /for update/);
+  assert.match(rpc, /partners_account_deletion_ready\(p_user_id\)/);
+  assert.match(rpc, /'ready', true/);
+  assert.match(rpc, /'changed', v_changes > 0/);
+  assert.match(rpc, /consumed_by_user_id = null/);
+  assert.match(rpc, /referred_user_id = null/);
+  assert.match(rpc, /status = 'closed'/);
+  assert.match(rpc, /verification_reference = null/);
+  assert.match(rpc, /beneficiary_token_ref =[\s\S]*'deleted_'/);
+
+  assert.match(
+    partners,
+    /revoke all on function[\s\S]*public\.partners_service_prepare_account_deletion\(uuid\)[\s\S]*from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    partners,
+    /grant execute on function[\s\S]*public\.partners_service_prepare_account_deletion\(uuid\)[\s\S]*to service_role/,
+  );
+
+  const edgePrepare = source.indexOf(
+    'admin.rpc("partners_service_prepare_account_deletion"',
+  );
+  const edgeDelete = source.indexOf('admin.auth.admin.deleteUser(user.id)');
+  const failure = source.indexOf(
+    'return json(req, { error: "Deletion preparation failed" }, 500)',
+  );
+  assert.ok(edgePrepare >= 0 && failure > edgePrepare && edgeDelete > failure);
+  assert.match(source, /partnersPreparation\.ready !== true/);
+  assert.match(source, /partnersPreparation\.action !== "partners_account_deletion_prepared"/);
+});
+
+test('retained Partners finance replaces auth UUIDs with bounded pseudonyms', () => {
+  assert.match(
+    partners,
+    /alter table affiliate_private\.affiliate_financial_facts[\s\S]*alter column referred_user_id drop not null/,
+  );
+  assert.match(
+    partners,
+    /affiliate_financial_facts_referred_identity[\s\S]*referred_user_pseudonym/,
+  );
+  assert.match(
+    partners,
+    /partners_user_deletion_pseudonym\(p_user_id uuid\)[\s\S]*norva-partners-subject:v1:/,
+  );
+  assert.match(
+    partners,
+    /current_setting\('norva\.partners_account_delete', true\)[\s\S]*server_prepare_v1/,
+  );
+  assert.match(
+    partners,
+    /prepare Partners records before deleting the user/,
+  );
 });
 
 test('the Edge fallback independently proves the exact auth identity is gone', () => {

@@ -14,12 +14,11 @@
 //   Ref: developer.revolut.com/docs/guides/.../verify-the-payload-signature
 //   (confirmed working against a real sandbox delivery on 2026-07-11.)
 //
-// MINIMAL BODY — Revolut delivers only { event, order_id }. The metadata, amount
-// and authoritative state are NOT in the body, so we GET the order from Revolut
-// ({REVOLUT_API_BASE}/api/1.0/orders/{id}) and trust the API — the same pattern
-// (re-fetch the order and trust the API, not the raw body). The checkout stamps the
-// order metadata with { user_id, plan, period, kind }, which we read back here.
-// Events whose order has no resolvable user are ack'd (200) and skipped.
+// MINIMAL BODY — order callbacks carry only { event, order_id }; DISPUTE_LOST
+// callbacks carry a dispute id. Metadata, money and authoritative state are
+// fetched from the matching Revolut API resource rather than trusted from the
+// webhook body. The checkout stamps order metadata with
+// { user_id, plan, period, kind }, which resolves the local owner.
 //
 // Required env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 //   REVOLUT_WEBHOOK_SIGNING_SECRET, REVOLUT_SECRET_KEY.
@@ -29,6 +28,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getPrices } from "../_shared/prices.ts";
+import {
+  ingestPartnerFinancialFact,
+  revolutDisputePartnerObservation,
+  revolutEnvironment,
+  revolutPartnerObservation,
+} from "../_shared/partners-finance.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -40,12 +45,22 @@ const SUPABASE_SERVICE_KEY =
 const SIGNING_SECRET = Deno.env.get("REVOLUT_WEBHOOK_SIGNING_SECRET") ?? "";
 const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 // Sandbox during dev; set to https://merchant.revolut.com at production cutover.
-const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
+const REVOLUT_API_BASE =
+  (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com")
+    .replace(/\/+$/, "");
+const PARTNERS_ENVIRONMENT = revolutEnvironment(REVOLUT_API_BASE);
+const REVOLUT_DISPUTES_API_VERSION = "2026-04-20";
 const TRIAL_DAYS = boundedInt(Deno.env.get("NORVA_TRIAL_DAYS"), 7, 0, 90);
-const FAIL_OPEN_HOURS = boundedInt(Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"), 72, 1, 24 * 14);
+const FAIL_OPEN_HOURS = boundedInt(
+  Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"),
+  72,
+  1,
+  24 * 14,
+);
 const TOLERANCE_MS = 5 * 60 * 1000;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const encoder = new TextEncoder();
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -68,15 +83,97 @@ Deno.serve(async (req) => {
 
   const eventType = String(body.event ?? body.type ?? "").toUpperCase();
   const data = recordOrEmpty(body.data);
-  const orderId = stringOrNull(body.order_id) ?? stringOrNull(data.order_id) ?? stringOrNull(data.id);
-  const subscriptionId = stringOrNull(body.subscription_id) ?? stringOrNull(data.subscription_id);
-  const eventId = `${eventType}:${orderId ?? subscriptionId ?? "?"}`;
+  const disputeEvent = eventType.startsWith("DISPUTE_");
+  const disputeId = stringOrNull(body.dispute_id) ??
+    stringOrNull(data.dispute_id) ??
+    (disputeEvent ? stringOrNull(data.id) : null);
+  const orderId = stringOrNull(body.order_id) ??
+    stringOrNull(data.order_id) ??
+    (disputeEvent ? null : stringOrNull(data.id));
+  const subscriptionId = stringOrNull(body.subscription_id) ??
+    stringOrNull(data.subscription_id);
+  const eventId = `${eventType}:${
+    disputeId ?? orderId ?? subscriptionId ?? "?"
+  }`;
   console.log("[norva-revolut-webhook]", eventType, eventId);
 
   try {
     // Idempotency before the API round-trip: Revolut retries, so a duplicate id
     // is ack'd and skipped without re-fetching.
-    if (await alreadyProcessed(admin, eventId)) return json({ ok: true, duplicate: true });
+    if (await alreadyProcessed(admin, eventId)) {
+      return json({ ok: true, duplicate: true });
+    }
+
+    if (disputeEvent) {
+      if (
+        eventType === "DISPUTE_ACTION_REQUIRED" ||
+        eventType === "DISPUTE_UNDER_REVIEW"
+      ) {
+        // These are non-economic lifecycle signals. Norva does not acknowledge
+        // a debit, credit or entitlement change from them.
+        return json({ ok: true, skipped: "non_terminal_dispute" });
+      }
+      if (eventType === "DISPUTE_WON") {
+        // A won dispute is a distinct chargeback reversal. P0 has no immutable
+        // correction type for it, so keep provider retry/monitoring visible
+        // instead of mislabelling it as a sale or silently erasing the loss.
+        throw new Error(
+          "dispute reversal financial contract is not configured",
+        );
+      }
+      if (eventType !== "DISPUTE_LOST") {
+        return json({ ok: true, skipped: "unsupported_dispute_event" });
+      }
+      if (!disputeId) {
+        throw new Error("lost dispute has no authoritative dispute id");
+      }
+      if (PARTNERS_ENVIRONMENT !== "production") {
+        throw new Error("Revolut disputes are unavailable outside production");
+      }
+
+      const dispute = await fetchDispute(disputeId);
+      if (String(dispute.state ?? "").toUpperCase() !== "LOST") {
+        throw new Error("authoritative dispute state is not lost");
+      }
+      const payment = recordOrEmpty(dispute.payment);
+      const parentOrderId = stringOrNull(payment.order_id);
+      if (!parentOrderId) {
+        throw new Error("lost dispute has no authoritative parent order");
+      }
+      const disputeUserId = await resolveRevolutOrderOwner(
+        admin,
+        parentOrderId,
+      );
+      if (!disputeUserId || !UUID_RE.test(disputeUserId)) {
+        throw new Error("lost dispute has no durable local owner");
+      }
+      const partnersObservation = revolutDisputePartnerObservation({
+        dispute,
+        referredUserId: disputeUserId,
+        environment: PARTNERS_ENVIRONMENT,
+      });
+      if (!partnersObservation) {
+        throw new Error("lost dispute has no authoritative financial identity");
+      }
+      await ingestPartnerFinancialFact(admin, partnersObservation);
+      await recordProcessedEvent(
+        admin,
+        disputeUserId,
+        eventId,
+        eventType,
+        {
+          event: eventType,
+          financial_event: "chargeback",
+          dispute_state: "LOST",
+          related_order_present: true,
+        },
+      );
+      return json({
+        ok: true,
+        financial_event: "chargeback",
+        state: "LOST",
+      });
+    }
 
     // Authoritative order from Revolut — the body carries no metadata/state.
     // TODO(subscriptions): fetch the subscription object for SUBSCRIPTION_* events.
@@ -153,10 +250,31 @@ Deno.serve(async (req) => {
             p_provider_response: order,
           },
         );
-        if (completeError) throw new Error(`refund completion failed: ${completeError.message}`);
-        await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
-          event: body, refund_order: order, refund_result: completed,
+        if (completeError) {
+          throw new Error(`refund completion failed: ${completeError.message}`);
+        }
+        const partnersObservation = revolutPartnerObservation({
+          order: stringOrNull(order.id) ? order : { ...order, id: orderId },
+          referredUserId: refundAttempt.user_id,
+          environment: PARTNERS_ENVIRONMENT,
         });
+        if (!partnersObservation) {
+          throw new Error(
+            "completed refund has no authoritative financial identity",
+          );
+        }
+        await ingestPartnerFinancialFact(admin, partnersObservation);
+        await recordProcessedEvent(
+          admin,
+          refundAttempt.user_id,
+          eventId,
+          eventType,
+          {
+            event: body,
+            refund_order: order,
+            refund_result: completed,
+          },
+        );
         return json({ ok: true, refund: completed, state: remoteState });
       }
       if (
@@ -188,19 +306,87 @@ Deno.serve(async (req) => {
       return json({ ok: true, refund: "processing", state: remoteState });
     }
     if (String(order.type ?? "").toLowerCase() === "refund") {
+      const relatedOrderId = stringOrNull(order.related_order_id);
+      if (remoteState === "COMPLETED" && orderId && relatedOrderId) {
+        const refundUserId = await resolveRevolutOrderOwner(
+          admin,
+          relatedOrderId,
+        );
+        if (refundUserId) {
+          const partnersObservation = revolutPartnerObservation({
+            order: stringOrNull(order.id) ? order : { ...order, id: orderId },
+            referredUserId: refundUserId,
+            environment: PARTNERS_ENVIRONMENT,
+          });
+          if (partnersObservation) {
+            // Preserve the existing refund-reservation invariant below, while
+            // still recording an authoritative out-of-band/partial money fact.
+            // The event remains unacknowledged until Norva's own refund state
+            // can reconcile.
+            await ingestPartnerFinancialFact(admin, partnersObservation);
+          }
+        }
+      }
       // Never acknowledge an uncorrelated money-out event: a reservation may
       // still be committing in another process, and Revolut retry is what makes
       // that race converge once the local row becomes visible.
       throw new Error("provider refund order has no durable local reservation");
     }
+    if (
+      String(order.type ?? "").toLowerCase() === "chargeback" &&
+      remoteState === "COMPLETED"
+    ) {
+      const relatedOrderId = stringOrNull(order.related_order_id);
+      if (!orderId || !relatedOrderId) {
+        throw new Error(
+          "completed chargeback has no authoritative order relation",
+        );
+      }
+      const chargebackUserId = await resolveRevolutOrderOwner(
+        admin,
+        relatedOrderId,
+      );
+      if (!chargebackUserId || !UUID_RE.test(chargebackUserId)) {
+        // A settled money-out event without an ownership anchor must not be
+        // acknowledged and disappear. Revolut retries while the local order
+        // journal catches up; the operator can then reconcile it safely.
+        throw new Error("completed chargeback has no durable local owner");
+      }
+      const partnersObservation = revolutPartnerObservation({
+        order: stringOrNull(order.id) ? order : { ...order, id: orderId },
+        referredUserId: chargebackUserId,
+        environment: PARTNERS_ENVIRONMENT,
+      });
+      if (!partnersObservation) {
+        throw new Error(
+          "completed chargeback has no authoritative financial identity",
+        );
+      }
+      await ingestPartnerFinancialFact(admin, partnersObservation);
+      await recordProcessedEvent(admin, chargebackUserId, eventId, eventType, {
+        event: body,
+        financial_event: "chargeback",
+        related_order_present: true,
+      });
+      return json({
+        ok: true,
+        financial_event: "chargeback",
+        state: remoteState,
+      });
+    }
     if (orderId) {
       const reconciledAt = new Date().toISOString();
-      const { error: journalError } = await admin.from("cloud_revolut_orders").update({
-        ...(remoteState ? { state: remoteState } : {}),
-        last_reconciled_at: reconciledAt,
-        updated_at: reconciledAt,
-      }).eq("order_id", orderId);
-      if (journalError) throw new Error(`order journal reconcile failed: ${journalError.message}`);
+      const { error: journalError } = await admin.from("cloud_revolut_orders")
+        .update({
+          ...(remoteState ? { state: remoteState } : {}),
+          last_reconciled_at: reconciledAt,
+          updated_at: reconciledAt,
+        }).eq("order_id", orderId);
+      if (journalError) {
+        throw new Error(
+          `order journal reconcile failed: ${journalError.message}`,
+        );
+      }
     }
     // The immutable local journal is the ownership anchor. Provider metadata is
     // still validated below, but missing/corrupted metadata must not make a real
@@ -296,20 +482,51 @@ Deno.serve(async (req) => {
             : quarantined as JsonRecord | null;
           if (stringOrNull(outcome?.result) === "already_refunded") {
             await recordProcessedEvent(admin, userId, eventId, eventType, {
-              event: body, order, already_refunded: true,
+              event: body,
+              order,
+              already_refunded: true,
             });
-            return json({ ok: true, already_refunded: true, state: "REFUNDED" });
+            return json({
+              ok: true,
+              already_refunded: true,
+              state: "REFUNDED",
+            });
           }
           throw new Error(
-            `captured checkout integrity mismatch requires refund: ${stringOrNull(outcome?.exception_reason) ?? "commercial_terms_invalid"}`,
+            `captured checkout integrity mismatch requires refund: ${
+              stringOrNull(outcome?.exception_reason) ??
+                "commercial_terms_invalid"
+            }`,
           );
         }
-        throw new Error("checkout order metadata does not match immutable journal");
+        throw new Error(
+          "checkout order metadata does not match immutable journal",
+        );
       }
     }
+    const partnersObservation = revolutPartnerObservation({
+      order: stringOrNull(order.id) ? order : { ...order, id: orderId },
+      referredUserId: userId,
+      kind: anchoredKind,
+      environment: PARTNERS_ENVIRONMENT,
+    });
+    if (partnersObservation) {
+      // Both the webhook and recurring-billing worker may observe the same
+      // settled order. They use the same economic source/transaction hashes;
+      // the database's economic unique key makes the second call a replay.
+      await ingestPartnerFinancialFact(admin, partnersObservation);
+    }
     if (checkoutEvent && journal?.finalized_at) {
-      await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, already_finalized: true });
-      return json({ ok: true, duplicate_finalization: true, state: remoteState });
+      await recordProcessedEvent(admin, userId, eventId, eventType, {
+        event: body,
+        order,
+        already_finalized: true,
+      });
+      return json({
+        ok: true,
+        duplicate_finalization: true,
+        state: remoteState,
+      });
     }
     if (
       checkoutEvent &&
@@ -428,6 +645,37 @@ async function fetchOrder(orderId: string): Promise<JsonRecord> {
     const message = String((e as Error)?.message || e);
     console.warn("[norva-revolut-webhook] fetchOrder failed", orderId, message);
     throw new Error(`provider order unavailable: ${message}`);
+  }
+}
+
+async function fetchDispute(disputeId: string): Promise<JsonRecord> {
+  if (!REVOLUT_SECRET_KEY) {
+    throw new Error("REVOLUT_SECRET_KEY not set — cannot fetch dispute");
+  }
+  try {
+    const resp = await fetch(
+      `${REVOLUT_API_BASE}/api/disputes/${encodeURIComponent(disputeId)}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`,
+          "Accept": "application/json",
+          "Revolut-Api-Version": REVOLUT_DISPUTES_API_VERSION,
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`provider returned ${resp.status}`);
+    }
+    return recordOrEmpty(await resp.json());
+  } catch (error) {
+    const message = String((error as Error)?.message || error);
+    console.warn("[norva-revolut-webhook] fetchDispute failed", {
+      code: message.startsWith("provider returned")
+        ? message.replace(/\D+/g, "") || "http_error"
+        : "unavailable",
+    });
+    throw new Error("provider dispute unavailable");
   }
 }
 
@@ -821,20 +1069,45 @@ async function commitOrderPlan(
   // absentes (vieil ordre) = réduction à vie, comportement historique.
   const metaBase = Number(meta.base_amount_cents);
   const metaCycles = Number(meta.promo_cycles);
-  const promoCycles = (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24) ? Math.round(metaCycles) : null;
-  const promoBase = (promoCycles && Number.isFinite(metaBase) && metaBase > amount && metaBase <= 99999) ? Math.round(metaBase) : null;
+  const promoCycles =
+    (Number.isFinite(metaCycles) && metaCycles >= 1 && metaCycles <= 24)
+      ? Math.round(metaCycles)
+      : null;
+  const promoBase =
+    (promoCycles && Number.isFinite(metaBase) && metaBase > amount &&
+        metaBase <= 99999)
+      ? Math.round(metaBase)
+      : null;
   const nowIso = new Date().toISOString();
   if (kind === "plan_change") {
-    const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
+    const { data: current, error: currentError } = await db.from(
+      "cloud_entitlement_projection",
+    )
       .select("status,provider,trial_ends_at,current_period_end")
       .eq("user_id", userId).maybeSingle();
-    if (currentError) throw new Error(`plan change projection read failed: ${currentError.message}`);
-    const provider = String((current as { provider?: string } | null)?.provider ?? "").toLowerCase();
-    const currentProjection = current as { status?: string; trial_ends_at?: string; current_period_end?: string } | null;
-    const effectiveAt = stringOrNull(currentProjection?.status === "trialing"
-      ? (currentProjection?.trial_ends_at ?? currentProjection?.current_period_end)
-      : currentProjection?.current_period_end);
-    if (provider !== "revolut" || !effectiveAt || new Date(effectiveAt).getTime() <= Date.now()) {
+    if (currentError) {
+      throw new Error(
+        `plan change projection read failed: ${currentError.message}`,
+      );
+    }
+    const provider = String(
+      (current as { provider?: string } | null)?.provider ?? "",
+    ).toLowerCase();
+    const currentProjection = current as {
+      status?: string;
+      trial_ends_at?: string;
+      current_period_end?: string;
+    } | null;
+    const effectiveAt = stringOrNull(
+      currentProjection?.status === "trialing"
+        ? (currentProjection?.trial_ends_at ??
+          currentProjection?.current_period_end)
+        : currentProjection?.current_period_end,
+    );
+    if (
+      provider !== "revolut" || !effectiveAt ||
+      new Date(effectiveAt).getTime() <= Date.now()
+    ) {
       throw new Error("plan change is not eligible for the next Revolut cycle");
     }
     const { error } = await db.from("cloud_revolut_customers").upsert({
@@ -856,11 +1129,19 @@ async function commitOrderPlan(
     return { effectiveAt, rejectedAs: null };
   }
   const { error } = await db.from("cloud_revolut_customers").upsert({
-    user_id: userId, plan, period, amount_cents: amount,
-    base_amount_cents: promoBase, promo_cycles_left: promoBase ? promoCycles : null,
-    pending_plan: null, pending_period: null, pending_amount_cents: null,
-    pending_base_amount_cents: null, pending_promo_cycles: null,
-    pending_effective_at: null, pending_order_id: null,
+    user_id: userId,
+    plan,
+    period,
+    amount_cents: amount,
+    base_amount_cents: promoBase,
+    promo_cycles_left: promoBase ? promoCycles : null,
+    pending_plan: null,
+    pending_period: null,
+    pending_amount_cents: null,
+    pending_base_amount_cents: null,
+    pending_promo_cycles: null,
+    pending_effective_at: null,
+    pending_order_id: null,
     updated_at: nowIso,
   }, { onConflict: "user_id" });
   if (error) {
@@ -875,7 +1156,9 @@ async function commitOrderPlan(
 
 async function verifySignature(req: Request, raw: string): Promise<boolean> {
   if (!SIGNING_SECRET) {
-    console.error("[norva-revolut-webhook] REVOLUT_WEBHOOK_SIGNING_SECRET is not set");
+    console.error(
+      "[norva-revolut-webhook] REVOLUT_WEBHOOK_SIGNING_SECRET is not set",
+    );
     return false; // fail closed
   }
   const ts = req.headers.get("Revolut-Request-Timestamp") ?? "";
@@ -888,25 +1171,70 @@ async function verifySignature(req: Request, raw: string): Promise<boolean> {
   }
   const expected = "v1=" + (await hmacHex(SIGNING_SECRET, `v1.${ts}.${raw}`));
   // The header can carry multiple space-separated signatures during key rotation.
-  return sigHeader.split(/\s+/).filter(Boolean).some((s) => timingSafeEqual(s, expected));
+  return sigHeader.split(/\s+/).filter(Boolean).some((s) =>
+    timingSafeEqual(s, expected)
+  );
 }
 
 async function hmacHex(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey(
-    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
   );
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let mismatch = 0;
-  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
   return mismatch === 0;
 }
 
 // --- persistence helpers ----------------------------------------------------
+
+async function resolveRevolutOrderOwner(
+  db: SupabaseClient,
+  orderId: string,
+): Promise<string | null> {
+  const { data: originalOrder, error: originalOrderError } = await db
+    .from("cloud_revolut_orders")
+    .select("user_id")
+    .eq("order_id", orderId)
+    .maybeSingle();
+  if (originalOrderError) {
+    throw new Error(
+      `financial parent ownership lookup failed: ${originalOrderError.message}`,
+    );
+  }
+  const journalUserId = stringOrNull(
+    (originalOrder as { user_id?: unknown } | null)?.user_id,
+  );
+  if (journalUserId && UUID_RE.test(journalUserId)) return journalUserId;
+
+  const { data: ledgerRow, error: ledgerError } = await db
+    .from("cloud_billing_ledger")
+    .select("user_id")
+    .eq("order_id", orderId)
+    .limit(1)
+    .maybeSingle();
+  if (ledgerError) {
+    throw new Error(
+      `financial parent ledger lookup failed: ${ledgerError.message}`,
+    );
+  }
+  const ledgerUserId = stringOrNull(
+    (ledgerRow as { user_id?: unknown } | null)?.user_id,
+  );
+  return ledgerUserId && UUID_RE.test(ledgerUserId) ? ledgerUserId : null;
+}
 
 async function applyNonCheckoutProjectionPatch(
   db: SupabaseClient,
@@ -915,14 +1243,18 @@ async function applyNonCheckoutProjectionPatch(
   patch: JsonRecord,
 ): Promise<string | null> {
   const eventAt = stringOrNull(patch.last_event_at);
-  if (!eventAt) throw new Error("non-checkout projection has no authoritative event time");
+  if (!eventAt) {
+    throw new Error("non-checkout projection has no authoritative event time");
+  }
   const { data, error } = await db.rpc("apply_revolut_entitlement_event", {
     p_user_id: userId,
     p_event_at: eventAt,
     p_event_id: eventId,
     p_patch: patch,
   });
-  if (error) throw new Error(`projection causal apply failed: ${error.message}`);
+  if (error) {
+    throw new Error(`projection causal apply failed: ${error.message}`);
+  }
   const outcome = (Array.isArray(data) ? data[0] : data) as {
     applied?: boolean;
     result?: string;
@@ -931,7 +1263,10 @@ async function applyNonCheckoutProjectionPatch(
   return stringOrNull(outcome?.result) ?? "not_applied";
 }
 
-async function alreadyProcessed(db: SupabaseClient, eventId: string): Promise<boolean> {
+async function alreadyProcessed(
+  db: SupabaseClient,
+  eventId: string,
+): Promise<boolean> {
   const { data, error } = await db
     .from("cloud_entitlement_events")
     .select("id")
@@ -970,7 +1305,9 @@ function resolveUserId(meta: JsonRecord): string | null {
 }
 
 function recordOrEmpty(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
 function stringOrNull(value: unknown): string | null {
@@ -986,7 +1323,12 @@ function isoTimestampOrNull(value: unknown): string | null {
   return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
 }
 
-function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+function boundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const n = Number(raw ?? fallback);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -995,6 +1337,9 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
   });
 }

@@ -228,6 +228,19 @@
                 return 'handled';
             }
 
+            // Searchable RegionPicker popovers (Settings and Partners) are not
+            // generic .modal-overlay nodes. Let the component unwind its own
+            // inert state and restore the exact opener before route/exit logic.
+            const openRegionPicker = document.querySelector(
+                '[data-region-picker] [data-region-pop]:not([hidden])'
+            );
+            if (openRegionPicker) {
+                const picker = openRegionPicker.closest('[data-region-picker]');
+                if (picker && typeof picker.__regionClose === 'function' && picker.__regionClose()) {
+                    return 'handled';
+                }
+            }
+
             // An open modal (settings, add source, dialogs).
             const modal = document.querySelector('#modal.active, .modal-overlay.active');
             if (modal) {

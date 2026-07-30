@@ -32,6 +32,11 @@
 //     Plus/Family product token or entitlement is accepted as a safe fallback.
 //   * NORVA_BILLING_FAIL_OPEN_HOURS — grace window applied on billing issues
 //     (default 72).
+//   * GOOGLE_PLAY_SERVICE_ACCOUNT_JSON — a dedicated service-account JSON
+//     authorized for the Google Play Developer API. Never reuse it client-side.
+//   * GOOGLE_PLAY_PACKAGE_NAME — exact Play package (`tv.norva.phone`).
+//     Both Google variables must be present to enrich attributed production
+//     purchases; both absent deliberately keeps the Partners fact incomplete.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -48,6 +53,18 @@ import {
   type PaywallAttribution,
   type PaywallSurface,
 } from "../_shared/paywall-experiments.ts";
+import {
+  buildPartnerFinancialObservation,
+  ingestPartnerFinancialFact,
+  revenueCatPartnerObservation,
+} from "../_shared/partners-finance.mjs";
+import {
+  fetchGooglePlayOrder,
+  googlePlayOrderFinancialCurrency,
+  googlePlayOrdersConfiguration,
+  isGooglePlayNonAuthoritative,
+  normalizeGooglePlayOrderFinancials,
+} from "../_shared/google-play-orders.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type ProjectionSnapshot = {
@@ -58,6 +75,21 @@ type ProjectionSnapshot = {
   trial_ends_at?: string | null;
   fail_open_until?: string | null;
   last_event_at?: string | null;
+};
+type PartnerFinancialObservation = {
+  referredUserId: string;
+  rail: string;
+  eventType: string;
+  environment: string;
+  transactionId: string;
+  parentTransactionId: string | null;
+  currency: string | null;
+  currencyExponent: number | null;
+  grossMinor: number | null;
+  discountMinor: number | null;
+  taxMinor: number | null;
+  eligibleMinor: number | null;
+  observedAt: string;
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -78,6 +110,10 @@ const UNKNOWN_PRODUCT_POLICY = (Deno.env.get("NORVA_RC_UNKNOWN_PRODUCT_POLICY") 
   ? "error"
   : "warn";
 const ACCEPT_SANDBOX = (Deno.env.get("NORVA_RC_ACCEPT_SANDBOX") ?? "false").toLowerCase() === "true";
+const GOOGLE_PLAY_SERVICE_ACCOUNT_JSON =
+  Deno.env.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON") ?? "";
+const GOOGLE_PLAY_PACKAGE_NAME =
+  Deno.env.get("GOOGLE_PLAY_PACKAGE_NAME") ?? "";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -218,6 +254,25 @@ Deno.serve(async (req) => {
     // the entitlement projection can become active. The projection trigger then
     // chains activation to that exact payment_captured funnel event.
     await journalRcPayment(admin, userId, eventType, event, resolvedPlan, attribution);
+    let partnersObservation = revenueCatPartnerObservation(
+      eventType,
+      event,
+      userId,
+    );
+    if (partnersObservation) {
+      partnersObservation = await enrichGooglePlayPartnersObservation(
+        admin,
+        partnersObservation,
+        effective,
+      );
+      // This write is deliberately before the provider marker. A transient
+      // failure leaves the RevenueCat delivery replayable; the entitlement and
+      // payment journal above are already idempotent. Google Play Orders can
+      // complete an attributed production fact with exact charged total/tax.
+      // Missing configuration, currency metadata, attribution, or an
+      // unmatchable refund remains incomplete instead of inventing money.
+      await ingestPartnerFinancialFact(admin, partnersObservation);
+    }
 
     const patch = projectionPatch(userId, eventType, event, resolvedPlan);
     let projectionApplied = false;
@@ -269,6 +324,109 @@ Deno.serve(async (req) => {
     return json({ error: message }, 500);
   }
 });
+
+async function enrichGooglePlayPartnersObservation(
+  db: SupabaseClient,
+  observation: PartnerFinancialObservation,
+  revenueCatEvent: JsonRecord,
+): Promise<PartnerFinancialObservation> {
+  if (
+    observation.rail !== "google_play" ||
+    observation.environment !== "production" ||
+    !["capture", "renewal", "refund"].includes(observation.eventType)
+  ) {
+    return observation;
+  }
+
+  const configuration = googlePlayOrdersConfiguration({
+    serviceAccountJson: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+    packageName: GOOGLE_PLAY_PACKAGE_NAME,
+  });
+  // Optional by design. With both settings absent, the immutable observation
+  // remains incomplete and cannot create a commission job.
+  if (!configuration) return observation;
+
+  const { data: requiredData, error: requiredError } = await db.rpc(
+    "partners_worker_financial_observation_required",
+    { p_user_id: observation.referredUserId },
+  );
+  if (requiredError) {
+    throw new Error(
+      `partners_google_play_required_failed:${
+        stringOrNull((requiredError as { code?: unknown }).code) ?? "unknown"
+      }`,
+    );
+  }
+  if (requiredData !== true) {
+    if (requiredData === false) return observation;
+    throw new Error("partners_google_play_required_invalid_response");
+  }
+
+  const orderId = observation.eventType === "refund"
+    ? observation.parentTransactionId
+    : observation.transactionId;
+  const expectedProductId = stringOrNull(revenueCatEvent.product_id);
+  if (!orderId || !expectedProductId) return observation;
+
+  let order: JsonRecord;
+  try {
+    order = await fetchGooglePlayOrder(configuration, orderId) as JsonRecord;
+  } catch (error) {
+    if (isGooglePlayNonAuthoritative(error)) return observation;
+    throw error;
+  }
+
+  const normalizationOptions = {
+    eventType: observation.eventType,
+    orderId,
+    expectedProductId,
+  };
+  let currency: string;
+  try {
+    currency = googlePlayOrderFinancialCurrency(
+      order,
+      normalizationOptions,
+    );
+  } catch (error) {
+    if (isGooglePlayNonAuthoritative(error)) return observation;
+    throw error;
+  }
+
+  const { data: exponentData, error: exponentError } = await db.rpc(
+    "partners_worker_currency_exponent_resolve",
+    { p_currency: currency },
+  );
+  if (exponentError) {
+    throw new Error(
+      `partners_google_play_currency_failed:${
+        stringOrNull((exponentError as { code?: unknown }).code) ?? "unknown"
+      }`,
+    );
+  }
+  if (exponentData == null) return observation;
+  const currencyExponent = Number(exponentData);
+  if (
+    !Number.isInteger(currencyExponent) ||
+    currencyExponent < 0 ||
+    currencyExponent > 6
+  ) {
+    throw new Error("partners_google_play_currency_invalid_response");
+  }
+
+  try {
+    const financials = normalizeGooglePlayOrderFinancials(order, {
+      ...normalizationOptions,
+      currencyExponent,
+    });
+    return buildPartnerFinancialObservation({
+      ...observation,
+      ...financials,
+    }) as PartnerFinancialObservation;
+  } catch (error) {
+    if (isGooglePlayNonAuthoritative(error)) return observation;
+    throw error;
+  }
+}
 
 // --- event -> projection mapping -------------------------------------------
 
@@ -641,6 +799,16 @@ function resolveUserId(event: JsonRecord): string | null {
   // RevenueCat may deliver the canonical id under original_app_user_id.
   const original = stringOrNull(event.original_app_user_id);
   if (original && UUID_RE.test(original)) return original;
+  // TRANSFER events can identify only the destination aliases. Accept exactly
+  // one canonical Supabase UUID; ambiguous multi-account transfers stay
+  // unmapped and are not silently attributed.
+  const transferredTo = Array.isArray(event.transferred_to) ? event.transferred_to : [];
+  const canonicalTargets = [...new Set(
+    transferredTo
+      .map((candidate) => stringOrNull(candidate))
+      .filter((candidate): candidate is string => Boolean(candidate && UUID_RE.test(candidate))),
+  )];
+  if (canonicalTargets.length === 1) return canonicalTargets[0];
   return null;
 }
 

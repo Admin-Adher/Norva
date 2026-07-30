@@ -39,12 +39,12 @@ default), this is your *upload* key; Google holds the app signing key.
 - Phone and TV: target/compile SDK 36; both min SDK 23.
   ✅ (meets the August 2026 phone requirement and the Android TV exception.)
 - **Android App Links** (`public/.well-known/assetlinks.json`): only the phone
-  app declares `autoVerify` https links to `norva.tv` (`/app.html`, `/t/`), so
+  app declares `autoVerify` https links to `norva.tv` (`/app.html`, `/t/`, `/r/`), so
   the file lists **only** `tv.norva.phone` — the TV app uses the `norva://open`
-  custom scheme and needs no entry. ⚠️ **Last repo blocker:** replace
-  `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` with the **App signing
-  key** SHA-256 from Play Console → (phone app) → Test and release → App
-  integrity → App signing key certificate, then commit + deploy.
+  custom scheme and needs no entry. ✅ The repository and live file were
+  checked on 2026-07-29: HTTP 200, phone package only, two SHA-256 fingerprints
+  with a valid shape. Final association must be replayed on a Play-signed build;
+  the public file intentionally does not trust the local debug certificate.
 
 ## 3. Privacy policy — **[repo, done] + [console]**
 

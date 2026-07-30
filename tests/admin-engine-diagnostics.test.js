@@ -620,7 +620,7 @@ test('Moteur requests the versioned engine RPC and keeps legacy coverage as an e
   assert.match(admin, /engineState\(/);
   assert.match(admin, /engineSchedulerIssues\(/);
   assert.match(admin, /engineHealth\.available/);
-  assert.match(app, /AdminPage\.js\?v=89/);
+  assert.match(app, /AdminPage\.js\?v=94/);
   assert.match(
     enrichRenderer,
     /latest\(r\.last_probe_at,\s*r\.last_verified_at\)/,

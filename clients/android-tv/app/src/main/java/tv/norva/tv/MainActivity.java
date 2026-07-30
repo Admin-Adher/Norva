@@ -890,6 +890,7 @@ public class MainActivity extends Activity {
 
     private static boolean isTrustedCloudUrl(String value) {
         if (value == null || value.isEmpty()) return false;
+        if (!PartnersTvContract.isTrustedNorvaCloudUrl(value)) return false;
         try {
             Uri uri = Uri.parse(value);
             int port = uri.getPort();
@@ -1716,8 +1717,8 @@ public class MainActivity extends Activity {
         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT
                 || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             int delta = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
-            int next = (index + delta + exitActions.getChildCount())
-                    % exitActions.getChildCount();
+            int next = PartnersTvContract.nextHorizontalIndex(
+                    index, exitActions.getChildCount(), delta);
             exitActions.getChildAt(next).requestFocus();
             return true;
         }

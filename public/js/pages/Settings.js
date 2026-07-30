@@ -119,6 +119,10 @@ class SettingsPage {
 
         document.getElementById('settings-signout-btn')?.addEventListener('click', () => this.signOut());
 
+        document.getElementById('settings-open-partners')?.addEventListener('click', (event) => {
+            this.app?.openPartners?.(event.currentTarget);
+        });
+
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
             // A real membership → the management screen (status, cancel, update
@@ -399,8 +403,32 @@ class SettingsPage {
         const deleteRow = document.getElementById('settings-delete-account-row');
         if (deleteRow) deleteRow.style.display = (user.cloud && !user.device) ? '' : 'none';
 
+        // Partners is an inert, feature-gated enhancement. It must never delay
+        // the account tab when the Edge Function is disabled or unreachable.
+        // The row stays hidden until a strict server-authoritative response
+        // explicitly makes it visible.
+        void this.refreshPartnersEntry().catch(() => {});
         await this.refreshAccessCard();
         await this.refreshSourceHealthCard();
+    }
+
+    async refreshPartnersEntry() {
+        const row = document.getElementById('settings-partners-row');
+        if (row) {
+            row.hidden = true;
+            row.setAttribute('aria-hidden', 'true');
+        }
+        const user = this.app?.currentUser || {};
+        if (!user.cloud) {
+            this.app?.pages?.partners?.setEntryVisibility?.(false);
+            return false;
+        }
+        try {
+            return await (this.app?.pages?.partners?.primeVisibility?.() || false);
+        } catch (_) {
+            this.app?.pages?.partners?.setEntryVisibility?.(false);
+            return false;
+        }
     }
 
     async refreshAccessCard() {

@@ -28,6 +28,9 @@ hr() { printf '%.0s-' {1..60}; echo; }
 TABLES=(cloud_media_items cloud_titles cloud_title_variants cloud_sources
         cloud_live_streams catalog_titles catalog_file_tracks
         catalog_provider_identities subtitle_tracks)
+PRIVATE_TABLES=(affiliate_accounts affiliate_events affiliate_attributions
+                affiliate_financial_facts affiliate_commission_entries
+                affiliate_payout_cycles)
 
 echo "PARITY CHECK  $(date -u +%FT%TZ)"
 hr
@@ -44,12 +47,18 @@ check() { # label, sql
 for t in "${TABLES[@]}"; do
   check "rows: $t" "select count(*) from public.$t"
 done
+for t in "${PRIVATE_TABLES[@]}"; do
+  check "private rows: $t" "select count(*) from affiliate_private.$t"
+done
 
 hr
 check "extensions (count)"        "select count(*) from pg_extension"
 check "cron jobs (total)"         "select count(*) from cron.job"
 check "cron jobs (active)"        "select count(*) from cron.job where active"
 check "RLS policies (public)"     "select count(*) from pg_policies where schemaname='public'"
+check "RLS policies (partners)"   "select count(*) from pg_policies where schemaname='affiliate_private'"
+check "partners private tables"   "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='affiliate_private' and c.relkind in ('r','p')"
+check "partners functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%partners%'"
 check "vault secrets"             "select count(*) from vault.secrets"
 check "anon statement_timeout"    "select setting from pg_settings where name='statement_timeout'"  # session-level; role GUC checked below
 

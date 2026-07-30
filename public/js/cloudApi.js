@@ -59,6 +59,8 @@
     const DEFAULT_CATALOG_URL = 'https://api.norva.tv/functions/v1/norva-catalog';
     const DEFAULT_SERIES_INFO_URL = 'https://api.norva.tv/functions/v1/norva-series-info';
     const DEFAULT_PLAYBACK_URL = 'https://api.norva.tv/functions/v1/norva-playback';
+    const DEFAULT_PARTNERS_API_URL = 'https://api.norva.tv/functions/v1/norva-partners';
+    const DEFAULT_PARTNERS_DEVICE_API_URL = 'https://api.norva.tv/functions/v1/norva-partners-device';
     const DEFAULT_EDGE_URL = 'https://edge.norva.tv';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
@@ -115,6 +117,16 @@
 
     function playbackBase() {
         const configured = localStorage.getItem(KEY_PLAYBACK_URL) || window.NORVA_PLAYBACK_URL || DEFAULT_PLAYBACK_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function partnersBase() {
+        const configured = window.NORVA_PARTNERS_API_URL || DEFAULT_PARTNERS_API_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function partnersDeviceBase() {
+        const configured = window.NORVA_PARTNERS_DEVICE_API_URL || DEFAULT_PARTNERS_DEVICE_API_URL;
         return configured.replace(/\/+$/, '');
     }
 
@@ -835,8 +847,13 @@
         };
         let token = usingUserToken ? getToken() : options.token;
         if (token) headers.Authorization = `Bearer ${token}`;
-        const activeProfileId = getActiveProfileId();
-        if (activeProfileId) headers['x-norva-profile-id'] = activeProfileId;
+        // Account-scoped functions such as Norva Partners deliberately opt out:
+        // their CORS contract does not accept a profile header and financial
+        // programme state must never depend on the currently selected viewer.
+        if (!options.skipProfile) {
+            const activeProfileId = getActiveProfileId();
+            if (activeProfileId) headers['x-norva-profile-id'] = activeProfileId;
+        }
 
         const _trLabel = method + ' ' + String(path).split('?')[0];
         const _trT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
@@ -845,6 +862,7 @@
             method,
             headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
+            ...(options.signal ? { signal: options.signal } : {}),
             // keepalive lets a small write (the history exit flush on pagehide /
             // backgrounding) outlive the page instead of being cancelled with it.
             // Scoped to callers that opt in; history payloads are ~1-2 KB (<<64 KB cap).
@@ -942,6 +960,1165 @@
         return dualGet('/ratings', { sourceId, itemId, itemType });
     }
 
+    const PARTNERS_CONTRACT_VERSION = '2026-07-29';
+    const PARTNERS_SCHEMA_VERSION = 1;
+    const PARTNERS_VISIBILITY_REASONS = new Set([
+        'disabled',
+        'invite_only',
+        'available',
+        'existing_account'
+    ]);
+    const PARTNERS_ELIGIBILITY_REASONS = new Set([
+        'disabled',
+        'country_required',
+        'country_not_supported',
+        'subdivision_not_supported',
+        'not_allowlisted',
+        'account_blocked',
+        'account_attention_required',
+        'eligible'
+    ]);
+    const PARTNERS_ACCOUNT_STATUSES = new Set([
+        'invited',
+        'pending_verification',
+        'active',
+        'held',
+        'suspended',
+        'closed'
+    ]);
+    const PARTNERS_VERIFICATION_STATUSES = new Set([
+        'not_started',
+        'pending',
+        'verified',
+        'failed',
+        'expired'
+    ]);
+    const PARTNERS_CONTRACT_STATUSES = new Set([
+        'not_accepted',
+        'accepted',
+        'expired'
+    ]);
+    const PARTNERS_LINK_STATUSES = new Set([
+        'none',
+        'active',
+        'revoked'
+    ]);
+    const PARTNERS_KYC_LEVELS = new Set([
+        'identity_age_country',
+        'identity_age_country_capacity'
+    ]);
+    const PARTNERS_NEXT_ACTIONS = new Set([
+        'start_verification',
+        'await_verification',
+        'accept_terms',
+        'activate_account',
+        'share_link',
+        'contact_support',
+        'none'
+    ]);
+    const PARTNERS_HISTORY_FILTERS = new Set([
+        'all',
+        'pending',
+        'available',
+        'held',
+        'paid',
+        'reversed'
+    ]);
+    const PARTNERS_HISTORY_TYPES = new Set([
+        'commission_pending',
+        'commission_available',
+        'commission_held',
+        'commission_paid',
+        'commission_reversed'
+    ]);
+    const PARTNERS_REPORTING_REASONS = new Set([
+        'available',
+        'no_financial_activity',
+        'multiple_currencies'
+    ]);
+    const PARTNERS_SHARE_URL_PATTERN = /^https:\/\/norva\.tv\/r\/[A-Za-z0-9_-]{32}$/;
+    const PARTNERS_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
+    const PARTNERS_CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+    const PARTNERS_TV_RELAY_TOKEN_PATTERN = /^v1\.[A-Za-z0-9_-]{43}\.[0-9a-f]{64}$/;
+    const PARTNERS_PUBLIC_ERROR_CODES = new Set([
+        'authentication_required',
+        'invalid_access_token',
+        'cors_origin_denied',
+        'cors_preflight_denied',
+        'invalid_content_type',
+        'invalid_request',
+        'payload_too_large',
+        'invalid_query',
+        'route_not_found',
+        'method_not_allowed',
+        'business_accounts_not_supported',
+        'idempotency_key_required',
+        'partners_action_not_allowed',
+        'provider_not_configured',
+        'provider_temporarily_unavailable',
+        'kyc_billing_unavailable',
+        'referral_not_configured',
+        'tv_relay_not_configured',
+        'tv_relay_not_found',
+        'rate_limited',
+        'idempotency_key_reused',
+        'request_in_progress',
+        'partners_temporarily_unavailable'
+    ]);
+    const PARTNERS_CONSENT_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/;
+    const PARTNERS_REFERRAL_CLAIM_STATES = new Set([
+        'absent',
+        'attributed',
+        'already_attributed',
+        'ineligible',
+        'expired',
+        'invalid',
+        'authentication_required',
+        'temporarily_unavailable'
+    ]);
+    const PARTNERS_PAYOUT_PROVIDERS = new Set(['wise', 'revolut', 'stripe_connect']);
+    const PARTNERS_PAYOUT_PROFILE_STATUSES = new Set([
+        'active',
+        'disabled',
+        'verification_required'
+    ]);
+    const PARTNERS_FISCAL_STATUSES = new Set([
+        'missing',
+        'pending',
+        'verified',
+        'rejected',
+        'expired'
+    ]);
+    const PARTNERS_PAYOUT_READINESS_REASONS = new Set([
+        'account_not_active',
+        'kyc_not_verified',
+        'fiscal_profile_required',
+        'provider_not_configured',
+        'payouts_not_live'
+    ]);
+
+    function partnersContractError() {
+        const error = new Error('Norva Partners is temporarily unavailable.');
+        error.code = 'partners_contract_invalid';
+        return error;
+    }
+
+    function partnersClientError(code) {
+        const error = new Error('Norva Partners is unavailable for this session.');
+        error.code = code;
+        return error;
+    }
+
+    function normalizePartnersRequestError(raw) {
+        const publicError = raw?.payload?.error;
+        const code = typeof publicError?.code === 'string'
+            && PARTNERS_PUBLIC_ERROR_CODES.has(publicError.code)
+            ? publicError.code
+            : 'partners_temporarily_unavailable';
+        const error = partnersClientError(code);
+        if (Number.isSafeInteger(raw?.status)) error.status = raw.status;
+        return error;
+    }
+
+    function isPlainRecord(value) {
+        return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+            && Object.prototype.toString.call(value) === '[object Object]';
+    }
+
+    function hasExactKeys(value, expected) {
+        if (!isPlainRecord(value)) return false;
+        const actual = Object.keys(value).sort();
+        const wanted = expected.slice().sort();
+        return actual.length === wanted.length
+            && actual.every((key, index) => key === wanted[index]);
+    }
+
+    function isBoundedString(value, { nullable = false, pattern = null, max = 128 } = {}) {
+        if (nullable && value === null) return true;
+        return typeof value === 'string'
+            && value.length > 0
+            && value.length <= max
+            && (!pattern || pattern.test(value));
+    }
+
+    function isIsoTimestamp(value, nullable = false) {
+        if (nullable && value === null) return true;
+        return isBoundedString(value, { max: 64 }) && Number.isFinite(Date.parse(value));
+    }
+
+    function isTrustedDiditHostedUrl(value) {
+        if (!isBoundedString(value, { max: 2048 })) return false;
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:'
+                && url.hostname === 'verify.didit.me'
+                && !url.username
+                && !url.password;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function validatePayoutThresholds(value) {
+        if (!isPlainRecord(value)) return false;
+        const entries = Object.entries(value);
+        return entries.length >= 1
+            && entries.length <= 32
+            && entries.every(([currency, amount]) => (
+                /^[A-Z]{3}$/.test(currency)
+                && Number.isSafeInteger(amount)
+                && amount > 0
+            ));
+    }
+
+    function deepFreeze(value) {
+        if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+        Object.values(value).forEach(deepFreeze);
+        return Object.freeze(value);
+    }
+
+    function validatePartnersBootstrap(payload, expectedJurisdiction = {}) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])) invalid();
+        if (payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'flags',
+                'visibility',
+                'eligibility',
+                'program',
+                'policy',
+                'allowlist',
+                'account'
+            ])) invalid();
+
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION) invalid();
+        if (!hasExactKeys(data.flags, [
+            'partners_enabled',
+            'partners_invite_only',
+            'partners_shadow_mode',
+            'partners_payouts_live',
+            'partners_tv_relay_enabled'
+        ]) || Object.values(data.flags).some((flag) => typeof flag !== 'boolean')) invalid();
+
+        if (!hasExactKeys(data.visibility, ['visible', 'reason'])
+            || typeof data.visibility.visible !== 'boolean'
+            || !PARTNERS_VISIBILITY_REASONS.has(data.visibility.reason)) invalid();
+        if (!hasExactKeys(data.eligibility, ['eligible', 'reason'])
+            || typeof data.eligibility.eligible !== 'boolean'
+            || !PARTNERS_ELIGIBILITY_REASONS.has(data.eligibility.reason)) invalid();
+
+        if (data.program !== null) {
+            const program = data.program;
+            if (!hasExactKeys(program, [
+                'version_key',
+                'commission_rate_bps',
+                'attribution_window_days',
+                'maturation_days',
+                'payout_thresholds',
+                'effective_from',
+                'effective_until'
+            ])
+                || !isBoundedString(program.version_key, { max: 128 })
+                || program.commission_rate_bps !== 2000
+                || program.attribution_window_days !== 30
+                || program.maturation_days !== 45
+                || !validatePayoutThresholds(program.payout_thresholds)
+                || !isIsoTimestamp(program.effective_from)
+                || !isIsoTimestamp(program.effective_until, true)) invalid();
+        }
+
+        if (data.policy !== null) {
+            const policy = data.policy;
+            if (!hasExactKeys(policy, [
+                'country_code',
+                'subdivision_code',
+                'individual_available',
+                'minimum_age',
+                'capacity_required',
+                'kyc_level',
+                'payout_currencies',
+                'terms_version',
+                'disclosure_version'
+            ])
+                || !isBoundedString(policy.country_code, { pattern: /^[A-Z]{2}$/, max: 2 })
+                || !isBoundedString(policy.subdivision_code, {
+                    nullable: true,
+                    pattern: /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/,
+                    max: 12
+                })
+                || typeof policy.individual_available !== 'boolean'
+                || !Number.isSafeInteger(policy.minimum_age)
+                || policy.minimum_age < 18
+                || policy.minimum_age > 99
+                || typeof policy.capacity_required !== 'boolean'
+                || !PARTNERS_KYC_LEVELS.has(policy.kyc_level)
+                || (policy.capacity_required !== (policy.kyc_level === 'identity_age_country_capacity'))
+                || !Array.isArray(policy.payout_currencies)
+                || policy.payout_currencies.length > 32
+                || policy.payout_currencies.some((currency) => !/^[A-Z]{3}$/.test(currency))
+                || new Set(policy.payout_currencies).size !== policy.payout_currencies.length
+                || !isBoundedString(policy.terms_version, { max: 128 })
+                || !isBoundedString(policy.disclosure_version, { max: 128 })) invalid();
+        }
+
+        if (!hasExactKeys(data.allowlist, ['required', 'included'])
+            || typeof data.allowlist.required !== 'boolean'
+            || typeof data.allowlist.included !== 'boolean') invalid();
+
+        if (!hasExactKeys(data.account, [
+            'exists',
+            'status',
+            'account_type',
+            'verification_status',
+            'contract_status',
+            'link_status'
+        ])
+            || typeof data.account.exists !== 'boolean') invalid();
+
+        if (data.account.exists) {
+            if (!PARTNERS_ACCOUNT_STATUSES.has(data.account.status)
+                || data.account.account_type !== 'individual'
+                || !PARTNERS_VERIFICATION_STATUSES.has(data.account.verification_status)
+                || !PARTNERS_CONTRACT_STATUSES.has(data.account.contract_status)
+                || !PARTNERS_LINK_STATUSES.has(data.account.link_status)) invalid();
+        } else if (data.account.status !== null
+            || data.account.account_type !== null
+            || data.account.verification_status !== null
+            || data.account.contract_status !== null
+            || data.account.link_status !== null) invalid();
+
+        if ((data.visibility.reason === 'existing_account') !== data.account.exists) invalid();
+        if (['account_blocked', 'account_attention_required'].includes(data.eligibility.reason)
+            && !data.account.exists) invalid();
+        if (data.allowlist.required !== data.flags.partners_invite_only) invalid();
+        if (data.visibility.reason === 'available' && !data.flags.partners_enabled) invalid();
+        if (data.account.link_status === 'active'
+            && (data.account.status !== 'active'
+                || data.account.verification_status !== 'verified'
+                || data.account.contract_status !== 'accepted')) invalid();
+
+        // A newly discovered programme must match the jurisdiction requested by
+        // this client. Existing partner accounts are intentionally exempt: the
+        // RPC returns their authoritative stored jurisdiction, which may differ
+        // from the device's current location.
+        if (!data.account.exists && data.policy !== null) {
+            if (expectedJurisdiction.countryCode
+                && data.policy.country_code !== expectedJurisdiction.countryCode) invalid();
+            if (expectedJurisdiction.subdivisionCode
+                && data.policy.subdivision_code !== null
+                && data.policy.subdivision_code !== expectedJurisdiction.subdivisionCode) invalid();
+        }
+
+        const visibilityExpected = data.visibility.reason === 'available'
+            || data.visibility.reason === 'existing_account';
+        if (data.visibility.visible !== visibilityExpected) invalid();
+        if (data.eligibility.eligible !== (data.eligibility.reason === 'eligible')) invalid();
+        if (data.visibility.reason === 'existing_account' && !data.account.exists) invalid();
+        if (data.eligibility.eligible && (
+            !data.flags.partners_enabled
+            || !data.visibility.visible
+            || data.program === null
+            || data.policy === null
+            || data.policy.individual_available !== true
+            || (data.allowlist.required && !data.allowlist.included)
+        )) invalid();
+
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersActionAccount(value) {
+        if (!hasExactKeys(value, [
+            'exists',
+            'status',
+            'verification_status',
+            'contract_status',
+            'link_status'
+        ])
+            || value.exists !== true
+            || !PARTNERS_ACCOUNT_STATUSES.has(value.status)
+            || !PARTNERS_VERIFICATION_STATUSES.has(value.verification_status)
+            || !PARTNERS_CONTRACT_STATUSES.has(value.contract_status)
+            || !PARTNERS_LINK_STATUSES.has(value.link_status)) {
+            throw partnersContractError();
+        }
+        if (value.link_status === 'active'
+            && (value.status !== 'active'
+                || value.verification_status !== 'verified'
+                || value.contract_status !== 'accepted')) {
+            throw partnersContractError();
+        }
+        return value;
+    }
+
+    function validatePartnersAction(payload, expectedAction, { linkRequired = false } = {}) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })) invalid();
+        const expectedKeys = [
+            'schema_version',
+            'action',
+            'replayed',
+            'account',
+            'next_action',
+            ...(linkRequired ? ['link'] : [])
+        ];
+        if (!hasExactKeys(payload.data, expectedKeys)) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || data.action !== expectedAction
+            || typeof data.replayed !== 'boolean'
+            || !PARTNERS_NEXT_ACTIONS.has(data.next_action)) invalid();
+        validatePartnersActionAccount(data.account);
+        if (linkRequired) {
+            if (!hasExactKeys(data.link, ['status', 'share_url', 'rotated_at'])
+                || data.link.status !== 'active'
+                || !isBoundedString(data.link.share_url, {
+                    pattern: PARTNERS_SHARE_URL_PATTERN,
+                    max: 128
+                })
+                || !isIsoTimestamp(data.link.rotated_at)) invalid();
+        }
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersDashboard(payload, expectedStatus) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'account',
+                'link',
+                'reporting',
+                'history'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || !hasExactKeys(data.account, [
+                'exists',
+                'status',
+                'verification_status',
+                'contract_status',
+                'link_status',
+                'country_code',
+                'subdivision_code',
+                'created_at',
+                'updated_at'
+            ])
+            || typeof data.account.exists !== 'boolean') invalid();
+        if (data.account.exists) {
+            if (!PARTNERS_ACCOUNT_STATUSES.has(data.account.status)
+                || !PARTNERS_VERIFICATION_STATUSES.has(data.account.verification_status)
+                || !PARTNERS_CONTRACT_STATUSES.has(data.account.contract_status)
+                || !PARTNERS_LINK_STATUSES.has(data.account.link_status)
+                || !isBoundedString(data.account.country_code, { pattern: /^[A-Z]{2}$/, max: 2 })
+                || !isBoundedString(data.account.subdivision_code, {
+                    nullable: true,
+                    pattern: /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/,
+                    max: 12
+                })
+                || !isIsoTimestamp(data.account.created_at)
+                || !isIsoTimestamp(data.account.updated_at)) invalid();
+        } else if (data.account.status !== null
+            || data.account.verification_status !== null
+            || data.account.contract_status !== null
+            || data.account.link_status !== null
+            || data.account.country_code !== null
+            || data.account.subdivision_code !== null
+            || data.account.created_at !== null
+            || data.account.updated_at !== null) invalid();
+
+        if (data.link !== null) {
+            if (!hasExactKeys(data.link, ['status', 'share_url', 'created_at'])
+                || data.link.status !== 'active'
+                || !isBoundedString(data.link.share_url, {
+                    pattern: PARTNERS_SHARE_URL_PATTERN,
+                    max: 128
+                })
+                || !isIsoTimestamp(data.link.created_at)) invalid();
+        }
+        if ((data.account.link_status === 'active') !== (data.link !== null)) invalid();
+
+        if (!hasExactKeys(data.reporting, [
+            'available',
+            'reason',
+            'currency',
+            'clicks',
+            'referrals',
+            'pending_minor',
+            'available_minor',
+            'paid_minor',
+            'currencies'
+        ]) || typeof data.reporting.available !== 'boolean') invalid();
+        const reporting = data.reporting;
+        const nullableNonNegativeInteger = (value) => value === null
+            || (Number.isSafeInteger(value) && value >= 0);
+        if (typeof reporting.reason !== 'string'
+            || !PARTNERS_REPORTING_REASONS.has(reporting.reason)
+            || !isBoundedString(reporting.currency, {
+                nullable: true,
+                pattern: /^[A-Z]{3}$/,
+                max: 3
+            })
+            || !nullableNonNegativeInteger(reporting.clicks)
+            || !nullableNonNegativeInteger(reporting.referrals)
+            || !nullableNonNegativeInteger(reporting.pending_minor)
+            || !nullableNonNegativeInteger(reporting.available_minor)
+            || !nullableNonNegativeInteger(reporting.paid_minor)
+            || !Array.isArray(reporting.currencies)
+            || reporting.currencies.length > 32) invalid();
+        for (const balance of reporting.currencies) {
+            if (!hasExactKeys(balance, [
+                'currency',
+                'pending_minor',
+                'available_minor',
+                'paid_minor',
+                'payout_destination_ready'
+            ])
+                || !/^[A-Z]{3}$/.test(balance.currency)
+                || !Number.isSafeInteger(balance.pending_minor)
+                || balance.pending_minor < 0
+                || !Number.isSafeInteger(balance.available_minor)
+                || balance.available_minor < 0
+                || !Number.isSafeInteger(balance.paid_minor)
+                || balance.paid_minor < 0
+                || typeof balance.payout_destination_ready !== 'boolean') invalid();
+        }
+        if (new Set(reporting.currencies.map((balance) => balance.currency)).size
+            !== reporting.currencies.length) invalid();
+        if (!Number.isSafeInteger(reporting.clicks)
+            || reporting.clicks < 0
+            || !Number.isSafeInteger(reporting.referrals)
+            || reporting.referrals < 0) invalid();
+        if (reporting.available && reporting.reason === 'available') {
+            if (reporting.currencies.length !== 1
+                || reporting.currency === null
+                || reporting.pending_minor === null
+                || reporting.available_minor === null
+                || reporting.paid_minor === null
+                || reporting.currencies[0].currency !== reporting.currency
+                || reporting.currencies[0].pending_minor !== reporting.pending_minor
+                || reporting.currencies[0].available_minor !== reporting.available_minor
+                || reporting.currencies[0].paid_minor !== reporting.paid_minor) invalid();
+        } else if (reporting.available && reporting.reason === 'multiple_currencies') {
+            if (reporting.currencies.length < 2
+                || reporting.currency !== null
+                || reporting.pending_minor !== null
+                || reporting.available_minor !== null
+                || reporting.paid_minor !== null) invalid();
+        } else if (
+            reporting.available
+            || reporting.reason === 'available'
+            || reporting.reason === 'multiple_currencies'
+            || reporting.currency !== null
+            || reporting.pending_minor !== null
+            || reporting.available_minor !== null
+            || reporting.paid_minor !== null
+            || reporting.currencies.length !== 0
+        ) invalid();
+
+        if (!hasExactKeys(data.history, ['status', 'items', 'next_cursor'])
+            || data.history.status !== expectedStatus
+            || !PARTNERS_HISTORY_FILTERS.has(data.history.status)
+            || !Array.isArray(data.history.items)
+            || data.history.items.length > 50
+            || (data.history.next_cursor !== null
+                && !isBoundedString(data.history.next_cursor, {
+                    pattern: PARTNERS_CURSOR_PATTERN,
+                    max: 256
+                }))) invalid();
+        for (const item of data.history.items) {
+            if (!hasExactKeys(item, ['type', 'occurred_at'])
+                || !PARTNERS_HISTORY_TYPES.has(item.type)
+                || !isIsoTimestamp(item.occurred_at)) invalid();
+            const expectedType = expectedStatus === 'all'
+                ? null
+                : `commission_${expectedStatus}`;
+            if (expectedType !== null && item.type !== expectedType) invalid();
+        }
+        if (reporting.reason === 'no_financial_activity'
+            && (data.history.items.length !== 0
+                || data.history.next_cursor !== null)) invalid();
+
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersKycSession(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'verification'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || data.action !== 'kyc_session_created'
+            || typeof data.replayed !== 'boolean'
+            || !hasExactKeys(data.verification, [
+                'provider',
+                'status',
+                'url',
+                'expires_at'
+            ])
+            || data.verification.provider !== 'didit'
+            || data.verification.status !== 'pending'
+            || !isTrustedDiditHostedUrl(data.verification.url)
+            || !isIsoTimestamp(data.verification.expires_at, true)) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersReferralClaim(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'claimed', 'state'])
+            || payload.version !== 1
+            || typeof payload.claimed !== 'boolean'
+            || !PARTNERS_REFERRAL_CLAIM_STATES.has(payload.state)
+            || payload.claimed !== (
+                payload.state === 'attributed'
+                || payload.state === 'already_attributed'
+            )) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersPayoutProfileValue(profile) {
+        return hasExactKeys(profile, ['provider', 'display_masked', 'currency', 'status'])
+            && PARTNERS_PAYOUT_PROVIDERS.has(profile.provider)
+            && isBoundedString(profile.display_masked, { max: 64 })
+            && profile.display_masked.length >= 4
+            && !looksLikeRawPayoutIdentifier(profile.display_masked)
+            && /^[A-Z]{3}$/.test(profile.currency)
+            && PARTNERS_PAYOUT_PROFILE_STATUSES.has(profile.status);
+    }
+
+    function looksLikeRawPayoutIdentifier(value) {
+        const text = String(value || '');
+        const compact = text.replace(/[- ]/g, '').toUpperCase();
+        return /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)
+            || /^\d{6,34}$/.test(text.replace(/[-:/. ]/g, ''))
+            || /^[^@\s]+@[^@\s]+$/.test(text);
+    }
+
+    function validatePartnersPayoutProfile(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'account',
+                'fiscal',
+                'profile',
+                'profiles',
+                'readiness'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || !hasExactKeys(data.account, ['id', 'status'])
+            || !/^prt_[0-9a-f]{24}$/.test(data.account.id)
+            || !PARTNERS_ACCOUNT_STATUSES.has(data.account.status)
+            || (data.fiscal !== null && (
+                !hasExactKeys(data.fiscal, ['status', 'country_code'])
+                || !PARTNERS_FISCAL_STATUSES.has(data.fiscal.status)
+                || !/^[A-Z]{2}$/.test(data.fiscal.country_code)
+            ))
+            || (data.profile !== null && !validatePartnersPayoutProfileValue(data.profile))
+            || !Array.isArray(data.profiles)
+            || data.profiles.length > 32
+            || data.profiles.some((profile) => !validatePartnersPayoutProfileValue(profile))
+            || new Set(data.profiles.map((profile) => profile.currency)).size !== data.profiles.length
+            || ((data.profile === null) !== (data.profiles.length === 0))
+            || (data.profile !== null && !data.profiles.some((profile) =>
+                profile.provider === data.profile.provider
+                && profile.display_masked === data.profile.display_masked
+                && profile.currency === data.profile.currency
+                && profile.status === data.profile.status
+            ))
+            || !hasExactKeys(data.readiness, ['ready', 'payouts_live', 'reason'])
+            || typeof data.readiness.ready !== 'boolean'
+            || typeof data.readiness.payouts_live !== 'boolean'
+            || (data.readiness.reason !== null
+                && !PARTNERS_PAYOUT_READINESS_REASONS.has(data.readiness.reason))) invalid();
+        if (data.readiness.ready !== (
+            data.readiness.reason === null
+            && data.readiness.payouts_live
+            && data.account.status === 'active'
+            && data.fiscal?.status === 'verified'
+            && data.profile?.status === 'active'
+        )) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersPayoutProfileSaved(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'profile'
+            ])
+            || payload.data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || payload.data.action !== 'payout_profile_saved'
+            || typeof payload.data.replayed !== 'boolean'
+            || !validatePartnersPayoutProfileValue(payload.data.profile)
+            || payload.data.profile.status !== 'active') invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersTvEnvelope(payload, validator) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !isPlainRecord(payload.data)
+            || typeof validator !== 'function') invalid();
+        validator(payload.data, invalid);
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersTvAvailability(payload) {
+        return validatePartnersTvEnvelope(payload, (data, invalid) => {
+            if (!hasExactKeys(data, ['schema_version', 'availability'])
+                || data.schema_version !== PARTNERS_SCHEMA_VERSION
+                || !hasExactKeys(data.availability, ['enabled', 'reason'])
+                || typeof data.availability.enabled !== 'boolean'
+                || !['available', 'feature_disabled', 'not_configured']
+                    .includes(data.availability.reason)
+                || data.availability.enabled !== (data.availability.reason === 'available')) invalid();
+        });
+    }
+
+    function validatePartnersTvRelayCreate(payload) {
+        return validatePartnersTvEnvelope(payload, (data, invalid) => {
+            if (!hasExactKeys(data, ['schema_version', 'action', 'relay'])
+                || data.schema_version !== PARTNERS_SCHEMA_VERSION
+                || data.action !== 'tv_relay_created'
+                || !hasExactKeys(data.relay, [
+                    'status',
+                    'relay_token',
+                    'handoff_url',
+                    'expires_at',
+                    'poll_after_seconds'
+                ])
+                || data.relay.status !== 'pending'
+                || data.relay.poll_after_seconds !== 3
+                || !PARTNERS_TV_RELAY_TOKEN_PATTERN.test(data.relay.relay_token)
+                || !isIsoTimestamp(data.relay.expires_at)
+                || !isTrustedPartnersTvHandoff(
+                    data.relay.handoff_url,
+                    data.relay.relay_token
+                )) invalid();
+        });
+    }
+
+    function validatePartnersTvRelayStatus(payload) {
+        return validatePartnersTvEnvelope(payload, (data, invalid) => {
+            if (!hasExactKeys(data, ['schema_version', 'relay'])
+                || data.schema_version !== PARTNERS_SCHEMA_VERSION
+                || !hasExactKeys(data.relay, [
+                    'status',
+                    'destination',
+                    'poll_after_seconds'
+                ])
+                || !['pending', 'consumed', 'expired'].includes(data.relay.status)
+                || data.relay.poll_after_seconds !== 3
+                || (data.relay.status === 'consumed'
+                    ? data.relay.destination !== 'partners'
+                    : data.relay.destination !== null)) invalid();
+        });
+    }
+
+    function validatePartnersTvRelayConsumed(payload) {
+        return validatePartnersTvEnvelope(payload, (data, invalid) => {
+            if (!hasExactKeys(data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'relay'
+            ])
+                || data.schema_version !== PARTNERS_SCHEMA_VERSION
+                || data.action !== 'tv_relay_consumed'
+                || typeof data.replayed !== 'boolean'
+                || !hasExactKeys(data.relay, ['status', 'destination'])
+                || data.relay.status !== 'consumed'
+                || data.relay.destination !== 'partners') invalid();
+        });
+    }
+
+    function isTrustedPartnersTvHandoff(value, relayToken) {
+        if (typeof value !== 'string' || value.length > 2048) return false;
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:'
+                && /^(?:[a-z0-9-]+\.)*norva\.tv$/.test(url.hostname)
+                && !url.username
+                && !url.password
+                && !url.search
+                && url.pathname !== '/'
+                && url.hash === `#relay=${encodeURIComponent(relayToken)}`;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function partnersRequireUserSession() {
+        if (!getToken() || isDeviceOnly()) {
+            throw partnersClientError('partners_user_session_required');
+        }
+    }
+
+    function partnersRequireDeviceSession() {
+        if (!isDeviceOnly() || !getDeviceToken()) {
+            throw partnersClientError('partners_device_session_required');
+        }
+    }
+
+    function partnersIdempotencyKey(value) {
+        const key = String(value || '').trim();
+        if (!PARTNERS_IDEMPOTENCY_PATTERN.test(key)) {
+            throw partnersClientError('partners_idempotency_key_invalid');
+        }
+        return key;
+    }
+
+    async function partnersPost(path, body, idempotencyKey, validator) {
+        partnersRequireUserSession();
+        const safeIdempotencyKey = partnersIdempotencyKey(idempotencyKey);
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'POST',
+                path,
+                body,
+                {
+                    skipProfile: true,
+                    headers: { 'Idempotency-Key': safeIdempotencyKey }
+                }
+            );
+        } catch (error) {
+            throw normalizePartnersRequestError(error);
+        }
+        return validator(payload);
+    }
+
+    async function partnersDeviceRequest(method, path, body, {
+        idempotencyKey,
+        signal,
+        validator
+    } = {}) {
+        partnersRequireDeviceSession();
+        const headers = {};
+        if (idempotencyKey !== undefined) {
+            headers['Idempotency-Key'] = partnersIdempotencyKey(idempotencyKey);
+        }
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersDeviceBase(),
+                method,
+                path,
+                body,
+                {
+                    token: getDeviceToken(),
+                    signal,
+                    skipProfile: true,
+                    headers
+                }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validator(payload);
+    }
+
+    async function partnersBootstrap({ countryCode, subdivisionCode, signal } = {}) {
+        partnersRequireUserSession();
+        const country = String(countryCode || '').trim().toUpperCase();
+        const subdivision = String(subdivisionCode || '').trim().toUpperCase();
+        if ((country && !/^[A-Z]{2}$/.test(country))
+            || (subdivision && !country)
+            || (subdivision && (
+                subdivision.length > 12
+                || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(subdivision)
+            ))
+            || (country
+                && subdivision.includes('-')
+                && subdivision.split('-')[0] !== country)) {
+            throw partnersClientError('partners_jurisdiction_invalid');
+        }
+        const suffix = query({
+            countryCode: country || undefined,
+            subdivisionCode: subdivision || undefined
+        });
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                `/bootstrap${suffix}`,
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validatePartnersBootstrap(payload, {
+            countryCode: country || null,
+            subdivisionCode: subdivision || null
+        });
+    }
+
+    async function partnersApply({
+        countryCode,
+        subdivisionCode,
+        accountType = 'individual',
+        idempotencyKey
+    } = {}) {
+        const country = String(countryCode || '').trim().toUpperCase();
+        const subdivision = String(subdivisionCode || '').trim().toUpperCase();
+        if (accountType !== 'individual'
+            || !/^[A-Z]{2}$/.test(country)
+            || (subdivision && (
+                subdivision.length > 12
+                || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(subdivision)
+                || (subdivision.includes('-') && subdivision.split('-')[0] !== country)
+            ))) {
+            throw partnersClientError(
+                accountType === 'individual'
+                    ? 'partners_jurisdiction_invalid'
+                    : 'business_accounts_not_supported'
+            );
+        }
+        return partnersPost('/applications', {
+            accountType: 'individual',
+            countryCode: country,
+            ...(subdivision ? { subdivisionCode: subdivision } : {})
+        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'application_submitted'));
+    }
+
+    function partnersAcceptTerms({ termsVersion, disclosureVersion, idempotencyKey } = {}) {
+        if (!isBoundedString(termsVersion, {
+            pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+            max: 64
+        }) || !isBoundedString(disclosureVersion, {
+            pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+            max: 64
+        })) {
+            throw partnersClientError('partners_terms_invalid');
+        }
+        return partnersPost('/activate', {
+            termsVersion,
+            disclosureVersion
+        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'terms_accepted'));
+    }
+
+    function partnersRotateLink({ idempotencyKey } = {}) {
+        return partnersPost(
+            '/links',
+            {},
+            idempotencyKey,
+            (payload) => validatePartnersAction(payload, 'link_rotated', { linkRequired: true })
+        );
+    }
+
+    function partnersStartKyc({
+        language = 'en',
+        consentVersion,
+        capacityConfirmed,
+        idempotencyKey
+    } = {}) {
+        const safeLanguage = String(language || '').trim().toLowerCase();
+        const safeConsentVersion = String(consentVersion || '').trim();
+        if (!/^[a-z]{2}$/.test(safeLanguage)
+            || !PARTNERS_CONSENT_VERSION_PATTERN.test(safeConsentVersion)
+            || capacityConfirmed !== true) {
+            throw partnersClientError('partners_kyc_consent_invalid');
+        }
+        return partnersPost('/kyc/sessions', {
+            language: safeLanguage,
+            consentVersion: safeConsentVersion,
+            consentGranted: true,
+            capacityConfirmed: true
+        }, idempotencyKey, validatePartnersKycSession);
+    }
+
+    async function partnersClaimReferral({ signal } = {}) {
+        partnersRequireUserSession();
+        let payload;
+        try {
+            payload = await requestToBase(
+                window.location.origin,
+                'POST',
+                '/api/partners/claim',
+                {},
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            const status = Number(error?.status) || 0;
+            if (status === 401) {
+                return deepFreeze({
+                    version: 1,
+                    claimed: false,
+                    state: 'authentication_required'
+                });
+            }
+            if (status === 429 || status >= 500) {
+                return deepFreeze({
+                    version: 1,
+                    claimed: false,
+                    state: 'temporarily_unavailable'
+                });
+            }
+            throw partnersContractError();
+        }
+        return validatePartnersReferralClaim(payload);
+    }
+
+    async function partnersPayoutProfile({ signal } = {}) {
+        partnersRequireUserSession();
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                '/payout-profile',
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validatePartnersPayoutProfile(payload);
+    }
+
+    function partnersSaveTokenizedPayoutProfile({
+        provider,
+        beneficiaryTokenRef,
+        displayMasked,
+        currency,
+        idempotencyKey
+    } = {}) {
+        const safeProvider = String(provider || '').trim();
+        const safeToken = String(beneficiaryTokenRef || '');
+        const safeMask = String(displayMasked || '');
+        const safeCurrency = String(currency || '').trim().toUpperCase();
+        if (!PARTNERS_PAYOUT_PROVIDERS.has(safeProvider)
+            || safeToken.length < 8
+            || safeToken.length > 255
+            || /[\s\u0000-\u001f\u007f]/u.test(safeToken)
+            || looksLikeRawPayoutIdentifier(safeToken)
+            || safeMask !== safeMask.trim()
+            || safeMask.length < 4
+            || safeMask.length > 64
+            || /[\u0000-\u001f\u007f]/u.test(safeMask)
+            || looksLikeRawPayoutIdentifier(safeMask)
+            || !/^[A-Z]{3}$/.test(safeCurrency)) {
+            throw partnersClientError('partners_payout_profile_invalid');
+        }
+        return partnersPost('/payout-profile', {
+            provider: safeProvider,
+            beneficiaryTokenRef: safeToken,
+            displayMasked: safeMask,
+            currency: safeCurrency
+        }, idempotencyKey, validatePartnersPayoutProfileSaved);
+    }
+
+    function partnersDeviceAvailability({ signal } = {}) {
+        return partnersDeviceRequest(
+            'GET',
+            '/availability',
+            null,
+            { signal, validator: validatePartnersTvAvailability }
+        );
+    }
+
+    function partnersDeviceCreateRelay({ idempotencyKey, signal } = {}) {
+        return partnersDeviceRequest(
+            'POST',
+            '/relays',
+            {},
+            {
+                idempotencyKey,
+                signal,
+                validator: validatePartnersTvRelayCreate
+            }
+        );
+    }
+
+    function partnersDeviceRelayStatus({ relayToken, signal } = {}) {
+        const safeRelayToken = String(relayToken || '');
+        if (!PARTNERS_TV_RELAY_TOKEN_PATTERN.test(safeRelayToken)) {
+            throw partnersClientError('partners_tv_relay_invalid');
+        }
+        return partnersDeviceRequest(
+            'POST',
+            '/relays/status',
+            { relayToken: safeRelayToken },
+            { signal, validator: validatePartnersTvRelayStatus }
+        );
+    }
+
+    function partnersConsumeTvRelay({ relayToken, idempotencyKey } = {}) {
+        const safeRelayToken = String(relayToken || '');
+        if (!PARTNERS_TV_RELAY_TOKEN_PATTERN.test(safeRelayToken)) {
+            throw partnersClientError('partners_tv_relay_invalid');
+        }
+        return partnersPost(
+            '/tv-relays/consume',
+            { relayToken: safeRelayToken },
+            idempotencyKey,
+            validatePartnersTvRelayConsumed
+        );
+    }
+
+    async function partnersDashboard({ limit = 25, status = 'all', cursor, signal } = {}) {
+        partnersRequireUserSession();
+        const safeLimit = Number(limit);
+        const safeStatus = String(status || 'all');
+        const safeCursor = cursor == null || cursor === '' ? null : String(cursor);
+        if (!Number.isSafeInteger(safeLimit)
+            || safeLimit < 1
+            || safeLimit > 50
+            || !PARTNERS_HISTORY_FILTERS.has(safeStatus)
+            || (safeCursor !== null && !PARTNERS_CURSOR_PATTERN.test(safeCursor))) {
+            throw partnersClientError('partners_dashboard_query_invalid');
+        }
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                `/dashboard${query({
+                    limit: safeLimit,
+                    status: safeStatus,
+                    cursor: safeCursor || undefined
+                })}`,
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validatePartnersDashboard(payload, safeStatus);
+    }
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get edgeUrl() { return edgeBase(); },
@@ -971,6 +2148,27 @@
         // profile / profiles / entitlements / sources caches so the launch
         // sequence makes a single norva-cloud round-trip instead of ~7.
         boot,
+
+        // Norva Partners is a separate user-JWT surface. Every response is
+        // validated against an exact schema and no financial data is persisted
+        // in the browser.
+        partners: Object.freeze({
+            bootstrap: partnersBootstrap,
+            apply: partnersApply,
+            acceptTerms: partnersAcceptTerms,
+            rotateLink: partnersRotateLink,
+            startKyc: partnersStartKyc,
+            claimReferral: partnersClaimReferral,
+            payoutProfile: partnersPayoutProfile,
+            saveTokenizedPayoutProfile: partnersSaveTokenizedPayoutProfile,
+            dashboard: partnersDashboard,
+            consumeTvRelay: partnersConsumeTvRelay,
+            device: Object.freeze({
+                availability: partnersDeviceAvailability,
+                createRelay: partnersDeviceCreateRelay,
+                relayStatus: partnersDeviceRelayStatus
+            })
+        }),
 
         profile: {
             get: () => cachedGet('profile', PROFILE_TTL_MS, () => request('GET', '/profile')).then(rememberProfileRegion),
@@ -1214,6 +2412,10 @@
         },
 
         device: {
+            // Reserved for the future device-only TV relay contract. Keeping an
+            // explicit, empty namespace prevents user financial methods from
+            // being reused with a paired-screen token.
+            partners: Object.freeze({}),
             me: () => request('GET', '/device/me', null, { token: getDeviceToken() }),
             // Self-unpair on logout: revoke this screen's own device token so the
             // account drops it and the pairing screen can't silently resume.

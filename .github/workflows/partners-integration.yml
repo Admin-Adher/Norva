@@ -1,0 +1,330 @@
+name: Norva Partners integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/partners-integration.yml'
+      - '.github/workflows/backup-db-to-r2.yml'
+      - 'public/app.html'
+      - 'public/partners-terms.html'
+      - 'public/privacy.html'
+      - 'public/terms.html'
+      - 'public/js/app.js'
+      - 'public/js/cloudApi.js'
+      - 'public/js/pages/AdminPage.js'
+      - 'public/js/pages/PartnersPage.js'
+      - 'public/js/pages/Settings.js'
+      - 'public/js/utils/standalone.js'
+      - 'public/css/main.css'
+      - 'clients/android-phone/**'
+      - 'clients/android-tv/**'
+      - 'functions/_shared/**'
+      - 'functions/api/partners/**'
+      - 'functions/r/**'
+      - 'ops/hetzner/.env.hetzner.example'
+      - 'ops/backup/**'
+      - 'ops/hetzner/backup/**'
+      - 'ops/hetzner/docker-compose.supabase.yml'
+      - 'ops/hetzner/scripts/01-dump-prod.sh'
+      - 'ops/hetzner/scripts/02-restore-hetzner.sh'
+      - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/partners/**'
+      - 'scripts/validate-partners-release-evidence.js'
+      - 'supabase/config.toml'
+      - 'supabase/functions/_shared/**'
+      - 'supabase/functions/norva-admin/**'
+      - 'supabase/functions/norva-account-delete/**'
+      - 'supabase/functions/norva-billing-webhook/**'
+      - 'supabase/functions/norva-partners/**'
+      - 'supabase/functions/norva-partners-device/**'
+      - 'supabase/functions/norva-partners-kyc-webhook/**'
+      - 'supabase/functions/norva-partners-referral/**'
+      - 'supabase/functions/norva-partners-worker/**'
+      - 'supabase/functions/norva-revolut-billing/**'
+      - 'supabase/functions/norva-revolut-webhook/**'
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - 'docs/NORVA-PARTNERS-*.md'
+      - 'tests/admin-norva-partners.test.js'
+      - 'tests/norva-partners-*.test.js'
+      - 'tests/android-phone-partners-contract.test.js'
+      - 'tests/google-play-orders-partners.test.js'
+      - 'tests/e2e/partners.spec.js'
+      - 'tests/e2e/playwright.config.js'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/partners-integration.yml'
+      - '.github/workflows/backup-db-to-r2.yml'
+      - 'public/app.html'
+      - 'public/partners-terms.html'
+      - 'public/privacy.html'
+      - 'public/terms.html'
+      - 'public/js/app.js'
+      - 'public/js/cloudApi.js'
+      - 'public/js/pages/AdminPage.js'
+      - 'public/js/pages/PartnersPage.js'
+      - 'public/js/pages/Settings.js'
+      - 'public/js/utils/standalone.js'
+      - 'public/css/main.css'
+      - 'clients/android-phone/**'
+      - 'clients/android-tv/**'
+      - 'functions/_shared/**'
+      - 'functions/api/partners/**'
+      - 'functions/r/**'
+      - 'ops/hetzner/.env.hetzner.example'
+      - 'ops/backup/**'
+      - 'ops/hetzner/backup/**'
+      - 'ops/hetzner/docker-compose.supabase.yml'
+      - 'ops/hetzner/scripts/01-dump-prod.sh'
+      - 'ops/hetzner/scripts/02-restore-hetzner.sh'
+      - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/partners/**'
+      - 'scripts/validate-partners-release-evidence.js'
+      - 'supabase/config.toml'
+      - 'supabase/functions/_shared/**'
+      - 'supabase/functions/norva-admin/**'
+      - 'supabase/functions/norva-account-delete/**'
+      - 'supabase/functions/norva-billing-webhook/**'
+      - 'supabase/functions/norva-partners/**'
+      - 'supabase/functions/norva-partners-device/**'
+      - 'supabase/functions/norva-partners-kyc-webhook/**'
+      - 'supabase/functions/norva-partners-referral/**'
+      - 'supabase/functions/norva-partners-worker/**'
+      - 'supabase/functions/norva-revolut-billing/**'
+      - 'supabase/functions/norva-revolut-webhook/**'
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - 'docs/NORVA-PARTNERS-*.md'
+      - 'tests/admin-norva-partners.test.js'
+      - 'tests/norva-partners-*.test.js'
+      - 'tests/android-phone-partners-contract.test.js'
+      - 'tests/google-play-orders-partners.test.js'
+      - 'tests/e2e/partners.spec.js'
+      - 'tests/e2e/playwright.config.js'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: partners-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts-and-edge:
+    name: Contracts and Edge type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Node.js
+        # actions/setup-node v6.5.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22.22.3'
+          cache: npm
+
+      - name: Install locked Node dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run Partners contract tests
+        run: >-
+          node --test
+          tests/admin-norva-partners.test.js
+          tests/norva-partners-*.test.js
+          tests/google-play-orders-partners.test.js
+          tests/android-phone-partners-contract.test.js
+
+      - name: Validate the fail-closed pilot evidence template
+        run: >-
+          node scripts/validate-partners-release-evidence.js
+          ops/partners/pilot-release.example.json
+
+      - name: Run financial producer non-regression tests
+        run: >-
+          node --test
+          tests/revenuecat-billing-contract.test.js
+          tests/revenuecat-email-producers.test.js
+          tests/revolut-billing-cycle-idempotency.test.js
+          tests/revolut-checkout-reliability.test.js
+          tests/revolut-monotonic-projection.test.js
+          tests/payment-terminal-reconciliation.test.js
+          tests/internal-account-billing-invariant.test.js
+
+      - name: Set up Deno
+        # denoland/setup-deno v2.0.5
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+        with:
+          deno-version: v2.9.4
+
+      - name: Type-check the Partners Edge boundary
+        run: >-
+          deno check --frozen
+          supabase/functions/norva-partners/index.ts
+          supabase/functions/norva-partners-device/index.ts
+          supabase/functions/norva-partners-kyc-webhook/index.ts
+          supabase/functions/norva-partners-referral/index.ts
+          supabase/functions/norva-partners-worker/index.ts
+          supabase/functions/norva-admin/index.ts
+          supabase/functions/norva-account-delete/index.ts
+          supabase/functions/norva-billing-webhook/index.ts
+          supabase/functions/norva-revolut-webhook/index.ts
+          supabase/functions/norva-revolut-billing/index.ts
+
+  android-contracts:
+    name: Android ${{ matrix.label }} compile and tests
+    needs: contracts-and-edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Phone
+            project: clients/android-phone
+          - label: TV
+            project: clients/android-tv
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up JDK 17
+        # actions/setup-java v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        # android-actions/setup-android v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: ''
+
+      - name: Install Android API 36 SDK
+        run: >-
+          sdkmanager
+          "platform-tools"
+          "platforms;android-36"
+          "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        # gradle/actions/setup-gradle v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Run unit tests, lint and compile
+        working-directory: ${{ matrix.project }}
+        run: >-
+          gradle
+          :app:testDebugUnitTest
+          :app:lintDebug
+          :app:assembleDebug
+          --no-daemon
+          --stacktrace
+
+  browser-e2e:
+    name: Mocked Web and mobile journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Node.js
+        # actions/setup-node v6.5.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22.22.3'
+          cache: npm
+
+      - name: Install locked application dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install the pinned Playwright runner
+        run: >-
+          npm install
+          --no-save
+          --ignore-scripts
+          --package-lock=false
+          @playwright/test@1.62.0
+
+      - name: Install Chromium and runner libraries
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the Partners browser journey
+        run: npx playwright test --config=tests/e2e/playwright.config.js
+
+  disposable-database:
+    name: Disposable Supabase database
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Node.js for the Supabase action
+        # actions/setup-node v6.5.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22.22.3'
+
+      - name: Set up the pinned Supabase CLI
+        # supabase/setup-cli v3.0.0
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520
+        with:
+          version: 2.110.0
+
+      - name: Start a fresh local Supabase stack
+        run: supabase start
+
+      - name: Rebuild the disposable database from every migration
+        run: supabase db reset --local --no-seed
+
+      - name: Run Partners pgTAP integration tests
+        run: supabase test db supabase/tests/affiliate_p0.sql --local
+
+      - name: Lint public and private Partners routines
+        run: >-
+          supabase db lint
+          --local
+          --schema public,affiliate_private
+          --level warning
+          --fail-on error
+
+      - name: Fail on security advisor warnings
+        run: >-
+          supabase db advisors
+          --local
+          --type security
+          --level warn
+          --fail-on warn
+
+      - name: Fail on performance advisor errors
+        run: >-
+          supabase db advisors
+          --local
+          --type performance
+          --level error
+          --fail-on error
+
+      - name: Stop the disposable stack
+        if: always()
+        run: supabase stop --no-backup

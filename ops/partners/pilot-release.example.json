@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "release_key": "partners-pilot-replace-me",
+  "contains_personal_data": false,
+  "program": {
+    "version_key": null,
+    "commission_rate_bps": 2000,
+    "attribution_window_days": 30,
+    "maturation_days": 45
+  },
+  "legal": {
+    "terms_version": null,
+    "terms_sha256": null,
+    "disclosure_version": null,
+    "disclosure_sha256": null,
+    "privacy_review_evidence": null,
+    "public_surfaces": {
+      "verified_at": null,
+      "deployment_ref": null,
+      "terms_evidence": null,
+      "privacy_evidence": null,
+      "partners_terms_evidence": null
+    }
+  },
+  "jurisdictions": [],
+  "allowlist": {
+    "target_min": 20,
+    "target_max": 50,
+    "configured_count": 0,
+    "identities_stored_in_evidence": false
+  },
+  "providers": {
+    "didit": {
+      "status": "not_configured",
+      "sandbox_evidence": null
+    },
+    "individual_payout": {
+      "status": "not_selected",
+      "sandbox_evidence": null
+    },
+    "web_tax": {
+      "status": "not_selected",
+      "sandbox_evidence": null
+    },
+    "google_play_orders": {
+      "status": "not_configured",
+      "sandbox_evidence": null
+    },
+    "revenuecat": {
+      "status": "not_configured",
+      "sandbox_evidence": null
+    },
+    "revolut": {
+      "status": "not_configured",
+      "sandbox_evidence": null
+    }
+  },
+  "feature_flags": {
+    "partners_enabled": false,
+    "partners_invite_only": false,
+    "partners_shadow_mode": false,
+    "partners_payouts_live": false,
+    "partners_tv_relay_enabled": false
+  },
+  "quality": {
+    "partners_ci_run_evidence": null,
+    "security_advisors_passed": false,
+    "performance_advisors_passed": false,
+    "offsite_backup_evidence": null,
+    "offsite_backup_encrypted": false,
+    "restore_drill_evidence": null,
+    "restore_verifier_passed": false
+  },
+  "runtime": {
+    "worker_cron_evidence": null,
+    "shadow_reconciliation_evidence": null,
+    "shadow_reconciliation_clean": false,
+    "alert_and_recovery_evidence": null
+  },
+  "payout_cycles": [
+    {
+      "sequence": 1,
+      "status": "not_started",
+      "reconciliation_evidence": null
+    },
+    {
+      "sequence": 2,
+      "status": "not_started",
+      "reconciliation_evidence": null
+    }
+  ],
+  "approvals": {
+    "legal": false,
+    "risk": false,
+    "finance": false,
+    "operations": false
+  }
+}

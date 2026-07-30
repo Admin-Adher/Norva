@@ -122,6 +122,7 @@ dependencies {
 
     androidTestImplementation "androidx.test:runner:1.6.2"
     androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    testImplementation "junit:junit:4.13.2"
 }
 
 // Apply the Firebase google-services plugin ONLY when the config file is present. CI debug builds

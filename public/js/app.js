@@ -27,6 +27,16 @@ const NORVA_DEVICE_APPS = [
 const NORVA_NATIVE_CONTINUITY_KEY = 'norva-native-continuity-v1';
 const NORVA_NATIVE_FICHE_KEY = 'norva-native-fiche-v1';
 const NORVA_NATIVE_CONTINUITY_TTL_MS = 12 * 60 * 60 * 1000;
+const NORVA_PARTNERS_TV_RELAY_SESSION_KEY = 'norva-partners-tv-relay-v1';
+const NORVA_PARTNERS_TV_RELAY_PATTERN = /^v1\.[A-Za-z0-9_-]{43}\.[0-9a-f]{64}$/;
+const NORVA_PARTNERS_TV_RELAY_CLIENT_TTL_MS = 15 * 60 * 1000;
+const NORVA_PARTNERS_KYC_SESSION_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const NORVA_PARTNERS_KYC_RETURN_STATUSES = new Set([
+    'Approved',
+    'Declined',
+    'In Review'
+]);
 
 class App {
     constructor() {
@@ -39,8 +49,10 @@ class App {
         this.currentPage = 'home';
         this.pages = {};
         this.currentUser = null;
+        this._partnersKycReturn = this.capturePartnersKycReturn();
         this._nativeRecovery = this.isNativeContinuityRecovery();
         this._nativeContinuity = this.readNativeContinuity();
+        this._pendingPartnersTvRelay = this.capturePartnersTvRelay();
         this._pageScroll = { ...(this._nativeContinuity?.pageScroll || {}) };
 
         // Initialize components
@@ -56,6 +68,7 @@ class App {
         this.pages.movies = new MoviesPage(this);
         this.pages.series = new SeriesPage(this);
         this.pages.settings = new SettingsPage(this);
+        this.pages.partners = new PartnersPage(this);
         this.pages.watch = new WatchPage(this);
         // AdminPage (76 KB) is admin-only: loaded on demand (ensureAdminPage) so
         // every non-admin phone stops downloading/parsing it at boot.
@@ -85,6 +98,159 @@ class App {
         }
     }
 
+    capturePartnersKycReturn() {
+        try {
+            const url = new URL(window.location.href);
+            const sessions = url.searchParams.getAll('verificationSessionId');
+            const statuses = url.searchParams.getAll('status');
+            if (sessions.length !== 1
+                || statuses.length !== 1
+                || !NORVA_PARTNERS_KYC_SESSION_PATTERN.test(sessions[0])
+                || !NORVA_PARTNERS_KYC_RETURN_STATUSES.has(statuses[0])) {
+                return null;
+            }
+
+            // Didit adds its opaque session id and status to the return URL.
+            // They are useful only to confirm that the hosted flow returned;
+            // the signed webhook remains authoritative. Remove both values
+            // before any referrer, analytics request or authentication return
+            // can retain a provider identifier.
+            url.searchParams.delete('verificationSessionId');
+            url.searchParams.delete('status');
+            url.hash = '#partners';
+            window.history.replaceState(
+                window.history.state,
+                '',
+                `${url.pathname}${url.search}${url.hash}`
+            );
+            return { capturedAt: Date.now() };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    consumePartnersKycReturnNotice() {
+        const returned = this._partnersKycReturn;
+        this._partnersKycReturn = null;
+        return Boolean(
+            returned
+            && Number.isSafeInteger(returned.capturedAt)
+            && Date.now() - returned.capturedAt < 15 * 60 * 1000
+        );
+    }
+
+    capturePartnersTvRelay() {
+        const safeRecord = (value) => {
+            if (!value || typeof value !== 'object') return null;
+            const relayToken = String(value.relayToken || '');
+            const idempotencyKey = String(value.idempotencyKey || '');
+            const capturedAt = Number(value.capturedAt);
+            if (!NORVA_PARTNERS_TV_RELAY_PATTERN.test(relayToken)
+                || !/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)
+                || !Number.isSafeInteger(capturedAt)
+                || capturedAt > Date.now() + 60_000
+                || Date.now() - capturedAt > NORVA_PARTNERS_TV_RELAY_CLIENT_TTL_MS) {
+                return null;
+            }
+            return { relayToken, idempotencyKey, capturedAt };
+        };
+        const readStored = () => {
+            try {
+                const record = safeRecord(JSON.parse(
+                    sessionStorage.getItem(NORVA_PARTNERS_TV_RELAY_SESSION_KEY) || 'null'
+                ));
+                if (!record) sessionStorage.removeItem(NORVA_PARTNERS_TV_RELAY_SESSION_KEY);
+                return record;
+            } catch (_) {
+                try { sessionStorage.removeItem(NORVA_PARTNERS_TV_RELAY_SESSION_KEY); } catch (_) { /* noop */ }
+                return null;
+            }
+        };
+
+        let relayToken = '';
+        try {
+            const match = String(window.location.hash || '').match(/^#relay=(.+)$/);
+            if (match) relayToken = decodeURIComponent(match[1]);
+        } catch (_) { relayToken = ''; }
+        if (!NORVA_PARTNERS_TV_RELAY_PATTERN.test(relayToken)) return readStored();
+
+        let idempotencyKey = '';
+        try {
+            idempotencyKey = `norva.tv-relay.${crypto.randomUUID()}`;
+        } catch (_) {
+            const bytes = new Uint8Array(18);
+            crypto.getRandomValues(bytes);
+            idempotencyKey = `norva.tv-relay.${
+                Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+            }`;
+        }
+        const record = { relayToken, idempotencyKey, capturedAt: Date.now() };
+        try {
+            sessionStorage.setItem(
+                NORVA_PARTNERS_TV_RELAY_SESSION_KEY,
+                JSON.stringify(record)
+            );
+        } catch (_) { /* the in-memory copy still works for an existing session */ }
+
+        // The bearer-like relay lives in a URL fragment so it is never sent in
+        // HTTP requests or Referer headers. Scrub it before an authentication
+        // redirect can copy it into a returnTo query string or an access log.
+        try {
+            window.history.replaceState(
+                window.history.state,
+                '',
+                `${window.location.pathname}${window.location.search}#partners`
+            );
+        } catch (_) { /* best-effort; never echo the token elsewhere */ }
+        return record;
+    }
+
+    clearPendingPartnersTvRelay() {
+        this._pendingPartnersTvRelay = null;
+        try { sessionStorage.removeItem(NORVA_PARTNERS_TV_RELAY_SESSION_KEY); } catch (_) { /* noop */ }
+    }
+
+    async consumePendingPartnersTvRelay() {
+        if (this._partnersTvRelayInFlight
+            || !this._pendingPartnersTvRelay
+            || !this.currentUser?.cloud
+            || this.currentUser?.device
+            || typeof window.NorvaCloud?.partners?.consumeTvRelay !== 'function') return false;
+        const pending = this._pendingPartnersTvRelay;
+        this._partnersTvRelayInFlight = true;
+        try {
+            await window.NorvaCloud.partners.consumeTvRelay({
+                relayToken: pending.relayToken,
+                idempotencyKey: pending.idempotencyKey
+            });
+            this.clearPendingPartnersTvRelay();
+            window.NorvaModal?.toast?.(
+                'TV hand-off confirmed. Norva Partners is open securely on this device.',
+                'success'
+            );
+            return true;
+        } catch (error) {
+            const terminal = new Set([
+                'tv_relay_not_found',
+                'partners_action_not_allowed',
+                'invalid_request',
+                'partners_tv_relay_invalid'
+            ]);
+            if (terminal.has(error?.code)) {
+                this.clearPendingPartnersTvRelay();
+                window.NorvaModal?.toast?.(
+                    'This TV hand-off expired. Start a new one from the TV.',
+                    'warning'
+                );
+            }
+            // Transient failures retain the same token and idempotency key in
+            // sessionStorage. A reload resumes the one authoritative consume.
+            return false;
+        } finally {
+            this._partnersTvRelayInFlight = false;
+        }
+    }
+
     readNativeContinuity() {
         if (!this._nativeRecovery) return null;
         try {
@@ -92,7 +258,7 @@ class App {
             if (!parsed || Date.now() - Number(parsed.updatedAt || 0) > NORVA_NATIVE_CONTINUITY_TTL_MS) {
                 return null;
             }
-            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings']);
+            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings', 'partners']);
             const page = allowed.has(parsed.page) ? parsed.page : 'home';
             const boundedScrollMap = (value) => Object.fromEntries(
                 Object.entries(value && typeof value === 'object' ? value : {})
@@ -116,9 +282,9 @@ class App {
     persistNativeContinuity() {
         if (!this.isNativePhoneShell()) return;
         try {
-            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings']);
+            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings', 'partners']);
             const page = allowed.has(this.currentPage) ? this.currentPage : 'home';
-            const currentPage = document.getElementById(`page-${page}`);
+            const currentPage = this.getPageScrollElement(page);
             this._pageScroll = this._pageScroll || {};
             if (currentPage) this._pageScroll[page] = currentPage.scrollTop || 0;
             const bounded = (value) => Math.max(
@@ -138,6 +304,30 @@ class App {
         } catch (_) {
             // Private/low-storage mode remains usable; continuity is best-effort.
         }
+    }
+
+    getPageScrollElement(pageName) {
+        const ownedScroller = this.pages?.[pageName]?.getScrollElement?.();
+        return ownedScroller || document.getElementById(`page-${pageName}`);
+    }
+
+    restorePageScroll(pageName, top = 0) {
+        const boundedTop = Math.max(
+            0,
+            Math.min(10_000_000, Math.floor(Number(top) || 0))
+        );
+        if (boundedTop <= 0) return;
+        const restore = () => {
+            const element = this.getPageScrollElement(pageName);
+            if (this.currentPage === pageName
+                && element
+                && element.scrollHeight > boundedTop
+                && Math.abs(element.scrollTop - boundedTop) > 4) {
+                element.scrollTop = boundedTop;
+            }
+        };
+        requestAnimationFrame(restore);
+        window.setTimeout(restore, 350);
     }
 
     installNativeContinuityListeners() {
@@ -315,6 +505,10 @@ class App {
         window.NorvaTrace?.log?.('checkCloudAccess() — entitlements (served from boot cache if seeded)');
         if (!await this.checkCloudAccess()) return;
         window.NorvaTrace?.log?.('checkCloudAccess() done');
+        // A scanned Partners TV relay is consumed only after both Auth and the
+        // account entitlement gate succeed. It stays non-blocking so a transient
+        // relay outage can never delay the catalogue or profile picker.
+        void this.consumePendingPartnersTvRelay();
         // Keep the premium launch surface UNDER the profile overlay. The overlay has a
         // deliberately higher z-index, so it stays interactive, while dismissing it can
         // never expose the empty app shell that used to sit between profile and Home.
@@ -1324,6 +1518,7 @@ class App {
                     device: !user
                 };
                 this.addLogoutButton();
+                if (user?.id) this.claimPendingPartnerReferral();
                 // Identify the RevenueCat App User ID as the Supabase user id at boot,
                 // so a store purchase is attributed to THIS account. Doing it here
                 // (not lazily right before purchase) avoids the async logIn/purchase
@@ -1364,6 +1559,7 @@ class App {
                         device: !cachedUser
                     };
                     this.addLogoutButton();
+                    if (cachedUser?.id) this.claimPendingPartnerReferral();
                     if (cachedUser?.id) { try { window.NorvaBilling?.login?.(cachedUser.id); } catch (_) { /* noop */ } }
                     return;
                 }
@@ -1413,6 +1609,34 @@ class App {
             localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         }
+    }
+
+    claimPendingPartnerReferral() {
+        if (this._partnersReferralClaimAttempted
+            || this.currentUser?.device
+            || typeof window.NorvaCloud?.partners?.claimReferral !== 'function') return;
+        this._partnersReferralClaimAttempted = true;
+        // The browser never reads the HttpOnly referral cookie. The same-origin
+        // endpoint owns cookie consumption and forwards only the authenticated
+        // claim to the account-scoped Edge Function. Attribution must not block
+        // app boot; transient outcomes deliberately keep the cookie for a later
+        // page load.
+        Promise.resolve(window.NorvaCloud.partners.claimReferral())
+            .then((result) => {
+                if (result?.state === 'attributed') {
+                    window.NorvaModal?.toast?.(
+                        'Referral attribution saved to your Norva account.',
+                        'success'
+                    );
+                }
+                if (result?.state === 'temporarily_unavailable'
+                    || result?.state === 'authentication_required') {
+                    this._partnersReferralClaimAttempted = false;
+                }
+            })
+            .catch(() => {
+                this._partnersReferralClaimAttempted = false;
+            });
     }
 
     async checkCloudAccess() {
@@ -2269,6 +2493,14 @@ class App {
         requestAnimationFrame(() => this.pages.settings?.switchTab?.('screens'));
     }
 
+    openPartners(opener = null) {
+        const page = this.pages?.partners;
+        if (!page?.canUsePartners?.()) return false;
+        page.rememberOpener?.(opener || document.activeElement);
+        this.navigateTo('partners');
+        return true;
+    }
+
     buildAccountSheet() {
         const overlay = document.createElement('div');
         overlay.id = 'account-sheet';
@@ -2296,6 +2528,13 @@ class App {
                         <span class="account-row-hint">Web, phone, tablet and TV</span>
                     </span>
                 </button>
+                <button type="button" class="account-row" data-act="partners" hidden aria-hidden="true">
+                    <img class="account-ic" src="/img/norva-app-icon.png" alt="">
+                    <span class="account-row-copy">
+                        <span class="account-row-title">Norva Partners</span>
+                        <span class="account-row-hint">Direct referrals · 20% recurring</span>
+                    </span>
+                </button>
                 <button type="button" class="account-row" data-act="settings">
                     <img class="account-ic" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt=""><span>Settings</span>
                 </button>
@@ -2312,6 +2551,7 @@ class App {
                 this.closeAccountSheet();
                 if (act === 'switch') window.NorvaProfiles?.openSwitcher?.();
                 else if (act === 'screens') this.openScreensSettings();
+                else if (act === 'partners') this.openPartners(row);
                 else if (act === 'settings') this.navigateTo('settings');
                 else if (act === 'logout') this.signOut();
             });
@@ -2328,6 +2568,7 @@ class App {
         const email = sheet.querySelector('#account-email');
         const switchRow = sheet.querySelector('[data-act="switch"]');
         const screensRow = sheet.querySelector('[data-act="screens"]');
+        const partnersRow = sheet.querySelector('[data-act="partners"]');
         if (avatar && cur.avatarUrl) avatar.src = cur.avatarUrl;
         if (switchIc && cur.avatarUrl) switchIc.src = cur.avatarUrl;
         if (name) name.textContent = cur.name || 'Profile';
@@ -2337,6 +2578,14 @@ class App {
         if (screensRow) {
             const cloudUser = Boolean(cur.isCloud || this.currentUser?.cloud || window.API?.isCloudMode?.());
             screensRow.style.display = cloudUser ? '' : 'none';
+        }
+        if (partnersRow) {
+            // The bootstrap is the only authority allowed to reveal this row.
+            // Keep it hidden synchronously, then let PartnersPage expose it only
+            // after a valid `visibility.visible=true` response.
+            partnersRow.hidden = true;
+            partnersRow.setAttribute('aria-hidden', 'true');
+            this.pages?.partners?.primeVisibility?.().catch(() => {});
         }
     }
 
@@ -3142,7 +3391,7 @@ class App {
         // Remember where the outgoing page was scrolled (page-level scroller, e.g.
         // #page-home; Movies/Series grids save their own scroller in hide()).
         this._pageScroll = this._pageScroll || {};
-        const prevPageEl = document.getElementById(`page-${this.currentPage}`);
+        const prevPageEl = this.getPageScrollElement(this.currentPage);
         if (prevPageEl) this._pageScroll[this.currentPage] = prevPageEl.scrollTop || 0;
 
         // Update nav
@@ -3198,22 +3447,14 @@ class App {
                 if (navigationToken !== this._navigationToken) return;
                 this.endTvRouteTransition(tvRouteToken);
                 this.restoreNativeGridScroll(pageName);
+                this.restorePageScroll(pageName, this._pageScroll?.[pageName]);
                 this.persistNativeContinuity();
             });
 
         // Restore the incoming page's position (two passes: instant, and once
         // async content has had a beat to paint back at full height).
         const savedTop = this._pageScroll[pageName] || 0;
-        if (savedTop > 0) {
-            const restore = () => {
-                const el = document.getElementById(`page-${pageName}`);
-                if (el && Math.abs(el.scrollTop - savedTop) > 4 && el.scrollHeight > savedTop) {
-                    el.scrollTop = savedTop;
-                }
-            };
-            requestAnimationFrame(restore);
-            setTimeout(restore, 350);
-        }
+        this.restorePageScroll(pageName, savedTop);
 
         // After the switch: the watch page is its own fullscreen player, so a movie
         // /episode must never play under a still-floating live mini. Run this LAST —
@@ -3284,7 +3525,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=89';
+                s.src = '/js/pages/AdminPage.js?v=94';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

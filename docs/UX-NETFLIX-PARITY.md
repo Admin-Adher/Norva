@@ -49,8 +49,9 @@ APK Android mobile, APK Android TV) ont été implémentés en 8 commits.
     `statusBarColor`), immersif réservé au player (`PlayerTheme`).
 14. Gestes verticaux player : gauche = luminosité, droite = volume.
 15. App Links https `norva.tv` (autoVerify) + `launchMode=singleTask` +
-    `onNewIntent`. ⚠ **Owner** : remplacer le SHA-256 placeholder dans
-    `public/.well-known/assetlinks.json` (empreinte release, Play Console).
+    `onNewIntent`. ✅ `assetlinks.json` est publié avec les empreintes phone
+    autorisées ; la validation finale doit être rejouée sur une installation
+    signée par Google Play, pas sur le certificat debug de l'émulateur.
 16. Bundle : AdminPage (76 Ko) lazy à la première entrée `#admin` (gating via
     RPC `is_admin` léger), hls.js (~400 Ko) injecté à l'idle / navigation
     playback. *(La minification complète exige une étape de build Cloudflare

@@ -43,3 +43,11 @@ deno.lock
 # Portable analytics report QA writes failure-only screenshots beside the report.
 *.verification-failure.png
 verify-debug.png
+
+# Superdesign scratch components and generated prompt payloads.
+.superdesign/tmp/
+
+# Local browser/emulator QA evidence. Curated evidence belongs under docs/audits/.
+.playwright-cli/
+test-results/
+output/

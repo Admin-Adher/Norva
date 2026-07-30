@@ -21,6 +21,9 @@ class AdminPage {
         this._allTags = [];
         this._usersDebounce = null;
         this._lastTs = null; // snapshot refreshed_at for the topbar
+        this._partnersCanManageCapabilities = false;
+        this._partnersCanManageRelease = false;
+        this._partnersCapabilities = { support: false, risk: false, finance: false };
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -90,8 +93,8 @@ class AdminPage {
         r = String(r || '');
         if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse',
             'marketing', 'marketing/promos', 'marketing/notifs',
-            'clients', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
-        const m = r.match(/^(client|ticket):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+            'clients', 'partners', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
+        const m = r.match(/^(client|ticket|partner):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
         return m ? (m[1] + ':' + m[2]) : null;
     }
 
@@ -103,6 +106,7 @@ class AdminPage {
             { key: 'finance', label: 'Finance', icon: '💶', section: 'Business' },
             { key: 'marketing', label: 'Marketing', icon: '📣', section: 'Business' },
             { key: 'clients', label: 'Clients', icon: '👥', section: 'Business' },
+            { key: 'partners', label: 'Partners', icon: 'P', section: 'Business' },
             { key: 'support', label: 'Support', icon: '🎫', section: 'Business' },
             { key: 'providers', label: 'Providers', icon: '📡', section: 'Catalogue' },
             { key: 'identites', label: 'Identités', icon: '🧬', section: 'Catalogue' },
@@ -663,6 +667,75 @@ class AdminPage {
 #page-admin .flag-del{background:none;border:0;color:#ff6b6b;cursor:pointer;font-size:19px;line-height:1;}
 #page-admin .flag-del:hover{color:#ff9b9b;}
 #page-admin .flag-add{margin-top:12px;}
+#page-admin .flag-row--managed{margin:6px 0;padding:12px 13px;background:linear-gradient(135deg,rgba(91,124,250,.08),rgba(168,85,247,.035));border:1px solid rgba(91,124,250,.2);border-radius:11px;}
+#page-admin .flag-managed-signal{width:10px;height:10px;flex:0 0 auto;border-radius:50%;background:var(--adm-tx3);box-shadow:0 0 0 4px rgba(130,141,163,.12);}
+#page-admin .flag-managed-signal.is-on{background:var(--adm-green);box-shadow:0 0 0 4px rgba(52,211,153,.13);}
+#page-admin .flag-managed-detail{display:flex;flex-wrap:wrap;align-items:center;gap:6px 9px;margin-top:5px;color:var(--adm-tx3);font-size:11px;line-height:1.4;}
+#page-admin .flag-managed-badge{display:inline-flex;align-items:center;min-height:24px;padding:2px 8px;border:1px solid rgba(91,124,250,.28);border-radius:999px;color:#aebdff;background:rgba(91,124,250,.09);font-weight:700;letter-spacing:.2px;}
+#page-admin .flag-managed-state{flex:0 0 auto;min-width:74px;padding:5px 9px;border:1px solid var(--adm-line);border-radius:8px;color:var(--adm-tx2);background:var(--adm-card2);font-size:11.5px;font-weight:700;text-align:center;}
+#page-admin .flag-managed-state.is-on{color:var(--adm-green);border-color:rgba(52,211,153,.25);background:rgba(52,211,153,.06);}
+#page-admin .partners-admin-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,260px);gap:12px;margin:16px 0;}
+#page-admin .partners-admin-toolbar input,#page-admin .partners-admin-toolbar select{min-height:44px;padding:9px 12px;border:1px solid var(--adm-line);border-radius:9px;background:var(--adm-card2);color:var(--adm-tx1);font:inherit;}
+#page-admin .partners-admin-readiness{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0;}
+#page-admin .partners-admin-cap{min-height:112px;padding:14px;border:1px solid var(--adm-line);border-radius:11px;background:var(--adm-card);}
+#page-admin .partners-admin-cap strong{display:block;margin-bottom:6px;color:var(--adm-tx1);}
+#page-admin .partners-admin-cap span{color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .partners-admin-cap.is-ready{border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.045);}
+#page-admin .partners-admin-cap .partners-action-row{margin-top:12px;}
+#page-admin .partners-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0;}
+#page-admin .partners-ops-card{min-width:0;padding:16px;border:1px solid var(--adm-line);border-radius:11px;background:var(--adm-card);}
+#page-admin .partners-ops-card h2{margin:0 0 5px;font-size:15px;color:var(--adm-tx1);}
+#page-admin .partners-ops-card p{margin:0 0 12px;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .partners-ops-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+#page-admin .partners-ops-stat{padding:10px;border:1px solid var(--adm-line);border-radius:9px;background:var(--adm-card2);}
+#page-admin .partners-ops-stat strong,#page-admin .partners-ops-stat span{display:block;}
+#page-admin .partners-ops-stat strong{font-size:16px;color:var(--adm-tx1);}
+#page-admin .partners-ops-stat span{margin-top:3px;color:var(--adm-tx3);font-size:10px;line-height:1.3;}
+#page-admin .partners-ops-list{display:grid;gap:7px;}
+#page-admin .partners-ops-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--adm-line);font-size:12px;}
+#page-admin .partners-ops-row:last-child{border-bottom:0;}
+#page-admin .partners-ops-row span{min-width:0;overflow-wrap:anywhere;color:var(--adm-tx2);}
+#page-admin .partners-ops-row strong{color:var(--adm-tx1);text-align:right;}
+#page-admin .partners-control-stack{display:grid;gap:16px;margin:16px 0;}
+#page-admin .partners-control-card{padding:17px;border:1px solid var(--adm-line);border-radius:12px;background:linear-gradient(145deg,var(--adm-card),rgba(91,124,250,.025));}
+#page-admin .partners-control-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px;}
+#page-admin .partners-control-head h2{margin:0 0 4px;color:var(--adm-tx1);font-size:15px;}
+#page-admin .partners-control-head p{margin:0;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .partners-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+#page-admin .partners-control-item{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:10px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
+#page-admin .partners-control-item > span{min-width:0;color:var(--adm-tx2);font-size:12px;overflow-wrap:anywhere;}
+#page-admin .partners-control-item small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:10px;line-height:1.35;}
+#page-admin .partners-action-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+#page-admin .partners-action{min-height:44px;padding:9px 12px;border:1px solid rgba(91,124,250,.35);border-radius:9px;background:rgba(91,124,250,.09);color:#c9d3ff;font:inherit;font-size:12px;font-weight:750;cursor:pointer;}
+#page-admin .partners-action:hover{border-color:#7c96ff;background:rgba(91,124,250,.16);}
+#page-admin .partners-action:disabled{opacity:.45;cursor:not-allowed;}
+#page-admin .partners-action.is-danger{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06);color:#ff9a9a;}
+#page-admin .partners-action.is-success{border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.06);color:#79e6bc;}
+#page-admin .partners-state{display:inline-flex;align-items:center;min-height:26px;padding:3px 8px;border:1px solid var(--adm-line);border-radius:999px;background:var(--adm-card2);color:var(--adm-tx3);font-size:10px;font-weight:800;white-space:nowrap;}
+#page-admin .partners-state.is-on{border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.07);color:var(--adm-green);}
+#page-admin .partners-state.is-alert{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.06);color:#ff8585;}
+#page-admin .partners-mini-chart{display:grid;grid-template-columns:repeat(30,minmax(3px,1fr));align-items:end;gap:3px;height:72px;margin-top:12px;}
+#page-admin .partners-mini-chart span{display:block;min-height:3px;border-radius:3px 3px 1px 1px;background:linear-gradient(180deg,#7c96ff,#7457e8);opacity:.85;}
+#page-admin .partners-analytics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px;}
+#page-admin .partners-analytics-section{min-width:0;padding:13px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
+#page-admin .partners-analytics-section h3{margin:0 0 9px;color:var(--adm-tx1);font-size:12px;}
+#page-admin .partners-analytics-section .partners-ops-stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+#page-admin .partners-analytics-section .partners-ops-row{font-size:11px;}
+#page-admin .partners-analytics-note{margin-top:8px;color:var(--adm-tx3);font-size:10px;line-height:1.45;}
+#page-admin .partners-analytics-wide{grid-column:1/-1;}
+#page-admin .partners-risk-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
+#page-admin .partners-risk-actions .partners-action{min-height:36px;padding:6px 9px;font-size:10px;}
+#page-admin .partner-row{display:grid;grid-template-columns:minmax(150px,1.4fr) repeat(4,minmax(100px,.8fr)) minmax(135px,.9fr);align-items:center;gap:12px;min-height:54px;padding:10px 12px;border-bottom:1px solid var(--adm-line);cursor:pointer;}
+#page-admin .partner-row:hover{background:var(--adm-card2);}
+#page-admin .partner-row.partner-head{min-height:38px;color:var(--adm-tx3);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;cursor:default;}
+#page-admin .partner-row.partner-head:hover{background:transparent;}
+#page-admin .partner-ref{min-width:0;color:var(--adm-tx1);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#page-admin .partner-meta{color:var(--adm-tx3);font-size:12px;}
+#page-admin .partners-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px;}
+#page-admin .partners-detail-grid .section{min-width:0;}
+#page-admin .partners-event-list{display:grid;gap:8px;margin-top:10px;}
+#page-admin .partners-event{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(180px,1.5fr) minmax(130px,.8fr);gap:10px;padding:10px 0;border-bottom:1px solid var(--adm-line);font-size:12px;}
+#page-admin .partners-event:last-child{border-bottom:0;}
 #page-admin .switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
 #page-admin .switch input{opacity:0;width:0;height:0;}
 #page-admin .switch .slider{position:absolute;inset:0;background:#3a3a44;border-radius:22px;transition:.2s;cursor:pointer;}
@@ -674,7 +747,7 @@ class AdminPage {
 /* Timeline/audit summaries: flex child needs min-width:0 to actually ellipsis/wrap instead of overflowing. */
 #page-admin .tl-sum{min-width:0;overflow-wrap:anywhere;}
 /* Visible keyboard focus for the interactive rows/cards/tabs/nav. */
-#page-admin .user-row:focus-visible,#page-admin .alert-card:focus-visible,#page-admin .audit-row:focus-visible,#page-admin .tl-item[data-ticket-id]:focus-visible,#page-admin .fin-status:focus-visible,#page-admin .sup-tab:focus-visible,#page-admin .crm-nav-item:focus-visible,#page-admin .crm-back:focus-visible{outline:2px solid #7c96ff;outline-offset:-2px;border-radius:6px;}
+#page-admin .user-row:focus-visible,#page-admin .partner-row:focus-visible,#page-admin .alert-card:focus-visible,#page-admin .audit-row:focus-visible,#page-admin .tl-item[data-ticket-id]:focus-visible,#page-admin .fin-status:focus-visible,#page-admin .sup-tab:focus-visible,#page-admin .crm-nav-item:focus-visible,#page-admin .crm-back:focus-visible{outline:2px solid #7c96ff;outline-offset:-2px;border-radius:6px;}
 /* Toasts + modal confirm/prompt (replace native alert/confirm/prompt). Scoped under #page-admin so the tokens apply. */
 #page-admin .crm-toasts{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(92vw,380px);}
 #page-admin .crm-toast{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-left:3px solid #5b7cfa;border-radius:9px;padding:11px 14px;font-size:13px;color:var(--color-text-primary,#e8e8ee);box-shadow:0 10px 30px #0009;animation:crmtoast .2s ease both;}
@@ -702,7 +775,17 @@ class AdminPage {
   #page-admin .tk-back-bar{top:66px;}  /* mobile topbar measures ~66px */
   #page-admin .crm-crumb{max-width:56vw;}
   #page-admin .users-controls input{min-width:0;}
+  #page-admin .partners-admin-readiness{grid-template-columns:1fr;}
+  #page-admin .partner-row{grid-template-columns:minmax(140px,1.4fr) repeat(2,minmax(100px,.8fr));}
+  #page-admin .partner-row > :nth-child(4),#page-admin .partner-row > :nth-child(5),#page-admin .partner-row > :nth-child(6){display:none;}
+  #page-admin .partners-detail-grid{grid-template-columns:1fr;}
+  #page-admin .partners-ops-grid{grid-template-columns:1fr;}
+  #page-admin .partners-control-grid{grid-template-columns:1fr;}
+  #page-admin .partners-analytics-grid{grid-template-columns:1fr;}
+  #page-admin .partners-analytics-wide{grid-column:auto;}
+  #page-admin .partners-event{grid-template-columns:1fr;}
 }
+@media(max-width:560px){#page-admin .partners-admin-toolbar{grid-template-columns:1fr;}}
 </style>
 <div class="crm-shell">
   <aside class="crm-sidebar">
@@ -749,6 +832,17 @@ class AdminPage {
             if (ar) { this._navigate(ar.dataset.route); return; }
             const au = e.target.closest('.audit-row[data-user-id]');
             if (au) { this._navigate('client:' + au.dataset.userId); return; }
+            const partner = e.target.closest('.partner-row[data-partner-id]');
+            if (partner && !e.target.closest('button,a')) {
+                this._navigate('partner:' + partner.dataset.partnerId);
+                return;
+            }
+            const partnersAction = e.target.closest('[data-partners-action]');
+            if (partnersAction) {
+                e.preventDefault();
+                this._partnersAdminAction(partnersAction);
+                return;
+            }
             if (e.target.closest('.crm-back')) { this._navigate(this._ficheReturn || 'clients'); return; }
             // Fiche relational actions
             const tRem = e.target.closest('.crm-tag-remove');
@@ -768,6 +862,10 @@ class AdminPage {
             if (e.target.closest('.flag-create')) { this._flagCreate(); return; }
             const fDel = e.target.closest('.flag-del');
             if (fDel) {
+                if (this._isManagedPartnersFlag(fDel.dataset.key)) {
+                    this._toast('Ce flag Partners est piloté par le contrôle de release sécurisé.', 'err');
+                    return;
+                }
                 this._confirm(`Supprimer le flag « ${fDel.dataset.key} » ?`, { danger: true, okLabel: 'Supprimer' }).then(ok => {
                     if (ok) this._rpc('admin_flag_delete', { p_key: fDel.dataset.key }).then(() => this._loadFlags()).catch(err => this._toast('Erreur : ' + err.message, 'err'));
                 });
@@ -779,7 +877,7 @@ class AdminPage {
         // native handling (guarded by e.target === el).
         root.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-            const el = e.target.closest('.user-row,.alert-card[data-user-id],.alert-card[data-route],.audit-row[data-user-id],[data-ticket-id],.fin-status');
+            const el = e.target.closest('.user-row,.partner-row,.alert-card[data-user-id],.alert-card[data-route],.audit-row[data-user-id],[data-ticket-id],.fin-status');
             if (el && e.target === el) { e.preventDefault(); el.click(); }
         });
         // Feature-flag switches fire 'change', not 'click' — delegate separately.
@@ -797,8 +895,8 @@ class AdminPage {
         if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 10 min') : '';
     }
     _setActiveNav(route) {
-        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support'
-            : (route.startsWith('finance') ? 'finance' : (route.startsWith('marketing') ? 'marketing' : route)));
+        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('partner') ? 'partners' : (route.startsWith('ticket') ? 'support'
+            : (route.startsWith('finance') ? 'finance' : (route.startsWith('marketing') ? 'marketing' : route))));
         document.querySelectorAll('#page-admin .crm-nav-item').forEach(el => {
             const on = el.dataset.route === mapped;
             el.classList.toggle('active', on);
@@ -935,16 +1033,20 @@ class AdminPage {
         if (!route) return 'Retour';
         if (route.startsWith('ticket:')) return 'Retour au ticket';
         if (route.startsWith('client:')) return 'Retour à la fiche';
+        if (route.startsWith('partner:')) return 'Retour au partenaire';
         return ({ clients: 'Retour aux clients', finance: 'Retour à la finance', cockpit: 'Retour au cockpit',
             systeme: 'Retour au système', identites: 'Retour aux identités', providers: 'Retour aux providers',
-            moteur: 'Retour au moteur', support: 'Retour au support' })[route] || 'Retour';
+            moteur: 'Retour au moteur', support: 'Retour au support', partners: 'Retour à Partners' })[route] || 'Retour';
     }
 
     _navigate(route) {
         const from = this._route;
         // Remember where a fiche was opened from so its back button returns there (not always Clients).
         // Keep the original entry across chained fiche→fiche hops (source row → another fiche).
-        if (route.startsWith('client:') && from && !from.startsWith('client:')) this._ficheReturn = from;
+        if ((route.startsWith('client:') || route.startsWith('partner:'))
+            && from
+            && !from.startsWith('client:')
+            && !from.startsWith('partner:')) this._ficheReturn = from;
         // Same for tickets: opened from a fiche (panel tickets) → back returns to that fiche,
         // not to the Support inbox (the back target used to be hardcoded 'support').
         if (route.startsWith('ticket:') && from && !from.startsWith('ticket:')) this._ticketReturn = from.startsWith('client:') ? from : 'support';
@@ -979,6 +1081,8 @@ class AdminPage {
             this._route = 'marketing'; this._pageMarketing();
         }
         else if (route === 'clients') this._pageClients();
+        else if (route === 'partners') this._pagePartners();
+        else if (route.startsWith('partner:')) this._pagePartnerDetail(route.slice(8));
         else if (route === 'support') this._pageSupport();
         else if (route.startsWith('ticket:')) this._pageTicket(route.slice(7));
         else if (route.startsWith('client:')) this._pageClientDetail(route.slice(7));
@@ -4054,6 +4158,1629 @@ class AdminPage {
             </div>`;
     }
 
+    // ── Page: Norva Partners ──
+    //
+    // These views intentionally consume dedicated, redacted RPCs. They never
+    // reuse the user dashboard, expose a public referral code, or render raw
+    // provider/KYC payloads. Server capabilities remain the authority for every
+    // Risk/Finance/Payout action.
+    async _pagePartners() {
+        const view = document.getElementById('crm-view');
+        if (!view) return;
+        // A previous navigation must never retain a capability-management
+        // privilege after the server-side app_metadata claim was revoked.
+        this._partnersCanManageCapabilities = false;
+        this._partnersCanManageRelease = false;
+        this._partnersCapabilities = { support: false, risk: false, finance: false };
+        const nav = this._nav;
+        const status = this._partnersStatus || '';
+        const search = this._partnersSearch || '';
+        this._setCrumb('Partners');
+        view.innerHTML = `
+            <div class="crm-page">
+              <h1 class="crm-h1">P Norva Partners</h1>
+              <p class="crm-sub">Comptes individuels, état contractuel et capacités opérationnelles — données serveur sanitisées.</p>
+              <div class="partners-admin-toolbar" role="search">
+                <input id="partners-admin-search" type="search" maxlength="64"
+                  value="${AdminPage.esc(search)}" placeholder="Clé partenaire (hexadécimale)"
+                  aria-label="Rechercher par clé partenaire" inputmode="text"
+                  pattern="[0-9a-f-]{1,64}" autocapitalize="none" spellcheck="false">
+                <select id="partners-admin-status" aria-label="Filtrer par statut">
+                  ${[
+                    ['', 'Tous les statuts'],
+                    ['pending_verification', 'Vérification en attente'],
+                    ['active', 'Actifs'],
+                    ['held', 'En attente de décision'],
+                    ['suspended', 'Suspendus'],
+                    ['closed', 'Clôturés']
+                  ].map(([value, label]) => `<option value="${value}"${status === value ? ' selected' : ''}>${label}</option>`).join('')}
+                </select>
+              </div>
+              <div id="partners-admin-summary" class="cockpit-summary" aria-busy="true">
+                <div class="ssub">Chargement des métriques autoritatives…</div>
+              </div>
+              <div id="partners-admin-readiness" class="partners-admin-readiness" aria-busy="true"></div>
+              <div class="partners-control-stack" aria-label="Pilotage du programme Partners">
+                <section id="partners-admin-monitoring" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Supervision</h2><p>Heartbeats, alertes KYC et files financières — aucune santé n’est déduite d’une donnée absente.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-analytics" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Acquisition sur 30 jours</h2><p>Claims, attributions, identités vérifiées et commissions créées.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-configuration" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Programme, juridictions et release</h2><p>Configuration explicite, auditée et fermée par défaut.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+              </div>
+              <div class="partners-ops-grid" aria-label="Santé opérationnelle Partners">
+                <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true">
+                  <h2>KYC individuel</h2><p>Quota informatif et capacité réelle.</p>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-finance" class="partners-ops-card" aria-busy="true">
+                  <h2>Ledger et worker</h2><p>Backlogs, maturation et réconciliation shadow.</p>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true">
+                  <h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-payouts" class="partners-ops-card" aria-busy="true">
+                  <h2>Cycles de versement</h2><p>Dry-run et exécution restent séparés par les gates.</p>
+                  <div class="ssub">Chargement…</div>
+                </section>
+              </div>
+              <section class="section">
+                <div class="sec-head"><h2>Partenaires individuels</h2><span id="partners-admin-count" class="pill">—</span></div>
+                <div id="partners-admin-list" class="card" aria-busy="true">
+                  <div class="ssub">Chargement des comptes…</div>
+                </div>
+              </section>
+            </div>`;
+
+        const searchInput = document.getElementById('partners-admin-search');
+        const statusInput = document.getElementById('partners-admin-status');
+        if (searchInput) searchInput.addEventListener('input', () => {
+            clearTimeout(this._partnersSearchDebounce);
+            this._partnersSearchDebounce = setTimeout(() => {
+                this._partnersSearch = searchInput.value
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^0-9a-f-]/g, '')
+                    .slice(0, 64);
+                if (this._route === 'partners') this._pagePartners();
+            }, 250);
+        });
+        if (statusInput) statusInput.addEventListener('change', () => {
+            this._partnersStatus = statusInput.value;
+            if (this._route === 'partners') this._pagePartners();
+        });
+
+        try {
+            const results = await Promise.allSettled([
+                this._rpc('admin_partners_overview'),
+                this._rpc('admin_partners_accounts', {
+                    p_limit: 50,
+                    p_offset: 0,
+                    p_status: status || null,
+                    p_search: search || null
+                }),
+                this._rpc('admin_partners_capabilities'),
+                this._rpc('admin_partners_kyc_quota'),
+                this._rpc('admin_partners_finance_overview'),
+                this._rpc('admin_partners_risk_queue', {
+                    p_limit: 8,
+                    p_offset: 0,
+                    p_status: null
+                }),
+                this._rpc('admin_partners_payout_cycles', {
+                    p_limit: 8,
+                    p_offset: 0,
+                    p_status: null
+                }),
+                this._rpc('admin_partners_monitoring'),
+                this._rpc('admin_partners_configuration'),
+                this._rpc('admin_partners_analytics', { p_days: 30 })
+            ]);
+            if (nav !== this._nav || this._route !== 'partners') return;
+            const value = (index, fallback = null) => results[index]?.status === 'fulfilled'
+                ? results[index].value
+                : fallback;
+            const overviewAvailable = results[0]?.status === 'fulfilled';
+            const accountsAvailable = results[1]?.status === 'fulfilled';
+            const capabilityEnvelope = value(2, null);
+            this._partnersCanManageCapabilities = capabilityEnvelope?.schema_version === 1
+                && capabilityEnvelope?.can_manage === true;
+            this._partnersCanManageRelease = capabilityEnvelope?.schema_version === 1
+                && capabilityEnvelope?.can_manage_release === true;
+            this._partnersCapabilities = {
+                support: capabilityEnvelope?.schema_version === 1
+                    && capabilityEnvelope?.capabilities?.support === true,
+                risk: capabilityEnvelope?.schema_version === 1
+                    && capabilityEnvelope?.capabilities?.risk === true,
+                finance: capabilityEnvelope?.schema_version === 1
+                    && capabilityEnvelope?.capabilities?.finance === true
+            };
+            const overviewRaw = value(0, {});
+            const accountsRaw = value(1, { items: [], total: 0 });
+            const overview = overviewRaw && typeof overviewRaw === 'object' && !Array.isArray(overviewRaw)
+                ? overviewRaw : {};
+            const rows = Array.isArray(accountsRaw)
+                ? accountsRaw
+                : (Array.isArray(accountsRaw?.items) ? accountsRaw.items : []);
+            const total = Number.isSafeInteger(accountsRaw?.total)
+                ? accountsRaw.total
+                : rows.length;
+            if (overviewAvailable) {
+                this._renderPartnersAdminSummary(overview, capabilityEnvelope);
+            } else {
+                const summary = document.getElementById('partners-admin-summary');
+                const readiness = document.getElementById('partners-admin-readiness');
+                if (summary) summary.innerHTML = '<div class="admin-err" role="status">Métriques de comptes indisponibles — aucun zéro n’est supposé.</div>';
+                if (readiness) readiness.innerHTML = this._partnersCapabilityCards(
+                    capabilityEnvelope?.capabilities || {},
+                    this._partnersCanManageCapabilities
+                );
+            }
+            if (accountsAvailable) {
+                this._renderPartnersAdminAccounts(rows, total);
+            } else {
+                const list = document.getElementById('partners-admin-list');
+                const count = document.getElementById('partners-admin-count');
+                if (count) count.textContent = 'inconnu';
+                if (list) list.innerHTML = '<div class="admin-err" role="status">Liste des partenaires indisponible.</div>';
+            }
+            this._renderPartnersKycQuota(value(3, null));
+            this._renderPartnersFinance(value(4, null));
+            this._renderPartnersRisk(value(5, null));
+            this._renderPartnersPayouts(value(6, null));
+            this._renderPartnersMonitoring(value(7, null));
+            this._renderPartnersConfiguration(value(8, null));
+            this._renderPartnersAnalytics(value(9, null));
+        } catch (_) {
+            if (nav !== this._nav || this._route !== 'partners') return;
+            this._partnersCanManageCapabilities = false;
+            this._partnersCanManageRelease = false;
+            this._partnersCapabilities = { support: false, risk: false, finance: false };
+            const summary = document.getElementById('partners-admin-summary');
+            const readiness = document.getElementById('partners-admin-readiness');
+            const list = document.getElementById('partners-admin-list');
+            if (summary) summary.innerHTML = '<div class="admin-err" role="alert">Les métriques Partners ne sont pas disponibles. Aucune action n’a été exécutée.</div>';
+            if (readiness) readiness.innerHTML = this._partnersCapabilityCards({});
+            if (list) list.innerHTML = '<div class="admin-err" role="alert">La liste Partners ne peut pas être chargée pour le moment.</div>';
+            this._renderPartnersKycQuota(null);
+            this._renderPartnersFinance(null);
+            this._renderPartnersRisk(null);
+            this._renderPartnersPayouts(null);
+            this._renderPartnersMonitoring(null);
+            this._renderPartnersConfiguration(null);
+            this._renderPartnersAnalytics(null);
+        }
+    }
+
+    _renderPartnersAdminSummary(overview, capabilityEnvelope = null) {
+        const el = document.getElementById('partners-admin-summary');
+        const readiness = document.getElementById('partners-admin-readiness');
+        if (!el || !readiness) return;
+        const accountStatuses = overview.account_statuses && typeof overview.account_statuses === 'object'
+            ? overview.account_statuses : {};
+        const verificationStatuses = overview.verification_statuses && typeof overview.verification_statuses === 'object'
+            ? overview.verification_statuses : {};
+        const linkStatuses = overview.link_statuses && typeof overview.link_statuses === 'object'
+            ? overview.link_statuses : {};
+        const counts = {
+            total: overview.accounts_total,
+            active: accountStatuses.active,
+            pending_verification: Number(verificationStatuses.pending || 0)
+                + Number(verificationStatuses.not_started || 0),
+            held: accountStatuses.held,
+            suspended: accountStatuses.suspended,
+            links_active: linkStatuses.active
+        };
+        const metric = (value, label, cls = '') => `<div class="cs-item ${cls}"><div class="cs-tx"><div class="cs-v">${AdminPage.n(Number(value) || 0)}</div><div class="cs-l">${AdminPage.esc(label)}</div></div></div>`;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = [
+            metric(counts.total, 'Comptes'),
+            metric(counts.active, 'Actifs', 'ok'),
+            metric(counts.pending_verification, 'KYC en attente', Number(counts.pending_verification) > 0 ? 'warn' : ''),
+            metric(counts.held, 'En revue', Number(counts.held) > 0 ? 'warn' : ''),
+            metric(counts.suspended, 'Suspendus', Number(counts.suspended) > 0 ? 'alert' : ''),
+            metric(counts.links_active, 'Liens actifs', 'ok')
+        ].join('');
+        readiness.removeAttribute('aria-busy');
+        const capabilities = capabilityEnvelope?.schema_version === 1
+            && capabilityEnvelope.capabilities
+            ? capabilityEnvelope.capabilities
+            : (overview.readiness || {});
+        const canManage = capabilityEnvelope?.schema_version === 1
+            && capabilityEnvelope?.can_manage === true;
+        this._partnersCanManageCapabilities = canManage;
+        readiness.innerHTML = this._partnersCapabilityCards(capabilities, canManage);
+    }
+
+    _partnersCapabilityCards(capabilities, canManage = false) {
+        const hasRoleContract = ['support', 'risk', 'finance']
+            .some((key) => typeof capabilities?.[key] === 'boolean');
+        const rows = hasRoleContract
+            ? [
+                ['support', 'Support', 'Compte, contrat et historique pseudonymisé'],
+                ['risk', 'Risque', 'Revue KYC, hold et fraude minimisée'],
+                ['finance', 'Finance', 'Ledger, réconciliation et versements']
+            ]
+            : [
+                ['fraud_workbench', 'Fraude et risque', 'Hold, release et contre-écritures'],
+                ['financial_ledger', 'Ledger de commissions', 'Écritures financières et rapprochement'],
+                ['payout_operations', 'Versements', 'Dry-run, approbation et envoi provider']
+            ];
+        return rows.map(([key, label, copy]) => {
+            const value = capabilities?.[key];
+            const ready = value === true || value?.ready === true;
+            const detail = ready
+                ? (value?.label || 'Capacité serveur disponible')
+                : (value?.label || capabilities?.reason || 'Non configuré — aucune action live exposée');
+            const control = canManage && hasRoleContract && typeof value === 'boolean'
+                ? `<div class="partners-action-row">
+                    <button type="button" class="partners-action${ready ? ' is-danger' : ' is-success'}"
+                      data-partners-action="capability"
+                      data-partners-capability="${AdminPage.esc(key)}"
+                      data-partners-enabled="${ready ? 'false' : 'true'}">
+                      ${ready ? 'Retirer de mon accès' : 'Activer pour mon accès'}
+                    </button>
+                  </div>`
+                : '';
+            return `<article class="partners-admin-cap${ready ? ' is-ready' : ''}">
+                <strong>${AdminPage.esc(label)}</strong>
+                <span>${AdminPage.esc(copy)}<br>${AdminPage.esc(detail)}</span>${control}
+            </article>`;
+        }).join('');
+    }
+
+    _partnersOpsUnavailable(id, title) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<h2>${AdminPage.esc(title)}</h2>
+            <p>Observation autoritative indisponible. Aucun zéro n’est déduit d’une donnée absente.</p>
+            <div class="admin-err" role="status">État inconnu ou capacité non accordée.</div>`;
+    }
+
+    _renderPartnersMonitoring(data) {
+        const el = document.getElementById('partners-admin-monitoring');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Array.isArray(data.workers)
+            || !Array.isArray(data.alerts) || !data.kyc_quota) {
+            this._partnersOpsUnavailable('partners-admin-monitoring', 'Supervision');
+            return;
+        }
+        const workerLabels = {
+            commission: 'Calcul des commissions',
+            maturation: 'Maturation J+45',
+            reconciliation: 'Réconciliation shadow'
+        };
+        const workers = data.workers.map((worker) => {
+            const status = ['healthy', 'degraded', 'blocked', 'stale', 'not_configured']
+                .includes(String(worker?.status)) ? String(worker.status) : 'unknown';
+            const healthy = status === 'healthy';
+            const lastSeen = worker?.last_seen_at
+                ? AdminPage.timeAgo(worker.last_seen_at) : 'jamais observé';
+            return `<div class="partners-control-item">
+                <span>${AdminPage.esc(workerLabels[worker?.worker] || worker?.worker || 'Worker')}
+                  <small>${AdminPage.esc(lastSeen)}</small>
+                </span>
+                <span class="partners-state${healthy ? ' is-on' : ' is-alert'}">${AdminPage.esc(status)}</span>
+              </div>`;
+        }).join('');
+        const alerts = data.alerts.slice(0, 10).map((alert) =>
+            `<div class="partners-control-item">
+              <span>${AdminPage.esc(String(alert?.code || 'alerte'))}</span>
+              <span class="partners-state${alert?.severity === 'critical' ? ' is-alert' : ''}">${AdminPage.n(Number(alert?.count) || 0)} · ${AdminPage.esc(String(alert?.severity || 'warning'))}</span>
+            </div>`
+        ).join('');
+        const quotaUsed = Number.isSafeInteger(data.kyc_quota.used)
+            ? data.kyc_quota.used : null;
+        const quotaLimit = Number.isSafeInteger(data.kyc_quota.informational_limit)
+            ? data.kyc_quota.informational_limit : null;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Supervision</h2><p>Les trois traitements doivent publier un heartbeat récent. Le quota KYC reste informatif et ne coupe pas le parcours.</p></div>
+            <span class="partners-state${data.alerts.length ? ' is-alert' : ' is-on'}">${data.alerts.length ? `${AdminPage.n(data.alerts.length)} alerte(s)` : 'Sain'}</span>
+          </div>
+          <div class="partners-control-grid">${workers}</div>
+          ${alerts ? `<div class="partners-ops-list" style="margin-top:10px">${alerts}</div>` : ''}
+          <div class="ssub" style="margin-top:10px">KYC 30 j : ${quotaUsed === null ? 'inconnu' : AdminPage.n(quotaUsed)} / ${quotaLimit === null ? 'seuil inconnu' : `${AdminPage.n(quotaLimit)} (informatif)`}</div>`;
+    }
+
+    _renderPartnersAnalytics(data) {
+        const el = document.getElementById('partners-admin-analytics');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.window_days)
+            || !Array.isArray(data.daily)) {
+            this._partnersOpsUnavailable('partners-admin-analytics', 'Acquisition Partners');
+            return;
+        }
+        const reasonLabels = {
+            support_capability_required: 'Accès Support requis',
+            risk_capability_required: 'Accès Risque requis',
+            finance_capability_required: 'Accès Finance requis',
+            referral_click_events_not_recorded: 'Les clics ne sont pas encore instrumentés',
+            no_claims_in_window: 'Aucun claim dans cette fenêtre',
+            no_attributions_in_window: 'Aucune attribution dans cette fenêtre',
+            payout_operations_not_ready: 'Versements live non activés',
+            authoritative_entitlement_and_billing_interval_history_not_modeled:
+                'Historique d’abonnement autoritatif non disponible',
+            authoritative_transfer_entitlement_contract_not_implemented:
+                'Contrat d’entitlement TRANSFER non disponible',
+            provider_fees_fx_infrastructure_and_other_costs_not_modeled:
+                'Frais provider, change et infrastructure non modélisés',
+            commission_processing_incomplete: 'Traitement des commissions incomplet',
+            no_eligible_first_payout_observations: 'Aucun premier versement éligible'
+        };
+        const reason = (leaf) => reasonLabels[String(leaf?.reason || '')]
+            || 'Mesure indisponible';
+        const hasValue = (leaf) => leaf?.status === 'available'
+            && Number.isFinite(Number(leaf.value));
+        const stat = (leaf, label, formatter = (value) => AdminPage.n(value)) => {
+            const available = hasValue(leaf);
+            const rendered = available ? formatter(Number(leaf.value)) : '—';
+            return `<div class="partners-ops-stat">
+                <strong>${AdminPage.esc(rendered)}</strong>
+                <span>${AdminPage.esc(label)}${available ? '' : `<small>${AdminPage.esc(reason(leaf))}</small>`}</span>
+              </div>`;
+        };
+        const whole = (value) => AdminPage.n(Math.round(value));
+        const percent = (value) => `${AdminPage.esc(value.toFixed(1))} %`;
+        const days = (value) => `${AdminPage.esc(value.toFixed(2))} j`;
+        const money = (value, currency, exponent) => {
+            if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+                return '—';
+            }
+            const raw = String(value ?? '');
+            const code = /^[A-Z]{3}$/.test(String(currency || ''))
+                ? String(currency) : '—';
+            const scale = Number.isSafeInteger(Number(exponent))
+                && Number(exponent) >= 0 && Number(exponent) <= 6
+                ? Number(exponent) : null;
+            if (!/^-?\d+$/.test(raw) || scale === null) return `— ${code}`;
+            const negative = raw.startsWith('-');
+            const digits = raw.replace('-', '').padStart(scale + 1, '0');
+            const integer = scale ? digits.slice(0, -scale) : digits;
+            const fraction = scale ? `,${digits.slice(-scale)}` : '';
+            const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            return `${negative ? '−' : ''}${grouped}${fraction} ${code}`;
+        };
+        const unavailable = (section, title) => `<section class="partners-analytics-section">
+            <h3>${AdminPage.esc(title)}</h3>
+            <div class="admin-err" role="status">${AdminPage.esc(reason(section))}</div>
+          </section>`;
+
+        const funnel = data.funnel;
+        const funnelHtml = funnel?.status === 'available'
+            ? `<section class="partners-analytics-section">
+                <h3>Acquisition attribuée</h3>
+                <div class="partners-ops-stats">
+                  ${stat(funnel.clicks, 'Clics')}
+                  ${stat(funnel.claims_issued, 'Claims émis', whole)}
+                  ${stat(funnel.attributions_created, 'Attributions', whole)}
+                  ${stat(funnel.first_paid_referrals, 'Premiers paiements', whole)}
+                  ${stat(funnel.claim_to_attribution_percent, 'Claim → attribution', percent)}
+                  ${stat(funnel.attribution_to_first_payment_percent, 'Attribution → paiement', percent)}
+                </div>
+                <div class="partners-analytics-note">Cohorte fondée sur la date d’émission du claim. Les taux ne mélangent pas les fenêtres.</div>
+              </section>`
+            : unavailable(funnel, 'Acquisition attribuée');
+
+        const activation = data.activation;
+        const activationHtml = activation?.status === 'available'
+            ? `<section class="partners-analytics-section">
+                <h3>Activation partenaire</h3>
+                <div class="partners-ops-stats">
+                  ${stat(activation.account_activation_events, 'Événements d’activation', whole)}
+                  ${stat(activation.distinct_accounts_activated, 'Comptes activés', whole)}
+                  ${stat(activation.kyc_verified_sessions, 'KYC vérifiés', whole)}
+                </div>
+              </section>`
+            : unavailable(activation, 'Activation partenaire');
+
+        const risk = data.risk;
+        const riskHtml = risk?.status === 'available'
+            ? `<section class="partners-analytics-section">
+                <h3>Risque et conformité</h3>
+                <div class="partners-ops-stats">
+                  ${stat(risk.kyc_terminal_sessions_in_window, 'KYC terminaux', whole)}
+                  ${stat(risk.blocked_activation_accounts_current, 'Activations bloquées', whole)}
+                  ${stat(risk.account_holds_current, 'Comptes en revue', whole)}
+                  ${stat(risk.account_suspensions_current, 'Comptes suspendus', whole)}
+                  ${stat(risk.attribution_holds_current, 'Attributions en revue', whole)}
+                  ${stat(risk.quarantined_financial_facts_in_window, 'Faits en quarantaine', whole)}
+                </div>
+                <div class="partners-analytics-note">
+                  ${hasValue(risk.quarantined_transfer_facts_total)
+                    ? `${AdminPage.esc(whole(Number(risk.quarantined_transfer_facts_total.value)))} TRANSFER en quarantaine au total.`
+                    : AdminPage.esc(reason(risk.transfer_entitlement))}
+                </div>
+              </section>`
+            : unavailable(risk, 'Risque et conformité');
+
+        const financial = data.financial;
+        const financialRows = financial?.status === 'available'
+            && Array.isArray(financial.rows)
+            ? financial.rows.map((row) => {
+                const rail = String(row?.rail || 'rail inconnu');
+                const currency = String(row?.currency || '');
+                const exponent = Number(row?.currency_exponent);
+                const contribution = row?.contribution_after_partner_commission_minor;
+                const contributionText = hasValue(contribution)
+                    ? money(contribution.value, currency, exponent)
+                    : reason(contribution);
+                return `<div class="partners-ops-row">
+                    <span>${AdminPage.esc(rail)} · ${AdminPage.esc(currency || 'devise inconnue')}
+                      <small>${AdminPage.esc(whole(Number(row?.paid_event_count) || 0))} paiement(s) · ${AdminPage.esc(whole(Number(row?.refund_count) || 0))} remboursement(s) · ${AdminPage.esc(whole(Number(row?.chargeback_count) || 0))} chargeback(s)</small>
+                    </span>
+                    <strong>${AdminPage.esc(money(row?.net_eligible_revenue_minor, currency, exponent))}
+                      <small>éligible net</small>
+                    </strong>
+                    <span>Commission partenaire nette
+                      <small>Contribution après commission : ${AdminPage.esc(contributionText)}</small>
+                    </span>
+                    <strong>${AdminPage.esc(money(row?.net_partner_commission_minor, currency, exponent))}</strong>
+                  </div>`;
+            }).join('') : '';
+        const financialHtml = financial?.status === 'available'
+            ? `<section class="partners-analytics-section partners-analytics-wide">
+                <h3>Économie par rail et devise</h3>
+                <div class="partners-ops-list">${financialRows || '<div class="ssub">Aucun fait financier complet sur la période.</div>'}</div>
+                <div class="partners-analytics-note">La marge brute reste volontairement indisponible tant que les frais provider, le change et les coûts d’infrastructure ne sont pas modélisés.</div>
+              </section>`
+            : unavailable(financial, 'Économie par rail et devise');
+
+        const payout = data.payout_timing;
+        const payoutHtml = payout?.status === 'available'
+            ? `<section class="partners-analytics-section">
+                <h3>Premiers versements</h3>
+                <div class="partners-ops-stats">
+                  ${stat(payout.first_settled_payouts, 'Premiers versements réglés', whole)}
+                  ${stat(payout.median_days_activation_to_first_settled_payout, 'Médiane activation → versement', days)}
+                  ${stat(payout.median_days_first_accrual_to_first_settled_payout, 'Médiane commission → versement', days)}
+                </div>
+              </section>`
+            : unavailable(payout, 'Premiers versements');
+
+        const retentionHtml = data.retention?.status === 'available'
+            ? `<section class="partners-analytics-section">
+                <h3>Rétention des filleuls</h3>
+                <div class="partners-analytics-note">Mesure disponible.</div>
+              </section>`
+            : unavailable(data.retention, 'Rétention des filleuls');
+
+        const daily = data.daily_status?.status === 'available'
+            ? data.daily.slice(-30) : [];
+        const max = Math.max(1, ...daily.map((row) =>
+            (Number(row?.claims) || 0)
+            + (Number(row?.attributions) || 0)
+            + (Number(row?.kyc_verified) || 0)
+            + (Number(row?.commission_entries) || 0)
+        ));
+        const bars = daily.map((row) => {
+            const value = (Number(row?.claims) || 0)
+                + (Number(row?.attributions) || 0)
+                + (Number(row?.kyc_verified) || 0)
+                + (Number(row?.commission_entries) || 0);
+            const height = Math.max(4, Math.round(value * 100 / max));
+            const title = `${row?.date || ''} · ${value} événement(s)`;
+            return `<span style="height:${height}%" title="${AdminPage.esc(title)}" aria-label="${AdminPage.esc(title)}"></span>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Performance Partners sur ${AdminPage.n(data.window_days)} jours</h2><p>Fenêtre UTC, cohortes explicites et montants exacts par devise. Une donnée absente reste indisponible, jamais zéro.</p></div>
+          </div>
+          ${bars
+            ? `<div class="partners-mini-chart" role="img" aria-label="Activité quotidienne Partners sur ${AdminPage.n(data.window_days)} jours">${bars}</div>`
+            : '<div class="admin-err" role="status">Série quotidienne indisponible pour cette capacité.</div>'}
+          <div class="partners-analytics-grid">
+            ${funnelHtml}
+            ${activationHtml}
+            ${riskHtml}
+            ${payoutHtml}
+            ${financialHtml}
+            ${retentionHtml}
+          </div>`;
+    }
+
+    _partnersHasCapabilities(...names) {
+        return names.every((name) => this._partnersCapabilities?.[name] === true);
+    }
+
+    _partnersCanUseConfigurationAction(action) {
+        if (['program-create', 'program-activate'].includes(action)) {
+            return this._partnersHasCapabilities('support', 'finance');
+        }
+        if (['country-create', 'country-availability'].includes(action)) {
+            return this._partnersHasCapabilities('support', 'risk');
+        }
+        if (['kyc-policy', 'country-map'].includes(action)) {
+            return this._partnersHasCapabilities('risk');
+        }
+        if (['currency', 'payout-provider'].includes(action)) {
+            return this._partnersHasCapabilities('finance');
+        }
+        if (action === 'allowlist') {
+            return this._partnersHasCapabilities('support')
+                || this._partnersHasCapabilities('risk');
+        }
+        return false;
+    }
+
+    _partnersCanUseReleaseControl(kind, key, targetEnabled) {
+        if (kind === 'gate') {
+            if ([
+                'legal_and_tax_approved',
+                'individual_payout_coverage_confirmed',
+                'financial_data_contract_approved',
+                'shadow_reconciliation_clean',
+                'backup_restore_verified',
+                'payout_execution_adapter_verified'
+            ].includes(key)) return this._partnersHasCapabilities('finance');
+            if ([
+                'privacy_approved',
+                'individual_verification_coverage_confirmed',
+                'country_policy_approved',
+                'tv_relay_security_verified'
+            ].includes(key)) return this._partnersHasCapabilities('risk');
+            return key === 'general_release_approved'
+                && this._partnersCanManageRelease === true;
+        }
+        if (kind !== 'flag') return false;
+        if (key === 'partners_shadow_mode') {
+            return this._partnersHasCapabilities('finance');
+        }
+        if (key === 'partners_payouts_live') {
+            return this._partnersHasCapabilities('finance')
+                && this._partnersCanManageRelease === true;
+        }
+        if (key === 'partners_enabled') {
+            return this._partnersCanManageRelease === true
+                || (targetEnabled === false && this._partnersHasCapabilities('support'));
+        }
+        if (key === 'partners_invite_only') {
+            return this._partnersCanManageRelease === true;
+        }
+        if (key === 'partners_tv_relay_enabled') {
+            return targetEnabled
+                ? this._partnersCanManageRelease === true
+                    && this._partnersHasCapabilities('risk')
+                : this._partnersCanManageRelease === true
+                    || this._partnersHasCapabilities('risk')
+                    || this._partnersHasCapabilities('support');
+        }
+        return false;
+    }
+
+    _renderPartnersConfiguration(data) {
+        const el = document.getElementById('partners-admin-configuration');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Array.isArray(data.programs)
+            || !Array.isArray(data.policies) || !data.configuration_counts) {
+            this._partnersOpsUnavailable('partners-admin-configuration', 'Programme et release');
+            return;
+        }
+        this._partnersConfiguration = data;
+        const programs = data.programs.map((program) => {
+            const key = String(program?.version_key || '');
+            const isDraft = program?.status === 'draft';
+            return `<div class="partners-control-item">
+                <span>${AdminPage.esc(key || 'Programme')}
+                  <small>20 % · attribution ${AdminPage.n(Number(program?.attribution_window_days) || 0)} j · maturation J+${AdminPage.n(Number(program?.maturation_days) || 0)} · ${AdminPage.esc(String(program?.terms_version || 'terms inconnus'))}</small>
+                </span>
+                <div class="partners-risk-actions">
+                  <span class="partners-state${program?.status === 'active' ? ' is-on' : ''}">${AdminPage.esc(String(program?.status || 'unknown'))}</span>
+                  ${isDraft && key && this._partnersCanUseConfigurationAction('program-activate') ? `<button type="button" class="partners-action is-success"
+                    data-partners-action="program-activate" data-partners-key="${AdminPage.esc(key)}">Activer</button>` : ''}
+                </div>
+              </div>`;
+        }).join('');
+        const policies = data.policies.map((policy) => {
+            const programKey = String(policy?.program_version_key || '');
+            const country = String(policy?.country_code || '');
+            const subdivision = String(policy?.subdivision_code || '');
+            const enabled = policy?.individual_available === true;
+            const kyc = policy?.kyc_attempt_policy;
+            return `<div class="partners-control-item">
+                <span>${AdminPage.esc(country || '—')}${subdivision ? ` · ${AdminPage.esc(subdivision)}` : ''}
+                  <small>${AdminPage.esc(programKey)} · majorité ${AdminPage.n(Number(policy?.minimum_age) || 0)} ans · ${AdminPage.esc((Array.isArray(policy?.payout_currencies) ? policy.payout_currencies : []).join(', ') || 'devise non configurée')} · KYC ${AdminPage.esc(String(kyc?.status || 'absent'))}</small>
+                </span>
+                <div class="partners-risk-actions">
+                  ${this._partnersCanUseConfigurationAction('kyc-policy') ? `<button type="button" class="partners-action"
+                    data-partners-action="kyc-policy"
+                    data-partners-program="${AdminPage.esc(programKey)}"
+                    data-partners-country="${AdminPage.esc(country)}"
+                    data-partners-subdivision="${AdminPage.esc(subdivision)}">KYC</button>` : ''}
+                  ${this._partnersCanUseConfigurationAction('country-availability') ? `<button type="button" class="partners-action${enabled ? ' is-danger' : ' is-success'}"
+                    data-partners-action="country-availability"
+                    data-partners-program="${AdminPage.esc(programKey)}"
+                    data-partners-country="${AdminPage.esc(country)}"
+                    data-partners-subdivision="${AdminPage.esc(subdivision)}"
+                    data-partners-enabled="${enabled ? 'false' : 'true'}">${enabled ? 'Fermer' : 'Ouvrir'}</button>` : ''}
+                </div>
+              </div>`;
+        }).join('');
+        const flags = Array.isArray(data.release_flags) ? data.release_flags : [];
+        const gates = Array.isArray(data.release_gates) ? data.release_gates : [];
+        const releaseRows = [
+            ...flags.map((flag) => ({
+                action: 'release-flag',
+                key: flag?.key,
+                enabled: flag?.enabled === true,
+                label: `Flag · ${flag?.key || 'inconnu'}`
+            })),
+            ...gates.map((gate) => ({
+                action: 'release-gate',
+                key: gate?.key,
+                enabled: gate?.satisfied === true,
+                label: `Gate · ${gate?.key || 'inconnu'}`
+            }))
+        ].filter((row) => /^[a-z0-9_]+$/.test(String(row.key || ''))).map((row) => {
+            const kind = row.action === 'release-flag' ? 'flag' : 'gate';
+            const targetEnabled = !row.enabled;
+            const control = this._partnersCanUseReleaseControl(kind, row.key, targetEnabled)
+                ? `<button type="button" class="partners-action${row.enabled ? ' is-danger' : ' is-success'}"
+                    data-partners-action="${row.action}"
+                    data-partners-key="${AdminPage.esc(row.key)}"
+                    data-partners-enabled="${targetEnabled ? 'true' : 'false'}">${row.enabled ? 'Désactiver' : 'Activer'}</button>`
+                : `<span class="partners-state${row.enabled ? ' is-on' : ''}">${row.enabled ? 'Actif' : 'Inactif'} · lecture seule</span>`;
+            return `<div class="partners-control-item">
+              <span>${AdminPage.esc(row.label)}</span>
+              ${control}
+            </div>`;
+        }).join('');
+        const configurationActions = [
+            ['program-create', 'Nouveau programme'],
+            ['country-create', 'Nouvelle juridiction'],
+            ['country-map', 'Mapping pays'],
+            ['currency', 'Devise'],
+            ['payout-provider', 'Provider payout'],
+            ['allowlist', 'Pilote allowlist']
+        ].filter(([action]) => this._partnersCanUseConfigurationAction(action))
+            .map(([action, label]) => `<button type="button" class="partners-action"
+                data-partners-action="${action}">${label}</button>`)
+            .join('');
+        const counts = data.configuration_counts;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Programme, juridictions et release</h2><p>Les mutations exigent une justification auditée et les dépendances restent contrôlées côté serveur.</p></div>
+            <span class="partners-state">${AdminPage.n(data.programs.length)} programme(s) · ${AdminPage.n(data.policies.length)} juridiction(s)</span>
+          </div>
+          <div class="partners-action-row">
+            ${configurationActions || '<span class="partners-state">Configuration en lecture seule pour vos capacités</span>'}
+          </div>
+          <div class="partners-ops-stats" style="margin-top:12px">
+            <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_country_mappings) || 0)}</strong><span>mappings pays actifs</span></div>
+            <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_currencies) || 0)}</strong><span>devises actives</span></div>
+            <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_payout_providers) || 0)}</strong><span>couvertures payout</span></div>
+          </div>
+          <div class="partners-control-grid" style="margin-top:12px">
+            ${programs || '<div class="ssub">Aucun programme configuré.</div>'}
+            ${policies || '<div class="ssub">Aucune juridiction configurée.</div>'}
+          </div>
+          ${releaseRows ? `<div class="partners-control-grid" style="margin-top:12px">${releaseRows}</div>` : '<div class="ssub" style="margin-top:12px">États de release indisponibles dans ce déploiement.</div>'}
+          <div class="ssub" style="margin-top:10px">${AdminPage.n(Number(counts.active_allowlist_entries) || 0)} compte(s) pilote autorisé(s).</div>`;
+    }
+
+    _renderPartnersKycQuota(data) {
+        const el = document.getElementById('partners-admin-kyc');
+        if (!el) return;
+        if (data?.schema_version !== 1
+            || !Number.isSafeInteger(data.used)
+            || !Number.isSafeInteger(data.informational_limit)
+            || !Number.isSafeInteger(data.remaining)
+            || typeof data.utilization_percent !== 'number'
+            || data.blocking !== false) {
+            this._partnersOpsUnavailable('partners-admin-kyc', 'KYC individuel');
+            return;
+        }
+        const utilization = Math.max(0, Math.min(999, data.utilization_percent));
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<h2>KYC individuel</h2>
+            <p>Fenêtre glissante de ${AdminPage.n(data.window_days)} jours. Le seuil gratuit est informatif et ne bloque jamais automatiquement la vérification 501.</p>
+            <div class="partners-ops-stats">
+              <div class="partners-ops-stat"><strong>${AdminPage.n(data.used)}</strong><span>utilisées</span></div>
+              <div class="partners-ops-stat"><strong>${AdminPage.n(data.remaining)}</strong><span>gratuites restantes</span></div>
+              <div class="partners-ops-stat"><strong>${AdminPage.esc(utilization.toFixed(1))}%</strong><span>du seuil informatif</span></div>
+            </div>`;
+    }
+
+    _renderPartnersFinance(data) {
+        const el = document.getElementById('partners-admin-finance');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !data.queues || !data.reconciliation
+            || !Array.isArray(data.currencies)) {
+            this._partnersOpsUnavailable('partners-admin-finance', 'Ledger et worker');
+            return;
+        }
+        const queueRows = [
+            ['Jobs en attente', data.queues.commission_pending],
+            ['Retries', data.queues.commission_retry],
+            ['Dead letter', data.queues.commission_dead_letter],
+            ['Maturations dues', data.queues.maturation_due],
+            ['Maturations en échec', data.queues.maturation_dead_letter]
+        ];
+        const currencies = data.currencies.slice(0, 8).map((row) => {
+            const code = /^[A-Z]{3}$/.test(String(row?.currency || ''))
+                ? row.currency : '—';
+            return `<div class="partners-ops-row">
+                <span>${AdminPage.esc(code)} · validation / disponible / clearing</span>
+                <strong>${AdminPage.n(Number(row?.pending_minor) || 0)} · ${AdminPage.n(Number(row?.available_minor) || 0)} · ${AdminPage.n(Number(row?.payout_clearing_minor) || 0)}</strong>
+            </div>`;
+        }).join('');
+        const lastRun = data.reconciliation.last_run_at
+            ? AdminPage.timeAgo(data.reconciliation.last_run_at) : 'jamais observée';
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<h2>Ledger et worker</h2>
+            <p>Montants en unités mineures par devise. Aucune conversion ni taxe n’est inférée.</p>
+            <div class="partners-action-row" style="margin-bottom:10px">
+              <button type="button" class="partners-action" data-partners-action="job-retry">Relancer un dead letter</button>
+              <button type="button" class="partners-action is-danger" data-partners-action="commission-reverse">Contre-écriture contrôlée</button>
+            </div>
+            <div class="partners-ops-stats">${queueRows.slice(0, 3).map(([label, value]) =>
+                `<div class="partners-ops-stat"><strong>${AdminPage.n(Number(value) || 0)}</strong><span>${AdminPage.esc(label)}</span></div>`
+            ).join('')}</div>
+            <div class="partners-ops-list">
+              ${queueRows.slice(3).map(([label, value]) => `<div class="partners-ops-row"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(Number(value) || 0)}</strong></div>`).join('')}
+              <div class="partners-ops-row"><span>Réconciliation · ${AdminPage.esc(String(data.reconciliation.last_status || 'inconnue'))} · ${AdminPage.esc(lastRun)}</span><strong>${AdminPage.n(Number(data.reconciliation.mismatches) || 0)} écart(s)</strong></div>
+              ${currencies || '<div class="ssub">Aucun solde financier observé.</div>'}
+            </div>`;
+    }
+
+    _renderPartnersRisk(data) {
+        const el = document.getElementById('partners-admin-risk');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable('partners-admin-risk', 'Risque');
+            return;
+        }
+        const rows = data.items.slice(0, 8).map((item) => {
+            const accountId = String(item?.account_id || '');
+            const status = String(item?.status || '');
+            const actions = /^prt_[0-9a-f]{24}$/.test(accountId)
+                ? [
+                    ...(status === 'held'
+                        ? [['release', 'Libérer', 'is-success']]
+                        : [['hold', 'Mettre en revue', '']]),
+                    ...(status !== 'suspended'
+                        ? [['suspend', 'Suspendre', 'is-danger']]
+                        : []),
+                    ['close', 'Clôturer', 'is-danger']
+                ].map(([action, label, cls]) =>
+                    `<button type="button" class="partners-action ${cls}"
+                      data-partners-action="account-action"
+                      data-partners-account="${AdminPage.esc(accountId)}"
+                      data-partners-operation="${action}">${label}</button>`
+                ).join('')
+                : '';
+            return `<div class="partners-ops-row">
+              <span>${AdminPage.esc(accountId || 'Partenaire')} · ${AdminPage.esc(String(item?.reason || 'review_required'))}
+                <small>${AdminPage.n(Number(item?.dead_letter_jobs) || 0)} dead letter · statut ${AdminPage.esc(status || 'inconnu')}</small>
+              </span>
+              <div class="partners-risk-actions">${actions || '<span class="partners-state">Lecture seule</span>'}</div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<h2>Risque</h2>
+            <p>${AdminPage.n(data.total)} dossier(s) pseudonymisé(s). Les signaux réseau, documents et payloads provider ne sont pas affichés.</p>
+            <div class="partners-ops-list">${rows || '<div class="ssub">Aucune revue en attente.</div>'}</div>`;
+    }
+
+    _renderPartnersPayouts(data) {
+        const el = document.getElementById('partners-admin-payouts');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable('partners-admin-payouts', 'Cycles de versement');
+            return;
+        }
+        const rows = data.items.slice(0, 8).map((item) => {
+            const mode = item?.live_execution === true ? 'live' : 'dry-run';
+            const key = String(item?.key || '');
+            const approve = item?.status === 'draft' && /^pay_[0-9a-f]{24}$/.test(key)
+                ? `<button type="button" class="partners-action is-success"
+                    data-partners-action="payout-approve"
+                    data-partners-key="${AdminPage.esc(key)}">Approuver</button>`
+                : `<span class="partners-state">${AdminPage.esc(String(item?.status || 'unknown'))}</span>`;
+            return `<div class="partners-ops-row">
+                <span>${AdminPage.esc(key || 'Cycle')} · ${AdminPage.esc(String(item?.currency || '—'))} · ${AdminPage.esc(mode)}
+                  <small>${AdminPage.n(Number(item?.total_minor) || 0)} unités mineures · ${AdminPage.n(Number(item?.item_count) || 0)} item(s)</small>
+                </span>
+                <div class="partners-risk-actions">${approve}</div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<h2>Cycles de versement</h2>
+            <p>${AdminPage.n(data.total)} cycle(s). Aucune exécution provider n’est possible tant que les gates Finance et le flag live restent fermés.</p>
+            <div class="partners-action-row" style="margin-bottom:10px">
+              <button type="button" class="partners-action" data-partners-action="payout-create">Créer un cycle contrôlé</button>
+            </div>
+            <div class="partners-ops-list">${rows || '<div class="ssub">Aucun cycle créé.</div>'}</div>`;
+    }
+
+    _renderPartnersAdminAccounts(rows, total) {
+        const el = document.getElementById('partners-admin-list');
+        const count = document.getElementById('partners-admin-count');
+        if (!el) return;
+        if (count) count.textContent = `${AdminPage.n(total)} compte${total === 1 ? '' : 's'}`;
+        el.removeAttribute('aria-busy');
+        if (!rows.length) {
+            el.innerHTML = '<div class="partners-empty-state"><strong>Aucun partenaire</strong><span>Aucun compte ne correspond à ce filtre.</span></div>';
+            return;
+        }
+        const head = `<div class="partner-row partner-head" aria-hidden="true">
+            <span>Partenaire</span><span>Compte</span><span>Identité</span><span>Contrat</span><span>Lien</span><span>Créé</span>
+        </div>`;
+        const body = rows.map((row) => {
+            const id = String(row.account_id || '');
+            if (!/^[0-9a-f-]{36}$/i.test(id)) return '';
+            const ref = String(row.partner_key || 'Partenaire');
+            const accountStatus = String(row.status || 'unknown');
+            const verification = String(row.verification_status || 'unknown');
+            const contract = String(row.contract_status || 'unknown');
+            const link = String(row.link_status || 'none');
+            const created = row.created_at ? AdminPage.timeAgo(row.created_at) : '—';
+            return `<div class="partner-row" role="button" tabindex="0" data-partner-id="${AdminPage.esc(id)}"
+                aria-label="Ouvrir la fiche ${AdminPage.esc(ref)}">
+                <span class="partner-ref">${AdminPage.esc(ref)}</span>
+                <span class="partner-meta">${AdminPage.esc(accountStatus)}</span>
+                <span class="partner-meta">${AdminPage.esc(verification)}</span>
+                <span class="partner-meta">${AdminPage.esc(contract)}</span>
+                <span class="partner-meta">${AdminPage.esc(link)}</span>
+                <span class="partner-meta">${AdminPage.esc(created)}</span>
+            </div>`;
+        }).join('');
+        el.innerHTML = head + body;
+    }
+
+    async _pagePartnerDetail(accountId) {
+        const view = document.getElementById('crm-view');
+        if (!view || !/^[0-9a-f-]{36}$/i.test(String(accountId || ''))) {
+            this._navigate('partners');
+            return;
+        }
+        const nav = this._nav;
+        this._setCrumb('Partners · fiche individuelle');
+        view.innerHTML = `<div class="crm-page">
+            <button class="crm-back" type="button">← ${AdminPage.esc(AdminPage.routeLabel(this._ficheReturn || 'partners'))}</button>
+            <h1 class="crm-h1">P Fiche partenaire</h1>
+            <p class="crm-sub">Chargement de la vue sanitisée…</p>
+            <div id="partners-admin-detail" class="card" aria-busy="true"><div class="ssub">Chargement…</div></div>
+        </div>`;
+        try {
+            const raw = await this._rpc('admin_partners_detail', { p_account_id: accountId });
+            if (nav !== this._nav || !this._route.startsWith('partner:')) return;
+            const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+            this._renderPartnerDetail(data);
+        } catch (_) {
+            if (nav !== this._nav || !this._route.startsWith('partner:')) return;
+            const el = document.getElementById('partners-admin-detail');
+            if (el) el.innerHTML = '<div class="admin-err" role="alert">Cette fiche partenaire n’est pas disponible. Aucune donnée brute n’a été affichée.</div>';
+        }
+    }
+
+    _renderPartnerDetail(data) {
+        const el = document.getElementById('partners-admin-detail');
+        if (!el) return;
+        const account = data.account && typeof data.account === 'object' ? data.account : {};
+        const policy = data.policy && typeof data.policy === 'object' ? data.policy : {};
+        const link = data.link && typeof data.link === 'object' ? data.link : {};
+        const events = Array.isArray(data.activity) ? data.activity.slice(0, 100) : [];
+        const fact = (label, value) => `<div><dt>${AdminPage.esc(label)}</dt><dd>${AdminPage.esc(value == null || value === '' ? '—' : value)}</dd></div>`;
+        const eventRows = events.map((event) => `<div class="partners-event">
+            <strong>${AdminPage.esc(event.action || 'Événement')}</strong>
+            <span>${AdminPage.esc(event.actor_type || 'Transition serveur auditée')}</span>
+            <span>${event.occurred_at ? AdminPage.esc(AdminPage.timeAgo(event.occurred_at)) : '—'}</span>
+        </div>`).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `
+            <div class="fiche-head">
+              <div class="fiche-avatar">P</div>
+              <div><div class="fiche-title">${AdminPage.esc(account.partner_key || 'Partenaire individuel')}</div>
+              <div class="umeta">Aucune référence KYC provider, adresse e-mail ou code public n’est exposé dans cette vue.</div></div>
+            </div>
+            <div class="partners-detail-grid">
+              <section class="section"><div class="sec-head"><h2>Compte et contrat</h2></div>
+                <dl class="partners-checklist">
+                  ${fact('Compte', account.status)}
+                  ${fact('Identité', account.verification_status)}
+                  ${fact('Contrat', account.contract_status)}
+                  ${fact('Lien', link.status || 'none')}
+                  ${fact('Juridiction', [
+                      account.country_code || policy.country_code,
+                      account.subdivision_code || policy.subdivision_code
+                  ].filter(Boolean).join(' · '))}
+                </dl>
+              </section>
+              <section class="section"><div class="sec-head"><h2>Capacités opérationnelles</h2></div>
+                <div class="partners-admin-readiness">${this._partnersCapabilityCards(data.readiness || {})}</div>
+                ${/^[0-9a-f-]{36}$/i.test(String(account.account_id || ''))
+                    && /^[A-Z]{2}$/.test(String(account.country_code || policy.country_code || ''))
+                    ? `<div class="partners-action-row">
+                        <button type="button" class="partners-action is-success"
+                          data-partners-action="fiscal-review"
+                          data-partners-account="${AdminPage.esc(account.account_id)}"
+                          data-partners-country="${AdminPage.esc(account.country_code || policy.country_code)}"
+                          data-partners-status="verified">Valider le profil fiscal</button>
+                        <button type="button" class="partners-action is-danger"
+                          data-partners-action="fiscal-review"
+                          data-partners-account="${AdminPage.esc(account.account_id)}"
+                          data-partners-country="${AdminPage.esc(account.country_code || policy.country_code)}"
+                          data-partners-status="rejected">Rejeter le profil fiscal</button>
+                      </div>`
+                    : ''}
+              </section>
+            </div>
+            <section class="section"><div class="sec-head"><h2>Historique audité</h2><span class="pill">${AdminPage.n(events.length)}</span></div>
+              <div class="partners-event-list">${eventRows || '<div class="ssub">Aucun événement audité pour ce compte.</div>'}</div>
+            </section>`;
+    }
+
+    async _partnersPrompt(message, defaultValue, validate, invalidMessage) {
+        const raw = await this._prompt(message, defaultValue == null ? '' : String(defaultValue));
+        if (raw === null) return null;
+        const value = String(raw).trim();
+        if (typeof validate === 'function' && !validate(value)) {
+            this._toast(invalidMessage || 'Valeur invalide. Aucune action n’a été exécutée.', 'err');
+            return null;
+        }
+        return value;
+    }
+
+    async _partnersJustification(label) {
+        return this._partnersPrompt(
+            `Justification auditée pour « ${label} » (12 à 1000 caractères) :`,
+            '',
+            (value) => value.length >= 12 && value.length <= 1000,
+            'La justification doit contenir entre 12 et 1000 caractères.'
+        );
+    }
+
+    async _partnersTypedConfirmation(expected) {
+        return this._partnersPrompt(
+            `Saisissez exactement cette confirmation :\n${expected}`,
+            '',
+            (value) => value === expected,
+            'La confirmation ne correspond pas. Aucune action n’a été exécutée.'
+        );
+    }
+
+    async _partnersAdminAction(button) {
+        if (!button || button.disabled) return;
+        const previous = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'Traitement…';
+        try {
+            const success = await this._runPartnersAdminAction(button);
+            if (!success) return;
+            this._toast(success, 'ok');
+            if (this._route === 'partners' || this._route.startsWith('partner:')) {
+                this._navigate(this._route);
+            }
+        } catch (_) {
+            this._toast('Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.', 'err');
+        } finally {
+            if (button.isConnected) {
+                button.disabled = false;
+                button.removeAttribute('aria-busy');
+                button.textContent = previous;
+            }
+        }
+    }
+
+    async _runPartnersAdminAction(button) {
+        const action = String(button.dataset.partnersAction || '');
+        const enabled = button.dataset.partnersEnabled === 'true';
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
+        const isoCountry = /^[A-Z]{2}$/;
+        const currencyCode = /^[A-Z]{3}$/;
+
+        if (action === 'capability') {
+            if (this._partnersCanManageCapabilities !== true) return false;
+            const capability = String(button.dataset.partnersCapability || '');
+            const me = this._meId();
+            if (!uuid.test(me) || !['support', 'risk', 'finance'].includes(capability)) return false;
+            const justification = await this._partnersJustification(
+                `${enabled ? 'activation' : 'retrait'} de la capacité ${capability}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_capability_set', {
+                p_user_id: me,
+                p_capability: capability,
+                p_enabled: enabled,
+                p_justification: justification
+            });
+            return `Capacité ${capability} ${enabled ? 'activée' : 'retirée'} pour votre accès admin.`;
+        }
+
+        if (action === 'release-flag' || action === 'release-gate') {
+            const key = String(button.dataset.partnersKey || '');
+            if (!/^[a-z0-9_]+$/.test(key)) return false;
+            const kind = action === 'release-flag' ? 'flag' : 'gate';
+            if (!this._partnersCanUseReleaseControl(kind, key, enabled)) return false;
+            const confirmed = await this._confirm(
+                `${enabled ? 'Activer' : 'Désactiver'} le ${kind} « ${key} » ? Les dépendances seront revérifiées dans la même transaction.`,
+                { danger: !enabled, okLabel: enabled ? 'Activer' : 'Désactiver' }
+            );
+            if (!confirmed) return false;
+            const justification = await this._partnersJustification(
+                `${enabled ? 'activation' : 'désactivation'} de ${key}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_control', {
+                p_action: action === 'release-flag' ? 'set_flag' : 'set_gate',
+                p_key: key,
+                p_enabled: enabled,
+                p_justification: justification
+            });
+            return `${kind === 'flag' ? 'Flag' : 'Gate'} ${key} ${enabled ? 'activé' : 'désactivé'}.`;
+        }
+
+        if ([
+            'program-create',
+            'program-activate',
+            'country-create',
+            'kyc-policy',
+            'country-availability',
+            'country-map',
+            'currency',
+            'payout-provider',
+            'allowlist'
+        ].includes(action) && !this._partnersCanUseConfigurationAction(action)) {
+            return false;
+        }
+
+        if (action === 'program-create') {
+            const key = await this._partnersPrompt(
+                'Clé version du programme (ex. individual-global-v1) :',
+                'individual-global-v1',
+                (value) => slug.test(value),
+                'Clé de programme invalide.'
+            );
+            if (!key) return false;
+            const thresholdsRaw = await this._partnersPrompt(
+                'Seuils de versement JSON en unités mineures (ex. {"EUR":5000,"USD":5000}) :',
+                '{"EUR":5000,"USD":5000}',
+                (value) => {
+                    try {
+                        const parsed = JSON.parse(value);
+                        const entries = parsed && !Array.isArray(parsed) ? Object.entries(parsed) : [];
+                        return entries.length > 0 && entries.length <= 32
+                            && entries.every(([code, amount]) =>
+                                currencyCode.test(code)
+                                && Number.isSafeInteger(amount)
+                                && amount > 0
+                            );
+                    } catch (_) { return false; }
+                },
+                'Seuils invalides : utilisez un objet JSON devise → entier positif.'
+            );
+            if (!thresholdsRaw) return false;
+            const terms = await this._partnersPrompt(
+                'Version des conditions Partners :',
+                'partners-terms-v1',
+                (value) => slug.test(value),
+                'Version des conditions invalide.'
+            );
+            if (!terms) return false;
+            const disclosure = await this._partnersPrompt(
+                'Version de la notice de transparence :',
+                'partners-disclosure-v1',
+                (value) => slug.test(value),
+                'Version de notice invalide.'
+            );
+            if (!disclosure) return false;
+            const effective = await this._partnersPrompt(
+                'Date d’effet ISO 8601 :',
+                new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+                (value) => Number.isFinite(Date.parse(value)),
+                'Date d’effet invalide.'
+            );
+            if (!effective) return false;
+            const justification = await this._partnersJustification(`création du programme ${key}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_program_create', {
+                p_version_key: key,
+                p_payout_thresholds: JSON.parse(thresholdsRaw),
+                p_terms_version: terms,
+                p_disclosure_version: disclosure,
+                p_effective_from: new Date(effective).toISOString(),
+                p_justification: justification
+            });
+            return `Programme ${key} créé en brouillon.`;
+        }
+
+        if (action === 'program-activate') {
+            const key = String(button.dataset.partnersKey || '');
+            if (!slug.test(key)) return false;
+            const confirmation = await this._partnersTypedConfirmation(`ACTIVATE:${key}`);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(`activation du programme ${key}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_program_activate', {
+                p_version_key: key,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return `Programme ${key} activé.`;
+        }
+
+        if (action === 'country-create') {
+            const suggestedProgram = this._partnersConfiguration?.programs
+                ?.find((program) => program.status === 'active')?.version_key
+                || this._partnersConfiguration?.programs?.[0]?.version_key
+                || 'individual-global-v1';
+            const program = await this._partnersPrompt(
+                'Clé du programme :',
+                suggestedProgram,
+                (value) => slug.test(value),
+                'Clé de programme invalide.'
+            );
+            if (!program) return false;
+            const country = await this._partnersPrompt(
+                'Pays ISO alpha-2 (ex. US, GB, FR) :',
+                '',
+                (value) => isoCountry.test(value.toUpperCase()),
+                'Code pays invalide.'
+            );
+            if (!country) return false;
+            const subdivision = await this._partnersPrompt(
+                'Subdivision ISO facultative (laisser vide pour tout le pays) :',
+                '',
+                (value) => value === '' || /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value.toUpperCase()),
+                'Subdivision invalide.'
+            );
+            if (subdivision === null) return false;
+            const ageRaw = await this._partnersPrompt(
+                'Âge minimum légal pour cette juridiction :',
+                '18',
+                (value) => Number.isInteger(Number(value)) && Number(value) >= 18 && Number(value) <= 99,
+                'Âge minimum invalide.'
+            );
+            if (!ageRaw) return false;
+            const currenciesRaw = await this._partnersPrompt(
+                'Devises de versement séparées par des virgules :',
+                'USD',
+                (value) => {
+                    const values = value.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+                    return values.length > 0 && values.length <= 32
+                        && values.every((code) => currencyCode.test(code))
+                        && new Set(values).size === values.length;
+                },
+                'Liste de devises invalide.'
+            );
+            if (!currenciesRaw) return false;
+            const effective = await this._partnersPrompt(
+                'Date d’effet ISO 8601 :',
+                new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+                (value) => Number.isFinite(Date.parse(value)),
+                'Date d’effet invalide.'
+            );
+            if (!effective) return false;
+            const justification = await this._partnersJustification(`création de la juridiction ${country.toUpperCase()}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_country_policy_create', {
+                p_program_version_key: program,
+                p_country_code: country.toUpperCase(),
+                p_subdivision_code: subdivision ? subdivision.toUpperCase() : null,
+                p_minimum_age: Number(ageRaw),
+                p_payout_currencies: currenciesRaw.split(',').map((item) => item.trim().toUpperCase()),
+                p_effective_from: new Date(effective).toISOString(),
+                p_justification: justification
+            });
+            return `Juridiction ${country.toUpperCase()} créée, fermée par défaut.`;
+        }
+
+        if (action === 'kyc-policy') {
+            const program = String(button.dataset.partnersProgram || '');
+            const country = String(button.dataset.partnersCountry || '');
+            const subdivision = String(button.dataset.partnersSubdivision || '');
+            if (!slug.test(program) || !isoCountry.test(country)) return false;
+            const maxAttempts = await this._partnersPrompt(
+                'Tentatives KYC maximales dans la fenêtre :',
+                '3',
+                (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 20,
+                'Nombre de tentatives invalide.'
+            );
+            if (!maxAttempts) return false;
+            const windowSeconds = await this._partnersPrompt(
+                'Fenêtre glissante en secondes :',
+                '2592000',
+                (value) => Number.isInteger(Number(value)) && Number(value) >= 3600 && Number(value) <= 2592000,
+                'Fenêtre KYC invalide.'
+            );
+            if (!windowSeconds) return false;
+            const cooldownSeconds = await this._partnersPrompt(
+                'Cooldown après limite, en secondes :',
+                '86400',
+                (value) => Number.isInteger(Number(value)) && Number(value) >= 60 && Number(value) <= 604800,
+                'Cooldown invalide.'
+            );
+            if (!cooldownSeconds) return false;
+            const justification = await this._partnersJustification(`politique KYC ${program}/${country}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_kyc_attempt_policy_set', {
+                p_program_version_key: program,
+                p_country_code: country,
+                p_subdivision_code: subdivision || null,
+                p_max_attempts: Number(maxAttempts),
+                p_window_seconds: Number(windowSeconds),
+                p_cooldown_seconds: Number(cooldownSeconds),
+                p_status: 'active',
+                p_justification: justification
+            });
+            return `Politique de tentatives KYC enregistrée pour ${country}.`;
+        }
+
+        if (action === 'country-availability') {
+            const program = String(button.dataset.partnersProgram || '');
+            const country = String(button.dataset.partnersCountry || '');
+            const subdivision = String(button.dataset.partnersSubdivision || '');
+            if (!slug.test(program) || !isoCountry.test(country)) return false;
+            const confirmationValue = `${enabled ? 'ENABLE' : 'DISABLE'}:${program}:${country}:${subdivision || '*'}`;
+            const confirmation = await this._partnersTypedConfirmation(confirmationValue);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${enabled ? 'ouverture' : 'fermeture'} de ${country}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_country_policy_set_available', {
+                p_program_version_key: program,
+                p_country_code: country,
+                p_subdivision_code: subdivision || null,
+                p_enabled: enabled,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return `Juridiction ${country} ${enabled ? 'ouverte' : 'fermée'}.`;
+        }
+
+        if (action === 'country-map') {
+            const iso3 = await this._partnersPrompt(
+                'Code pays ISO alpha-3 fourni par le provider :',
+                '',
+                (value) => /^[A-Z]{3}$/.test(value.toUpperCase()),
+                'Code ISO alpha-3 invalide.'
+            );
+            if (!iso3) return false;
+            const country = await this._partnersPrompt(
+                'Code pays Norva ISO alpha-2 :',
+                '',
+                (value) => isoCountry.test(value.toUpperCase()),
+                'Code ISO alpha-2 invalide.'
+            );
+            if (!country) return false;
+            const justification = await this._partnersJustification(`mapping pays ${iso3.toUpperCase()}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_country_mapping_set', {
+                p_iso3: iso3.toUpperCase(),
+                p_country_code: country.toUpperCase(),
+                p_status: 'active',
+                p_justification: justification
+            });
+            return `Mapping ${iso3.toUpperCase()} → ${country.toUpperCase()} activé.`;
+        }
+
+        if (action === 'currency') {
+            const currency = await this._partnersPrompt(
+                'Code devise ISO 4217 :',
+                'USD',
+                (value) => currencyCode.test(value.toUpperCase()),
+                'Code devise invalide.'
+            );
+            if (!currency) return false;
+            const exponent = await this._partnersPrompt(
+                'Nombre de décimales de la devise :',
+                '2',
+                (value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 6,
+                'Exposant de devise invalide.'
+            );
+            if (exponent === null) return false;
+            const justification = await this._partnersJustification(`configuration de ${currency.toUpperCase()}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_currency_set', {
+                p_currency: currency.toUpperCase(),
+                p_exponent: Number(exponent),
+                p_status: 'active',
+                p_justification: justification
+            });
+            return `Devise ${currency.toUpperCase()} activée.`;
+        }
+
+        if (action === 'payout-provider') {
+            const provider = await this._partnersPrompt(
+                'Provider (wise, revolut ou stripe_connect) :',
+                'wise',
+                (value) => ['wise', 'revolut', 'stripe_connect'].includes(value.toLowerCase()),
+                'Provider invalide.'
+            );
+            if (!provider) return false;
+            const country = await this._partnersPrompt(
+                'Pays couvert (ISO alpha-2) :',
+                '',
+                (value) => isoCountry.test(value.toUpperCase()),
+                'Code pays invalide.'
+            );
+            if (!country) return false;
+            const currency = await this._partnersPrompt(
+                'Devise couverte :',
+                'USD',
+                (value) => currencyCode.test(value.toUpperCase()),
+                'Code devise invalide.'
+            );
+            if (!currency) return false;
+            const justification = await this._partnersJustification(
+                `couverture payout ${provider.toLowerCase()}/${country.toUpperCase()}/${currency.toUpperCase()}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_payout_provider_set', {
+                p_provider: provider.toLowerCase(),
+                p_country_code: country.toUpperCase(),
+                p_currency: currency.toUpperCase(),
+                p_status: 'active',
+                p_justification: justification
+            });
+            return 'Couverture payout enregistrée. Les identifiants provider restent à configurer hors de cette page.';
+        }
+
+        if (action === 'allowlist') {
+            const subject = await this._partnersPrompt(
+                'UUID Supabase du compte pilote (il ne sera pas affiché ensuite) :',
+                '',
+                (value) => uuid.test(value),
+                'UUID utilisateur invalide.'
+            );
+            if (!subject) return false;
+            const operation = await this._partnersPrompt(
+                'Action : ENABLE ou DISABLE',
+                'ENABLE',
+                (value) => ['ENABLE', 'DISABLE'].includes(value.toUpperCase()),
+                'Action allowlist invalide.'
+            );
+            if (!operation) return false;
+            const country = await this._partnersPrompt(
+                'Pays ISO alpha-2 facultatif :',
+                '',
+                (value) => value === '' || isoCountry.test(value.toUpperCase()),
+                'Code pays invalide.'
+            );
+            if (country === null) return false;
+            const subdivision = await this._partnersPrompt(
+                'Subdivision facultative :',
+                '',
+                (value) => value === '' || /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value.toUpperCase()),
+                'Subdivision invalide.'
+            );
+            if (subdivision === null) return false;
+            const expiry = await this._partnersPrompt(
+                'Expiration ISO facultative (vide = sans expiration) :',
+                '',
+                (value) => value === '' || (Number.isFinite(Date.parse(value)) && Date.parse(value) > Date.now()),
+                'Expiration invalide.'
+            );
+            if (expiry === null) return false;
+            const allow = operation.toUpperCase() === 'ENABLE';
+            if (allow
+                ? !this._partnersHasCapabilities('risk')
+                : !(this._partnersHasCapabilities('support')
+                    || this._partnersHasCapabilities('risk'))) return false;
+            const justification = await this._partnersJustification(
+                `${allow ? 'ajout' : 'retrait'} de la liste pilote`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_control', {
+                p_action: 'set_allowlist',
+                p_enabled: allow,
+                p_justification: justification,
+                p_subject_user_id: subject,
+                p_country_code: country ? country.toUpperCase() : null,
+                p_subdivision_code: subdivision ? subdivision.toUpperCase() : null,
+                p_expires_at: expiry ? new Date(expiry).toISOString() : null
+            });
+            return `Compte pilote ${allow ? 'autorisé' : 'retiré'}.`;
+        }
+
+        if (action === 'account-action') {
+            const account = String(button.dataset.partnersAccount || '');
+            const operation = String(button.dataset.partnersOperation || '');
+            if (!/^prt_[0-9a-f]{24}$/.test(account)
+                || !['hold', 'release', 'suspend', 'close'].includes(operation)) return false;
+            const expected = `${operation.toUpperCase()}:${account}`;
+            const confirmation = await this._partnersTypedConfirmation(expected);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(`${operation} du compte pseudonymisé ${account}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_account_action', {
+                p_account_public_id: account,
+                p_action: operation,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return `Décision ${operation} appliquée au compte pseudonymisé.`;
+        }
+
+        if (action === 'job-retry') {
+            const type = await this._partnersPrompt(
+                'Type du job : commission ou maturation',
+                'commission',
+                (value) => ['commission', 'maturation'].includes(value.toLowerCase()),
+                'Type de job invalide.'
+            );
+            if (!type) return false;
+            const pattern = type.toLowerCase() === 'commission'
+                ? /^job_[0-9a-f]{24}$/ : /^mat_[0-9a-f]{24}$/;
+            const key = await this._partnersPrompt(
+                'Clé pseudonymisée du dead letter :',
+                type.toLowerCase() === 'commission' ? 'job_' : 'mat_',
+                (value) => pattern.test(value),
+                'Clé de job invalide.'
+            );
+            if (!key) return false;
+            const confirmation = await this._partnersTypedConfirmation(`RETRY:${key}`);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(`retry du job ${key}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_job_retry', {
+                p_job_key: key,
+                p_job_type: type.toLowerCase(),
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return 'Dead letter replacé en retry.';
+        }
+
+        if (action === 'commission-reverse') {
+            const key = await this._partnersPrompt(
+                'Clé pseudonymisée de l’écriture à contrepasser :',
+                'led_',
+                (value) => /^led_[0-9a-f]{24}$/.test(value),
+                'Clé d’écriture invalide.'
+            );
+            if (!key) return false;
+            const confirmation = await this._partnersTypedConfirmation(`REVERSE:${key}`);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(`contre-écriture ${key}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_commission_reverse', {
+                p_entry_key: key,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return 'Contre-écriture append-only enregistrée.';
+        }
+
+        if (action === 'payout-create') {
+            const now = new Date();
+            const previousStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+            const previousEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+            const dateOnly = (date) => date.toISOString().slice(0, 10);
+            const start = await this._partnersPrompt(
+                'Début de période (AAAA-MM-JJ) :',
+                dateOnly(previousStart),
+                (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)),
+                'Date de début invalide.'
+            );
+            if (!start) return false;
+            const end = await this._partnersPrompt(
+                'Fin de période (AAAA-MM-JJ, antérieure à aujourd’hui) :',
+                dateOnly(previousEnd),
+                (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)),
+                'Date de fin invalide.'
+            );
+            if (!end) return false;
+            const currency = await this._partnersPrompt(
+                'Devise du cycle :',
+                'USD',
+                (value) => currencyCode.test(value.toUpperCase()),
+                'Devise invalide.'
+            );
+            if (!currency) return false;
+            const mode = await this._partnersPrompt(
+                'Mode : DRY pour simulation ou LIVE pour allocation réelle',
+                'DRY',
+                (value) => ['DRY', 'LIVE'].includes(value.toUpperCase()),
+                'Mode de cycle invalide.'
+            );
+            if (!mode) return false;
+            const normalizedMode = mode.toUpperCase();
+            const expected = `CREATE:${start}:${end}:${currency.toUpperCase()}:${normalizedMode}`;
+            const confirmation = await this._partnersTypedConfirmation(expected);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `création du cycle ${start}/${end}/${currency.toUpperCase()}/${normalizedMode}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_payout_cycle_create', {
+                p_period_start: start,
+                p_period_end: end,
+                p_currency: currency.toUpperCase(),
+                p_live_execution: normalizedMode === 'LIVE',
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return `Cycle ${normalizedMode === 'LIVE' ? 'live' : 'dry-run'} créé en brouillon.`;
+        }
+
+        if (action === 'payout-approve') {
+            const key = String(button.dataset.partnersKey || '');
+            if (!/^pay_[0-9a-f]{24}$/.test(key)) return false;
+            const confirmation = await this._partnersTypedConfirmation(`APPROVE:${key}`);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(`approbation du cycle ${key}`);
+            if (!justification) return false;
+            await this._rpc('admin_partners_payout_cycle_approve', {
+                p_cycle_key: key,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return 'Cycle de versement approuvé.';
+        }
+
+        if (action === 'fiscal-review') {
+            const account = String(button.dataset.partnersAccount || '');
+            const country = String(button.dataset.partnersCountry || '');
+            const status = String(button.dataset.partnersStatus || '');
+            if (!uuid.test(account) || !isoCountry.test(country)
+                || !['verified', 'rejected'].includes(status)) return false;
+            let provider = null;
+            let reference = null;
+            let form = null;
+            if (status === 'verified') {
+                provider = await this._partnersPrompt(
+                    'Provider de vérification fiscale (aucun document brut) :',
+                    'manual_review',
+                    (value) => /^[a-z0-9][a-z0-9._-]{1,63}$/.test(value),
+                    'Provider fiscal invalide.'
+                );
+                if (!provider) return false;
+                reference = await this._partnersPrompt(
+                    'Empreinte SHA-256 (64 caractères hexadécimaux) de la référence provider :',
+                    '',
+                    (value) => /^[0-9a-f]{64}$/.test(value.toLowerCase()),
+                    'Empreinte provider invalide. Ne saisissez aucun identifiant fiscal brut.'
+                );
+                if (!reference) return false;
+                form = await this._partnersPrompt(
+                    'Type de formulaire fiscal facultatif (sans contenu ni identifiant) :',
+                    '',
+                    (value) => value.length <= 64 && !/[\u0000-\u001f\u007f]/u.test(value),
+                    'Type de formulaire invalide.'
+                );
+                if (form === null) return false;
+            }
+            const justification = await this._partnersJustification(
+                `${status === 'verified' ? 'validation' : 'rejet'} du profil fiscal`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_fiscal_review', {
+                p_account_id: account,
+                p_status: status,
+                p_residence_country_code: country,
+                p_provider: provider,
+                p_reference_hash: reference ? reference.toLowerCase() : null,
+                p_tax_form_type: form || null,
+                p_justification: justification
+            });
+            return `Profil fiscal ${status === 'verified' ? 'validé' : 'rejeté'} sans donnée brute.`;
+        }
+
+        return false;
+    }
+
     // ── Page: Providers ──
     async _pageProviders() {
         this._setCrumb('Sources', this._lastTs);
@@ -4965,15 +6692,51 @@ class AdminPage {
     _renderFlags(flags) {
         const el = document.getElementById('sys-flags');
         if (!el) return;
-        const rows = flags.map(f => `<div class="flag-row">
-            <label class="switch"><input type="checkbox" class="flag-toggle" data-key="${AdminPage.esc(f.key)}" aria-label="Activer le flag ${AdminPage.esc(f.key)}" ${f.enabled ? 'checked' : ''}><span class="slider"></span></label>
-            <div class="flag-meta"><div class="flag-key">${AdminPage.esc(f.key)}</div><div class="flag-desc">${AdminPage.esc(f.description || '')}${f.updated_by ? ` · ${AdminPage.esc(f.updated_by)}` : ''}</div></div>
-            <button class="flag-del" data-key="${AdminPage.esc(f.key)}" aria-label="Supprimer le flag ${AdminPage.esc(f.key)}" title="Supprimer le flag">×</button>
-        </div>`).join('');
+        const rows = flags.map((f) => {
+            const key = AdminPage.esc(f.key);
+            const description = `${AdminPage.esc(f.description || '')}${f.updated_by ? ` · ${AdminPage.esc(f.updated_by)}` : ''}`;
+            if (this._isManagedPartnersFlag(f.key)) {
+                const state = f.enabled ? 'Activé' : 'Désactivé';
+                return `<div class="flag-row flag-row--managed" data-managed-partners-flag="${key}"
+                    role="group" aria-label="${key} — contrôle de release sécurisé, état ${state.toLowerCase()}, lecture seule">
+                    <span class="flag-managed-signal ${f.enabled ? 'is-on' : ''}" aria-hidden="true"></span>
+                    <div class="flag-meta">
+                        <div class="flag-key">${key}</div>
+                        <div class="flag-desc">${description}</div>
+                        <div class="flag-managed-detail">
+                            <span class="flag-managed-badge">Release gérée</span>
+                            <span>Contrôle de release sécurisé · lecture seule dans cette vue</span>
+                        </div>
+                    </div>
+                    <span class="flag-managed-state ${f.enabled ? 'is-on' : ''}"
+                        aria-label="État actuel : ${state.toLowerCase()}">${state}</span>
+                </div>`;
+            }
+            return `<div class="flag-row">
+                <label class="switch"><input type="checkbox" class="flag-toggle" data-key="${key}" aria-label="Activer le flag ${key}" ${f.enabled ? 'checked' : ''}><span class="slider"></span></label>
+                <div class="flag-meta"><div class="flag-key">${key}</div><div class="flag-desc">${description}</div></div>
+                <button class="flag-del" data-key="${key}" aria-label="Supprimer le flag ${key}" title="Supprimer le flag">×</button>
+            </div>`;
+        }).join('');
         el.innerHTML = `${rows || '<div class="ssub">Aucun flag.</div>'}<div class="flag-add"><button class="flag-create tag-add-chip">＋ créer un flag</button></div>`;
     }
 
+    _isManagedPartnersFlag(key) {
+        return [
+            'partners_enabled',
+            'partners_invite_only',
+            'partners_shadow_mode',
+            'partners_payouts_live',
+            'partners_tv_relay_enabled'
+        ].includes(String(key || ''));
+    }
+
     async _flagToggle(input) {
+        if (this._isManagedPartnersFlag(input?.dataset?.key)) {
+            this._toast('Ce flag Partners est piloté par le contrôle de release sécurisé.', 'err');
+            this._loadFlags();
+            return;
+        }
         try { await this._rpc('admin_flag_set', { p_key: input.dataset.key, p_enabled: input.checked }); this._toast(`Flag « ${input.dataset.key} » ${input.checked ? 'activé' : 'désactivé'}.`, 'ok'); }
         catch (e) { input.checked = !input.checked; this._toast('Erreur : ' + e.message, 'err'); }
     }

@@ -9,6 +9,12 @@
 >
 > **Date : 2026-07-03 (soir).** Ancré dans le code déployé sur `main` et dans les validations
 > **réelles en navigateur** (essai `trialing` posé en base, débit token USD `response 00`).
+>
+> **Résolution datée — 2026-07-29.** La mention ci-dessous d'un
+> `assetlinks.json` encore en placeholder est un constat historique désormais
+> résolu : le fichier est publié avec les empreintes autorisées du package
+> phone. Le parcours `/r/{code}` doit encore être validé sur une installation
+> signée par Google Play.
 
 ---
 

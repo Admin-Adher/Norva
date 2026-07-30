@@ -30,6 +30,21 @@ test('every sign-out entry uses the same cancel-first accessible confirmation', 
   assert.match(settings, /return this\.app\.signOut\(\)/);
 });
 
+test('Android phone Back closes searchable region pickers before route navigation', () => {
+  assert.match(
+    standalone,
+    /\[data-region-picker\] \[data-region-pop\]:not\(\[hidden\]\)/,
+  );
+  assert.match(
+    standalone,
+    /openRegionPicker\.closest\('\[data-region-picker\]'\)[\s\S]{0,220}picker\.__regionClose\(\)[\s\S]{0,100}return 'handled'/,
+  );
+  assert.ok(
+    standalone.indexOf('const openRegionPicker') < standalone.indexOf('// An open modal'),
+    'the phone bridge must consume the picker before generic route/modal fallthrough',
+  );
+});
+
 test('mobile Account sheet isolates the background, traps focus and restores its exact opener', () => {
   assert.match(app, /aria-labelledby="account-sheet-title"/);
   assert.match(app, /overlay\.setAttribute\('aria-hidden', 'true'\)/);

@@ -236,6 +236,52 @@ async function readLidCascadeLeaseHealth(): Promise<JsonRecord> {
 // the state row is DELETED the moment its condition heals, so a NEW occurrence alerts immediately.
 const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
 
+type PartnersOpsSnapshot = {
+  enabled: boolean;
+  unavailable: boolean;
+  alerts: Array<{ code: string; severity: "warning" | "critical"; count: number }>;
+};
+
+async function readPartnersOpsSnapshot(): Promise<PartnersOpsSnapshot> {
+  const { data: flag, error: flagError } = await admin
+    .from("admin_feature_flags")
+    .select("enabled")
+    .eq("key", "partners_enabled")
+    .maybeSingle();
+  if (flagError || flag?.enabled !== true) {
+    return { enabled: false, unavailable: false, alerts: [] };
+  }
+
+  const { data, error } = await admin.rpc("partners_service_ops_alert_snapshot");
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    return { enabled: true, unavailable: true, alerts: [] };
+  }
+  const payload = data as JsonRecord;
+  if (payload.schema_version !== 1 || !Array.isArray(payload.alerts)) {
+    return { enabled: true, unavailable: true, alerts: [] };
+  }
+
+  const alerts: PartnersOpsSnapshot["alerts"] = [];
+  for (const raw of payload.alerts.slice(0, 64)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return { enabled: true, unavailable: true, alerts: [] };
+    }
+    const row = raw as JsonRecord;
+    const code = typeof row.code === "string" && /^[a-z0-9_]{3,64}$/.test(row.code)
+      ? row.code
+      : "";
+    const severity = row.severity === "critical" || row.severity === "warning"
+      ? row.severity
+      : null;
+    const count = Number(row.count);
+    if (!code || !severity || !Number.isSafeInteger(count) || count < 0) {
+      return { enabled: true, unavailable: true, alerts: [] };
+    }
+    alerts.push({ code, severity, count });
+  }
+  return { enabled: true, unavailable: false, alerts };
+}
+
 async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 1) Snapshot counters (free) + staleness of the snapshot itself. The `cron` blob carries
   // per-job last_run/last_status (refresh_admin_dashboard's lateral join) — the alert
@@ -249,11 +295,12 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 2) Live infra pings — including Revolut (the payment API: any HTTP response = reachable).
   const { gateway, relay } = await resolveInfraUrls();
   const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
-  const [gw, rl, st, lidCascade] = await Promise.all([
+  const [gw, rl, st, lidCascade, partnersOps] = await Promise.all([
     gateway ? ping(gateway) : Promise.resolve(null),
     relay ? ping(relay) : Promise.resolve(null),
     ping(revolutApiBase),
     readLidCascadeLeaseHealth(),
+    readPartnersOpsSnapshot(),
   ]);
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
@@ -278,6 +325,19 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
   if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
+  if (partnersOps.enabled && partnersOps.unavailable) {
+    problems.push({
+      key: "partners_monitoring_unavailable",
+      detail: "Norva Partners est activé mais son snapshot de supervision autoritatif est indisponible",
+    });
+  } else if (partnersOps.enabled) {
+    for (const alert of partnersOps.alerts) {
+      problems.push({
+        key: `partners_${alert.code}`,
+        detail: `Norva Partners · ${alert.code} · ${alert.count} observation(s) · ${alert.severity}`,
+      });
+    }
+  }
 
   const lidState = String(lidCascade.state ?? "conflict");
   const lidExpiresAt = typeof lidCascade.expiresAt === "string"
@@ -491,7 +551,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
 
   return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "lid_cascade_expired", "lid_cascade_expiring", "lid_cascade_conflict", "vat_threshold", "vat_fx_pending"],
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale", "partners_monitoring", "lid_cascade_expired", "lid_cascade_expiring", "lid_cascade_conflict", "vat_threshold", "vat_fx_pending"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
     recovery_delivered: recoveryDelivered,
     recovery_channels: recoveryChannels,

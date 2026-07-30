@@ -3,6 +3,14 @@
 État de tout ce qui a été livré, où ça vit, si c'est **actif** ou **derrière un flag**, et comment
 l'activer. Mis à jour au fil des sessions.
 
+> **Mise à jour corrective — 2026-07-29.** Les applications Phone et TV disposent
+> désormais de fiches Google Play publiques. Le fichier
+> `public/.well-known/assetlinks.json` est publié sur `norva.tv`, contient les
+> empreintes autorisées de `tv.norva.phone` et ne comporte plus de placeholder.
+> La validation finale du parcours `/r/{code}` doit encore être rejouée avec une
+> installation signée par Google Play ; le certificat debug local est
+> volontairement absent de la relation Digital Asset Links.
+
 ---
 
 ## ⚠️ Actions owner en attente (checklist vivante)
@@ -12,18 +20,15 @@ build/publish signés). Elles bloquent la **release du natif**. Ordre logique.
 **Suivi détaillé + pas-à-pas : `clients/PLAY_STORE_RELEASE_STATUS.md`.**
 
 1. **Compte Google Play Console** — ✅ **obtenu** (2026-07-03). → débloque 2, 3, 4.
-2. **Build des AAB signés** — ✅ **fait**. Keystore d'origine détenu par l'owner (hors-repo) ;
-   les 4 secrets Android + `GOOGLE_SERVICES_JSON` sont posés dans GitHub. Dernier build vert =
-   **run #3** (`android-release.yml`, `main`, 2026-07-03) → 2 AAB signés en artéfacts
-   (phone `1.2.0`/vc3, TV `3.8.0`/vc13). **Reste à faire** : créer les 2 apps Console +
-   **uploader** les AAB en Test interne (accepter Play App Signing). → porte tout le natif
-   (cast natif, gestes player, Watch Next, « À suivre »).
-3. **assetlinks SHA-256** — ⏳ remplacer le placeholder
-   `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` dans
-   `public/.well-known/assetlinks.json` par l'empreinte **de la clé de signature générée par
-   Google** (Play Console → app phone → Intégrité de l'app), **pas** la clé d'upload. Dispo
-   seulement **après** l'upload (étape 2). Fichier déjà correct par ailleurs (seul
-   `tv.norva.phone` déclare les App Links https `norva.tv`). Réf : `UX-NETFLIX-PARITY.md` #15.
+2. **Build et publication des applications** — ✅ **fait**. Les fiches publiques
+   `tv.norva.phone` et `tv.norva.tv` répondent sur Google Play. Le suivi de
+   version et les éventuelles nouvelles releases restent dans
+   `clients/PLAY_STORE_RELEASE_STATUS.md`.
+3. **assetlinks SHA-256** — ✅ **publié**. Le fichier
+   `public/.well-known/assetlinks.json` expose les empreintes de signature
+   autorisées de `tv.norva.phone`. Il reste à valider `/r/{code}` sur une
+   installation distribuée et signée par Google Play. Réf :
+   `UX-NETFLIX-PARITY.md` #15.
 4. **FCM push** — `GOOGLE_SERVICES_JSON` (GitHub) + `FCM_SERVICE_ACCOUNT` (Supabase) déjà posés ;
    le build les embarque déjà. Il ne reste que la publication de l'APK (étape 2). Réf : `FCM-PUSH-SETUP.md`.
 5. **E-mail de support** — ✅ **fait**. `support@norva.tv` : réception via Cloudflare Email

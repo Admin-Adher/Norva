@@ -1,0 +1,2781 @@
+begin;
+
+create extension if not exists pgtap with schema extensions;
+
+select extensions.plan(142);
+
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'public.partners_service_apply(uuid,text,text,text,text)',
+    'EXECUTE'
+  ),
+  'anon cannot execute the Partners application RPC'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_service_apply(uuid,text,text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot bypass the Partners Edge Function'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'affiliate_private.partners_can_manage_capabilities()',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot execute the capability-manager predicate'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_service_prepare_account_deletion(uuid)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot prepare retained Partners data for deletion'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'public.partners_service_prepare_account_deletion(uuid)',
+    'EXECUTE'
+  ),
+  'anonymous clients cannot prepare retained Partners data for deletion'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_service_prepare_account_deletion(uuid)',
+    'EXECUTE'
+  ),
+  'service_role can prepare retained Partners data for account deletion'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_service_ops_alert_snapshot()',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot read the Partners ops alert snapshot'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_service_ops_alert_snapshot()',
+    'EXECUTE'
+  ),
+  'service_role can read the sanitized Partners ops alert snapshot'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_service_apply(uuid,text,text,text,text)',
+    'EXECUTE'
+  ),
+  'service_role can execute the Partners application RPC'
+);
+select extensions.ok(
+  (
+    select p.prosecdef
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'affiliate_private'
+      and p.proname = 'partners_service_apply'
+  ),
+  'the privileged application implementation is SECURITY DEFINER'
+);
+select extensions.ok(
+  not (
+    select p.prosecdef
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'partners_service_apply'
+  ),
+  'the public application shim is SECURITY INVOKER'
+);
+select extensions.ok(
+  (
+    select c.relrowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'affiliate_private'
+      and c.relname = 'affiliate_service_idempotency'
+  ),
+  'the private idempotency table has RLS enabled'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from pg_indexes i
+    where i.schemaname = 'affiliate_private'
+      and i.indexname = 'affiliate_events_sequence_idx'
+      and i.indexdef ilike '%unique%'
+  ),
+  'affiliate history has a unique monotonic sequence cursor'
+);
+select extensions.ok(
+  (
+    select pg_get_constraintdef(c.oid)
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'affiliate_private'
+      and t.relname = 'affiliate_country_policies'
+      and c.conname = 'affiliate_country_policies_age'
+  ) like '%18%99%',
+  'country-policy age bounds remain aligned to 18 through 99'
+);
+select extensions.ok(
+  (
+    select pg_get_constraintdef(c.oid)
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'affiliate_private'
+      and t.relname = 'affiliate_country_policies'
+      and c.conname = 'affiliate_country_policies_verification_level'
+  ) like '%identity_age_country_capacity%',
+  'verification-level values remain the exact foundation enum'
+);
+
+insert into auth.users (
+  id,
+  instance_id,
+  aud,
+  role,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at
+)
+values
+  (
+    '10000000-0000-4000-8000-000000000001',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'partners-admin@example.invalid',
+    '',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '10000000-0000-4000-8000-000000000002',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'partners-member@example.invalid',
+    '',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '10000000-0000-4000-8000-000000000003',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'partners-kyc@example.invalid',
+    '',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  ),
+  (
+    '10000000-0000-4000-8000-000000000004',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'partners-referred@example.invalid',
+    '',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now() + interval '1 second',
+    now() + interval '1 second'
+  ),
+  (
+    '10000000-0000-4000-8000-000000000005',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'partners-unattributed@example.invalid',
+    '',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  );
+
+insert into affiliate_private.affiliate_program_versions (
+  version_key,
+  account_type,
+  status,
+  commission_rate_bps,
+  attribution_window_days,
+  maturation_days,
+  payout_thresholds,
+  terms_version,
+  disclosure_version,
+  effective_from
+)
+values (
+  'p0-test-v1',
+  'individual',
+  'active',
+  2000,
+  30,
+  45,
+  '{"USD":1000}'::jsonb,
+  'partners-terms-v1',
+  'partners-disclosure-v1',
+  now() - interval '1 minute'
+);
+
+insert into affiliate_private.affiliate_country_policies (
+  program_version_id,
+  country_code,
+  individual_available,
+  minimum_age,
+  capacity_required,
+  verification_level,
+  verification_provider,
+  payout_currencies,
+  terms_version,
+  disclosure_version,
+  effective_from
+)
+select
+  p.id,
+  'US',
+  true,
+  18,
+  false,
+  'identity_age_country',
+  'didit',
+  array['USD']::text[],
+  'partners-terms-v1',
+  'partners-disclosure-v1',
+  now() - interval '1 minute'
+from affiliate_private.affiliate_program_versions p
+where p.version_key = 'p0-test-v1';
+
+insert into affiliate_private.affiliate_country_code_mappings (
+  iso3,
+  country_code,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+values (
+  'USA',
+  'US',
+  'active',
+  repeat('a', 64),
+  'P0 database integration country mapping.'
+);
+
+insert into affiliate_private.affiliate_kyc_attempt_policies (
+  country_policy_id,
+  max_attempts,
+  window_seconds,
+  cooldown_seconds,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+select
+  policy.id,
+  3,
+  86400,
+  60,
+  'active',
+  repeat('a', 64),
+  'P0 database integration KYC attempt policy.'
+from affiliate_private.affiliate_country_policies policy
+where policy.country_code = 'US'
+  and policy.subdivision_code is null;
+
+insert into affiliate_private.affiliate_currency_metadata (
+  currency_code,
+  exponent,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+values (
+  'USD',
+  2,
+  'active',
+  repeat('a', 64),
+  'P0 database integration currency metadata.'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+
+select extensions.is(
+  public.admin_partners_capabilities() ->> 'can_manage',
+  'false',
+  'a regular admin cannot manage Partners capabilities'
+);
+select extensions.is(
+  public.admin_partners_capabilities() ->> 'can_manage_release',
+  'false',
+  'a regular admin has no server-managed Partners release authority'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000001',
+      'support',
+      true,
+      'A regular admin must not self-elevate.'
+    )
+  $$,
+  '42501',
+  'Partners capability manager role is required',
+  'a regular admin cannot grant itself a Partners capability'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_flag',
+      'partners_enabled',
+      false,
+      'A regular admin must not control the Partners release.'
+    )
+  $$,
+  '42501',
+  'Partners control capability is required',
+  'a regular admin cannot mutate Partners release controls'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+select extensions.is(
+  public.admin_partners_capabilities() ->> 'can_manage',
+  'true',
+  'a server-designated capability manager can manage capabilities'
+);
+select extensions.is(
+  public.admin_partners_capabilities() ->> 'can_manage_release',
+  'false',
+  'capability delegation does not grant production release authority'
+);
+
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000001',
+  'support',
+  true,
+  'P0 database integration support capability.'
+);
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000001',
+  'risk',
+  true,
+  'P0 database integration risk capability.'
+);
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000001',
+  'finance',
+  true,
+  'P0 database integration finance capability.'
+);
+
+select extensions.is(
+  public.admin_partners_capability_set(
+    '10000000-0000-4000-8000-000000000001',
+    'risk',
+    false,
+    'P0 database integration risk capability revocation.'
+  ) ->> 'enabled',
+  'false',
+  'a capability manager can revoke a capability'
+);
+
+select extensions.is(
+  public.admin_partners_capability_set(
+    '10000000-0000-4000-8000-000000000001',
+    'risk',
+    true,
+    'P0 database integration risk capability restoration.'
+  ) ->> 'enabled',
+  'true',
+  'a capability manager can grant a capability'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_events e
+    where e.aggregate_type = 'admin_capability'
+      and e.action = 'admin_capability_set'
+      and e.after_state @> '{"capability":"risk","enabled":true}'::jsonb
+  )
+  and exists (
+    select 1
+    from affiliate_private.affiliate_events e
+    where e.aggregate_type = 'admin_capability'
+      and e.action = 'admin_capability_set'
+      and e.after_state @> '{"capability":"risk","enabled":false}'::jsonb
+  ),
+  'capability grant and revoke mutations append distinct audit events'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+
+do $setup$
+declare
+  v_gate text;
+begin
+  foreach v_gate in array array[
+    'legal_and_tax_approved',
+    'privacy_approved',
+    'individual_verification_coverage_confirmed',
+    'individual_payout_coverage_confirmed',
+    'country_policy_approved',
+    'financial_data_contract_approved',
+    'backup_restore_verified'
+  ]::text[]
+  loop
+    perform public.admin_partners_control(
+      'set_gate',
+      v_gate,
+      true,
+      'P0 database integration test approval.'
+    );
+  end loop;
+
+  perform public.admin_partners_control(
+    'set_allowlist',
+    null,
+    true,
+    'P0 database integration test allowlist.',
+    '10000000-0000-4000-8000-000000000002',
+    'US',
+    null,
+    now() + interval '1 day'
+  );
+  perform public.admin_partners_control(
+    'set_allowlist',
+    null,
+    true,
+    'P0 database integration KYC allowlist.',
+    '10000000-0000-4000-8000-000000000003',
+    'US',
+    null,
+    now() + interval '1 day'
+  );
+  perform public.admin_partners_control(
+    'set_flag',
+    'partners_invite_only',
+    true,
+    'P0 database integration test invite-only activation.'
+  );
+  perform public.admin_partners_control(
+    'set_flag',
+    'partners_enabled',
+    true,
+    'P0 database integration test programme activation.'
+  );
+  perform public.admin_partners_control(
+    'set_flag',
+    'partners_shadow_mode',
+    true,
+    'P0 database integration shadow worker activation.'
+  );
+end;
+$setup$;
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_apply(
+    '10000000-0000-4000-8000-000000000002',
+    'US',
+    null,
+    'individual',
+    'apply.integration.0001'
+  ) ->> 'action',
+  'application_submitted',
+  'an allowlisted individual can submit an application'
+);
+select extensions.is(
+  public.partners_service_apply(
+    '10000000-0000-4000-8000-000000000002',
+    'US',
+    null,
+    'individual',
+    'apply.integration.0001'
+  ) ->> 'replayed',
+  'true',
+  'application retries replay the stored response'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_accounts a
+    where a.user_id = '10000000-0000-4000-8000-000000000002'
+      and a.status <> 'closed'
+  ),
+  1::bigint,
+  'application idempotency creates one open account'
+);
+select extensions.is(
+  (
+    select a.status
+    from affiliate_private.affiliate_accounts a
+    where a.user_id = '10000000-0000-4000-8000-000000000002'
+  ),
+  'pending_verification',
+  'new applications remain pending verification'
+);
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_accept_terms(
+    '10000000-0000-4000-8000-000000000002',
+    'partners-terms-v1',
+    'partners-disclosure-v1',
+    'terms.integration.0001'
+  ) ->> 'action',
+  'terms_accepted',
+  'the current versioned terms can be accepted'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select a.contract_status
+    from affiliate_private.affiliate_accounts a
+    where a.user_id = '10000000-0000-4000-8000-000000000002'
+  ),
+  'accepted',
+  'term acceptance is stored on the private account'
+);
+select extensions.is(
+  (
+    select a.status
+    from affiliate_private.affiliate_accounts a
+    where a.user_id = '10000000-0000-4000-8000-000000000002'
+  ),
+  'pending_verification',
+  'term acceptance does not bypass KYC'
+);
+
+update affiliate_private.affiliate_accounts
+set
+  verification_status = 'verified',
+  verification_provider = 'didit',
+  verification_reference = 'test-verification-reference',
+  age_verified = true,
+  capacity_verified = true,
+  updated_at = now()
+where user_id = '10000000-0000-4000-8000-000000000002';
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_accept_terms(
+    '10000000-0000-4000-8000-000000000002',
+    'partners-terms-v1',
+    'partners-disclosure-v1',
+    'terms.integration.0002'
+  ) #>> '{account,status}',
+  'active',
+  'a server-verified account activates after every gate passes'
+);
+select extensions.is(
+  public.partners_service_rotate_link(
+    '10000000-0000-4000-8000-000000000002',
+    'links.integration.0001'
+  ) ->> 'action',
+  'link_rotated',
+  'an active account can create its first sharing link'
+);
+select extensions.is(
+  public.partners_service_rotate_link(
+    '10000000-0000-4000-8000-000000000002',
+    'links.integration.0001'
+  ) ->> 'replayed',
+  'true',
+  'link retries replay without rotating again'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_links
+  ),
+  1::bigint,
+  'a replayed link request creates no extra link'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_links
+    where status = 'active'
+  ),
+  1::bigint,
+  'exactly one active link exists after initial creation'
+);
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_rotate_link(
+    '10000000-0000-4000-8000-000000000002',
+    'links.integration.0002'
+  ) ->> 'action',
+  'link_rotated',
+  'a fresh key atomically rotates the sharing link'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_links
+    where status = 'active'
+  ),
+  1::bigint,
+  'link rotation preserves one active link'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_links
+    where status = 'revoked'
+  ),
+  1::bigint,
+  'link rotation retains one terminal predecessor'
+);
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_dashboard(
+    '10000000-0000-4000-8000-000000000002',
+    2,
+    null,
+    'all'
+  ) #>> '{reporting,available}',
+  'false',
+  'dashboard reporting stays explicitly unavailable without a ledger'
+);
+select extensions.ok(
+  (
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      2,
+      null,
+      'all'
+    ) #> '{reporting,pending_minor}'
+  ) = 'null'::jsonb,
+  'dashboard does not invent a pending commission balance'
+);
+select extensions.ok(
+  (
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      2,
+      null,
+      'all'
+    ) #>> '{link,share_url}'
+  ) ~ '^https://norva[.]tv/r/[A-Za-z0-9_-]{32}$',
+  'dashboard exposes the real active sharing URL'
+);
+select extensions.is(
+  jsonb_typeof(
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      2,
+      null,
+      'all'
+    ) #> '{history,items}'
+  ),
+  'array',
+  'dashboard history is a bounded JSON array'
+);
+select extensions.ok(
+  (
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      2,
+      null,
+      'all'
+    ) #> '{history,next_cursor}'
+  ) = 'null'::jsonb,
+  'dashboard has no synthetic cursor before financial activity exists'
+);
+select extensions.ok(
+  public.partners_service_dashboard(
+    '10000000-0000-4000-8000-000000000002',
+    2,
+    null,
+    'all'
+  )::text !~
+    '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
+  'member dashboard contains no UUID'
+);
+select extensions.is(
+  jsonb_array_length(
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      25,
+      null,
+      'pending'
+    ) #> '{history,items}'
+  ),
+  0,
+  'financial history filters stay empty until ledger facts exist'
+);
+select extensions.throws_ok(
+  $$
+    select public.partners_service_apply(
+      '10000000-0000-4000-8000-000000000002',
+      'CA',
+      null,
+      'individual',
+      'apply.integration.0001'
+    )
+  $$,
+  'P0003',
+  'idempotency key was reused with another request',
+  'idempotency-key reuse with another payload is rejected'
+);
+
+select extensions.is(
+  public.partners_service_apply(
+    '10000000-0000-4000-8000-000000000003',
+    'US',
+    null,
+    'individual',
+    'apply.kyc.integration.0001'
+  ) ->> 'action',
+  'application_submitted',
+  'the KYC fixture can submit an allowlisted application'
+);
+select extensions.is(
+  public.partners_service_accept_terms(
+    '10000000-0000-4000-8000-000000000003',
+    'partners-terms-v1',
+    'partners-disclosure-v1',
+    'terms.kyc.integration.0001'
+  ) ->> 'action',
+  'terms_accepted',
+  'the KYC fixture accepts the current terms and disclosure'
+);
+select extensions.throws_ok(
+  $$
+    select public.partners_service_kyc_prepare(
+      '10000000-0000-4000-8000-000000000003',
+      'kyc.prepare.integration.bad1',
+      'partners-disclosure-old',
+      true,
+      'en'
+    )
+  $$,
+  'P0001',
+  'capacity consent version is not current',
+  'KYC preparation rejects a stale disclosure'
+);
+select extensions.is(
+  public.partners_service_kyc_prepare(
+    '10000000-0000-4000-8000-000000000003',
+    'kyc.prepare.integration.0001',
+    'partners-disclosure-v1',
+    true,
+    'en'
+  ) ->> 'action',
+  'kyc_ready',
+  'KYC preparation reserves exactly one hosted session slot'
+);
+select extensions.is(
+  public.partners_service_kyc_prepare(
+    '10000000-0000-4000-8000-000000000003',
+    'kyc.prepare.integration.0001',
+    'partners-disclosure-v1',
+    true,
+    'en'
+  ) ->> 'replayed',
+  'true',
+  'the same KYC preparation key replays its reservation'
+);
+select extensions.throws_ok(
+  $$
+    select public.partners_service_kyc_prepare(
+      '10000000-0000-4000-8000-000000000003',
+      'kyc.prepare.integration.0002',
+      'partners-disclosure-v1',
+      true,
+      'en'
+    )
+  $$,
+  'P0004',
+  'KYC session creation is already in progress',
+  'a second KYC key cannot create a concurrent hosted session'
+);
+
+reset role;
+create temporary table partners_test_state (
+  state_key text primary key,
+  state_value text not null
+) on commit drop;
+insert into partners_test_state (state_key, state_value)
+select
+  'kyc_reservation',
+  reservation.reservation_key
+from affiliate_private.affiliate_kyc_session_reservations reservation
+join affiliate_private.affiliate_accounts account
+  on account.id = reservation.account_id
+where account.user_id = '10000000-0000-4000-8000-000000000003';
+grant select on partners_test_state to service_role, authenticated;
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_kyc_session_record(
+    '10000000-0000-4000-8000-000000000003',
+    'kyc.session.integration.0001',
+    'didit-session-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'not_started',
+    now() + interval '1 day',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'kyc_reservation'
+    )
+  ) ->> 'action',
+  'kyc_session_recorded',
+  'a Didit session binds to its database reservation'
+);
+select extensions.is(
+  public.partners_service_kyc_session_record(
+    '10000000-0000-4000-8000-000000000003',
+    'kyc.session.integration.0001',
+    'didit-session-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'not_started',
+    now() + interval '1 day',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'kyc_reservation'
+    )
+  ) ->> 'replayed',
+  'true',
+  'provider session recording is retry-safe after a network timeout'
+);
+select extensions.throws_ok(
+  $$
+    select public.partners_service_kyc_session_record(
+      '10000000-0000-4000-8000-000000000003',
+      'kyc.session.integration.0002',
+      'didit-session-integration-0001',
+      'different-workflow-integration',
+      1,
+      'not_started',
+      now() + interval '1 day',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'kyc_reservation'
+      )
+    )
+  $$,
+  'P0003',
+  'provider session identity conflict',
+  'a Didit provider id cannot be rebound to another workflow'
+);
+
+reset role;
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash =
+      'didit-session-integration-0001'
+       or session.provider_workflow_hash =
+      'didit-workflow-integration'
+  ),
+  'raw Didit session and workflow identifiers are never stored'
+);
+insert into partners_test_state (state_key, state_value)
+select 'referral_code_hash', link.code_hash
+from affiliate_private.affiliate_links link
+join affiliate_private.affiliate_accounts account
+  on account.id = link.account_id
+where account.user_id = '10000000-0000-4000-8000-000000000002'
+  and link.status = 'active';
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_referral_resolve(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'referral_code_hash'
+    ),
+    repeat('b', 64),
+    now() + interval '1 day',
+    repeat('c', 64),
+    repeat('d', 64),
+    repeat('e', 64)
+  ) ->> 'accepted',
+  'true',
+  'an active public link resolves to a privacy-preserving claim'
+);
+select extensions.is(
+  public.partners_service_referral_claim(
+    '10000000-0000-4000-8000-000000000004',
+    repeat('b', 64),
+    'referral.claim.integration.0001'
+  ) ->> 'outcome',
+  'attributed',
+  'a strictly pre-signup referral claim is attributed once'
+);
+select extensions.is(
+  public.partners_service_referral_claim(
+    '10000000-0000-4000-8000-000000000004',
+    repeat('b', 64),
+    'referral.claim.integration.0001'
+  ) ->> 'replayed',
+  'true',
+  'referral consumption replays without duplicate attribution'
+);
+
+reset role;
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_attributions attribution
+    where attribution.referred_user_id =
+      '10000000-0000-4000-8000-000000000004'
+  ),
+  1::bigint,
+  'one referred user has exactly one immutable attribution'
+);
+
+select extensions.is(
+  affiliate_private.partners_commission_minor(2, 2000),
+  0::bigint,
+  '20 percent of two minor units rounds half up to zero'
+);
+select extensions.is(
+  affiliate_private.partners_commission_minor(3, 2000),
+  1::bigint,
+  '20 percent of three minor units rounds half up to one'
+);
+select extensions.is(
+  affiliate_private.partners_commission_minor(800, 2000),
+  160::bigint,
+  'the centralized commission calculator applies the exact 20 percent rate'
+);
+
+set local role service_role;
+select extensions.ok(
+  public.partners_worker_financial_observation_required(
+    '10000000-0000-4000-8000-000000000004'
+  ),
+  'the finance producer enriches only a user with an immutable attribution'
+);
+select extensions.ok(
+  not public.partners_worker_financial_observation_required(
+    '10000000-0000-4000-8000-000000000005'
+  ),
+  'the finance producer skips Google Orders for an unattributed user'
+);
+select extensions.is(
+  public.partners_worker_currency_exponent_resolve('usd'),
+  2,
+  'the finance producer resolves a configured active currency exponent'
+);
+select extensions.ok(
+  public.partners_worker_currency_exponent_resolve('EUR') is null,
+  'the finance producer never guesses an unconfigured currency exponent'
+);
+select extensions.is(
+  public.partners_worker_financial_fact_ingest(
+    repeat('1', 64),
+    repeat('2', 64),
+    repeat('3', 64),
+    null,
+    '10000000-0000-4000-8000-000000000004',
+    'web',
+    'capture',
+    'production',
+    'USD',
+    2,
+    1000,
+    null,
+    100,
+    900,
+    now() - interval '45 days'
+  ) #>> '{fact,job_status}',
+  'pending',
+  'a complete attributed capture creates a durable commission job'
+);
+select extensions.is(
+  public.partners_worker_financial_fact_ingest(
+    repeat('1', 64),
+    repeat('2', 64),
+    repeat('3', 64),
+    null,
+    '10000000-0000-4000-8000-000000000004',
+    'web',
+    'capture',
+    'production',
+    'USD',
+    2,
+    1000,
+    null,
+    100,
+    900,
+    now() - interval '45 days'
+  ) ->> 'replayed',
+  'true',
+  'financial fact ingestion replays the same source event exactly once'
+);
+select extensions.is(
+  public.partners_worker_financial_fact_ingest(
+    repeat('4', 64),
+    repeat('5', 64),
+    repeat('6', 64),
+    null,
+    '10000000-0000-4000-8000-000000000005',
+    'web',
+    'capture',
+    'production',
+    'USD',
+    2,
+    1000,
+    100,
+    100,
+    800,
+    now() - interval '45 days'
+  ) #>> '{fact,status}',
+  'incomplete',
+  'a discount is context and cannot be subtracted twice from gross'
+);
+
+reset role;
+select extensions.is(
+  (
+    select fact.facts_status
+    from affiliate_private.affiliate_financial_facts fact
+    where fact.transaction_hash = repeat('3', 64)
+  ),
+  'complete',
+  'gross minus tax is a complete canonical fact when discount is absent'
+);
+select extensions.ok(
+  (
+    select fact.discount_minor is null
+    from affiliate_private.affiliate_financial_facts fact
+    where fact.transaction_hash = repeat('3', 64)
+  ),
+  'discount remains optional context in immutable facts'
+);
+select extensions.is(
+  (
+    select fact.eligible_minor
+    from affiliate_private.affiliate_financial_facts fact
+    where fact.transaction_hash = repeat('3', 64)
+  ),
+  900::bigint,
+  'eligible minor units equal the final gross paid minus tax'
+);
+insert into partners_test_state (state_key, state_value)
+select 'commission_job', job.job_key
+from affiliate_private.affiliate_commission_jobs job
+join affiliate_private.affiliate_financial_facts fact
+  on fact.id = job.fact_id
+where fact.transaction_hash = repeat('3', 64);
+set local role service_role;
+select extensions.is(
+  jsonb_array_length(
+    public.partners_worker_commission_jobs_lease(
+      'p0-finance-worker',
+      repeat('f', 64),
+      10,
+      60
+    ) -> 'jobs'
+  ),
+  1,
+  'the commission worker leases the due capture once'
+);
+select extensions.is(
+  public.partners_worker_commission_job_complete(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'commission_job'
+    ),
+    'p0-finance-worker',
+    repeat('f', 64),
+    'succeeded',
+    null
+  ) #>> '{ledger_entry,status}',
+  'pending',
+  'the worker appends a pending balanced commission entry'
+);
+
+reset role;
+select extensions.is(
+  (
+    select entry.amount_minor
+    from affiliate_private.affiliate_commission_entries entry
+    join affiliate_private.affiliate_financial_facts fact
+      on fact.id = entry.fact_id
+    where fact.transaction_hash = repeat('3', 64)
+      and entry.entry_kind = 'accrual'
+  ),
+  180::bigint,
+  'the persisted commission is 20 percent of the eligible amount'
+);
+insert into partners_test_state (state_key, state_value)
+select 'commission_entry', entry.entry_key
+from affiliate_private.affiliate_commission_entries entry
+join affiliate_private.affiliate_financial_facts fact
+  on fact.id = entry.fact_id
+where fact.transaction_hash = repeat('3', 64)
+  and entry.entry_kind = 'accrual';
+insert into partners_test_state (state_key, state_value)
+select 'maturation_job', job.job_key
+from affiliate_private.affiliate_maturation_jobs job
+join affiliate_private.affiliate_commission_entries entry
+  on entry.id = job.accrual_entry_id
+where entry.entry_key = (
+  select state_value
+  from partners_test_state
+  where state_key = 'commission_entry'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.is(
+  public.admin_partners_commission_reverse(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'commission_entry'
+    ),
+    'REVERSE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'commission_entry'
+    ),
+    'P0 database integration manual reversal.'
+  ) ->> 'action',
+  'manual_commission_reversal',
+  'Finance can append a traceable manual counter-entry'
+);
+
+reset role;
+set local role service_role;
+select extensions.is(
+  jsonb_array_length(
+    public.partners_worker_maturation_lease(
+      'p0-maturation-worker',
+      repeat('9', 64),
+      10,
+      60
+    ) -> 'jobs'
+  ),
+  1,
+  'the J plus 45 maturation job becomes leasable'
+);
+select extensions.ok(
+  (
+    public.partners_worker_maturation_complete(
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'maturation_job'
+      ),
+      'p0-maturation-worker',
+      repeat('9', 64),
+      'succeeded',
+      null
+    ) -> 'ledger_entry'
+  ) = 'null'::jsonb,
+  'a fully reversed commission releases no value at J plus 45'
+);
+select extensions.is(
+  public.partners_service_dashboard(
+    '10000000-0000-4000-8000-000000000002',
+    25,
+    null,
+    'reversed'
+  ) #>> '{history,items,0,type}',
+  'commission_reversed',
+  'the member dashboard exposes a sanitized real reversal event'
+);
+
+reset role;
+select extensions.is(
+  (
+    select coalesce(sum(entry.amount_minor), 0)::bigint
+    from affiliate_private.affiliate_commission_entries entry
+    where entry.related_entry_id = (
+      select accrual.id
+      from affiliate_private.affiliate_commission_entries accrual
+      where accrual.entry_key = (
+        select state_value
+        from partners_test_state
+        where state_key = 'commission_entry'
+      )
+    )
+      and entry.entry_kind in ('reversal', 'manual_reversal')
+  ),
+  180::bigint,
+  'manual reversal is included in the immutable reversal cap'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+
+select extensions.is(
+  public.admin_partners_overview() ->> 'accounts_open',
+  '2',
+  'admin overview reports the real open-account count'
+);
+select extensions.is(
+  jsonb_array_length(
+    public.admin_partners_accounts(25, 0, 'all', null) -> 'items'
+  ),
+  2,
+  'admin account list returns both sanitized partner rows'
+);
+select extensions.ok(
+  not ((
+    public.admin_partners_detail((
+      select (item ->> 'account_id')::uuid
+      from jsonb_array_elements(
+        public.admin_partners_accounts(25, 0, 'all', null) -> 'items'
+      ) item
+      where item ->> 'link_status' = 'active'
+      limit 1
+    )) -> 'account'
+  ) ? 'verification_provider'),
+  'admin detail omits the KYC provider'
+);
+select extensions.ok(
+  not ((
+    public.admin_partners_detail((
+      select (item ->> 'account_id')::uuid
+      from jsonb_array_elements(
+        public.admin_partners_accounts(25, 0, 'all', null) -> 'items'
+      ) item
+      where item ->> 'link_status' = 'active'
+      limit 1
+    )) -> 'account'
+  ) ? 'verification_reference'),
+  'admin detail omits the KYC provider reference'
+);
+select extensions.is(
+  length(
+    public.admin_partners_detail((
+      select (item ->> 'account_id')::uuid
+      from jsonb_array_elements(
+        public.admin_partners_accounts(25, 0, 'all', null) -> 'items'
+      ) item
+      where item ->> 'link_status' = 'active'
+      limit 1
+    )) #>> '{link,code_preview}'
+  ),
+  11,
+  'admin detail exposes only a shortened affiliate-code preview'
+);
+select extensions.is(
+  public.admin_partners_detail((
+    select (item ->> 'account_id')::uuid
+    from jsonb_array_elements(
+      public.admin_partners_accounts(25, 0, 'all', null) -> 'items'
+    ) item
+    where item ->> 'link_status' = 'active'
+    limit 1
+  )) #>> '{readiness,financial_ledger}',
+  'true',
+  'admin detail reports the installed financial ledger'
+);
+select extensions.is(
+  public.admin_partners_overview()
+    #>> '{readiness,payout_operations}',
+  'false',
+  'Admin readiness does not advertise a payout adapter that is absent'
+);
+select extensions.is(
+  public.admin_partners_overview() #>> '{readiness,reason}',
+  'payout_execution_adapter_not_verified',
+  'Admin readiness states the exact missing payout control'
+);
+select extensions.is(
+  jsonb_array_length(
+    public.admin_partners_configuration() -> 'release_flags'
+  ),
+  5,
+  'Admin configuration exposes the five managed flags without audit actors'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      public.admin_partners_configuration() -> 'release_gates'
+    ) gate
+    where gate ->> 'key' = 'payout_execution_adapter_verified'
+      and gate ->> 'satisfied' = 'false'
+      and not (gate ? 'updated_by_pseudonym')
+      and not (gate ? 'justification')
+  ),
+  'Admin configuration exposes the redacted payout adapter gate'
+);
+
+select public.admin_partners_control(
+  'set_flag',
+  'partners_shadow_mode',
+  false,
+  'P0 database integration payout gate test.'
+);
+select public.admin_partners_control(
+  'set_gate',
+  'shadow_reconciliation_clean',
+  true,
+  'P0 database integration clean shadow result.'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_flag',
+      'partners_payouts_live',
+      true,
+      'P0 database integration live payout attempt.'
+    )
+  $$,
+  '55000',
+  'payout prerequisites are incomplete',
+  'live payouts cannot be enabled before the adapter is verified'
+);
+select public.admin_partners_control(
+  'set_flag',
+  'partners_shadow_mode',
+  true,
+  'P0 database integration resumes shadow processing.'
+);
+
+reset role;
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000002","role":"authenticated","app_metadata":{}}';
+set local role authenticated;
+
+select extensions.throws_ok(
+  $$select public.admin_partners_overview()$$,
+  '42501',
+  'Partners Admin capability is required',
+  'a non-admin without a capability cannot read Partners admin data'
+);
+
+reset role;
+
+select extensions.ok(
+  (
+    select count(*) >= 5
+    from affiliate_private.affiliate_events e
+    where e.aggregate_type = 'account'
+      and e.aggregate_key = (
+        select a.id::text
+        from affiliate_private.affiliate_accounts a
+        where a.user_id = '10000000-0000-4000-8000-000000000002'
+      )
+  ),
+  'application, contract, activation and link changes are audited'
+);
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_events e
+    where e.aggregate_type = 'account'
+      and (
+        e.before_state::text ilike '%verification_reference%'
+        or e.after_state::text ilike '%verification_reference%'
+      )
+  ),
+  'member audit events do not copy KYC references'
+);
+select extensions.ok(
+  not has_table_privilege(
+    'service_role',
+    'affiliate_private.affiliate_accounts',
+    'SELECT'
+  ),
+  'service_role reaches private accounts only through RPCs'
+);
+select extensions.ok(
+  not has_table_privilege(
+    'authenticated',
+    'affiliate_private.affiliate_accounts',
+    'SELECT'
+  ),
+  'authenticated admins reach private accounts only through sanitized RPCs'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_worker_financial_fact_ingest(text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz)',
+    'EXECUTE'
+  ),
+  'service_role alone can reach the financial fact ingestion boundary'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_worker_financial_observation_required(uuid)',
+    'EXECUTE'
+  ),
+  'service_role can decide whether a financial observation needs enrichment'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_worker_financial_observation_required(uuid)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot probe financial attribution requirements'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_worker_currency_exponent_resolve(text)',
+    'EXECUTE'
+  ),
+  'service_role can resolve active currency metadata'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_worker_currency_exponent_resolve(text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot probe private currency configuration'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_worker_financial_fact_ingest(text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot ingest financial facts'
+);
+select extensions.ok(
+  (
+    select relation.relrowsecurity
+    from pg_class relation
+    join pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'affiliate_private'
+      and relation.relname = 'affiliate_financial_facts'
+  ),
+  'immutable financial facts are protected by fail-closed RLS'
+);
+select extensions.ok(
+  not (
+    select gate.satisfied
+    from affiliate_private.affiliate_release_gates gate
+    where gate.gate_key = 'payout_execution_adapter_verified'
+  ),
+  'the real payout execution adapter gate is seeded fail-closed'
+);
+
+reset role;
+
+select extensions.ok(
+  position(
+    'partners_balance_lock' in pg_get_functiondef(
+      'affiliate_private.partners_route_commission_recovery(uuid,uuid,text,bigint,boolean)'::regprocedure
+    )
+  ) > 0
+  and position(
+    'partners_route_commission_recovery' in pg_get_functiondef(
+      'affiliate_private.partners_worker_commission_job_complete(text,text,text,text,text)'::regprocedure
+    )
+  ) > 0
+  and position(
+    'partners_balance_lock' in pg_get_functiondef(
+      'affiliate_private.admin_partners_payout_cycle_approve(text,text,text)'::regprocedure
+    )
+  ) > 0,
+  'refund routing and payout approval share one account-currency transaction lock'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from pg_constraint constraint_row
+    where constraint_row.conname in (
+      'affiliate_payout_items_cycle_currency_fk',
+      'affiliate_payout_items_profile_currency_fk'
+    )
+  ),
+  2::bigint,
+  'payout items are bound to the exact cycle and destination currency'
+);
+
+insert into partners_test_state (state_key, state_value)
+select 'payout_account', account.id::text
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000002';
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+set local role authenticated;
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000005',
+  'finance',
+  true,
+  'P0 payout integration independent approver.'
+);
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_payout_provider_set(
+  'wise',
+  'US',
+  'USD',
+  'active',
+  'P0 payout integration exact USD destination.'
+);
+select public.admin_partners_fiscal_review(
+  (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_account'
+  ),
+  'verified',
+  'US',
+  'didit',
+  encode(extensions.digest('p0-fiscal-profile', 'sha256'), 'hex'),
+  'W9',
+  'P0 payout integration verified fiscal profile.'
+);
+
+reset role;
+set local role service_role;
+select extensions.is(
+  public.partners_service_payout_profile_set(
+    '10000000-0000-4000-8000-000000000002',
+    'payout.profile.usd.0001',
+    'wise',
+    'tok_test_usd_00000001',
+    'Wise ending 8421',
+    'USD'
+  ) ->> 'action',
+  'payout_profile_saved',
+  'a tokenized payout destination can be saved for USD'
+);
+
+reset role;
+create or replace function pg_temp.partners_test_add_released_commission(
+  p_transaction_hash text,
+  p_currency text,
+  p_commission_minor bigint,
+  p_created_at timestamptz
+)
+returns uuid
+language plpgsql
+as $test$
+declare
+  v_account_id uuid;
+  v_attribution_id uuid;
+  v_referred_user_id uuid;
+  v_fact_id uuid;
+  v_accrual_id uuid;
+  v_release_id uuid;
+begin
+  select
+    attribution.referrer_account_id,
+    attribution.id,
+    attribution.referred_user_id
+  into strict v_account_id, v_attribution_id, v_referred_user_id
+  from affiliate_private.affiliate_attributions attribution
+  where attribution.referrer_account_id = (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_account'
+  );
+
+  insert into affiliate_private.affiliate_financial_facts (
+    transaction_hash,
+    referred_user_id,
+    attribution_id,
+    rail,
+    event_type,
+    environment,
+    facts_status,
+    currency,
+    currency_exponent,
+    gross_minor,
+    discount_minor,
+    tax_minor,
+    eligible_minor,
+    occurred_at,
+    created_at
+  )
+  values (
+    p_transaction_hash,
+    v_referred_user_id,
+    v_attribution_id,
+    'web',
+    'renewal',
+    'production',
+    'complete',
+    p_currency,
+    2,
+    p_commission_minor * 5,
+    null,
+    0,
+    p_commission_minor * 5,
+    p_created_at - interval '60 days',
+    p_created_at
+  )
+  returning id into v_fact_id;
+
+  insert into affiliate_private.affiliate_commission_jobs (
+    fact_id,
+    job_kind,
+    status,
+    next_attempt_at,
+    created_at,
+    updated_at,
+    completed_at
+  )
+  values (
+    v_fact_id,
+    'accrual',
+    'succeeded',
+    p_created_at,
+    p_created_at,
+    p_created_at,
+    p_created_at
+  );
+
+  insert into affiliate_private.affiliate_commission_entries (
+    account_id,
+    attribution_id,
+    fact_id,
+    entry_kind,
+    currency,
+    currency_exponent,
+    amount_minor,
+    matures_at,
+    created_at
+  )
+  values (
+    v_account_id,
+    v_attribution_id,
+    v_fact_id,
+    'accrual',
+    p_currency,
+    2,
+    p_commission_minor,
+    p_created_at - interval '1 day',
+    p_created_at
+  )
+  returning id into v_accrual_id;
+  insert into affiliate_private.affiliate_commission_postings (
+    entry_id, ledger_account, direction, amount_minor, currency
+  )
+  values
+    (
+      v_accrual_id,
+      'platform_commission_expense',
+      'debit',
+      p_commission_minor,
+      p_currency
+    ),
+    (
+      v_accrual_id,
+      'partner_commission_pending',
+      'credit',
+      p_commission_minor,
+      p_currency
+    );
+
+  insert into affiliate_private.affiliate_maturation_jobs (
+    accrual_entry_id,
+    status,
+    available_at,
+    next_attempt_at,
+    created_at,
+    updated_at,
+    completed_at
+  )
+  values (
+    v_accrual_id,
+    'succeeded',
+    p_created_at - interval '1 day',
+    p_created_at - interval '1 day',
+    p_created_at,
+    p_created_at,
+    p_created_at
+  );
+
+  insert into affiliate_private.affiliate_commission_entries (
+    account_id,
+    attribution_id,
+    fact_id,
+    entry_kind,
+    related_entry_id,
+    currency,
+    currency_exponent,
+    amount_minor,
+    created_at
+  )
+  values (
+    v_account_id,
+    v_attribution_id,
+    v_fact_id,
+    'release',
+    v_accrual_id,
+    p_currency,
+    2,
+    p_commission_minor,
+    p_created_at
+  )
+  returning id into v_release_id;
+  insert into affiliate_private.affiliate_commission_postings (
+    entry_id, ledger_account, direction, amount_minor, currency
+  )
+  values
+    (
+      v_release_id,
+      'partner_commission_pending',
+      'debit',
+      p_commission_minor,
+      p_currency
+    ),
+    (
+      v_release_id,
+      'partner_commission_available',
+      'credit',
+      p_commission_minor,
+      p_currency
+    );
+  perform affiliate_private.partners_recovery_due_consume(
+    v_account_id,
+    p_currency
+  );
+  return v_accrual_id;
+end;
+$test$;
+
+create or replace function pg_temp.partners_test_recover_commission(
+  p_accrual_id uuid,
+  p_amount_minor bigint
+)
+returns jsonb
+language plpgsql
+as $test$
+declare
+  v_accrual affiliate_private.affiliate_commission_entries%rowtype;
+  v_reversal_id uuid;
+begin
+  select entry.*
+  into strict v_accrual
+  from affiliate_private.affiliate_commission_entries entry
+  where entry.id = p_accrual_id;
+
+  insert into affiliate_private.affiliate_commission_entries (
+    account_id,
+    attribution_id,
+    entry_kind,
+    related_entry_id,
+    currency,
+    currency_exponent,
+    amount_minor
+  )
+  values (
+    v_accrual.account_id,
+    v_accrual.attribution_id,
+    'manual_reversal',
+    v_accrual.id,
+    v_accrual.currency,
+    v_accrual.currency_exponent,
+    p_amount_minor
+  )
+  returning id into v_reversal_id;
+
+  return affiliate_private.partners_route_commission_recovery(
+    v_reversal_id,
+    v_accrual.account_id,
+    v_accrual.currency,
+    p_amount_minor,
+    false
+  );
+end;
+$test$;
+
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_accrual_1',
+  pg_temp.partners_test_add_released_commission(
+    repeat('7', 64),
+    'USD',
+    2000,
+    now() - interval '2 days'
+  )::text
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select public.admin_partners_control(
+  'set_gate',
+  'payout_execution_adapter_verified',
+  true,
+  'P0 payout integration verified test adapter.'
+);
+select public.admin_partners_control(
+  'set_flag',
+  'partners_shadow_mode',
+  false,
+  'P0 payout integration exits shadow mode.'
+);
+select public.admin_partners_control(
+  'set_flag',
+  'partners_payouts_live',
+  true,
+  'P0 payout integration enables live test path.'
+);
+
+select extensions.is(
+  public.admin_partners_payout_cycle_create(
+    current_date - 30,
+    current_date - 1,
+    'USD',
+    false,
+    'CREATE:' || (current_date - 30)::text || ':'
+      || (current_date - 1)::text || ':USD:DRY',
+    'P0 payout integration dry cycle.'
+  ) ->> 'action',
+  'payout_cycle_created',
+  'Finance can create the dry payout snapshot'
+);
+reset role;
+insert into partners_test_state (state_key, state_value)
+select 'payout_cycle_1', cycle.cycle_key
+from affiliate_private.affiliate_payout_cycles cycle
+where cycle.period_start = current_date - 30
+  and cycle.period_end = current_date - 1
+  and cycle.currency = 'USD';
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select extensions.ok(
+  (
+    select result ->> 'replayed' = 'true'
+      and result #>> '{cycle,key}' = (
+        select state_value
+        from partners_test_state
+        where state_key = 'payout_cycle_1'
+      )
+    from (
+      select public.admin_partners_payout_cycle_create(
+        current_date - 30,
+        current_date - 1,
+        'USD',
+        false,
+        'CREATE:' || (current_date - 30)::text || ':'
+          || (current_date - 1)::text || ':USD:DRY',
+        'P0 payout integration dry replay.'
+      ) as result
+    ) replay
+  ),
+  'a repeated dry cycle request replays the same cycle'
+);
+select extensions.is(
+  public.admin_partners_payout_cycle_create(
+    current_date - 30,
+    current_date - 1,
+    'USD',
+    true,
+    'CREATE:' || (current_date - 30)::text || ':'
+      || (current_date - 1)::text || ':USD:LIVE',
+    'P0 payout integration live promotion.'
+  ) ->> 'action',
+  'payout_cycle_promoted_live',
+  'the dry cycle is atomically promoted instead of duplicated'
+);
+reset role;
+select extensions.ok(
+  (
+    select count(*) = 1
+      and bool_and(cycle.live_execution)
+      and min(cycle.cycle_key) = (
+        select state_value
+        from partners_test_state
+        where state_key = 'payout_cycle_1'
+      )
+    from affiliate_private.affiliate_payout_cycles cycle
+    where cycle.period_start = current_date - 30
+      and cycle.period_end = current_date - 1
+      and cycle.currency = 'USD'
+  ),
+  'dry-to-live promotion preserves one period-currency cycle and its key'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_events event
+    where event.aggregate_key = (
+        select state_value
+        from partners_test_state
+        where state_key = 'payout_cycle_1'
+      )
+      and event.action = 'payout_cycle_promoted_live'
+      and event.before_state @> '{"live_execution":false}'::jsonb
+      and event.after_state @> '{"live_execution":true}'::jsonb
+  ),
+  'dry-to-live promotion appends a redacted audit transition'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_payout_cycle_approve(%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'APPROVE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'P0 payout integration same-actor rejection.'
+  ),
+  'P0001',
+  'live payout approval controls are incomplete',
+  'the live promoter cannot approve their own promoted cycle'
+);
+
+reset role;
+create temporary sequence partners_conflict_signal;
+grant usage, select on sequence partners_conflict_signal to authenticated;
+select nextval('partners_conflict_signal');
+savepoint payout_conflict_probe;
+insert into affiliate_private.affiliate_financial_fact_conflicts (
+  fact_id,
+  source_event_hash,
+  payload_hash,
+  mismatched_fields,
+  observed_at
+)
+select
+  accrual.fact_id,
+  encode(extensions.digest('p0-payout-conflict-source', 'sha256'), 'hex'),
+  encode(extensions.digest('p0-payout-conflict-payload', 'sha256'), 'hex'),
+  array['gross']::text[],
+  now()
+from affiliate_private.affiliate_commission_entries accrual
+where accrual.id = (
+  select state_value::uuid
+  from partners_test_state
+  where state_key = 'payout_accrual_1'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+do $probe$
+begin
+  perform public.admin_partners_payout_cycle_approve(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'APPROVE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'P0 payout integration conflict rejection.'
+  );
+exception
+  when sqlstate 'P0004' then
+    perform nextval('partners_conflict_signal');
+end;
+$probe$;
+rollback to savepoint payout_conflict_probe;
+select extensions.is(
+  (select last_value from partners_conflict_signal),
+  2::bigint,
+  'payout approval fails closed while an exact financial fact is conflicted'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.is(
+  public.admin_partners_payout_cycle_approve(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'APPROVE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    ),
+    'P0 payout integration independent approval.'
+  ) ->> 'action',
+  'payout_cycle_approved',
+  'an independent Finance actor approves the authoritative live cycle'
+);
+
+reset role;
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_partial_route',
+  pg_temp.partners_test_recover_commission(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_accrual_1'
+    ),
+    500
+  )::text
+);
+select extensions.is(
+  (
+    select state_value::jsonb ->> 'clearing_minor'
+    from partners_test_state
+    where state_key = 'payout_partial_route'
+  ),
+  '500',
+  'a partial refund is recovered from approved clearing'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.amount_minor,
+      item.recovered_minor,
+      item.status,
+      cycle.total_minor,
+      cycle.item_count
+    )
+    from affiliate_private.affiliate_payout_items item
+    join affiliate_private.affiliate_payout_cycles cycle
+      on cycle.id = item.cycle_id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    )
+  ),
+  '1500:500:pending:1500:1',
+  'partial recovery atomically reduces both the item and cycle payable total'
+);
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_full_route',
+  pg_temp.partners_test_recover_commission(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_accrual_1'
+    ),
+    1500
+  )::text
+);
+select extensions.is(
+  (
+    select state_value::jsonb ->> 'clearing_minor'
+    from partners_test_state
+    where state_key = 'payout_full_route'
+  ),
+  '1500',
+  'the remaining refund is fully recovered from approved clearing'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.amount_minor,
+      item.recovered_minor,
+      item.status,
+      cycle.total_minor,
+      cycle.item_count
+    )
+    from affiliate_private.affiliate_payout_items item
+    join affiliate_private.affiliate_payout_cycles cycle
+      on cycle.id = item.cycle_id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_1'
+    )
+  ),
+  '0:2000:reversed:0:0',
+  'a full recovery cancels the item and zeroes cycle totals'
+);
+select extensions.is(
+  (
+    select coalesce(sum(
+      case
+        when posting.direction = 'credit' then posting.amount_minor
+        else -posting.amount_minor
+      end
+    ), 0)::bigint
+    from affiliate_private.affiliate_commission_postings posting
+    join affiliate_private.affiliate_commission_entries entry
+      on entry.id = posting.entry_id
+    where entry.account_id = (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'payout_account'
+      )
+      and posting.currency = 'USD'
+      and posting.ledger_account = 'partner_payout_clearing'
+  ),
+  0::bigint,
+  'pre-submission recovery leaves no payable value in clearing'
+);
+
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_accrual_2',
+  pg_temp.partners_test_add_released_commission(
+    repeat('8', 64),
+    'USD',
+    2000,
+    now() - interval '2 days'
+  )::text
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select public.admin_partners_payout_cycle_create(
+  current_date - 29,
+  current_date - 1,
+  'USD',
+  true,
+  'CREATE:' || (current_date - 29)::text || ':'
+    || (current_date - 1)::text || ':USD:LIVE',
+  'P0 payout integration settled cycle.'
+);
+reset role;
+insert into partners_test_state (state_key, state_value)
+select 'payout_cycle_2', cycle.cycle_key
+from affiliate_private.affiliate_payout_cycles cycle
+where cycle.period_start = current_date - 29
+  and cycle.period_end = current_date - 1
+  and cycle.currency = 'USD';
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_payout_cycle_approve(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_cycle_2'
+  ),
+  'APPROVE:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_cycle_2'
+  ),
+  'P0 payout integration settled approval.'
+);
+
+reset role;
+do $settle$
+declare
+  v_item affiliate_private.affiliate_payout_items%rowtype;
+  v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
+  v_settlement_id uuid;
+begin
+  select cycle.*
+  into strict v_cycle
+  from affiliate_private.affiliate_payout_cycles cycle
+  where cycle.cycle_key = (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_cycle_2'
+  );
+  select item.*
+  into strict v_item
+  from affiliate_private.affiliate_payout_items item
+  where item.cycle_id = v_cycle.id;
+
+  insert into affiliate_private.affiliate_commission_entries (
+    account_id,
+    entry_kind,
+    related_entry_id,
+    currency,
+    currency_exponent,
+    amount_minor
+  )
+  values (
+    v_item.account_id,
+    'payout_settlement',
+    v_item.allocation_entry_id,
+    v_cycle.currency,
+    v_cycle.currency_exponent,
+    v_item.amount_minor
+  )
+  returning id into v_settlement_id;
+  insert into affiliate_private.affiliate_commission_postings (
+    entry_id, ledger_account, direction, amount_minor, currency
+  )
+  values
+    (
+      v_settlement_id,
+      'partner_payout_clearing',
+      'debit',
+      v_item.amount_minor,
+      v_cycle.currency
+    ),
+    (
+      v_settlement_id,
+      'partner_cash_settled',
+      'credit',
+      v_item.amount_minor,
+      v_cycle.currency
+    );
+  update affiliate_private.affiliate_payout_items
+  set
+    status = 'settled',
+    provider_transfer_hash = encode(
+      extensions.digest('p0-provider-transfer', 'sha256'),
+      'hex'
+    ),
+    updated_at = now()
+  where id = v_item.id;
+  update affiliate_private.affiliate_payout_cycles
+  set
+    status = 'settled',
+    submitted_at = now(),
+    settled_at = now(),
+    updated_at = now()
+  where id = v_cycle.id;
+end;
+$settle$;
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_settled_route',
+  pg_temp.partners_test_recover_commission(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_accrual_2'
+    ),
+    2000
+  )::text
+);
+select extensions.is(
+  (
+    select state_value::jsonb ->> 'recovery_due_minor'
+    from partners_test_state
+    where state_key = 'payout_settled_route'
+  ),
+  '2000',
+  'a post-settlement refund becomes an explicit recovery receivable'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.amount_minor,
+      item.recovered_minor,
+      item.status
+    )
+    from affiliate_private.affiliate_payout_items item
+    join affiliate_private.affiliate_payout_cycles cycle
+      on cycle.id = item.cycle_id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    )
+  ),
+  '2000:0:settled',
+  'post-settlement recovery never rewrites the settled transfer'
+);
+select extensions.is(
+  (
+    select coalesce(sum(
+      case
+        when posting.direction = 'debit' then posting.amount_minor
+        else -posting.amount_minor
+      end
+    ), 0)::bigint
+    from affiliate_private.affiliate_commission_postings posting
+    join affiliate_private.affiliate_commission_entries entry
+      on entry.id = posting.entry_id
+    where entry.account_id = (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'payout_account'
+      )
+      and posting.currency = 'USD'
+      and posting.ledger_account = 'partner_recovery_due'
+  ),
+  2000::bigint,
+  'post-settlement recovery debt is visible in the immutable ledger'
+);
+
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_accrual_3',
+  pg_temp.partners_test_add_released_commission(
+    repeat('0', 64),
+    'USD',
+    2000,
+    now() - interval '2 days'
+  )::text
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select public.admin_partners_payout_cycle_create(
+  current_date - 28,
+  current_date - 1,
+  'USD',
+  true,
+  'CREATE:' || (current_date - 28)::text || ':'
+    || (current_date - 1)::text || ':USD:LIVE',
+  'P0 payout integration recovery offset cycle.'
+);
+reset role;
+select extensions.is(
+  (
+    select cycle.item_count
+    from affiliate_private.affiliate_payout_cycles cycle
+    where cycle.period_start = current_date - 28
+      and cycle.period_end = current_date - 1
+      and cycle.currency = 'USD'
+  ),
+  0,
+  'a recovery receivable prevents a second payout allocation'
+);
+select extensions.ok(
+  affiliate_private.partners_account_payable_balance(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_account'
+    ),
+    'USD'
+  ) = 0
+  and (
+    select coalesce(sum(
+      case
+        when posting.direction = 'debit' then posting.amount_minor
+        else -posting.amount_minor
+      end
+    ), 0)::bigint
+    from affiliate_private.affiliate_commission_postings posting
+    join affiliate_private.affiliate_commission_entries entry
+      on entry.id = posting.entry_id
+    where entry.account_id = (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'payout_account'
+      )
+      and posting.currency = 'USD'
+      and posting.ledger_account = 'partner_recovery_due'
+  ) = 0
+  and exists (
+    select 1
+    from affiliate_private.affiliate_commission_entries entry
+    where entry.account_id = (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'payout_account'
+      )
+      and entry.currency = 'USD'
+      and entry.entry_kind = 'recovery_offset'
+      and entry.amount_minor = 2000
+  ),
+  'future commission atomically settles recovery debt before another payout'
+);
+select extensions.ok(
+  (
+    select count(*) = count(distinct item.allocation_entry_id)
+    from affiliate_private.affiliate_payout_items item
+    where item.allocation_entry_id is not null
+  ),
+  'each payout item owns at most one immutable allocation entry'
+);
+
+insert into affiliate_private.affiliate_currency_metadata (
+  currency_code,
+  exponent,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+values (
+  'EUR',
+  2,
+  'active',
+  repeat('a', 64),
+  'P0 payout integration EUR metadata.'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_payout_provider_set(
+  'wise',
+  'US',
+  'EUR',
+  'active',
+  'P0 payout integration exact EUR destination.'
+);
+reset role;
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_accrual_eur',
+  pg_temp.partners_test_add_released_commission(
+    encode(extensions.digest('p0-eur-renewal', 'sha256'), 'hex'),
+    'EUR',
+    2000,
+    now() - interval '2 days'
+  )::text
+);
+insert into affiliate_private.affiliate_payout_profiles (
+  account_id,
+  provider,
+  beneficiary_token_ref,
+  display_masked,
+  currency,
+  status
+)
+values (
+  (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_account'
+  ),
+  'wise',
+  'tok_test_eur_00000001',
+  'Wise ending 1932',
+  'EUR',
+  'active'
+);
+insert into partners_test_state (state_key, state_value)
+values (
+  'payout_accrual_4',
+  pg_temp.partners_test_add_released_commission(
+    encode(extensions.digest('p0-usd-after-recovery', 'sha256'), 'hex'),
+    'USD',
+    2000,
+    now() - interval '2 days'
+  )::text
+);
+update affiliate_private.affiliate_payout_profiles profile
+set status = 'disabled', updated_at = now()
+where profile.account_id = (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_account'
+  )
+  and profile.currency = 'USD';
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+set local role authenticated;
+select public.admin_partners_payout_cycle_create(
+  current_date - 27,
+  current_date - 1,
+  'USD',
+  false,
+  'CREATE:' || (current_date - 27)::text || ':'
+    || (current_date - 1)::text || ':USD:DRY',
+  'P0 payout integration no-FX dry cycle.'
+);
+reset role;
+select extensions.is(
+  (
+    select cycle.item_count
+    from affiliate_private.affiliate_payout_cycles cycle
+    where cycle.period_start = current_date - 27
+      and cycle.period_end = current_date - 1
+      and cycle.currency = 'USD'
+  ),
+  0,
+  'an EUR destination never receives USD commission through an implicit FX fallback'
+);
+
+update affiliate_private.affiliate_payout_profiles profile
+set status = 'active', updated_at = now()
+where profile.account_id = (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_account'
+  )
+  and profile.currency = 'USD';
+select extensions.ok(
+  position(
+    'on conflict (account_id, currency)' in lower(pg_get_functiondef(
+      'affiliate_private.partners_service_payout_profile_set(uuid,text,text,text,text,text)'::regprocedure
+    ))
+  ) > 0,
+  'the payout profile RPC upserts one destination per account and currency'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_payout_profiles profile
+    where profile.account_id = (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_account'
+    )
+  ),
+  2::bigint,
+  'payout profiles are unique per account and currency rather than per account'
+);
+set local role service_role;
+select extensions.ok(
+  jsonb_array_length(
+    public.partners_service_payout_profile_get(
+      '10000000-0000-4000-8000-000000000002'
+    ) -> 'profiles'
+  ) = 2
+  and public.partners_service_payout_profile_get(
+    '10000000-0000-4000-8000-000000000002'
+  )::text !~* '(beneficiary|tok_test_)',
+  'the payout profile API returns every masked currency destination and no token'
+);
+select extensions.ok(
+  (
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      25,
+      null,
+      'all'
+    ) #>> '{reporting,available}'
+  ) = 'true'
+  and (
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      25,
+      null,
+      'all'
+    ) #>> '{reporting,reason}'
+  ) = 'multiple_currencies'
+  and jsonb_array_length(
+    public.partners_service_dashboard(
+      '10000000-0000-4000-8000-000000000002',
+      25,
+      null,
+      'all'
+    ) #> '{reporting,currencies}'
+  ) = 2
+  and not exists (
+    select 1
+    from jsonb_array_elements(
+      public.partners_service_dashboard(
+        '10000000-0000-4000-8000-000000000002',
+        25,
+        null,
+        'all'
+      ) #> '{reporting,currencies}'
+    ) balance
+    where balance ->> 'payout_destination_ready' <> 'true'
+  ),
+  'the member dashboard exposes authoritative balances and readiness by currency'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    delete from auth.users
+    where id = '10000000-0000-4000-8000-000000000003'
+  $$,
+  '55000',
+  'prepare Partners records before deleting the user',
+  'auth deletion fails closed while direct Partners references remain'
+);
+
+set local role service_role;
+
+select extensions.ok(
+  public.partners_service_ops_alert_snapshot()
+    ?& array['schema_version', 'workers', 'alerts', 'kyc_quota']::text[]
+  and public.partners_service_ops_alert_snapshot()::text
+    !~* '(email|user_id|account_id|token|secret)',
+  'the service ops snapshot is complete and contains no identity material'
+);
+
+select extensions.is(
+  public.partners_service_prepare_account_deletion(
+    '10000000-0000-4000-8000-000000000004'
+  ) ->> 'ready',
+  'true',
+  'service preparation atomically makes a referred user deletion-ready'
+);
+select extensions.is(
+  public.partners_service_prepare_account_deletion(
+    '10000000-0000-4000-8000-000000000004'
+  ) ->> 'changed',
+  'false',
+  'account deletion preparation is idempotent before Auth deletion'
+);
+
+reset role;
+
+delete from auth.users
+where id = '10000000-0000-4000-8000-000000000004';
+
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_link_claims c
+    where c.consumed_by_user_id =
+      '10000000-0000-4000-8000-000000000004'
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_attributions a
+    where a.referred_user_id =
+      '10000000-0000-4000-8000-000000000004'
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_financial_facts f
+    where f.referred_user_id =
+      '10000000-0000-4000-8000-000000000004'
+  ),
+  'retained referral and finance rows contain no deleted Auth UUID'
+);
+select extensions.ok(
+  (
+    select count(*) = 8
+      and count(distinct identity_pseudonym) = 1
+      and bool_and(identity_pseudonym ~ '^[0-9a-f]{64}$')
+    from (
+      select c.consumed_by_pseudonym as identity_pseudonym
+      from affiliate_private.affiliate_link_claims c
+      where c.consumed_by_pseudonym =
+        affiliate_private.partners_user_deletion_pseudonym(
+          '10000000-0000-4000-8000-000000000004'
+        )
+      union all
+      select a.referred_user_pseudonym
+      from affiliate_private.affiliate_attributions a
+      where a.referred_user_pseudonym =
+        affiliate_private.partners_user_deletion_pseudonym(
+          '10000000-0000-4000-8000-000000000004'
+        )
+      union all
+      select f.referred_user_pseudonym
+      from affiliate_private.affiliate_financial_facts f
+      where f.referred_user_pseudonym =
+        affiliate_private.partners_user_deletion_pseudonym(
+          '10000000-0000-4000-8000-000000000004'
+        )
+    ) retained_identity
+  ),
+  'claims, attribution and finance retain one bounded lineage pseudonym'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_financial_facts f
+    where f.referred_user_pseudonym =
+      affiliate_private.partners_user_deletion_pseudonym(
+        '10000000-0000-4000-8000-000000000004'
+      )
+  ),
+  6::bigint,
+  'all immutable financial facts survive referred-user deletion'
+);
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_prepare_account_deletion(
+    '10000000-0000-4000-8000-000000000002'
+  ) ->> 'accounts_closed',
+  '1',
+  'service preparation closes and minimizes the owned Partners account'
+);
+
+reset role;
+
+delete from auth.users
+where id = '10000000-0000-4000-8000-000000000002';
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_accounts a
+    where a.user_pseudonym =
+      affiliate_private.partners_user_deletion_pseudonym(
+        '10000000-0000-4000-8000-000000000002'
+      )
+      and a.user_id is null
+      and a.status = 'closed'
+      and a.program_version_id is null
+      and a.country_policy_id is null
+      and a.country_code is null
+      and a.subdivision_code is null
+      and a.verification_status = 'expired'
+      and a.verification_reference is null
+      and a.contract_status = 'expired'
+      and exists (
+        select 1
+        from affiliate_private.affiliate_links l
+        where l.account_id = a.id
+          and l.status = 'revoked'
+      )
+      and exists (
+        select 1
+        from affiliate_private.affiliate_commission_entries e
+        where e.account_id = a.id
+      )
+  ),
+  'partner deletion retains ledger lineage on a closed minimized account'
+);
+
+select * from extensions.finish();
+
+rollback;

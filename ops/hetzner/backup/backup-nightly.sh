@@ -3,7 +3,8 @@
 # backup-nightly.sh — nightly LOGICAL backup of the self-host DB → R2
 # =============================================================================
 # Dumps everything a from-scratch rebuild needs (lessons from the 2026-07-11
-# cutover): globals, public schema+data, AUTH data (accounts!), STORAGE data,
+# cutover): globals, public + affiliate_private schema/data, AUTH data
+# (accounts!), STORAGE data,
 # replayable cron statements, extension list. Tars, uploads to R2, prunes old.
 # Read-only against the DB. Run by norva-backup-nightly.timer as root.
 # Restore procedure: backup/RESTORE.md §1.
@@ -20,12 +21,12 @@ trap 'rm -rf "$STAGE"' EXIT
 OUT="$STAGE/$BASENAME"
 H=127.0.0.1; U=supabase_admin; D=postgres
 
-log "[1/5] logical dumps (globals, public, auth, storage)"
+log "[1/5] logical dumps (globals, public, affiliate_private, auth, storage)"
 pgtool pg_dumpall -h $H -U $U --globals-only --no-role-passwords > "$OUT/00-globals.sql"
 pgtool pg_dump -h $H -U $U -d $D --schema-only --no-owner --no-privileges \
-  --schema=public > "$OUT/01-schema.sql"
+  --schema=public --schema=affiliate_private > "$OUT/01-schema.sql"
 pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
-  --schema=public --disable-triggers > "$OUT/02-data.sql"
+  --schema=public --schema=affiliate_private --disable-triggers > "$OUT/02-data.sql"
 pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
   --schema=auth --disable-triggers > "$OUT/03-auth-data.sql"
 pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
@@ -50,6 +51,7 @@ log "[3/5] manifest + checksums"
   echo "server_version=$(pgtool psql -h $H -U $U -d $D -Atc 'show server_version')"
   echo "cloud_media_items=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from public.cloud_media_items')"
   echo "auth_users=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from auth.users')"
+  echo "affiliate_accounts=$(pgtool psql -h $H -U $U -d $D -Atc \"select case when to_regclass('affiliate_private.affiliate_accounts') is null then -1 else (select count(*) from affiliate_private.affiliate_accounts) end\")"
 } > "$OUT/MANIFEST.txt"
 ( cd "$OUT" && sha256sum ./* > SHA256SUMS )
 

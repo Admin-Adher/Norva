@@ -33,13 +33,23 @@ dpsql -v ON_ERROR_STOP=0 -f - < ref-cron-jobs.sql
 grep 'active=f' ref-cron-active.txt   # → jobs à désactiver, puis :
 dpsql -c "update cron.job set active=false where jobname in ('<jobs listés ci-dessus>');"
 
-# 4) vérifier vs MANIFEST.txt
+# 4) vérifier vs MANIFEST.txt et les invariants Partners
 dpsql -Atc "select count(*) from public.cloud_media_items;"
 dpsql -Atc "select count(*) from auth.users;"
+dpsql -Atc "select count(*) from affiliate_private.affiliate_accounts;"
+dpsql -Atc "select count(*) from affiliate_private.affiliate_events;"
+dpsql -v ON_ERROR_STOP=1 \
+  -f "$NORVA_OPS_DIR/backup/verify-partners-restore.sql"
 ```
 
 Post-restore : GUCs + vault sont dans la DB restaurée (globals + data). Les
 secrets **plateforme** (`.env`) viennent du gestionnaire de secrets, pas du backup.
+
+Le vérificateur Partners est obligatoire avant toute remise en trafic. Il
+échoue si le schéma ou une table critique manque, si RLS ou la frontière de
+privilèges privés a régressé, si un trigger append-only est absent ou désactivé,
+ou si une écriture du ledger n'est plus équilibrée. Sa sortie ne contient que
+des compteurs agrégés.
 
 ## 2. Restauration PITR (base + WAL) — « remonter à 14:32, juste avant la bêtise »
 

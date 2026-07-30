@@ -501,8 +501,45 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Deletes auth.users; ON DELETE CASCADE removes every user-owned row. The
-  // activation trigger runs inside that same transaction.
+  // Partners has legally retained attribution/financial records that cannot
+  // cascade. Minimize and unlink them atomically through the server-only RPC.
+  // This step is fail-closed and idempotent: auth deletion never starts unless
+  // the database confirms that every direct user/device reference is gone.
+  const {
+    data: partnersPreparationData,
+    error: partnersPreparationError,
+  } = await admin.rpc("partners_service_prepare_account_deletion", {
+    p_user_id: user.id,
+  });
+  const partnersPreparation =
+    (partnersPreparationData ?? {}) as JsonRecord;
+  if (
+    partnersPreparationError
+    || partnersPreparation.action !== "partners_account_deletion_prepared"
+    || partnersPreparation.ready !== true
+  ) {
+    console.error(
+      "[norva-account-delete] Partners deletion preparation failed",
+      partnersPreparationError?.message ?? "invalid_preparation_envelope",
+    );
+    if (deliveryKey) {
+      const { error: cancelError } = await admin.rpc(
+        "cancel_prepared_account_deletion_email",
+        { p_delivery_key: deliveryKey },
+      );
+      if (cancelError) {
+        console.error(
+          "[norva-account-delete] prepared confirmation cleanup failed",
+          cancelError.message,
+        );
+      }
+    }
+    return json(req, { error: "Deletion preparation failed" }, 500);
+  }
+
+  // Deletes auth.users; ordinary user-owned rows cascade, the Partners guard
+  // verifies the preparation, and the email activation trigger shares the
+  // Auth deletion transaction.
   const { error: delErr } = await admin.auth.admin.deleteUser(user.id);
   if (delErr) {
     console.error("[norva-account-delete] account deletion failed", delErr.message);

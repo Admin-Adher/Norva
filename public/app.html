@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=93">
+  <link rel="stylesheet" href="/css/main.css?v=96">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -903,6 +903,17 @@
               </div>
             </div>
 
+            <div class="settings-section" id="settings-partners-row" hidden aria-hidden="true">
+              <h3>Norva Partners</h3>
+              <div class="setting-item partners-settings-entry">
+                <div class="setting-info">
+                  <span class="setting-label">Earn from direct referrals</span>
+                  <span class="setting-hint">A server-controlled individual programme with 20% recurring commission on eligible payments.</span>
+                </div>
+                <button class="btn btn-secondary" id="settings-open-partners" type="button">Open Partners</button>
+              </div>
+            </div>
+
             <div class="settings-section">
               <h3>Privacy &amp; legal</h3>
               <div class="setting-item">
@@ -1688,6 +1699,9 @@
       <!-- Admin Dashboard (Ops MVP) - hidden nav, admin-only (server-verified) -->
       <div id="page-admin" class="page"></div>
 
+      <!-- Norva Partners - account/settings entry only, never primary navigation -->
+      <div id="page-partners" class="page"></div>
+
       <!-- Watch Page (VOD Player) - Not in navigation -->
       <div id="page-watch" class="page watch-page">
         <!-- Video Section (100vh) -->
@@ -2048,7 +2062,7 @@
   <!-- JavaScript -->
   <script defer src="/js/icons.js?v=1"></script>
   <script defer src="/js/utils/regions.js?v=1"></script>
-  <script defer src="/js/cloudApi.js?v=53"></script>
+  <script defer src="/js/cloudApi.js?v=55"></script>
   <script defer src="/js/authApi.js?v=7"></script>
   <script defer src="/js/norvaEngine.js?v=45"></script>
   <script defer src="/js/api.js?v=76"></script>
@@ -2059,13 +2073,14 @@
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=7"></script>
   <script defer src="/js/utils/tvNavigation.js?v=30"></script>
-  <script defer src="/js/utils/standalone.js?v=9"></script>
+  <script defer src="/js/utils/standalone.js?v=10"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=8"></script>
   <script defer src="/js/components/NorvaModal.js?v=2"></script>
   <script defer src="/js/components/MultiSelect.js?v=4"></script>
   <script defer src="/js/components/RegionPicker.js?v=1"></script>
+  <script defer src="/js/vendor/qrcode.js?v=1"></script>
   <script defer src="/js/components/TitleRatingControl.js?v=2"></script>
   <script defer src="/js/components/VideoPlayer.js?v=41"></script>
   <script defer src="/js/components/ChannelList.js?v=49"></script>
@@ -2077,14 +2092,15 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=55"></script>
   <script defer src="/js/pages/SeriesPage.js?v=53"></script>
-  <script defer src="/js/pages/Settings.js?v=45"></script>
+  <script defer src="/js/pages/Settings.js?v=46"></script>
+  <script defer src="/js/pages/PartnersPage.js?v=4"></script>
   <script defer src="/js/pages/WatchPage.js?v=126"></script>
   <script defer src="/js/profiles.js?v=13"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=17"></script>
-  <script defer src="/js/app.js?v=55"></script>
+  <script defer src="/js/app.js?v=60"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK
