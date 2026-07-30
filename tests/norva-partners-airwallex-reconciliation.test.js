@@ -108,6 +108,11 @@ test('service evidence and two distinct human Finance approvals are least-privil
   );
   assert.match(
     sql,
+    /v_confirmation <> \(\s*case[\s\S]*?'CONFIRM:' \|\| v_key[\s\S]*?'QUARANTINE:' \|\| v_key[\s\S]*?end\s*\)\s*or length/i,
+    'nested CASE remains parenthesized so PL/pgSQL does not consume its THEN as the IF terminator',
+  );
+  assert.match(
+    sql,
     /grant execute on function\s+public\.partners_service_airwallex_settlement_observe\([\s\S]*?\)\s*to service_role;/i,
   );
   assert.match(

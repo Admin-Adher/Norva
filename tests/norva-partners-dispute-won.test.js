@@ -350,6 +350,11 @@ test("database correction is one-to-one, proof-bound and fail-closed", () => {
     migration,
     /release\.created_at <= v_reinstatement\.created_at[\s\S]*?when v_release_precedes_reinstatement then 0[\s\S]*?then v_reversal_pending_minor/,
   );
+  assert.match(
+    migration,
+    /\) <> \(\s*case\s*when v_release_precedes_reinstatement then 0\s*else v_reversal_pending_minor\s*end\s*\)\s*or/,
+    'nested CASE remains parenthesized so PL/pgSQL does not consume its THEN as the IF terminator',
+  );
   assert.doesNotMatch(migration, /v_accrual\.matures_at <= now\(\)/);
   assert.match(
     migration,

@@ -669,10 +669,12 @@ begin
         where posting.entry_id = v_reinstatement.id
           and posting.ledger_account = 'partner_commission_pending'
           and posting.direction = 'credit'
-      ) <> case
-        when v_release_precedes_reinstatement then 0
-        else v_reversal_pending_minor
-      end
+      ) <> (
+        case
+          when v_release_precedes_reinstatement then 0
+          else v_reversal_pending_minor
+        end
+      )
       or (
         select coalesce(sum(posting.amount_minor), 0)
         from affiliate_private.affiliate_commission_postings posting

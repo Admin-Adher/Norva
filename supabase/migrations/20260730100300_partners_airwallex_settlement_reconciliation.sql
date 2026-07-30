@@ -1297,10 +1297,12 @@ begin
   end if;
   if v_key !~ '^aso_[0-9a-f]{24}$'
     or v_decision not in ('confirmed', 'quarantined')
-    or v_confirmation <> case
-      when v_decision = 'confirmed' then 'CONFIRM:' || v_key
-      else 'QUARANTINE:' || v_key
-    end
+    or v_confirmation <> (
+      case
+        when v_decision = 'confirmed' then 'CONFIRM:' || v_key
+        else 'QUARANTINE:' || v_key
+      end
+    )
     or length(v_justification) not between 12 and 1000
   then
     raise exception 'invalid Airwallex settlement decision'
