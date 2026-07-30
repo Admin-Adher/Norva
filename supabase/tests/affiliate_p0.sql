@@ -3466,8 +3466,8 @@ declare
   v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
   v_entry_id uuid;
 begin
-  select item, cycle
-  into strict v_item, v_cycle
+  select item.*
+  into strict v_item
   from affiliate_private.affiliate_payout_items item
   join affiliate_private.affiliate_payout_cycles cycle
     on cycle.id = item.cycle_id
@@ -3476,6 +3476,10 @@ begin
     from partners_test_state
     where state_key = 'payout_cycle_2'
   );
+  select cycle.*
+  into strict v_cycle
+  from affiliate_private.affiliate_payout_cycles cycle
+  where cycle.id = v_item.cycle_id;
   insert into affiliate_private.affiliate_commission_entries (
     account_id,
     entry_kind,
@@ -4776,6 +4780,7 @@ select extensions.is(
   'true',
   'two distinct report facts place the dispatch in terminal conflict'
 );
+reset role;
 select extensions.is(
   (
     select concat_ws(
@@ -4794,6 +4799,7 @@ select extensions.is(
   'exception:exception:settlement_evidence_conflict',
   'conflicting report facts project one explicit terminal reason'
 );
+set local role service_role;
 select extensions.is(
   public.partners_worker_airwallex_observation_record(
     (

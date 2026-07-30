@@ -365,6 +365,15 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
     sql,
     /conflicting evidence remains visible with no impossible Finance action[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_airwallex_settlement_decisions[\s\S]*?conflicting evidence cannot append a Finance decision/,
   );
+  assert.match(
+    sql,
+    /select item\.\*[\s\S]*?into strict v_item[\s\S]*?select cycle\.\*[\s\S]*?into strict v_cycle[\s\S]*?where cycle\.id = v_item\.cycle_id/,
+  );
+  assert.doesNotMatch(sql, /into strict v_item,\s*v_cycle/);
+  assert.match(
+    sql,
+    /two distinct report facts place the dispatch in terminal conflict[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_payout_dispatches[\s\S]*?conflicting report facts project one explicit terminal reason[\s\S]*?set local role service_role;[\s\S]*?partners_worker_airwallex_observation_record/,
+  );
 });
 
 test('only the automated cron report boundary can ingest provider settlements', () => {
