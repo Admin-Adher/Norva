@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(243);
+select extensions.plan(244);
 
 select extensions.ok(
   exists (
@@ -4890,8 +4890,14 @@ select extensions.ok(
       from partners_test_state
       where state_key = 'airwallex_conflict_fixture'
     )
-  )
-  and not exists (
+  ),
+  'conflicting evidence remains visible with no impossible Finance action'
+);
+
+reset role;
+
+select extensions.ok(
+  not exists (
     select 1
     from affiliate_private.affiliate_airwallex_settlement_decisions decision
     join affiliate_private.affiliate_payout_dispatches dispatch
@@ -4902,7 +4908,7 @@ select extensions.ok(
       where state_key = 'airwallex_conflict_fixture'
     )
   ),
-  'conflicting evidence remains visible but offers no impossible Finance action'
+  'conflicting evidence cannot append a Finance decision'
 );
 
 reset role;

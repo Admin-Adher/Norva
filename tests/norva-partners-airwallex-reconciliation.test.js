@@ -354,11 +354,12 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
   );
   assert.match(
     sql,
-    /conflicting evidence remains visible but offers no impossible Finance action/,
+    /a stale Finance review cannot overwrite terminal conflict with quarantine/,
   );
+  assert.match(sql, /select extensions\.plan\(244\)/);
   assert.match(
     sql,
-    /a stale Finance review cannot overwrite terminal conflict with quarantine/,
+    /conflicting evidence remains visible with no impossible Finance action[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_airwallex_settlement_decisions[\s\S]*?conflicting evidence cannot append a Finance decision/,
   );
 });
 
