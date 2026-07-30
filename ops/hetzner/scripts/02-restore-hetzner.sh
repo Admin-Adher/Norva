@@ -18,16 +18,22 @@ DUMP="${DUMP:-$HERE/dump}"
 set -a; source "$ENV_FILE"; set +a
 : "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in $ENV_FILE}"
 
-# Target the local stack's Postgres (bound to 127.0.0.1:5432 by the compose).
-TARGET="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-postgres}"
+# Keep the password out of command arguments, process listings, errors and
+# operator instructions. libpq reads it only from the exported environment.
 export PGPASSWORD="$POSTGRES_PASSWORD"
+PSQL_TARGET=(
+  -h 127.0.0.1
+  -p 5432
+  -U postgres
+  -d "${POSTGRES_DB:-postgres}"
+)
 
 for f in 00-globals 01-schema 02-data; do
   [[ -f "$DUMP/$f.sql" ]] || { echo "ERROR: $DUMP/$f.sql missing — run 01-dump-prod.sh first" >&2; exit 1; }
 done
 
 echo ">> 0) Ensure required extensions exist (idempotent)"
-psql "$TARGET" -v ON_ERROR_STOP=1 <<'SQL'
+psql "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 <<'SQL'
 create extension if not exists "uuid-ossp";
 create extension if not exists pgcrypto;
 create extension if not exists pg_trgm;
@@ -41,16 +47,16 @@ create extension if not exists supabase_vault;
 SQL
 
 echo ">> 1) globals (roles + role GUCs). Non-fatal if some roles already exist."
-psql "$TARGET" -f "$DUMP/00-globals.sql" || echo "   (some globals pre-existed — OK)"
+psql "${PSQL_TARGET[@]}" -f "$DUMP/00-globals.sql" || echo "   (some globals pre-existed — OK)"
 
 echo ">> 2) schema (public + affiliate_private)"
-psql "$TARGET" -v ON_ERROR_STOP=1 -f "$DUMP/01-schema.sql"
+psql "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 -f "$DUMP/01-schema.sql"
 
 echo ">> 3) data (public + affiliate_private) — this is the big one (~5 GB); grab a coffee"
-psql "$TARGET" -v ON_ERROR_STOP=1 -f "$DUMP/02-data.sql"
+psql "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 -f "$DUMP/02-data.sql"
 
 echo ">> 4) ANALYZE so the planner has fresh stats before traffic"
-psql "$TARGET" -c "vacuum analyze;"
+psql "${PSQL_TARGET[@]}" -c "vacuum analyze;"
 
 echo ">> 5) Partners private-schema parity"
 PARTNERS_VERIFY="$HERE/backup/verify-partners-restore.sql"
@@ -58,7 +64,8 @@ PARTNERS_VERIFY="$HERE/backup/verify-partners-restore.sql"
   echo "ERROR: $PARTNERS_VERIFY missing" >&2
   exit 1
 }
-psql "$TARGET" -v ON_ERROR_STOP=1 -f "$PARTNERS_VERIFY"
+psql "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 -f "$PARTNERS_VERIFY"
 
 echo ">> Restore complete."
-echo "NEXT: psql \"$TARGET\" -f scripts/03-recreate-cron-guc.sql  (GUCs, vault, crons)"
+echo "NEXT: load PGPASSWORD from the protected env file (never on the command line), then run:"
+echo "      psql -h 127.0.0.1 -U postgres -d \"${POSTGRES_DB:-postgres}\" -f scripts/03-recreate-cron-guc.sql"
