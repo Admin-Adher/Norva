@@ -3515,7 +3515,8 @@ begin
       v_item.amount_minor + 1,
       v_cycle.currency
     );
-  set constraints affiliate_payout_settlement_semantics immediate;
+  set constraints
+    affiliate_private.affiliate_payout_settlement_semantics immediate;
 end;
 $invalid$;
 select extensions.throws_ok(

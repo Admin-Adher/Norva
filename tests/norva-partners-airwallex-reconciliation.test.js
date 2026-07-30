@@ -160,6 +160,19 @@ test('confirmation is exact-money, idempotent and posts one balanced settlement'
   assert.match(sql, /replayed', true/i);
 });
 
+test('the pgTAP settlement guard resolves the private deferred constraint', () => {
+  const pgTap = read('supabase/tests/affiliate_p0.sql');
+
+  assert.match(
+    pgTap,
+    /set constraints\s+affiliate_private\.affiliate_payout_settlement_semantics immediate/i,
+  );
+  assert.doesNotMatch(
+    pgTap,
+    /set constraints\s+affiliate_payout_settlement_semantics immediate/i,
+  );
+});
+
 test('late provider failure quarantines the projection without rewriting settled money', () => {
   const sql = read(migrationPath);
 
