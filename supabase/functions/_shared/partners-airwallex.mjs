@@ -38,6 +38,7 @@ const BASE_URLS = Object.freeze({
   sandbox: "https://api.sandbox.airwallex.com",
 });
 const API_VERSION = "2025-06-30";
+const FINANCIAL_REPORTS_API_VERSION = "2024-04-30";
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_BANK_FIELDS = 40;
 
@@ -45,11 +46,18 @@ export class AirwallexContractError extends Error {
   constructor(code, options = {}) {
     super(code);
     this.name = "AirwallexContractError";
-    this.code = SAFE_CODE_RE.test(String(code ?? "")) ? code : "invalid_contract";
+    this.code = SAFE_CODE_RE.test(String(code ?? ""))
+      ? code
+      : "invalid_contract";
     this.retryable = options.retryable === true;
     this.uncertainOutcome = options.uncertainOutcome === true;
     this.httpStatus = Number.isInteger(options.httpStatus)
       ? options.httpStatus
+      : null;
+    this.retryAfterMs = Number.isInteger(options.retryAfterMs) &&
+        options.retryAfterMs >= 0 &&
+        options.retryAfterMs <= 6 * 60 * 60 * 1000
+      ? options.retryAfterMs
       : null;
   }
 }
@@ -287,11 +295,21 @@ export function canAdvanceTransferState(previous, next) {
   }
   const transitions = {
     SCHEDULED: new Set([
-      "SCHEDULED", "PROCESSING", "SENT", "PAID", "FAILED", "CANCELLED",
+      "SCHEDULED",
+      "PROCESSING",
+      "SENT",
+      "PAID",
+      "FAILED",
+      "CANCELLED",
       "REVERSED",
     ]),
     PROCESSING: new Set([
-      "PROCESSING", "SENT", "PAID", "FAILED", "CANCELLED", "REVERSED",
+      "PROCESSING",
+      "SENT",
+      "PAID",
+      "FAILED",
+      "CANCELLED",
+      "REVERSED",
     ]),
     SENT: new Set(["SENT", "PAID", "FAILED", "CANCELLED", "REVERSED"]),
     // PAID is intentionally non-terminal: Airwallex documents late failures.
@@ -483,6 +501,68 @@ export class AirwallexClient {
     return sanitizeTransferResponse(items[0], expectedRequest);
   }
 
+  async listFinancialReports(pageNum = 0) {
+    if (!Number.isInteger(pageNum) || pageNum < 0 || pageNum > 2) {
+      throw new AirwallexContractError("invalid_report_page");
+    }
+    return await this.authorizedJson(
+      "GET",
+      `/api/v1/finance/financial_reports?page_num=${pageNum}&page_size=100`,
+      null,
+      { apiVersion: FINANCIAL_REPORTS_API_VERSION },
+    );
+  }
+
+  async createFinancialReport(body) {
+    const report = recordOrNull(body);
+    if (
+      !report ||
+      report.type !== "TRANSACTION_RECON_REPORT" ||
+      report.file_format !== "CSV"
+    ) {
+      throw new AirwallexContractError("invalid_report_request");
+    }
+    return await this.authorizedJson(
+      "POST",
+      "/api/v1/finance/financial_reports/create",
+      body,
+      {
+        apiVersion: FINANCIAL_REPORTS_API_VERSION,
+        mutation: true,
+      },
+    );
+  }
+
+  async getFinancialReport(id) {
+    if (!PROVIDER_ID_RE.test(String(id ?? ""))) {
+      throw new AirwallexContractError("invalid_report_id");
+    }
+    return await this.authorizedJson(
+      "GET",
+      `/api/v1/finance/financial_reports/${encodeURIComponent(id)}`,
+      null,
+      { apiVersion: FINANCIAL_REPORTS_API_VERSION },
+    );
+  }
+
+  async downloadFinancialReportContent(id, maxBytes) {
+    if (
+      !PROVIDER_ID_RE.test(String(id ?? "")) ||
+      !Number.isInteger(maxBytes) ||
+      maxBytes < 64 * 1024 ||
+      maxBytes > 8 * 1024 * 1024
+    ) {
+      throw new AirwallexContractError("invalid_report_download");
+    }
+    return await this.authorizedBytes(
+      `/api/v1/finance/financial_reports/${encodeURIComponent(id)}/content`,
+      {
+        apiVersion: FINANCIAL_REPORTS_API_VERSION,
+        maxBytes,
+      },
+    );
+  }
+
   async authorizedJson(method, path, body = null, options = {}) {
     let token = await this.login();
     try {
@@ -490,6 +570,7 @@ export class AirwallexClient {
         body,
         token,
         mutation: options.mutation === true,
+        apiVersion: options.apiVersion,
       });
     } catch (error) {
       if (
@@ -503,6 +584,33 @@ export class AirwallexClient {
           body,
           token,
           mutation: options.mutation === true,
+          apiVersion: options.apiVersion,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async authorizedBytes(path, options = {}) {
+    let token = await this.login();
+    try {
+      return await this.requestBytes(path, {
+        token,
+        apiVersion: options.apiVersion,
+        maxBytes: options.maxBytes,
+      });
+    } catch (error) {
+      if (
+        error instanceof AirwallexContractError &&
+        error.httpStatus === 401
+      ) {
+        this.accessToken = null;
+        this.accessTokenExpiresAt = 0;
+        token = await this.login();
+        return await this.requestBytes(path, {
+          token,
+          apiVersion: options.apiVersion,
+          maxBytes: options.maxBytes,
         });
       }
       throw error;
@@ -538,13 +646,11 @@ export class AirwallexClient {
   }
 
   async requestJson(method, path, options = {}) {
-    const headers = options.headers
-      ? { ...options.headers }
-      : {
-        "Authorization": `Bearer ${options.token}`,
-        "Content-Type": "application/json",
-        "x-api-version": this.config.apiVersion,
-      };
+    const headers = options.headers ? { ...options.headers } : {
+      "Authorization": `Bearer ${options.token}`,
+      "Content-Type": "application/json",
+      "x-api-version": options.apiVersion ?? this.config.apiVersion,
+    };
     let response;
     try {
       response = await this.fetchImpl(`${this.config.baseUrl}${path}`, {
@@ -554,6 +660,7 @@ export class AirwallexClient {
           ? undefined
           : JSON.stringify(options.body),
         signal: AbortSignal.timeout(this.config.timeoutMs),
+        redirect: "error",
       });
     } catch {
       throw new AirwallexContractError("provider_network_error", {
@@ -584,9 +691,96 @@ export class AirwallexClient {
         uncertainOutcome: options.mutation === true &&
           (response.status === 409 || response.status >= 500),
         httpStatus: response.status,
+        retryAfterMs: parseRetryAfter(response.headers?.get?.("retry-after")),
       });
     }
     return parsed;
+  }
+
+  async requestBytes(path, options = {}) {
+    const maxBytes = options.maxBytes;
+    const expectedUrl = `${this.config.baseUrl}${path}`;
+    let response;
+    try {
+      response = await this.fetchImpl(expectedUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${options.token}`,
+          "Content-Type": "application/json",
+          "x-api-version": options.apiVersion ?? this.config.apiVersion,
+        },
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+        redirect: "error",
+      });
+    } catch {
+      throw new AirwallexContractError("provider_network_error", {
+        retryable: true,
+      });
+    }
+    const retryAfterMs = parseRetryAfter(
+      response.headers?.get?.("retry-after"),
+    );
+    if (!response.ok) {
+      throw new AirwallexContractError("provider_request_failed", {
+        retryable: response.status === 429 || response.status >= 500,
+        httpStatus: response.status,
+        retryAfterMs,
+      });
+    }
+    if (
+      response.url &&
+      response.url !== expectedUrl
+    ) {
+      throw new AirwallexContractError("report_download_redirected");
+    }
+    const contentType = String(
+      response.headers?.get?.("content-type") ?? "",
+    ).split(";", 1)[0].trim().toLowerCase();
+    if (
+      contentType !== "text/plain" &&
+      contentType !== "application/octet-stream"
+    ) {
+      throw new AirwallexContractError("invalid_report_content_type");
+    }
+    const declaredLengthRaw = response.headers?.get?.("content-length");
+    const declaredLength = declaredLengthRaw === null
+      ? null
+      : Number(declaredLengthRaw);
+    if (
+      declaredLength !== null &&
+      (
+        !Number.isSafeInteger(declaredLength) ||
+        declaredLength < 1 ||
+        declaredLength > maxBytes
+      )
+    ) {
+      throw new AirwallexContractError("invalid_report_content_length");
+    }
+    const disposition = response.headers?.get?.("content-disposition");
+    if (
+      disposition !== null &&
+      (
+        /[\r\n]/.test(disposition) ||
+        !/filename\*?=(?:UTF-8''|\"?)[^\";]{1,240}\.csv\"?(?:;|$)/i.test(
+          disposition,
+        )
+      )
+    ) {
+      throw new AirwallexContractError("invalid_report_disposition");
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (
+      bytes.byteLength < 16 ||
+      bytes.byteLength > maxBytes ||
+      (declaredLength !== null && declaredLength !== bytes.byteLength)
+    ) {
+      throw new AirwallexContractError("invalid_report_content_length");
+    }
+    return Object.freeze({
+      bytes,
+      contentType,
+      contentLength: bytes.byteLength,
+    });
   }
 }
 
@@ -778,6 +972,22 @@ function boundedInt(raw, fallback, min, max) {
   return Number.isInteger(number) && number >= min && number <= max
     ? number
     : fallback;
+}
+
+function parseRetryAfter(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  let millis;
+  if (/^\d{1,6}$/.test(raw)) {
+    millis = Number(raw) * 1000;
+  } else {
+    const parsed = Date.parse(raw);
+    if (!Number.isFinite(parsed)) return null;
+    millis = Math.max(0, parsed - Date.now());
+  }
+  return Number.isSafeInteger(millis)
+    ? Math.min(millis, 6 * 60 * 60 * 1000)
+    : null;
 }
 
 function constantTimeHexEqual(left, right) {

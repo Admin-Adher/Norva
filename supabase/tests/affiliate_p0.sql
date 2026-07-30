@@ -2,7 +2,89 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(142);
+select extensions.plan(243);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid =
+        'affiliate_private.affiliate_payout_provider_configs'::regclass
+      and constraint_row.conname =
+        'affiliate_payout_provider_configs_pilot_adapter'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and pg_get_constraintdef(constraint_row.oid)
+        like '%status <> ''active''%provider = ''airwallex''%'
+  ),
+  'the payout pilot has a validated Airwallex-only active-adapter lock'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from pg_index index_row
+    where index_row.indexrelid = to_regclass(
+        'affiliate_private.'
+        || 'affiliate_payout_provider_configs_active_route_idx'
+      )
+      and index_row.indisunique
+      and pg_get_indexdef(index_row.indexrelid)
+        like '%(country_code, currency)%'
+      and pg_get_expr(index_row.indpred, index_row.indrelid)
+        like '%status = ''active''%'
+  ),
+  'each country-currency corridor has at most one active payout configuration'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.status = 'pending'
+      and session.provider_environment = 'legacy_unbound'
+  ),
+  'the binding migration terminalizes every unprovable legacy pending KYC session'
+);
+
+-- The production observation RPC is owner-only after Financial Reports. This
+-- transaction-local SECURITY DEFINER fixture lets legacy reconciliation
+-- scenarios exercise the underlying invariant without reopening that API.
+create or replace function
+pg_temp.partners_test_airwallex_settlement_observe(
+  p_dispatch_key text,
+  p_provider_transfer_id text,
+  p_settlement_reference text,
+  p_proof_hash text,
+  p_amount_minor bigint,
+  p_currency text,
+  p_value_date date,
+  p_observed_at timestamptz,
+  p_importer text
+)
+returns jsonb
+language sql
+volatile
+security definer
+set search_path = ''
+as $fixture$
+  select affiliate_private.partners_service_airwallex_settlement_observe(
+    p_dispatch_key,
+    p_provider_transfer_id,
+    p_settlement_reference,
+    p_proof_hash,
+    p_amount_minor,
+    p_currency,
+    p_value_date,
+    p_observed_at,
+    p_importer
+  );
+$fixture$;
+grant usage on schema pg_temp to service_role;
+grant execute on function
+  pg_temp.partners_test_airwallex_settlement_observe(
+    text, text, text, text, bigint, text, date, timestamptz, text
+  )
+to service_role;
 
 select extensions.ok(
   not has_function_privilege(
@@ -139,6 +221,172 @@ select extensions.ok(
       and c.conname = 'affiliate_country_policies_verification_level'
   ) like '%identity_age_country_capacity%',
   'verification-level values remain the exact foundation enum'
+);
+
+select extensions.ok(
+  to_regclass(
+    'affiliate_private.affiliate_airwallex_settlement_observations'
+  ) is not null,
+  'Airwallex settlement observations survive migration replay'
+);
+select extensions.ok(
+  to_regclass(
+    'affiliate_private.affiliate_airwallex_settlement_decisions'
+  ) is not null,
+  'Airwallex settlement decisions survive migration replay'
+);
+select extensions.ok(
+  to_regclass(
+    'affiliate_private.affiliate_airwallex_settlement_reviews'
+  ) is not null,
+  'Airwallex independent Finance reviews survive migration replay'
+);
+select extensions.ok(
+  (
+    select c.relrowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'affiliate_private'
+      and c.relname = 'affiliate_airwallex_settlement_observations'
+  ),
+  'Airwallex settlement observations have RLS enabled'
+);
+select extensions.ok(
+  (
+    select c.relrowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'affiliate_private'
+      and c.relname = 'affiliate_airwallex_settlement_decisions'
+  ),
+  'Airwallex settlement decisions have RLS enabled'
+);
+select extensions.ok(
+  (
+    select c.relrowsecurity
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'affiliate_private'
+      and c.relname = 'affiliate_airwallex_settlement_reviews'
+  ),
+  'Airwallex settlement reviews have RLS enabled'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'service_role',
+    'public.partners_service_airwallex_settlement_observe(text,text,text,text,bigint,text,date,timestamp with time zone,text)',
+    'EXECUTE'
+  ),
+  'service_role cannot bypass the atomic Financial Reports observation path'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_service_airwallex_settlement_observe(text,text,text,text,bigint,text,date,timestamp with time zone,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot forge Airwallex settlement evidence'
+);
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_airwallex_settlements(integer)',
+    'EXECUTE'
+  ),
+  'authenticated Admin clients may reach the Finance-gated settlement queue'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'public.admin_partners_airwallex_settlements(integer)',
+    'EXECUTE'
+  ),
+  'anonymous clients cannot reach the Airwallex settlement queue'
+);
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_airwallex_settlement_review(text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated Admin clients may reach the Finance-gated review RPC'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'public.admin_partners_airwallex_settlement_review(text,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous clients cannot reach the Airwallex settlement review RPC'
+);
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_airwallex_settlement_decide(text,text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated Admin clients may reach the Finance-gated decision RPC'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'public.admin_partners_airwallex_settlement_decide(text,text,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous clients cannot reach the Airwallex settlement decision RPC'
+);
+select extensions.ok(
+  to_regclass(
+    'affiliate_private.affiliate_payout_settlement_allocation_once_idx'
+  ) is not null,
+  'one payout allocation can produce only one settlement ledger entry'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from pg_trigger t
+    where t.tgname in (
+      'affiliate_airwallex_settlement_observations_append_only',
+      'affiliate_airwallex_settlement_reviews_append_only',
+      'affiliate_airwallex_settlement_decisions_append_only',
+      'affiliate_airwallex_settlement_decision_guard',
+      'affiliate_payout_settlement_semantics',
+      'affiliate_airwallex_post_settlement_dispatch_guard',
+      'affiliate_airwallex_settled_payout_item_guard',
+      'affiliate_airwallex_settled_payout_cycle_guard'
+    )
+      and not t.tgisinternal
+      and t.tgenabled <> 'D'
+  ),
+  8::bigint,
+  'all Airwallex append-only, semantic and terminal-state guards are enabled'
+);
+select extensions.ok(
+  position(
+    'for update' in lower(pg_get_functiondef(
+      'affiliate_private.admin_partners_airwallex_settlement_review(text,text,text)'::regprocedure
+    ))
+  ) > 0
+  and position(
+    'for update' in lower(pg_get_functiondef(
+      'affiliate_private.admin_partners_airwallex_settlement_decide(text,text,text,text)'::regprocedure
+    ))
+  ) > 0,
+  'review and decision serialize competing writers on the payout dispatch'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraint_row
+    join pg_class relation on relation.oid = constraint_row.conrelid
+    join pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'affiliate_private'
+      and relation.relname = 'affiliate_airwallex_settlement_decisions'
+      and constraint_row.contype = 'u'
+      and pg_get_constraintdef(constraint_row.oid)
+        = 'UNIQUE (observation_id)'
+  ),
+  'one settlement observation has a database-enforced single decision writer'
 );
 
 insert into auth.users (
@@ -867,12 +1115,15 @@ select extensions.is(
     'didit-workflow-integration',
     1,
     'not_started',
-    now() + interval '1 day',
+    null,
     (
       select state_value
       from partners_test_state
       where state_key = 'kyc_reservation'
-    )
+    ),
+    'sandbox',
+    repeat('1', 64),
+    604800
   ) ->> 'action',
   'kyc_session_recorded',
   'a Didit session binds to its database reservation'
@@ -885,12 +1136,15 @@ select extensions.is(
     'didit-workflow-integration',
     1,
     'not_started',
-    now() + interval '1 day',
+    null,
     (
       select state_value
       from partners_test_state
       where state_key = 'kyc_reservation'
-    )
+    ),
+    'sandbox',
+    repeat('1', 64),
+    604800
   ) ->> 'replayed',
   'true',
   'provider session recording is retry-safe after a network timeout'
@@ -904,12 +1158,15 @@ select extensions.throws_ok(
       'different-workflow-integration',
       1,
       'not_started',
-      now() + interval '1 day',
+      null,
       (
         select state_value
         from partners_test_state
         where state_key = 'kyc_reservation'
-      )
+      ),
+      'sandbox',
+      repeat('1', 64),
+      604800
     )
   $$,
   'P0003',
@@ -918,6 +1175,831 @@ select extensions.throws_ok(
 );
 
 reset role;
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      session.provider_environment,
+      session.provider_config_fingerprint,
+      session.expires_at is not null
+    )
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-session-integration-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'sandbox:' || repeat('1', 64) || ':true',
+  'a KYC session stores its immutable sandbox binding and bounded local expiry'
+);
+select extensions.throws_ok(
+  $$
+    update affiliate_private.affiliate_kyc_sessions
+    set provider_environment = 'live'
+    where provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-session-integration-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  $$,
+  '55000',
+  'KYC session identity is immutable',
+  'a stored KYC environment cannot be promoted from sandbox to live'
+);
+
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-sandbox-integration-0001',
+    'didit-session-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('a', 64),
+    'sandbox',
+    repeat('1', 64)
+  ) ->> 'action',
+  'kyc_result_observed',
+  'an approved sandbox decision is observation-only'
+);
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-sandbox-integration-0001',
+    'didit-session-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('a', 64),
+    'sandbox',
+    repeat('1', 64)
+  ) ->> 'replayed',
+  'true',
+  'the exact sandbox observation replays without another decision'
+);
+
+reset role;
+select extensions.is(
+  (
+    select concat_ws(':', account.status, account.verification_status)
+    from affiliate_private.affiliate_accounts account
+    where account.user_id =
+      '10000000-0000-4000-8000-000000000003'
+  ),
+  'pending_verification:not_started',
+  'sandbox approval never verifies or activates the Partners account'
+);
+select extensions.is(
+  (
+    select session.status
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-session-integration-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'superseded',
+  'a sandbox attempt is terminally closed without becoming verified'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      event.processing_outcome,
+      event.decision_reason,
+      event.provider_environment
+    )
+    from affiliate_private.affiliate_kyc_webhook_events event
+    where event.provider_event_hash = encode(
+      extensions.digest(
+        'norva:didit:event:v1:didit-event-sandbox-integration-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'observed_sandbox:sandbox_non_authoritative:sandbox',
+  'the exact sandbox outcome remains visible in append-only audit evidence'
+);
+
+insert into affiliate_private.affiliate_kyc_session_reservations (
+  account_id
+)
+select account.id
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000003'
+returning reservation_key;
+insert into partners_test_state (state_key, state_value)
+select
+  'kyc_live_reservation',
+  reservation.reservation_key
+from affiliate_private.affiliate_kyc_session_reservations reservation
+join affiliate_private.affiliate_accounts account
+  on account.id = reservation.account_id
+where account.user_id = '10000000-0000-4000-8000-000000000003'
+  and reservation.status = 'reserved';
+
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_session_record(
+    '10000000-0000-4000-8000-000000000003',
+    'kyc.session.live.integration.0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'not_started',
+    null,
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'kyc_live_reservation'
+    ),
+    'live',
+    repeat('2', 64),
+    604800
+  ) ->> 'action',
+  'kyc_session_recorded',
+  'a fresh production session receives a distinct live binding'
+);
+select extensions.is(
+  concat_ws(
+    ':',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-pending-config-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('9', 64),
+      'live',
+      repeat('6', 64)
+    ) ->> 'action',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-pending-config-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('9', 64),
+      'live',
+      repeat('6', 64)
+    ) ->> 'reason'
+  ),
+  'kyc_result_quarantined:provider_config_mismatch',
+  'a mismatched signed event is quarantined before the exact live decision'
+);
+reset role;
+select extensions.is(
+  (
+    select session.status
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-session-live-integration-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'pending',
+  'a binding quarantine cannot poison or supersede the real pending session'
+);
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-live-integration-0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('b', 64),
+    'live',
+    repeat('2', 64)
+  ) ->> 'action',
+  'kyc_result_applied',
+  'an exact live binding reaches the authoritative KYC reducer'
+);
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-live-integration-0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('b', 64),
+    'live',
+    repeat('2', 64)
+  ) #>> '{kyc,status}',
+  'verified',
+  'the exact live result is retry-safe and remains verified'
+);
+
+reset role;
+select extensions.is(
+  (
+    select concat_ws(':', account.status, account.verification_status)
+    from affiliate_private.affiliate_accounts account
+    where account.user_id =
+      '10000000-0000-4000-8000-000000000003'
+  ),
+  'active:verified',
+  'only the exact live contract activates the allowlisted account'
+);
+
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-binding-conflict-0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('c', 64),
+    'sandbox',
+    repeat('1', 64)
+  ) ->> 'action',
+  'kyc_result_quarantined',
+  'an environment conflict is rejected into a visible quarantine'
+);
+select extensions.is(
+  concat_ws(
+    ':',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-workflow-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-replaced',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('d', 64),
+      'live',
+      repeat('3', 64)
+    ) ->> 'action',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-workflow-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-replaced',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('d', 64),
+      'live',
+      repeat('3', 64)
+    ) ->> 'reason'
+  ),
+  'kyc_result_quarantined:provider_config_mismatch',
+  'a signed known-session workflow-id drift reaches visible quarantine'
+);
+select extensions.is(
+  concat_ws(
+    ':',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-version-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      2,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('e', 64),
+      'live',
+      repeat('4', 64)
+    ) ->> 'action',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-version-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      2,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('e', 64),
+      'live',
+      repeat('4', 64)
+    ) ->> 'reason'
+  ),
+  'kyc_result_quarantined:provider_config_mismatch',
+  'a signed known-session workflow-version drift reaches visible quarantine'
+);
+select extensions.is(
+  concat_ws(
+    ':',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-node-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('f', 64),
+      'live',
+      repeat('5', 64)
+    ) ->> 'action',
+    public.partners_service_kyc_webhook_apply(
+      'didit-event-node-drift-0001',
+      'didit-session-live-integration-0001',
+      'didit-workflow-integration',
+      1,
+      'approved',
+      now(),
+      null,
+      null,
+      false,
+      false,
+      false,
+      repeat('f', 64),
+      'live',
+      repeat('5', 64)
+    ) ->> 'reason'
+  ),
+  'kyc_result_quarantined:provider_config_mismatch',
+  'a signed known-session node/config drift reaches visible quarantine'
+);
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-live-integration-0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('b', 64),
+    'sandbox',
+    repeat('1', 64)
+  ) ->> 'action',
+  'kyc_result_quarantined',
+  'a replay of a live event through another provider binding is quarantined'
+);
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-live-integration-0001',
+    'didit-session-live-integration-0001',
+    'didit-workflow-integration',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('b', 64),
+    'sandbox',
+    repeat('1', 64)
+  ) ->> 'action',
+  'kyc_result_quarantined',
+  'a retry of the same binding-conflict replay remains idempotent'
+);
+
+reset role;
+select extensions.is(
+  (
+    select concat_ws(':', account.status, account.verification_status)
+    from affiliate_private.affiliate_accounts account
+    where account.user_id =
+      '10000000-0000-4000-8000-000000000003'
+  ),
+  'active:verified',
+  'a quarantined conflict cannot rewrite the prior live decision'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      event.processing_outcome,
+      event.decision_reason,
+      event.provider_environment
+    )
+    from affiliate_private.affiliate_kyc_webhook_events event
+    where event.provider_event_hash = encode(
+      extensions.digest(
+        'norva:didit:event:v1:didit-event-binding-conflict-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'quarantined:provider_environment_mismatch:sandbox',
+  'the conflicting environment is retained as minimized quarantine evidence'
+);
+select set_config('norva.didit.environment', 'live', true);
+select set_config(
+  'norva.didit.config_fingerprint',
+  repeat('6', 64),
+  true
+);
+insert into affiliate_private.affiliate_kyc_sessions (
+  account_id,
+  provider,
+  provider_session_hash,
+  provider_workflow_hash,
+  provider_workflow_version,
+  provider_status,
+  status,
+  consent_version,
+  capacity_attested,
+  expires_at,
+  created_at
+)
+select
+  account.id,
+  'didit',
+  encode(
+    extensions.digest(
+      'norva:didit:session:v1:didit-recovery-session-old-0001',
+      'sha256'
+    ),
+    'hex'
+  ),
+  encode(
+    extensions.digest(
+      'norva:didit:workflow:v1:didit-workflow-recovery',
+      'sha256'
+    ),
+    'hex'
+  ),
+  1,
+  'not_started',
+  'pending',
+  'partners-kyc-v1',
+  true,
+  now() + interval '1 hour',
+  now() - interval '1 hour'
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000003';
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-recovery-drift-0001',
+    'didit-recovery-session-old-0001',
+    'didit-workflow-recovery',
+    1,
+    'approved',
+    now(),
+    null,
+    null,
+    false,
+    false,
+    false,
+    repeat('6', 64),
+    'live',
+    repeat('7', 64)
+  ) ->> 'action',
+  'kyc_result_quarantined',
+  'a known pending session enters bounded recovery after config drift'
+);
+reset role;
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      session.status,
+      session.expires_at <= now() + interval '15 minutes'
+    )
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-recovery-session-old-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'pending:true',
+  'quarantine preserves pending state but installs a bounded grace deadline'
+);
+update affiliate_private.affiliate_kyc_sessions
+set expires_at = now() - interval '1 minute'
+where provider_session_hash = encode(
+  extensions.digest(
+    'norva:didit:session:v1:didit-recovery-session-old-0001',
+    'sha256'
+  ),
+  'hex'
+);
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_binding_recover(10) ->> 'expired',
+  '1',
+  'the bounded worker recovery expires the elapsed drifted session'
+);
+select extensions.is(
+  public.partners_service_kyc_webhook_apply(
+    'didit-event-recovery-late-exact-0001',
+    'didit-recovery-session-old-0001',
+    'didit-workflow-recovery',
+    1,
+    'approved',
+    now(),
+    27,
+    'USA',
+    true,
+    true,
+    true,
+    repeat('a', 64),
+    'live',
+    repeat('6', 64)
+  ) #>> '{kyc,status}',
+  'expired',
+  'an exact live decision arriving after recovery cannot activate an expired session'
+);
+reset role;
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_events event
+    where event.action = 'kyc_session_recovery_expired'
+      and event.aggregate_key = (
+        select session.id::text
+        from affiliate_private.affiliate_kyc_sessions session
+        where session.provider_session_hash = encode(
+          extensions.digest(
+            'norva:didit:session:v1:didit-recovery-session-old-0001',
+            'sha256'
+          ),
+          'hex'
+        )
+      )
+  ),
+  'elapsed recovery appends one sanitized terminal audit event'
+);
+select set_config('norva.didit.environment', 'live', true);
+select set_config(
+  'norva.didit.config_fingerprint',
+  repeat('8', 64),
+  true
+);
+insert into affiliate_private.affiliate_kyc_sessions (
+  account_id,
+  provider,
+  provider_session_hash,
+  provider_workflow_hash,
+  provider_workflow_version,
+  provider_status,
+  status,
+  consent_version,
+  capacity_attested,
+  expires_at
+)
+select
+  account.id,
+  'didit',
+  encode(
+    extensions.digest(
+      'norva:didit:session:v1:didit-recovery-session-new-0001',
+      'sha256'
+    ),
+    'hex'
+  ),
+  encode(
+    extensions.digest(
+      'norva:didit:workflow:v1:didit-workflow-recovery-new',
+      'sha256'
+    ),
+    'hex'
+  ),
+  2,
+  'not_started',
+  'pending',
+  'partners-kyc-v1',
+  true,
+  now() + interval '7 days'
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000003';
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      session.status,
+      session.provider_environment,
+      session.provider_config_fingerprint
+    )
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash = encode(
+      extensions.digest(
+        'norva:didit:session:v1:didit-recovery-session-new-0001',
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
+  'pending:live:' || repeat('8', 64),
+  'an expired drifted session no longer blocks a fresh distinct binding'
+);
+select set_config('norva.didit.environment', 'sandbox', true);
+select set_config(
+  'norva.didit.config_fingerprint',
+  repeat('7', 64),
+  true
+);
+insert into affiliate_private.affiliate_kyc_sessions (
+  account_id,
+  provider,
+  provider_session_hash,
+  provider_workflow_hash,
+  provider_workflow_version,
+  provider_status,
+  status,
+  consent_version,
+  capacity_attested
+)
+select
+  account.id,
+  'didit',
+  repeat('7', 64),
+  repeat('8', 64),
+  1,
+  'approved',
+  'pending',
+  'partners-kyc-v1',
+  true
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000003';
+update affiliate_private.affiliate_kyc_sessions
+set
+  status = 'verified',
+  verified_at = now(),
+  age_over_minimum = true,
+  country_policy_match = true,
+  identity_checks_approved = true,
+  capacity_attested = true
+where provider_session_hash = repeat('7', 64);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.status = 'verified'
+      and session.verified_at >= now() - interval '30 days'
+  ),
+  2::bigint,
+  'the analytics fixture contains one live and one synthetic sandbox verification'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.is(
+  (
+    public.admin_partners_analytics(30)
+      #>> '{activation,kyc_verified_sessions,value}'
+  )::bigint,
+  1::bigint,
+  'activation analytics count only the authoritative shareable live session'
+);
+select extensions.is(
+  (
+    select sum((day ->> 'kyc_verified')::bigint)
+    from jsonb_array_elements(
+      public.admin_partners_analytics(30) -> 'daily'
+    ) day
+  ),
+  1::numeric,
+  'daily KYC analytics count only the authoritative shareable live session'
+);
+reset role;
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      affiliate_private.partners_ops_alert_snapshot() -> 'alerts'
+    ) alert
+    where alert ->> 'code' =
+      'kyc_provider_binding_quarantined_recent'
+      and alert ->> 'severity' = 'critical'
+      and (alert ->> 'count')::bigint = 7
+  ),
+  'seven distinct Didit binding conflicts produce exactly seven Ops incidents'
+);
+insert into affiliate_private.affiliate_events (
+  aggregate_type,
+  aggregate_key,
+  action,
+  actor_type,
+  actor_pseudonym,
+  justification
+)
+values (
+  'account',
+  '00000000-0000-4000-8000-000000000099',
+  'legacy_kyc_binding_quarantined',
+  'system',
+  null,
+  'Synthetic legacy binding quarantine used to verify the separate operations signal.'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      affiliate_private.partners_ops_alert_snapshot() -> 'alerts'
+    ) alert
+    where alert ->> 'code' =
+      'kyc_legacy_binding_quarantined_recent'
+      and alert ->> 'severity' = 'critical'
+      and (alert ->> 'count')::bigint = 1
+  ),
+  'legacy fail-closed backfill is visible as one separate Ops incident'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'service_role',
+    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text)',
+    'EXECUTE'
+  ),
+  'the pre-binding webhook service signature is no longer callable'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'EXECUTE'
+  ),
+  'service_role can call only the environment-bound webhook signature'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot forge an environment-bound KYC result'
+);
+
 select extensions.ok(
   not exists (
     select 1
@@ -1564,17 +2646,55 @@ select public.admin_partners_capability_set(
   true,
   'P0 payout integration independent approver.'
 );
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000004',
+  'finance',
+  true,
+  'P0 payout integration competing Finance writer.'
+);
 
 reset role;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
 set local role authenticated;
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_provider_set(
+      'wise',
+      'US',
+      'USD',
+      'active',
+      'P0 payout pilot must reject an unimplemented execution adapter.'
+    )
+  $$,
+  '23514',
+  'new row for relation "affiliate_payout_provider_configs" violates check constraint "affiliate_payout_provider_configs_pilot_adapter"',
+  'the pilot cannot activate a provider without an execution adapter'
+);
 select public.admin_partners_payout_provider_set(
   'wise',
   'US',
   'USD',
+  'disabled',
+  'P0 payout pilot keeps future provider configuration dormant.'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_payout_provider_configs config
+    where config.provider = 'wise'
+      and config.country_code = 'US'
+      and config.currency = 'USD'
+      and config.status = 'disabled'
+  ),
+  'dormant future-provider configurations remain available'
+);
+select public.admin_partners_payout_provider_set(
+  'airwallex',
+  'US',
+  'USD',
   'active',
-  'P0 payout integration exact USD destination.'
+  'P0 payout pilot exact Airwallex USD corridor.'
 );
 select public.admin_partners_fiscal_review(
   (
@@ -1592,17 +2712,39 @@ select public.admin_partners_fiscal_review(
 
 reset role;
 set local role service_role;
-select extensions.is(
-  public.partners_service_payout_profile_set(
+insert into partners_test_state (state_key, state_value)
+select
+  'payout_beneficiary_usd',
+  prepared.result #>> '{beneficiary,reservation_key}'
+from (
+  select public.partners_service_airwallex_beneficiary_prepare(
     '10000000-0000-4000-8000-000000000002',
-    'payout.profile.usd.0001',
-    'wise',
-    'tok_test_usd_00000001',
-    'Wise ending 8421',
-    'USD'
+    'airwallex.beneficiary.usd.0001',
+    'USD',
+    'LOCAL'
+  ) as result
+) prepared;
+select public.partners_service_airwallex_beneficiary_start(
+  '10000000-0000-4000-8000-000000000002',
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_beneficiary_usd'
+  )
+);
+select extensions.is(
+  public.partners_service_airwallex_beneficiary_record(
+    '10000000-0000-4000-8000-000000000002',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_beneficiary_usd'
+    ),
+    'awx_beneficiary_test_usd_0001',
+    'Bank ending 8421'
   ) ->> 'action',
-  'payout_profile_saved',
-  'a tokenized payout destination can be saved for USD'
+  'airwallex_beneficiary_recorded',
+  'the implemented adapter records a tokenized Airwallex USD destination'
 );
 
 reset role;
@@ -2224,11 +3366,16 @@ select public.admin_partners_payout_cycle_approve(
 );
 
 reset role;
-do $settle$
+do $prepare_airwallex_settlement$
 declare
   v_item affiliate_private.affiliate_payout_items%rowtype;
   v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
-  v_settlement_id uuid;
+  v_dispatch_key text;
+  v_provider_id text := 'p0-airwallex-transfer-00000001';
+  v_provider_hash text := encode(
+    extensions.digest('p0-airwallex-transfer-00000001', 'sha256'),
+    'hex'
+  );
 begin
   select cycle.*
   into strict v_cycle
@@ -2243,6 +3390,76 @@ begin
   from affiliate_private.affiliate_payout_items item
   where item.cycle_id = v_cycle.id;
 
+  update affiliate_private.affiliate_payout_items item
+  set
+    status = 'submitted',
+    provider_transfer_hash = v_provider_hash,
+    updated_at = now()
+  where item.id = v_item.id;
+  update affiliate_private.affiliate_payout_cycles cycle
+  set
+    status = 'submitted',
+    submitted_at = now(),
+    updated_at = now()
+  where cycle.id = v_cycle.id;
+
+  insert into affiliate_private.affiliate_payout_dispatches (
+    payout_item_id,
+    request_id,
+    job_status,
+    provider_state,
+    provider_status,
+    funding_status,
+    provider_transfer_id,
+    provider_transfer_hash,
+    reconciliation_status,
+    submitted_at,
+    paid_observed_at
+  )
+  values (
+    v_item.id,
+    'p0-settlement-cycle-0001',
+    'observing',
+    'PAID',
+    'PAID',
+    'FUNDED',
+    v_provider_id,
+    v_provider_hash,
+    'pending',
+    now(),
+    now()
+  )
+  returning dispatch_key into v_dispatch_key;
+
+  insert into partners_test_state (state_key, state_value)
+  values
+    ('airwallex_dispatch', v_dispatch_key),
+    ('airwallex_provider_id', v_provider_id),
+    ('airwallex_provider_hash', v_provider_hash);
+end;
+$prepare_airwallex_settlement$;
+
+create or replace function
+pg_temp.partners_test_invalid_payout_settlement()
+returns void
+language plpgsql
+volatile
+as $invalid$
+declare
+  v_item affiliate_private.affiliate_payout_items%rowtype;
+  v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
+  v_entry_id uuid;
+begin
+  select item, cycle
+  into strict v_item, v_cycle
+  from affiliate_private.affiliate_payout_items item
+  join affiliate_private.affiliate_payout_cycles cycle
+    on cycle.id = item.cycle_id
+  where cycle.cycle_key = (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_cycle_2'
+  );
   insert into affiliate_private.affiliate_commission_entries (
     account_id,
     entry_kind,
@@ -2257,45 +3474,494 @@ begin
     v_item.allocation_entry_id,
     v_cycle.currency,
     v_cycle.currency_exponent,
-    v_item.amount_minor
+    v_item.amount_minor + 1
   )
-  returning id into v_settlement_id;
+  returning id into v_entry_id;
   insert into affiliate_private.affiliate_commission_postings (
     entry_id, ledger_account, direction, amount_minor, currency
   )
   values
     (
-      v_settlement_id,
+      v_entry_id,
       'partner_payout_clearing',
       'debit',
-      v_item.amount_minor,
+      v_item.amount_minor + 1,
       v_cycle.currency
     ),
     (
-      v_settlement_id,
+      v_entry_id,
       'partner_cash_settled',
       'credit',
-      v_item.amount_minor,
+      v_item.amount_minor + 1,
       v_cycle.currency
     );
-  update affiliate_private.affiliate_payout_items
-  set
-    status = 'settled',
-    provider_transfer_hash = encode(
-      extensions.digest('p0-provider-transfer', 'sha256'),
+  set constraints affiliate_payout_settlement_semantics immediate;
+end;
+$invalid$;
+select extensions.throws_ok(
+  'select pg_temp.partners_test_invalid_payout_settlement()',
+  '23514',
+  'payout settlement does not match its allocation',
+  'the deferred ledger guard rejects a settlement that differs by one unit'
+);
+
+set local role service_role;
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_observation_result',
+  pg_temp.partners_test_airwallex_settlement_observe(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_dispatch'
+    ),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_provider_id'
+    ),
+    'p0-airwallex-report-row-0001',
+    encode(
+      extensions.digest('p0-airwallex-settlement-proof-0001', 'sha256'),
       'hex'
     ),
-    updated_at = now()
-  where id = v_item.id;
-  update affiliate_private.affiliate_payout_cycles
-  set
-    status = 'settled',
-    submitted_at = now(),
-    settled_at = now(),
-    updated_at = now()
-  where id = v_cycle.id;
-end;
-$settle$;
+    2000,
+    'USD',
+    current_date,
+    now(),
+    'p0-settlement-importer'
+  )::text;
+select extensions.is(
+  (
+    select state_value::jsonb ->> 'action'
+    from partners_test_state
+    where state_key = 'airwallex_observation_result'
+  ),
+  'airwallex_settlement_observed',
+  'a normalized transaction-report observation reaches the service boundary'
+);
+select extensions.is(
+  (
+    select state_value::jsonb ->> 'replayed'
+    from partners_test_state
+    where state_key = 'airwallex_observation_result'
+  ),
+  'false',
+  'the first minimized Airwallex settlement observation is appended once'
+);
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_observation',
+  state_value::jsonb -> 'observation' ->> 'key'
+from partners_test_state
+where state_key = 'airwallex_observation_result';
+select extensions.is(
+  pg_temp.partners_test_airwallex_settlement_observe(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_dispatch'
+    ),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_provider_id'
+    ),
+    'p0-airwallex-report-row-0001',
+    encode(
+      extensions.digest('p0-airwallex-settlement-proof-0001', 'sha256'),
+      'hex'
+    ),
+    2000,
+    'USD',
+    current_date,
+    now(),
+    'p0-settlement-importer'
+  ) ->> 'replayed',
+  'true',
+  'the exact normalized report replay is idempotent'
+);
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_airwallex_settlement_review(%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'REVIEW:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 AAL1 Finance review must fail closed.'
+  ),
+  '42501',
+  'Airwallex settlement mutation requires AAL2',
+  'an AAL1 Finance reviewer cannot mutate settlement evidence'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+select extensions.ok(
+  public.admin_partners_airwallex_settlements(25) -> 'items'
+    @> jsonb_build_array(jsonb_build_object(
+      'observation_key',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'airwallex_observation'
+      ),
+      'can_review',
+      true
+    )),
+  'the first Finance actor sees only the redacted review action'
+);
+select extensions.is(
+  public.admin_partners_airwallex_settlement_review(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'REVIEW:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 first Finance actor independent evidence review.'
+  ) ->> 'action',
+  'airwallex_settlement_reviewed',
+  'the first AAL2 Finance actor records the explicit evidence review'
+);
+select extensions.is(
+  public.admin_partners_airwallex_settlement_review(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'REVIEW:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 first Finance actor independent evidence review.'
+  ) ->> 'replayed',
+  'true',
+  'an exact Finance review replay is idempotent'
+);
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_airwallex_settlement_decide(%L,%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'confirmed',
+    'CONFIRM:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 same Finance actor must not decide its own review.'
+  ),
+  '42501',
+  'settlement review and decision require distinct Finance actors',
+  'the human reviewer cannot also confirm the Airwallex settlement'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal1","app_metadata":{"role":"admin"}}';
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_airwallex_settlement_decide(%L,%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'confirmed',
+    'CONFIRM:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 AAL1 Finance decision must fail closed.'
+  ),
+  '42501',
+  'Airwallex settlement mutation requires AAL2',
+  'an AAL1 Finance decision cannot settle money'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+select extensions.ok(
+  public.admin_partners_airwallex_settlements(25) -> 'items'
+    @> jsonb_build_array(jsonb_build_object(
+      'observation_key',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'airwallex_observation'
+      ),
+      'can_decide',
+      true
+    )),
+  'a distinct Finance actor sees the confirmation decision'
+);
+select extensions.is(
+  public.admin_partners_airwallex_settlement_decide(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'confirmed',
+    'CONFIRM:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 second Finance actor authoritative settlement decision.'
+  ) -> 'decision' ->> 'status',
+  'confirmed',
+  'the second distinct AAL2 Finance actor confirms the settlement'
+);
+select extensions.is(
+  public.admin_partners_airwallex_settlement_decide(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'confirmed',
+    'CONFIRM:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 second Finance actor authoritative settlement decision.'
+  ) ->> 'replayed',
+  'true',
+  'an exact second-actor confirmation replay is idempotent'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000004","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_airwallex_settlement_decide(%L,%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'quarantined',
+    'QUARANTINE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    ),
+    'P0 serialized competing Finance writer must lose.'
+  ),
+  'P0003',
+  'settlement observation already has another decision',
+  'a competing Finance writer serializes behind and cannot double-decide'
+);
+
+reset role;
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_airwallex_settlement_decisions decision
+    join affiliate_private.affiliate_airwallex_settlement_observations observation
+      on observation.id = decision.observation_id
+    where observation.observation_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_observation'
+    )
+  ),
+  1::bigint,
+  'confirmation and the competing writer leave exactly one decision'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from affiliate_private.affiliate_commission_entries settlement
+    join affiliate_private.affiliate_payout_items item
+      on item.allocation_entry_id = settlement.related_entry_id
+    join affiliate_private.affiliate_payout_cycles cycle
+      on cycle.id = item.cycle_id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    )
+      and settlement.entry_kind = 'payout_settlement'
+  ),
+  1::bigint,
+  'confirmation and the competing writer create one canonical settlement entry'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.status,
+      cycle.status,
+      dispatch.reconciliation_status,
+      dispatch.job_status
+    )
+    from affiliate_private.affiliate_payout_cycles cycle
+    join affiliate_private.affiliate_payout_items item
+      on item.cycle_id = cycle.id
+    join affiliate_private.affiliate_payout_dispatches dispatch
+      on dispatch.payout_item_id = item.id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    )
+  ),
+  'settled:settled:confirmed:settled',
+  'confirmation atomically closes item, cycle, reconciliation and worker job'
+);
+select extensions.throws_ok(
+  $$
+    update affiliate_private.affiliate_payout_items item
+    set provider_transfer_hash = null
+    from affiliate_private.affiliate_payout_cycles cycle
+    where item.cycle_id = cycle.id
+      and cycle.cycle_key = (
+        select state_value
+        from partners_test_state
+        where state_key = 'payout_cycle_2'
+      )
+  $$,
+  '55000',
+  'settled payout financial fields are immutable',
+  'a settled payout item rejects a NULL transfer-hash rewrite'
+);
+select extensions.throws_ok(
+  $$
+    update affiliate_private.affiliate_payout_dispatches dispatch
+    set provider_transfer_hash = null
+    where dispatch.dispatch_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_dispatch'
+    )
+  $$,
+  '55000',
+  'confirmed payout dispatch identity is immutable',
+  'a confirmed dispatch rejects a NULL transfer-hash rewrite'
+);
+select extensions.throws_ok(
+  $$
+    update affiliate_private.affiliate_payout_cycles cycle
+    set total_minor = cycle.total_minor + 1
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    )
+  $$,
+  '55000',
+  'settled payout cycle is immutable',
+  'a settled payout cycle rejects financial rewrites'
+);
+
+set local role service_role;
+select extensions.is(
+  public.partners_worker_airwallex_observation_record(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_dispatch'
+    ),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_provider_id'
+    ),
+    'FAILED',
+    'FAILED',
+    'FUNDED',
+    encode(
+      extensions.digest('p0-airwallex-late-failure-0001', 'sha256'),
+      'hex'
+    ),
+    now(),
+    null,
+    null
+  ) -> 'dispatch' ->> 'reconciliation_status',
+  'exception',
+  'a late provider failure becomes an exception instead of reversing settlement'
+);
+reset role;
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.status,
+      cycle.status,
+      dispatch.reconciliation_status,
+      dispatch.job_status
+    )
+    from affiliate_private.affiliate_payout_cycles cycle
+    join affiliate_private.affiliate_payout_items item
+      on item.cycle_id = cycle.id
+    join affiliate_private.affiliate_payout_dispatches dispatch
+      on dispatch.payout_item_id = item.id
+    where cycle.cycle_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    )
+  ),
+  'settled:settled:exception:exception',
+  'late failure preserves terminal money state while surfacing operations risk'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from
+      affiliate_private.affiliate_airwallex_settlement_observations observation
+    join affiliate_private.affiliate_payout_dispatches dispatch
+      on dispatch.id = observation.dispatch_id
+    where dispatch.dispatch_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_dispatch'
+    )
+      and observation.observation_kind = 'post_settlement_exception'
+  ),
+  1::bigint,
+  'late failure appends one auditable post-settlement exception observation'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.ok(
+  public.admin_partners_airwallex_settlements(25) -> 'items'
+    @> jsonb_build_array(jsonb_build_object(
+      'observation_key',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'airwallex_observation'
+      ),
+      'stage',
+      'exception'
+    )),
+  'the Finance queue surfaces late provider failure as an explicit exception'
+);
+reset role;
 insert into partners_test_state (state_key, state_value)
 values (
   'payout_settled_route',
@@ -2462,13 +4128,25 @@ set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select public.admin_partners_payout_provider_set(
-  'wise',
+  'airwallex',
   'US',
   'EUR',
   'active',
-  'P0 payout integration exact EUR destination.'
+  'P0 payout pilot exact Airwallex EUR corridor.'
 );
 reset role;
+select extensions.ok(
+  (
+    select count(*) = 2
+      and count(distinct config.provider) = 1
+      and min(config.provider) = 'airwallex'
+    from affiliate_private.affiliate_payout_provider_configs config
+    where config.status = 'active'
+      and config.country_code = 'US'
+      and config.currency in ('USD', 'EUR')
+  ),
+  'one active provider can serve several pilot payout corridors'
+);
 insert into partners_test_state (state_key, state_value)
 values (
   'payout_accrual_eur',
@@ -2485,6 +4163,7 @@ insert into affiliate_private.affiliate_payout_profiles (
   beneficiary_token_ref,
   display_masked,
   currency,
+  transfer_method,
   status
 )
 values (
@@ -2493,10 +4172,11 @@ values (
     from partners_test_state
     where state_key = 'payout_account'
   ),
-  'wise',
-  'tok_test_eur_00000001',
-  'Wise ending 1932',
+  'airwallex',
+  'awx_beneficiary_test_eur_0001',
+  'Bank ending 1932',
   'EUR',
+  'LOCAL',
   'active'
 );
 insert into partners_test_state (state_key, state_value)
@@ -2625,6 +4305,593 @@ select extensions.ok(
 
 reset role;
 
+create or replace function
+pg_temp.partners_test_prepare_terminal_airwallex_dispatch(
+  p_tag text,
+  p_period_start date
+)
+returns jsonb
+language plpgsql
+volatile
+as $fixture$
+declare
+  v_account_id uuid;
+  v_profile_id uuid;
+  v_allocation_id uuid;
+  v_cycle_id uuid;
+  v_item_id uuid;
+  v_dispatch_key text;
+  v_provider_id text := 'p0-airwallex-terminal-' || p_tag;
+  v_provider_hash text;
+begin
+  select state_value::uuid
+  into strict v_account_id
+  from partners_test_state
+  where state_key = 'payout_account';
+
+  select profile.id
+  into strict v_profile_id
+  from affiliate_private.affiliate_payout_profiles profile
+  where profile.account_id = v_account_id
+    and profile.currency = 'USD';
+
+  v_provider_hash := encode(
+    extensions.digest(v_provider_id, 'sha256'),
+    'hex'
+  );
+
+  insert into affiliate_private.affiliate_commission_entries (
+    account_id,
+    entry_kind,
+    currency,
+    currency_exponent,
+    amount_minor
+  )
+  values (
+    v_account_id,
+    'payout_allocation',
+    'USD',
+    2,
+    2000
+  )
+  returning id into v_allocation_id;
+
+  insert into affiliate_private.affiliate_commission_postings (
+    entry_id,
+    ledger_account,
+    direction,
+    amount_minor,
+    currency
+  )
+  values
+    (
+      v_allocation_id,
+      'partner_commission_available',
+      'debit',
+      2000,
+      'USD'
+    ),
+    (
+      v_allocation_id,
+      'partner_payout_clearing',
+      'credit',
+      2000,
+      'USD'
+    );
+
+  insert into affiliate_private.affiliate_payout_cycles (
+    period_start,
+    period_end,
+    currency,
+    currency_exponent,
+    status,
+    live_execution,
+    total_minor,
+    item_count,
+    created_by_pseudonym,
+    live_promoted_by_pseudonym,
+    live_promoted_at,
+    approved_by_pseudonym,
+    approved_at,
+    submitted_at
+  )
+  values (
+    p_period_start,
+    p_period_start + 1,
+    'USD',
+    2,
+    'submitted',
+    true,
+    2000,
+    1,
+    repeat('a', 64),
+    repeat('b', 64),
+    now(),
+    repeat('c', 64),
+    now(),
+    now()
+  )
+  returning id into v_cycle_id;
+
+  insert into affiliate_private.affiliate_payout_items (
+    cycle_id,
+    account_id,
+    currency,
+    payout_profile_id,
+    allocation_entry_id,
+    original_amount_minor,
+    amount_minor,
+    recovered_minor,
+    status,
+    provider_transfer_hash
+  )
+  values (
+    v_cycle_id,
+    v_account_id,
+    'USD',
+    v_profile_id,
+    v_allocation_id,
+    2000,
+    2000,
+    0,
+    'submitted',
+    v_provider_hash
+  )
+  returning id into v_item_id;
+
+  insert into affiliate_private.affiliate_payout_dispatches (
+    payout_item_id,
+    request_id,
+    job_status,
+    provider_state,
+    provider_status,
+    funding_status,
+    provider_transfer_id,
+    provider_transfer_hash,
+    reconciliation_status,
+    submitted_at,
+    paid_observed_at
+  )
+  values (
+    v_item_id,
+    'p0-terminal-' || p_tag,
+    'observing',
+    'PAID',
+    'PAID',
+    'FUNDED',
+    v_provider_id,
+    v_provider_hash,
+    'pending',
+    now(),
+    now()
+  )
+  returning dispatch_key into v_dispatch_key;
+
+  return jsonb_build_object(
+    'dispatch_key', v_dispatch_key,
+    'provider_id', v_provider_id,
+    'allocation_id', v_allocation_id
+  );
+end;
+$fixture$;
+
+insert into partners_test_state (state_key, state_value)
+values (
+  'airwallex_quarantine_fixture',
+  pg_temp.partners_test_prepare_terminal_airwallex_dispatch(
+    'quarantine',
+    date '2099-01-01'
+  )::text
+);
+
+set local role service_role;
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_quarantine_observation',
+  pg_temp.partners_test_airwallex_settlement_observe(
+    state_value::jsonb ->> 'dispatch_key',
+    state_value::jsonb ->> 'provider_id',
+    'p0-airwallex-terminal-quarantine-report',
+    encode(
+      extensions.digest(
+        'p0-airwallex-terminal-quarantine-proof',
+        'sha256'
+      ),
+      'hex'
+    ),
+    2000,
+    'USD',
+    current_date,
+    now(),
+    'p0-settlement-importer'
+  ) -> 'observation' ->> 'key'
+from partners_test_state
+where state_key = 'airwallex_quarantine_fixture';
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_airwallex_settlement_review(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'airwallex_quarantine_observation'
+  ),
+  'REVIEW:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'airwallex_quarantine_observation'
+  ),
+  'P0 terminal quarantine independent Finance review.'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+select extensions.is(
+  public.admin_partners_airwallex_settlement_decide(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_observation'
+    ),
+    'quarantined',
+    'QUARANTINE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_observation'
+    ),
+    'P0 second Finance actor terminal quarantine decision.'
+  ) -> 'decision' ->> 'status',
+  'quarantined',
+  'a two-person quarantine creates a terminal Finance decision'
+);
+
+reset role;
+set local role service_role;
+select extensions.is(
+  public.partners_worker_airwallex_observation_record(
+    (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    ),
+    (
+      select state_value::jsonb ->> 'provider_id'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    ),
+    'PAID',
+    'PAID',
+    'FUNDED',
+    encode(
+      extensions.digest(
+        'p0-airwallex-paid-after-quarantine',
+        'sha256'
+      ),
+      'hex'
+    ),
+    now(),
+    null,
+    null
+  ) -> 'dispatch' ->> 'reconciliation_status',
+  'exception',
+  'a fresh PAID webhook cannot reopen a quarantined dispatch'
+);
+select extensions.throws_ok(
+  format(
+    'select pg_temp.partners_test_airwallex_settlement_observe(%L,%L,%L,%L,2000,%L,current_date,now(),%L)',
+    (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    ),
+    (
+      select state_value::jsonb ->> 'provider_id'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    ),
+    'p0-airwallex-terminal-quarantine-conflict',
+    encode(
+      extensions.digest(
+        'p0-airwallex-terminal-quarantine-conflict-proof',
+        'sha256'
+      ),
+      'hex'
+    ),
+    'USD',
+    'p0-settlement-importer'
+  ),
+  'P0004',
+  'Airwallex settlement guards are incomplete',
+  'new conflicting report evidence cannot append after quarantine'
+);
+
+reset role;
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      item.status,
+      dispatch.reconciliation_status,
+      dispatch.job_status,
+      dispatch.last_error_code
+    )
+    from affiliate_private.affiliate_payout_dispatches dispatch
+    join affiliate_private.affiliate_payout_items item
+      on item.id = dispatch.payout_item_id
+    where dispatch.dispatch_key = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    )
+  ),
+  'submitted:exception:exception:settlement_quarantined',
+  'the quarantine projection stays terminal after the later PAID event'
+);
+select extensions.ok(
+  (
+    select count(*) = 1
+      and bool_and(decision.decision = 'quarantined')
+      and bool_and(decision.settlement_entry_id is null)
+    from affiliate_private.affiliate_airwallex_settlement_decisions decision
+    join affiliate_private.affiliate_payout_dispatches dispatch
+      on dispatch.id = decision.dispatch_id
+    where dispatch.dispatch_key = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    )
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_commission_entries settlement
+    where settlement.entry_kind = 'payout_settlement'
+      and settlement.related_entry_id = (
+        select state_value::jsonb ->> 'allocation_id'
+        from partners_test_state
+        where state_key = 'airwallex_quarantine_fixture'
+      )::uuid
+  ),
+  'PAID after quarantine creates neither a second decision nor money movement'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.ok(
+  (
+    select count(*) = 1
+      and bool_and(item ->> 'stage' = 'exception')
+      and bool_and((item ->> 'can_review')::boolean is false)
+      and bool_and((item ->> 'can_decide')::boolean is false)
+    from jsonb_array_elements(
+      public.admin_partners_airwallex_settlements(50) -> 'items'
+    ) item
+    where item ->> 'dispatch_key' = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_quarantine_fixture'
+    )
+  ),
+  'the quarantined Finance row remains terminal and exposes no dead action'
+);
+
+reset role;
+insert into partners_test_state (state_key, state_value)
+values (
+  'airwallex_conflict_fixture',
+  pg_temp.partners_test_prepare_terminal_airwallex_dispatch(
+    'conflict',
+    date '2099-01-03'
+  )::text
+);
+
+set local role service_role;
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_conflict_observation',
+  pg_temp.partners_test_airwallex_settlement_observe(
+    state_value::jsonb ->> 'dispatch_key',
+    state_value::jsonb ->> 'provider_id',
+    'p0-airwallex-terminal-conflict-report-a',
+    encode(
+      extensions.digest(
+        'p0-airwallex-terminal-conflict-proof-a',
+        'sha256'
+      ),
+      'hex'
+    ),
+    2000,
+    'USD',
+    current_date,
+    now(),
+    'p0-settlement-importer'
+  ) -> 'observation' ->> 'key'
+from partners_test_state
+where state_key = 'airwallex_conflict_fixture';
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_airwallex_settlement_review(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'airwallex_conflict_observation'
+  ),
+  'REVIEW:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'airwallex_conflict_observation'
+  ),
+  'P0 stale review must not override later conflicting evidence.'
+);
+
+reset role;
+set local role service_role;
+select extensions.is(
+  pg_temp.partners_test_airwallex_settlement_observe(
+    (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    ),
+    (
+      select state_value::jsonb ->> 'provider_id'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    ),
+    'p0-airwallex-terminal-conflict-report-b',
+    encode(
+      extensions.digest(
+        'p0-airwallex-terminal-conflict-proof-b',
+        'sha256'
+      ),
+      'hex'
+    ),
+    2000,
+    'USD',
+    current_date,
+    now(),
+    'p0-settlement-importer'
+  ) ->> 'conflicted',
+  'true',
+  'two distinct report facts place the dispatch in terminal conflict'
+);
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      dispatch.reconciliation_status,
+      dispatch.job_status,
+      dispatch.last_error_code
+    )
+    from affiliate_private.affiliate_payout_dispatches dispatch
+    where dispatch.dispatch_key = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    )
+  ),
+  'exception:exception:settlement_evidence_conflict',
+  'conflicting report facts project one explicit terminal reason'
+);
+select extensions.is(
+  public.partners_worker_airwallex_observation_record(
+    (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    ),
+    (
+      select state_value::jsonb ->> 'provider_id'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    ),
+    'PAID',
+    'PAID',
+    'FUNDED',
+    encode(
+      extensions.digest(
+        'p0-airwallex-paid-after-conflict',
+        'sha256'
+      ),
+      'hex'
+    ),
+    now(),
+    null,
+    null
+  ) -> 'dispatch' ->> 'reconciliation_status',
+  'exception',
+  'a fresh PAID webhook cannot reopen conflicting settlement evidence'
+);
+
+reset role;
+select extensions.is(
+  (
+    select concat_ws(
+      ':',
+      dispatch.reconciliation_status,
+      dispatch.job_status,
+      dispatch.last_error_code,
+      count(observation.id)
+    )
+    from affiliate_private.affiliate_payout_dispatches dispatch
+    join affiliate_private.affiliate_airwallex_settlement_observations
+      observation
+      on observation.dispatch_id = dispatch.id
+      and observation.observation_kind = 'settlement_evidence'
+    where dispatch.dispatch_key = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    )
+    group by
+      dispatch.reconciliation_status,
+      dispatch.job_status,
+      dispatch.last_error_code
+  ),
+  'exception:exception:settlement_evidence_conflict:2',
+  'the conflict reason and both immutable facts survive PAID replay'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_airwallex_settlement_decide(%L,%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_conflict_observation'
+    ),
+    'quarantined',
+    'QUARANTINE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_conflict_observation'
+    ),
+    'P0 stale review cannot relabel terminal settlement conflict.'
+  ),
+  'P0004',
+  'Airwallex settlement decision guards are incomplete',
+  'a stale Finance review cannot overwrite terminal conflict with quarantine'
+);
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+select extensions.ok(
+  (
+    select count(*) = 2
+      and bool_and(item ->> 'stage' = 'exception')
+      and bool_and((item ->> 'can_review')::boolean is false)
+      and bool_and((item ->> 'can_decide')::boolean is false)
+    from jsonb_array_elements(
+      public.admin_partners_airwallex_settlements(50) -> 'items'
+    ) item
+    where item ->> 'dispatch_key' = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    )
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_airwallex_settlement_decisions decision
+    join affiliate_private.affiliate_payout_dispatches dispatch
+      on dispatch.id = decision.dispatch_id
+    where dispatch.dispatch_key = (
+      select state_value::jsonb ->> 'dispatch_key'
+      from partners_test_state
+      where state_key = 'airwallex_conflict_fixture'
+    )
+  ),
+  'conflicting evidence remains visible but offers no impossible Finance action'
+);
+
+reset role;
+
 select extensions.throws_ok(
   $$
     delete from auth.users
@@ -2729,6 +4996,300 @@ select extensions.is(
   'all immutable financial facts survive referred-user deletion'
 );
 
+insert into partners_test_state (state_key, state_value)
+values
+  (
+    'airwallex_report_atomic_fixture_a',
+    pg_temp.partners_test_prepare_terminal_airwallex_dispatch(
+      'report-atomic-a',
+      date '2101-01-01'
+    )::text
+  ),
+  (
+    'airwallex_report_atomic_fixture_b',
+    pg_temp.partners_test_prepare_terminal_airwallex_dispatch(
+      'report-atomic-b',
+      date '2101-01-03'
+    )::text
+  );
+
+update affiliate_private.affiliate_airwallex_report_contracts contract
+set
+  status = 'approved',
+  approved_evidence_hash = repeat('a', 64),
+  approved_by_pseudonym = repeat('b', 64),
+  approved_at = now(),
+  justification = 'pgTAP atomic report contract evidence.',
+  updated_at = now()
+where contract.environment = 'sandbox';
+
+insert into affiliate_private.affiliate_airwallex_report_runs (
+  environment,
+  contract_version,
+  period_start,
+  period_end,
+  file_name,
+  status,
+  provider_report_id,
+  provider_report_hash,
+  provider_status,
+  worker_id,
+  lease_token_hash,
+  leased_until,
+  attempts,
+  provider_completed_at
+)
+values (
+  'sandbox',
+  'transaction_recon_csv_1_1_0_preamble_v1',
+  current_date - 35,
+  current_date,
+  'NORVA_TRANSACTION_RECON_' ||
+    to_char(current_date, 'YYYY_MM_DD') ||
+    '_0123456789ab.csv',
+  'leased',
+  'report_atomic_test_00000001',
+  encode(
+    extensions.digest('report_atomic_test_00000001', 'sha256'),
+    'hex'
+  ),
+  'COMPLETED',
+  'report-atomic-test',
+  repeat('c', 64),
+  now() + interval '10 minutes',
+  1,
+  now()
+);
+
+insert into partners_test_state (state_key, state_value)
+select 'airwallex_report_atomic_run', run.report_key
+from affiliate_private.affiliate_airwallex_report_runs run
+where run.provider_report_hash = encode(
+  extensions.digest('report_atomic_test_00000001', 'sha256'),
+  'hex'
+);
+
+create or replace function
+pg_temp.partners_test_airwallex_report_observations(p_break_last boolean)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $report_observations$
+  with candidates as (
+    select
+      dispatch.dispatch_key,
+      dispatch.provider_transfer_id,
+      item.amount_minor,
+      item.currency,
+      max(dispatch.dispatch_key) over () as last_key
+    from affiliate_private.affiliate_payout_dispatches dispatch
+    join affiliate_private.affiliate_payout_items item
+      on item.id = dispatch.payout_item_id
+    join affiliate_private.affiliate_payout_cycles cycle
+      on cycle.id = item.cycle_id
+    where dispatch.provider = 'airwallex'
+      and dispatch.provider_transfer_id is not null
+      and dispatch.provider_state = 'PAID'
+      and dispatch.reconciliation_status = 'pending'
+      and item.status = 'submitted'
+      and cycle.status = 'submitted'
+      and cycle.live_execution
+      and dispatch.created_at::date
+        between current_date - 35 and current_date
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'amount_minor', case
+          when p_break_last and candidate.dispatch_key = candidate.last_key
+            then candidate.amount_minor + 1
+          else candidate.amount_minor
+        end,
+        'currency', candidate.currency,
+        'dispatch_key', candidate.dispatch_key,
+        'observed_at', now(),
+        'proof_hash', encode(
+          extensions.digest(
+            'pgTAP:airwallex-report-atomic:' || candidate.dispatch_key,
+            'sha256'
+          ),
+          'hex'
+        ),
+        'provider_transfer_id', candidate.provider_transfer_id,
+        'settlement_reference',
+          'pgTAP-airwallex-report-' || candidate.dispatch_key,
+        'value_date', current_date
+      )
+      order by candidate.dispatch_key
+    ),
+    '[]'::jsonb
+  )
+  from candidates candidate;
+$report_observations$;
+grant execute on function
+  pg_temp.partners_test_airwallex_report_observations(boolean)
+to service_role;
+
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_report_atomic_candidate_count',
+  jsonb_array_length(
+    pg_temp.partners_test_airwallex_report_observations(false)
+  )::text;
+
+insert into partners_test_state (state_key, state_value)
+select
+  'airwallex_report_atomic_observation_count_before',
+  count(*)::text
+from affiliate_private.affiliate_airwallex_settlement_observations;
+
+set local role service_role;
+
+select extensions.throws_ok(
+  format(
+    $sql$
+      select public.partners_worker_airwallex_report_apply(
+        %L,
+        'report-atomic-test',
+        %L,
+        %L,
+        1024,
+        25,
+        %s,
+        '[]'::jsonb
+      )
+    $sql$,
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_run'
+    ),
+    repeat('c', 64),
+    repeat('d', 64),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_candidate_count'
+    )
+  ),
+  '22023',
+  'invalid Airwallex report application',
+  'a partial report envelope is rejected before any observation'
+);
+
+select extensions.throws_ok(
+  format(
+    $sql$
+      select public.partners_worker_airwallex_report_apply(
+        %L,
+        'report-atomic-test',
+        %L,
+        %L,
+        1024,
+        25,
+        %s,
+        %L::jsonb
+      )
+    $sql$,
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_run'
+    ),
+    repeat('c', 64),
+    repeat('d', 64),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_candidate_count'
+    ),
+    pg_temp.partners_test_airwallex_report_observations(true)::text
+  ),
+  'P0004',
+  'Airwallex settlement guards are incomplete',
+  'a failure on the final normalized row aborts the atomic report apply'
+);
+
+reset role;
+
+select extensions.ok(
+  (
+    select count(*)::text
+    from affiliate_private.affiliate_airwallex_settlement_observations
+  ) = (
+    select state_value
+    from partners_test_state
+    where state_key = 'airwallex_report_atomic_observation_count_before'
+  )
+  and (
+    select run.status
+    from affiliate_private.affiliate_airwallex_report_runs run
+    where run.report_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_run'
+    )
+  ) = 'leased',
+  'a mid-batch failure leaves zero partial evidence and the run uncompleted'
+);
+
+set local role service_role;
+
+select extensions.is(
+  (
+    public.partners_worker_airwallex_report_apply(
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'airwallex_report_atomic_run'
+      ),
+      'report-atomic-test',
+      repeat('c', 64),
+      repeat('d', 64),
+      1024,
+      25,
+      (
+        select state_value::integer
+        from partners_test_state
+        where state_key = 'airwallex_report_atomic_candidate_count'
+      ),
+      pg_temp.partners_test_airwallex_report_observations(false)
+    ) ->> 'observed_count'
+  )::integer,
+  (
+    select state_value::integer
+    from partners_test_state
+    where state_key = 'airwallex_report_atomic_candidate_count'
+  ),
+  'the atomic apply ingests every and only current candidate'
+);
+
+reset role;
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_airwallex_report_runs run
+    where run.report_key = (
+      select state_value
+      from partners_test_state
+      where state_key = 'airwallex_report_atomic_run'
+    )
+      and run.status = 'completed'
+      and run.candidate_count = (
+        select state_value::integer
+        from partners_test_state
+        where state_key = 'airwallex_report_atomic_candidate_count'
+      )
+      and run.matched_count = run.candidate_count
+      and run.unmatched_count = 0
+      and run.completed_at is not null
+  ),
+  'a report becomes completed only with zero unmatched candidates'
+);
+
 set local role service_role;
 
 select extensions.is(
@@ -2774,6 +5335,76 @@ select extensions.ok(
       )
   ),
   'partner deletion retains ledger lineage on a closed minimized account'
+);
+
+update affiliate_private.affiliate_links link
+set
+  status = 'revoked',
+  revoked_at = coalesce(link.revoked_at, now())
+where link.status = 'active'
+  and link.account_id = (
+    select account.id
+    from affiliate_private.affiliate_accounts account
+    where account.user_id =
+      '10000000-0000-4000-8000-000000000003'
+  );
+insert into affiliate_private.affiliate_events (
+  aggregate_type,
+  aggregate_key,
+  action,
+  actor_type,
+  actor_pseudonym,
+  justification,
+  before_state,
+  after_state
+)
+select
+  'account',
+  account.id::text,
+  'legacy_kyc_binding_quarantined',
+  'system',
+  account.user_pseudonym,
+  'Runtime fixture verifies the guarded legacy account re-verification transition.',
+  jsonb_build_object('status', 'active'),
+  jsonb_build_object('status', 'pending_verification')
+from affiliate_private.affiliate_accounts account
+where account.user_id =
+  '10000000-0000-4000-8000-000000000003';
+update affiliate_private.affiliate_accounts account
+set
+  status = 'held',
+  verification_status = 'expired',
+  verification_reference = null,
+  age_verified = false,
+  capacity_verified = false,
+  updated_at = now()
+where account.user_id =
+  '10000000-0000-4000-8000-000000000003'
+  and account.status = 'active';
+update affiliate_private.affiliate_accounts account
+set
+  status = 'pending_verification',
+  updated_at = now()
+where account.user_id =
+  '10000000-0000-4000-8000-000000000003'
+  and account.status = 'held'
+  and exists (
+    select 1
+    from affiliate_private.affiliate_events event
+    where event.aggregate_type = 'account'
+      and event.aggregate_key = account.id::text
+      and event.action = 'legacy_kyc_binding_quarantined'
+      and event.before_state ->> 'status' = 'active'
+  );
+select extensions.is(
+  (
+    select account.status
+    from affiliate_private.affiliate_accounts account
+    where account.user_id =
+      '10000000-0000-4000-8000-000000000003'
+  ),
+  'pending_verification',
+  'legacy active accounts traverse guarded held state into self-service re-verification'
 );
 
 select * from extensions.finish();

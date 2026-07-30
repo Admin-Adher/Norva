@@ -1,6 +1,6 @@
 # Norva Partners — Backlog d'implémentation P0 ordonné
 
-**Date :** 29 juillet 2026
+**Date :** 30 juillet 2026
 **Source produit :** [NORVA-PARTNERS-P0.md](./NORVA-PARTNERS-P0.md)
 **Statut :** socle P0 livré en mode fail-closed ; pilote non activé tant que
 Didit, le rail de versement individuel, le parcours fiscal Web, les juridictions
@@ -495,7 +495,7 @@ Cette tranche prouve attribution, sécurité, calcul et réconciliation en mode
 shadow. Le KYC individuel Didit peut ensuite être branché sans aucune surface
 KYB ; les versements réels restent bloqués jusqu'à `PRT-007`.
 
-## 21. État réel du lot au 29 juillet 2026
+## 21. État réel du lot au 30 juillet 2026
 
 Cette matrice sépare volontairement le code présent du dépôt, sa validation et
 les opérations qui nécessitent encore un compte fournisseur ou un environnement
@@ -503,21 +503,27 @@ déployé. « Livré » ne signifie donc pas « activé en production ».
 
 | Domaine | Code livré dans ce lot | Validation obtenue | Configuration ou preuve encore requise |
 |---|---|---|---|
-| Comptes, liens et dashboard membre | RPC membre bornées et idempotentes, activation/rotation de lien, QR et historique filtré | contrats Node ; pgTAP versionné dans `supabase/tests/affiliate_p0.sql` | rejouer toutes les migrations et pgTAP sur le Postgres Supabase jetable de CI avant merge |
-| Référencement Web/mobile/TV | `/r/{code}`, cookie `__Host-` HttpOnly signé, claim post-auth, App Link Android, partage natif et relais TV temporaire | contrats Node et E2E Playwright Web/mobile versionnés | secrets HMAC Pages/Edge identiques, domaine/App Link publié et replay sur émulateurs réels |
-| KYC individuel Didit | création de session hébergée, retour sanitisé et webhook HMAC sur corps brut ; KYB exclu | contrats Node et `deno check` versionnés | créer/configurer compte Didit, API key, workflow, application, IDs des nœuds, webhook secret/URL et callback ; exécuter sandbox puis pilote |
-| Faits financiers | ingestion immuable RevenueCat/Revolut, déduplication économique, lineage, refunds et chargebacks | tests d'adapters et de non-régression facturation | abonner RevenueCat aux événements retenus ; configurer Revolut `ORDER_COMPLETED` et `DISPUTE_LOST` ; vérifier les livraisons sandbox/production |
-| Moteur de commissions | accrual, contre-écriture, arrondi exact, retry/dead-letter, maturation J+45 et réconciliation shadow | tests Node ; tests SQL versionnés ; typage Deno | déployer les migrations/fonctions dans l'ordre, créer le secret cron et enregistrer le cron ; prouver un cycle complet avec observations fraîches |
-| `DISPUTE_WON` | réception détectée et refusée sans inventer une vente ni effacer un chargeback | contrat fail-closed testé | concevoir puis migrer un type financier immuable de chargeback reversal avant d'acquitter cet événement ; alerte opérationnelle requise jusque-là |
-| Payout individuel | tables, profils tokenisés, fiscalité/payout masqués, batches/items, gates et vues Admin | invariants et contrats statiques versionnés | **bloqué fournisseur** : choisir le rail, contractualiser, configurer onboarding bénéficiaire, webhooks, sandbox, dispatch et réconciliation ; aucun worker de débit réel n'est livré |
-| Admin et observabilité | routes overview/détail, capacités Support/Risk/Finance, mutations auditées, heartbeats commission/maturation/réconciliation | contrats Node | attribuer les capacités serveur, connecter alertes/quotas, vérifier les dashboards contre données réelles ; aucun heartbeat payout avant worker provider |
-| Juridictions, juridique et pilote | modèles de programme/policy, gates fail-closed, pages Terms/Privacy/Partners | contrats statiques | avis juridique/fiscal par pays, versions publiées, allowlist réellement peuplée, invitations pilote et validation des devises/seuils |
-| CI, backup et restauration | workflow Node/Deno/Android/Playwright/Postgres, scripts incluant `affiliate_private`, procédure de restore | YAML et tests locaux compatibles avec l'environnement disponible | obtenir un run GitHub Actions vert, Advisors/lint verts et un restore drill isolé ; la machine locale sans Docker ne constitue pas cette preuve |
+| Comptes, liens et dashboard membre | RPC membre bornées et idempotentes, activation/rotation de lien, QR et historique filtré | suites Node/pgTAP et replay PostgreSQL présents ; aucune run immuable du commit candidat n'est encore consignée | exécuter le workflow du commit candidat et valider le runtime Norva déployé avant pilote |
+| Référencement Web/mobile/TV | `/r/{code}`, cookie `__Host-` HttpOnly signé, claim post-auth, App Link Android, partage natif et relais TV temporaire | contrats/E2E présents et `assetlinks.json` public contrôlé ; la preuve Play signée reste absente | rejouer l'App Link avec l'AAB signé par Google Play ; le certificat debug reste volontairement refusé |
+| KYC individuel Didit | création de session hébergée, callback canonique fail-closed, retour sanitisé et webhook HMAC sur corps brut ; KYB exclu | contrats Node et type-check configurés ; aucune preuve sandbox du commit candidat | créer/configurer compte Didit, API key, workflow, application, IDs des nœuds, webhook secret/URL et callback canonique ; exécuter sandbox puis pilote |
+| Faits financiers | ingestion immuable RevenueCat/Revolut, déduplication économique, lineage, refunds, chargebacks, TRANSFER entitlement et contre-correction | suites Node/Deno/pgTAP présentes ; aucune run immuable du commit candidat ni preuve provider | configurer les webhooks/HMAC, clé RevenueCat serveur et événements Revolut ; vérifier sandbox puis production |
+| Moteur de commissions | accrual, reversal/reinstatement, arrondi exact, retry/dead-letter, maturation J+45 et réconciliation shadow | suites Node/Deno/pgTAP et replay jetable présents ; crons/heartbeats/shadow déployés non prouvés | déployer les migrations/fonctions dans l'ordre, créer les secrets cron, enregistrer les crons et prouver des observations fraîches |
+| `DISPUTE_WON` | type append-only `chargeback_reversal`, inbox out-of-order, lineage exact et `reinstatement` unique après pending ou release | cas de test codés ; run du commit candidat et lecture provider non prouvées | activer `DISPUTE_WON` dans Revolut, vérifier lecture autoritative et cas sandbox/production disponibles |
+| Payout individuel | adaptateur technique provisoire Airwallex individuel + worker Financial Reports : bénéficiaire tokenisé, dispatch idempotent, webhooks signés, API 2024-04-30, rapport CSV v1.1.0 borné, observation minimisée et double validation Finance distincte ; aucun choix commercial définitif n'est activé | invariants/tests présents ; prestataire vide par défaut, pilote DB limité à l'adaptateur implémenté, contrat physique CSV `draft`, aucun secret/corridor sandbox, run provider, restore drill ou rapprochement réel référencé | évaluer Revolut Business en priorité et Airwallex en comparaison ; si Airwallex est retenu pour le pilote, contractualiser, injecter les secrets hors Git, configurer un corridor, valider un CSV réel hors ligne, faire approuver le contrat sandbox puis production en AAL2 Finance, smoke-tester `/cron/reports` et prouver le rapprochement bancaire |
+| Admin et observabilité | routes overview/détail, capacités Support/Risk/Finance, mutations auditées, heartbeats, TRANSFER/DISPUTE_WON et settlement Airwallex | contrats et contrôles pgTAP présents ; aucune preuve contre les données réelles du commit candidat | attribuer les capacités serveur, connecter alertes/quotas et vérifier les dashboards contre données réelles |
+| Juridictions, juridique et pilote | modèles de programme/policy, gates fail-closed, pages Terms/Privacy/Partners | première preuve technique de publication archivée le 30 juillet ; elle ne vaut pas approbation et les hashes live bruts Cloudflare ne sont pas rejouables sans normalisation | avis juridique/fiscal par pays, programme/policies/devises/routes configurés, snapshot DB immuable, allowlist 20–50, invitations et 45 jours d'observation |
+| CI, backup et restauration | workflow Node/Deno/Android/Playwright/Postgres, scripts incluant `affiliate_private`, procédure de restore | harness livré ; chaque commit candidat doit produire sa propre preuve immuable | exécuter la CI/Advisors du commit candidat et conserver la preuve d'un restore drill isolé contre le déploiement Norva |
 
 Les gates `partners_enabled`, `partners_invite_only`,
 `partners_shadow_mode`, `partners_tv_relay_enabled` et
 `partners_payouts_live` restent la source d'autorité. Le pilote ne doit pas être
-ouvert par simple présence du code : Didit, secrets, cron, policies et allowlist
-doivent d'abord être configurés et vérifiés. `partners_payouts_live` reste
-obligatoirement faux tant que l'onboarding et le dispatch du fournisseur payout
-n'existent pas.
+ouvert par simple présence du code : Didit, secrets, crons, policies et
+allowlist doivent d'abord être configurés et vérifiés.
+`partners_payouts_live` reste obligatoirement faux tant que l'onboarding
+Airwallex réel, le corridor, les contrats CSV sandbox/production approuvés,
+l'exécution autoritative du worker de rapports et les deux cycles de versement
+supervisés n'ont pas été prouvés.
+Le journal de release exige en plus l'App Link signé Play, un snapshot DB
+sanitisé et immuable, `partners_tv_relay_enabled=true`, 45 jours calendaires et
+la gate `general_release_approved`. Sa cible allowlist 20–50 ne modifie pas la
+précondition DB minimale `>= 1`, conservée pour le dogfood technique.

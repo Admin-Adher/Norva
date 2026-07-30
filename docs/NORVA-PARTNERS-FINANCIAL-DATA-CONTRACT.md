@@ -20,7 +20,9 @@ décider si ce fait est suffisamment complet pour créer une commission.
   « deux décimales ».
 - Un champ inconnu reste `NULL`. Le fait devient `incomplete` et aucun job de
   commission n'est créé : ce blocage n'est jamais remplacé par un zéro.
-- `transfer` est toujours `quarantined`.
+- Un événement financier `transfer` est toujours `quarantined` et ne crée
+  jamais de commission. La continuité d'entitlement RevenueCat suit une machine
+  d'états séparée, sans déplacer de fait financier ni de ledger Partners.
 - L'environnement `sandbox` peut être observé, mais ne crée jamais de
   commission.
 - Les faits et écritures sont append-only. Toute correction financière future
@@ -37,22 +39,31 @@ décider si ce fait est suffisamment complet pour créer une commission.
 | Revolut webhook | ordre `refund` en état `COMPLETED` | `refund` | ordre refund / `related_order_id` | `amount` minor explicite + devise ; composants inconnus `NULL` |
 | Revolut webhook | ordre `chargeback` en état `COMPLETED` | `chargeback` | ordre chargeback / `related_order_id` | `amount` minor explicite + devise ; composants inconnus `NULL` |
 | Revolut webhook | `DISPUTE_LOST`, puis GET serveur du dispute `lost` | `chargeback` | `dispute.id` / `payment.order_id` | `amount` minor explicite + devise ; composants inconnus `NULL` |
+| Revolut webhook | `DISPUTE_WON`, puis GET serveur du dispute `won` | `chargeback_reversal` | `dispute.id` / chargeback autoritatif précédent | même montant minor et devise que le chargeback exact ; contre-correction uniquement |
 | Revolut webhook | ordre abonnement en état `COMPLETED` | `capture` ou `renewal` | `order_id` | `amount` minor explicite + devise ; composants inconnus `NULL` |
 | Revolut billing | capture récurrente confirmée `COMPLETED` | `capture` ou `renewal` | le même `order_id` que le webhook | montant débité minor explicite + devise ; composants inconnus `NULL` |
 
 Les événements de validation de carte (`trial_setup`, `plan_change`,
 `card_update`) ne sont pas des captures et ne produisent aucun fait. Les
 événements non réglés (`PENDING`, `PROCESSING`, `AUTHORISED`) ne produisent
-aucun fait. `REFUND_REVERSED`, `chargeback_reversal` et `DISPUTE_WON` restent
-hors du vocabulaire P0 : ils doivent faire l'objet d'un type de correction
-explicite avant ingestion, pas être maquillés en nouvelle vente. Un
-`DISPUTE_WON` reçu est donc refusé de manière visible et n'est jamais marqué
-traité tant que ce contrat de correction n'existe pas.
+aucun fait. `REFUND_REVERSED` reste hors du vocabulaire P0 et doit faire l'objet
+d'un type de correction explicite avant ingestion. `DISPUTE_WON` possède en
+revanche le type append-only `chargeback_reversal` : il ne recrée pas une vente,
+mais rattache une unique écriture `reinstatement` au chargeback et à sa
+`reversal` exacts. Toute divergence de propriétaire, attribution, montant,
+devise, chronologie ou lineage est mise en conflit ou en dead-letter, jamais
+acquittée comme un succès.
 
 `TRANSFER` utilise son `event.id` stable comme identité d'observation. RevenueCat
 ne fournit volontairement aucun `transaction_id` dans ce groupe d'événements :
 le parent reste donc `NULL`, sans être reconstruit depuis les identifiants de
-compte. Le fait demeure en quarantaine et n'alimente jamais le ledger.
+compte. Le fait financier demeure en quarantaine et n'alimente jamais le
+ledger. En parallèle, le receiver authentifie le webhook RevenueCat sur le corps
+brut, relit `CustomerInfo` côté serveur et confie la projection d'entitlement à
+un worker borné. Une source déjà expirée est résolue, un état actif strictement
+postérieur au transfert est préservé comme nouvel achat, et une égalité ambiguë
+reste partielle avec alerte. Cette projection n'invente ni montant, ni taxe,
+ni commission.
 
 RevenueCat reste le signal de cycle de vie et d'identité économique, mais ses
 prix/taxes estimés ne sont jamais utilisés pour une commission. Pour un
@@ -99,6 +110,14 @@ charge l'objet autoritatif via `GET /api/disputes/{dispute_id}` (API version
 unique, un montant minor positif et une devise cohérente, puis ingère seulement
 le fait normalisé. Les événements de dispute sont disponibles uniquement en
 production.
+
+`DISPUTE_WON` suit la même lecture serveur, exige `state=won`, un timestamp
+provider valide et le chargeback `DISPUTE_LOST` exact. La contre-correction
+restaure uniquement ce qui avait été automatiquement reversé : dans
+`partner_commission_pending` si aucune maturation n'avait libéré l'accrual, ou
+dans `partner_commission_available` lorsqu'un `release` existe déjà. Un solde
+de recovery est réduit avant tout crédit positif. L'idempotence autorise une
+seule `reinstatement` par `reversal`, y compris si `WON` arrive avant `LOST`.
 
 Références provider :
 
@@ -181,9 +200,11 @@ déjà mis en quarantaine par la base, est terminal et ne bloque pas les droits.
   `reconciliation`, y compris un état `degraded` en cas d'échec ;
 - ne contacte aucune autre Edge Function ni aucun provider de versement.
 
-Il n'existe volontairement aucun heartbeat `payout` en P0 : aucun worker de
-versement provider n'est encore déployé et le monitoring ne doit pas simuler sa
-présence.
+Le worker RevenueCat TRANSFER possède son propre heartbeat
+`revenuecat_transfer`, un budget global inférieur au timeout du cron et des
+compteurs bornés pour partiels, quarantaines et dead-letters. Le worker payout
+Airwallex publie séparément son exécution réelle ; un simple webhook `PAID`
+reste une observation en attente et ne fabrique jamais un settlement.
 
 Le cron n'est pas seedé par migration. L'URL de production et son secret n'étant
 pas des constantes de schéma, l'opérateur l'enregistre seulement après
@@ -193,9 +214,10 @@ déploiement et smoke test. L'absence du schedule doit apparaître comme
 ## Activation et enrichissement
 
 L'ordre de déploiement est : migration DB, tests jetables/Advisors, fonctions
-productrices, worker, puis enregistrement manuel du cron. Les devises restent
+productrices, workers, puis enregistrement manuel des crons. Les devises restent
 désactivées tant que Finance n'a pas configuré explicitement code ISO et
-exposant. Aucun payout provider n'est activé en P0.
+exposant. L'adaptateur Airwallex reste inactif et fail-closed tant que son
+contrat, son corridor sandbox, ses secrets et ses gates ne sont pas configurés.
 
 Pour rendre un événement commissionnable, la source doit fournir de façon
 autoritative et cohérente :
@@ -221,8 +243,8 @@ indépendantes du simple déploiement du code.
 
 ## Ce qui empêche encore un statut 100 % live
 
-- La migration, les trois producteurs et le worker doivent être déployés dans
-  cet ordre, puis le cron doit être enregistré manuellement.
+- Les migrations, producteurs et workers doivent être déployés dans l'ordre,
+  puis les crons doivent être enregistrés manuellement.
 - `REVOLUT_API_BASE` doit pointer sur le bon environnement ; les secrets
   RevenueCat/Revolut existants doivent être actifs et leurs webhooks vérifiés.
 - `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` doit contenir le JSON du compte de service
@@ -239,7 +261,29 @@ indépendantes du simple déploiement du code.
   pas rejoués automatiquement. Un backfill historique ne pourra être lancé que
   depuis une source financière autoritative, jamais depuis un prix reconstitué.
 - Le monitoring doit alerter sur conflit, incomplete, plus vieux job prêt,
-  retry, dead-letter, lease expiré et mismatch shadow avant le pilote.
-- Les profils fiscaux, bénéficiaires tokenisés et le provider de versement
-  restent nécessaires pour payer ; `partners_payouts_live=false` demeure la
-  position P0.
+  retry, dead-letter, lease expiré, TRANSFER partiel/ancien et mismatch shadow
+  avant le pilote.
+- Airwallex est codé comme adaptateur individuel et conserve seulement des
+  références opaques. Le worker cron-authentifié Financial Reports crée ou
+  récupère un Transaction Reconciliation Report CSV v1.1.0 via l'API
+  `2024-04-30`, suit `PENDING/COMPLETED`, télécharge uniquement le contenu
+  first-party, contrôle taille/type/période/colonnes/compteurs et produit des
+  observations minimisées idempotentes. Il n'accepte aucun URL, CSV ou
+  identifiant de rapport fourni par un client.
+- La complétude est un invariant transactionnel : le run et les dispatches sont
+  verrouillés, l'ensemble d'identifiants doit correspondre exactement, et les
+  observations sont appliquées dans la même transaction que la clôture du run.
+  La moindre ligne absente ou invalide annule tout le lot et alerte Finance ;
+  seul `matched_count=candidate_count` avec `unmatched_count=0` peut devenir
+  `completed`.
+- Airwallex ne publie pas le contrat complet de disposition physique du CSV.
+  Norva utilise donc le mapping versionné
+  `transaction_recon_csv_1_1_0_preamble_v1`, dont les lignes `sandbox` et
+  `production` restent `draft` jusqu'à une approbation Finance `aal2` fondée
+  sur le SHA-256 d'un fichier réel validé hors ligne. Le code livré n'est pas
+  une preuve de complétude bancaire ou de production.
+- Un settlement exige une revue Finance puis une décision d'un second acteur
+  Finance distinct. `partners_payouts_live=false`, l'absence de corridor réel et
+  l'absence de deux cycles supervisés empêchent tout statut live.
+- Les profils fiscaux réels et la ventilation Web HT/taxe autoritative restent
+  nécessaires avant de commissionner le rail Web ou de payer un partenaire.

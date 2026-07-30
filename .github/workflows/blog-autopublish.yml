@@ -31,21 +31,29 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
-    name: Publish due articles and deploy
+    name: Publish due articles
     runs-on: ubuntu-latest
-    environment: Cloudflare
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: main
+          persist-credentials: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: '22'
+          node-version: '22.22.3'
+
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts
 
       - name: Validate the full corpus renders cleanly
         run: npm run blog:validate
@@ -55,6 +63,9 @@ jobs:
           BLOG_MIN_PUBLISHED: ${{ github.event.inputs.min_published || '4' }}
         run: npm run blog:build
 
+      - name: Run the complete regression suite before committing
+        run: npm test
+
       - name: Commit newly published pages to main
         id: commit
         run: |
@@ -63,34 +74,84 @@ jobs:
           git add public/blog public/sitemap-blog.xml content/blog/published-state.json
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             echo "No newly-due articles — nothing to publish this run."
           else
             git commit -m "chore(blog): auto-publish scheduled article(s) [skip ci]"
             git push origin main
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
-      # The remaining steps mirror deploy-cloudflare.yml so the deployed artifact
-      # is processed identically (cache-busting + critical-CSS inlining).
+  deploy:
+    name: Validate and deploy the exact blog commit
+    needs: publish
+    if: needs.publish.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: Cloudflare
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.publish.outputs.commit_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22.22.3'
+
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run regression suite on the exact deployment commit
+        run: npm test
+
       - name: Verify region model
-        if: steps.commit.outputs.changed == 'true'
         run: npm run verify:region
 
+      - name: Check frontend JavaScript syntax
+        run: |
+          node --check public/js/api.js
+          node --check public/js/cloudApi.js
+          node --check public/js/pages/WatchPage.js
+          node --check public/js/norvaEngine.js
+
+      - name: Compile and verify Cloudflare Pages Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          functions_build="$(mktemp -d)"
+          trap 'rm -rf -- "$functions_build"' EXIT
+          test "$(npx --no-install wrangler --version)" = "4.102.0"
+          npx --no-install wrangler pages functions build functions \
+            --outdir "$functions_build/bundle" \
+            --output-routes-path "$functions_build/routes.json"
+          test -s "$functions_build/bundle/index.js"
+          node - "$functions_build/routes.json" "$functions_build/bundle/index.js" <<'NODE'
+          const fs = require('node:fs');
+          const routes = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const bundle = fs.readFileSync(process.argv[3], 'utf8');
+          if (
+            !Array.isArray(routes.include)
+            || !routes.include.includes('/partners-kyc-return')
+            || !bundle.includes('routePath: "/partners-kyc-return"')
+          ) {
+            throw new Error('Didit callback is missing from the Pages Functions bundle');
+          }
+          NODE
+
       - name: Minify landing CSS
-        if: steps.commit.outputs.changed == 'true'
         run: npm run minify:css
 
       - name: Cache-bust assets by content hash
-        if: steps.commit.outputs.changed == 'true'
         run: npm run hash:assets
 
       - name: Inline landing CSS into entry HTML
-        if: steps.commit.outputs.changed == 'true'
         run: npm run inline:css
 
       - name: Deploy public/ to Cloudflare Pages (norva-web)
-        if: steps.commit.outputs.changed == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

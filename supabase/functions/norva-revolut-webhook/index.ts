@@ -9,13 +9,14 @@
 // AUTH — Revolut signs each webhook (HMAC-SHA256). We verify:
 //   payload_to_sign = "v1." + Revolut-Request-Timestamp + "." + rawBody
 //   expected        = "v1=" + hex(HMAC_SHA256(signing_secret, payload_to_sign))
-//   compare (timing-safe) against Revolut-Signature (may hold multiple, space-
-//   separated, during key rotation); reject a timestamp older than 5 min (replay).
+//   compare (timing-safe) against Revolut-Signature (may hold multiple,
+//   comma-separated values during key rotation); reject a timestamp older than
+//   5 min (replay).
 //   Ref: developer.revolut.com/docs/guides/.../verify-the-payload-signature
 //   (confirmed working against a real sandbox delivery on 2026-07-11.)
 //
-// MINIMAL BODY — order callbacks carry only { event, order_id }; DISPUTE_LOST
-// callbacks carry a dispute id. Metadata, money and authoritative state are
+// MINIMAL BODY — order callbacks carry only { event, order_id }; terminal
+// dispute callbacks carry a dispute id. Metadata, money and authoritative state are
 // fetched from the matching Revolut API resource rather than trusted from the
 // webhook body. The checkout stamps order metadata with
 // { user_id, plan, period, kind }, which resolves the local owner.
@@ -29,17 +30,20 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getPrices } from "../_shared/prices.ts";
 import {
+  enqueuePartnerChargebackReversal,
   ingestPartnerFinancialFact,
   revolutDisputePartnerObservation,
+  revolutDisputeWonPartnerObservation,
   revolutEnvironment,
   revolutPartnerObservation,
+  revolutWebhookSignatureMatches,
+  sha256Hex,
 } from "../_shared/partners-finance.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_KEY =
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const SIGNING_SECRET = Deno.env.get("REVOLUT_WEBHOOK_SIGNING_SECRET") ?? "";
@@ -76,10 +80,16 @@ Deno.serve(async (req) => {
 
   // Raw body FIRST — the HMAC is over the exact bytes.
   const raw = await req.text();
-  if (!(await verifySignature(req, raw))) return json({ error: "Invalid signature" }, 401);
+  if (!(await verifySignature(req, raw))) {
+    return json({ error: "Invalid signature" }, 401);
+  }
 
   let body: JsonRecord;
-  try { body = JSON.parse(raw) as JsonRecord; } catch (_) { return json({ error: "Invalid JSON" }, 400); }
+  try {
+    body = JSON.parse(raw) as JsonRecord;
+  } catch (_) {
+    return json({ error: "Invalid JSON" }, 400);
+  }
 
   const eventType = String(body.event ?? body.type ?? "").toUpperCase();
   const data = recordOrEmpty(body.data);
@@ -95,7 +105,10 @@ Deno.serve(async (req) => {
   const eventId = `${eventType}:${
     disputeId ?? orderId ?? subscriptionId ?? "?"
   }`;
-  console.log("[norva-revolut-webhook]", eventType, eventId);
+  const eventLogKey = (await sha256Hex(eventId)).slice(0, 16);
+  console.log("[norva-revolut-webhook]", eventType, {
+    event_key: eventLogKey,
+  });
 
   try {
     // Idempotency before the API round-trip: Revolut retries, so a duplicate id
@@ -113,39 +126,81 @@ Deno.serve(async (req) => {
         // a debit, credit or entitlement change from them.
         return json({ ok: true, skipped: "non_terminal_dispute" });
       }
-      if (eventType === "DISPUTE_WON") {
-        // A won dispute is a distinct chargeback reversal. P0 has no immutable
-        // correction type for it, so keep provider retry/monitoring visible
-        // instead of mislabelling it as a sale or silently erasing the loss.
-        throw new Error(
-          "dispute reversal financial contract is not configured",
-        );
-      }
-      if (eventType !== "DISPUTE_LOST") {
+      if (
+        eventType !== "DISPUTE_LOST" &&
+        eventType !== "DISPUTE_WON"
+      ) {
         return json({ ok: true, skipped: "unsupported_dispute_event" });
       }
       if (!disputeId) {
-        throw new Error("lost dispute has no authoritative dispute id");
+        throw new Error("terminal dispute has no authoritative dispute id");
       }
       if (PARTNERS_ENVIRONMENT !== "production") {
         throw new Error("Revolut disputes are unavailable outside production");
       }
 
       const dispute = await fetchDispute(disputeId);
-      if (String(dispute.state ?? "").toUpperCase() !== "LOST") {
-        throw new Error("authoritative dispute state is not lost");
+      const authoritativeDisputeState = String(dispute.state ?? "")
+        .toUpperCase();
+      const expectedDisputeState = eventType === "DISPUTE_WON" ? "WON" : "LOST";
+      if (authoritativeDisputeState !== expectedDisputeState) {
+        throw new Error(
+          `authoritative dispute state is not ${expectedDisputeState.toLowerCase()}`,
+        );
       }
       const payment = recordOrEmpty(dispute.payment);
       const parentOrderId = stringOrNull(payment.order_id);
       if (!parentOrderId) {
-        throw new Error("lost dispute has no authoritative parent order");
+        throw new Error("terminal dispute has no authoritative parent order");
       }
       const disputeUserId = await resolveRevolutOrderOwner(
         admin,
         parentOrderId,
       );
       if (!disputeUserId || !UUID_RE.test(disputeUserId)) {
-        throw new Error("lost dispute has no durable local owner");
+        throw new Error("terminal dispute has no durable local owner");
+      }
+      if (eventType === "DISPUTE_WON") {
+        const partnersCorrection = revolutDisputeWonPartnerObservation({
+          dispute,
+          referredUserId: disputeUserId,
+          environment: PARTNERS_ENVIRONMENT,
+        });
+        if (!partnersCorrection) {
+          throw new Error(
+            "won dispute has no authoritative correction identity",
+          );
+        }
+        const correctionResult = await enqueuePartnerChargebackReversal(
+          admin,
+          partnersCorrection,
+        );
+        await recordProcessedEvent(
+          admin,
+          disputeUserId,
+          eventId,
+          eventType,
+          {
+            event: eventType,
+            financial_event: "chargeback_reversal",
+            dispute_state: "WON",
+            related_order_present: true,
+            correction_job_status: String(
+              (correctionResult.job as JsonRecord | undefined)?.status ??
+                "pending",
+            ),
+            correction_replayed: correctionResult.replayed,
+            correction_conflict: correctionResult.conflict,
+          },
+        );
+        return json({
+          ok: true,
+          financial_event: "chargeback_reversal",
+          state: "WON",
+          queued: true,
+          replayed: correctionResult.replayed,
+          conflict: correctionResult.conflict,
+        }, 202);
       }
       const partnersObservation = revolutDisputePartnerObservation({
         dispute,
@@ -181,13 +236,23 @@ Deno.serve(async (req) => {
     const remoteState = String(order.state ?? "").toUpperCase();
     const { data: refundAttemptRow, error: refundAttemptError } = orderId
       ? await admin.from("cloud_revolut_refund_attempts")
-        .select("order_id,user_id,amount_cents,currency,status,provider_refund_id")
+        .select(
+          "order_id,user_id,amount_cents,currency,status,provider_refund_id",
+        )
         .eq("provider_refund_id", orderId).maybeSingle()
       : { data: null, error: null };
-    if (refundAttemptError) throw new Error(`refund attempt lookup failed: ${refundAttemptError.message}`);
+    if (refundAttemptError) {
+      throw new Error(
+        `refund attempt lookup failed: ${refundAttemptError.message}`,
+      );
+    }
     type RefundAttempt = {
-      order_id: string; user_id: string; amount_cents: number; currency: string;
-      status: string; provider_refund_id: string | null;
+      order_id: string;
+      user_id: string;
+      amount_cents: number;
+      currency: string;
+      status: string;
+      provider_refund_id: string | null;
     };
     let refundAttempt = refundAttemptRow as RefundAttempt | null;
     // Revolut may deliver the refund webhook before POST /refund returns. The
@@ -196,18 +261,22 @@ Deno.serve(async (req) => {
     // unrelated checkout event.
     const refundRelatedOrderId = stringOrNull(order.related_order_id);
     if (
-      !refundAttempt && orderId
-      && String(order.type ?? "").toLowerCase() === "refund"
-      && refundRelatedOrderId
+      !refundAttempt && orderId &&
+      String(order.type ?? "").toLowerCase() === "refund" &&
+      refundRelatedOrderId
     ) {
       const { data: relatedAttempt, error: relatedAttemptError } = await admin
         .from("cloud_revolut_refund_attempts")
-        .select("order_id,user_id,amount_cents,currency,status,provider_refund_id")
+        .select(
+          "order_id,user_id,amount_cents,currency,status,provider_refund_id",
+        )
         .eq("order_id", refundRelatedOrderId)
         .in("status", ["creating", "processing"])
         .maybeSingle();
       if (relatedAttemptError) {
-        throw new Error(`related refund attempt lookup failed: ${relatedAttemptError.message}`);
+        throw new Error(
+          `related refund attempt lookup failed: ${relatedAttemptError.message}`,
+        );
       }
       refundAttempt = relatedAttempt as RefundAttempt | null;
     }
@@ -218,22 +287,36 @@ Deno.serve(async (req) => {
       const relatedOrderId = stringOrNull(order.related_order_id);
       const providerAmount = Number(order.amount);
       const providerCurrency = String(order.currency ?? "").toUpperCase();
-      const integrityValid = String(order.type ?? "").toLowerCase() === "refund"
-        && relatedOrderId === refundAttempt.order_id
-        && Number.isFinite(providerAmount)
-        && Math.round(providerAmount) === refundAttempt.amount_cents
-        && providerCurrency === refundAttempt.currency;
-      if (!integrityValid) throw new Error("provider refund order failed integrity validation");
+      const integrityValid =
+        String(order.type ?? "").toLowerCase() === "refund" &&
+        relatedOrderId === refundAttempt.order_id &&
+        Number.isFinite(providerAmount) &&
+        Math.round(providerAmount) === refundAttempt.amount_cents &&
+        providerCurrency === refundAttempt.currency;
+      if (!integrityValid) {
+        throw new Error("provider refund order failed integrity validation");
+      }
       if (refundAttempt.provider_refund_id !== orderId) {
-        const { error: bindError } = await admin.rpc("mark_revolut_full_refund_processing", {
-          p_order_id: refundAttempt.order_id,
-          p_user_id: refundAttempt.user_id,
-          p_lease_token: null,
-          p_provider_refund_id: orderId,
-          p_provider_response: order,
-        });
-        if (bindError) throw new Error(`refund order correlation failed: ${bindError.message}`);
-        refundAttempt = { ...refundAttempt, status: "processing", provider_refund_id: orderId };
+        const { error: bindError } = await admin.rpc(
+          "mark_revolut_full_refund_processing",
+          {
+            p_order_id: refundAttempt.order_id,
+            p_user_id: refundAttempt.user_id,
+            p_lease_token: null,
+            p_provider_refund_id: orderId,
+            p_provider_response: order,
+          },
+        );
+        if (bindError) {
+          throw new Error(
+            `refund order correlation failed: ${bindError.message}`,
+          );
+        }
+        refundAttempt = {
+          ...refundAttempt,
+          status: "processing",
+          provider_refund_id: orderId,
+        };
       }
 
       if (eventType === "ORDER_COMPLETED" && remoteState === "COMPLETED") {
@@ -278,31 +361,62 @@ Deno.serve(async (req) => {
         return json({ ok: true, refund: completed, state: remoteState });
       }
       if (
-        ["ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED", "ORDER_CANCELLED"].includes(eventType)
-        || ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(remoteState)
+        ["ORDER_PAYMENT_DECLINED", "ORDER_PAYMENT_FAILED", "ORDER_CANCELLED"]
+          .includes(eventType) ||
+        ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(
+          remoteState,
+        )
       ) {
-        const failureState = ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(remoteState)
-          ? remoteState
-          : eventType.replace(/^ORDER_(?:PAYMENT_)?/, "");
-        const { error: failureError } = await admin.rpc("fail_revolut_refund_order", {
-          p_provider_refund_id: orderId,
-          p_provider_state: failureState,
-          p_provider_response: order,
-        });
-        if (failureError) throw new Error(`refund failure write failed: ${failureError.message}`);
-        await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
-          event: body, refund_order: order, refund_result: "failed",
-        });
+        const failureState =
+          ["FAILED", "DECLINED", "CANCELLED", "REVERSED", "VOIDED"].includes(
+              remoteState,
+            )
+            ? remoteState
+            : eventType.replace(/^ORDER_(?:PAYMENT_)?/, "");
+        const { error: failureError } = await admin.rpc(
+          "fail_revolut_refund_order",
+          {
+            p_provider_refund_id: orderId,
+            p_provider_state: failureState,
+            p_provider_response: order,
+          },
+        );
+        if (failureError) {
+          throw new Error(
+            `refund failure write failed: ${failureError.message}`,
+          );
+        }
+        await recordProcessedEvent(
+          admin,
+          refundAttempt.user_id,
+          eventId,
+          eventType,
+          {
+            event: body,
+            refund_order: order,
+            refund_result: "failed",
+          },
+        );
         return json({ ok: true, refund: "failed", state: failureState });
       }
       // A delivery can race the provider state transition. Do not acknowledge a
       // supposed completion until the authoritative GET is actually COMPLETED.
       if (eventType === "ORDER_COMPLETED") {
-        throw new Error(`authoritative refund state not settled: ${remoteState || "missing"}`);
+        throw new Error(
+          `authoritative refund state not settled: ${remoteState || "missing"}`,
+        );
       }
-      await recordProcessedEvent(admin, refundAttempt.user_id, eventId, eventType, {
-        event: body, refund_order: order, refund_result: "processing",
-      });
+      await recordProcessedEvent(
+        admin,
+        refundAttempt.user_id,
+        eventId,
+        eventType,
+        {
+          event: body,
+          refund_order: order,
+          refund_result: "processing",
+        },
+      );
       return json({ ok: true, refund: "processing", state: remoteState });
     }
     if (String(order.type ?? "").toLowerCase() === "refund") {
@@ -393,16 +507,25 @@ Deno.serve(async (req) => {
     // COMPLETED resubscribe capture disappear from the ledger/refund queue.
     const { data: journalRow, error: journalReadError } = orderId
       ? await admin.from("cloud_revolut_orders")
-        .select("order_id,user_id,kind,plan,period,amount,currency,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result,experiment_key,experiment_variant,paywall_placement,paywall_surface")
+        .select(
+          "order_id,user_id,kind,plan,period,amount,currency,requested_amount_cents,merchant_ext_ref,intent_key,finalized_at,expired_at,superseded_at,finalization_result,experiment_key,experiment_variant,paywall_placement,paywall_surface",
+        )
         .eq("order_id", orderId).maybeSingle()
       : { data: null, error: null };
-    if (journalReadError) throw new Error(`order journal read failed: ${journalReadError.message}`);
+    if (journalReadError) {
+      throw new Error(`order journal read failed: ${journalReadError.message}`);
+    }
     const meta = recordOrEmpty(order.metadata);
     const metadataUserId = resolveUserId(meta);
-    const journalUserId = stringOrNull((journalRow as JsonRecord | null)?.user_id);
+    const journalUserId = stringOrNull(
+      (journalRow as JsonRecord | null)?.user_id,
+    );
     const userId = journalUserId ?? metadataUserId;
     if (!userId) {
-      console.warn("[norva-revolut-webhook] no user_id in order metadata — skipped", { eventType, orderId });
+      console.warn(
+        "[norva-revolut-webhook] no user_id in order metadata — skipped",
+        { eventType, orderId },
+      );
       return json({ ok: true, skipped: "no_user_metadata" });
     }
 
@@ -427,8 +550,15 @@ Deno.serve(async (req) => {
       paywall_surface?: string | null;
     } | null;
     const anchoredKind = String(journal?.kind ?? kind).toLowerCase();
-    const checkoutKind = ["trial_setup", "plan_change", "resubscribe", "card_update"].includes(anchoredKind);
-    const checkoutEvent = ["ORDER_AUTHORISED", "ORDER_COMPLETED"].includes(eventType) && checkoutKind;
+    const checkoutKind = [
+      "trial_setup",
+      "plan_change",
+      "resubscribe",
+      "card_update",
+    ].includes(anchoredKind);
+    const checkoutEvent =
+      ["ORDER_AUTHORISED", "ORDER_COMPLETED"].includes(eventType) &&
+      checkoutKind;
     // Resubscribe is a real full-price AUTOMATIC purchase. A mere card
     // authorization must never grant access; all other checkout kinds are
     // intentionally uncaptured validation holds where AUTHORISED is success.
@@ -439,29 +569,47 @@ Deno.serve(async (req) => {
       throw new Error("checkout order journal missing or ownership mismatch");
     }
     if (checkoutEvent && journal) {
-      const remoteExtRef = stringOrNull(order.merchant_order_ext_ref) ?? stringOrNull(order.merchant_ext_ref);
+      const remoteExtRef = stringOrNull(order.merchant_order_ext_ref) ??
+        stringOrNull(order.merchant_ext_ref);
       const remoteAmount = Number(meta.amount_cents);
       const remoteOrderAmount = Number(order.amount);
-      const remoteCurrency = String(order.currency ?? meta.price_currency ?? "").toUpperCase();
+      const remoteCurrency = String(order.currency ?? meta.price_currency ?? "")
+        .toUpperCase();
       const expectedOrderAmount = journal.kind === "resubscribe"
         ? Number(journal.requested_amount_cents)
         : Number(journal.amount);
-      const immutableMismatch =
-        metadataUserId !== userId ||
+      const immutableMismatch = metadataUserId !== userId ||
         (journal.kind != null && journal.kind !== kind) ||
         (journal.plan != null && journal.plan !== planForMeta(meta)) ||
-        (journal.period != null && journal.period !== (String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly")) ||
-        (journal.requested_amount_cents != null && remoteAmount !== journal.requested_amount_cents) ||
-        (journal.amount != null && Number.isFinite(expectedOrderAmount) && remoteOrderAmount !== expectedOrderAmount) ||
-        (journal.currency != null && remoteCurrency !== journal.currency.toUpperCase()) ||
-        (journal.merchant_ext_ref != null && remoteExtRef !== journal.merchant_ext_ref) ||
-        (journal.intent_key != null && stringOrNull(meta.intent_key) !== journal.intent_key) ||
-        (journal.experiment_key != null && stringOrNull(meta.experiment_key) !== journal.experiment_key) ||
-        (journal.experiment_variant != null && stringOrNull(meta.experiment_variant) !== journal.experiment_variant) ||
-        (journal.paywall_placement != null && stringOrNull(meta.paywall_placement) !== journal.paywall_placement) ||
-        (journal.paywall_surface != null && stringOrNull(meta.paywall_surface) !== journal.paywall_surface);
+        (journal.period != null &&
+          journal.period !==
+            (String(meta.period ?? "").toLowerCase() === "annual"
+              ? "annual"
+              : "monthly")) ||
+        (journal.requested_amount_cents != null &&
+          remoteAmount !== journal.requested_amount_cents) ||
+        (journal.amount != null && Number.isFinite(expectedOrderAmount) &&
+          remoteOrderAmount !== expectedOrderAmount) ||
+        (journal.currency != null &&
+          remoteCurrency !== journal.currency.toUpperCase()) ||
+        (journal.merchant_ext_ref != null &&
+          remoteExtRef !== journal.merchant_ext_ref) ||
+        (journal.intent_key != null &&
+          stringOrNull(meta.intent_key) !== journal.intent_key) ||
+        (journal.experiment_key != null &&
+          stringOrNull(meta.experiment_key) !== journal.experiment_key) ||
+        (journal.experiment_variant != null &&
+          stringOrNull(meta.experiment_variant) !==
+            journal.experiment_variant) ||
+        (journal.paywall_placement != null &&
+          stringOrNull(meta.paywall_placement) !== journal.paywall_placement) ||
+        (journal.paywall_surface != null &&
+          stringOrNull(meta.paywall_surface) !== journal.paywall_surface);
       if (immutableMismatch) {
-        if (journal.kind === "resubscribe" && remoteState === "COMPLETED" && orderId) {
+        if (
+          journal.kind === "resubscribe" && remoteState === "COMPLETED" &&
+          orderId
+        ) {
           const payment = paymentSnapshotFromOrder(order);
           const { data: quarantined, error: quarantineError } = await admin.rpc(
             "reconcile_completed_revolut_resubscribe",
@@ -469,13 +617,17 @@ Deno.serve(async (req) => {
               p_order_id: orderId,
               p_user_id: userId,
               p_provider_payment_id: payment.providerPaymentId,
-              p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+              p_captured_amount_cents: Number.isFinite(remoteOrderAmount)
+                ? Math.round(remoteOrderAmount)
+                : null,
               p_captured_currency: remoteCurrency || null,
               p_provider_integrity_valid: false,
             },
           );
           if (quarantineError) {
-            throw new Error(`captured checkout quarantine failed: ${quarantineError.message}`);
+            throw new Error(
+              `captured checkout quarantine failed: ${quarantineError.message}`,
+            );
           }
           const outcome = Array.isArray(quarantined)
             ? quarantined[0] as JsonRecord | undefined
@@ -533,49 +685,114 @@ Deno.serve(async (req) => {
       (journal?.expired_at || journal?.superseded_at) &&
       !(anchoredKind === "resubscribe" && remoteState === "COMPLETED")
     ) {
-      const holdReleased = remoteState === "AUTHORISED" ? await cancelValidationHold(String(orderId)) : true;
+      const holdReleased = remoteState === "AUTHORISED"
+        ? await cancelValidationHold(String(orderId))
+        : true;
       await recordProcessedEvent(admin, userId, eventId, eventType, {
-        event: body, order, skipped_checkout: journal.superseded_at ? "superseded" : "expired", hold_released: holdReleased,
+        event: body,
+        order,
+        skipped_checkout: journal.superseded_at ? "superseded" : "expired",
+        hold_released: holdReleased,
       });
-      return json({ ok: true, skipped: journal.superseded_at ? "superseded_checkout" : "expired_checkout" });
+      return json({
+        ok: true,
+        skipped: journal.superseded_at
+          ? "superseded_checkout"
+          : "expired_checkout",
+      });
     }
     if (checkoutEvent && !remoteCheckoutSuccess) {
-      if (anchoredKind === "resubscribe" && ["AUTHORISED", "AUTHORIZED", "PROCESSING", "PENDING"].includes(remoteState)) {
+      if (
+        anchoredKind === "resubscribe" &&
+        ["AUTHORISED", "AUTHORIZED", "PROCESSING", "PENDING"].includes(
+          remoteState,
+        )
+      ) {
         await recordProcessedEvent(admin, userId, eventId, eventType, {
-          event: body, order, checkout_status: "payment_processing",
+          event: body,
+          order,
+          checkout_status: "payment_processing",
         });
-        return json({ ok: true, pending: true, status: "payment_processing", state: remoteState });
+        return json({
+          ok: true,
+          pending: true,
+          status: "payment_processing",
+          state: remoteState,
+        });
       }
-      if (["CANCELLED", "FAILED", "DECLINED", "REVERSED", "VOIDED", "EXPIRED"].includes(remoteState)) {
-        await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order, skipped_state: remoteState });
-        return json({ ok: true, skipped: "authoritative_state_not_successful", state: remoteState });
+      if (
+        ["CANCELLED", "FAILED", "DECLINED", "REVERSED", "VOIDED", "EXPIRED"]
+          .includes(remoteState)
+      ) {
+        await recordProcessedEvent(admin, userId, eventId, eventType, {
+          event: body,
+          order,
+          skipped_state: remoteState,
+        });
+        return json({
+          ok: true,
+          skipped: "authoritative_state_not_successful",
+          state: remoteState,
+        });
       }
       // An AUTHORISED event can beat the read replica/API state transition. A 5xx
       // makes Revolut retry rather than permanently acknowledging an unsettled order.
-      throw new Error(`authoritative checkout state not settled: ${remoteState || "missing"}`);
+      throw new Error(
+        `authoritative checkout state not settled: ${remoteState || "missing"}`,
+      );
     }
 
     const checkoutSuccess = checkoutEvent && remoteCheckoutSuccess;
     // Checkout/card-validation orders are account mutations, not recurring
     // charges.  Their failure events must never put an existing subscription in
     // past_due; only an authoritative successful state enters finalization.
-    const patch = checkoutSuccess || checkoutKind ? null : projectionPatch(userId, eventType, order, meta);
+    const patch = checkoutSuccess || checkoutKind
+      ? null
+      : projectionPatch(userId, eventType, order, meta);
     let checkoutResult: string | null = null;
-    if (checkoutSuccess) checkoutResult = await finalizeCheckoutEntitlement(admin, userId, order, meta);
-    else if (patch) {
-      const projectionResult = await applyNonCheckoutProjectionPatch(admin, userId, eventId, patch);
+    if (checkoutSuccess) {
+      checkoutResult = await finalizeCheckoutEntitlement(
+        admin,
+        userId,
+        order,
+        meta,
+      );
+    } else if (patch) {
+      const projectionResult = await applyNonCheckoutProjectionPatch(
+        admin,
+        userId,
+        eventId,
+        patch,
+      );
       if (projectionResult) {
         await recordProcessedEvent(admin, userId, eventId, eventType, {
-          event: body, order, skipped_projection_result: projectionResult,
+          event: body,
+          order,
+          skipped_projection_result: projectionResult,
         });
-        return json({ ok: true, skipped: "projection_not_applied", result: projectionResult });
+        return json({
+          ok: true,
+          skipped: "projection_not_applied",
+          result: projectionResult,
+        });
       }
     }
 
     let effectiveAt: string | null = null;
     let firstChargeAt: string | null = null;
-    if (checkoutSuccess && ["trial_started", "already_confirmed", "plan_change_scheduled"].includes(String(checkoutResult))) {
-      const planCommit = await commitOrderPlan(admin, userId, eventType, meta, orderId);
+    if (
+      checkoutSuccess &&
+      ["trial_started", "already_confirmed", "plan_change_scheduled"].includes(
+        String(checkoutResult),
+      )
+    ) {
+      const planCommit = await commitOrderPlan(
+        admin,
+        userId,
+        eventType,
+        meta,
+        orderId,
+      );
       effectiveAt = planCommit.effectiveAt;
       // A tag/hard-block/rail move can win after entitlement finalization but
       // before the recurring mapping write. The DB trigger makes that race
@@ -584,9 +801,13 @@ Deno.serve(async (req) => {
       if (planCommit.rejectedAs) checkoutResult = planCommit.rejectedAs;
     }
     if (checkoutSuccess && checkoutResult === "trial_started") {
-      const { data: trialProjection } = await admin.from("cloud_entitlement_projection")
+      const { data: trialProjection } = await admin.from(
+        "cloud_entitlement_projection",
+      )
         .select("trial_ends_at").eq("user_id", userId).maybeSingle();
-      firstChargeAt = stringOrNull((trialProjection as { trial_ends_at?: unknown } | null)?.trial_ends_at);
+      firstChargeAt = stringOrNull(
+        (trialProjection as { trial_ends_at?: unknown } | null)?.trial_ends_at,
+      );
     }
     if (checkoutSuccess && orderId) {
       let holdReleased = remoteState !== "AUTHORISED";
@@ -596,28 +817,50 @@ Deno.serve(async (req) => {
         if (holdReleased) finalState = "CANCELLED";
       }
       const finalizationResult = {
-          result: checkoutResult, kind, remote_state: remoteState,
-          hold_released: holdReleased, source: "webhook", effective_at: effectiveAt,
-          first_charge_at: firstChargeAt, trial_ends_at: firstChargeAt,
-        };
-      const { data: finalizationOutcome, error: finalizedError } = await admin.rpc(
-        "finalize_revolut_checkout_order",
-        {
-          p_order_id: orderId,
-          p_user_id: userId,
-          p_state: finalState,
-          p_finalization_result: finalizationResult,
-        },
-      );
-      if (finalizedError) throw new Error(`order finalization journal failed: ${finalizedError.message}`);
-      if (finalizationOutcome !== "finalized" && finalizationOutcome !== "already_finalized") {
-        throw new Error(`order finalization journal rejected: ${String(finalizationOutcome)}`);
+        result: checkoutResult,
+        kind,
+        remote_state: remoteState,
+        hold_released: holdReleased,
+        source: "webhook",
+        effective_at: effectiveAt,
+        first_charge_at: firstChargeAt,
+        trial_ends_at: firstChargeAt,
+      };
+      const { data: finalizationOutcome, error: finalizedError } = await admin
+        .rpc(
+          "finalize_revolut_checkout_order",
+          {
+            p_order_id: orderId,
+            p_user_id: userId,
+            p_state: finalState,
+            p_finalization_result: finalizationResult,
+          },
+        );
+      if (finalizedError) {
+        throw new Error(
+          `order finalization journal failed: ${finalizedError.message}`,
+        );
+      }
+      if (
+        finalizationOutcome !== "finalized" &&
+        finalizationOutcome !== "already_finalized"
+      ) {
+        throw new Error(
+          `order finalization journal rejected: ${String(finalizationOutcome)}`,
+        );
       }
     }
     // The processed marker is deliberately last: a 5xx from any mandatory write
     // above must leave the event replayable.
-    await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order });
-    return json({ ok: true, type: eventType, plan: checkoutSuccess ? planForMeta(meta) : patch?.plan_code ?? null });
+    await recordProcessedEvent(admin, userId, eventId, eventType, {
+      event: body,
+      order,
+    });
+    return json({
+      ok: true,
+      type: eventType,
+      plan: checkoutSuccess ? planForMeta(meta) : patch?.plan_code ?? null,
+    });
   } catch (error) {
     // 5xx → Revolut retries with backoff (3× / 10 min).
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -633,10 +876,16 @@ async function fetchOrder(orderId: string): Promise<JsonRecord> {
     throw new Error("REVOLUT_SECRET_KEY not set — cannot fetch order");
   }
   try {
-    const resp = await fetch(`${REVOLUT_API_BASE}/api/1.0/orders/${encodeURIComponent(orderId)}`, {
-      headers: { "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`, "Accept": "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
+    const resp = await fetch(
+      `${REVOLUT_API_BASE}/api/1.0/orders/${encodeURIComponent(orderId)}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`,
+          "Accept": "application/json",
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
     if (!resp.ok) {
       throw new Error(`fetchOrder ${orderId} returned ${resp.status}`);
     }
@@ -682,31 +931,49 @@ async function fetchDispute(disputeId: string): Promise<JsonRecord> {
 async function cancelValidationHold(orderId: string): Promise<boolean> {
   if (!REVOLUT_SECRET_KEY) return false;
   try {
-    const resp = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/cancel`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`,
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Revolut-Api-Version": "2024-09-01",
+    const resp = await fetch(
+      `${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`,
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Revolut-Api-Version": "2024-09-01",
+        },
+        signal: AbortSignal.timeout(10_000),
       },
-      signal: AbortSignal.timeout(10_000),
-    });
+    );
     return resp.ok;
   } catch (error) {
-    console.warn("[norva-revolut-webhook] validation hold cancel failed", orderId, String((error as Error)?.message ?? error));
+    console.warn(
+      "[norva-revolut-webhook] validation hold cancel failed",
+      orderId,
+      String((error as Error)?.message ?? error),
+    );
     return false;
   }
 }
 
 // --- event -> projection mapping --------------------------------------------
 
-function projectionPatch(userId: string, type: string, order: JsonRecord, meta: JsonRecord): JsonRecord | null {
-  const status = statusForEvent(type, meta, String(order.state ?? "").toUpperCase());
+function projectionPatch(
+  userId: string,
+  type: string,
+  order: JsonRecord,
+  meta: JsonRecord,
+): JsonRecord | null {
+  const status = statusForEvent(
+    type,
+    meta,
+    String(order.state ?? "").toUpperCase(),
+  );
   if (!status) return null;
 
   const planCode = planForMeta(meta);
-  const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
+  const period = String(meta.period ?? "").toLowerCase() === "annual"
+    ? "annual"
+    : "monthly";
   const eventAt = authoritativeOrderEventAt(order);
   const eventMs = new Date(eventAt).getTime();
   const verifiedAt = new Date().toISOString();
@@ -714,7 +981,8 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   const patch: JsonRecord = {
     user_id: userId,
     provider: "revolut",
-    provider_customer_id: stringOrNull(order.customer_id) ?? stringOrNull(meta.customer_id),
+    provider_customer_id: stringOrNull(order.customer_id) ??
+      stringOrNull(meta.customer_id),
     plan_code: planCode,
     status,
     // No per-user limit overrides — entitlements.ts layers the current plan-catalog
@@ -728,20 +996,25 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   if (status === "trialing") {
     // TODO(subscriptions): prefer the subscription's real trial-phase end once we
     // fetch it; TRIAL_DAYS is the interim source of truth.
-    patch.trial_ends_at = new Date(eventMs + TRIAL_DAYS * 86_400_000).toISOString();
+    patch.trial_ends_at = new Date(eventMs + TRIAL_DAYS * 86_400_000)
+      .toISOString();
     patch.trial_consumed_at = eventAt;
     patch.current_period_end = patch.trial_ends_at;
   } else if (status === "active") {
     // TODO(subscriptions): prefer the subscription's real next_billing/period end.
     const days = period === "annual" ? 365 : 30;
-    patch.current_period_end = new Date(eventMs + days * 86_400_000).toISOString();
+    patch.current_period_end = new Date(eventMs + days * 86_400_000)
+      .toISOString();
     const cents = Number(recordOrEmpty(order.order_amount).value);
-    if (Number.isFinite(cents) && cents > 0) patch.mrr_cents = Math.round(cents);
+    if (Number.isFinite(cents) && cents > 0) {
+      patch.mrr_cents = Math.round(cents);
+    }
   }
 
   if (status === "past_due") {
     // Keep access open for a grace window (matches entitlements.ts fail-open).
-    patch.fail_open_until = new Date(eventMs + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
+    patch.fail_open_until = new Date(eventMs + FAIL_OPEN_HOURS * 60 * 60 * 1000)
+      .toISOString();
   }
 
   // Customer-country proxy for the web rail: the card's ISSUING country, read on the
@@ -762,7 +1035,9 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
 function authoritativeOrderEventAt(order: JsonRecord): string {
   const raw = stringOrNull(order.updated_at);
   const ms = raw ? new Date(raw).getTime() : Number.NaN;
-  if (!Number.isFinite(ms)) throw new Error("authoritative order updated_at is missing or invalid");
+  if (!Number.isFinite(ms)) {
+    throw new Error("authoritative order updated_at is missing or invalid");
+  }
   return new Date(ms).toISOString();
 }
 
@@ -778,20 +1053,35 @@ async function finalizeCheckoutEntitlement(
 ): Promise<string> {
   const kind = String(meta.kind ?? "trial_setup").toLowerCase();
   const plan = planForMeta(meta);
-  const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
+  const period = String(meta.period ?? "").toLowerCase() === "annual"
+    ? "annual"
+    : "monthly";
   const nowIso = new Date().toISOString();
-  const customerId = stringOrNull(order.customer_id) ?? stringOrNull(meta.customer_id);
-  const { data: internalAccount, error: internalError } = await db.from("admin_internal_accounts")
+  const customerId = stringOrNull(order.customer_id) ??
+    stringOrNull(meta.customer_id);
+  const { data: internalAccount, error: internalError } = await db.from(
+    "admin_internal_accounts",
+  )
     .select("user_id").eq("user_id", userId).maybeSingle();
-  if (internalError) throw new Error(`internal account lookup failed: ${internalError.message}`);
+  if (internalError) {
+    throw new Error(`internal account lookup failed: ${internalError.message}`);
+  }
   // A checkout may complete after an administrator converted an account to an
   // included pilot.  The order is still finalized/released by the caller, but it
   // cannot create a paid plan or a recurring-customer mapping.
-  if (internalAccount && kind !== "resubscribe") return "rejected_internal_account";
-  const { data: current, error: currentError } = await db.from("cloud_entitlement_projection")
-    .select("status,provider,trial_ends_at,trial_consumed_at,current_period_end,fail_open_until")
+  if (internalAccount && kind !== "resubscribe") {
+    return "rejected_internal_account";
+  }
+  const { data: current, error: currentError } = await db.from(
+    "cloud_entitlement_projection",
+  )
+    .select(
+      "status,provider,trial_ends_at,trial_consumed_at,current_period_end,fail_open_until",
+    )
     .eq("user_id", userId).maybeSingle();
-  if (currentError) throw new Error(`projection read failed: ${currentError.message}`);
+  if (currentError) {
+    throw new Error(`projection read failed: ${currentError.message}`);
+  }
   const cur = current as {
     status?: string;
     provider?: string;
@@ -807,68 +1097,118 @@ async function finalizeCheckoutEntitlement(
   // webhook after that decision. Journal it and release its validation hold, but
   // never replace the authoritative hard block or commit a recurring plan.
   if (hardBlocked && kind !== "resubscribe") return "rejected_account_blocked";
-  const currentEndMs = cur?.current_period_end ? new Date(cur.current_period_end).getTime() : 0;
-  const trialEndMs = cur?.trial_ends_at ? new Date(cur.trial_ends_at).getTime() : 0;
-  const failOpenMs = cur?.fail_open_until ? new Date(cur.fail_open_until).getTime() : 0;
-  const isLive = ["trialing", "active", "past_due", "grace", "cancelled_at_period_end"].includes(curStatus) &&
+  const currentEndMs = cur?.current_period_end
+    ? new Date(cur.current_period_end).getTime()
+    : 0;
+  const trialEndMs = cur?.trial_ends_at
+    ? new Date(cur.trial_ends_at).getTime()
+    : 0;
+  const failOpenMs = cur?.fail_open_until
+    ? new Date(cur.fail_open_until).getTime()
+    : 0;
+  const isLive =
+    ["trialing", "active", "past_due", "grace", "cancelled_at_period_end"]
+      .includes(curStatus) &&
     Math.max(currentEndMs, trialEndMs, failOpenMs) > Date.now();
   const terminalStatus = curStatus === "expired";
-  const foreignRailBlocked = Boolean(cur && curProvider && curProvider !== "revolut" && !terminalStatus);
+  const foreignRailBlocked = Boolean(
+    cur && curProvider && curProvider !== "revolut" && !terminalStatus,
+  );
   const planEffectiveAt = curStatus === "trialing"
     ? (cur?.trial_ends_at ?? cur?.current_period_end)
     : cur?.current_period_end;
   const cardCountry = cardCountryFromOrder(order);
-  const replaceProjectionWithRailCas = async (patch: JsonRecord): Promise<void> => {
+  const replaceProjectionWithRailCas = async (
+    patch: JsonRecord,
+  ): Promise<void> => {
     if (!cur) {
-      const { error } = await db.from("cloud_entitlement_projection").insert(patch);
+      const { error } = await db.from("cloud_entitlement_projection").insert(
+        patch,
+      );
       if (error) throw new Error(`projection insert failed: ${error.message}`);
       return;
     }
-    const { data: changed, error } = await db.from("cloud_entitlement_projection")
+    const { data: changed, error } = await db.from(
+      "cloud_entitlement_projection",
+    )
       .update(patch)
       .eq("user_id", userId)
       .eq("provider", curProvider)
       .eq("status", curStatus)
       .select("user_id");
-    if (error) throw new Error(`projection replacement failed: ${error.message}`);
-    if (!Array.isArray(changed) || changed.length !== 1) throw new Error("projection rail changed concurrently");
+    if (error) {
+      throw new Error(`projection replacement failed: ${error.message}`);
+    }
+    if (!Array.isArray(changed) || changed.length !== 1) {
+      throw new Error("projection rail changed concurrently");
+    }
   };
 
   if (kind === "card_update") {
     if (curProvider !== "revolut") return "rejected_cross_rail";
     if (curStatus === "past_due" || curStatus === "grace") {
-      const { data: changed, error } = await db.from("cloud_entitlement_projection").update({
-        status: "active", provider: "revolut", current_period_end: nowIso,
-        last_event_at: nowIso, last_verified_at: nowIso,
-        ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
-      }).eq("user_id", userId).eq("provider", "revolut").in("status", ["past_due", "grace"]).select("user_id");
+      const { data: changed, error } = await db.from(
+        "cloud_entitlement_projection",
+      ).update({
+        status: "active",
+        provider: "revolut",
+        current_period_end: nowIso,
+        last_event_at: nowIso,
+        last_verified_at: nowIso,
+        ...(cardCountry
+          ? { country_code: cardCountry, country_source: "card" }
+          : {}),
+      }).eq("user_id", userId).eq("provider", "revolut").in("status", [
+        "past_due",
+        "grace",
+      ]).select("user_id");
       if (error) throw new Error(`card recovery failed: ${error.message}`);
-      if (!Array.isArray(changed) || changed.length !== 1) return "card_already_recovered";
+      if (!Array.isArray(changed) || changed.length !== 1) {
+        return "card_already_recovered";
+      }
       return "card_updated_retrying";
     }
     return "card_updated";
   }
 
   const metaAmount = Number(meta.amount_cents);
-  const amount = Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999
-    ? Math.round(metaAmount)
-    : (await getPrices(db))[plan]?.[period];
+  const amount =
+    Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999
+      ? Math.round(metaAmount)
+      : (await getPrices(db))[plan]?.[period];
 
   if (kind === "plan_change") {
     if (curProvider !== "revolut") return "rejected_cross_rail";
-    if (!isLive || !planEffectiveAt || new Date(planEffectiveAt).getTime() <= Date.now()) return "rejected_plan_not_live";
+    if (
+      !isLive || !planEffectiveAt ||
+      new Date(planEffectiveAt).getTime() <= Date.now()
+    ) return "rejected_plan_not_live";
     const change: JsonRecord = {
-      provider: "revolut", provider_customer_id: customerId,
-      last_event_at: nowIso, last_verified_at: nowIso,
-      ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+      provider: "revolut",
+      provider_customer_id: customerId,
+      last_event_at: nowIso,
+      last_verified_at: nowIso,
+      ...(cardCountry
+        ? { country_code: cardCountry, country_source: "card" }
+        : {}),
     };
     if (curStatus === "cancelled_at_period_end") {
-      change.status = cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now() ? "trialing" : "active";
+      change.status =
+        cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now()
+          ? "trialing"
+          : "active";
     }
-    const { data: changed, error } = await db.from("cloud_entitlement_projection")
-      .update(change).eq("user_id", userId).eq("provider", "revolut").eq("status", curStatus).select("user_id");
+    const { data: changed, error } = await db.from(
+      "cloud_entitlement_projection",
+    )
+      .update(change).eq("user_id", userId).eq("provider", "revolut").eq(
+        "status",
+        curStatus,
+      ).select("user_id");
     if (error) throw new Error(`plan change failed: ${error.message}`);
-    if (!Array.isArray(changed) || changed.length !== 1) throw new Error("plan change projection missing");
+    if (!Array.isArray(changed) || changed.length !== 1) {
+      throw new Error("plan change projection missing");
+    }
     return "plan_change_scheduled";
   }
 
@@ -884,8 +1224,12 @@ async function finalizeCheckoutEntitlement(
         p_order_id: orderId,
         p_user_id: userId,
         p_provider_payment_id: payment.providerPaymentId,
-        p_captured_amount_cents: Number.isFinite(Number(order.amount)) ? Math.round(Number(order.amount)) : null,
-        p_captured_currency: String(order.currency ?? meta.price_currency ?? "").toUpperCase() || null,
+        p_captured_amount_cents: Number.isFinite(Number(order.amount))
+          ? Math.round(Number(order.amount))
+          : null,
+        p_captured_currency:
+          String(order.currency ?? meta.price_currency ?? "").toUpperCase() ||
+          null,
         p_provider_integrity_valid: true,
         p_customer_id: customerId,
         p_payment_method_id: payment.paymentMethodId,
@@ -896,15 +1240,25 @@ async function finalizeCheckoutEntitlement(
       },
     );
     if (reconcileError) {
-      throw new Error(`resubscribe terminal reconciliation failed: ${reconcileError.message}`);
+      throw new Error(
+        `resubscribe terminal reconciliation failed: ${reconcileError.message}`,
+      );
     }
-    const outcome = Array.isArray(reconciled) ? reconciled[0] as JsonRecord | undefined : reconciled as JsonRecord | null;
+    const outcome = Array.isArray(reconciled)
+      ? reconciled[0] as JsonRecord | undefined
+      : reconciled as JsonRecord | null;
     const result = stringOrNull(outcome?.result);
     if (result === "refund_required") {
-      throw new Error(`captured resubscribe requires refund: ${stringOrNull(outcome?.exception_reason) ?? "manual_review"}`);
+      throw new Error(
+        `captured resubscribe requires refund: ${
+          stringOrNull(outcome?.exception_reason) ?? "manual_review"
+        }`,
+      );
     }
     if (result !== "applied" && result !== "already_applied") {
-      throw new Error(`resubscribe terminal reconciliation returned ${result ?? "no_result"}`);
+      throw new Error(
+        `resubscribe terminal reconciliation returned ${result ?? "no_result"}`,
+      );
     }
     return "resubscribed";
   }
@@ -914,35 +1268,56 @@ async function finalizeCheckoutEntitlement(
   if (isLive) return "already_active";
   // New checkout orders freeze the exact first debit date in server metadata;
   // the calculated fallback is retained only for pre-contract legacy orders.
-  const trialEnd = isoTimestampOrNull(meta.first_charge_at)
-    ?? new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
+  const trialEnd = isoTimestampOrNull(meta.first_charge_at) ??
+    new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
   const trialOrderId = stringOrNull(order.id);
   if (trialOrderId) {
-    const { error: lifecycleError } = await db.from("cloud_entitlement_events").upsert({
-      user_id: userId,
-      provider: "revolut",
-      provider_event_id: `checkout:${trialOrderId}:trial-started`,
-      event_type: "TRIAL_STARTED",
-      payload: { order_id: trialOrderId, plan_label: plan, bill_period: period, first_charge_at: trialEnd },
-      processed_at: nowIso,
-    }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
-    if (lifecycleError) throw new Error(`trial lifecycle write failed: ${lifecycleError.message}`);
+    const { error: lifecycleError } = await db.from("cloud_entitlement_events")
+      .upsert({
+        user_id: userId,
+        provider: "revolut",
+        provider_event_id: `checkout:${trialOrderId}:trial-started`,
+        event_type: "TRIAL_STARTED",
+        payload: {
+          order_id: trialOrderId,
+          plan_label: plan,
+          bill_period: period,
+          first_charge_at: trialEnd,
+        },
+        processed_at: nowIso,
+      }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
+    if (lifecycleError) {
+      throw new Error(
+        `trial lifecycle write failed: ${lifecycleError.message}`,
+      );
+    }
   }
   await replaceProjectionWithRailCas({
-    user_id: userId, status: "trialing", provider: "revolut", provider_customer_id: customerId,
-    plan_code: plan, trial_ends_at: trialEnd, trial_consumed_at: nowIso,
-    current_period_end: trialEnd, last_event_at: nowIso, last_verified_at: nowIso,
-    ...(amount ? {
-      // mrr_cents stores the full billed-period amount. Annual normalization is
-      // performed exactly once by the reporting views.
-      mrr_cents: amount,
-      bill_period: period,
-      billing_currency: "USD",
-      billing_product_id: null,
-      billing_package_id: null,
-      billing_terms_source: "revolut_order_snapshot",
-    } : {}),
-    ...(cardCountry ? { country_code: cardCountry, country_source: "card" } : {}),
+    user_id: userId,
+    status: "trialing",
+    provider: "revolut",
+    provider_customer_id: customerId,
+    plan_code: plan,
+    trial_ends_at: trialEnd,
+    trial_consumed_at: nowIso,
+    current_period_end: trialEnd,
+    last_event_at: nowIso,
+    last_verified_at: nowIso,
+    ...(amount
+      ? {
+        // mrr_cents stores the full billed-period amount. Annual normalization is
+        // performed exactly once by the reporting views.
+        mrr_cents: amount,
+        bill_period: period,
+        billing_currency: "USD",
+        billing_product_id: null,
+        billing_package_id: null,
+        billing_terms_source: "revolut_order_snapshot",
+      }
+      : {}),
+    ...(cardCountry
+      ? { country_code: cardCountry, country_source: "card" }
+      : {}),
   });
   return "trial_started";
 }
@@ -951,17 +1326,26 @@ async function finalizeCheckoutEntitlement(
 // live events (étape 0, 2026-07-17): payments[].payment_method.card.card_country.
 // Older candidates kept as fallback for other API generations.
 function cardCountryFromOrder(order: JsonRecord): string | null {
-  const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+  const payments = Array.isArray(order.payments)
+    ? order.payments as JsonRecord[]
+    : [];
   for (const p of payments) {
     const pm = recordOrEmpty(p.payment_method);
     const card = recordOrEmpty(pm.card);
-    const raw = card.card_country ?? pm.card_country_code ?? card.card_country_code ?? card.country_code ?? p.card_country_code;
-    if (typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim())) return raw.trim().toUpperCase();
+    const raw = card.card_country ?? pm.card_country_code ??
+      card.card_country_code ?? card.country_code ?? p.card_country_code;
+    if (typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim())) {
+      return raw.trim().toUpperCase();
+    }
   }
   return null;
 }
 
-function statusForEvent(type: string, meta: JsonRecord, authoritativeOrderState: string): string | null {
+function statusForEvent(
+  type: string,
+  meta: JsonRecord,
+  authoritativeOrderState: string,
+): string | null {
   const kind = String(meta.kind ?? "").toLowerCase();
   switch (type) {
     case "ORDER_COMPLETED":
@@ -973,7 +1357,9 @@ function statusForEvent(type: string, meta: JsonRecord, authoritativeOrderState:
       return kind === "trial_setup" ? "trialing" : "active";
     case "ORDER_PAYMENT_DECLINED":
     case "ORDER_PAYMENT_FAILED":
-      return ["FAILED", "DECLINED", "CANCELLED"].includes(authoritativeOrderState)
+      return ["FAILED", "DECLINED", "CANCELLED"].includes(
+          authoritativeOrderState,
+        )
         ? "past_due"
         : null;
     // Subscription notifications need the authoritative Subscription object,
@@ -1010,9 +1396,15 @@ type OrderPlanCommitResult = {
 };
 
 function mappingGuardFinalization(message: string): string | null {
-  if (message.includes("internal_account_not_billable")) return "rejected_internal_account";
-  if (message.includes("revolut_customer_account_blocked")) return "rejected_account_blocked";
-  if (message.includes("revolut_customer_rail_mismatch")) return "rejected_cross_rail";
+  if (message.includes("internal_account_not_billable")) {
+    return "rejected_internal_account";
+  }
+  if (message.includes("revolut_customer_account_blocked")) {
+    return "rejected_account_blocked";
+  }
+  if (message.includes("revolut_customer_rail_mismatch")) {
+    return "rejected_cross_rail";
+  }
   return null;
 }
 
@@ -1023,18 +1415,24 @@ function paymentSnapshotFromOrder(order: JsonRecord): {
   cardBrand: string | null;
   cardExp: string | null;
 } {
-  const payments = Array.isArray(order.payments) ? order.payments as JsonRecord[] : [];
+  const payments = Array.isArray(order.payments)
+    ? order.payments as JsonRecord[]
+    : [];
   const payment = payments.length ? payments[payments.length - 1] : {};
   const method = recordOrEmpty(payment.payment_method);
   const card = recordOrEmpty(method.card);
-  const expMonth = stringOrNull(card.expiry_month) ?? stringOrNull(card.exp_month);
+  const expMonth = stringOrNull(card.expiry_month) ??
+    stringOrNull(card.exp_month);
   const expYear = stringOrNull(card.expiry_year) ?? stringOrNull(card.exp_year);
   const cardExp = expMonth && expYear
-    ? `${expMonth.padStart(2, "0")}/${expYear.length === 4 ? expYear.slice(-2) : expYear}`
+    ? `${expMonth.padStart(2, "0")}/${
+      expYear.length === 4 ? expYear.slice(-2) : expYear
+    }`
     : stringOrNull(card.expiry);
   return {
     providerPaymentId: stringOrNull(payment.id),
-    paymentMethodId: stringOrNull(method.id) ?? stringOrNull(payment.payment_method_id),
+    paymentMethodId: stringOrNull(method.id) ??
+      stringOrNull(payment.payment_method_id),
     cardLast4: stringOrNull(card.last4) ?? stringOrNull(method.last4),
     cardBrand: stringOrNull(card.brand) ?? stringOrNull(method.brand),
     cardExp,
@@ -1059,11 +1457,14 @@ async function commitOrderPlan(
     return { effectiveAt: null, rejectedAs: null };
   }
   const plan = planForMeta(meta);
-  const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
+  const period = String(meta.period ?? "").toLowerCase() === "annual"
+    ? "annual"
+    : "monthly";
   const metaAmount = Number(meta.amount_cents);
-  const amount = (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
-    ? Math.round(metaAmount)
-    : (await getPrices(db))[plan]?.[period];
+  const amount =
+    (Number.isFinite(metaAmount) && metaAmount >= 100 && metaAmount <= 99999)
+      ? Math.round(metaAmount)
+      : (await getPrices(db))[plan]?.[period];
   if (!amount) throw new Error("checkout plan amount is not committable");
   // Conditions promo « N périodes » stampées à l'ouverture du checkout —
   // absentes (vieil ordre) = réduction à vie, comportement historique.
@@ -1170,10 +1571,7 @@ async function verifySignature(req: Request, raw: string): Promise<boolean> {
     return false;
   }
   const expected = "v1=" + (await hmacHex(SIGNING_SECRET, `v1.${ts}.${raw}`));
-  // The header can carry multiple space-separated signatures during key rotation.
-  return sigHeader.split(/\s+/).filter(Boolean).some((s) =>
-    timingSafeEqual(s, expected)
-  );
+  return revolutWebhookSignatureMatches(sigHeader, expected);
 }
 
 async function hmacHex(secret: string, message: string): Promise<string> {
@@ -1187,15 +1585,6 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
 }
 
 // --- persistence helpers ----------------------------------------------------

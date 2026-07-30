@@ -43,7 +43,7 @@ const SHADOW_WINDOW_HOURS = boundedInt(
 );
 
 type JsonRecord = Record<string, unknown>;
-type JobKind = "commission" | "maturation";
+type JobKind = "commission" | "correction" | "maturation";
 type WorkerName = JobKind | "reconciliation";
 type JobCounts = {
   leased: number;
@@ -138,6 +138,8 @@ function validateLeaseEnvelope(
     : null;
   const keyPattern = kind === "commission"
     ? /^job_[0-9a-f]{24}$/
+    : kind === "correction"
+    ? /^crw_[0-9a-f]{24}$/
     : /^mat_[0-9a-f]{24}$/;
   if (
     Number(envelope.schema_version) !== 1 ||
@@ -173,6 +175,8 @@ function validateCompletion(
   const status = String(job.status ?? "");
   const expectedAction = kind === "commission"
     ? "commission_job_completed"
+    : kind === "correction"
+    ? "chargeback_reversal_job_completed"
     : "maturation_job_completed";
   if (
     Number(envelope.schema_version) !== 1 ||
@@ -230,6 +234,11 @@ function rpcNames(kind: JobKind): {
       lease: "partners_worker_commission_jobs_lease",
       complete: "partners_worker_commission_job_complete",
     }
+    : kind === "correction"
+    ? {
+      lease: "partners_worker_revolut_dispute_won_jobs_lease",
+      complete: "partners_worker_revolut_dispute_won_job_complete",
+    }
     : {
       lease: "partners_worker_maturation_lease",
       complete: "partners_worker_maturation_complete",
@@ -264,6 +273,9 @@ async function completeJob(
     const classification = classifyPartnersWorkerRpcFailure({
       code: error instanceof RpcFailure ? error.code : "unknown",
     });
+    if (kind === "correction" && classification.code === "P0006") {
+      classification.outcome = "retry";
+    }
     if (classification.outcome === "lease_lost") {
       counts.lease_lost += 1;
       return;
@@ -377,6 +389,30 @@ async function shadowReconcile(
   };
 }
 
+async function recoverKycBindings(
+  db: SupabaseClient,
+): Promise<{ expired: number }> {
+  const result = unwrapRpcJson(
+    await rpc(db, "partners_service_kyc_binding_recover", {
+      p_limit: BATCH_SIZE,
+    }),
+  );
+  const expired = Number(result.expired);
+  if (
+    Number(result.schema_version) !== 1 ||
+    result.action !== "kyc_binding_recovery_completed" ||
+    !Number.isSafeInteger(expired) ||
+    expired < 0 ||
+    expired > BATCH_SIZE
+  ) {
+    throw new RpcFailure(
+      "kyc_binding_recovery_invalid_response",
+      "invalid_response",
+    );
+  }
+  return { expired };
+}
+
 async function runObservedTask<T>(
   db: SupabaseClient,
   worker: WorkerName,
@@ -435,10 +471,30 @@ Deno.serve(async (req) => {
   }
 
   const workerId = `partners-worker:${crypto.randomUUID()}`;
+  let kycRecovery:
+    | { ok: true; value: { expired: number } }
+    | { ok: false };
+  try {
+    kycRecovery = {
+      ok: true,
+      value: await recoverKycBindings(db),
+    };
+  } catch (error) {
+    console.error("[norva-partners-worker] KYC recovery failed", {
+      code: sanitizedFailureCode(error),
+    });
+    kycRecovery = { ok: false };
+  }
   const commission = await runObservedTask(
     db,
     "commission",
     () => drainJobKind(db, "commission", workerId),
+    (counts) => ({ ...counts }),
+  );
+  const correction = await runObservedTask(
+    db,
+    "correction",
+    () => drainJobKind(db, "correction", workerId),
     (counts) => ({ ...counts }),
   );
   const maturation = await runObservedTask(
@@ -460,13 +516,21 @@ Deno.serve(async (req) => {
     }),
   );
 
-  if (!commission.ok || !maturation.ok || !reconciliation.ok) {
+  if (
+    !kycRecovery.ok ||
+    !commission.ok ||
+    !correction.ok ||
+    !maturation.ok ||
+    !reconciliation.ok
+  ) {
     return json({ error: "Partners worker run failed" }, 500);
   }
   return json({
     ok: true,
     schema_version: 1,
+    kyc_recovery: kycRecovery.value,
     commission: commission.value,
+    correction: correction.value,
     maturation: maturation.value,
     reconciliation: reconciliation.value,
   });

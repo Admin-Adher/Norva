@@ -5,17 +5,22 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
     environment: Cloudflare
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: '22'
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22.22.3'
 
       - name: Install test dependencies
         run: npm ci --ignore-scripts
@@ -35,6 +40,30 @@ jobs:
           node --check public/js/pages/WatchPage.js
           node --check public/js/norvaEngine.js
 
+      - name: Compile and verify Cloudflare Pages Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          functions_build="$(mktemp -d)"
+          trap 'rm -rf -- "$functions_build"' EXIT
+          test "$(npx --no-install wrangler --version)" = "4.102.0"
+          npx --no-install wrangler pages functions build functions \
+            --outdir "$functions_build/bundle" \
+            --output-routes-path "$functions_build/routes.json"
+          test -s "$functions_build/bundle/index.js"
+          node - "$functions_build/routes.json" "$functions_build/bundle/index.js" <<'NODE'
+          const fs = require('node:fs');
+          const routes = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const bundle = fs.readFileSync(process.argv[3], 'utf8');
+          if (
+            !Array.isArray(routes.include)
+            || !routes.include.includes('/partners-kyc-return')
+            || !bundle.includes('routePath: "/partners-kyc-return"')
+          ) {
+            throw new Error('Didit callback is missing from the Pages Functions bundle');
+          }
+          NODE
+
       - name: Minify landing CSS (strips comments and whitespace only)
         run: npm run minify:css
 
@@ -45,7 +74,7 @@ jobs:
         run: npm run inline:css
 
       - name: Deploy public/ to Cloudflare Pages (norva-web)
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

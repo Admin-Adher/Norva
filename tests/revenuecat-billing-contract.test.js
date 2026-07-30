@@ -71,9 +71,15 @@ test('an unmapped paid grant stays retryable unless a same-rail plan can be pres
   assert.equal(shouldRejectUnmappedRevenueCatEvent('RENEWAL', 'family', 'warn'), false);
 
   const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-billing-webhook/index.ts'), 'utf8');
-  const rejection = source.indexOf('shouldRejectUnmappedRevenueCatEvent(eventType, resolvedPlan');
-  const paymentJournal = source.indexOf('await journalRcPayment(admin, userId, eventType, event, resolvedPlan, attribution)');
-  const processedMarker = source.indexOf('await recordProcessedEvent(admin, userId, eventId, eventType');
+  const rejection = source.search(
+    /shouldRejectUnmappedRevenueCatEvent\(\s*eventType,\s*resolvedPlan/,
+  );
+  const paymentJournal = source.search(
+    /await\s+journalRcPayment\(\s*admin,\s*userId,\s*eventType,\s*event,\s*resolvedPlan,\s*attribution,\s*\)/,
+  );
+  const processedMarker = source.search(
+    /await\s+recordProcessedEvent\(\s*admin,\s*userId,\s*eventId,\s*eventType/,
+  );
   assert.ok(rejection > 0 && rejection < paymentJournal && rejection < processedMarker);
 });
 
@@ -96,7 +102,10 @@ test('an older RevenueCat delivery after a renewal is rejected by the monotonic 
   assert.match(migration, /current_projection\.provider[\s\S]*'revenuecat'[\s\S]*'google_play'[\s\S]*'apple_app_store'/);
   assert.match(migration, /excluded\.status in \('trialing', 'active'\)/);
   assert.match(migration, /revoke all on function public\.apply_revenuecat_entitlement_event/);
-  assert.match(webhook, /admin\.rpc\("apply_revenuecat_entitlement_event"/);
+  assert.match(
+    webhook,
+    /admin\.rpc\(\s*"apply_revenuecat_entitlement_event"/,
+  );
   assert.match(webhook, /p_event_id: causalEventId/);
   assert.doesNotMatch(webhook, /\.upsert\(patch,\s*\{\s*onConflict:\s*"user_id"\s*\}\)/);
 });

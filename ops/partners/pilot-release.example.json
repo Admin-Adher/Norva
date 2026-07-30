@@ -1,7 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "draft",
-  "release_key": "partners-pilot-replace-me",
+  "release_key": "partners-pilot-draft",
+  "candidate_commit_sha": null,
+  "repository": "Admin-Adher/Norva",
+  "target_environment": "sandbox",
+  "deployment_id": null,
   "contains_personal_data": false,
   "program": {
     "version_key": null,
@@ -17,7 +21,8 @@
     "privacy_review_evidence": null,
     "public_surfaces": {
       "verified_at": null,
-      "deployment_ref": null,
+      "hash_basis": "normalized_deployment_artifact",
+      "deployment_evidence": null,
       "terms_evidence": null,
       "privacy_evidence": null,
       "partners_terms_evidence": null
@@ -30,13 +35,41 @@
     "configured_count": 0,
     "identities_stored_in_evidence": false
   },
+  "database_snapshot": {
+    "status": "not_captured",
+    "evidence": null,
+    "includes": {
+      "program_versions": false,
+      "country_policies": false,
+      "currency_metadata": false,
+      "payout_provider_routes": false,
+      "pilot_allowlist": false,
+      "feature_flags": false,
+      "release_gates": false
+    }
+  },
+  "app_links": {
+    "android_phone": {
+      "status": "not_verified",
+      "package_name": "tv.norva.phone",
+      "referral_path": "/r/{code}",
+      "play_signed_aab": false,
+      "evidence": null
+    }
+  },
   "providers": {
     "didit": {
       "status": "not_configured",
-      "sandbox_evidence": null
+      "environment": "sandbox",
+      "config_fingerprint_sha256": null,
+      "workflow_version": null,
+      "sandbox_evidence": null,
+      "live_evidence": null,
+      "environment_isolation_evidence": null
     },
     "individual_payout": {
       "status": "not_selected",
+      "provider": null,
       "sandbox_evidence": null
     },
     "web_tax": {
@@ -63,6 +96,16 @@
     "partners_payouts_live": false,
     "partners_tv_relay_enabled": false
   },
+  "release_gates": {
+    "general_release_approved": false,
+    "general_release_evidence": null
+  },
+  "payout_reconciliation": {
+    "provider": null,
+    "contract_version": null,
+    "financial_reports_status": "not_verified",
+    "financial_reports_completeness_evidence": null
+  },
   "quality": {
     "partners_ci_run_evidence": null,
     "security_advisors_passed": false,
@@ -74,26 +117,52 @@
   },
   "runtime": {
     "worker_cron_evidence": null,
-    "shadow_reconciliation_evidence": null,
-    "shadow_reconciliation_clean": false,
+    "shadow_observation": {
+      "started_at": null,
+      "completed_at": null,
+      "clean": false,
+      "evidence": null
+    },
+    "pilot_observation": {
+      "started_at": null,
+      "completed_at": null,
+      "observed_days": 0,
+      "evidence": null
+    },
     "alert_and_recovery_evidence": null
   },
   "payout_cycles": [
     {
       "sequence": 1,
       "status": "not_started",
+      "period_started_at": null,
+      "period_completed_at": null,
       "reconciliation_evidence": null
     },
     {
       "sequence": 2,
       "status": "not_started",
+      "period_started_at": null,
+      "period_completed_at": null,
       "reconciliation_evidence": null
     }
   ],
   "approvals": {
-    "legal": false,
-    "risk": false,
-    "finance": false,
-    "operations": false
+    "legal": {
+      "approved": false,
+      "evidence": null
+    },
+    "risk": {
+      "approved": false,
+      "evidence": null
+    },
+    "finance": {
+      "approved": false,
+      "evidence": null
+    },
+    "operations": {
+      "approved": false,
+      "evidence": null
+    }
   }
 }

@@ -90,7 +90,10 @@ test('webhook retries provider read failures and marks events only after mandato
   assert.match(source, /checkout order metadata does not match immutable journal/);
   assert.match(source, /journal\?\.finalized_at[\s\S]*duplicate_finalization/);
   assert.match(source, /journal\?\.expired_at \|\| journal\?\.superseded_at/);
-  assert.match(source, /checkoutSuccess \|\| checkoutKind \? null : projectionPatch/);
+  assert.match(
+    source,
+    /checkoutSuccess\s*\|\|\s*checkoutKind\s*\?\s*null\s*:\s*projectionPatch/,
+  );
   const finalMarker = source.lastIndexOf('await recordProcessedEvent');
   const journalFinalization = source.indexOf('order finalization journal failed');
   const planCommit = source.indexOf('const planCommit = await commitOrderPlan');
@@ -110,14 +113,23 @@ test('Revolut webhook rejects validation holds over a hard block and quarantines
   assert.ok(guard < finalize.indexOf('replaceProjectionWithRailCas({'));
   assert.match(source, /reconcile_completed_revolut_resubscribe/);
   assert.match(source, /captured resubscribe requires refund/);
-  assert.match(source, /checkoutSuccess && \["trial_started", "already_confirmed", "plan_change_scheduled"\]/);
+  assert.match(
+    source,
+    /checkoutSuccess\s*&&\s*\[\s*"trial_started",\s*"already_confirmed",\s*"plan_change_scheduled",?\s*\]\.includes\(\s*String\(checkoutResult\),?\s*\)/,
+  );
   assert.doesNotMatch(source, /checkoutSuccess && \[[^\]]*rejected_account_blocked/);
 });
 
 test('Revolut webhook preserves internal and terminal accounts for every event kind', () => {
   const source = read('supabase/functions/norva-revolut-webhook/index.ts');
-  assert.match(source, /if \(internalAccount && kind !== "resubscribe"\) return "rejected_internal_account"/);
-  assert.match(source, /applyNonCheckoutProjectionPatch\(admin, userId, eventId, patch\)/);
+  assert.match(
+    source,
+    /if\s*\(\s*internalAccount\s*&&\s*kind\s*!==\s*"resubscribe"\s*\)\s*\{\s*return\s+"rejected_internal_account";?\s*\}/,
+  );
+  assert.match(
+    source,
+    /applyNonCheckoutProjectionPatch\(\s*admin,\s*userId,\s*eventId,\s*patch,?\s*\)/,
+  );
   assert.match(source, /\.rpc\("apply_revolut_entitlement_event"/);
   assert.match(source, /skipped_projection_result: projectionResult/);
   assert.doesNotMatch(source, /\.upsert\(patch, \{ onConflict: "user_id" \}\)/);

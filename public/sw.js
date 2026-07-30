@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION to drop every old cache on activate.
  */
 
-const CACHE_VERSION = 'norva-sw-v5';
+const CACHE_VERSION = 'norva-sw-v6';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const ASSET_CACHE_LIMIT = 220;
@@ -43,6 +43,22 @@ function isSameOrigin(url) {
   return url.origin === self.location.origin;
 }
 
+function hasSensitiveDiditParams(url) {
+  const isAppReturnPath = url.pathname === '/partners-kyc-return'
+    || url.pathname === '/app'
+    || url.pathname === '/app.html';
+  return url.searchParams.has('verificationSessionId')
+    || (isAppReturnPath && url.searchParams.has('status'));
+}
+
+function canCacheRequest(request) {
+  try {
+    return new URL(request.url).search === '';
+  } catch (_) {
+    return false;
+  }
+}
+
 // Anything that streams or talks to the backend must bypass the SW entirely.
 function isBypassed(url) {
   if (!isSameOrigin(url)) {
@@ -50,7 +66,9 @@ function isBypassed(url) {
     // (Supabase, gateway, relay, CDN scripts) goes straight to the network.
     return url.hostname !== 'image.tmdb.org';
   }
-  return url.pathname.startsWith('/api/')
+  return url.pathname === '/partners-kyc-return'
+    || hasSensitiveDiditParams(url)
+    || url.pathname.startsWith('/api/')
     || url.pathname.startsWith('/relay/')
     || url.pathname.startsWith('/raw/')
     || url.pathname.startsWith('/sessions/');
@@ -70,7 +88,7 @@ async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
+    if (response && response.ok && canCacheRequest(request)) {
       cache.put(request, response.clone()).catch(() => { });
     }
     return response;
@@ -90,7 +108,7 @@ async function cacheFirst(request, cacheName) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response && response.ok) {
+  if (response && response.ok && canCacheRequest(request)) {
     cache.put(request, response.clone()).catch(() => { });
     trimCache(cacheName, ASSET_CACHE_LIMIT);
   }

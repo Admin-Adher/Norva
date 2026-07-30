@@ -1356,6 +1356,7 @@ class PartnersPage {
 
     payoutProviderLabel(provider) {
         return ({
+            airwallex: 'Airwallex',
             wise: 'Wise',
             revolut: 'Revolut',
             stripe_connect: 'Stripe Connect'
@@ -1496,6 +1497,7 @@ class PartnersPage {
             ['available', 'Available'],
             ['held', 'Held'],
             ['paid', 'Paid'],
+            ['restored', 'Restored'],
             ['reversed', 'Reversed']
         ].map(([value, label]) => `<button class="partners-filter-chip${dashboard.history.status === value ? ' is-active' : ''}"
             type="button" data-partners-history-filter="${value}"
@@ -1651,6 +1653,7 @@ class PartnersPage {
             commission_available: 'Commission available',
             commission_held: 'Commission held for review',
             commission_paid: 'Commission paid',
+            commission_restored: 'Commission restored',
             commission_reversed: 'Commission reversed'
         })[type] || 'Partner event';
     }

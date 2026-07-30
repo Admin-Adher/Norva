@@ -7,10 +7,14 @@ on:
       - main
     paths:
       - '.github/workflows/partners-integration.yml'
+      - '.github/workflows/partners-release-gate.yml'
+      - '.github/workflows/deploy-cloudflare.yml'
+      - '.github/workflows/deploy-relay.yml'
       - '.github/workflows/backup-db-to-r2.yml'
       - 'supabase/functions/deno.partners.json'
       - 'supabase/functions/deno.partners.lock'
       - 'public/app.html'
+      - 'public/sw.js'
       - 'public/partners-terms.html'
       - 'public/privacy.html'
       - 'public/terms.html'
@@ -24,6 +28,7 @@ on:
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
       - 'functions/_shared/**'
+      - 'functions/partners-kyc-return.js'
       - 'functions/api/partners/**'
       - 'functions/r/**'
       - 'ops/hetzner/.env.hetzner.example'
@@ -34,9 +39,12 @@ on:
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
+      - 'scripts/verify-airwallex-report-contract.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -48,6 +56,7 @@ on:
       - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
+      - 'supabase/functions/norva-revenuecat-transfer-worker/**'
       - 'supabase/functions/norva-revolut-billing/**'
       - 'supabase/functions/norva-revolut-webhook/**'
       - 'supabase/migrations/**'
@@ -64,10 +73,14 @@ on:
       - main
     paths:
       - '.github/workflows/partners-integration.yml'
+      - '.github/workflows/partners-release-gate.yml'
+      - '.github/workflows/deploy-cloudflare.yml'
+      - '.github/workflows/deploy-relay.yml'
       - '.github/workflows/backup-db-to-r2.yml'
       - 'supabase/functions/deno.partners.json'
       - 'supabase/functions/deno.partners.lock'
       - 'public/app.html'
+      - 'public/sw.js'
       - 'public/partners-terms.html'
       - 'public/privacy.html'
       - 'public/terms.html'
@@ -81,6 +94,7 @@ on:
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
       - 'functions/_shared/**'
+      - 'functions/partners-kyc-return.js'
       - 'functions/api/partners/**'
       - 'functions/r/**'
       - 'ops/hetzner/.env.hetzner.example'
@@ -91,9 +105,12 @@ on:
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
+      - 'scripts/verify-airwallex-report-contract.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -105,6 +122,7 @@ on:
       - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
+      - 'supabase/functions/norva-revenuecat-transfer-worker/**'
       - 'supabase/functions/norva-revolut-billing/**'
       - 'supabase/functions/norva-revolut-webhook/**'
       - 'supabase/migrations/**'
@@ -186,6 +204,7 @@ jobs:
           supabase/functions/norva-partners-payout/index.ts
           supabase/functions/norva-partners-referral/index.ts
           supabase/functions/norva-partners-worker/index.ts
+          supabase/functions/norva-revenuecat-transfer-worker/index.ts
           supabase/functions/norva-admin/index.ts
           supabase/functions/norva-account-delete/index.ts
           supabase/functions/norva-billing-webhook/index.ts
@@ -197,6 +216,7 @@ jobs:
           deno test
           --config supabase/functions/deno.partners.json
           --frozen
+          supabase/functions/_shared/didit-partners.test.ts
           supabase/functions/norva-partners-payout/partners-airwallex.test.ts
 
   android-contracts:
@@ -317,7 +337,13 @@ jobs:
         run: supabase db reset --local --no-seed
 
       - name: Run Partners pgTAP integration tests
-        run: supabase test db supabase/tests/affiliate_p0.sql --local
+        run: >-
+          supabase test db
+          supabase/tests/affiliate_p0.sql
+          supabase/tests/affiliate_airwallex_reports.sql
+          supabase/tests/affiliate_dispute_won.sql
+          supabase/tests/revenuecat_transfer.sql
+          --local
 
       - name: Lint public and private Partners routines
         run: >-

@@ -46,7 +46,10 @@ test('obsolete order event names cannot contradict the re-fetched order state', 
   const end = source.indexOf('function planForMeta', start);
   const mapper = source.slice(start, end);
   assert.match(mapper, /authoritativeOrderState !== "COMPLETED"/);
-  assert.match(mapper, /\["FAILED", "DECLINED", "CANCELLED"\]\.includes\(authoritativeOrderState\)/);
+  assert.match(
+    mapper,
+    /\["FAILED", "DECLINED", "CANCELLED"\]\.includes\(\s*authoritativeOrderState,\s*\)/,
+  );
   assert.match(mapper, /Subscription notifications need the authoritative Subscription object/);
   assert.doesNotMatch(mapper, /case "SUBSCRIPTION_OVERDUE":\s*return "past_due"/);
 });

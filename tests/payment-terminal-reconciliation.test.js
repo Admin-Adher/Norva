@@ -93,7 +93,10 @@ test('paid RevenueCat INTRO periods fail closed without money and ledger keeps b
   const freeTrial = rc.slice(rc.indexOf('function isFreeTrialPeriod'), rc.indexOf('function refundedMoney'));
   assert.match(freeTrial, /return periodType === "TRIAL"/);
   assert.doesNotMatch(freeTrial, /INTRO/);
-  assert.match(rc, /periodType === "INTRO"[\s\S]*paidMoney\(effective\) == null[\s\S]*throw new Error\("RevenueCat paid INTRO/);
+  assert.match(
+    rc,
+    /periodType\s*===\s*"INTRO"[\s\S]*paidMoney\(\s*effective\s*\)\s*==\s*null[\s\S]*throw\s+new\s+Error\(\s*"RevenueCat paid INTRO/,
+  );
   assert.ok(rc.indexOf('RevenueCat paid INTRO event has no authoritative amount/currency') < rc.indexOf('await journalRcPayment'));
   assert.match(rc, /if \(isFreeTrialPeriod\(event\)\) return/);
   assert.match(rc, /amount: money\.cents/);

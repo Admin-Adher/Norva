@@ -4,6 +4,11 @@ import {
   minorUnitsToDecimal,
   verifyAirwallexWebhook,
 } from "../_shared/partners-airwallex.mjs";
+import {
+  AIRWALLEX_TRANSACTION_COLUMNS,
+  buildTransactionReportRequest,
+  decimalToMinor,
+} from "../_shared/airwallex-financial-reports.mjs";
 
 Deno.test("Airwallex payout money and PAID semantics stay fail-closed", () => {
   if (minorUnitsToDecimal("499", 2) !== "4.99") {
@@ -49,4 +54,31 @@ Deno.test("Airwallex webhook HMAC binds timestamp and raw body", async () => {
     toleranceMs: 60_000,
   });
   if (!valid) throw new Error("valid signature rejected");
+});
+
+Deno.test("Airwallex Financial Reports contract stays version-pinned", () => {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const prior = new Date(today);
+  prior.setUTCDate(prior.getUTCDate() - 2);
+  const fromDate = prior.toISOString().slice(0, 10);
+  const toDate = today.toISOString().slice(0, 10);
+  const request = buildTransactionReportRequest({
+    fromDate,
+    toDate,
+    fileName: `NORVA_TRANSACTION_RECON_${
+      toDate.replaceAll("-", "_")
+    }_0123456789ab.csv`,
+  });
+  if (
+    request.type !== "TRANSACTION_RECON_REPORT" ||
+    request.report_version !== "1.1.0" ||
+    request.statuses?.[0] !== "SETTLED" ||
+    request.transaction_types?.[0] !== "PAYOUT" ||
+    request.timezone !== "UTC" ||
+    AIRWALLEX_TRANSACTION_COLUMNS[8] !== "Settled At" ||
+    decimalToMinor("4.99", 2) !== 499
+  ) {
+    throw new Error("Financial Reports contract drifted");
+  }
 });

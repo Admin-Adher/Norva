@@ -10,7 +10,10 @@ const migration = read('supabase/migrations/20260722005200_revenuecat_billing_em
 const lifecycleBase = read('supabase/migrations/20260722003500_lifecycle_billing_event_intents.sql');
 
 test('captured RevenueCat payments carry authoritative confirmation context', () => {
-  assert.match(webhook, /journalRcPayment\(admin, userId, eventType, event, resolvedPlan, attribution\)/);
+  assert.match(
+    webhook,
+    /journalRcPayment\(\s*admin,\s*userId,\s*eventType,\s*event,\s*resolvedPlan,\s*attribution,\s*\)/,
+  );
   assert.match(webhook, /plan_code:\s*isKnownStorePlan\(resolvedPlan\)/);
   assert.match(webhook, /bill_period:\s*billPeriodForEvent\(event\)/);
   assert.match(webhook, /billing_period_end:\s*msToIso\(event\.expiration_at_ms\)/);

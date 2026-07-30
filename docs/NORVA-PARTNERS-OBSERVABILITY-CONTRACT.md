@@ -51,26 +51,48 @@ donc pas rendus visibles à Support par défaut.
   `partners_payouts_live` ne prouvent pas un rail réel.
 - rétention : `unavailable` tant que l'historique autoritatif des droits et de
   l'intervalle de facturation n'est pas modélisé.
-- `TRANSFER` : le stock quarantiné est compté pour Risk/Finance, mais aucun
-  entitlement n'est transféré sans contrat autoritatif.
+- `TRANSFER` : le fait financier quarantiné est compté pour Risk/Finance et ne
+  produit aucune commission. La projection d'entitlement RevenueCat est suivie
+  séparément par états `pending`, `processing`, `partial`, `applied`,
+  `quarantined` ou `dead_letter`.
+- `DISPUTE_WON` : la correction `chargeback_reversal` et son
+  `reinstatement` sont comptées séparément. Le net soustrait reversals et
+  corrections manuelles, puis ajoute les reinstatements exacts.
+- settlement Airwallex : `PAID` reste une observation `pending`. Seule une
+  preuve de rapport normalisée, revue par un acteur Finance puis confirmée par
+  un second acteur distinct, rend l'item `settled`. Les décisions quarantinées
+  et exceptions post-settlement restent terminales et visibles.
 
 ## Alertes stables
 
 `partners_ops_alert_snapshot` publie uniquement codes, sévérité et compteurs :
 
-- dead-letter commission/maturation : critique dès la première ligne ;
+- dead-letter commission/maturation/chargeback-reversal : critique dès la
+  première ligne ;
 - conflit de fait financier : critique dès la première ligne ;
 - dernier rapprochement shadow en écart : critique ;
-- heartbeat commission/maturation/reconciliation absent ou âgé de plus de
-  15 minutes : critique ;
+- heartbeat commission/correction/maturation/reconciliation/
+  revenuecat_transfer/payout/payout_report attendu mais absent ou âgé de plus
+  de 15 minutes : critique ;
 - quota Didit sur 30 jours : warning à 400/500, critique à 500/500, toujours
   informatif et non bloquant ;
 - nouveau fait `TRANSFER` quarantiné créé dans les dernières 24 heures :
-  warning `financial_transfer_quarantined_recent`.
+  warning `financial_transfer_quarantined_recent` ;
+- événement RevenueCat TRANSFER en `dead_letter` ou outbox Partners en échec :
+  critique dès la première ligne ;
+- événement TRANSFER `partial` vieillissant ou quarantaine ancienne : warning
+  avec compte et âge bornés, sans identifiant ;
+- evidence Airwallex en conflit/quarantaine, décision en attente ou exception
+  post-settlement : warning ou critique selon l'état, sans référence provider.
+- Financial Reports Airwallex : `airwallex_report_exception` est critique ;
+  `airwallex_report_stale` et `airwallex_report_candidates_unmatched` sont des
+  warnings distincts. L'absence totale du cron reste détectable par le
+  heartbeat `payout_report`, même sans run créé.
 
 La fenêtre de 24 heures évite une alerte éternelle sur un stock append-only.
-Le stock total reste visible dans analytics pour le suivi Risk/Finance.
-Aucun heartbeat payout n'est fabriqué avant l'existence du worker provider.
+Le stock total reste visible dans analytics pour le suivi Risk/Finance. Un
+heartbeat ne devient attendu qu'après déploiement/activation du worker
+correspondant ; l'absence de configuration est `not_configured`, pas `healthy`.
 
 ## Preuves runtime
 
@@ -81,8 +103,13 @@ Avant le pilote, conserver dans le journal de release :
 3. un heartbeat frais puis périmé avec alerte et notification de rétablissement ;
 4. les seuils KYC 400/500 et 500/500 sur données sandbox ;
 5. un refund, un chargeback et un fait incomplet sans commission inventée ;
-6. un `TRANSFER` quarantiné visible sans mutation d'entitlement ;
-7. une réconciliation shadow propre.
+6. un `TRANSFER` financier quarantiné, puis les cas entitlement appliqué,
+   source expirée, nouvel achat préservé, égalité partielle et dead-letter ;
+7. `DISPUTE_LOST → maturation/release → DISPUTE_WON`, avec restauration exacte,
+   replay et ordre inversé ;
+8. un Airwallex `PAID` encore pending, une double validation distincte, une
+   quarantaine monotone et un échec tardif post-settlement ;
+9. une réconciliation shadow propre.
 
 Les événements UX facultatifs côté client ne sont pas une source financière et
 ne sont pas déclarés actifs tant que leur instrumentation consentie et leur

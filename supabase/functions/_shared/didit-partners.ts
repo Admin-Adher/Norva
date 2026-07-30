@@ -6,6 +6,8 @@ import {
 
 export const DIDIT_CREATE_SESSION_URL =
   "https://verification.didit.me/v3/session/";
+export const DIDIT_PARTNERS_CALLBACK_URL =
+  "https://norva.tv/partners-kyc-return";
 export const DIDIT_WEBHOOK_MAX_AGE_SECONDS = 300;
 export const DIDIT_WEBHOOK_MAX_BYTES = 2 * 1_024 * 1_024;
 
@@ -35,6 +37,7 @@ export type DiditConfig = {
   workflowId: string;
   applicationId: string;
   environment: "live" | "sandbox";
+  sessionExpirationSeconds: number;
   webhookSecret: string;
   callbackUrl: string;
   idVerificationNodeId: string;
@@ -62,6 +65,8 @@ export type DiditWebhookResult = {
   providerSessionId: string;
   providerWorkflowId: string;
   providerWorkflowVersion: number;
+  providerEnvironment: "live" | "sandbox";
+  providerConfigFingerprint: string;
   providerStatus: DiditStatus;
   eventCreatedAt: string;
   documentAge: number | null;
@@ -90,6 +95,32 @@ export type KycPrepareResult = {
   };
 };
 
+export type KycWebhookRpcResult =
+  | {
+    schema_version: 1;
+    action: "kyc_result_applied";
+    replayed: boolean;
+    account: { id: string; status: string };
+    kyc: { status: string; verified_at: string | null };
+  }
+  | {
+    schema_version: 1;
+    action: "kyc_result_observed";
+    replayed: boolean;
+    environment: "sandbox";
+    reason: "sandbox_non_authoritative";
+  }
+  | {
+    schema_version: 1;
+    action: "kyc_result_quarantined";
+    replayed: boolean;
+    environment: "live" | "sandbox";
+    reason:
+      | "legacy_provider_binding"
+      | "provider_environment_mismatch"
+      | "provider_config_mismatch";
+  };
+
 export class DiditContractError extends Error {
   constructor(message = "Invalid Didit contract") {
     super(message);
@@ -105,6 +136,7 @@ export function loadDiditConfig(
     workflowId: get("DIDIT_WORKFLOW_ID"),
     applicationId: get("DIDIT_APPLICATION_ID"),
     environment: get("DIDIT_ENVIRONMENT"),
+    sessionExpirationSeconds: get("DIDIT_SESSION_EXPIRATION_SECONDS"),
     webhookSecret: get("DIDIT_WEBHOOK_SECRET"),
     callbackUrl: get("DIDIT_CALLBACK_URL"),
     idVerificationNodeId: get("DIDIT_ID_VERIFICATION_NODE_ID"),
@@ -114,11 +146,17 @@ export function loadDiditConfig(
   if (Object.values(raw).some((value) => !value)) return null;
 
   const callbackUrl = parseCallbackUrl(raw.callbackUrl!);
+  const sessionExpirationSeconds = Number(raw.sessionExpirationSeconds);
   if (
     !isBoundedSecret(raw.apiKey!, 512, 16) ||
     !UUID_PATTERN.test(raw.workflowId!) ||
     !UUID_PATTERN.test(raw.applicationId!) ||
     (raw.environment !== "live" && raw.environment !== "sandbox") ||
+    !/^\d{4,7}$/.test(raw.sessionExpirationSeconds!) ||
+    !Number.isSafeInteger(sessionExpirationSeconds) ||
+    String(sessionExpirationSeconds) !== raw.sessionExpirationSeconds ||
+    sessionExpirationSeconds < 3_600 ||
+    sessionExpirationSeconds > 2_419_200 ||
     !isBoundedSecret(raw.webhookSecret!, 512, 16) ||
     !NODE_ID_PATTERN.test(raw.idVerificationNodeId!) ||
     !NODE_ID_PATTERN.test(raw.livenessNodeId!) ||
@@ -138,12 +176,69 @@ export function loadDiditConfig(
     workflowId: raw.workflowId!.toLowerCase(),
     applicationId: raw.applicationId!.toLowerCase(),
     environment: raw.environment,
+    sessionExpirationSeconds,
     webhookSecret: raw.webhookSecret!,
     callbackUrl,
     idVerificationNodeId: raw.idVerificationNodeId!,
     livenessNodeId: raw.livenessNodeId!,
     faceMatchNodeId: raw.faceMatchNodeId!,
   };
+}
+
+/**
+ * Binds a provider session to the non-secret Didit configuration that created
+ * it. API and webhook secrets are deliberately excluded so routine secret
+ * rotation does not invalidate an otherwise identical verification contract.
+ */
+export async function diditConfigFingerprint(
+  config: DiditConfig,
+  workflowVersion: number,
+): Promise<string> {
+  if (
+    !Number.isSafeInteger(workflowVersion) ||
+    workflowVersion < 1 ||
+    workflowVersion > 1_000_000
+  ) {
+    throw new DiditContractError();
+  }
+  return await diditBindingFingerprint({
+    environment: config.environment,
+    applicationId: config.applicationId,
+    workflowId: config.workflowId,
+    workflowVersion,
+    callbackUrl: config.callbackUrl,
+    idVerificationNodeId: config.idVerificationNodeId,
+    livenessNodeId: config.livenessNodeId,
+    faceMatchNodeId: config.faceMatchNodeId,
+    sessionExpirationSeconds: config.sessionExpirationSeconds,
+  });
+}
+
+async function diditBindingFingerprint(binding: {
+  environment: "live" | "sandbox";
+  applicationId: string;
+  workflowId: string;
+  workflowVersion: number;
+  callbackUrl: string;
+  idVerificationNodeId: string;
+  livenessNodeId: string;
+  faceMatchNodeId: string;
+  sessionExpirationSeconds: number;
+}): Promise<string> {
+  return await sha256Hex([
+    "norva:didit:config:v1",
+    `sessions_api_url=${DIDIT_CREATE_SESSION_URL}`,
+    "webhook_contract=status.updated:v1",
+    `environment=${binding.environment}`,
+    `application_id=${binding.applicationId}`,
+    `workflow_id=${binding.workflowId}`,
+    `workflow_version=${binding.workflowVersion}`,
+    `callback_url=${binding.callbackUrl}`,
+    `id_verification_node_id=${binding.idVerificationNodeId}`,
+    `liveness_node_id=${binding.livenessNodeId}`,
+    `face_match_node_id=${binding.faceMatchNodeId}`,
+    `session_expiration_seconds=${binding.sessionExpirationSeconds}`,
+  ].join("\n"));
 }
 
 export function parseKycSessionInput(
@@ -274,13 +369,65 @@ export function sanitizeKycSessionRecordRpc(
 
 export function sanitizeKycWebhookRpc(
   raw: unknown,
-): {
-  schema_version: 1;
-  action: "kyc_result_applied";
-  replayed: boolean;
-  account: { id: string; status: string };
-  kyc: { status: string; verified_at: string | null };
-} {
+): KycWebhookRpcResult {
+  if (!isRecord(raw)) throw new DiditContractError();
+  if (raw.action === "kyc_result_observed") {
+    const root = exactRecord(raw, [
+      "schema_version",
+      "action",
+      "replayed",
+      "environment",
+      "reason",
+    ]);
+    if (
+      root.schema_version !== 1 ||
+      typeof root.replayed !== "boolean" ||
+      root.environment !== "sandbox" ||
+      root.reason !== "sandbox_non_authoritative"
+    ) {
+      throw new DiditContractError();
+    }
+    return {
+      schema_version: 1,
+      action: "kyc_result_observed",
+      replayed: root.replayed,
+      environment: "sandbox",
+      reason: "sandbox_non_authoritative",
+    };
+  }
+  if (raw.action === "kyc_result_quarantined") {
+    const root = exactRecord(raw, [
+      "schema_version",
+      "action",
+      "replayed",
+      "environment",
+      "reason",
+    ]);
+    const reasons = new Set([
+      "legacy_provider_binding",
+      "provider_environment_mismatch",
+      "provider_config_mismatch",
+    ]);
+    if (
+      root.schema_version !== 1 ||
+      typeof root.replayed !== "boolean" ||
+      (root.environment !== "live" && root.environment !== "sandbox") ||
+      typeof root.reason !== "string" ||
+      !reasons.has(root.reason)
+    ) {
+      throw new DiditContractError();
+    }
+    return {
+      schema_version: 1,
+      action: "kyc_result_quarantined",
+      replayed: root.replayed,
+      environment: root.environment,
+      reason: root.reason as
+        | "legacy_provider_binding"
+        | "provider_environment_mismatch"
+        | "provider_config_mismatch",
+    };
+  }
   const root = exactRecord(raw, [
     "schema_version",
     "action",
@@ -438,8 +585,7 @@ export async function verifyAndNormalizeDiditWebhook(
     raw.webhook_type !== "status.updated" ||
     raw.timestamp !== timestamp ||
     uuid(raw.application_id) !== config.applicationId ||
-    raw.environment !== config.environment ||
-    uuid(raw.workflow_id) !== config.workflowId ||
+    (raw.environment !== "live" && raw.environment !== "sandbox") ||
     raw.session_kind === "business" ||
     Object.hasOwn(raw, "business_session_id")
   ) {
@@ -451,43 +597,79 @@ export async function verifyAndNormalizeDiditWebhook(
   const providerSessionId = uuid(raw.session_id);
   const providerWorkflowId = uuid(raw.workflow_id);
   const providerWorkflowVersion = positiveInteger(raw.workflow_version);
+  const providerEnvironment = raw.environment;
   const createdAt = epochSeconds(raw.created_at);
-  const payloadHash = await sha256Hex(rawBody);
+  // Didit keeps event_id and the underlying event stable across delivery
+  // retries, but refreshes the top-level dispatch timestamp and its signature.
+  // Deduplicate on the complete signed semantic payload, excluding only that
+  // transport timestamp. Session, application, environment, workflow,
+  // created_at, status and the full decision remain bound to this hash.
+  const payloadHash = await sha256Hex(
+    stableDiditWebhookPayload(raw),
+  );
 
   let documentAge: number | null = null;
   let documentCountryIso3: string | null = null;
   let idCheckApproved = false;
   let livenessApproved = false;
   let faceMatchApproved = false;
+  let observedIdNodeId = config.idVerificationNodeId;
+  let observedLivenessNodeId = config.livenessNodeId;
+  let observedFaceNodeId = config.faceMatchNodeId;
 
   if (providerStatus === "approved") {
-    const decision = record(raw.decision);
-    const idResult = exactNodeResult(
+    const decision = isRecord(raw.decision) ? raw.decision : {};
+    const idObservation = observedNodeResult(
       decision.id_verifications,
       config.idVerificationNodeId,
     );
-    const livenessResult = exactNodeResult(
+    const livenessObservation = observedNodeResult(
       decision.liveness_checks,
       config.livenessNodeId,
     );
-    const faceResult = exactNodeResult(
+    const faceObservation = observedNodeResult(
       decision.face_matches,
       config.faceMatchNodeId,
     );
-    idCheckApproved = idResult.status === "Approved";
-    livenessApproved = livenessResult.status === "Approved";
-    faceMatchApproved = faceResult.status === "Approved";
+    observedIdNodeId = idObservation.bindingId;
+    observedLivenessNodeId = livenessObservation.bindingId;
+    observedFaceNodeId = faceObservation.bindingId;
+    idCheckApproved = idObservation.result?.status === "Approved";
+    livenessApproved = livenessObservation.result?.status === "Approved";
+    faceMatchApproved = faceObservation.result?.status === "Approved";
     if (idCheckApproved) {
-      documentAge = age(idResult.age);
-      documentCountryIso3 = iso3(idResult.issuing_state);
+      try {
+        documentAge = age(idObservation.result?.age);
+        documentCountryIso3 = iso3(idObservation.result?.issuing_state);
+      } catch {
+        // A signed but structurally drifted decision must remain observable.
+        // Force a divergent binding and let SQL quarantine it before policy.
+        observedIdNodeId = "!invalid:identity-policy";
+        idCheckApproved = false;
+        documentAge = null;
+        documentCountryIso3 = null;
+      }
     }
   }
+  const providerConfigFingerprint = await diditBindingFingerprint({
+    environment: providerEnvironment,
+    applicationId: config.applicationId,
+    workflowId: providerWorkflowId,
+    workflowVersion: providerWorkflowVersion,
+    callbackUrl: config.callbackUrl,
+    idVerificationNodeId: observedIdNodeId,
+    livenessNodeId: observedLivenessNodeId,
+    faceMatchNodeId: observedFaceNodeId,
+    sessionExpirationSeconds: config.sessionExpirationSeconds,
+  });
 
   return {
     providerEventId,
     providerSessionId,
     providerWorkflowId,
     providerWorkflowVersion,
+    providerEnvironment,
+    providerConfigFingerprint,
     providerStatus,
     eventCreatedAt: new Date(createdAt * 1_000).toISOString(),
     documentAge,
@@ -519,40 +701,78 @@ export function normalizeDiditStatus(value: unknown): DiditStatus {
   }
 }
 
-function exactNodeResult(
+function observedNodeResult(
   value: unknown,
   nodeId: string,
-): Record<string, unknown> {
-  if (!Array.isArray(value) || value.length > 32) {
-    throw new DiditContractError();
+): {
+  bindingId: string;
+  result: Record<string, unknown> | null;
+} {
+  if (!Array.isArray(value) || value.length === 0) {
+    return { bindingId: "!missing", result: null };
   }
-  const matches = value.filter((entry) =>
-    isRecord(entry) && entry.node_id === nodeId
+  if (value.length > 32) {
+    return { bindingId: "!invalid:oversized", result: null };
+  }
+  const results: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.node_id !== "string" ||
+      !NODE_ID_PATTERN.test(entry.node_id) ||
+      typeof entry.status !== "string" ||
+      !["Approved", "Declined", "In Review"].includes(entry.status)
+    ) {
+      return { bindingId: "!invalid", result: null };
+    }
+    results.push(entry);
+  }
+  const matches = results.filter((entry) => entry.node_id === nodeId);
+  if (matches.length === 1) {
+    return { bindingId: nodeId, result: matches[0] };
+  }
+  const observedIds = [
+    ...new Set(
+      results.map((entry) => String(entry.node_id)),
+    ),
+  ].sort();
+  return {
+    // "!" is forbidden by NODE_ID_PATTERN, so an unresolved observation can
+    // never collide with a valid configured node identifier.
+    bindingId: `!unmatched:${observedIds.join(",")}`,
+    result: null,
+  };
+}
+
+function stableDiditWebhookPayload(
+  payload: Record<string, unknown>,
+): string {
+  const semanticPayload = { ...payload };
+  delete semanticPayload.timestamp;
+  return JSON.stringify(sortJsonValue(semanticPayload));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortJsonValue(value[key])]),
   );
-  if (matches.length !== 1) throw new DiditContractError();
-  const result = matches[0] as Record<string, unknown>;
-  if (
-    typeof result.status !== "string" ||
-    !["Approved", "Declined", "In Review"].includes(result.status)
-  ) {
-    throw new DiditContractError();
-  }
-  return result;
 }
 
 function parseCallbackUrl(value: string): string | null {
   if (value.length > 2_048) return null;
   try {
     const url = new URL(value);
-    if (
-      url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
-      !["norva.tv", "www.norva.tv", "app.norva.tv"].includes(url.hostname)
-    ) {
-      return null;
-    }
-    return url.href;
+    return url.href === DIDIT_PARTNERS_CALLBACK_URL
+      ? DIDIT_PARTNERS_CALLBACK_URL
+      : null;
   } catch {
     return null;
   }

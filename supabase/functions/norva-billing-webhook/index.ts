@@ -25,6 +25,8 @@
 //   * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (standard)
 //   * NORVA_REVENUECAT_WEBHOOK_AUTH  — shared secret matched against the
 //     Authorization header RevenueCat sends.
+//   * NORVA_REVENUECAT_WEBHOOK_HMAC_SECRET — independent timestamped raw-body
+//     signature secret. Both webhook defenses are mandatory and fail closed.
 // Optional:
 //   * NORVA_RC_PRODUCT_MAP — JSON object mapping store product ids -> plan code,
 //     e.g. {"norva_family_monthly":"family","norva_family_annual":"family"}.
@@ -37,6 +39,12 @@
 //   * GOOGLE_PLAY_PACKAGE_NAME — exact Play package (`tv.norva.phone`).
 //     Both Google variables must be present to enrich attributed production
 //     purchases; both absent deliberately keeps the Partners fact incomplete.
+//   * NORVA_REVENUECAT_SECRET_API_KEY — server-only RevenueCat secret key used
+//     to re-fetch CustomerInfo before applying a TRANSFER. Without it, transfer
+//     deliveries are quarantined and remain retryable; webhook data alone never
+//     moves an entitlement.
+//   * NORVA_REVENUECAT_ALLOWED_APP_IDS — comma-separated RevenueCat app ids.
+//     When configured, a missing or non-allowlisted event.app_id fails closed.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -65,6 +73,16 @@ import {
   isGooglePlayNonAuthoritative,
   normalizeGooglePlayOrderFinancials,
 } from "../_shared/google-play-orders.mjs";
+import {
+  inspectRevenueCatTransferEvidence,
+  parseRevenueCatAllowedAppIds,
+  parseRevenueCatTransferEvent,
+  resolveRevenueCatTransferAuthority,
+  revenueCatEventAppAllowed,
+  RevenueCatTransferError,
+  sha256Hex,
+  verifyRevenueCatWebhookSignature,
+} from "../_shared/revenuecat-transfer.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type ProjectionSnapshot = {
@@ -93,28 +111,50 @@ type PartnerFinancialObservation = {
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_KEY =
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const WEBHOOK_AUTH = Deno.env.get("NORVA_REVENUECAT_WEBHOOK_AUTH") ?? "";
-const FAIL_OPEN_HOURS = boundedInt(Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"), 72, 1, 24 * 14);
+const FAIL_OPEN_HOURS = boundedInt(
+  Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"),
+  72,
+  1,
+  24 * 14,
+);
 const DEFAULT_PRODUCT_MAP = {
-  norva_plus_monthly: "plus", norva_plus_annual: "plus",
-  norva_family_monthly: "family", norva_family_annual: "family",
-  "norva_plus:monthly": "plus", "norva_plus:annual": "plus",
-  "norva_family:monthly": "family", "norva_family:annual": "family",
+  norva_plus_monthly: "plus",
+  norva_plus_annual: "plus",
+  norva_family_monthly: "family",
+  norva_family_annual: "family",
+  "norva_plus:monthly": "plus",
+  "norva_plus:annual": "plus",
+  "norva_family:monthly": "family",
+  "norva_family:annual": "family",
 };
-const PRODUCT_MAP = parseRevenueCatProductMap(Deno.env.get("NORVA_RC_PRODUCT_MAP"), DEFAULT_PRODUCT_MAP);
-const UNKNOWN_PRODUCT_POLICY = (Deno.env.get("NORVA_RC_UNKNOWN_PRODUCT_POLICY") ?? "error").toLowerCase() === "error"
-  ? "error"
-  : "warn";
-const ACCEPT_SANDBOX = (Deno.env.get("NORVA_RC_ACCEPT_SANDBOX") ?? "false").toLowerCase() === "true";
+const PRODUCT_MAP = parseRevenueCatProductMap(
+  Deno.env.get("NORVA_RC_PRODUCT_MAP"),
+  DEFAULT_PRODUCT_MAP,
+);
+const UNKNOWN_PRODUCT_POLICY =
+  (Deno.env.get("NORVA_RC_UNKNOWN_PRODUCT_POLICY") ?? "error").toLowerCase() ===
+      "error"
+    ? "error"
+    : "warn";
+const ACCEPT_SANDBOX =
+  (Deno.env.get("NORVA_RC_ACCEPT_SANDBOX") ?? "false").toLowerCase() === "true";
 const GOOGLE_PLAY_SERVICE_ACCOUNT_JSON =
   Deno.env.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON") ?? "";
-const GOOGLE_PLAY_PACKAGE_NAME =
-  Deno.env.get("GOOGLE_PLAY_PACKAGE_NAME") ?? "";
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GOOGLE_PLAY_PACKAGE_NAME = Deno.env.get("GOOGLE_PLAY_PACKAGE_NAME") ?? "";
+const REVENUECAT_SECRET_API_KEY =
+  Deno.env.get("NORVA_REVENUECAT_SECRET_API_KEY") ?? "";
+const REVENUECAT_WEBHOOK_HMAC_SECRET =
+  Deno.env.get("NORVA_REVENUECAT_WEBHOOK_HMAC_SECRET") ?? "";
+const REVENUECAT_ALLOWED_APP_IDS = parseRevenueCatAllowedAppIds(
+  Deno.env.get("NORVA_REVENUECAT_ALLOWED_APP_IDS"),
+);
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_WEBHOOK_BYTES = 2_000_000;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -132,9 +172,43 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
+  const declaredLength = Number(req.headers.get("Content-Length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BYTES) {
+    return json({ error: "Payload too large" }, 413);
+  }
+  let rawBody = "";
+  try {
+    rawBody = await req.text();
+  } catch (_) {
+    return json({ error: "Invalid request body" }, 400);
+  }
+  if (
+    !rawBody || new TextEncoder().encode(rawBody).byteLength > MAX_WEBHOOK_BYTES
+  ) {
+    return json({ error: "Invalid request body" }, rawBody ? 413 : 400);
+  }
+  if (!REVENUECAT_WEBHOOK_HMAC_SECRET) {
+    console.error(
+      "[norva-billing-webhook] NORVA_REVENUECAT_WEBHOOK_HMAC_SECRET is not set",
+    );
+    return json({ error: "Webhook verification unavailable" }, 503);
+  }
+  const signatureHeader = req.headers.get("X-RevenueCat-Webhook-Signature") ??
+    "";
+  if (
+    !(await verifyRevenueCatWebhookSignature({
+      rawBody,
+      signatureHeader,
+      secret: REVENUECAT_WEBHOOK_HMAC_SECRET,
+      now: new Date(),
+    }))
+  ) {
+    return json({ error: "Invalid webhook signature" }, 401);
+  }
+
   let body: JsonRecord;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody) as JsonRecord;
   } catch (_) {
     return json({ error: "Invalid JSON" }, 400);
   }
@@ -142,16 +216,42 @@ Deno.serve(async (req) => {
   const event = (body?.event ?? {}) as JsonRecord;
   const eventType = String(event.type ?? "").toUpperCase();
   const eventId = stringOrNull(event.id);
-  const causalEventId = eventId ?? `${eventType}:${String(event.event_timestamp_ms ?? "missing")}:${String(event.transaction_id ?? "none")}`;
+  const causalEventId = eventId ??
+    `${eventType}:${String(event.event_timestamp_ms ?? "missing")}:${
+      String(event.transaction_id ?? "none")
+    }`;
+  if (!revenueCatEventAppAllowed(event, REVENUECAT_ALLOWED_APP_IDS)) {
+    console.warn("[norva-billing-webhook] RevenueCat app rejected", {
+      type: eventType,
+      configured_allowlist: true,
+    });
+    return json({ error: "revenuecat_app_not_allowed" }, 403);
+  }
 
   // RevenueCat "Send test event" — acknowledge so the dashboard goes green.
   if (eventType === "TEST") {
     return json({ ok: true, test: true });
   }
 
-  const purchaseEnvironment = String(event.environment ?? event.purchase_environment ?? "PRODUCTION").toUpperCase();
+  if (eventType === "TRANSFER") {
+    try {
+      return await handleRevenueCatTransfer(admin, event);
+    } catch (error) {
+      console.error("[norva-billing-webhook] TRANSFER", {
+        code: transferErrorCode(error),
+      });
+      return json({ error: "revenuecat_transfer_internal_error" }, 500);
+    }
+  }
+
+  const purchaseEnvironment = String(
+    event.environment ?? event.purchase_environment ?? "PRODUCTION",
+  ).toUpperCase();
   if (purchaseEnvironment === "SANDBOX" && !ACCEPT_SANDBOX) {
-    console.warn("[norva-billing-webhook] sandbox event ignored", { type: eventType, id: eventId });
+    console.warn("[norva-billing-webhook] sandbox event ignored", {
+      type: eventType,
+      id: eventId,
+    });
     return json({ ok: true, skipped: "sandbox" });
   }
 
@@ -185,37 +285,67 @@ Deno.serve(async (req) => {
     ) !== null;
     let existingProjection: ProjectionSnapshot | null = null;
     if (reconcilesProjection) {
-      const { data: existing, error: existingError } = await admin.from("cloud_entitlement_projection")
-        .select("plan_code,provider,status,current_period_end,trial_ends_at,fail_open_until,last_event_at")
+      const { data: existing, error: existingError } = await admin.from(
+        "cloud_entitlement_projection",
+      )
+        .select(
+          "plan_code,provider,status,current_period_end,trial_ends_at,fail_open_until,last_event_at",
+        )
         .eq("user_id", userId).maybeSingle();
-      if (existingError) throw new Error(`existing projection read failed: ${existingError.message}`);
+      if (existingError) {
+        throw new Error(
+          `existing projection read failed: ${existingError.message}`,
+        );
+      }
       existingProjection = existing as ProjectionSnapshot | null;
     }
     const resolution = resolveRevenueCatPlan(effective, PRODUCT_MAP);
     let resolvedPlan: string | null = resolution.planCode;
     if (reconcilesProjection && resolution.mapping === "unknown") {
-      const currentPlan = String(existingProjection?.plan_code ?? "").toLowerCase();
+      const currentPlan = String(existingProjection?.plan_code ?? "")
+        .toLowerCase();
       const sameRail = isRevenueCatProvider(existingProjection?.provider);
       if (sameRail && isKnownStorePlan(currentPlan)) resolvedPlan = currentPlan;
-      const signalId = `${eventId ?? `${eventType}:${userId}:${String(event.event_timestamp_ms ?? "unknown")}`}:unknown_product`;
-      await recordProcessedEvent(admin, userId, signalId, "UNKNOWN_PRODUCT_ID", {
-        product_id: effective.product_id ?? null,
-        new_product_id: event.new_product_id ?? null,
-        entitlement_ids: effective.entitlement_ids ?? [],
-        preserved_plan: resolvedPlan,
-        preserved_existing_plan: sameRail && isKnownStorePlan(currentPlan),
-        existing_provider: existingProjection?.provider ?? null,
-        source_event_id: eventId,
-      });
+      const signalId = `${
+        eventId ??
+          `${eventType}:${userId}:${
+            String(event.event_timestamp_ms ?? "unknown")
+          }`
+      }:unknown_product`;
+      await recordProcessedEvent(
+        admin,
+        userId,
+        signalId,
+        "UNKNOWN_PRODUCT_ID",
+        {
+          product_id: effective.product_id ?? null,
+          new_product_id: event.new_product_id ?? null,
+          entitlement_ids: effective.entitlement_ids ?? [],
+          preserved_plan: resolvedPlan,
+          preserved_existing_plan: sameRail && isKnownStorePlan(currentPlan),
+          existing_provider: existingProjection?.provider ?? null,
+          source_event_id: eventId,
+        },
+      );
       console.error("[norva-billing-webhook] UNKNOWN_PRODUCT_ID", {
-        product_id: effective.product_id, user_id: userId, preserved_plan: resolvedPlan,
+        product_id: effective.product_id,
+        user_id: userId,
+        preserved_plan: resolvedPlan,
       });
       // Never acknowledge a purchase/grant that cannot be mapped to a safe tier.
       // Throwing before both the payment ledger and the source event marker keeps
       // the original RevenueCat delivery retryable after the product map is fixed.
       // A known projection from this same rail is safe to preserve and may proceed.
-      if (shouldRejectUnmappedRevenueCatEvent(eventType, resolvedPlan, UNKNOWN_PRODUCT_POLICY)) {
-        throw new Error(`unmapped RevenueCat product: ${resolution.productId || "(missing)"}`);
+      if (
+        shouldRejectUnmappedRevenueCatEvent(
+          eventType,
+          resolvedPlan,
+          UNKNOWN_PRODUCT_POLICY,
+        )
+      ) {
+        throw new Error(
+          `unmapped RevenueCat product: ${resolution.productId || "(missing)"}`,
+        );
       }
     }
     // RevenueCat INTRO is a paid discounted period, never a synonym for a free
@@ -223,18 +353,22 @@ Deno.serve(async (req) => {
     // fail before the cash journal or entitlement projection so RevenueCat will
     // retry after its payload/source data is corrected.
     if (
-      periodType === "INTRO"
-      && ["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"].includes(eventType)
-      && paidMoney(effective) == null
+      periodType === "INTRO" &&
+      ["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"].includes(
+        eventType,
+      ) &&
+      paidMoney(effective) == null
     ) {
-      throw new Error("RevenueCat paid INTRO event has no authoritative amount/currency");
+      throw new Error(
+        "RevenueCat paid INTRO event has no authoritative amount/currency",
+      );
     }
     const attributionSurface = surfaceForStore(stringOrNull(effective.store));
     const purchaseMs = Number(effective.purchased_at_ms);
     const attribution = (
-      ["INITIAL_PURCHASE", "NON_RENEWING_PURCHASE"].includes(eventType) &&
-      Number.isFinite(purchaseMs)
-    )
+        ["INITIAL_PURCHASE", "NON_RENEWING_PURCHASE"].includes(eventType) &&
+        Number.isFinite(purchaseMs)
+      )
       ? await latestPaywallAttribution(admin, userId, {
         occurredAfter: new Date(purchaseMs - 30 * 86_400_000).toISOString(),
         occurredBefore: new Date(purchaseMs + 5 * 60_000).toISOString(),
@@ -253,7 +387,14 @@ Deno.serve(async (req) => {
     // A captured purchase must exist in the immutable payment journal before
     // the entitlement projection can become active. The projection trigger then
     // chains activation to that exact payment_captured funnel event.
-    await journalRcPayment(admin, userId, eventType, event, resolvedPlan, attribution);
+    await journalRcPayment(
+      admin,
+      userId,
+      eventType,
+      event,
+      resolvedPlan,
+      attribution,
+    );
     let partnersObservation = revenueCatPartnerObservation(
       eventType,
       event,
@@ -277,23 +418,44 @@ Deno.serve(async (req) => {
     const patch = projectionPatch(userId, eventType, event, resolvedPlan);
     let projectionApplied = false;
     if (patch) {
-      const { data, error } = await admin.rpc("apply_revenuecat_entitlement_event", {
-        p_user_id: userId,
-        p_event_at: String(patch.last_event_at),
-        p_event_id: causalEventId,
-        p_patch: patch,
-      });
-      if (error) throw new Error(`projection monotonic apply failed: ${error.message}`);
-      projectionApplied = Boolean((data as { applied?: boolean }[] | null)?.[0]?.applied);
-      if (!projectionApplied && existingProjection && !isRevenueCatProvider(existingProjection.provider)) {
-        const signalId = `${eventId ?? `${eventType}:${userId}:${String(event.event_timestamp_ms ?? "unknown")}`}:cross_rail`;
-        await recordProcessedEvent(admin, userId, signalId, "CROSS_RAIL_EVENT_IGNORED", {
-          source_event_id: eventId,
-          event_type: eventType,
-          incoming_provider: patch.provider,
-          existing_provider: existingProjection.provider ?? null,
-          existing_status: existingProjection.status ?? null,
-        });
+      const { data, error } = await admin.rpc(
+        "apply_revenuecat_entitlement_event",
+        {
+          p_user_id: userId,
+          p_event_at: String(patch.last_event_at),
+          p_event_id: causalEventId,
+          p_patch: patch,
+        },
+      );
+      if (error) {
+        throw new Error(`projection monotonic apply failed: ${error.message}`);
+      }
+      projectionApplied = Boolean(
+        (data as { applied?: boolean }[] | null)?.[0]?.applied,
+      );
+      if (
+        !projectionApplied && existingProjection &&
+        !isRevenueCatProvider(existingProjection.provider)
+      ) {
+        const signalId = `${
+          eventId ??
+            `${eventType}:${userId}:${
+              String(event.event_timestamp_ms ?? "unknown")
+            }`
+        }:cross_rail`;
+        await recordProcessedEvent(
+          admin,
+          userId,
+          signalId,
+          "CROSS_RAIL_EVENT_IGNORED",
+          {
+            source_event_id: eventId,
+            event_type: eventType,
+            incoming_provider: patch.provider,
+            existing_provider: existingProjection.provider ?? null,
+            existing_status: existingProjection.status ?? null,
+          },
+        );
       }
     }
 
@@ -306,8 +468,10 @@ Deno.serve(async (req) => {
         previous_plan: existingProjection?.plan_code ?? null,
         previous_provider: existingProjection?.provider ?? null,
         next_status: patch?.status ?? existingProjection?.status ?? null,
-        next_plan: patch?.plan_code ?? existingProjection?.plan_code ?? resolvedPlan ?? null,
-        current_period_end: patch?.current_period_end ?? existingProjection?.current_period_end ?? null,
+        next_plan: patch?.plan_code ?? existingProjection?.plan_code ??
+          resolvedPlan ?? null,
+        current_period_end: patch?.current_period_end ??
+          existingProjection?.current_period_end ?? null,
       },
     });
     return json({
@@ -324,6 +488,361 @@ Deno.serve(async (req) => {
     return json({ error: message }, 500);
   }
 });
+
+async function handleRevenueCatTransfer(
+  db: SupabaseClient,
+  event: JsonRecord,
+): Promise<Response> {
+  let transfer: ReturnType<typeof parseRevenueCatTransferEvent>;
+  try {
+    transfer = parseRevenueCatTransferEvent(event);
+  } catch (error) {
+    const reason = transferErrorCode(error);
+    let evidence: ReturnType<typeof inspectRevenueCatTransferEvidence>;
+    try {
+      evidence = inspectRevenueCatTransferEvidence(event);
+    } catch (_) {
+      // Without RevenueCat's stable id, timestamp and bounded identity arrays,
+      // there is no safe idempotency key to persist. Do not manufacture one.
+      return json({ error: "invalid_transfer_contract" }, 400);
+    }
+    const payloadFingerprint = await sha256Hex(evidence.fingerprintMaterial);
+    const recorded = await recordRevenueCatTransfer(
+      db,
+      evidence,
+      payloadFingerprint,
+      reason,
+      false,
+      undefined,
+      undefined,
+      true,
+    );
+    return json({
+      ok: true,
+      type: "TRANSFER",
+      projection_applied: false,
+      rejected: true,
+      reason: recorded.reason,
+    });
+  }
+
+  const destinationUserId = transfer.destinationUserId;
+  if (!destinationUserId) {
+    throw new Error("transfer_destination_not_unique");
+  }
+
+  const payloadFingerprint = await sha256Hex(transfer.fingerprintMaterial);
+  const initial = await recordRevenueCatTransfer(
+    db,
+    transfer,
+    payloadFingerprint,
+    "authority_verification_pending",
+    true,
+    undefined,
+    undefined,
+    true,
+  );
+  if (initial.terminal) {
+    return json({
+      ok: true,
+      type: "TRANSFER",
+      duplicate: true,
+      disposition: initial.status,
+      reason: initial.reason,
+    });
+  }
+  if (!REVENUECAT_SECRET_API_KEY) {
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "authority_api_not_configured",
+      true,
+    );
+    return json({ error: "revenuecat_transfer_authority_not_configured" }, 503);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.revenuecat.com/v1/subscribers/${
+        encodeURIComponent(destinationUserId)
+      }`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${REVENUECAT_SECRET_API_KEY}`,
+        },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch (_) {
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "authority_fetch_unavailable",
+      true,
+    );
+    return json({ error: "revenuecat_transfer_authority_unavailable" }, 503);
+  }
+
+  if (response.status !== 200) {
+    const status = Number.isInteger(response.status)
+      ? Math.max(100, Math.min(599, response.status))
+      : 500;
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      `authority_fetch_http_${status}`,
+      true,
+    );
+    // RevenueCat's GET endpoint can return 201 after creating a customer. A
+    // newly created empty customer is not proof of a completed transfer.
+    return json({ error: `revenuecat_transfer_authority_http_${status}` }, 503);
+  }
+
+  const responseText = await response.text();
+  if (!responseText || responseText.length > 2_000_000) {
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "authority_response_invalid",
+      true,
+    );
+    return json({ error: "revenuecat_transfer_authority_invalid" }, 503);
+  }
+
+  let customerInfo: JsonRecord;
+  try {
+    customerInfo = JSON.parse(responseText) as JsonRecord;
+  } catch (_) {
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "authority_response_invalid",
+      true,
+    );
+    return json({ error: "revenuecat_transfer_authority_invalid" }, 503);
+  }
+
+  let authority: ReturnType<typeof resolveRevenueCatTransferAuthority>;
+  try {
+    authority = resolveRevenueCatTransferAuthority(
+      customerInfo,
+      transfer,
+      PRODUCT_MAP,
+      new Date(),
+    );
+  } catch (error) {
+    const reason = transferErrorCode(error);
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      reason,
+      true,
+    );
+    return json({ error: reason }, 503);
+  }
+  const authorityFingerprint = await sha256Hex(
+    authority.authorityFingerprintMaterial,
+  );
+
+  if (authority.resolvedEnvironment === "SANDBOX" && !ACCEPT_SANDBOX) {
+    const recorded = await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "sandbox_disabled",
+      false,
+      authority.resolvedEnvironment,
+      authority.resolvedStore,
+    );
+    return json({
+      ok: true,
+      type: "TRANSFER",
+      projection_applied: false,
+      rejected: true,
+      reason: recorded.reason,
+    });
+  }
+
+  const { data, error } = await db.rpc(
+    "apply_revenuecat_entitlement_transfer",
+    {
+      p_event_id: transfer.eventId,
+      p_event_at: transfer.eventAt,
+      p_payload_fingerprint: payloadFingerprint,
+      p_authority_fingerprint: authorityFingerprint,
+      p_destination_user_id: destinationUserId,
+      p_source_user_ids: transfer.sourceUserIds,
+      p_source_identifier_count: transfer.sourceIdentifierCount,
+      p_destination_identifier_count: transfer.destinationIdentifierCount,
+      p_environment: authority.resolvedEnvironment,
+      p_store: authority.resolvedStore,
+      p_patch: authority.patch,
+    },
+  );
+  if (error) {
+    const code = stringOrNull((error as { code?: unknown }).code) ??
+      "apply_failed";
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      `apply_${transferErrorCode(new Error(code))}`,
+      true,
+      authority.resolvedEnvironment,
+      authority.resolvedStore,
+    );
+    return json({ error: "revenuecat_transfer_apply_failed" }, 503);
+  }
+  const result = (
+    Array.isArray(data) ? data[0] : data
+  ) as {
+    terminal?: unknown;
+    applied?: unknown;
+    disposition?: unknown;
+    source_expired_count?: unknown;
+    source_absent_count?: unknown;
+    source_internal_preserved_count?: unknown;
+    source_hard_block_preserved_count?: unknown;
+    source_cross_rail_preserved_count?: unknown;
+    source_newer_pending_count?: unknown;
+    source_newer_preserved_count?: unknown;
+    source_equal_pending_count?: unknown;
+  } | null;
+  if (
+    !result ||
+    typeof result.terminal !== "boolean" ||
+    typeof result.applied !== "boolean"
+  ) {
+    await recordRevenueCatTransfer(
+      db,
+      transfer,
+      payloadFingerprint,
+      "apply_invalid_response",
+      true,
+      authority.resolvedEnvironment,
+      authority.resolvedStore,
+    );
+    return json({ error: "revenuecat_transfer_apply_invalid_response" }, 503);
+  }
+  if (!result.terminal) {
+    // The SQL state machine has already persisted the exact per-source
+    // outcomes and a retry lease. A non-2xx keeps RevenueCat's own retry alive.
+    return json({
+      error: "revenuecat_transfer_partial",
+      disposition: stringOrNull(result.disposition) ?? "partial",
+      source_projections_expired: Number(result.source_expired_count ?? 0),
+      source_projections_absent: Number(result.source_absent_count ?? 0),
+      source_projections_newer_pending: Number(
+        result.source_newer_pending_count ?? 0,
+      ),
+      source_projections_newer_preserved: Number(
+        result.source_newer_preserved_count ?? 0,
+      ),
+      source_projections_equal_pending: Number(
+        result.source_equal_pending_count ?? 0,
+      ),
+    }, 503);
+  }
+  return json({
+    ok: true,
+    type: "TRANSFER",
+    plan: authority.patch.plan_code,
+    plan_mapping: authority.planMapping,
+    projection_applied: result.applied,
+    disposition: stringOrNull(result.disposition) ?? "unknown",
+    source_projections_expired: Number(result.source_expired_count ?? 0),
+    source_projections_absent: Number(result.source_absent_count ?? 0),
+    source_internal_preserved: Number(
+      result.source_internal_preserved_count ?? 0,
+    ),
+    source_hard_block_preserved: Number(
+      result.source_hard_block_preserved_count ?? 0,
+    ),
+    source_cross_rail_preserved: Number(
+      result.source_cross_rail_preserved_count ?? 0,
+    ),
+    source_newer_preserved: Number(
+      result.source_newer_preserved_count ?? 0,
+    ),
+    source_equal_pending: Number(
+      result.source_equal_pending_count ?? 0,
+    ),
+  });
+}
+
+async function recordRevenueCatTransfer(
+  db: SupabaseClient,
+  transfer: ReturnType<typeof inspectRevenueCatTransferEvidence>,
+  payloadFingerprint: string,
+  reason: string,
+  retryable: boolean,
+  resolvedEnvironment?: string | null,
+  resolvedStore?: string | null,
+  countDelivery = false,
+): Promise<{ status: string; reason: string; terminal: boolean }> {
+  const { data, error } = await db.rpc(
+    "record_revenuecat_entitlement_transfer",
+    {
+      p_event_id: transfer.eventId,
+      p_event_at: transfer.eventAt,
+      p_payload_fingerprint: payloadFingerprint,
+      p_reason: reason,
+      p_destination_user_id: transfer.destinationUserId,
+      p_source_user_ids: transfer.sourceUserIds,
+      p_source_identifier_count: transfer.sourceIdentifierCount,
+      p_destination_identifier_count: transfer.destinationIdentifierCount,
+      p_environment: resolvedEnvironment ?? transfer.environment,
+      p_store: resolvedStore ?? transfer.store,
+      p_retryable: retryable,
+      p_count_delivery: countDelivery,
+    },
+  );
+  if (error) {
+    throw new Error(
+      `revenuecat transfer record failed:${
+        stringOrNull((error as { code?: unknown }).code) ?? "unknown"
+      }`,
+    );
+  }
+  const row = (
+    Array.isArray(data) ? data[0] : data
+  ) as {
+    transfer_status?: unknown;
+    transfer_reason?: unknown;
+    terminal?: unknown;
+  } | null;
+  if (
+    !row ||
+    typeof row.terminal !== "boolean" ||
+    !stringOrNull(row.transfer_status) ||
+    !stringOrNull(row.transfer_reason)
+  ) {
+    throw new Error("revenuecat_transfer_record_invalid_response");
+  }
+  return {
+    status: String(row.transfer_status),
+    reason: String(row.transfer_reason),
+    terminal: row.terminal,
+  };
+}
+
+function transferErrorCode(error: unknown): string {
+  const code = error instanceof RevenueCatTransferError
+    ? error.code
+    : error instanceof Error
+    ? error.message
+    : "";
+  return /^[a-z0-9_]{3,80}$/.test(code) ? code : "transfer_authority_invalid";
+}
 
 async function enrichGooglePlayPartnersObservation(
   db: SupabaseClient,
@@ -443,7 +962,9 @@ function projectionPatch(
   const status = statusForEvent(type, isTrial, event);
   if (!status) return null; // nothing to reconcile (e.g. TRANSFER — TODO below)
 
-  const planCode = isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null;
+  const planCode = isKnownStorePlan(resolvedPlan)
+    ? String(resolvedPlan).toLowerCase()
+    : null;
   if (!planCode) return null;
   if (!canGrantRevenueCatAccess(type, event)) return null;
   const periodEnd = msToIso(event.expiration_at_ms);
@@ -454,7 +975,8 @@ function projectionPatch(
   const patch: JsonRecord = {
     user_id: userId,
     provider: providerForStore(stringOrNull(event.store)),
-    provider_customer_id: stringOrNull(event.original_app_user_id) ?? stringOrNull(event.app_user_id),
+    provider_customer_id: stringOrNull(event.original_app_user_id) ??
+      stringOrNull(event.app_user_id),
     plan_code: planCode,
     status,
     // Store no per-user overrides: the read path (entitlements.ts
@@ -507,14 +1029,14 @@ function projectionPatch(
     patch.billing_terms_source = "revenuecat_webhook";
   }
 
-  // TODO(transfer): handle the TRANSFER event by moving the entitlement from
-  // the previous app_user_id to the new one (e.g. account merge). Skipped for
-  // now — see RevenueCat "transferred_from"/"transferred_to".
-
   return patch;
 }
 
-function statusForEvent(type: string, isTrial: boolean, event: JsonRecord = {}): string | null {
+function statusForEvent(
+  type: string,
+  isTrial: boolean,
+  event: JsonRecord = {},
+): string | null {
   switch (type) {
     case "INITIAL_PURCHASE":
     case "RENEWAL":
@@ -547,7 +1069,8 @@ function statusForEvent(type: string, isTrial: boolean, event: JsonRecord = {}):
 }
 
 function isRefundCancellation(event: JsonRecord): boolean {
-  return String(event.cancel_reason ?? "").trim().toUpperCase() === "CUSTOMER_SUPPORT";
+  return String(event.cancel_reason ?? "").trim().toUpperCase() ===
+    "CUSTOMER_SUPPORT";
 }
 
 function providerForStore(store: string | null): string {
@@ -584,21 +1107,25 @@ function rcCurrency(event: JsonRecord): string | null {
 
 function surfaceForStore(store: string | null): PaywallSurface {
   switch ((store ?? "").toUpperCase()) {
-    case "PLAY_STORE": return "mobile_android";
+    case "PLAY_STORE":
+      return "mobile_android";
     case "STRIPE":
     case "RC_BILLING":
-    case "PADDLE": return "web";
-    default: return "unknown";
+    case "PADDLE":
+      return "web";
+    default:
+      return "unknown";
   }
 }
 
 function packageIdOf(event: JsonRecord): string | null {
-  const context = event.presented_offering_context && typeof event.presented_offering_context === "object"
+  const context = event.presented_offering_context &&
+      typeof event.presented_offering_context === "object"
     ? event.presented_offering_context as JsonRecord
     : {};
-  return stringOrNull(event.package_id)
-    ?? stringOrNull(event.package_identifier)
-    ?? stringOrNull(context.package_identifier);
+  return stringOrNull(event.package_id) ??
+    stringOrNull(event.package_identifier) ??
+    stringOrNull(context.package_identifier);
 }
 
 // Prefer the buyer-currency amount only when RevenueCat also supplies its ISO
@@ -625,7 +1152,10 @@ function refundedMoney(event: JsonRecord): RcMoney | null {
   const local = Number(event.price_in_purchased_currency);
   const localCurrency = rcCurrency(event);
   if (Number.isFinite(local) && local < 0 && localCurrency) {
-    return { cents: Math.round(Math.abs(local) * 100), currency: localCurrency };
+    return {
+      cents: Math.round(Math.abs(local) * 100),
+      currency: localCurrency,
+    };
   }
   const usd = Number(event.price);
   return Number.isFinite(usd) && usd < 0
@@ -691,7 +1221,8 @@ async function journalRcPayment(
     const refund = refundedMoney(event);
     if (!refund || refund.cents <= 0 || refund.cents > 9_999_999) return;
     const eventId = stringOrNull(event.id);
-    const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.original_transaction_id);
+    const txId = stringOrNull(event.transaction_id) ??
+      stringOrNull(event.original_transaction_id);
     const refundIdentity = eventId ?? txId;
     if (!refundIdentity) return;
     const { error } = await db.from("cloud_billing_ledger").upsert({
@@ -704,7 +1235,9 @@ async function journalRcPayment(
       provider: providerForStore(stringOrNull(event.store)),
       order_id: txId,
       country_code: countryOf(event),
-      plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
+      plan_code: isKnownStorePlan(resolvedPlan)
+        ? String(resolvedPlan).toLowerCase()
+        : null,
       bill_period: billPeriodForEvent(event),
       billing_period_end: msToIso(event.expiration_at_ms),
       experiment_key: attribution.experimentKey,
@@ -721,7 +1254,11 @@ async function journalRcPayment(
     return;
   }
 
-  const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"]);
+  const MONEY = new Set([
+    "INITIAL_PURCHASE",
+    "RENEWAL",
+    "NON_RENEWING_PURCHASE",
+  ]);
   if (!MONEY.has(type)) return;
   const money = paidMoney(event);
   if (isFreeTrialPeriod(event)) return;
@@ -741,7 +1278,9 @@ async function journalRcPayment(
     // Transaction-time country (VAT/OSS record). NB: for store rails the STORE is the
     // deemed supplier for EU VAT — this is analytics/audit context, not a tax base.
     country_code: countryOf(event),
-    plan_code: isKnownStorePlan(resolvedPlan) ? String(resolvedPlan).toLowerCase() : null,
+    plan_code: isKnownStorePlan(resolvedPlan)
+      ? String(resolvedPlan).toLowerCase()
+      : null,
     bill_period: billPeriodForEvent(event),
     billing_period_end: msToIso(event.expiration_at_ms),
     experiment_key: attribution.experimentKey,
@@ -759,7 +1298,10 @@ async function journalRcPayment(
 
 // --- persistence helpers ----------------------------------------------------
 
-async function alreadyProcessed(db: SupabaseClient, eventId: string): Promise<boolean> {
+async function alreadyProcessed(
+  db: SupabaseClient,
+  eventId: string,
+): Promise<boolean> {
   const { data, error } = await db
     .from("cloud_entitlement_events")
     .select("id")
@@ -799,23 +1341,15 @@ function resolveUserId(event: JsonRecord): string | null {
   // RevenueCat may deliver the canonical id under original_app_user_id.
   const original = stringOrNull(event.original_app_user_id);
   if (original && UUID_RE.test(original)) return original;
-  // TRANSFER events can identify only the destination aliases. Accept exactly
-  // one canonical Supabase UUID; ambiguous multi-account transfers stay
-  // unmapped and are not silently attributed.
-  const transferredTo = Array.isArray(event.transferred_to) ? event.transferred_to : [];
-  const canonicalTargets = [...new Set(
-    transferredTo
-      .map((candidate) => stringOrNull(candidate))
-      .filter((candidate): candidate is string => Boolean(candidate && UUID_RE.test(candidate))),
-  )];
-  if (canonicalTargets.length === 1) return canonicalTargets[0];
   return null;
 }
 
 function verifyAuth(req: Request): boolean {
   if (!WEBHOOK_AUTH) {
     // Fail closed: never accept unauthenticated webhooks in any environment.
-    console.error("[norva-billing-webhook] NORVA_REVENUECAT_WEBHOOK_AUTH is not set");
+    console.error(
+      "[norva-billing-webhook] NORVA_REVENUECAT_WEBHOOK_AUTH is not set",
+    );
     return false;
   }
   const header = req.headers.get("Authorization") ?? "";
@@ -844,7 +1378,12 @@ function stringOrNull(value: unknown): string | null {
   return trimmed.length ? trimmed : null;
 }
 
-function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+function boundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const n = Number(raw ?? fallback);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));

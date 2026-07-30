@@ -386,6 +386,7 @@ test('worker error policy is table-driven', async () => {
     ['22023', 'dead_letter'],
     ['23514', 'dead_letter'],
     ['55000', 'dead_letter'],
+    ['P0003', 'dead_letter'],
     ['P0006', 'dead_letter'],
     ['08006', 'retry'],
     ['unknown', 'retry'],
@@ -404,15 +405,27 @@ test('worker remains cron-authenticated, bounded and shadow-only', () => {
   const adminMigration = read(
     'supabase/migrations/20260729201447_partners_tv_admin_analytics.sql',
   );
+  const disputeWonMigration = read(
+    'supabase/migrations/20260730100200_partners_revolut_dispute_won.sql',
+  );
 
   assert.match(worker, /norva_verify_cron_secret/);
   assert.match(worker, /partners_worker_commission_jobs_lease/);
   assert.match(worker, /partners_worker_commission_job_complete/);
+  assert.match(worker, /partners_worker_revolut_dispute_won_jobs_lease/);
+  assert.match(worker, /partners_worker_revolut_dispute_won_job_complete/);
   assert.match(worker, /partners_worker_maturation_lease/);
   assert.match(worker, /partners_worker_maturation_complete/);
   assert.match(worker, /partners_worker_shadow_reconcile/);
   assert.match(worker, /partners_worker_heartbeat/);
-  for (const workerName of ['commission', 'maturation', 'reconciliation']) {
+  for (
+    const workerName of [
+      'commission',
+      'correction',
+      'maturation',
+      'reconciliation',
+    ]
+  ) {
     assert.match(
       worker,
       new RegExp(`runObservedTask\\([\\s\\S]{0,120}"${workerName}"`),
@@ -431,15 +444,21 @@ test('worker remains cron-authenticated, bounded and shadow-only', () => {
   assert.match(cronRegistration, /norva-partners-worker\/cron\/run/);
   assert.doesNotMatch(cronRegistration, /Bearer\s+[A-Za-z0-9._-]{24,}/);
 
-  const monitoringSnapshot = adminMigration.slice(
-    adminMigration.indexOf(
-      'create or replace function affiliate_private.partners_ops_alert_snapshot()',
-    ),
-    adminMigration.indexOf(
-      'create or replace function affiliate_private.admin_partners_monitoring()',
-    ),
+  const monitoringStart = disputeWonMigration.lastIndexOf(
+    'create or replace function affiliate_private.partners_ops_alert_snapshot()',
   );
-  for (const workerName of ['commission', 'maturation', 'reconciliation']) {
+  const monitoringSnapshot = disputeWonMigration.slice(
+    monitoringStart,
+    disputeWonMigration.indexOf('$$;', monitoringStart) + 3,
+  );
+  for (
+    const workerName of [
+      'commission',
+      'correction',
+      'maturation',
+      'reconciliation',
+    ]
+  ) {
     assert.match(
       monitoringSnapshot,
       new RegExp(`\\('${workerName}'::text\\)`),
@@ -454,6 +473,9 @@ test('worker remains cron-authenticated, bounded and shadow-only', () => {
 
 test('database exposes only service-role worker wrappers and bounds retries', () => {
   const migration = read('supabase/migrations/20260729201430_partners_finance_maturation_payout.sql');
+  const disputeWonMigration = read(
+    'supabase/migrations/20260730100200_partners_revolut_dispute_won.sql',
+  );
   const rpcNames = [
     'partners_worker_financial_observation_required',
     'partners_worker_currency_exponent_resolve',
@@ -487,23 +509,19 @@ test('database exposes only service-role worker wrappers and bounds retries', ()
     migration,
     /v_event_type in \('refund', 'chargeback'\) and v_parent_hash is null/,
   );
-  assert.match(
-    migration,
-    /and e\.entry_kind in \('reversal', 'manual_reversal'\)/,
+  assert.match(disputeWonMigration, /partners_net_reversed_minor/);
+  const completionStart = disputeWonMigration.lastIndexOf(
+    'affiliate_private.partners_worker_commission_job_complete(',
   );
-  const commissionCompletion = migration.slice(
-    migration.indexOf(
-      'affiliate_private.partners_worker_commission_job_complete(',
-    ),
-    migration.indexOf(
-      'affiliate_private.partners_worker_maturation_lease(',
-    ),
+  const commissionCompletion = disputeWonMigration.slice(
+    completionStart,
+    disputeWonMigration.indexOf('$$;', completionStart) + 3,
   );
   assert.match(
     commissionCompletion,
-    /v_already_reversed[\s\S]*?e\.entry_kind in \('reversal', 'manual_reversal'\)/,
+    /v_already_reversed[\s\S]*?partners_net_reversed_minor\(v_origin_entry\.id\)/,
   );
-  assert.match(migration, /v_over_reversed/);
+  assert.match(disputeWonMigration, /v_over_reversed/);
   assert.match(migration, /p_dry_run boolean/);
 });
 
@@ -516,10 +534,12 @@ test('all three authoritative billing producers call the shared financial adapte
   assert.match(revenueCat, /await ingestPartnerFinancialFact\(admin, partnersObservation\)/);
   assert.match(revolutWebhook, /financial_event: "chargeback"/);
   assert.match(revolutWebhook, /eventType !== "DISPUTE_LOST"/);
+  assert.match(revolutWebhook, /eventType !== "DISPUTE_WON"/);
   assert.match(revolutWebhook, /revolutDisputePartnerObservation/);
+  assert.match(revolutWebhook, /revolutDisputeWonPartnerObservation/);
+  assert.match(revolutWebhook, /enqueuePartnerChargebackReversal/);
   assert.match(revolutWebhook, /\/api\/disputes\//);
   assert.match(revolutWebhook, /REVOLUT_DISPUTES_API_VERSION = "2026-04-20"/);
-  assert.match(revolutWebhook, /dispute reversal financial contract is not configured/);
   assert.ok((revolutWebhook.match(/ingestPartnerFinancialFact/g) ?? []).length >= 4);
   assert.match(revolutBilling, /await ingestPartnerFinancialFact\(db, partnersObservation\)/);
 

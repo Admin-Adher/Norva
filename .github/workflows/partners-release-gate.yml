@@ -1,0 +1,121 @@
+name: Partners protected release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      readiness:
+        description: Readiness level to validate
+        required: true
+        type: choice
+        options:
+          - pilot
+          - generalization
+
+permissions:
+  contents: read
+
+jobs:
+  reject-noncanonical-dispatch:
+    if: >-
+      github.repository != 'Admin-Adher/Norva'
+      || github.ref != 'refs/heads/main'
+    name: Reject noncanonical release dispatch
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail closed without requesting protected evidence
+        shell: bash
+        run: |
+          echo "Partners release validation is restricted to Admin-Adher/Norva main." >&2
+          exit 1
+
+  validate-private-evidence:
+    if: >-
+      github.repository == 'Admin-Adher/Norva'
+      && github.ref == 'refs/heads/main'
+    name: Validate private release evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Partners Release
+    steps:
+      - name: Require the canonical repository and protected release ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" != "Admin-Adher/Norva" ]]; then
+            echo "Partners release evidence is restricted to Admin-Adher/Norva." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Partners release evidence can only validate refs/heads/main." >&2
+            exit 1
+          fi
+
+      - name: Check out the exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned Node runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.22.3
+          check-latest: false
+
+      - name: Validate protected evidence against candidate commit
+        shell: bash
+        env:
+          PARTNERS_RELEASE_EVIDENCE_B64: ${{ secrets.PARTNERS_RELEASE_EVIDENCE_B64 }}
+          READINESS: ${{ inputs.readiness }}
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence_dir="$(mktemp -d)"
+          evidence_file="$evidence_dir/evidence.json"
+          trap 'rm -f "$evidence_file"; rmdir "$evidence_dir"' EXIT
+
+          if [[ -z "${PARTNERS_RELEASE_EVIDENCE_B64:-}" ]]; then
+            echo "Protected Partners release evidence is not configured." >&2
+            exit 1
+          fi
+
+          node - "$evidence_file" <<'NODE'
+          const fs = require('node:fs');
+          const encoded = process.env.PARTNERS_RELEASE_EVIDENCE_B64 || '';
+          const canonicalBase64 =
+            /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+          if (!encoded || !canonicalBase64.test(encoded)) {
+            process.exit(1);
+          }
+          const decoded = Buffer.from(encoded, 'base64');
+          if (
+            decoded.length === 0
+            || decoded.toString('base64') !== encoded
+          ) {
+            process.exit(1);
+          }
+          fs.writeFileSync(process.argv[2], decoded, {
+            encoding: null,
+            mode: 0o600,
+            flag: 'wx',
+          });
+          NODE
+          unset PARTNERS_RELEASE_EVIDENCE_B64
+
+          case "$READINESS" in
+            pilot)
+              readiness_flag="--require-pilot-ready"
+              ;;
+            generalization)
+              readiness_flag="--require-generalization-ready"
+              ;;
+            *)
+              echo "Unsupported readiness mode." >&2
+              exit 2
+              ;;
+          esac
+
+          node scripts/validate-partners-release-evidence.js \
+            "$evidence_file" \
+            "$readiness_flag" \
+            "--expected-commit-sha=${GITHUB_SHA}"

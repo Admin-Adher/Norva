@@ -26,11 +26,22 @@ hr() { printf '%.0s-' {1..60}; echo; }
 
 # The tables whose counts must match exactly after restore.
 TABLES=(cloud_media_items cloud_titles cloud_title_variants cloud_sources
-        cloud_live_streams catalog_titles catalog_file_tracks
-        catalog_provider_identities subtitle_tracks)
+         cloud_live_streams catalog_titles catalog_file_tracks
+         catalog_provider_identities subtitle_tracks
+         cloud_revenuecat_transfer_events)
 PRIVATE_TABLES=(affiliate_accounts affiliate_events affiliate_attributions
-                affiliate_financial_facts affiliate_commission_entries
-                affiliate_payout_cycles)
+                affiliate_kyc_sessions affiliate_kyc_webhook_events
+                affiliate_financial_facts
+                affiliate_revolut_dispute_won_jobs
+                affiliate_revolut_dispute_won_conflicts
+                affiliate_commission_entries affiliate_payout_cycles
+                affiliate_payout_items affiliate_payout_dispatches
+                affiliate_worker_heartbeats
+                affiliate_airwallex_settlement_observations
+                affiliate_airwallex_settlement_reviews
+                affiliate_airwallex_settlement_decisions
+                affiliate_airwallex_report_contracts
+                affiliate_airwallex_report_runs)
 
 echo "PARITY CHECK  $(date -u +%FT%TZ)"
 hr
@@ -41,6 +52,13 @@ check() { # label, sql
   local label="$1" sql="$2" a b ok
   a="$(q "$SRC" "$sql")"; b="$(q "$DST" "$sql")"
   [[ "$a" == "$b" ]] && ok="✓" || ok="✗"
+  printf "%-32s %14s %14s %4s\n" "$label" "${a:-?}" "${b:-?}" "$ok"
+}
+
+check_zero() { # label, sql expected to return an invariant-violation count
+  local label="$1" sql="$2" a b ok
+  a="$(q "$SRC" "$sql")"; b="$(q "$DST" "$sql")"
+  [[ "$a" == "0" && "$b" == "0" ]] && ok="âœ“" || ok="âœ—"
   printf "%-32s %14s %14s %4s\n" "$label" "${a:-?}" "${b:-?}" "$ok"
 }
 
@@ -59,6 +77,17 @@ check "RLS policies (public)"     "select count(*) from pg_policies where schema
 check "RLS policies (partners)"   "select count(*) from pg_policies where schemaname='affiliate_private'"
 check "partners private tables"   "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='affiliate_private' and c.relkind in ('r','p')"
 check "partners functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%partners%'"
+check "TRANSFER functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%revenuecat%transfer%'"
+check "DISPUTE_WON functions"     "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%revolut_dispute_won%'"
+check "Airwallex report functions" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%airwallex_report%'"
+check_zero "Airwallex direct observe grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname='partners_service_airwallex_settlement_observe' and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') or has_function_privilege('service_role',p.oid,'EXECUTE'))"
+check_zero "Payout pilot adapter violations" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and provider<>'airwallex'"
+check_zero "Payout active route collisions" "select count(*) from (select 1 from affiliate_private.affiliate_payout_provider_configs where status='active' group by country_code,currency having count(*)>1) collision"
+check "Didit binding columns"      "select count(*) from information_schema.columns where table_schema='affiliate_private' and table_name in ('affiliate_kyc_sessions','affiliate_kyc_webhook_events') and column_name in ('provider_environment','provider_config_fingerprint')"
+check_zero "Didit legacy RPC grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and ((p.proname='partners_service_kyc_session_record' and pg_get_function_identity_arguments(p.oid)='p_user_id uuid, p_idempotency_key text, p_provider_session_id text, p_provider_workflow_id text, p_provider_workflow_version integer, p_provider_status text, p_expires_at timestamp with time zone, p_reservation_key text') or (p.proname='partners_service_kyc_webhook_apply' and pg_get_function_identity_arguments(p.oid)='p_provider_event_id text, p_provider_session_id text, p_provider_workflow_id text, p_provider_workflow_version integer, p_provider_status text, p_event_created_at timestamp with time zone, p_document_age integer, p_document_country_iso3 text, p_id_check_approved boolean, p_liveness_approved boolean, p_face_match_approved boolean, p_payload_hash text')) and has_function_privilege('service_role',p.oid,'EXECUTE')"
+check_zero "Didit unbound trust"      "select count(*) from affiliate_private.affiliate_accounts a where a.status<>'closed' and a.verification_provider='didit' and a.verification_status='verified' and not exists (select 1 from affiliate_private.affiliate_kyc_sessions s where s.account_id=a.id and s.provider_session_hash=a.verification_reference and s.provider_environment='live' and s.provider_config_fingerprint~'^[0-9a-f]{64}$' and s.provider_config_fingerprint<>repeat('0',64) and s.status='verified' and exists (select 1 from affiliate_private.affiliate_kyc_webhook_events e where e.session_id=s.id and e.processing_outcome='verified' and e.provider_environment='live' and e.provider_config_fingerprint=s.provider_config_fingerprint and e.provider_event_at=s.verified_at))"
+check_zero "Didit legacy pending"      "select count(*) from affiliate_private.affiliate_kyc_sessions s where s.status='pending' and s.provider_environment='legacy_unbound'"
+check_zero "Didit recovery RPC grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='partners_service_kyc_binding_recover' and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') or not has_function_privilege('service_role',p.oid,'EXECUTE'))"
 check "vault secrets"             "select count(*) from vault.secrets"
 check "anon statement_timeout"    "select setting from pg_settings where name='statement_timeout'"  # session-level; role GUC checked below
 

@@ -52,6 +52,39 @@ function isoOrNow(value, now = new Date()) {
     : now.toISOString();
 }
 
+function isoOrNull(value) {
+  const raw = textOrNull(value, 80);
+  const millis = raw ? new Date(raw).getTime() : Number.NaN;
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
+}
+
+export function revolutWebhookSignatureMatches(signatureHeader, expected) {
+  if (
+    typeof signatureHeader !== "string" ||
+    signatureHeader.length === 0 ||
+    signatureHeader.length > 4096 ||
+    typeof expected !== "string" ||
+    !/^v1=[0-9a-f]{64}$/.test(expected)
+  ) {
+    return false;
+  }
+
+  // Revolut separates signatures with commas during secret rotation. Accepting
+  // ASCII whitespace as an additional delimiter keeps older single-secret
+  // deliveries compatible without weakening exact signature comparison.
+  const candidates = signatureHeader.split(/[,\s]+/).filter(Boolean);
+  let matched = 0;
+  for (const candidate of candidates) {
+    let mismatch = candidate.length ^ expected.length;
+    for (let index = 0; index < expected.length; index += 1) {
+      mismatch |= (candidate.charCodeAt(index) || 0) ^
+        expected.charCodeAt(index);
+    }
+    matched |= mismatch === 0 ? 1 : 0;
+  }
+  return matched === 1;
+}
+
 function millisecondsIsoOrNull(value) {
   const millis = typeof value === "number" ? value : Number(value);
   return Number.isFinite(millis) && millis > 0
@@ -255,6 +288,147 @@ export function revolutDisputePartnerObservation(input, now = new Date()) {
   });
 }
 
+export function revolutDisputeWonPartnerObservation(input, now = new Date()) {
+  const dispute = recordOrEmpty(input?.dispute);
+  const payment = recordOrEmpty(dispute.payment);
+  const state = String(dispute.state ?? "").trim().toUpperCase();
+  if (state !== "WON") return null;
+
+  const disputeId = textOrNull(dispute.id);
+  const parentOrderId = textOrNull(payment.order_id);
+  const amount = nonNegativeSafeIntegerOrNull(dispute.amount);
+  const currency = currencyOrNull(dispute.currency);
+  const paymentCurrency = currencyOrNull(payment.currency);
+  const observedAt = isoOrNull(dispute.updated_at ?? dispute.created_at);
+  if (!disputeId) throw new Error("partners_dispute_won_missing_id");
+  if (!parentOrderId) {
+    throw new Error("partners_dispute_won_missing_parent_order");
+  }
+  if (amount == null || amount <= 0) {
+    throw new Error("partners_dispute_won_invalid_amount");
+  }
+  if (!currency || (paymentCurrency && paymentCurrency !== currency)) {
+    throw new Error("partners_dispute_won_currency_mismatch");
+  }
+  if (!observedAt) {
+    throw new Error("partners_dispute_won_invalid_observed_at");
+  }
+
+  const referredUserId = textOrNull(input?.referredUserId, 36);
+  if (!referredUserId || !UUID_RE.test(referredUserId)) {
+    throw new Error("partners_fact_invalid_user");
+  }
+  const environment = ENVIRONMENTS.has(input?.environment)
+    ? input.environment
+    : "production";
+  if (environment !== "production") {
+    throw new Error("partners_dispute_won_invalid_environment");
+  }
+
+  return {
+    referredUserId,
+    rail: "web",
+    eventType: "chargeback_reversal",
+    environment,
+    transactionId: disputeId,
+    parentTransactionId: parentOrderId,
+    currency,
+    grossMinor: amount,
+    observedAt,
+  };
+}
+
+export async function partnerChargebackReversalRpcArgs(observation) {
+  const referredUserId = textOrNull(observation?.referredUserId, 36);
+  const disputeId = textOrNull(observation?.transactionId);
+  const parentOrderId = textOrNull(observation?.parentTransactionId);
+  const currency = currencyOrNull(observation?.currency);
+  const grossMinor = nonNegativeSafeIntegerOrNull(observation?.grossMinor);
+  const observedAt = textOrNull(observation?.observedAt, 80);
+  if (
+    observation?.rail !== "web" ||
+    observation?.eventType !== "chargeback_reversal" ||
+    observation?.environment !== "production" ||
+    !referredUserId ||
+    !UUID_RE.test(referredUserId) ||
+    !disputeId ||
+    !parentOrderId ||
+    !currency ||
+    grossMinor == null ||
+    grossMinor <= 0 ||
+    !observedAt ||
+    !Number.isFinite(new Date(observedAt).getTime())
+  ) {
+    throw new Error("partners_chargeback_reversal_invalid_envelope");
+  }
+
+  const disputeHash = await sha256Hex(disputeId);
+  const parentOrderHash = await sha256Hex(parentOrderId);
+  const sourceIdentity = [
+    "billing:economic:v1",
+    "production",
+    "web",
+    "chargeback_reversal",
+    disputeHash,
+  ].join(":");
+  const payload = JSON.stringify({
+    schema_version: 1,
+    referred_user_id: referredUserId,
+    rail: "web",
+    event_type: "chargeback_reversal",
+    environment: "production",
+    dispute_hash: disputeHash,
+    parent_order_hash: parentOrderHash,
+    currency,
+    gross_minor: grossMinor,
+  });
+
+  return {
+    p_source_event_hash: await sha256Hex(sourceIdentity),
+    p_payload_hash: await sha256Hex(payload),
+    p_dispute_hash: disputeHash,
+    p_parent_order_hash: parentOrderHash,
+    p_referred_user_id: referredUserId,
+    p_currency: currency,
+    p_gross_minor: grossMinor,
+    p_observed_at: new Date(observedAt).toISOString(),
+  };
+}
+
+export async function enqueuePartnerChargebackReversal(db, observation) {
+  const args = await partnerChargebackReversalRpcArgs(observation);
+  const { data, error } = await db.rpc(
+    "partners_worker_revolut_dispute_won_enqueue",
+    args,
+  );
+  if (error) {
+    const code = textOrNull(error.code, 16) ?? "unknown";
+    throw new Error(`partners_chargeback_reversal_enqueue_failed:${code}`);
+  }
+
+  const result = unwrapRpcJson(data);
+  const job = recordOrEmpty(result?.job);
+  if (
+    Number(result?.schema_version) !== 1 ||
+    result?.action !== "chargeback_reversal_queued" ||
+    typeof result?.replayed !== "boolean" ||
+    typeof result?.conflict !== "boolean" ||
+    !/^crw_[0-9a-f]{24}$/.test(String(job.key ?? "")) ||
+    !["pending", "leased", "retry", "succeeded", "dead_letter"].includes(
+      String(job.status ?? ""),
+    )
+  ) {
+    throw new Error("partners_chargeback_reversal_enqueue_invalid_response");
+  }
+  if (result.conflict === true) {
+    console.error("[partners-finance] dispute-won conflict quarantined", {
+      rail: "web",
+      event_type: "chargeback_reversal",
+    });
+  }
+  return result;
+}
+
 export function buildPartnerFinancialObservation(input) {
   const referredUserId = textOrNull(input?.referredUserId, 36);
   const rail = textOrNull(input?.rail, 32);
@@ -391,6 +565,7 @@ export function classifyPartnersWorkerRpcFailure(error) {
     code === "22023" ||
     code === "23514" ||
     code === "55000" ||
+    code === "P0003" ||
     code === "P0006"
   ) {
     return { outcome: "dead_letter", code };

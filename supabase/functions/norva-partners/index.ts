@@ -3,6 +3,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import {
   DIDIT_CREATE_SESSION_URL,
+  diditConfigFingerprint,
   DiditContractError,
   diditCreateBody,
   loadDiditConfig,
@@ -224,6 +225,10 @@ Deno.serve(async (req) => {
         vendorData,
         input.language,
       );
+      const providerConfigFingerprint = await diditConfigFingerprint(
+        DIDIT_CONFIG,
+        providerSession.workflowVersion,
+      );
       const recorded = sanitizeKycSessionRecordRpc(
         await callRpc(
           PARTNERS_RPC.kycSessionRecord,
@@ -236,6 +241,10 @@ Deno.serve(async (req) => {
             p_provider_status: providerSession.providerStatus,
             p_expires_at: null,
             p_reservation_key: prepared.kyc.reservation_key,
+            p_provider_environment: DIDIT_CONFIG.environment,
+            p_provider_config_fingerprint: providerConfigFingerprint,
+            p_provider_session_ttl_seconds:
+              DIDIT_CONFIG.sessionExpirationSeconds,
           },
           "mutation",
         ),

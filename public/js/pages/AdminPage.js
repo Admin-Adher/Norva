@@ -4213,6 +4213,12 @@ class AdminPage {
                   </div>
                   <div class="ssub">Chargement…</div>
                 </section>
+                <section id="partners-admin-settlements" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Rapprochement Airwallex</h2><p>Preuve technique, revue Finance puis décision d’un second opérateur Finance distinct.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
                 <section id="partners-admin-configuration" class="partners-control-card" aria-busy="true">
                   <div class="partners-control-head">
                     <div><h2>Programme, juridictions et release</h2><p>Configuration explicite, auditée et fermée par défaut.</p></div>
@@ -4288,7 +4294,10 @@ class AdminPage {
                 }),
                 this._rpc('admin_partners_monitoring'),
                 this._rpc('admin_partners_configuration'),
-                this._rpc('admin_partners_analytics', { p_days: 30 })
+                this._rpc('admin_partners_analytics', { p_days: 30 }),
+                this._rpc('admin_partners_airwallex_settlements', {
+                    p_limit: 25
+                })
             ]);
             if (nav !== this._nav || this._route !== 'partners') return;
             const value = (index, fallback = null) => results[index]?.status === 'fulfilled'
@@ -4345,6 +4354,7 @@ class AdminPage {
             this._renderPartnersMonitoring(value(7, null));
             this._renderPartnersConfiguration(value(8, null));
             this._renderPartnersAnalytics(value(9, null));
+            this._renderPartnersSettlements(value(10, null));
         } catch (_) {
             if (nav !== this._nav || this._route !== 'partners') return;
             this._partnersCanManageCapabilities = false;
@@ -4363,6 +4373,7 @@ class AdminPage {
             this._renderPartnersMonitoring(null);
             this._renderPartnersConfiguration(null);
             this._renderPartnersAnalytics(null);
+            this._renderPartnersSettlements(null);
         }
     }
 
@@ -4462,8 +4473,10 @@ class AdminPage {
         }
         const workerLabels = {
             commission: 'Calcul des commissions',
+            correction: 'Contre-corrections financières',
             maturation: 'Maturation J+45',
-            reconciliation: 'Réconciliation shadow'
+            reconciliation: 'Réconciliation shadow',
+            revenuecat_transfer: 'Transferts RevenueCat'
         };
         const workers = data.workers.map((worker) => {
             const status = ['healthy', 'degraded', 'blocked', 'stale', 'not_configured']
@@ -4478,9 +4491,15 @@ class AdminPage {
                 <span class="partners-state${healthy ? ' is-on' : ' is-alert'}">${AdminPage.esc(status)}</span>
               </div>`;
         }).join('');
-        const alerts = data.alerts.slice(0, 10).map((alert) =>
+        const alertLabels = {
+            revenuecat_transfer_dead_letter: 'Transferts RevenueCat en échec terminal',
+            revenuecat_transfer_partial_aged: 'Transferts partiels depuis plus de 15 min',
+            revenuecat_transfer_quarantined_aged: 'Transferts en quarantaine depuis plus de 15 min',
+            revenuecat_transfer_partner_dead_letter: 'Observations Partners TRANSFER en échec terminal'
+        };
+        const alerts = data.alerts.slice(0, 20).map((alert) =>
             `<div class="partners-control-item">
-              <span>${AdminPage.esc(String(alert?.code || 'alerte'))}</span>
+              <span>${AdminPage.esc(alertLabels[alert?.code] || String(alert?.code || 'alerte'))}</span>
               <span class="partners-state${alert?.severity === 'critical' ? ' is-alert' : ''}">${AdminPage.n(Number(alert?.count) || 0)} · ${AdminPage.esc(String(alert?.severity || 'warning'))}</span>
             </div>`
         ).join('');
@@ -4490,7 +4509,7 @@ class AdminPage {
             ? data.kyc_quota.informational_limit : null;
         el.removeAttribute('aria-busy');
         el.innerHTML = `<div class="partners-control-head">
-            <div><h2>Supervision</h2><p>Les trois traitements doivent publier un heartbeat récent. Le quota KYC reste informatif et ne coupe pas le parcours.</p></div>
+            <div><h2>Supervision</h2><p>Chaque traitement critique doit publier un heartbeat récent. Le quota KYC reste informatif et ne coupe pas le parcours.</p></div>
             <span class="partners-state${data.alerts.length ? ' is-alert' : ' is-on'}">${data.alerts.length ? `${AdminPage.n(data.alerts.length)} alerte(s)` : 'Sain'}</span>
           </div>
           <div class="partners-control-grid">${workers}</div>
@@ -4763,6 +4782,83 @@ class AdminPage {
         return false;
     }
 
+    _renderPartnersSettlements(data) {
+        const el = document.getElementById('partners-admin-settlements');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable(
+                'partners-admin-settlements',
+                'Rapprochement Airwallex'
+            );
+            return;
+        }
+        const stageLabels = {
+            needs_review: 'Revue Finance requise',
+            awaiting_independent_decision: 'Second opérateur requis',
+            needs_decision: 'Décision requise',
+            confirmed: 'Confirmé',
+            quarantined: 'Mis en quarantaine',
+            exception: 'Exception après règlement'
+        };
+        const rows = data.items.slice(0, 25).map((item) => {
+            const observation = String(item?.observation_key || '');
+            const dispatch = String(item?.dispatch_key || '');
+            const currency = String(item?.currency || '');
+            const stage = String(item?.stage || '');
+            const validKeys = /^aso_[0-9a-f]{24}$/.test(observation)
+                && /^pds_[0-9a-f]{24}$/.test(dispatch);
+            const validMoney = Number.isSafeInteger(item?.amount_minor)
+                && item.amount_minor > 0
+                && /^[A-Z]{3}$/.test(currency);
+            const actions = [];
+            if (validKeys && item?.can_review === true
+                && this._partnersCapabilities.finance === true) {
+                actions.push(`<button type="button" class="partners-action"
+                    data-partners-action="settlement-review"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Effectuer la revue
+                  </button>`);
+            }
+            if (validKeys && item?.can_decide === true
+                && this._partnersCapabilities.finance === true) {
+                actions.push(`<button type="button" class="partners-action is-success"
+                    data-partners-action="settlement-confirm"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Confirmer
+                  </button>`);
+                actions.push(`<button type="button" class="partners-action is-danger"
+                    data-partners-action="settlement-quarantine"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Quarantaine
+                  </button>`);
+            }
+            const observed = item?.observed_at
+                ? AdminPage.timeAgo(item.observed_at)
+                : 'date indisponible';
+            const valueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.value_date || ''))
+                ? String(item.value_date)
+                : 'indisponible';
+            return `<div class="partners-ops-row">
+              <span>${AdminPage.esc(validKeys ? dispatch : 'Rapprochement invalide')}
+                <small>${validMoney
+                    ? `${AdminPage.n(item.amount_minor)} ${AdminPage.esc(currency)} en unités mineures`
+                    : 'Montant indisponible'} · valeur ${AdminPage.esc(valueDate)} · ${AdminPage.esc(observed)}</small>
+              </span>
+              <div class="partners-risk-actions">${actions.join('')
+                  || `<span class="partners-state">${AdminPage.esc(stageLabels[stage] || 'État indisponible')}</span>`}</div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Rapprochement Airwallex</h2>
+              <p>${AdminPage.n(data.total)} preuve(s) minimisée(s). Aucun identifiant provider, hash de preuve ou document bancaire n’est affiché.</p>
+            </div>
+          </div>
+          <div class="partners-ops-list">${rows
+              || '<div class="ssub">Aucun rapprochement à traiter.</div>'}</div>`;
+    }
+
     _renderPartnersConfiguration(data) {
         const el = document.getElementById('partners-admin-configuration');
         if (!el) return;
@@ -4908,6 +5004,9 @@ class AdminPage {
             ['Jobs en attente', data.queues.commission_pending],
             ['Retries', data.queues.commission_retry],
             ['Dead letter', data.queues.commission_dead_letter],
+            ['Corrections en attente', data.queues.correction_pending],
+            ['Corrections en retry', data.queues.correction_retry],
+            ['Corrections en dead letter', data.queues.correction_dead_letter],
             ['Maturations dues', data.queues.maturation_due],
             ['Maturations en échec', data.queues.maturation_dead_letter]
         ];
@@ -4928,11 +5027,11 @@ class AdminPage {
               <button type="button" class="partners-action" data-partners-action="job-retry">Relancer un dead letter</button>
               <button type="button" class="partners-action is-danger" data-partners-action="commission-reverse">Contre-écriture contrôlée</button>
             </div>
-            <div class="partners-ops-stats">${queueRows.slice(0, 3).map(([label, value]) =>
+            <div class="partners-ops-stats">${queueRows.slice(0, 6).map(([label, value]) =>
                 `<div class="partners-ops-stat"><strong>${AdminPage.n(Number(value) || 0)}</strong><span>${AdminPage.esc(label)}</span></div>`
             ).join('')}</div>
             <div class="partners-ops-list">
-              ${queueRows.slice(3).map(([label, value]) => `<div class="partners-ops-row"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(Number(value) || 0)}</strong></div>`).join('')}
+              ${queueRows.slice(6).map(([label, value]) => `<div class="partners-ops-row"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(Number(value) || 0)}</strong></div>`).join('')}
               <div class="partners-ops-row"><span>Réconciliation · ${AdminPage.esc(String(data.reconciliation.last_status || 'inconnue'))} · ${AdminPage.esc(lastRun)}</span><strong>${AdminPage.n(Number(data.reconciliation.mismatches) || 0)} écart(s)</strong></div>
               ${currencies || '<div class="ssub">Aucun solde financier observé.</div>'}
             </div>`;
@@ -5188,6 +5287,47 @@ class AdminPage {
         const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
         const isoCountry = /^[A-Z]{2}$/;
         const currencyCode = /^[A-Z]{3}$/;
+
+        if ([
+            'settlement-review',
+            'settlement-confirm',
+            'settlement-quarantine'
+        ].includes(action)) {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const observation = String(button.dataset.partnersObservation || '');
+            if (!/^aso_[0-9a-f]{24}$/.test(observation)) return false;
+            const operation = action === 'settlement-review'
+                ? 'REVIEW'
+                : (action === 'settlement-confirm' ? 'CONFIRM' : 'QUARANTINE');
+            const confirmation = await this._partnersTypedConfirmation(
+                `${operation}:${observation}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${operation.toLowerCase()} du rapprochement ${observation}`
+            );
+            if (!justification) return false;
+            if (action === 'settlement-review') {
+                await this._rpc('admin_partners_airwallex_settlement_review', {
+                    p_observation_key: observation,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                });
+                return 'Revue Finance enregistrée. Un second opérateur Finance distinct doit maintenant décider.';
+            }
+            const decision = action === 'settlement-confirm'
+                ? 'confirmed'
+                : 'quarantined';
+            await this._rpc('admin_partners_airwallex_settlement_decide', {
+                p_observation_key: observation,
+                p_decision: decision,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return decision === 'confirmed'
+                ? 'Rapprochement confirmé et ledger de règlement créé.'
+                : 'Rapprochement placé en quarantaine sans écriture de règlement.';
+        }
 
         if (action === 'capability') {
             if (this._partnersCanManageCapabilities !== true) return false;
@@ -5615,17 +5755,23 @@ class AdminPage {
 
         if (action === 'job-retry') {
             const type = await this._partnersPrompt(
-                'Type du job : commission ou maturation',
+                'Type du job : commission, correction ou maturation',
                 'commission',
-                (value) => ['commission', 'maturation'].includes(value.toLowerCase()),
+                (value) => ['commission', 'correction', 'maturation'].includes(value.toLowerCase()),
                 'Type de job invalide.'
             );
             if (!type) return false;
-            const pattern = type.toLowerCase() === 'commission'
-                ? /^job_[0-9a-f]{24}$/ : /^mat_[0-9a-f]{24}$/;
+            const normalizedType = type.toLowerCase();
+            const pattern = normalizedType === 'commission'
+                ? /^job_[0-9a-f]{24}$/
+                : normalizedType === 'correction'
+                    ? /^crw_[0-9a-f]{24}$/
+                    : /^mat_[0-9a-f]{24}$/;
             const key = await this._partnersPrompt(
                 'Clé pseudonymisée du dead letter :',
-                type.toLowerCase() === 'commission' ? 'job_' : 'mat_',
+                normalizedType === 'commission'
+                    ? 'job_'
+                    : normalizedType === 'correction' ? 'crw_' : 'mat_',
                 (value) => pattern.test(value),
                 'Clé de job invalide.'
             );
@@ -5636,7 +5782,7 @@ class AdminPage {
             if (!justification) return false;
             await this._rpc('admin_partners_job_retry', {
                 p_job_key: key,
-                p_job_type: type.toLowerCase(),
+                p_job_type: normalizedType,
                 p_confirmation: confirmation,
                 p_justification: justification
             });

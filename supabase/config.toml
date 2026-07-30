@@ -26,10 +26,16 @@ verify_jwt = false
 [functions.norva-tmdb-origlang]
 verify_jwt = false
 
-# RevenueCat sends our shared secret in the Authorization header (not a Supabase
-# JWT), so the platform gateway check is disabled and the function verifies the
-# secret itself via NORVA_REVENUECAT_WEBHOOK_AUTH.
+# RevenueCat uses a shared Authorization value (not a Supabase JWT), so the
+# platform gateway check is disabled. The function itself requires both
+# NORVA_REVENUECAT_WEBHOOK_AUTH and the timestamped raw-body HMAC configured in
+# NORVA_REVENUECAT_WEBHOOK_HMAC_SECRET; either missing/invalid fails closed.
 [functions.norva-billing-webhook]
+verify_jwt = false
+
+# Cron-only RevenueCat TRANSFER replay and post-commit Partners outbox worker.
+# The endpoint verifies NORVA_CRON_SHARED_SECRET in PostgreSQL before leasing.
+[functions.norva-revenuecat-transfer-worker]
 verify_jwt = false
 
 # Supabase "Send Email Hook": called by the auth server (no user JWT) with a

@@ -58,8 +58,9 @@ function diditConfig(overrides = {}) {
     DIDIT_WORKFLOW_ID: workflowId,
     DIDIT_APPLICATION_ID: applicationId,
     DIDIT_ENVIRONMENT: 'sandbox',
+    DIDIT_SESSION_EXPIRATION_SECONDS: '604800',
     DIDIT_WEBHOOK_SECRET: webhookSecret,
-    DIDIT_CALLBACK_URL: 'https://norva.tv/app#partners',
+    DIDIT_CALLBACK_URL: 'https://norva.tv/partners-kyc-return',
     DIDIT_ID_VERIFICATION_NODE_ID: 'id-primary',
     DIDIT_LIVENESS_NODE_ID: 'liveness-primary',
     DIDIT_FACE_MATCH_NODE_ID: 'face-primary',
@@ -72,25 +73,219 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function diditSemanticPayloadHash(payload) {
+  function sortJson(value) {
+    if (Array.isArray(value)) return value.map(sortJson);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, sortJson(value[key])]),
+    );
+  }
+  const semantic = { ...payload };
+  delete semantic.timestamp;
+  return cryptoNode.createHash('sha256')
+    .update(JSON.stringify(sortJson(semantic)))
+    .digest('hex');
+}
+
 test('Didit configuration is complete, KYC-only and fail-closed', () => {
   const { loadDiditConfig } = bundled('supabase/functions/_shared/didit-partners.ts');
   const values = diditConfig();
   const config = plain(loadDiditConfig((name) => values[name]));
   assert.equal(config.workflowId, workflowId);
   assert.equal(config.applicationId, applicationId);
-  assert.equal(config.callbackUrl, 'https://norva.tv/app#partners');
+  assert.equal(config.sessionExpirationSeconds, 604800);
+  assert.equal(
+    config.callbackUrl,
+    'https://norva.tv/partners-kyc-return',
+  );
   assert.equal(Object.hasOwn(config, 'consentVersion'), false, 'consent comes from jurisdiction policy, not a global provider env');
   for (const overrides of [
     { DIDIT_API_KEY: '' },
     { DIDIT_CALLBACK_URL: 'https://evil.example/steal' },
+    { DIDIT_CALLBACK_URL: 'https://norva.tv/app#partners' },
+    {
+      DIDIT_CALLBACK_URL:
+        'https://www.norva.tv/partners-kyc-return',
+    },
+    {
+      DIDIT_CALLBACK_URL:
+        'https://norva.tv/partners-kyc-return?session=leak',
+    },
     { DIDIT_WORKFLOW_ID: 'workflow-name' },
     { DIDIT_ENVIRONMENT: 'production' },
+    { DIDIT_SESSION_EXPIRATION_SECONDS: '' },
+    { DIDIT_SESSION_EXPIRATION_SECONDS: '3599' },
+    { DIDIT_SESSION_EXPIRATION_SECONDS: '0604800' },
+    { DIDIT_SESSION_EXPIRATION_SECONDS: '2419201' },
     { DIDIT_LIVENESS_NODE_ID: 'id-primary' },
     { DIDIT_WEBHOOK_SECRET: 'short' },
   ]) {
     const invalid = diditConfig(overrides);
     assert.equal(loadDiditConfig((name) => invalid[name]), null);
   }
+});
+
+test('Didit environment fingerprint is stable, secret-free and contract-sensitive', async () => {
+  const {
+    diditConfigFingerprint,
+    loadDiditConfig,
+  } = bundled('supabase/functions/_shared/didit-partners.ts');
+  const values = diditConfig();
+  const config = loadDiditConfig((name) => values[name]);
+  const fingerprint = await diditConfigFingerprint(config, 4);
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+
+  const rotatedSecrets = diditConfig({
+    DIDIT_API_KEY: 'rotated-didit-api-key-at-least-sixteen',
+    DIDIT_WEBHOOK_SECRET:
+      'rotated-didit-webhook-secret-at-least-thirty-two-characters',
+  });
+  assert.equal(
+    await diditConfigFingerprint(
+      loadDiditConfig((name) => rotatedSecrets[name]),
+      4,
+    ),
+    fingerprint,
+    'routine secret rotation must not orphan an otherwise identical session',
+  );
+
+  for (const overrides of [
+    { DIDIT_ENVIRONMENT: 'live' },
+    { DIDIT_WORKFLOW_ID: applicationId },
+    { DIDIT_ID_VERIFICATION_NODE_ID: 'id-primary-v2' },
+    { DIDIT_SESSION_EXPIRATION_SECONDS: '3600' },
+  ]) {
+    const changed = diditConfig(overrides);
+    assert.notEqual(
+      await diditConfigFingerprint(
+        loadDiditConfig((name) => changed[name]),
+        4,
+      ),
+      fingerprint,
+    );
+  }
+  assert.notEqual(
+    await diditConfigFingerprint(config, 5),
+    fingerprint,
+    'an in-place Didit workflow revision must produce a new binding',
+  );
+  await assert.rejects(() => diditConfigFingerprint(config, 0));
+  assert.doesNotMatch(
+    fingerprint,
+    /didit-api-key|webhook-secret/i,
+  );
+});
+
+test('Didit webhook RPC sanitizer separates applied, sandbox and quarantine states', () => {
+  const { sanitizeKycWebhookRpc } = bundled(
+    'supabase/functions/_shared/didit-partners.ts',
+  );
+  assert.deepEqual(plain(sanitizeKycWebhookRpc({
+    schema_version: 1,
+    action: 'kyc_result_observed',
+    replayed: false,
+    environment: 'sandbox',
+    reason: 'sandbox_non_authoritative',
+  })), {
+    schema_version: 1,
+    action: 'kyc_result_observed',
+    replayed: false,
+    environment: 'sandbox',
+    reason: 'sandbox_non_authoritative',
+  });
+  assert.deepEqual(plain(sanitizeKycWebhookRpc({
+    schema_version: 1,
+    action: 'kyc_result_quarantined',
+    replayed: true,
+    environment: 'live',
+    reason: 'provider_config_mismatch',
+  })), {
+    schema_version: 1,
+    action: 'kyc_result_quarantined',
+    replayed: true,
+    environment: 'live',
+    reason: 'provider_config_mismatch',
+  });
+  for (const invalid of [
+    {
+      schema_version: 1,
+      action: 'kyc_result_observed',
+      replayed: false,
+      environment: 'live',
+      reason: 'sandbox_non_authoritative',
+    },
+    {
+      schema_version: 1,
+      action: 'kyc_result_quarantined',
+      replayed: false,
+      environment: 'sandbox',
+      reason: 'dogfood_override',
+    },
+  ]) {
+    assert.throws(() => sanitizeKycWebhookRpc(invalid));
+  }
+});
+
+test('Didit return boundary drops provider query before app history or referrer', async () => {
+  const source = read('functions/partners-kyc-return.js');
+  const callback = bundled('functions/partners-kyc-return.js');
+  const providerSession = '99999999-8888-4777-8666-555555555555';
+  const response = await callback.onRequest({
+    request: new Request(
+      'https://norva.tv/partners-kyc-return'
+        + `?verificationSessionId=${providerSession}&status=approved`,
+    ),
+  });
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get('Location'),
+    '/app.html?mobile=1#partners',
+  );
+  assert.equal(
+    response.headers.get('Cache-Control'),
+    'private, no-store, max-age=0',
+  );
+  assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+  const publicResponse = [
+    response.headers.get('Location'),
+    response.headers.get('Cache-Control'),
+    response.headers.get('Referrer-Policy'),
+    await response.text(),
+  ].join('\n');
+  assert.doesNotMatch(
+    publicResponse,
+    /verificationSessionId|approved|99999999/i,
+  );
+  assert.doesNotMatch(
+    source,
+    /request\.url|searchParams|sessionStorage|localStorage|history\.|returnTo/,
+  );
+
+  const head = await callback.onRequest({
+    request: new Request(
+      'https://norva.tv/partners-kyc-return?status=declined',
+      { method: 'HEAD' },
+    ),
+  });
+  assert.equal(head.status, 303);
+  assert.equal(head.headers.get('Location'), '/app.html?mobile=1#partners');
+
+  const rejected = await callback.onRequest({
+    request: new Request(
+      'https://norva.tv/partners-kyc-return?status=approved',
+      { method: 'POST' },
+    ),
+  });
+  assert.equal(rejected.status, 405);
+  assert.equal(
+    rejected.headers.get('Cache-Control'),
+    'private, no-store, max-age=0',
+  );
+  assert.equal(rejected.headers.get('Allow'), 'GET, HEAD');
 });
 
 test('KYC session input is exact and consent version is supplied by the sanitized policy', () => {
@@ -132,6 +327,11 @@ test('Didit session creation sends no identity, contact, document or biometric d
     'vendor_data',
     'workflow_id',
   ]);
+  assert.equal(
+    Object.hasOwn(body, 'session_expiration_time'),
+    false,
+    'workflow expiry is verified locally and is not a create-session field',
+  );
   assert.doesNotMatch(
     JSON.stringify(body),
     /email|phone|name|birth|document|selfie|portrait|metadata|expected_details|contact_details/i,
@@ -174,6 +374,7 @@ test('Didit session creation sends no identity, contact, document or biometric d
 
 test('Didit raw-body HMAC authenticates the full decision and stores only normalized minimum', async () => {
   const {
+    diditConfigFingerprint,
     loadDiditConfig,
     verifyAndNormalizeDiditWebhook,
   } = bundled('supabase/functions/_shared/didit-partners.ts');
@@ -226,11 +427,14 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
     config,
     timestamp,
   ));
+  const expectedFingerprint = await diditConfigFingerprint(config, 4);
   assert.deepEqual(result, {
     providerEventId: eventId,
     providerSessionId: sessionId,
     providerWorkflowId: workflowId,
     providerWorkflowVersion: 4,
+    providerEnvironment: 'sandbox',
+    providerConfigFingerprint: expectedFingerprint,
     providerStatus: 'approved',
     eventCreatedAt: new Date((timestamp - 6) * 1000).toISOString(),
     documentAge: 28,
@@ -238,11 +442,62 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
     idCheckApproved: true,
     livenessApproved: true,
     faceMatchApproved: true,
-    payloadHash: cryptoNode.createHash('sha256').update(raw).digest('hex'),
+    payloadHash: diditSemanticPayloadHash(payload),
   });
   assert.doesNotMatch(
     JSON.stringify(result),
     /full_name|document\.jpg|liveness\.mp4|face\.jpg|vendor_data|decision/i,
+  );
+
+  const retryTimestamp = timestamp + 120;
+  const retryPayload = {
+    ...payload,
+    timestamp: retryTimestamp,
+  };
+  const retryRaw = Buffer.from(JSON.stringify(retryPayload));
+  const retryResult = plain(await verifyAndNormalizeDiditWebhook(
+    new Uint8Array(retryRaw),
+    new Headers({
+      'X-Timestamp': String(retryTimestamp),
+      'X-Signature': cryptoNode.createHmac('sha256', webhookSecret)
+        .update(retryRaw)
+        .digest('hex'),
+    }),
+    config,
+    retryTimestamp,
+  ));
+  assert.equal(
+    retryResult.payloadHash,
+    result.payloadHash,
+    'a retry with Didit refreshed dispatch timestamp/signature keeps the semantic event hash',
+  );
+
+  const changedDecisionPayload = {
+    ...retryPayload,
+    decision: {
+      ...retryPayload.decision,
+      id_verifications: [{
+        ...retryPayload.decision.id_verifications[0],
+        age: 29,
+      }],
+    },
+  };
+  const changedDecisionRaw = Buffer.from(JSON.stringify(changedDecisionPayload));
+  const changedDecisionResult = plain(await verifyAndNormalizeDiditWebhook(
+    new Uint8Array(changedDecisionRaw),
+    new Headers({
+      'X-Timestamp': String(retryTimestamp),
+      'X-Signature': cryptoNode.createHmac('sha256', webhookSecret)
+        .update(changedDecisionRaw)
+        .digest('hex'),
+    }),
+    config,
+    retryTimestamp,
+  ));
+  assert.notEqual(
+    changedDecisionResult.payloadHash,
+    result.payloadHash,
+    'a signed decision divergence with the same event id cannot replay as the original event',
   );
 
   const tampered = new Headers(headers);
@@ -259,10 +514,42 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
     config,
     timestamp + 301,
   ));
+
+  const crossEnvironmentPayload = {
+    ...payload,
+    environment: 'live',
+  };
+  const crossEnvironmentRaw = Buffer.from(
+    JSON.stringify(crossEnvironmentPayload),
+  );
+  const crossEnvironmentResult = plain(
+    await verifyAndNormalizeDiditWebhook(
+      new Uint8Array(crossEnvironmentRaw),
+      new Headers({
+        'X-Timestamp': String(timestamp),
+        'X-Signature': cryptoNode.createHmac('sha256', webhookSecret)
+          .update(crossEnvironmentRaw)
+          .digest('hex'),
+      }),
+      config,
+      timestamp,
+    ),
+  );
+  assert.equal(
+    crossEnvironmentResult.providerEnvironment,
+    'live',
+    'a valid signed environment mismatch must reach SQL quarantine',
+  );
+  assert.equal(
+    crossEnvironmentResult.providerConfigFingerprint,
+    await diditConfigFingerprint({ ...config, environment: 'live' }, 4),
+    'the event fingerprint uses the provider-signed environment',
+  );
 });
 
-test('Didit webhook rejects KYB, non-status events and missing configured workflow nodes', async () => {
+test('Didit webhook rejects foreign envelopes but preserves signed workflow drift for SQL quarantine', async () => {
   const {
+    diditConfigFingerprint,
     loadDiditConfig,
     verifyAndNormalizeDiditWebhook,
   } = bundled('supabase/functions/_shared/didit-partners.ts');
@@ -308,8 +595,88 @@ test('Didit webhook rejects KYB, non-status events and missing configured workfl
   await assert.rejects(() => signed({ ...base, webhook_type: 'data.updated' }));
   await assert.rejects(() => signed({
     ...base,
+    application_id: sessionId,
+  }));
+
+  const baselineFingerprint = await diditConfigFingerprint(config, 1);
+  const workflowDrift = plain(await signed({
+    ...base,
+    workflow_id: applicationId,
+  }));
+  assert.equal(workflowDrift.providerWorkflowId, applicationId);
+  assert.notEqual(
+    workflowDrift.providerConfigFingerprint,
+    baselineFingerprint,
+  );
+
+  const versionDrift = plain(await signed({
+    ...base,
+    workflow_version: 2,
+  }));
+  assert.equal(versionDrift.providerWorkflowVersion, 2);
+  assert.notEqual(
+    versionDrift.providerConfigFingerprint,
+    baselineFingerprint,
+  );
+
+  const nodeDrift = plain(await signed({
+    ...base,
+    decision: {
+      ...base.decision,
+      face_matches: [{
+        node_id: 'face-legacy',
+        status: 'Approved',
+      }],
+    },
+  }));
+  assert.equal(nodeDrift.faceMatchApproved, false);
+  assert.notEqual(
+    nodeDrift.providerConfigFingerprint,
+    baselineFingerprint,
+  );
+
+  const missingNode = plain(await signed({
+    ...base,
     decision: { ...base.decision, face_matches: [] },
   }));
+  assert.equal(missingNode.faceMatchApproved, false);
+  assert.notEqual(
+    missingNode.providerConfigFingerprint,
+    baselineFingerprint,
+  );
+
+  const invalidNode = plain(await signed({
+    ...base,
+    decision: {
+      ...base.decision,
+      face_matches: [{
+        node_id: '<invalid-private-node>',
+        status: 'Approved',
+      }],
+    },
+  }));
+  assert.equal(invalidNode.faceMatchApproved, false);
+  assert.notEqual(
+    invalidNode.providerConfigFingerprint,
+    baselineFingerprint,
+  );
+  assert.doesNotMatch(JSON.stringify(invalidNode), /invalid-private-node/);
+
+  const oversizedNodes = plain(await signed({
+    ...base,
+    decision: {
+      ...base.decision,
+      face_matches: Array.from({ length: 33 }, (_, index) => ({
+        node_id: `legacy-face-${index}`,
+        status: 'Approved',
+      })),
+    },
+  }));
+  assert.equal(oversizedNodes.faceMatchApproved, false);
+  assert.notEqual(
+    oversizedNodes.providerConfigFingerprint,
+    baselineFingerprint,
+  );
 });
 
 test('signed referral cookie is opaque, tamper-evident and hash-only at the DB boundary', async () => {
@@ -610,4 +977,51 @@ test('phase 2 security boundaries are separately configured and never trust simp
   assert.doesNotMatch(referral, /console\[[^\]]+\]\([^)]*(?:code|claim|network|userAgent|nonce)/s);
   assert.match(member, /p_beneficiary_token_ref: input\.beneficiaryTokenRef/);
   assert.doesNotMatch(member, /beneficiaryTokenRef[\s\S]*cleanData\s*=\s*\{/, 'token refs are never constructed into public responses');
+});
+
+test('Didit Edge and SQL boundaries require immutable environment bindings', () => {
+  const member = read('supabase/functions/norva-partners/index.ts');
+  const webhook = read(
+    'supabase/functions/norva-partners-kyc-webhook/index.ts',
+  );
+  const migration = read(
+    'supabase/migrations/20260730100500_partners_didit_environment_binding.sql',
+  );
+  assert.match(
+    member,
+    /p_provider_environment:\s*DIDIT_CONFIG\.environment/,
+  );
+  assert.match(
+    member,
+    /p_provider_session_ttl_seconds:\s*[\s\S]*DIDIT_CONFIG\.sessionExpirationSeconds/,
+  );
+  assert.match(
+    webhook,
+    /p_provider_environment:\s*event\.providerEnvironment/,
+  );
+  assert.match(member, /p_provider_config_fingerprint:/);
+  assert.match(member, /diditConfigFingerprint/);
+  assert.match(webhook, /p_provider_config_fingerprint:/);
+  assert.match(
+    webhook,
+    /p_provider_config_fingerprint:\s*event\.providerConfigFingerprint/,
+    'the webhook must pass the provider-observed fingerprint to SQL unchanged',
+  );
+  assert.match(
+    migration,
+    /provider_environment\s+in\s+\('legacy_unbound', 'sandbox', 'live'\)/,
+  );
+  assert.match(migration, /sandbox_non_authoritative/);
+  assert.match(migration, /kyc_result_observed/);
+  assert.match(migration, /kyc_result_quarantined/);
+  assert.match(
+    migration,
+    /v_environment = 'sandbox'[\s\S]*sandbox_non_authoritative/,
+  );
+  assert.match(
+    migration,
+    /return affiliate_private\.partners_service_kyc_webhook_apply\([\s\S]*p_payload_hash[\s\S]*\);/,
+    'only the exact live branch reaches the authoritative policy reducer',
+  );
+  assert.doesNotMatch(migration, /dogfood|test_user|override_activation/i);
 });

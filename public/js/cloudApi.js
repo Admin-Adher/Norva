@@ -1076,7 +1076,20 @@
         'authentication_required',
         'temporarily_unavailable'
     ]);
-    const PARTNERS_PAYOUT_PROVIDERS = new Set(['wise', 'revolut', 'stripe_connect']);
+    // Provider-managed destinations such as Airwallex are readable, but their
+    // onboarding must stay on the dedicated /beneficiaries route. The generic
+    // token mutation deliberately remains narrower.
+    const PARTNERS_PAYOUT_READ_PROVIDERS = new Set([
+        'airwallex',
+        'wise',
+        'revolut',
+        'stripe_connect'
+    ]);
+    const PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS = new Set([
+        'wise',
+        'revolut',
+        'stripe_connect'
+    ]);
     const PARTNERS_PAYOUT_PROFILE_STATUSES = new Set([
         'active',
         'disabled',
@@ -1591,7 +1604,7 @@
 
     function validatePartnersPayoutProfileValue(profile) {
         return hasExactKeys(profile, ['provider', 'display_masked', 'currency', 'status'])
-            && PARTNERS_PAYOUT_PROVIDERS.has(profile.provider)
+            && PARTNERS_PAYOUT_READ_PROVIDERS.has(profile.provider)
             && isBoundedString(profile.display_masked, { max: 64 })
             && profile.display_masked.length >= 4
             && !looksLikeRawPayoutIdentifier(profile.display_masked)
@@ -2018,7 +2031,7 @@
         const safeToken = String(beneficiaryTokenRef || '');
         const safeMask = String(displayMasked || '');
         const safeCurrency = String(currency || '').trim().toUpperCase();
-        if (!PARTNERS_PAYOUT_PROVIDERS.has(safeProvider)
+        if (!PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS.has(safeProvider)
             || safeToken.length < 8
             || safeToken.length > 255
             || /[\s\u0000-\u001f\u007f]/u.test(safeToken)

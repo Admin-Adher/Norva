@@ -64,6 +64,11 @@ test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.match(source, /this\._rpc\('admin_partners_accounts',\s*\{/);
   assert.match(source, /this\._rpc\('admin_partners_detail',\s*\{\s*p_account_id:\s*accountId\s*\}\)/);
   assert.match(source, /this\._rpc\('admin_partners_monitoring'\)/);
+  assert.match(source, /revenuecat_transfer:\s*'Transferts RevenueCat'/);
+  assert.match(source, /revenuecat_transfer_dead_letter/);
+  assert.match(source, /revenuecat_transfer_partial_aged/);
+  assert.match(source, /revenuecat_transfer_quarantined_aged/);
+  assert.match(source, /revenuecat_transfer_partner_dead_letter/);
   assert.match(source, /this\._rpc\('admin_partners_configuration'\)/);
   assert.match(source, /this\._rpc\('admin_partners_analytics',\s*\{\s*p_days:\s*30\s*\}\)/);
   assert.match(source, /else if \(route === 'partners'\) this\._pagePartners\(\)/);

@@ -489,6 +489,26 @@ test('Partners payout profile stays tokenized, masked and fail-closed', async ()
     }),
     (error) => error?.code === 'partners_payout_profile_invalid',
   );
+
+  const airwallexPayload = structuredClone(getPayload);
+  airwallexPayload.data.profile.provider = 'airwallex';
+  airwallexPayload.data.profile.display_masked = 'Airwallex ·•• 8421';
+  airwallexPayload.data.profiles[0].provider = 'airwallex';
+  airwallexPayload.data.profiles[0].display_masked = 'Airwallex ·•• 8421';
+  const airwallex = loadCloudApi(airwallexPayload);
+  const airwallexProfile = await airwallex.cloud.partners.payoutProfile();
+  assert.equal(airwallexProfile.data.profile.provider, 'airwallex');
+
+  assert.throws(
+    () => saved.cloud.partners.saveTokenizedPayoutProfile({
+      provider: 'airwallex',
+      beneficiaryTokenRef: 'ben_tok_opaque_0123456789',
+      displayMasked: 'Airwallex ·•• 8421',
+      currency: 'EUR',
+      idempotencyKey: 'payout:airwallex0123456789',
+    }),
+    (error) => error?.code === 'partners_payout_profile_invalid',
+  );
 });
 
 test('Partners user actions reject local business flows, weak idempotency and dashboard drift', async () => {
@@ -1247,7 +1267,7 @@ test('Partners route participates in bounded native continuity without storing p
     continuityWrites[0],
     /commission|payout|referral|verification|contract|eligibility|programme/i,
   );
-  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v5'/);
+  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v6'/);
   assert.match(cssSource, /\.main-content\s*\{\s*padding-bottom:\s*var\(--bottom-nav-h\)/);
   assert.match(
     cssSource,
@@ -1281,4 +1301,20 @@ test('Didit return identifiers are scrubbed before analytics, referrers or auth 
   assert.match(pageSource, /consumePartnersKycReturnNotice/);
   assert.doesNotMatch(appSource, /sessionStorage\.[^(]+\([^)]*verificationSessionId/);
   assert.doesNotMatch(appSource, /localStorage\.[^(]+\([^)]*verificationSessionId/);
+  assert.match(
+    serviceWorkerSource,
+    /url\.pathname === '\/partners-kyc-return'[\s\S]{0,180}hasSensitiveDiditParams\(url\)/,
+  );
+  assert.match(
+    serviceWorkerSource,
+    /url\.searchParams\.has\('verificationSessionId'\)/,
+  );
+  assert.match(
+    serviceWorkerSource,
+    /response\.ok && canCacheRequest\(request\)/,
+  );
+  assert.match(
+    serviceWorkerSource,
+    /new URL\(request\.url\)\.search === ''/,
+  );
 });

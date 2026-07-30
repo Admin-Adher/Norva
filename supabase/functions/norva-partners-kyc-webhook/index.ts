@@ -93,6 +93,8 @@ Deno.serve(async (req) => {
         p_liveness_approved: event.livenessApproved,
         p_face_match_approved: event.faceMatchApproved,
         p_payload_hash: event.payloadHash,
+        p_provider_environment: event.providerEnvironment,
+        p_provider_config_fingerprint: event.providerConfigFingerprint,
       },
     );
     if (error) {
@@ -116,6 +118,26 @@ Deno.serve(async (req) => {
     } catch {
       log("error", correlationId, "database_contract_invalid");
       return problem(503, "temporarily_unavailable", correlationId);
+    }
+    if (result.action === "kyc_result_quarantined") {
+      log("warn", correlationId, `quarantined_${result.reason}`);
+      return problem(409, "webhook_quarantined", correlationId);
+    }
+    if (result.action === "kyc_result_observed") {
+      log(
+        "info",
+        correlationId,
+        result.replayed ? "sandbox_observation_replayed" : "sandbox_observed",
+      );
+      return json(
+        200,
+        {
+          received: true,
+          replayed: result.replayed,
+          observed: true,
+        },
+        correlationId,
+      );
     }
     log(
       "info",

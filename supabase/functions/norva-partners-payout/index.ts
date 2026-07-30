@@ -3,6 +3,7 @@
 // Routes:
 // - POST /beneficiaries   authenticated PERSONAL beneficiary tokenization
 // - POST /cron/run        bounded approved-cycle dispatch + authoritative poll
+// - POST /cron/reports    bounded Financial Reports reconciliation
 // - POST /webhooks/airwallex signed webhook followed by authoritative re-fetch
 //
 // This function is inert unless NORVA_PARTNERS_PAYOUT_PROVIDER=airwallex and
@@ -22,6 +23,15 @@ import {
   sha256Hex,
   verifyAirwallexWebhook,
 } from "../_shared/partners-airwallex.mjs";
+import {
+  AirwallexReportContractError,
+  buildTransactionReportRequest,
+  isApprovedReportContract,
+  loadAirwallexFinancialReportsConfig,
+  parseTransactionReconciliationCsv,
+  sanitizeFinancialReport,
+  sha256Bytes,
+} from "../_shared/airwallex-financial-reports.mjs";
 import {
   assertAllowedOrigin,
   corsHeaders,
@@ -58,15 +68,36 @@ const LEASE_SECONDS = boundedInt(
   30,
   300,
 );
+const REPORT_LEASE_SECONDS = boundedInt(
+  Deno.env.get("AIRWALLEX_FINANCIAL_REPORTS_LEASE_SECONDS"),
+  180,
+  60,
+  300,
+);
+const REPORT_BUDGET_MS = boundedInt(
+  Deno.env.get("AIRWALLEX_FINANCIAL_REPORTS_BUDGET_MS"),
+  45_000,
+  10_000,
+  50_000,
+);
 
 let AIRWALLEX_CONFIG: ReturnType<typeof loadAirwallexConfig> = null;
 let AIRWALLEX_CONFIG_ERROR = false;
 try {
-  AIRWALLEX_CONFIG = loadAirwallexConfig((name: string) =>
-    Deno.env.get(name)
-  );
+  AIRWALLEX_CONFIG = loadAirwallexConfig((name: string) => Deno.env.get(name));
 } catch {
   AIRWALLEX_CONFIG_ERROR = true;
+}
+let AIRWALLEX_REPORTS_CONFIG: ReturnType<
+  typeof loadAirwallexFinancialReportsConfig
+> = null;
+let AIRWALLEX_REPORTS_CONFIG_ERROR = false;
+try {
+  AIRWALLEX_REPORTS_CONFIG = loadAirwallexFinancialReportsConfig(
+    (name: string) => Deno.env.get(name),
+  );
+} catch {
+  AIRWALLEX_REPORTS_CONFIG_ERROR = true;
 }
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
@@ -87,6 +118,17 @@ type LeaseJob = {
   currency_exponent?: number;
   transfer_method?: string;
   provider_transfer_id?: string;
+};
+type ReportRun = {
+  key: string;
+  environment: "sandbox" | "production";
+  contract_version: string;
+  period_start: string;
+  period_end: string;
+  file_name: string;
+  provider_report_id: string | null;
+  provider_status: "PENDING" | "COMPLETED" | null;
+  attempt: number;
 };
 
 class EdgeError extends Error {
@@ -131,6 +173,9 @@ Deno.serve(async (req) => {
     if (route === "/cron/run") {
       return await handleCron(req);
     }
+    if (route === "/cron/reports") {
+      return await handleReportsCron(req);
+    }
     if (route === "/webhooks/airwallex") {
       return await handleWebhook(req);
     }
@@ -141,12 +186,16 @@ Deno.serve(async (req) => {
       route,
       code: problem.code,
     });
-    return json({
-      error: {
-        code: problem.code,
-        message: problem.publicMessage,
+    return json(
+      {
+        error: {
+          code: problem.code,
+          message: problem.publicMessage,
+        },
       },
-    }, problem.status, route === "/beneficiaries" ? req : null);
+      problem.status,
+      route === "/beneficiaries" ? req : null,
+    );
   }
 });
 
@@ -268,18 +317,270 @@ async function handleCron(req: Request): Promise<Response> {
   });
 }
 
+async function handleReportsCron(req: Request): Promise<Response> {
+  await requireCron(req);
+  const startedAt = Date.now();
+  let client: AirwallexClient;
+  try {
+    client = requireReportsProvider();
+  } catch (error) {
+    await safeReportHeartbeat("blocked", {
+      error_code: providerErrorCode(error),
+      state: "not_configured",
+    });
+    throw error;
+  }
+  const config = AIRWALLEX_REPORTS_CONFIG!;
+  const workerId = `partners-payout-report:${crypto.randomUUID()}`;
+  const leaseHash = await sha256Hex(crypto.randomUUID());
+  let run: ReportRun | null = null;
+
+  try {
+    const leased = validateReportLease(
+      await rpc("partners_worker_airwallex_report_lease", {
+        p_environment: AIRWALLEX_CONFIG!.environment,
+        p_worker_id: workerId,
+        p_lease_token_hash: leaseHash,
+        p_lookback_days: config.lookbackDays,
+        p_lease_seconds: REPORT_LEASE_SECONDS,
+      }),
+    );
+    run = leased.run;
+    if (!run) {
+      await recordReportHeartbeat("healthy", {
+        state: "idle",
+        reports_processed: 0,
+      });
+      return json({
+        ok: true,
+        schema_version: 1,
+        state: "idle",
+      });
+    }
+
+    const result = await processFinancialReport(
+      client,
+      run,
+      workerId,
+      leaseHash,
+      startedAt + REPORT_BUDGET_MS,
+    );
+    await recordReportHeartbeat("healthy", {
+      state: result.state,
+      report_rows: result.rowCount,
+      candidates: result.candidateCount,
+      matched: result.matchedCount,
+      unmatched: result.unmatchedCount,
+    });
+    return json({
+      ok: true,
+      schema_version: 1,
+      state: result.state,
+      row_count: result.rowCount,
+      candidate_count: result.candidateCount,
+      matched_count: result.matchedCount,
+      unmatched_count: result.unmatchedCount,
+    });
+  } catch (error) {
+    const code = providerErrorCode(error);
+    if (run) {
+      try {
+        const retryAfterSeconds = boundedRetryAfter(error, run.attempt);
+        await rpc("partners_worker_airwallex_report_retry", {
+          p_report_key: run.key,
+          p_worker_id: workerId,
+          p_lease_token_hash: leaseHash,
+          p_error_code: code,
+          p_retry_after_seconds: retryAfterSeconds,
+          p_terminal: isTerminalReportError(error),
+        });
+      } catch {
+        // A lost lease is intentionally not replaced with a blind state write.
+      }
+    }
+    await safeReportHeartbeat(
+      isTerminalReportError(error) ? "blocked" : "degraded",
+      {
+        error_code: code,
+        state: isTerminalReportError(error) ? "exception" : "retry",
+      },
+    );
+    throw error;
+  }
+}
+
+async function processFinancialReport(
+  client: AirwallexClient,
+  run: ReportRun,
+  workerId: string,
+  leaseHash: string,
+  deadline: number,
+) {
+  const config = AIRWALLEX_REPORTS_CONFIG!;
+  ensureReportBudget(deadline);
+  const expected = {
+    fileName: run.file_name,
+    fromDate: run.period_start,
+    toDate: run.period_end,
+  };
+  let report;
+  if (run.provider_report_id) {
+    report = sanitizeFinancialReport(
+      await client.getFinancialReport(run.provider_report_id),
+      expected,
+    );
+  } else {
+    report = await recoverOrCreateFinancialReport(client, expected);
+  }
+  const reportStatus = report.status;
+  if (reportStatus !== "PENDING" && reportStatus !== "COMPLETED") {
+    throw new AirwallexReportContractError("invalid_report_response");
+  }
+
+  const providerRecord = unwrapRpc(
+    await rpc("partners_worker_airwallex_report_provider_record", {
+      p_report_key: run.key,
+      p_worker_id: workerId,
+      p_lease_token_hash: leaseHash,
+      p_provider_report_id: report.id,
+      p_provider_status: reportStatus,
+      p_retry_after_seconds: 60,
+    }),
+  );
+  const recordedState = validateReportProviderRecord(
+    providerRecord,
+    run.key,
+    reportStatus,
+  );
+  if (reportStatus === "PENDING") {
+    if (recordedState === "exception") {
+      throw new AirwallexReportContractError(
+        "provider_report_pending_timeout",
+      );
+    }
+    return {
+      state: "pending",
+      rowCount: 0,
+      candidateCount: 0,
+      matchedCount: 0,
+      unmatchedCount: 0,
+    };
+  }
+
+  ensureReportBudget(deadline);
+  const candidates = validateReportCandidates(
+    await rpc("partners_worker_airwallex_report_candidates", {
+      p_report_key: run.key,
+      p_worker_id: workerId,
+      p_lease_token_hash: leaseHash,
+    }),
+  );
+  const content = await client.downloadFinancialReportContent(
+    report.id,
+    config.maxBytes,
+  );
+  const contentHash = await sha256Bytes(content.bytes);
+  const parsed = await parseTransactionReconciliationCsv(content.bytes, {
+    fromDate: run.period_start,
+    toDate: run.period_end,
+    candidates: candidates.items,
+    maxBytes: config.maxBytes,
+    maxRows: config.maxRows,
+    maxMatches: config.maxMatches,
+  });
+  if (
+    parsed.candidateCount !== candidates.total ||
+    parsed.matchedCount + parsed.unmatchedCount !== parsed.candidateCount
+  ) {
+    throw new AirwallexReportContractError("report_completeness_mismatch");
+  }
+  if (parsed.unmatchedCount !== 0) {
+    throw new AirwallexReportContractError(
+      "report_candidates_unmatched",
+      { retryable: true },
+    );
+  }
+
+  ensureReportBudget(deadline);
+  const applied = unwrapRpc(
+    await rpc("partners_worker_airwallex_report_apply", {
+      p_report_key: run.key,
+      p_worker_id: workerId,
+      p_lease_token_hash: leaseHash,
+      p_content_sha256: contentHash,
+      p_content_bytes: content.contentLength,
+      p_row_count: parsed.rowCount,
+      p_candidate_count: parsed.candidateCount,
+      p_observations: parsed.matches.map((match) => ({
+        amount_minor: match.amountMinor,
+        currency: match.currency,
+        dispatch_key: match.dispatchKey,
+        observed_at: match.observedAt,
+        proof_hash: match.proofHash,
+        provider_transfer_id: match.providerTransferId,
+        settlement_reference: match.settlementReference,
+        value_date: match.valueDate,
+      })),
+    }),
+  );
+  validateReportApplication(applied, run.key, parsed);
+  return {
+    state: "completed",
+    rowCount: parsed.rowCount,
+    candidateCount: parsed.candidateCount,
+    matchedCount: parsed.matchedCount,
+    unmatchedCount: parsed.unmatchedCount,
+  };
+}
+
+async function recoverOrCreateFinancialReport(
+  client: AirwallexClient,
+  expected: { fileName: string; fromDate: string; toDate: string },
+) {
+  const matches = [];
+  for (let page = 0; page < 3; page += 1) {
+    const listed = recordOrEmpty(await client.listFinancialReports(page));
+    const items = Array.isArray(listed.items) ? listed.items : null;
+    if (!items || items.length > 100 || typeof listed.has_more !== "boolean") {
+      throw new AirwallexReportContractError("invalid_report_list");
+    }
+    for (const item of items) {
+      const candidate = recordOrEmpty(item);
+      if (candidate.file_name === expected.fileName) {
+        matches.push(sanitizeFinancialReport(candidate, expected));
+      }
+    }
+    if (!listed.has_more) break;
+    if (page === 2) {
+      throw new AirwallexReportContractError("report_recovery_incomplete");
+    }
+  }
+  if (matches.length > 1) {
+    throw new AirwallexReportContractError("duplicate_provider_report");
+  }
+  if (matches.length === 1) return matches[0];
+
+  const request = buildTransactionReportRequest(expected);
+  return sanitizeFinancialReport(
+    await client.createFinancialReport(request),
+    expected,
+  );
+}
+
 async function handleWebhook(req: Request): Promise<Response> {
   const client = requireProvider();
   const rawBody = await readRawBody(req, 64 * 1024);
   const timestamp = req.headers.get("x-timestamp") ?? "";
   const signature = req.headers.get("x-signature") ?? "";
-  if (!await verifyAirwallexWebhook({
-    rawBody,
-    timestamp,
-    signature,
-    secret: AIRWALLEX_CONFIG?.webhookSecret ?? "",
-    toleranceMs: AIRWALLEX_CONFIG?.webhookToleranceMs ?? 0,
-  })) {
+  if (
+    !await verifyAirwallexWebhook({
+      rawBody,
+      timestamp,
+      signature,
+      secret: AIRWALLEX_CONFIG?.webhookSecret ?? "",
+      toleranceMs: AIRWALLEX_CONFIG?.webhookToleranceMs ?? 0,
+    })
+  ) {
     throw new EdgeError(401, "invalid_webhook_signature", "Unauthorized.");
   }
   const event = parseAirwallexTransferWebhook(rawBody);
@@ -469,6 +770,144 @@ function validateObservation(raw: JsonRecord, expectedKey?: string) {
   ) throw new EdgeError(503, "invalid_service_response", unavailable());
 }
 
+function validateReportLease(raw: unknown): { run: ReportRun | null } {
+  const envelope = unwrapRpc(raw);
+  const contract = recordOrEmpty(envelope.contract);
+  const expectedEnvironment = String(
+    AIRWALLEX_CONFIG?.environment ?? "",
+  );
+  if (
+    envelope.schema_version !== 1 ||
+    ![
+      "airwallex_report_leased",
+      "airwallex_report_lease_empty",
+    ].includes(String(envelope.action ?? "")) ||
+    !isApprovedReportContract(contract, expectedEnvironment)
+  ) {
+    throw new EdgeError(503, "invalid_service_response", unavailable());
+  }
+  if (envelope.run === null) {
+    if (envelope.action !== "airwallex_report_lease_empty") {
+      throw new EdgeError(503, "invalid_service_response", unavailable());
+    }
+    return { run: null };
+  }
+  const value = recordOrEmpty(envelope.run);
+  const providerReportId = value.provider_report_id;
+  const providerStatus = value.provider_status;
+  const run: ReportRun = {
+    key: String(value.key ?? ""),
+    environment: String(value.environment ?? "") as ReportRun["environment"],
+    contract_version: String(value.contract_version ?? ""),
+    period_start: String(value.period_start ?? ""),
+    period_end: String(value.period_end ?? ""),
+    file_name: String(value.file_name ?? ""),
+    provider_report_id: providerReportId === null
+      ? null
+      : String(providerReportId ?? ""),
+    provider_status: providerStatus === null
+      ? null
+      : String(providerStatus ?? "") as ReportRun["provider_status"],
+    attempt: Number(value.attempt),
+  };
+  if (
+    envelope.action !== "airwallex_report_leased" ||
+    !/^afr_[0-9a-f]{24}$/.test(run.key) ||
+    run.environment !== expectedEnvironment ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(run.period_start) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(run.period_end) ||
+    !/^NORVA_TRANSACTION_RECON_\d{4}_\d{2}_\d{2}_[0-9a-f]{12}\.csv$/
+      .test(run.file_name) ||
+    (
+      run.provider_report_id !== null &&
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(
+        run.provider_report_id,
+      )
+    ) ||
+    ![null, "PENDING", "COMPLETED"].includes(run.provider_status) ||
+    !Number.isInteger(run.attempt) ||
+    run.attempt < 1 ||
+    run.attempt > 20
+  ) {
+    throw new EdgeError(503, "invalid_service_response", unavailable());
+  }
+  return { run };
+}
+
+function validateReportProviderRecord(
+  raw: JsonRecord,
+  expectedKey: string,
+  expectedProviderStatus: "PENDING" | "COMPLETED",
+) {
+  const run = recordOrEmpty(raw.run);
+  const expectedState = expectedProviderStatus === "PENDING"
+    ? ["pending", "exception"]
+    : ["leased"];
+  if (
+    raw.schema_version !== 1 ||
+    raw.action !== "airwallex_report_provider_recorded" ||
+    run.key !== expectedKey ||
+    run.provider_status !== expectedProviderStatus ||
+    !expectedState.includes(String(run.status ?? ""))
+  ) {
+    throw new EdgeError(503, "invalid_service_response", unavailable());
+  }
+  return String(run.status);
+}
+
+function validateReportCandidates(raw: unknown) {
+  const envelope = unwrapRpc(raw);
+  const items = Array.isArray(envelope.items) ? envelope.items : null;
+  const total = Number(envelope.total);
+  if (
+    envelope.schema_version !== 1 ||
+    envelope.action !== "airwallex_report_candidates" ||
+    !Number.isInteger(total) ||
+    total < 0 ||
+    total > 250 ||
+    envelope.truncated !== false ||
+    !items ||
+    items.length !== total
+  ) {
+    throw new AirwallexReportContractError("invalid_report_candidates");
+  }
+  return { total, items };
+}
+
+function validateReportApplication(
+  raw: JsonRecord,
+  expectedKey: string,
+  parsed: {
+    rowCount: number;
+    candidateCount: number;
+    matchedCount: number;
+    unmatchedCount: number;
+  },
+) {
+  const run = recordOrEmpty(raw.run);
+  if (
+    raw.schema_version !== 1 ||
+    raw.action !== "airwallex_report_applied" ||
+    raw.observed_count !== parsed.candidateCount ||
+    run.key !== expectedKey ||
+    run.status !== "completed" ||
+    run.row_count !== parsed.rowCount ||
+    run.candidate_count !== parsed.candidateCount ||
+    run.matched_count !== parsed.matchedCount ||
+    run.unmatched_count !== parsed.unmatchedCount
+  ) {
+    throw new EdgeError(503, "invalid_service_response", unavailable());
+  }
+}
+
+function ensureReportBudget(deadline: number) {
+  if (!Number.isFinite(deadline) || Date.now() + 1500 >= deadline) {
+    throw new AirwallexReportContractError("report_budget_exhausted", {
+      retryable: true,
+    });
+  }
+}
+
 async function requireCron(req: Request) {
   const presented = (req.headers.get("Authorization") ?? "").replace(
     /^Bearer\s+/i,
@@ -514,6 +953,22 @@ function requireProvider(): AirwallexClient {
   return new AirwallexClient(AIRWALLEX_CONFIG);
 }
 
+function requireReportsProvider(): AirwallexClient {
+  if (
+    AIRWALLEX_REPORTS_CONFIG_ERROR ||
+    !AIRWALLEX_REPORTS_CONFIG ||
+    AIRWALLEX_CONFIG_ERROR ||
+    !AIRWALLEX_CONFIG
+  ) {
+    throw new EdgeError(
+      503,
+      "airwallex_reports_not_configured",
+      unavailable(),
+    );
+  }
+  return new AirwallexClient(AIRWALLEX_CONFIG);
+}
+
 async function rpc(name: string, args: JsonRecord): Promise<unknown> {
   const { data, error } = await db.rpc(name, args);
   if (!error) return data;
@@ -521,7 +976,10 @@ async function rpc(name: string, args: JsonRecord): Promise<unknown> {
   throw new EdgeError(mapped.status, mapped.code, mapped.message);
 }
 
-async function recordHeartbeat(status: "healthy" | "degraded", details: JsonRecord) {
+async function recordHeartbeat(
+  status: "healthy" | "degraded",
+  details: JsonRecord,
+) {
   const result = unwrapRpc(
     await rpc("partners_worker_heartbeat", {
       p_worker_name: "payout",
@@ -545,6 +1003,36 @@ async function safeHeartbeat(
     await recordHeartbeat(status, details);
   } catch {
     // Preserve the original failure; heartbeat expiry remains observable.
+  }
+}
+
+async function recordReportHeartbeat(
+  status: "healthy" | "degraded" | "blocked",
+  details: JsonRecord,
+) {
+  const result = unwrapRpc(
+    await rpc("partners_worker_heartbeat", {
+      p_worker_name: "payout_report",
+      p_status: status,
+      p_details: details,
+    }),
+  );
+  if (
+    result.schema_version !== 1 ||
+    result.action !== "worker_heartbeat_recorded" ||
+    result.worker !== "payout_report" ||
+    result.status !== status
+  ) throw new EdgeError(503, "invalid_service_response", unavailable());
+}
+
+async function safeReportHeartbeat(
+  status: "healthy" | "degraded" | "blocked",
+  details: JsonRecord,
+) {
+  try {
+    await recordReportHeartbeat(status, details);
+  } catch {
+    // Preserve the report failure. Heartbeat expiry remains observable.
   }
 }
 
@@ -644,32 +1132,72 @@ function publicProblem(error: unknown): EdgeError {
   if (error instanceof AirwallexContractError) {
     return new EdgeError(
       error.code === "invalid_request" ||
-          error.code === "invalid_beneficiary" ||
-          error.code === "invalid_bank_details"
+        error.code === "invalid_beneficiary" ||
+        error.code === "invalid_bank_details"
         ? 400
         : 503,
       error.code === "invalid_request" ||
-          error.code === "invalid_beneficiary" ||
-          error.code === "invalid_bank_details"
+        error.code === "invalid_beneficiary" ||
+        error.code === "invalid_bank_details"
         ? "invalid_request"
         : "payout_provider_temporarily_unavailable",
       error.code === "invalid_request" ||
-          error.code === "invalid_beneficiary" ||
-          error.code === "invalid_bank_details"
+        error.code === "invalid_beneficiary" ||
+        error.code === "invalid_bank_details"
         ? "Invalid request."
         : unavailable(),
+    );
+  }
+  if (error instanceof AirwallexReportContractError) {
+    return new EdgeError(
+      503,
+      "airwallex_report_temporarily_unavailable",
+      unavailable(),
     );
   }
   return new EdgeError(503, "payout_temporarily_unavailable", unavailable());
 }
 
 function providerErrorCode(error: unknown) {
-  const value = error instanceof AirwallexContractError
+  const value = error instanceof AirwallexContractError ||
+      error instanceof AirwallexReportContractError ||
+      error instanceof EdgeError
     ? String(error.code)
     : "unknown";
-  return /^[a-z0-9][a-z0-9._-]{1,63}$/.test(value)
-    ? value
-    : "unknown";
+  return /^[a-z0-9][a-z0-9._-]{1,63}$/.test(value) ? value : "unknown";
+}
+
+function boundedRetryAfter(error: unknown, attempt: number) {
+  const providerDelay = error instanceof AirwallexContractError
+    ? error.retryAfterMs
+    : null;
+  if (
+    Number.isInteger(providerDelay) &&
+    Number(providerDelay) >= 0
+  ) {
+    return Math.max(
+      30,
+      Math.min(21_600, Math.ceil(Number(providerDelay) / 1000)),
+    );
+  }
+  const exponent = Number.isInteger(attempt)
+    ? Math.max(0, Math.min(10, attempt))
+    : 0;
+  return Math.max(30, Math.min(3600, 30 * (2 ** exponent)));
+}
+
+function isTerminalReportError(error: unknown) {
+  if (error instanceof AirwallexReportContractError) {
+    return error.retryable !== true;
+  }
+  if (error instanceof AirwallexContractError) {
+    return error.retryable !== true;
+  }
+  return error instanceof EdgeError &&
+    [
+      "invalid_service_response",
+      "airwallex_reports_not_configured",
+    ].includes(error.code);
 }
 
 function unwrapRpc(value: unknown): JsonRecord {
