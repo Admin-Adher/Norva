@@ -1205,7 +1205,7 @@ select extensions.is(
       'hex'
     )
   ),
-  'sandbox:' || repeat('1', 64) || ':true',
+  'sandbox:' || repeat('1', 64) || ':t',
   'a KYC session stores its immutable sandbox binding and bounded local expiry'
 );
 select extensions.throws_ok(
@@ -1755,7 +1755,7 @@ select extensions.is(
       'hex'
     )
   ),
-  'pending:true',
+  'pending:t',
   'quarantine preserves pending state but installs a bounded grace deadline'
 );
 update affiliate_private.affiliate_kyc_sessions
@@ -2691,6 +2691,7 @@ select public.admin_partners_payout_provider_set(
   'disabled',
   'P0 payout pilot keeps future provider configuration dormant.'
 );
+reset role;
 select extensions.ok(
   exists (
     select 1
@@ -2702,6 +2703,7 @@ select extensions.ok(
   ),
   'dormant future-provider configurations remain available'
 );
+set local role authenticated;
 select public.admin_partners_payout_provider_set(
   'airwallex',
   'US',

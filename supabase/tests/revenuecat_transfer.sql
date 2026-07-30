@@ -766,7 +766,7 @@ select extensions.is(
     from public.cloud_revenuecat_transfer_events
     where event_id = 'rc-transfer-pgtap-causal'
   ),
-  0,
+  0::smallint,
   'the terminal causal reconciliation has no ambiguous equality'
 );
 
@@ -872,7 +872,7 @@ select extensions.is(
     from public.cloud_revenuecat_transfer_events
     where event_id = 'rc-transfer-pgtap-c'
   ),
-  3,
+  3::smallint,
   'every canonical source has exactly one persisted outcome'
 );
 select extensions.is(

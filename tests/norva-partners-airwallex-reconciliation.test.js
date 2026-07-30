@@ -293,6 +293,15 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
   assert.doesNotMatch(sql, /grant usage on schema pg_temp to service_role/);
   assert.match(
     sql,
+    /admin_partners_payout_provider_set\(\s*'wise'[\s\S]*?'disabled'[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_payout_provider_configs[\s\S]*?set local role authenticated;[\s\S]*?admin_partners_payout_provider_set\(\s*'airwallex'/,
+  );
+  assert.match(
+    sql,
+    /'sandbox:' \|\| repeat\('1', 64\) \|\| ':t'/,
+  );
+  assert.match(sql, /'pending:t'/);
+  assert.match(
+    sql,
     /the second distinct AAL2 Finance actor confirms the settlement/,
   );
   assert.match(

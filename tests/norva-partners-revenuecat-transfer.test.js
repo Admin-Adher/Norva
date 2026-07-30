@@ -703,6 +703,14 @@ test("database transfer RPC is private, atomic and distinguishes newer, equal, e
     pgTap,
     /'30000000-0000-4000-8000-000000000010'::uuid[\s\S]*union all[\s\S]*'30000000-0000-4000-8000-000000000012'::uuid/,
   );
+  assert.match(
+    pgTap,
+    /select source_equal_pending_count[\s\S]*?where event_id = 'rc-transfer-pgtap-causal'[\s\S]*?\),\s*0::smallint,/,
+  );
+  assert.match(
+    pgTap,
+    /source_absent_count \+[\s\S]*?where event_id = 'rc-transfer-pgtap-c'[\s\S]*?\),\s*3::smallint,/,
+  );
 });
 
 test("dedicated cron worker reserves Partners delivery and enforces the bounded authority budget", () => {
