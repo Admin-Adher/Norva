@@ -12,9 +12,26 @@ alter table public.catalog_generated_subtitles add column if not exists stage te
 --    traduction : l'intention est résolue par le callback du transcript ; si ce transcript est
 --    lui-même fauché par le reaper — pas de callback — l'intention resterait pending pour
 --    toujours). 24 h >> le pire cas légitime (defer 4 h + whisper long).
-select cron.alter_job(
-  (select jobid from cron.job where jobname = 'norva-generated-subtitle-reaper'),
-  command => $reap$
+do $block$
+declare
+  v_job_id bigint;
+begin
+  select jobid
+    into v_job_id
+    from cron.job
+   where jobname = 'norva-generated-subtitle-reaper';
+
+  -- This job pre-dated its versioned creation in
+  -- 20260717150000_subtitle_notify_v2.sql. A fresh migration replay must not
+  -- pass NULL to cron.alter_job; the later migration installs the full command.
+  if v_job_id is null then
+    raise notice 'norva-generated-subtitle-reaper is not installed yet; command update deferred';
+    return;
+  end if;
+
+  perform cron.alter_job(
+    v_job_id,
+    command => $reap$
   update public.catalog_generated_subtitles
      set status = 'failed',
          error = coalesce(error, '') || ' [reaped: stuck in processing > 2h]',
@@ -28,3 +45,5 @@ select cron.alter_job(
    where status = 'pending-transcript'
      and updated_at < now() - interval '24 hours';
 $reap$);
+end
+$block$;
