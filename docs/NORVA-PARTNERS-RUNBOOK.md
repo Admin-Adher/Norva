@@ -351,7 +351,7 @@ répare par machines d'états, reprises et contre-écritures.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | `supabase db start`, bootstrap CI de `pg_cron`/`pg_net`, `migration up --local --include-all`, pgTAP, lint et Advisors verts | appliquer toutes les migrations en attente dans l'ordre |
+| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer toutes les migrations en attente dans l'ordre |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
 | API membre, referral et TV | livrées | contrats Node, E2E Web/mobile et replay émulateur TV | synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC-only | code livré, inactif sans configuration complète | session sandbox, décision signée, replay et refus KYB | renseigner API key, workflow/application/node IDs, webhook secret/URL et callback |

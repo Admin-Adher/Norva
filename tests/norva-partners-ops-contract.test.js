@@ -120,7 +120,7 @@ test('Partners CI covers exact Google money, deletion and release evidence', () 
   assert.match(workflow, /ops\/hetzner\/backup\/\*\*/);
 });
 
-test('Partners CI freezes Edge dependencies and bootstraps a migration-only database', () => {
+test('Partners CI freezes Edge dependencies and replays a blank database', () => {
   const workflow = read('.github/workflows/partners-integration.yml');
   const denoConfig = JSON.parse(
     read('supabase/functions/deno.partners.json'),
@@ -128,8 +128,8 @@ test('Partners CI freezes Edge dependencies and bootstraps a migration-only data
   const denoLock = JSON.parse(
     read('supabase/functions/deno.partners.lock'),
   );
-  const bootstrap = read(
-    'supabase/tests/bootstrap_migration_dependencies.sql',
+  const extensionMigration = read(
+    'supabase/migrations/20260617100000_required_runtime_extensions.sql',
   );
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
@@ -160,16 +160,18 @@ test('Partners CI freezes Edge dependencies and bootstraps a migration-only data
   assert.match(workflow, /run: supabase db start/);
   assert.match(
     workflow,
-    /supabase db query[\s\S]*?--file supabase\/tests\/bootstrap_migration_dependencies\.sql/,
-  );
-  assert.match(
-    workflow,
-    /supabase migration up --local --include-all/,
+    /supabase db reset --local --no-seed/,
   );
   assert.doesNotMatch(workflow, /run: supabase start/);
-  assert.doesNotMatch(workflow, /supabase db reset/);
-  assert.match(bootstrap, /create extension if not exists pg_cron/);
-  assert.match(bootstrap, /create extension if not exists pg_net/);
+  assert.doesNotMatch(workflow, /supabase db query/);
+  assert.match(
+    extensionMigration,
+    /create extension if not exists pg_cron with schema pg_catalog/,
+  );
+  assert.match(
+    extensionMigration,
+    /create extension if not exists pg_net with schema extensions/,
+  );
 
   assert.match(deploy, /mapfile -t configured_functions/);
   assert.match(deploy, /if \(\( missing != 0 \)\); then/);

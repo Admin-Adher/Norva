@@ -313,14 +313,8 @@ jobs:
       - name: Start a fresh database-only Supabase container
         run: supabase db start
 
-      - name: Bootstrap extensions required during migration replay
-        run: >-
-          supabase db query
-          --local
-          --file supabase/tests/bootstrap_migration_dependencies.sql
-
-      - name: Apply every migration to the disposable database
-        run: supabase migration up --local --include-all
+      - name: Replay every migration from a blank database
+        run: supabase db reset --local --no-seed
 
       - name: Run Partners pgTAP integration tests
         run: supabase test db supabase/tests/affiliate_p0.sql --local
