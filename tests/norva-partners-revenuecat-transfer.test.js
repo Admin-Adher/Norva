@@ -645,6 +645,7 @@ test("database transfer RPC is private, atomic and distinguishes newer, equal, e
   const sql = read(
     "supabase/migrations/20260730100100_revenuecat_transfer_replay_cron.sql",
   );
+  const pgTap = read("supabase/tests/revenuecat_transfer.sql");
   assert.match(
     baseSql,
     /create table if not exists public\.cloud_revenuecat_transfer_events/,
@@ -697,6 +698,10 @@ test("database transfer RPC is private, atomic and distinguishes newer, equal, e
   assert.doesNotMatch(
     sql,
     /jsonb_build_object\([\s\S]{0,400}'transferred_(from|to)'/,
+  );
+  assert.match(
+    pgTap,
+    /'30000000-0000-4000-8000-000000000010'::uuid[\s\S]*union all[\s\S]*'30000000-0000-4000-8000-000000000012'::uuid/,
   );
 });
 

@@ -79,7 +79,20 @@ as $fixture$
     p_importer
   );
 $fixture$;
-grant usage on schema pg_temp to service_role;
+do $fixture_grant$
+declare
+  v_temp_schema name;
+begin
+  select namespace.nspname
+  into strict v_temp_schema
+  from pg_namespace namespace
+  where namespace.oid = pg_my_temp_schema();
+  execute format(
+    'grant usage on schema %I to service_role',
+    v_temp_schema
+  );
+end;
+$fixture_grant$;
 grant execute on function
   pg_temp.partners_test_airwallex_settlement_observe(
     text, text, text, text, bigint, text, date, timestamptz, text

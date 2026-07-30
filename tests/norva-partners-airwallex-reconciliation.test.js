@@ -288,6 +288,11 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
 
   assert.match(
     sql,
+    /where namespace\.oid = pg_my_temp_schema\(\)[\s\S]*grant usage on schema %I to service_role/,
+  );
+  assert.doesNotMatch(sql, /grant usage on schema pg_temp to service_role/);
+  assert.match(
+    sql,
     /the second distinct AAL2 Finance actor confirms the settlement/,
   );
   assert.match(
