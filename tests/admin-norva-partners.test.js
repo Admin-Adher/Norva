@@ -113,6 +113,9 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   assert.match(section, /capabilityEnvelope\?\.can_manage_release === true/);
   assert.match(section, /this\._partnersCanManageCapabilities !== true/);
   assert.match(section, /this\._partnersCanUseReleaseControl\(kind, key, enabled\)/);
+  assert.match(section, /Revolut Business reste en évaluation et aucun versement live n’est activé ici/);
+  assert.match(section, /\(value\) => value\.toLowerCase\(\) === 'airwallex'/);
+  assert.doesNotMatch(section, /Provider \(wise, revolut ou stripe_connect\)/);
   assert.doesNotMatch(section, /catch\s*\([^)]*\)\s*\{[\s\S]{0,220}\.message/);
   assert.match(source, /\.partners-admin-toolbar input,[\s\S]{0,180}min-height:44px/);
   assert.match(source, /\.partners-action\{[^}]*min-height:44px/);

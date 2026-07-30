@@ -5643,10 +5643,10 @@ class AdminPage {
 
         if (action === 'payout-provider') {
             const provider = await this._partnersPrompt(
-                'Provider (wise, revolut ou stripe_connect) :',
-                'wise',
-                (value) => ['wise', 'revolut', 'stripe_connect'].includes(value.toLowerCase()),
-                'Provider invalide.'
+                'Adaptateur technique disponible : airwallex uniquement. Revolut Business reste en évaluation et aucun versement live n’est activé ici.',
+                'airwallex',
+                (value) => value.toLowerCase() === 'airwallex',
+                'Seul l’adaptateur technique Airwallex est actuellement implémenté.'
             );
             if (!provider) return false;
             const country = await this._partnersPrompt(
@@ -5674,7 +5674,7 @@ class AdminPage {
                 p_status: 'active',
                 p_justification: justification
             });
-            return 'Couverture payout enregistrée. Les identifiants provider restent à configurer hors de cette page.';
+            return 'Couverture technique Airwallex enregistrée. Ce réglage ne constitue pas un choix commercial et n’active aucun versement live.';
         }
 
         if (action === 'allowlist') {
