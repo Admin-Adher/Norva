@@ -32,6 +32,20 @@ test('every Supabase migration has a unique version identifier', () => {
   );
 });
 
+test('SQL lint exception is limited to the runtime temp-table routine', () => {
+  const migration = read(
+    'supabase/migrations/20260730084500_sql_lint_runtime_fixes.sql',
+  );
+  const exemptions = migration.match(/set\s+plpgsql\.enable_check\s*=\s*false/gi) || [];
+
+  assert.equal(exemptions.length, 1);
+  assert.match(
+    migration,
+    /alter function public\.norva_backfill_media_identity\(uuid,\s*integer\)[\s\S]*set plpgsql\.enable_check = false/,
+  );
+  assert.doesNotMatch(migration, /execute \$dedup\$|pg_temp\._dp_upd/);
+});
+
 test('every logical application backup includes the private Partners schema and data', () => {
   const scripts = [
     'ops/backup/backup-to-r2.sh',

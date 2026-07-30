@@ -1,4 +1,4 @@
--- Correct five runtime-invalid routine bodies exposed by a full blank-database
+-- Correct four runtime-invalid routine bodies exposed by a full blank-database
 -- replay followed by `supabase db lint --fail-on error`.
 --
 -- These are transformations of the canonical stored definitions rather than
@@ -6,55 +6,17 @@
 -- is fail-closed: schema drift aborts the migration instead of silently leaving
 -- an unsafe body installed.
 
+-- `norva_backfill_media_identity` creates and consumes a session-local temp
+-- table. plpgsql_check explicitly cannot validate that pattern; exempt only
+-- this exact routine while keeping its runtime implementation unchanged.
+alter function public.norva_backfill_media_identity(uuid, integer)
+  set plpgsql.enable_check = false;
+
 do $migration$
 declare
   v_definition text;
   v_fixed text;
 begin
-  -- plpgsql_check cannot resolve a session-local temp table across statements.
-  -- Keep the bounded temp-table algorithm, but execute the two consumers
-  -- dynamically after the table is created.
-  select pg_get_functiondef(
-    'public.norva_backfill_media_identity(uuid,integer)'::regprocedure
-  ) into v_definition;
-
-  v_fixed := replace(
-    v_definition,
-    '  select count(*) into v_touched from _dp_upd;',
-    '  execute ''select count(*) from pg_temp._dp_upd'' into v_touched;'
-  );
-  v_fixed := replace(
-    v_fixed,
-$old$
-  with affected as (
-$old$,
-$new$
-  execute $dedup$
-  with affected as (
-$new$
-  );
-  v_fixed := replace(
-    v_fixed,
-$old$
-  where mi.id = m.id and mi.is_dedup_primary is distinct from m.should_be_primary;
-
-  drop table if exists _dp_upd;
-$old$,
-$new$
-  where mi.id = m.id and mi.is_dedup_primary is distinct from m.should_be_primary;
-  $dedup$;
-
-  drop table if exists _dp_upd;
-$new$
-  );
-
-  if v_fixed = v_definition
-     or strpos(v_fixed, 'execute ''select count(*) from pg_temp._dp_upd''') = 0
-     or strpos(v_fixed, 'execute $dedup$') = 0 then
-    raise exception 'norva_backfill_media_identity definition drifted';
-  end if;
-  execute v_fixed;
-
   -- PostgreSQL cannot plan FULL JOIN with IS NOT DISTINCT FROM. Country codes
   -- are either ISO codes or NULL, so an empty-string sentinel makes both
   -- predicates hash-joinable without changing NULL grouping semantics.
