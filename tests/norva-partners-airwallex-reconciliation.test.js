@@ -293,6 +293,10 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
   assert.doesNotMatch(sql, /grant usage on schema pg_temp to service_role/);
   assert.match(
     sql,
+    /grant select, insert on partners_test_state to service_role;[\s\S]*?grant select on partners_test_state to authenticated;/,
+  );
+  assert.match(
+    sql,
     /admin_partners_payout_provider_set\(\s*'wise'[\s\S]*?'disabled'[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_payout_provider_configs[\s\S]*?set local role authenticated;[\s\S]*?admin_partners_payout_provider_set\(\s*'airwallex'/,
   );
   assert.match(

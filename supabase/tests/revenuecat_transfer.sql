@@ -781,7 +781,7 @@ insert into public.cloud_entitlement_projection (
   last_event_at
 )
 select
-  '30000000-0000-4000-8000-000000000007',
+  '30000000-0000-4000-8000-000000000007'::uuid,
   'google_play',
   'plus',
   'fraud',
@@ -792,7 +792,7 @@ select
 from rc_clock
 union all
 select
-  '30000000-0000-4000-8000-000000000008',
+  '30000000-0000-4000-8000-000000000008'::uuid,
   'manual',
   'manual',
   'active',
