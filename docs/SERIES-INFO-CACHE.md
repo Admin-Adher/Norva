@@ -255,7 +255,7 @@ self-heals with **zero user action** once the account is single-IP.
 Manual one-shot (e.g. right after the user closes other devices) — fills fast:
 ```sql
 select net.http_post(
-  url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-prewarm',
+  url := 'https://api.norva.tv/functions/v1/norva-series-prewarm',
   headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' ||
     (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
   body := jsonb_build_object('sourceId','<xtream source id>','userId','<owner id>','limit',60),

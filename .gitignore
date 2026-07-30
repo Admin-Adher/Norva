@@ -51,3 +51,10 @@ verify-debug.png
 .playwright-cli/
 test-results/
 output/
+
+# Hetzner operational snapshots can contain live credentials. Keep the
+# versioned redacted example, but never allow timestamped env/script/compose
+# backups or media env files into Git.
+ops/hetzner/.env.bak-*
+ops/hetzner/media/.env.*
+ops/hetzner/**/*.bak-*

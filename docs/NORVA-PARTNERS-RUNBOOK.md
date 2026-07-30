@@ -48,6 +48,18 @@ NORVA_PARTNERS_TV_RELAY_TTL_SECONDS
 NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS  # optionnel ; sinon allowlist Partners
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON      # JSON sur une ligne, secret Edge
 GOOGLE_PLAY_PACKAGE_NAME              # tv.norva.phone
+
+# Versements Airwallex P0 - laisser le sélecteur vide jusqu'au pilote sandbox
+NORVA_PARTNERS_PAYOUT_PROVIDER         # valeur autorisée : airwallex
+AIRWALLEX_ENVIRONMENT                  # sandbox | production
+AIRWALLEX_API_VERSION                  # doit rester 2025-06-30 pour ce contrat
+AIRWALLEX_CLIENT_ID
+AIRWALLEX_API_KEY
+AIRWALLEX_LOGIN_AS                     # optionnel, compte ciblé par clé scoped
+AIRWALLEX_WEBHOOK_SECRET               # secret propre à l'URL webhook
+AIRWALLEX_TRANSFER_REASON              # valeur validée pour le corridor pilote
+AIRWALLEX_TIMEOUT_MS                   # 1000..12000, défaut 7000
+AIRWALLEX_WEBHOOK_TOLERANCE_MS         # 30000..600000, défaut 300000
 ```
 
 Configurer séparément sur Cloudflare Pages :
@@ -71,6 +83,54 @@ pas de secret parallèle. Ses réglages optionnels sont bornés :
 est HTTPS, sous `*.norva.tv`, sans query ni fragment ; son TTL est compris entre
 120 et 600 secondes. Didit reçoit directement la `kyc.reservation_key` opaque
 émise par la DB comme `vendor_data` : aucun second secret vendor n'est requis.
+
+### Airwallex P0 : ordre d'activation
+
+Le code déployé ne suffit jamais à envoyer un versement. Respecter cet ordre :
+
+1. laisser `NORVA_PARTNERS_PAYOUT_PROVIDER` vide et conserver
+   `partners_payouts_live=false` ;
+2. créer une clé Airwallex sandbox scoped au strict nécessaire
+   (bénéficiaires et transferts), puis renseigner les secrets hors Git ;
+3. créer le webhook sandbox pour les événements `payout.transfer.scheduled`,
+   `processing`, `sent`, `paid`, `failed`, `cancelled` et
+   `payout.transfer.funding.reversed` ;
+4. vérifier le HMAC sur le corps brut, les doublons, le désordre des événements,
+   un timeout de création résolu par `request_id`, puis le scénario
+   `PAID -> FAILED` ;
+5. activer une route pays/devise Airwallex avec
+   `admin_partners_payout_provider_set`, sans ouvrir encore le flag global ;
+6. seulement après rapprochement sandbox et double validation Finance/Release,
+   satisfaire `payout_execution_adapter_verified`, puis ouvrir le pilote.
+
+Le bénéficiaire envoyé à Airwallex est toujours `PERSONAL/BANK_ACCOUNT`. L'IBAN
+ou le numéro de compte traverse uniquement la requête TLS de l'Edge Function :
+PostgreSQL ne conserve que l'identifiant opaque Airwallex et un libellé masqué.
+La création est réservée avant l'appel externe ; toute issue ambiguë passe en
+revue manuelle au lieu de rejouer une création potentiellement réussie.
+
+Chaque transfert utilise le `request_id` stable de la ligne de dispatch. Après
+un timeout ou un conflit 409, l'Edge Function recherche ce `request_id` avant
+toute nouvelle tentative. Le webhook signé ne décide jamais d'un état
+financier : il réveille une lecture autoritaire
+`GET /api/v1/transfers/{id}`. L'état `PAID` reste
+`reconciliation_status=pending`, car Airwallex documente qu'un échec tardif
+reste possible. Aucun posting de règlement ni contre-écriture automatique
+n'est créé avant un rapprochement financier séparé.
+
+Réglages bornés du worker :
+`NORVA_PARTNERS_PAYOUT_BATCH` (1..25),
+`NORVA_PARTNERS_PAYOUT_MAX_BATCHES` (1..4) et
+`NORVA_PARTNERS_PAYOUT_LEASE_SECONDS` (30..300).
+
+Références officielles qui figent ce contrat d'intégration :
+
+- [authentification et jeton API](https://www.airwallex.com/docs/api/authentication/api_access_token) ;
+- [création des bénéficiaires](https://www.airwallex.com/docs/payouts/beneficiaries/create-beneficiaries) ;
+- [API Transfers et résolution par `request_id`](https://www.airwallex.com/docs/api/payouts/transfers) ;
+- [signature et traitement des webhooks](https://www.airwallex.com/docs/developer-tools/webhooks/listen-for-webhook-events) ;
+- [machine d'états des transferts](https://www.airwallex.com/docs/payouts/transfers/create-a-transfer/transfer-statuses) ;
+- [versionnement de l'API](https://www.airwallex.com/docs/api/versioning).
 
 Le workflow Didit doit être un workflow KYC individuel. Aucun module KYB ne doit
 être présent. Pour préserver le retour Web et Android App Link, configurer
@@ -123,7 +183,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
     select net.http_post(
-      url := 'https://<project-ref>.supabase.co/functions/v1/norva-partners-worker/cron/run',
+      url := 'https://api.norva.tv/functions/v1/norva-partners-worker/cron/run',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'Authorization', 'Bearer ' || (
@@ -291,14 +351,15 @@ répare par machines d'états, reprises et contre-écritures.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | `db reset`, pgTAP, lint et Advisors verts en CI Supabase jetable | déployer les cinq migrations dans l'ordre |
+| Migrations/RPC Partners | livrées | `supabase db start`, bootstrap CI de `pg_cron`/`pg_net`, `migration up --local --include-all`, pgTAP, lint et Advisors verts | appliquer toutes les migrations en attente dans l'ordre |
+| Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
 | API membre, referral et TV | livrées | contrats Node, E2E Web/mobile et replay émulateur TV | synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC-only | code livré, inactif sans configuration complète | session sandbox, décision signée, replay et refus KYB | renseigner API key, workflow/application/node IDs, webhook secret/URL et callback |
 | Worker commission/J+45/shadow | livré | capture → accrual → J+45/reversal → shadow sans écart ; heartbeats frais | réutiliser le secret cron existant vérifié par `norva_verify_cron_secret`, confirmer son entrée Vault et créer le job `pg_cron` |
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
 | RevenueCat/Revolut | producteurs livrés ; Web reste incomplet sans ventilation fiscale | événements économiques rejoués deux fois sans double écriture ; aucun `tax=0` supposé | activer les événements provider ; inclure Revolut `DISPUTE_LOST` ; sélectionner un moteur/contrat fiscal Web avant commission |
 | `DISPUTE_WON` | **fail-closed** | alerte visible et aucune mutation financière | ne pas acquitter silencieusement ; livrer d'abord le contrat de chargeback reversal |
-| Payout onboarding/dispatch | **non livré, bloqué fournisseur** | aucun débit réel autorisé | sélectionner et contractualiser le provider, intégrer onboarding/webhooks/dispatch ; conserver `partners_payouts_live=false` |
+| Payout onboarding/dispatch | adaptateur Airwallex P0 livré, **inactif/fail-closed** sans configuration complète | création `PERSONAL` sans IBAN en DB, idempotence, timeout ambigu, webhook signé, lecture autoritaire et `PAID -> FAILED` testés en sandbox | contractualiser Airwallex, injecter les secrets hors Git, configurer un corridor sandbox et conserver `partners_payouts_live=false` jusqu'à la double validation |
 | Admin/alertes | surfaces, heartbeats et relais Ops Telegram/e-mail livrés | capacités vérifiées, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
 | Pilote mondial | gates et policies livrées mais vides/fail-closed | Terms/Privacy publiées, pays approuvés et restore drill réussi | configurer juridictions, programme, allowlist et invitations ; laisser invite-only |
 

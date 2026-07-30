@@ -1,0 +1,12 @@
+{
+  "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+  "imports": {
+    "jsr:@panva/jose@6": "jsr:@panva/jose@6.2.4",
+    "npm:@supabase/supabase-js@2": "npm:@supabase/supabase-js@2.108.1"
+  },
+  "lock": {
+    "path": "./deno.partners.lock",
+    "frozen": true
+  },
+  "nodeModulesDir": "none"
+}

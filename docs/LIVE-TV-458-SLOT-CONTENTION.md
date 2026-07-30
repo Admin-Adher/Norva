@@ -236,7 +236,7 @@ adversarial 22 agents → 15 findings corrigés), et déployés sur `main`**.
 Le **rapporteur gateway** est **inerte** tant que la variable d'env
 **`NORVA_EDGE_CALLBACK_BASE`** n'est pas posée pour le service media-gateway :
 ```
-NORVA_EDGE_CALLBACK_BASE=https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback
+NORVA_EDGE_CALLBACK_BASE=https://api.norva.tv/functions/v1/norva-playback
 ```
 La **plomberie repo est désormais en place** : la variable est câblée dans
 `ops/hetzner/media/docker-compose.media.yml` (`NORVA_EDGE_CALLBACK_BASE:

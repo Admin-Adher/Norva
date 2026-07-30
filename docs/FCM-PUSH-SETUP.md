@@ -69,23 +69,25 @@ token FCM (Android) → cache prefs → `NorvaTVCloud.getPushToken()` → `app.j
      + `build.yml`). Le fichier reste `.gitignore` → jamais dans l'historique.
    - ✅ Distinction : la clé API dans `google-services.json` est de la config client (embarquée dans l'APK), mais
      on la garde hors du repo par propreté + pour ne pas déclencher le secret scanning. La **vraie** clé secrète
-     (service account, étape 2) ne va JAMAIS dans le repo non plus — elle vit dans le secret **edge Supabase**.
+     (service account, étape 2) ne va JAMAIS dans le repo non plus — elle vit dans le secret **Edge self-host**.
 
 *Résultat* : les builds Android (debug CI + release) matérialisent le fichier depuis le secret → le plugin
 s'applique → Firebase est initialisé. Sans le secret, le plugin reste off et le build compile quand même.
 
-### Étape 2 — Secret `FCM_SERVICE_ACCOUNT` (Supabase) — ✅ FAITE
-> **FAIT** : clé service-account posée dans le secret Supabase `FCM_SERVICE_ACCOUNT` → `fcmConfigured()` = `true`,
+### Étape 2 — Secret `FCM_SERVICE_ACCOUNT` (Hetzner) — ✅ FAITE
+> **FAIT** : clé service-account posée dans le secret Edge self-host `FCM_SERVICE_ACCOUNT` → `fcmConfigured()` = `true`,
 > l'envoi push backend est actif. Procédure conservée ci-dessous pour référence.
 
 1. Firebase Console → **Paramètres du projet** (roue crantée) → onglet **Comptes de service**.
 2. **Générer une nouvelle clé privée** → confirme → télécharge un fichier **JSON** (contient `client_email`,
    `private_key`, `project_id`…). **C'est un secret** — ne le commite jamais.
-3. Supabase Dashboard → projet `oupsceccxsonaalhueff` → **Edge Functions → Secrets** (ou *Project Settings →
-   Edge Functions*) → **Add secret** :
+3. Sur l'hôte Hetzner, ajouter la variable au gestionnaire de secrets qui
+   matérialise `ops/hetzner/.env`, sans l'inscrire dans Git :
    - Nom : **`FCM_SERVICE_ACCOUNT`**
    - Valeur : **coller le contenu JSON complet** du fichier (tel quel, avec les `\n` de la private_key).
-4. Sauvegarder. **Aucun redéploiement requis** — `fcm.ts` lit `Deno.env.get("FCM_SERVICE_ACCOUNT")` à l'exécution.
+4. Recréer les deux conteneurs Edge afin qu'ils reçoivent le nouvel
+   environnement (`docker compose up -d functions functions2`). Un simple
+   `restart` ne recharge pas les variables.
 
 *Résultat* : `fcmConfigured()` passe à `true` → le prochain cycle du cron digest envoie les push. C'est **la
 seule étape nécessaire pour que l'envoi backend fonctionne** (l'app mobile n'est requise que pour produire des

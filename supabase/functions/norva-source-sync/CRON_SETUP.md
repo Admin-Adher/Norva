@@ -74,7 +74,7 @@ select cron.schedule(
   '*/30 * * * *',
   $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/refresh-due',
+    url := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/refresh-due',
     body := '{}'::jsonb,
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
@@ -117,7 +117,7 @@ select http_set_curlopt('CURLOPT_TIMEOUT_MS', '60000');
 do $$
 declare
   v_secret text; v_phase text := 'live'; v_offset int := 0; v_resp jsonb; v_status text; i int := 0;
-  v_base text := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/finalize-step/<SOURCE_ID>';
+  v_base text := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/finalize-step/<SOURCE_ID>';
 begin
   select decrypted_secret into v_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret';
   loop

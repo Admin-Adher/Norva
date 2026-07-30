@@ -23,16 +23,18 @@ NorvaEngine remuxe MKV → fMP4 (ftyp+moov init, puis moof+mdat) → MediaSource
 - **`engine`** : NorvaEngine tire les octets via `/raw` sur la gateway → connexion **gateway → provider** (IP **datacenter** Railway). Nécessaire pour mkv/HEVC/AC-3… que le navigateur ne lit pas nativement.
 - `CHUNK_DEMUXER_ERROR_APPEND_FAILED` (`MediaError.code === 3`) = Chromium refuse les octets `appendBuffer`és (init ou fragment mal formé / incohérent).
 
-## 1. Surfaces de déploiement (toutes auto-déployées sur push `main`)
+## 1. Surfaces de déploiement
 
 | Surface | Quoi | Déploiement | Vérif version |
 |---|---|---|---|
 | Client (`public/js/**`) | Cloudflare Pages | `deploy-cloudflare.yml` (hash `?v=` auto) | `ENGINE_VERSION` dans le log `timings` |
-| Edge functions | Supabase (bundle CLI) | `deploy-supabase-functions.yml` | `curl $EDGE/...` |
+| Edge functions | Supabase OSS self-host, Hetzner | mise à jour serveur + `ops/hetzner/scripts/04-deploy-edge-functions.sh` | `curl $EDGE/...` |
 | Relais | Cloudflare Worker | `deploy-relay.yml` | — |
 | media-gateway | Railway (Dockerfile) | auto-build sur `main` | `GET /health` → `version` |
 
-⚠️ Edge functions : **uniquement via la CLI Supabase** (bundle des imports `../_shared`). Jamais via un outil MCP qui n'agrège pas (plante au boot).
+⚠️ Les Edge Functions ne partent pas avec un push `main`. Le runtime
+self-host monte l'arbre complet `supabase/functions`; après mise à jour du
+checkout Hetzner, recharger toutes ses répliques avec le script 04.
 
 ## 2. Infra de diagnostic (la clé de toute la campagne)
 

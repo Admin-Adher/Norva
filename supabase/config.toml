@@ -1,4 +1,6 @@
-project_id = "oupsceccxsonaalhueff"
+# Local CLI namespace only. Production is the self-hosted api.norva.tv stack;
+# the deleted managed project reference must never be used as a deploy target.
+project_id = "norva-self-host"
 
 [functions.norva-cloud]
 verify_jwt = false
@@ -136,4 +138,12 @@ verify_jwt = false
 # lease. Monetary arithmetic, J+45 eligibility and immutable ledger writes stay
 # inside the database RPCs. No payout provider is called by this boundary.
 [functions.norva-partners-worker]
+verify_jwt = false
+
+# Airwallex payout boundary. /beneficiaries verifies a current user JWT and
+# exact CORS allowlist, /cron/run verifies NORVA_CRON_SHARED_SECRET in
+# PostgreSQL, and /webhooks/airwallex verifies x-timestamp+x-signature before
+# an authenticated provider re-fetch. Missing provider secrets keep all three
+# routes fail-closed; no feature flag is enabled by this configuration.
+[functions.norva-partners-payout]
 verify_jwt = false

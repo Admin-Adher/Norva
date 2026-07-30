@@ -224,18 +224,20 @@ KING365 58 %) sont les **plus** avancés, les gros (Ninja/Promax) montent lentem
 
 ---
 
-## Surfaces de déploiement (toutes auto-déployées sur push `main`)
+## Surfaces de déploiement
 
 | Surface | Quoi | Déploiement |
 |---------|------|-------------|
 | Web / client (`public/js/**`) | Cloudflare Pages | `deploy-cloudflare.yml` (push main) |
-| Edge functions (`supabase/functions/**`) | Supabase (bundle CLI) | `deploy-supabase-functions.yml` (push main) |
+| Edge functions (`supabase/functions/**`) | Supabase OSS self-host, Hetzner | manuel : mise à jour du checkout serveur puis `ops/hetzner/scripts/04-deploy-edge-functions.sh` |
 | Relais (`services/norva-relay`) | Cloudflare Worker | `deploy-relay.yml` (push main) |
 | Media gateway (`services/media-gateway`) | Railway | auto-build depuis `main` (pas de GH Action, Railway est branché au repo) |
 
-→ **Un push sur `main` déploie les 4.** ⚠️ Edge functions = **uniquement via la CLI Supabase** (le bundle
-résout les imports `../_shared`). Ne jamais déployer une edge function via un outil qui n'agrège pas
-(ça plante au boot — cf. incident résolu). Toujours `curl` l'endpoint après déploiement.
+→ Un push sur `main` déploie automatiquement le Web et le relais. Le media
+gateway reste piloté par Railway. Les Edge Functions **ne sont pas
+auto-déployées** : le runtime self-host monte l'arbre complet
+`supabase/functions`, puis doit être rechargé sur Hetzner. Toujours tester
+l'endpoint après ce déploiement manuel.
 
 ## Ce qui est LIVE (actif, sans rien à faire)
 

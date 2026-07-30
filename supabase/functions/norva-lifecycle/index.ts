@@ -14,7 +14,7 @@
 // Cron to register AT/AFTER DEPLOY (pointing a cron at a missing function 404s every run):
 //   select cron.schedule('norva-lifecycle', '*/15 * * * *', $$
 //     select net.http_post(
-//       url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-lifecycle/cron/run',
+//       url := 'https://api.norva.tv/functions/v1/norva-lifecycle/cron/run',
 //       headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' ||
 //         (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
 //       body := '{}'::jsonb, timeout_milliseconds := 60000);

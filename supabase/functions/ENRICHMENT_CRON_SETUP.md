@@ -12,6 +12,9 @@ Like `norva-source-sync/CRON_SETUP.md`, this is **not a migration**: apply with
 secret value appears here. `cron.schedule(name, …)` is idempotent (re-running
 updates the existing job), so this file is the source of truth for the cadences.
 
+Production is the self-hosted stack at `https://api.norva.tv`; the deleted
+managed Supabase project must never be restored as a cron or deployment target.
+
 ## 🔄 2026-07-16 — Fenêtres jour RESTAURÉES + Ninja 24/7 (cap 60/h) + ordre récent-d'abord
 
 > **État live actuel** (script `ops/hetzner/scripts/09-reopen-probe-windows.sql`). Le 2026-07-10
@@ -57,13 +60,13 @@ Séquence : déployer gateway v63 → merger l'edge → **PUIS** :
 ```sql
 select cron.schedule('norva-audio-airo-ninja', '4-59/12 * * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','mode','probe','limit',12,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000 ); $cron$);
 select cron.schedule('norva-audio-airo-ninja-series', '9-59/12 * * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','series','mode','probe','limit',8,'concurrency',1),
     timeout_milliseconds := 110000 ); $cron$);
@@ -306,7 +309,7 @@ qu'ils soient déjà prêts avant qu'un user les demande. Détail produit : `doc
 -- films audio bulk : header-probe de TOUS les films non-résolus, jour 6-23 (libère 0-5).
 select cron.schedule('norva-audio-langs-untagged', '*/3 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','probe','limit',25,'concurrency',1),
     timeout_milliseconds := 110000
@@ -316,7 +319,7 @@ $cron$);
 
 select cron.schedule('norva-audio-langs-series', '0-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','series','mode','probe','limit',15,'concurrency',1),
     timeout_milliseconds := 110000
@@ -325,7 +328,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-backfill-movie', '3-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','target','subtitle','limit',10,'concurrency',1),
     timeout_milliseconds := 110000
@@ -334,7 +337,7 @@ $cron$);
 
 select cron.schedule('norva-audio-langs-whisper', '6-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','whisper','limit',4,'concurrency',1),
     timeout_milliseconds := 110000
@@ -345,7 +348,7 @@ $cron$);
 -- films audio : get_vod_info MARCHE → 'vod' (métadonnées). 429 sur toute concurrence → 6-23, conc 2.
 select cron.schedule('norva-audio-langs-jeremy', '3-58/5 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','movie','mode','vod','limit',50,'concurrency',2),
     timeout_milliseconds := 110000
@@ -354,7 +357,7 @@ $cron$);
 
 select cron.schedule('norva-audio-langs-jeremy-series', '0-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','series','mode','probe','limit',15,'concurrency',1),
     timeout_milliseconds := 110000
@@ -363,7 +366,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-backfill-jeremy', '3-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','movie','target','subtitle','limit',10,'concurrency',1),
     timeout_milliseconds := 110000
@@ -372,7 +375,7 @@ $cron$);
 
 select cron.schedule('norva-audio-langs-jeremy-whisper', '6-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','movie','mode','whisper','limit',4,'concurrency',1),
     timeout_milliseconds := 110000
@@ -395,7 +398,7 @@ $cron$);
 -- Films audio — JOUR 6-23, fallthrough (draine séries/sous-titres/whisper du panel une fois fini)
 select cron.schedule('norva-audio-airo-ninja', '0-59/3 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
@@ -404,7 +407,7 @@ $cron$);
 
 select cron.schedule('norva-audio-airo-promax', '1-59/3 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
@@ -413,7 +416,7 @@ $cron$);
 
 select cron.schedule('norva-audio-airo-opplex', '2-59/6 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','9579e61b-5cda-4ea2-8b40-7996de8af32a','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
@@ -422,7 +425,7 @@ $cron$);
 
 select cron.schedule('norva-audio-airo-king365', '4-59/12 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','4e3d7dd8-9123-4bd6-9a02-36cc92e40a33','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
@@ -431,7 +434,7 @@ $cron$);
 
 select cron.schedule('norva-audio-airo-airysat', '5-59/30 6-23 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','f660f738-dbd6-43f8-acc0-b91784bfa138','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
@@ -444,7 +447,7 @@ $cron$);
 -- 0/3, Promax 1/4) ; même hôte jamais 2 accès simultanés (≥3 min, connexions courtes).
 select cron.schedule('norva-audio-airo-ninja-series', '0-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','series','mode','probe','limit',15,'concurrency',1),
     timeout_milliseconds := 110000
@@ -453,7 +456,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-airo-ninja', '3-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','target','subtitle','limit',10,'concurrency',1),
     timeout_milliseconds := 110000
@@ -462,7 +465,7 @@ $cron$);
 
 select cron.schedule('norva-audio-airo-promax-series', '1-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','series','mode','probe','limit',15,'concurrency',1),
     timeout_milliseconds := 110000
@@ -471,7 +474,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-airo-promax', '4-59/9 0-5 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','movie','target','subtitle','limit',10,'concurrency',1),
     timeout_milliseconds := 110000
@@ -487,7 +490,7 @@ $cron$);
 -- Sous-titres IA — pré-génération nocturne whitelist (Phase 3c). Staggerés 00:20/25/30, limit 2.
 select cron.schedule('norva-subtitle-pregen-jeremy', '20 0 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','mode','transcribe-whitelist','limit',2),
     timeout_milliseconds := 110000
@@ -496,7 +499,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-pregen-airo', '25 0 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','mode','transcribe-whitelist','limit',2),
     timeout_milliseconds := 110000
@@ -505,7 +508,7 @@ $cron$);
 
 select cron.schedule('norva-subtitle-pregen-super8k', '30 0 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    url := 'https://api.norva.tv/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','mode','transcribe-whitelist','limit',2),
     timeout_milliseconds := 110000
@@ -527,7 +530,7 @@ $cron$);
 -- l'egress diurne calme. Drainer : ne fait rien si rien n'est à matcher.
 select cron.schedule('norva-enrich-search-match', '6,16,26,36,46,56 3,4 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/search-match?limit=50&conc=6',
+    url := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/search-match?limit=50&conc=6',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000);
 $cron$);
@@ -537,7 +540,7 @@ $cron$);
 -- le tick ne POST que s'il reste des lignes à combler (sinon zéro invocation edge).
 select cron.schedule('norva-origlang-backfill', '1,11,21,31,41,51 3,4 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-tmdb-origlang',
+    url := 'https://api.norva.tv/functions/v1/norva-tmdb-origlang',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
     body := jsonb_build_object('limit',300),
     timeout_milliseconds := 120000
@@ -550,14 +553,14 @@ $cron$);
 
 select cron.schedule('norva-enrich-revalidate', '5 */6 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/revalidate?limit=80&conc=8',
+    url := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/revalidate?limit=80&conc=8',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000);
 $cron$);
 
 select cron.schedule('norva-enrich-backfill-years', '30 3 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/backfill-years?limit=200&conc=12',
+    url := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/backfill-years?limit=200&conc=12',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000);
 $cron$);
@@ -581,7 +584,7 @@ $cron$);
 --      candidate font un seq-scan détoast lent à chaque tick).
 select cron.schedule('norva-prewarm-i18n', '35 2 * * *', $cron$
   select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/prewarm-i18n?limit=200&conc=8',
+    url := 'https://api.norva.tv/functions/v1/norva-source-sync/cron/prewarm-i18n?limit=200&conc=8',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000)
   where exists (

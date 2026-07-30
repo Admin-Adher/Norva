@@ -1,9 +1,9 @@
 # Norva — Migration Hetzner (stack Supabase OSS self-host)
 
-> **Statut : scripts PRÉPARÉS, pas exécutés.** L'infra (provisioning, DNS, TLS, secrets réels,
-> ops) reste ton domaine. Ce dossier est le *code* de migration : dump/restore, recréation des
-> crons/vault/GUC, déploiement des edge functions, vérif de parité. Grounded sur l'inventaire
-> prod réel du **2026-07-07** (projet managé `oupsceccxsonaalhueff`).
+> **Statut actuel : production self-host sur `api.norva.tv`.** Le projet
+> Supabase managé utilisé pour l'inventaire du 2026-07-07 a été supprimé.
+> Les références à cet ancien projet dans les journaux et scripts de cutover
+> sont historiques et ne sont jamais des cibles de déploiement.
 >
 > Le **pourquoi / le sizing / quelle box** : voir
 > [`../../docs/roadmap/scaling-cost-hetzner-plan.md`](../../docs/roadmap/scaling-cost-hetzner-plan.md)

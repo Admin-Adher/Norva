@@ -120,6 +120,62 @@ test('Partners CI covers exact Google money, deletion and release evidence', () 
   assert.match(workflow, /ops\/hetzner\/backup\/\*\*/);
 });
 
+test('Partners CI freezes Edge dependencies and bootstraps a migration-only database', () => {
+  const workflow = read('.github/workflows/partners-integration.yml');
+  const denoConfig = JSON.parse(
+    read('supabase/functions/deno.partners.json'),
+  );
+  const denoLock = JSON.parse(
+    read('supabase/functions/deno.partners.lock'),
+  );
+  const bootstrap = read(
+    'supabase/tests/bootstrap_migration_dependencies.sql',
+  );
+  const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
+
+  assert.match(
+    workflow,
+    /deno check[\s\S]*?--config supabase\/functions\/deno\.partners\.json[\s\S]*?--frozen/,
+  );
+  assert.match(
+    workflow,
+    /supabase\/functions\/norva-partners-payout\/index\.ts/,
+  );
+  assert.equal(denoConfig.lock.path, './deno.partners.lock');
+  assert.equal(denoConfig.lock.frozen, true);
+  assert.equal(
+    denoConfig.imports['jsr:@panva/jose@6'],
+    'jsr:@panva/jose@6.2.4',
+  );
+  assert.equal(
+    denoConfig.imports['npm:@supabase/supabase-js@2'],
+    'npm:@supabase/supabase-js@2.108.1',
+  );
+  assert.equal(denoLock.specifiers['jsr:@panva/jose@6.2.4'], '6.2.4');
+  assert.equal(
+    denoLock.specifiers['npm:@supabase/supabase-js@2.108.1'],
+    '2.108.1',
+  );
+
+  assert.match(workflow, /run: supabase db start/);
+  assert.match(
+    workflow,
+    /supabase db query[\s\S]*?--file supabase\/tests\/bootstrap_migration_dependencies\.sql/,
+  );
+  assert.match(
+    workflow,
+    /supabase migration up --local --include-all/,
+  );
+  assert.doesNotMatch(workflow, /run: supabase start/);
+  assert.doesNotMatch(workflow, /supabase db reset/);
+  assert.match(bootstrap, /create extension if not exists pg_cron/);
+  assert.match(bootstrap, /create extension if not exists pg_net/);
+
+  assert.match(deploy, /mapfile -t configured_functions/);
+  assert.match(deploy, /if \(\( missing != 0 \)\); then/);
+  assert.match(deploy, /exit 1/);
+});
+
 test('offsite Partners backup is scheduled, least-privilege and secret-backed', () => {
   const workflow = read('.github/workflows/backup-db-to-r2.yml');
   assert.match(workflow, /cron: '15 3 \* \* \*'/);

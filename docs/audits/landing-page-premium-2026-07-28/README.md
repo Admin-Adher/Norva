@@ -3,6 +3,7 @@
 Date : 28 juillet 2026
 Périmètre : landing publique Web, état authentifié observé sur `https://norva.tv/`
 Livrable design : [canvas Superdesign](https://superdesign.dev/teams/235f8bb0-73fd-4f0f-affc-7debc947fe7e/projects/514a848c-7272-4585-9a8a-acf398927e36?live=1)
+Validation de l’implémentation : [implementation-qa.md](./implementation-qa.md)
 
 ## Verdict
 

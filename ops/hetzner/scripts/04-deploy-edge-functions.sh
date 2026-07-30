@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 04-deploy-edge-functions.sh — serve the 19 norva-* functions on self-host
+# 04-deploy-edge-functions.sh — reload configured norva-* functions on self-host
 # =============================================================================
 # In the self-host stack, edge functions are NOT "deployed" to a remote — the
 # `functions` (edge-runtime) container serves them directly from the repo's
@@ -11,13 +11,12 @@
 #   1. sanity-checks that every function in supabase/config.toml has a dir,
 #   2. restarts every configured edge-runtime replica to pick up changes.
 #
-# CI ADAPTATION (do this once, separately): .github/workflows/deploy-supabase-
-# functions.yml today runs `supabase functions deploy --project-ref
-# oupsceccxsonaalhueff` (the MANAGED project). For self-host, replace that step
-# with an SSH deploy that pulls the repo on the box and runs THIS script, e.g.:
-#     ssh deploy@box 'cd /opt/norva && git pull && \
-#         ops/hetzner/scripts/04-deploy-edge-functions.sh'
-# Keep supabase/config.toml as the source of truth for verify_jwt per function.
+# GitHub CI validates the functions but does not deploy them to the Hetzner
+# runtime. Until an explicit SSH deploy workflow exists, production deployment
+# is a reviewed manual operation: update the checkout, then run this script.
+# `supabase/config.toml` is only the checked-in function inventory used by the
+# sanity check below. Runtime authentication is configured by Compose and by
+# each function's own authorization boundary.
 # =============================================================================
 set -euo pipefail
 
@@ -31,7 +30,16 @@ COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabas
 echo ">> Verifying each configured function has a directory"
 missing=0
 # Extract [functions.NAME] headers from config.toml and check the dir exists.
-grep -oE '^\[functions\.[a-z0-9-]+\]' "$CONFIG" | sed -E 's/^\[functions\.(.*)\]$/\1/' | while read -r fn; do
+mapfile -t configured_functions < <(
+  grep -oE '^\[functions\.[a-z0-9-]+\]' "$CONFIG" |
+    sed -E 's/^\[functions\.(.*)\]$/\1/'
+)
+if [[ ${#configured_functions[@]} -eq 0 ]]; then
+  echo "ERROR: no functions declared in $CONFIG" >&2
+  exit 1
+fi
+
+for fn in "${configured_functions[@]}"; do
   if [[ -d "$FUNCS_DIR/$fn" ]]; then
     echo "   ok   $fn"
   else
@@ -39,8 +47,12 @@ grep -oE '^\[functions\.[a-z0-9-]+\]' "$CONFIG" | sed -E 's/^\[functions\.(.*)\]
     missing=1
   fi
 done
-# (subshell can't set parent var; re-check count directly)
-declared=$(grep -cE '^\[functions\.[a-z0-9-]+\]' "$CONFIG")
+if (( missing != 0 )); then
+  echo "ERROR: one or more functions declared in $CONFIG are missing" >&2
+  exit 1
+fi
+
+declared=${#configured_functions[@]}
 present=$(find "$FUNCS_DIR" -maxdepth 1 -mindepth 1 -type d -name 'norva-*' | wc -l | tr -d ' ')
 echo ">> config.toml declares $declared functions; $present norva-* dirs present."
 

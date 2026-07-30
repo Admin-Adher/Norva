@@ -1,8 +1,7 @@
-// DEPLOY NOTE: this function imports sibling modules from ../_shared. It MUST be
-// deployed by the bundling Supabase CLI (`supabase functions deploy`, run by the
-// deploy-supabase-functions.yml workflow on push to main), which inlines those
-// relative imports. Uploading the raw files via other tooling leaves the imports
-// unbundled and the function fails to boot (WORKER_ERROR). Deploy via CI only.
+// SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
+// supabase/functions tree, so sibling ../_shared imports stay available. A push
+// to main validates this code but does not reload production: update the server
+// checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";

@@ -1,13 +1,25 @@
-export type PayoutProvider = "wise" | "revolut" | "stripe_connect";
+export type PayoutProvider =
+  | "airwallex"
+  | "wise"
+  | "revolut"
+  | "stripe_connect";
+
+type ClientSuppliedPayoutProvider = Exclude<PayoutProvider, "airwallex">;
 
 export type PayoutProfileInput = {
-  provider: PayoutProvider;
+  provider: ClientSuppliedPayoutProvider;
   beneficiaryTokenRef: string;
   displayMasked: string;
   currency: string;
 };
 
 const PROVIDERS = new Set<PayoutProvider>([
+  "airwallex",
+  "wise",
+  "revolut",
+  "stripe_connect",
+]);
+const CLIENT_SUPPLIED_PROVIDERS = new Set<ClientSuppliedPayoutProvider>([
   "wise",
   "revolut",
   "stripe_connect",
@@ -59,7 +71,9 @@ export function parsePayoutProfileInput(raw: unknown): PayoutProfileInput {
   ]);
   if (
     typeof body.provider !== "string" ||
-    !PROVIDERS.has(body.provider as PayoutProvider) ||
+    !CLIENT_SUPPLIED_PROVIDERS.has(
+      body.provider as ClientSuppliedPayoutProvider,
+    ) ||
     typeof body.beneficiaryTokenRef !== "string" ||
     body.beneficiaryTokenRef.length < 8 ||
     body.beneficiaryTokenRef.length > 255 ||
@@ -77,7 +91,7 @@ export function parsePayoutProfileInput(raw: unknown): PayoutProfileInput {
     throw new PayoutContractError();
   }
   return {
-    provider: body.provider as PayoutProvider,
+    provider: body.provider as ClientSuppliedPayoutProvider,
     beneficiaryTokenRef: body.beneficiaryTokenRef,
     displayMasked: body.displayMasked,
     currency: body.currency,

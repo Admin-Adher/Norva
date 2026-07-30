@@ -18,7 +18,7 @@
 //     immediately without the webhook keeping a copy of the catalog.
 //
 // Configure in the RevenueCat dashboard → Integrations → Webhooks:
-//   * URL:    https://<project-ref>.supabase.co/functions/v1/norva-billing-webhook
+//   * URL:    https://api.norva.tv/functions/v1/norva-billing-webhook
 //   * Header: Authorization: <the secret you also set in NORVA_REVENUECAT_WEBHOOK_AUTH>
 //
 // Required env / secrets:

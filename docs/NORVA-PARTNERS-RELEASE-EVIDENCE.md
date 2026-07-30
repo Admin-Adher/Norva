@@ -59,6 +59,11 @@ distinctifs, pas une réécriture vers la landing page — puis consigner dans
 
 Un simple code HTTP `200` n'est pas suffisant.
 
+La première preuve technique de publication, attachée au déploiement Pages du
+30 juillet 2026, est archivée dans
+`docs/audits/partners-legal-production-2026-07-30.md`. Elle confirme les
+surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
+
 ## Sémantique des états
 
 - `draft` : état normal du dépôt ; les flags peuvent tous rester faux et les

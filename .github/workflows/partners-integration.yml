@@ -8,6 +8,8 @@ on:
     paths:
       - '.github/workflows/partners-integration.yml'
       - '.github/workflows/backup-db-to-r2.yml'
+      - 'supabase/functions/deno.partners.json'
+      - 'supabase/functions/deno.partners.lock'
       - 'public/app.html'
       - 'public/partners-terms.html'
       - 'public/privacy.html'
@@ -32,6 +34,7 @@ on:
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
       - 'supabase/config.toml'
@@ -42,6 +45,7 @@ on:
       - 'supabase/functions/norva-partners/**'
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
+      - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
       - 'supabase/functions/norva-revolut-billing/**'
@@ -61,6 +65,8 @@ on:
     paths:
       - '.github/workflows/partners-integration.yml'
       - '.github/workflows/backup-db-to-r2.yml'
+      - 'supabase/functions/deno.partners.json'
+      - 'supabase/functions/deno.partners.lock'
       - 'public/app.html'
       - 'public/partners-terms.html'
       - 'public/privacy.html'
@@ -85,6 +91,7 @@ on:
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
+      - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
       - 'supabase/config.toml'
@@ -95,6 +102,7 @@ on:
       - 'supabase/functions/norva-partners/**'
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
+      - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
       - 'supabase/functions/norva-revolut-billing/**'
@@ -169,10 +177,13 @@ jobs:
 
       - name: Type-check the Partners Edge boundary
         run: >-
-          deno check --frozen
+          deno check
+          --config supabase/functions/deno.partners.json
+          --frozen
           supabase/functions/norva-partners/index.ts
           supabase/functions/norva-partners-device/index.ts
           supabase/functions/norva-partners-kyc-webhook/index.ts
+          supabase/functions/norva-partners-payout/index.ts
           supabase/functions/norva-partners-referral/index.ts
           supabase/functions/norva-partners-worker/index.ts
           supabase/functions/norva-admin/index.ts
@@ -180,6 +191,13 @@ jobs:
           supabase/functions/norva-billing-webhook/index.ts
           supabase/functions/norva-revolut-webhook/index.ts
           supabase/functions/norva-revolut-billing/index.ts
+
+      - name: Test the Airwallex payout boundary
+        run: >-
+          deno test
+          --config supabase/functions/deno.partners.json
+          --frozen
+          supabase/functions/norva-partners-payout/partners-airwallex.test.ts
 
   android-contracts:
     name: Android ${{ matrix.label }} compile and tests
@@ -292,11 +310,17 @@ jobs:
         with:
           version: 2.110.0
 
-      - name: Start a fresh local Supabase stack
-        run: supabase start
+      - name: Start a fresh database-only Supabase container
+        run: supabase db start
 
-      - name: Rebuild the disposable database from every migration
-        run: supabase db reset --local --no-seed
+      - name: Bootstrap extensions required during migration replay
+        run: >-
+          supabase db query
+          --local
+          --file supabase/tests/bootstrap_migration_dependencies.sql
+
+      - name: Apply every migration to the disposable database
+        run: supabase migration up --local --include-all
 
       - name: Run Partners pgTAP integration tests
         run: supabase test db supabase/tests/affiliate_p0.sql --local

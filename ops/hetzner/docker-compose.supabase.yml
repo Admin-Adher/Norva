@@ -362,7 +362,7 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT:-false}"
-      # --- App-level function secrets (mirror the managed project's secrets) ---
+      # --- App-level function secrets for the authoritative self-host runtime ---
       NORVA_BACKFILL_TOKEN: ${NORVA_BACKFILL_TOKEN:-}
       NORVA_CRON_SHARED_SECRET: ${NORVA_CRON_SHARED_SECRET:-}
       # Domain-scoped sending_access key only. Never expose the host-side
@@ -406,6 +406,22 @@ services:
       NORVA_PARTNERS_WORKER_MAX_BATCHES: ${NORVA_PARTNERS_WORKER_MAX_BATCHES:-4}
       NORVA_PARTNERS_WORKER_LEASE_SECONDS: ${NORVA_PARTNERS_WORKER_LEASE_SECONDS:-120}
       NORVA_PARTNERS_SHADOW_WINDOW_HOURS: ${NORVA_PARTNERS_SHADOW_WINDOW_HOURS:-48}
+      # Airwallex Partners payout adapter. Empty defaults are intentionally
+      # inert. Do not set the provider selector until sandbox validation,
+      # webhook HMAC replay and the database release gates are complete.
+      NORVA_PARTNERS_PAYOUT_PROVIDER: ${NORVA_PARTNERS_PAYOUT_PROVIDER:-}
+      NORVA_PARTNERS_PAYOUT_BATCH: ${NORVA_PARTNERS_PAYOUT_BATCH:-10}
+      NORVA_PARTNERS_PAYOUT_MAX_BATCHES: ${NORVA_PARTNERS_PAYOUT_MAX_BATCHES:-2}
+      NORVA_PARTNERS_PAYOUT_LEASE_SECONDS: ${NORVA_PARTNERS_PAYOUT_LEASE_SECONDS:-90}
+      AIRWALLEX_ENVIRONMENT: ${AIRWALLEX_ENVIRONMENT:-sandbox}
+      AIRWALLEX_API_VERSION: ${AIRWALLEX_API_VERSION:-2025-06-30}
+      AIRWALLEX_CLIENT_ID: ${AIRWALLEX_CLIENT_ID:-}
+      AIRWALLEX_API_KEY: ${AIRWALLEX_API_KEY:-}
+      AIRWALLEX_LOGIN_AS: ${AIRWALLEX_LOGIN_AS:-}
+      AIRWALLEX_WEBHOOK_SECRET: ${AIRWALLEX_WEBHOOK_SECRET:-}
+      AIRWALLEX_TRANSFER_REASON: ${AIRWALLEX_TRANSFER_REASON:-}
+      AIRWALLEX_TIMEOUT_MS: ${AIRWALLEX_TIMEOUT_MS:-7000}
+      AIRWALLEX_WEBHOOK_TOLERANCE_MS: ${AIRWALLEX_WEBHOOK_TOLERANCE_MS:-300000}
       # Didit KYC: all fields are required together. An incomplete set keeps
       # session creation and webhook processing unavailable.
       DIDIT_API_KEY: ${DIDIT_API_KEY:-}

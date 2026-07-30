@@ -2,7 +2,8 @@
 
 ## Scope
 
-- Reference: `outputs/norva-red-noir-landing/index.html`
+- Reference: local Superdesign prototype used during implementation. The
+  generated `outputs/` workspace is intentionally not versioned.
 - Production entries: `public/index.html` and `public/landing.html`
 - Shared production behavior retained: authentication-aware CTAs, live billing periods and prices, attribution, consent, FAQ, contextual guide, SEO, and Play Store destinations.
 
@@ -11,7 +12,12 @@
 - Desktop reference and implementation were compared at 1440 × 900 in the same side-by-side image.
 - Reviewed sections: hero, ecosystem proof, bento features, cross-screen continuity, pricing, FAQ/final CTA, and footer.
 - Reviewed responsive viewports: 1102 × 800, 768 × 1024, 390 × 844, and 320 × 700.
-- Evidence is stored under `output/playwright/norva-landing-premium-implementation/`.
+- Curated baseline captures are versioned beside this document:
+  [hero](./01-hero-current.png), [benefits](./02-benefits-current.png),
+  [setup](./03-how-current.png), [pricing](./04-pricing-current.png),
+  [FAQ closed](./05-faq-current.png), and
+  [FAQ open](./06-faq-open-current.png). Detailed implementation comparisons
+  were local Playwright QA artifacts and are intentionally not versioned.
 
 ## Issues found and resolved
 
@@ -52,12 +58,14 @@
 
 ## Final evidence
 
-- Desktop hero: `output/playwright/norva-landing-premium-implementation/20-implementation-polished-desktop.png`
-- Current multi-device proof: `output/playwright/norva-landing-premium-implementation/21-implementation-polished-device-stage.png`
-- Responsive menu closed/open: `output/playwright/norva-landing-premium-implementation/18-implementation-final-mobile-nav.png`
-  and `output/playwright/norva-landing-premium-implementation/19-implementation-final-mobile-nav-open.png`
-- Final CTA after legacy-style reset:
-  `output/playwright/norva-landing-premium-implementation/29-implementation-final-cta-polished.png`
+- Versioned public baseline: [desktop hero](./01-hero-current.png),
+  [benefits](./02-benefits-current.png), [setup](./03-how-current.png),
+  [pricing](./04-pricing-current.png), and
+  [FAQ states](./05-faq-current.png).
+- The polished desktop hero, current multi-device stage, responsive menu
+  closed/open states, and final CTA comparison were verified with local
+  Playwright captures. Those generated QA files are intentionally not
+  versioned.
 
 ## Accepted production differences
 
@@ -68,26 +76,20 @@
 
 ### Source visual truth
 
-- Desired full navigation:
-  `C:\Users\ADRIEN~1\AppData\Local\Temp\codex-clipboard-017b5397-80e5-4141-b63c-98cca19f94b9.png`
-  (`1834 x 190` pixels).
-- Tablet state before the change:
-  `C:\Users\ADRIEN~1\AppData\Local\Temp\codex-clipboard-5225a494-9af5-46bf-8359-e85ad03653ad.png`
-  (`1840 x 1271` pixels).
+- The desired full-navigation state and the tablet state before the change
+  were supplied as temporary user reference captures. They are intentionally
+  not versioned.
 - Target state: authenticated, closed navigation, dark theme, landscape tablet.
 
 ### Implementation evidence
 
-- Browser-rendered implementation:
-  `output/playwright/norva-landing-premium-implementation/35-tablet-landscape-nav-1042-scale65.png`
-  (`1027 x 801` pixels), rendered at a `1042 x 900` CSS viewport with device scale factor `1`.
-- Browser-rendered production confirmation:
-  `output/playwright/norva-landing-premium-implementation/37-production-tablet-landscape-nav-1042.png`
-  at `https://norva.tv/`, with the full authenticated navigation visible at
-  `1042` CSS px.
-- Focused normalized comparison:
-  `output/playwright/norva-landing-premium-implementation/36-tablet-nav-comparison-normalized.png`
-  (`2054 x 146` pixels).
+- The browser-rendered implementation was verified at a `1042 x 900` CSS
+  viewport with device scale factor `1`.
+- Production was verified at `https://norva.tv/`, with the full authenticated
+  navigation visible at `1042` CSS px.
+- The implementation, production confirmation, and focused normalized
+  comparison were local browser QA captures and are intentionally not
+  versioned.
 - The in-app browser host enlarged the first emulated raster surface. The accepted
   implementation capture uses the CDP device-metrics `scale: 0.65` normalization;
   DOM layout remains at `1042` CSS px. This removes a capture-only crop without
@@ -143,23 +145,20 @@
 - Scope: the six real Norva navigation assets (`Home`, `Live TV`, `Movies`,
   `Series`, `Settings`, and `Logout`) across web, tablet, Android-phone WebView,
   and Android TV.
-- Selected design target:
-  `output/navigation-icon-sharpness-2026-07-28/04-navbar-current-vs-recommended-dpr2.png`.
+- Selected design target: a local render-lab comparison between the current and
+  recommended navigation treatment. The generated comparison is intentionally
+  not versioned.
 - Target treatment: a filter-free vector core, no resting halo, one active aura
   no larger than `4 CSS px`, and the existing Norva selected tile.
-- Same-input visual comparison:
-  `output/navigation-icon-sharpness-2026-07-28/09-design-qa-reference-vs-implementation.png`.
+- The same-input reference-versus-implementation comparison was reviewed
+  locally and is intentionally not versioned.
 
 ### Implementation evidence
 
-- Desktop at `1280 x 720`:
-  `output/navigation-icon-sharpness-2026-07-28/05-implementation-desktop-1280-dpr2.jpg`.
-- Tablet at `725 CSS px`:
-  `output/navigation-icon-sharpness-2026-07-28/06-implementation-tablet-725-dpr2.png`.
-- Mobile bottom navigation at `390 CSS px`:
-  `output/navigation-icon-sharpness-2026-07-28/07-implementation-mobile-390-dpr2.png`.
-- Android TV at `1280 x 720`:
-  `output/navigation-icon-sharpness-2026-07-28/08-implementation-tv-1280-dpr2.jpg`.
+- Desktop at `1280 x 720`, tablet at `725` CSS px, mobile bottom navigation at
+  `390` CSS px, and Android TV at `1280 x 720` were verified with local
+  render-lab captures. Those generated QA files are intentionally not
+  versioned.
 
 ### Findings resolved
 

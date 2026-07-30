@@ -1,5 +1,9 @@
 # Norva — Paiements : état & récapitulatif
 
+> ⛔ **ARCHIVE RETIRÉE (2026-07-11).** Cet état décrit l’ancien rail Stancer,
+> remplacé par Revolut. Les URLs et procédures Supabase managées conservées
+> ci-dessous sont historiques et ne doivent pas être exécutées.
+
 > Registre **de ce qui a été fait** pour les paiements. La conception détaillée est dans
 > `STANCER-BILLING.md` ; ce document dit **où on en est**, ce qui est **déployé/testé**, et la
 > marche à suivre pour **passer live**.
