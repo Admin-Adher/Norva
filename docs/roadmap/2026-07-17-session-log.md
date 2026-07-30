@@ -6,12 +6,12 @@ Chantier double : (1) donner au CRM la **dimension pays** de chaque client — d
 
 | # | Sujet | Commit | Fichiers |
 |---|---|---|---|
-| 1 | Socle pays + TVA : colonnes, backfill, ré-émissions RPC, `admin_vat_report`, capture live, UI complète | `7b5cae0` | `20260717120000_customer_country_vat.sql`, `norva-revolut/index.ts`, `norva-revolut-webhook/index.ts`, `norva-billing-webhook/index.ts`, `norva-revolut-billing/index.ts`, `AdminPage.js` |
+| 1 | Socle pays + TVA : colonnes, backfill, ré-émissions RPC, `admin_vat_report`, capture live, UI complète | `7b5cae0` | `20260717120001_customer_country_vat.sql`, `norva-revolut/index.ts`, `norva-revolut-webhook/index.ts`, `norva-billing-webhook/index.ts`, `norva-revolut-billing/index.ts`, `AdminPage.js` |
 | 2 | Runbook TVA + panneau Finance aligné sur la recherche (jauge franchise FR, alerte UK, notes BCE/TEDB/DES) | `6918294` | `docs/TVA-OSS.md`, `AdminPage.js` |
 | 3 | Docs pays + journal de session + bump `?v=58` (oubli du commit 1) | `8640002` | `docs/CLIENT-COUNTRY.md`, ce fichier, `README.md` (index), `app.js` |
 | 4 | Fallback pré-migration PGRST202 (liste Clients vivante avant la migration) | `5153abd` | `AdminPage.js` (`?v=59`), `app.js` |
 | 5 | Fix chemin réel `card.card_country` (étape 0 live) + backfill de rattrapage | `b3d06d1` | `20260717140000_revolut_card_country_backfill_fix.sql`, `norva-revolut`, `norva-revolut-webhook`, docs |
-| 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | `ec18f06` | `20260717150000_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
+| 6 | Remboursements pays-corrects + corrections OSS inter-trimestres (audit « toutes les logiques ? ») | `ec18f06` | `20260717150001_vat_refund_country_corrections.sql`, `norva-admin/index.ts`, `AdminPage.js` (`?v=60`), docs |
 | 7 | Cockpit TVA niveau 2 : calcul TVA due par pays + total à reverser + couche de confiance | `0119971` | `AdminPage.js` (`?v=61`), `app.js` |
 | 8 | Cockpit TVA niveau 3 : fx BCE figé serveur + hero/échéancier + assistant de dépôt + checklist | `0d57317` | `20260717160000_vat_rates_fx_server_calc.sql`, `AdminPage.js` (`?v=62`), `app.js` |
 | 9 | Onglet « 🇪🇺 TVA & conformité » dédié + registre par transaction (preuve par ligne, résolution des inconnus) | `eaa3ef6` | `20260717170000_vat_transactions_rpc.sql` (⚠ NOTIFY pgrst requis — nouvelle fonction), `AdminPage.js` (`?v=63`), `app.js` |

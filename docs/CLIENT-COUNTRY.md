@@ -1,7 +1,7 @@
 # Pays client — capture, backfill, surfaces admin
 
 > Livré le 2026-07-17 (branche `claude/client-location-revolut-playstore-p9nf74`,
-> migration `20260717120000_customer_country_vat.sql`). Compagnon TVA : [`TVA-OSS.md`](./TVA-OSS.md).
+> migration `20260717120001_customer_country_vat.sql`). Compagnon TVA : [`TVA-OSS.md`](./TVA-OSS.md).
 
 ## Sources de vérité (décision produit 2026-07-17)
 
@@ -132,9 +132,9 @@ référence (migrations dans l'ordre, en `supabase_admin`) :
 
 1. **Pays (socle + fix + logiques)** — puis redéploiement edge :
    ```
-   for m in 20260717120000_customer_country_vat \
+   for m in 20260717120001_customer_country_vat \
             20260717140000_revolut_card_country_backfill_fix \
-            20260717150000_vat_refund_country_corrections; do
+            20260717150001_vat_refund_country_corrections; do
      docker exec -i norva-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
        < supabase/migrations/${m}.sql; done
    ops/hetzner/scripts/04-deploy-edge-functions.sh

@@ -6,7 +6,7 @@
 > Commission, douane.gouv.fr). Les points restés incertains sont explicitement listés en
 > section 6 — à trancher avec l'expert-comptable.
 >
-> **Outillage dashboard** (livré avec la migration `20260717120000_customer_country_vat.sql`) :
+> **Outillage dashboard** (livré avec la migration `20260717120001_customer_country_vat.sql`) :
 > le panneau « 🇪🇺 TVA — préparation OSS » de la page Finance (RPC `admin_vat_report`) fournit
 > la base trimestrielle par pays de consommation (rail web uniquement), le cumul annuel
 > FR / UE hors FR / hors UE / inconnu, les jauges de seuils 10 000 € (UE) et 37 500 / 41 250 €

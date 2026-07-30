@@ -338,7 +338,7 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
     'utf8',
   );
   const flagMigration = fs.readFileSync(
-    path.join(root, 'supabase/migrations/20260719210000_lid_benchmark_flag.sql'),
+    path.join(root, 'supabase/migrations/20260719210001_lid_benchmark_flag.sql'),
     'utf8',
   );
 

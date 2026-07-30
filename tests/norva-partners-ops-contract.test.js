@@ -8,6 +8,30 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
+test('every Supabase migration has a unique version identifier', () => {
+  const files = fs
+    .readdirSync(path.join(root, 'supabase', 'migrations'))
+    .filter((file) => /^\d{14}_.+\.sql$/.test(file))
+    .sort();
+  const byVersion = new Map();
+
+  for (const file of files) {
+    const version = file.slice(0, 14);
+    const collisions = byVersion.get(version) || [];
+    collisions.push(file);
+    byVersion.set(version, collisions);
+  }
+
+  const duplicates = [...byVersion.entries()].filter(
+    ([, collisions]) => collisions.length > 1,
+  );
+  assert.deepEqual(
+    duplicates,
+    [],
+    `Supabase records only the 14-digit version; duplicate migrations: ${JSON.stringify(duplicates)}`,
+  );
+});
+
 test('every logical application backup includes the private Partners schema and data', () => {
   const scripts = [
     'ops/backup/backup-to-r2.sh',

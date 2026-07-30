@@ -1,6 +1,6 @@
 -- Cross-rail finance, part 2: teach admin_finance() to READ every rail's money.
 --
--- Companion to 20260705100000_cross_rail_finance.sql (which added the columns).
+-- Companion to 20260705100001_cross_rail_finance.sql (which added the columns).
 -- Before this, every money aggregate in admin_finance() read Stancer-only tables,
 -- so a google_play / apple_app_store subscriber counted as $0 MRR and never showed
 -- up in "collected" or "renewals". Now:

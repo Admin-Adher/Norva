@@ -155,7 +155,7 @@ Les deux audits ont produit des **verdicts vérifiés adversarialement** (chaque
 | Fichier | Objet | Rôle box | Vérification |
 |---|---|---|---|
 | `20260717150000_subtitle_notify_v2.sql` | colonnes source_id/series_id + reaper ré-émis (résout pending + cloche) + purge 30 j | **supabase_admin** (touche cron.*) | PG16 jetable : reaped→resolved→insert (job vivant intact, morts résolus + cloche) |
-| `20260717160000_watch_history_null_source_dedupe.sql` | dédoublonnage NULL + index NULLS NOT DISTINCT | postgres | PG16 jetable : upsert matche l'orphelin (999 sans nouvelle row) |
+| `20260717160001_watch_history_null_source_dedupe.sql` | dédoublonnage NULL + index NULLS NOT DISTINCT | postgres | PG16 jetable : upsert matche l'orphelin (999 sans nouvelle row) |
 
 Résultat prod (2026-07-17) : première migration OK (`ALTER TABLE`/`COMMENT`×2/`DO`). Seconde : `DELETE 0` (aucun doublon NULL en prod — l'index est posé en prévention). Crons confirmés : reaper `0 * * * *` + purge `25 3 * * *`, tous deux `active=t`.
 
@@ -178,7 +178,7 @@ server/routes/history.js                               B10 merge hub local
 supabase/functions/norva-playback/index.ts             A2/A3/A6/A7 deep link, ready-check, dispatch échecs, cloche
 supabase/functions/norva-cloud/index.ts                B5/B6/B9/B10 garde, DELETE keyed, signal profil, completed
 supabase/migrations/20260717150000_subtitle_notify_v2.sql
-supabase/migrations/20260717160000_watch_history_null_source_dedupe.sql
+supabase/migrations/20260717160001_watch_history_null_source_dedupe.sql
 ```
 
 ## Vérification
