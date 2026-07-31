@@ -924,7 +924,7 @@ join affiliate_private.affiliate_accounts account
   on account.id = reservation.account_id
 where account.user_id = '10000000-0000-4000-8000-000000000003';
 grant select, insert on partners_test_state to service_role;
-grant select on partners_test_state to authenticated;
+grant select, insert on partners_test_state to authenticated;
 set local role service_role;
 
 select extensions.is(
