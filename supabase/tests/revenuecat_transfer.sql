@@ -959,15 +959,16 @@ select extensions.ok(
   'the operations snapshot exposes the TRANSFER worker health'
 );
 select extensions.ok(
-  exists (
+  affiliate_private.partners_ops_alert_snapshot() ->> 'payout_mode'
+    = 'revolut_manual'
+  and not exists (
     select 1
     from jsonb_array_elements(
       affiliate_private.partners_ops_alert_snapshot()->'workers'
     ) worker
-    where worker->>'worker' = 'payout'
-      and worker->>'status' = 'not_configured'
+    where worker->>'worker' in ('payout', 'payout_report')
   ),
-  'the operations snapshot keeps the payout heartbeat explicit before configuration'
+  'the operations snapshot exposes manual payout mode without API workers'
 );
 select extensions.ok(
   exists (

@@ -234,22 +234,27 @@ select extensions.ok(
   'service role cannot bypass the atomic report pipeline through the private observation RPC'
 );
 select extensions.ok(
-  (
+  not (
     affiliate_private.partners_ops_alert_snapshot() -> 'workers'
-  ) @> '[{"worker":"payout_report","status":"blocked"}]'::jsonb,
-  'the cumulative Ops snapshot includes the report worker heartbeat'
+      @> '[{"worker":"payout_report"}]'::jsonb
+  ),
+  'Revolut manual mode removes the inactive Airwallex report heartbeat'
 );
 select extensions.ok(
-  pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
-  ) like '%airwallex_report_exception%'
-  and pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
-  ) like '%airwallex_report_stale%'
-  and pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
-  ) like '%airwallex_report_candidates_unmatched%',
-  'the cumulative Ops snapshot carries every Financial Reports alert'
+  not exists (
+    select 1
+    from jsonb_array_elements(
+      affiliate_private.partners_ops_alert_snapshot() -> 'alerts'
+    ) alert
+    where alert ->> 'code' in (
+      'airwallex_report_exception',
+      'airwallex_report_stale',
+      'airwallex_report_candidates_unmatched'
+    )
+  )
+  and affiliate_private.partners_ops_alert_snapshot() ->> 'payout_mode'
+    = 'revolut_manual',
+  'Revolut manual mode removes inactive Airwallex report alerts'
 );
 
 select * from extensions.finish();

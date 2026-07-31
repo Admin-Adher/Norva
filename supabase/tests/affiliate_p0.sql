@@ -15,9 +15,11 @@ select extensions.ok(
       and constraint_row.contype = 'c'
       and constraint_row.convalidated
       and pg_get_constraintdef(constraint_row.oid)
-        like '%status <> ''active''%provider = ''airwallex''%'
+        like
+          '%status <> ''active''%provider = ''revolut''%'
+          || 'execution_adapter%revolut_manual%revolut_api%'
   ),
-  'the payout pilot has a validated Airwallex-only active-adapter lock'
+  'the payout pilot has a validated Revolut manual/API active-adapter lock'
 );
 select extensions.ok(
   exists (
@@ -365,14 +367,14 @@ select extensions.is(
       'affiliate_airwallex_settlement_decision_guard',
       'affiliate_payout_settlement_semantics',
       'affiliate_airwallex_post_settlement_dispatch_guard',
-      'affiliate_airwallex_settled_payout_item_guard',
-      'affiliate_airwallex_settled_payout_cycle_guard'
+      'affiliate_partners_settled_payout_item_guard',
+      'affiliate_partners_settled_payout_cycle_guard'
     )
       and not t.tgisinternal
       and t.tgenabled <> 'D'
   ),
   8::bigint,
-  'all Airwallex append-only, semantic and terminal-state guards are enabled'
+  'all historical evidence and provider-neutral settlement guards are enabled'
 );
 select extensions.ok(
   position(
@@ -701,7 +703,7 @@ select extensions.ok(
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 
 do $setup$
 declare
