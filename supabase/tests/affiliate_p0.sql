@@ -3188,6 +3188,7 @@ from affiliate_private.affiliate_payout_cycles cycle
 where cycle.period_start = current_date - 29
   and cycle.period_end = current_date - 1
   and cycle.currency = 'USD';
+
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
@@ -3204,7 +3205,167 @@ select public.admin_partners_payout_cycle_approve(
   ),
   'P0 payout integration settled approval.'
 );
+insert into partners_test_state (state_key, state_value)
+select
+  'payout_batch_2',
+  public.admin_partners_revolut_manual_batch_prepare(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    ),
+    'PREPARE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_cycle_2'
+    ),
+    'P0 payout integration prepares the manual Revolut batch.'
+  ) #>> '{batch,key}';
+select public.admin_partners_revolut_manual_batch_export(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_batch_2'
+  ),
+  'EXPORT:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_batch_2'
+  ),
+  'P0 payout integration exports the manual Revolut batch.'
+);
+reset role;
 
+insert into partners_test_state (state_key, state_value)
+select 'payout_reference_2', execution.payout_reference
+from affiliate_private.affiliate_revolut_payout_executions execution
+join affiliate_private.affiliate_revolut_manual_batches batch
+  on batch.id = execution.manual_batch_id
+where batch.batch_key = (
+  select state_value
+  from partners_test_state
+  where state_key = 'payout_batch_2'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_revolut_manual_batch_mark_submitted(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_batch_2'
+  ),
+  jsonb_build_array(jsonb_build_object(
+    'reference',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_reference_2'
+    )
+  )),
+  'SUBMIT:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'payout_batch_2'
+  ),
+  'P0 payout integration records entry in Revolut Business.'
+);
+reset role;
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000004","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+insert into partners_test_state (state_key, state_value)
+select
+  'statement_ticket_2',
+  public.admin_partners_revolut_statement_authorize()
+    ->> 'import_ticket';
+reset role;
+
+set local role service_role;
+select public.partners_service_revolut_statement_ingest(
+  encode(
+    extensions.digest('p0-revolut-statement-2', 'sha256'),
+    'hex'
+  ),
+  current_date - 1,
+  current_date,
+  'USD',
+  jsonb_build_array(jsonb_build_object(
+    'reference',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_reference_2'
+    ),
+    'provider_transaction_id',
+    'p0-transfer-00000002',
+    'provider_state',
+    'COMPLETED',
+    'amount_minor',
+    2000,
+    'currency',
+    'USD',
+    'value_date',
+    current_date::text
+  )),
+  'p0-revolut-statement',
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'statement_ticket_2'
+  )
+);
+reset role;
+
+insert into partners_test_state (state_key, state_value)
+select 'statement_row_2', statement.row_key
+from affiliate_private.affiliate_revolut_statement_rows statement
+where statement.payout_reference = (
+  select state_value
+  from partners_test_state
+  where state_key = 'payout_reference_2'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000004","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+insert into partners_test_state (state_key, state_value)
+select
+  'reconciliation_review_2',
+  public.admin_partners_revolut_reconciliation_review(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'statement_row_2'
+    ),
+    'REVIEW:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'statement_row_2'
+    ),
+    'P0 payout integration reviews the matched statement evidence.'
+  ) #>> '{review,key}';
+reset role;
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_revolut_reconciliation_decide(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'reconciliation_review_2'
+  ),
+  'confirmed',
+  'CONFIRM:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'reconciliation_review_2'
+  ),
+  'P0 payout integration confirms the exact settled transfer.'
+);
 reset role;
 
 create or replace function
@@ -3226,7 +3387,7 @@ begin
   where cycle.cycle_key = (
     select state_value
     from partners_test_state
-    where state_key = 'payout_cycle_2'
+    where state_key = 'payout_cycle_1'
   );
   select cycle.*
   into strict v_cycle
@@ -3278,7 +3439,6 @@ select extensions.throws_ok(
   'the deferred ledger guard rejects a settlement that differs by one unit'
 );
 
-reset role;
 insert into partners_test_state (state_key, state_value)
 values (
   'payout_settled_route',
@@ -3578,13 +3738,21 @@ select extensions.is(
 );
 
 update affiliate_private.affiliate_payout_profiles profile
-set status = 'active', updated_at = now()
+set
+  status = 'active',
+  revolut_binding_id = binding.id,
+  revolut_binding_version = binding.binding_version,
+  updated_at = now()
+from affiliate_private.affiliate_revolut_beneficiary_bindings binding
 where profile.account_id = (
     select state_value::uuid
     from partners_test_state
     where state_key = 'payout_account'
   )
-  and profile.currency = 'USD';
+  and profile.currency = 'USD'
+  and binding.account_id = profile.account_id
+  and binding.currency = profile.currency
+  and binding.status = 'active';
 select extensions.ok(
   position(
     'on conflict (account_id, currency)' in lower(pg_get_functiondef(
