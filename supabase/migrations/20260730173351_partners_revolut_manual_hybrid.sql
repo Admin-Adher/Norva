@@ -4256,7 +4256,7 @@ begin
   into v_balance_count, v_balances
   from (
     select
-      account.account_key,
+      account.user_pseudonym as account_key,
       posting.currency,
       coalesce(sum(
         case
@@ -4310,7 +4310,7 @@ begin
         'partner_payout_clearing'
       )
     where account.user_id = p_user_id
-    group by account.account_key, posting.currency
+    group by account.user_pseudonym, posting.currency
   ) balances;
 
   if v_open_batches > 0
@@ -6669,7 +6669,7 @@ begin
   )
   values (
     'payout',
-    v_account.account_key || ':' || v_currency,
+    v_account.user_pseudonym || ':' || v_currency,
     'revolut_beneficiary_profile_set',
     'admin',
     v_actor,
@@ -7808,7 +7808,7 @@ begin
       using errcode = '22023';
   end if;
 
-  select account.account_key
+  select account.user_pseudonym
   into v_account_key
   from affiliate_private.affiliate_accounts account
   where account.id = p_account_id;
