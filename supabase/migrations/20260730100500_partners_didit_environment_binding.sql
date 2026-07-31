@@ -1310,7 +1310,6 @@ begin
       ('maturation'::text),
       ('reconciliation'::text),
       ('payout'::text),
-      ('payout_report'::text),
       ('revenuecat_transfer'::text)
   )
   select jsonb_agg(
@@ -1436,32 +1435,6 @@ begin
     having count(*) > 0
     union all
     select
-      'airwallex_report_exception',
-      'critical',
-      count(*)::bigint
-    from affiliate_private.affiliate_airwallex_report_runs
-    where status = 'exception'
-    having count(*) > 0
-    union all
-    select
-      'airwallex_report_stale',
-      'warning',
-      count(*)::bigint
-    from affiliate_private.affiliate_airwallex_report_runs
-    where status in ('planned', 'leased', 'pending', 'retry')
-      and updated_at < now() - interval '30 minutes'
-    having count(*) > 0
-    union all
-    select
-      'airwallex_report_candidates_unmatched',
-      'warning',
-      count(*)::bigint
-    from affiliate_private.affiliate_airwallex_report_runs
-    where status = 'retry'
-      and last_error_code = 'report_candidates_unmatched'
-    having count(*) > 0
-    union all
-    select
       'shadow_reconciliation_mismatch',
       'critical',
       r.mismatch_count
@@ -1528,7 +1501,6 @@ begin
         ('maturation'::text),
         ('reconciliation'::text),
         ('payout'::text),
-        ('payout_report'::text),
         ('revenuecat_transfer'::text)
     ) expected(worker_name)
     left join affiliate_private.affiliate_worker_heartbeats h

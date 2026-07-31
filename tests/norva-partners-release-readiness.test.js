@@ -668,7 +668,7 @@ test('pilot readiness gates Play App Links, DB snapshot, TV, statement and incid
 test('payout evidence pins Revolut manual, references and beneficiary registry', () => {
   const unsupportedProvider = readyEvidence();
   unsupportedProvider.status = 'draft';
-  unsupportedProvider.providers.individual_payout.provider = 'airwallex';
+  unsupportedProvider.providers.individual_payout.provider = 'wise';
   assert.throws(
     () => validateEvidence(unsupportedProvider),
     /individual payout provider must be null or revolut/,

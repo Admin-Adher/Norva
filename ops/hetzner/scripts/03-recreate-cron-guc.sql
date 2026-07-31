@@ -52,9 +52,9 @@ select vault.create_secret(:'NORVA_CRON_SHARED_SECRET', 'norva_cron_shared_secre
 --        dump/ref-cron-jobs.sql | psql "$TARGET" -v ON_ERROR_STOP=0 -f -
 --
 --    (Or regenerate live from the managed DB — see CUTOVER-LOG-2026-07-11.md §9.)
---    The exported file ends with a fail-closed guard for all provider/API
---    Partners payout jobs. Before traffic, run the cutover guard again:
---      \i scripts/disable-norva-partners-airwallex-crons.sql
+--    The exported file ends with a fail-closed guard for the dormant Revolut
+--    Business API job. Before traffic, confirm it is still inactive:
+--      select active from cron.job where jobname='norva-partners-revolut-api';
 --    Never infer a safe state from cron.schedule's ACTIVE default.
 -- ---------------------------------------------------------------------------
 

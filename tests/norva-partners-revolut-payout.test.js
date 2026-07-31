@@ -1145,15 +1145,6 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
   const compose = read('ops/hetzner/docker-compose.supabase.yml');
   const envExample = read('ops/hetzner/.env.hetzner.example');
   const parity = read('ops/hetzner/scripts/05-verify-parity.sh');
-  const disableLegacyCrons = read(
-    'ops/hetzner/scripts/disable-norva-partners-airwallex-crons.sql',
-  );
-  const legacyPayoutCron = read(
-    'ops/hetzner/scripts/register-norva-partners-payout-cron.sql',
-  );
-  const legacyReportsCron = read(
-    'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql',
-  );
   const config = read('supabase/config.toml');
   assert.match(edge, /revolutApiEnvironmentEnabled/);
   assert.match(edge, /partners_worker_revolut_global_lease_acquire/);
@@ -1211,7 +1202,6 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
     assert.match(compose, new RegExp(`${secret}: \\\${${secret}:-}`));
     assert.match(envExample, new RegExp(`^${secret}=$`, 'm'));
   }
-  assert.match(envExample, /^NORVA_PARTNERS_PAYOUT_PROVIDER=revolut$/m);
   assert.match(envExample, /^NORVA_PARTNERS_REVOLUT_API_ENABLED=false$/m);
   assert.match(
     envExample,
@@ -1222,11 +1212,6 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
     /^NORVA_PARTNERS_REVOLUT_BENEFICIARY_HMAC_ACTIVE_VERSION=$/m,
   );
   assert.match(envExample, /^REVOLUT_BUSINESS_ENVIRONMENT=$/m);
-  assert.match(envExample, /^AIRWALLEX_ENVIRONMENT=$/m);
-  assert.match(
-    compose,
-    /AIRWALLEX_ENVIRONMENT: \$\{AIRWALLEX_ENVIRONMENT:-\}/,
-  );
   assert.match(
     compose,
     /REVOLUT_BUSINESS_ENVIRONMENT: \$\{REVOLUT_BUSINESS_ENVIRONMENT:-\}/,
@@ -1238,22 +1223,12 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
     /Revolut API cron scheduled[\s\S]*jobname='norva-partners-revolut-api'/,
   );
   assert.match(
-    disableLegacyCrons,
-    /update cron\.job\s+set active = false[\s\S]*jobname in \(\s*'norva-partners-payout',\s*'norva-partners-airwallex-reports',\s*'norva-partners-revolut-api'/i,
-  );
-  for (const legacyCron of [legacyPayoutCron, legacyReportsCron]) {
-    assert.match(
-      legacyCron,
-      /provider = 'airwallex'[\s\S]*execution_adapter = 'airwallex_api'[\s\S]*status = 'active'/,
-    );
-  }
-  assert.match(
     config,
     /\[functions\.norva-partners-revolut-payout\]\nverify_jwt = false/,
   );
 });
 
-test('cron backups preserve active state and restore all payout rails fail-closed', () => {
+test('cron backups preserve active state and restore Revolut API fail-closed', () => {
   for (const file of [
     'ops/hetzner/scripts/01-dump-prod.sh',
     'ops/hetzner/backup/backup-nightly.sh',
@@ -1264,20 +1239,14 @@ test('cron backups preserve active state and restore all payout rails fail-close
       /cron\.schedule\(%L,%L,%L\); update cron\.job set active=%s where jobname=%L;/,
     );
     assert.match(script, /active::text/);
-    for (const job of [
-      'norva-partners-payout',
-      'norva-partners-airwallex-reports',
-      'norva-partners-revolut-api',
-    ]) {
-      assert.match(script, new RegExp(job));
-    }
+    assert.match(script, /norva-partners-revolut-api/);
   }
 
   const restore = read('ops/hetzner/backup/RESTORE.md');
   assert.match(restore, /ref-cron-jobs\.sql/);
   assert.match(
     restore,
-    /where active and jobname in \('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api'\)/,
+    /where active and jobname='norva-partners-revolut-api'/,
   );
 });
 

@@ -1076,12 +1076,9 @@
         'authentication_required',
         'temporarily_unavailable'
     ]);
-    // Provider-managed destinations are readable, but their onboarding must
-    // stay on a trusted provider/admin boundary: Airwallex uses the dedicated
-    // /beneficiaries route and Revolut is configured by Finance. The generic
-    // token mutation deliberately remains narrower.
+    // Revolut destinations are provisioned by Finance. The generic token
+    // mutation deliberately remains narrower.
     const PARTNERS_PAYOUT_READ_PROVIDERS = new Set([
-        'airwallex',
         'wise',
         'revolut',
         'stripe_connect'

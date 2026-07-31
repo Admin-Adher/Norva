@@ -1,14 +1,12 @@
 export type PayoutProvider =
-  | "airwallex"
   | "wise"
   | "revolut"
   | "stripe_connect";
 
 type ClientSuppliedPayoutProvider = Exclude<
   PayoutProvider,
-  // Airwallex is created through its dedicated provider boundary; Revolut
-  // counterparty tokens are provisioned only by Finance.
-  "airwallex" | "revolut"
+  // Revolut counterparty tokens are provisioned only by Finance.
+  "revolut"
 >;
 
 export type PayoutProfileInput = {
@@ -19,7 +17,6 @@ export type PayoutProfileInput = {
 };
 
 const PROVIDERS = new Set<PayoutProvider>([
-  "airwallex",
   "wise",
   "revolut",
   "stripe_connect",

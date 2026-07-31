@@ -966,7 +966,7 @@ select extensions.ok(
     from jsonb_array_elements(
       affiliate_private.partners_ops_alert_snapshot()->'workers'
     ) worker
-    where worker->>'worker' in ('payout', 'payout_report')
+    where worker->>'worker' = 'payout'
   ),
   'the operations snapshot exposes manual payout mode without API workers'
 );

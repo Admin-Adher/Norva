@@ -28,13 +28,13 @@ dpsql -v ON_ERROR_STOP=0 -f - < 04-storage-data.sql
 dpsql -c "vacuum analyze;"
 
 # 3) crons (rejouables, URLs déjà self-host). Chaque instruction restaure son
-#    état active exact ; le fichier finit aussi par la coupure fail-closed des
-#    trois anciens/futurs rails provider/API Partners :
+#    état active exact ; le fichier finit aussi par la coupure fail-closed du
+#    rail Revolut Business API dormant :
 dpsql -v ON_ERROR_STOP=1 -f - < ref-cron-jobs.sql
 dpsql -v ON_ERROR_STOP=1 -c \
-  "update cron.job set active=false where jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api');"
+  "update cron.job set active=false where jobname='norva-partners-revolut-api';"
 dpsql -Atc \
-  "select count(*) from cron.job where active and jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api');" \
+  "select count(*) from cron.job where active and jobname='norva-partners-revolut-api';" \
   | grep -qx '0'
 
 # 4) vérifier vs MANIFEST.txt et les invariants Partners

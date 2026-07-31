@@ -770,11 +770,8 @@ select extensions.ok(
   )) like '%revolut_manual_action_required%'
   and lower(pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
-  )) like '%not in (''payout'', ''payout_report'')%'
-  and lower(pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
-  )) like '%airwallex_report_stale%',
-  'manual mode filters inactive payout heartbeats and legacy Airwallex alerts'
+  )) like '%worker_item ->> ''worker'' <> ''payout''%',
+  'manual mode filters inactive payout worker heartbeats'
 );
 select extensions.ok(
   lower(pg_catalog.pg_get_functiondef(

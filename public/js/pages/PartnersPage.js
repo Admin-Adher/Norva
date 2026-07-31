@@ -1356,7 +1356,6 @@ class PartnersPage {
 
     payoutProviderLabel(provider) {
         return ({
-            airwallex: 'Airwallex',
             wise: 'Wise',
             revolut: 'Revolut',
             stripe_connect: 'Stripe Connect'

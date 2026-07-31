@@ -75,8 +75,8 @@ donc pas rendus visibles à Support par défaut.
 - dernier rapprochement shadow en écart : critique ;
 - heartbeat commission/correction/maturation/reconciliation/
   revenuecat_transfer attendu mais absent ou âgé de plus de 15 minutes :
-  critique. Les anciens heartbeats provider `payout` et `payout_report` ne sont
-  jamais attendus sous Revolut Basic ;
+  critique. Le heartbeat provider `payout` n'est jamais attendu sous Revolut
+  Basic ;
 - quota Didit sur 30 jours : warning à 400/500, critique à 500/500, toujours
   informatif et non bloquant ;
 - nouveau fait `TRANSFER` quarantiné créé dans les dernières 24 heures :
@@ -89,8 +89,7 @@ donc pas rendus visibles à Support par défaut.
   montant/devise incorrects, référence inconnue, doublon `COMPLETED`, paiement
   tardif, retour ou contrôle de lot en attente : critique selon la nature et
   l'âge, sans identifiant bancaire brut ;
-- tout job `norva-partners-payout`,
-  `norva-partners-airwallex-reports` ou `norva-partners-revolut-api` actif sous
+- tout job `norva-partners-payout` ou `norva-partners-revolut-api` actif sous
   Basic : critique de configuration. L'absence de ces crons est l'état sain
   attendu, pas un heartbeat manquant.
 

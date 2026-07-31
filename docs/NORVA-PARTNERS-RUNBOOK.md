@@ -58,7 +58,6 @@ NORVA_REVENUECAT_TRANSFER_WORKER_MAX_BATCHES # forcé à 1
 NORVA_REVENUECAT_TRANSFER_WORKER_LEASE_SECONDS # 120..300, défaut 120
 
 # Rail de production initial : Revolut Business Basic, exécution manuelle.
-NORVA_PARTNERS_PAYOUT_PROVIDER         # revolut
 NORVA_PARTNERS_REVOLUT_API_ENABLED     # kill switch Edge ; false sous Basic
 
 # Registre bénéficiaire du rail manuel. Ces secrets serveur sont nécessaires
@@ -82,14 +81,6 @@ REVOLUT_BUSINESS_REFRESH_TOKEN
 REVOLUT_BUSINESS_SOURCE_ACCOUNTS_JSON  # allowlist compte source par devise
 REVOLUT_BUSINESS_MAX_FEE_MINOR_JSON    # plafond Finance en unités mineures/devise
 REVOLUT_BUSINESS_TIMEOUT_MS
-
-# Héritage Airwallex : code et preuves historiques seulement. Ne configurer
-# aucune de ces variables et n'activer aucun cron Airwallex sous Revolut Basic.
-AIRWALLEX_ENVIRONMENT
-AIRWALLEX_CLIENT_ID
-AIRWALLEX_API_KEY
-AIRWALLEX_WEBHOOK_SECRET
-AIRWALLEX_FINANCIAL_REPORTS_ENABLED    # doit rester false
 ```
 
 Configurer séparément sur Cloudflare Pages :
@@ -393,14 +384,6 @@ clearing sans ambiguïté, et tant qu'une même réalité provider reçue par po
 webhook puis relevé ne se regroupe pas en un incident sémantique unique tout en
 conservant ses preuves sources append-only. Ces exigences n'affectent pas le
 rail `revolut_manual` Basic, mais bloquent toute activation de `revolut_api`.
-
-### Airwallex historique désactivé
-
-Le code, les migrations et les preuves Airwallex restent conservés pour
-l'audit, mais ne constituent plus un rail pilote. Les routes Airwallex restent
-`disabled`, leurs variables ne sont pas renseignées et aucun cron payout ou
-Financial Reports Airwallex n'est enregistré. Une ancienne preuve Airwallex ne
-peut jamais satisfaire le contrat de rapprochement Revolut manuel.
 
 Le workflow Didit doit être un workflow KYC individuel. Aucun module KYB ne doit
 être présent. Pour préserver le retour Web et Android App Link, configurer

@@ -251,17 +251,12 @@ begin
   select coalesce(jsonb_agg(worker_item order by worker_item ->> 'worker'), '[]')
   into v_workers
   from jsonb_array_elements(coalesce(v_base -> 'workers', '[]')) worker_item
-  where worker_item ->> 'worker' not in ('payout', 'payout_report');
+  where worker_item ->> 'worker' <> 'payout';
 
   select coalesce(jsonb_agg(alert_item), '[]')
   into v_alerts
   from jsonb_array_elements(coalesce(v_base -> 'alerts', '[]')) alert_item
-  where alert_item ->> 'code' not in (
-    'airwallex_report_exception',
-    'airwallex_report_stale',
-    'airwallex_report_candidates_unmatched',
-    'worker_heartbeat_missing'
-  );
+  where alert_item ->> 'code' <> 'worker_heartbeat_missing';
 
   select count(*)
   into v_missing_workers
@@ -1919,7 +1914,6 @@ alter table affiliate_private.affiliate_payout_profiles
 update affiliate_private.affiliate_payout_provider_configs config
 set execution_adapter = case
   when config.provider = 'revolut' then 'revolut_manual'
-  when config.provider = 'airwallex' then 'airwallex_api'
   else 'legacy_disabled'
 end
 where config.execution_adapter is null;
@@ -1933,10 +1927,6 @@ alter table affiliate_private.affiliate_payout_provider_configs
     (
       provider = 'revolut'
       and execution_adapter in ('revolut_manual', 'revolut_api')
-    )
-    or (
-      provider = 'airwallex'
-      and execution_adapter = 'airwallex_api'
     )
     or (
       provider in ('wise', 'stripe_connect')
@@ -2118,50 +2108,8 @@ begin
       'disable non-Revolut payout routes before installing the Revolut rail'
       using errcode = 'P0001';
   end if;
-  if exists (
-    select 1
-    from affiliate_private.affiliate_payout_dispatches dispatch
-    where dispatch.provider = 'airwallex'
-      and (
-        dispatch.provider_state is null
-        or dispatch.provider_state not in (
-          'PAID',
-          'FAILED',
-          'CANCELLED',
-          'REVERSED'
-        )
-      )
-  ) then
-    raise exception
-      'drain every nonterminal Airwallex dispatch before Revolut cutover'
-      using errcode = 'P0001';
-  end if;
 end;
 $revolut_manual_preflight$;
-
--- New Airwallex payments/retries are disabled at the database boundary.
--- Observation and settlement RPCs remain available for terminal historical
--- transfers that still need reconciliation evidence.
-revoke all on function
-  affiliate_private.partners_worker_airwallex_dispatch_lease(
-    text, text, integer, integer
-  )
-from public, anon, authenticated, service_role;
-revoke all on function
-  public.partners_worker_airwallex_dispatch_lease(
-    text, text, integer, integer
-  )
-from public, anon, authenticated, service_role;
-revoke all on function
-  affiliate_private.partners_worker_airwallex_dispatch_retry(
-    text, text, text, text
-  )
-from public, anon, authenticated, service_role;
-revoke all on function
-  public.partners_worker_airwallex_dispatch_retry(
-    text, text, text, text
-  )
-from public, anon, authenticated, service_role;
 
 alter table affiliate_private.affiliate_payout_provider_configs
   drop constraint affiliate_payout_provider_configs_pilot_adapter;
@@ -2598,7 +2546,6 @@ alter table affiliate_private.affiliate_payout_items
     or (
       payout_reference ~ '^NORVA-[A-F0-9]{12}$'
       and execution_adapter in (
-        'airwallex_api',
         'revolut_manual',
         'revolut_api'
       )
@@ -3074,9 +3021,8 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  -- Both adapter guards lock the shared payout item first. This makes a
-  -- concurrent legacy dispatch versus Revolut execution insert serializable
-  -- instead of relying on two independent existence checks.
+  -- Serialize execution creation on the shared payout item so competing
+  -- manual/API workers cannot claim the same transfer.
   perform 1
   from affiliate_private.affiliate_payout_items item
   where item.id = new.payout_item_id
@@ -3084,15 +3030,6 @@ begin
   if not found then
     raise exception 'payout item is unavailable'
       using errcode = '23503';
-  end if;
-  if exists (
-    select 1
-    from affiliate_private.affiliate_payout_dispatches dispatch
-    where dispatch.payout_item_id = new.payout_item_id
-  ) then
-    raise exception
-      'payout item already belongs to the legacy Airwallex adapter'
-      using errcode = '23505';
   end if;
   return new;
 end;
@@ -3102,41 +3039,6 @@ create trigger affiliate_revolut_execution_adapter_exclusive
 before insert on affiliate_private.affiliate_revolut_payout_executions
 for each row execute function
   affiliate_private.guard_revolut_execution_adapter_exclusive();
-
-create or replace function
-affiliate_private.guard_airwallex_dispatch_adapter_exclusive()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  perform 1
-  from affiliate_private.affiliate_payout_items item
-  where item.id = new.payout_item_id
-  for update;
-  if not found then
-    raise exception 'payout item is unavailable'
-      using errcode = '23503';
-  end if;
-  if exists (
-    select 1
-    from affiliate_private.affiliate_revolut_payout_executions execution
-    where execution.payout_item_id = new.payout_item_id
-  ) then
-    raise exception
-      'payout item already belongs to a Revolut execution adapter'
-      using errcode = '23505';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists affiliate_airwallex_dispatch_adapter_exclusive
-  on affiliate_private.affiliate_payout_dispatches;
-create trigger affiliate_airwallex_dispatch_adapter_exclusive
-before insert on affiliate_private.affiliate_payout_dispatches
-for each row execute function
-  affiliate_private.guard_airwallex_dispatch_adapter_exclusive();
 
 create table affiliate_private.affiliate_revolut_api_worker_lease (
   lease_name               text primary key,
@@ -6569,7 +6471,7 @@ begin
     );
   end if;
   if v_status <> 'disabled'
-    or v_provider not in ('airwallex', 'wise', 'stripe_connect')
+    or v_provider not in ('wise', 'stripe_connect')
     or v_country !~ '^[A-Z]{2}$'
     or v_currency !~ '^[A-Z]{3}$'
     or length(v_justification) not between 12 and 1000
@@ -6706,28 +6608,6 @@ begin
   if exists (
     select 1
     from affiliate_private.affiliate_payout_items item
-    join affiliate_private.affiliate_payout_dispatches dispatch
-      on dispatch.payout_item_id = item.id
-      and dispatch.provider = 'airwallex'
-    where item.account_id = v_account.id
-      and item.currency = v_currency
-      and (
-        dispatch.provider_state is null
-        or dispatch.provider_state not in (
-          'PAID',
-          'FAILED',
-          'CANCELLED',
-          'REVERSED'
-        )
-      )
-  ) then
-    raise exception
-      'drain the legacy Airwallex payout before changing beneficiary'
-      using errcode = 'P0003';
-  end if;
-  if exists (
-    select 1
-    from affiliate_private.affiliate_payout_items item
     join affiliate_private.affiliate_payout_cycles cycle
       on cycle.id = item.cycle_id
       and cycle.status in ('approved', 'submitted')
@@ -6749,7 +6629,6 @@ begin
     display_masked,
     currency,
     status,
-    transfer_method,
     revolut_binding_id,
     revolut_binding_version,
     updated_at
@@ -6764,7 +6643,6 @@ begin
     v_status,
     null,
     null,
-    null,
     now()
   )
   on conflict (account_id, currency) do update
@@ -6775,7 +6653,6 @@ begin
       excluded.beneficiary_payment_method_ref,
     display_masked = excluded.display_masked,
     status = excluded.status,
-    transfer_method = null,
     revolut_binding_id = excluded.revolut_binding_id,
     revolut_binding_version = excluded.revolut_binding_version,
     updated_at = now()
@@ -7480,7 +7357,6 @@ begin
     display_masked,
     currency,
     status,
-    transfer_method,
     revolut_binding_id,
     revolut_binding_version,
     updated_at
@@ -7493,7 +7369,6 @@ begin
     v_binding.destination_masked,
     v_binding.currency,
     'active',
-    null,
     v_binding.id,
     v_binding.binding_version,
     now()
@@ -7506,7 +7381,6 @@ begin
       excluded.beneficiary_payment_method_ref,
     display_masked = excluded.display_masked,
     status = 'active',
-    transfer_method = null,
     revolut_binding_id = excluded.revolut_binding_id,
     revolut_binding_version = excluded.revolut_binding_version,
     updated_at = now();
@@ -8112,11 +7986,6 @@ begin
         or item.allocation_entry_id is null
         or item.payout_reference is not null
         or item.execution_adapter is not null
-        or exists (
-          select 1
-          from affiliate_private.affiliate_payout_dispatches dispatch
-          where dispatch.payout_item_id = item.id
-        )
       )
   ) then
     raise exception 'payout cycle contains an unavailable item'
@@ -8204,11 +8073,6 @@ begin
   where item.cycle_id = v_cycle.id
     and item.status = 'pending'
     and item.allocation_entry_id is not null
-    and not exists (
-      select 1
-      from affiliate_private.affiliate_payout_dispatches dispatch
-      where dispatch.payout_item_id = item.id
-    )
   order by item.account_id, item.id;
   get diagnostics v_count = row_count;
   if v_count <> v_cycle.item_count then
@@ -10887,8 +10751,7 @@ before insert on affiliate_private.affiliate_revolut_manual_decisions
 for each row execute function
   affiliate_private.guard_revolut_manual_decision();
 
--- Provider-neutral settlement guards. Airwallex history remains valid while a
--- confirmed Revolut statement decision becomes an equally authoritative path.
+-- A payout item can settle only from confirmed Revolut evidence.
 create or replace function
 affiliate_private.partners_payout_item_has_confirmed_settlement(
   p_item_id uuid,
@@ -10900,32 +10763,6 @@ stable
 set search_path = ''
 as $$
   select exists (
-    select 1
-    from affiliate_private.affiliate_payout_dispatches dispatch
-    join affiliate_private.affiliate_airwallex_settlement_decisions decision
-      on decision.dispatch_id = dispatch.id
-      and decision.decision = 'confirmed'
-    join affiliate_private.affiliate_commission_entries settlement
-      on settlement.id = decision.settlement_entry_id
-    join affiliate_private.affiliate_payout_items item
-      on item.id = dispatch.payout_item_id
-    where dispatch.payout_item_id = p_item_id
-      and dispatch.provider = 'airwallex'
-      and dispatch.provider_state = 'PAID'
-      -- The immutable Finance decision and its settlement ledger entry are the
-      -- authoritative evidence for the item transition. The legacy Airwallex
-      -- decision RPC then projects the dispatch to confirmed in the same
-      -- transaction; requiring that projection here would create a circular
-      -- dependency with its dispatch guard, which first requires a settled
-      -- item.
-      and dispatch.provider_transfer_hash is not distinct from
-        p_provider_transfer_hash
-      and settlement.related_entry_id is not distinct from
-        item.allocation_entry_id
-      and settlement.account_id is not distinct from item.account_id
-      and settlement.amount_minor is not distinct from item.amount_minor
-      and settlement.currency is not distinct from item.currency
-  ) or exists (
     select 1
     from affiliate_private.affiliate_revolut_payout_executions execution
     join affiliate_private.affiliate_revolut_manual_decisions decision
@@ -11046,8 +10883,6 @@ begin
 end;
 $$;
 
-drop trigger if exists affiliate_airwallex_settled_payout_item_guard
-  on affiliate_private.affiliate_payout_items;
 drop trigger if exists affiliate_partners_settled_payout_item_guard
   on affiliate_private.affiliate_payout_items;
 create trigger affiliate_partners_settled_payout_item_guard
@@ -11114,8 +10949,6 @@ begin
 end;
 $$;
 
-drop trigger if exists affiliate_airwallex_settled_payout_cycle_guard
-  on affiliate_private.affiliate_payout_cycles;
 drop trigger if exists affiliate_partners_settled_payout_cycle_guard
   on affiliate_private.affiliate_payout_cycles;
 create trigger affiliate_partners_settled_payout_cycle_guard
@@ -11474,11 +11307,6 @@ begin
       and item.allocation_entry_id is not null
       and item.payout_reference is null
       and item.execution_adapter is null
-      and not exists (
-        select 1
-        from affiliate_private.affiliate_payout_dispatches dispatch
-        where dispatch.payout_item_id = item.id
-      )
       and (
         profile.beneficiary_token_ref is null
         or profile.beneficiary_token_ref !~
@@ -11538,11 +11366,6 @@ begin
     and item.allocation_entry_id is not null
     and item.payout_reference is null
     and item.execution_adapter is null
-    and not exists (
-      select 1
-      from affiliate_private.affiliate_payout_dispatches dispatch
-      where dispatch.payout_item_id = item.id
-    )
     and not exists (
       select 1
       from
@@ -11633,11 +11456,6 @@ begin
     and item.execution_adapter is null
     and not exists (
       select 1
-      from affiliate_private.affiliate_payout_dispatches dispatch
-      where dispatch.payout_item_id = item.id
-    )
-    and not exists (
-      select 1
       from
         affiliate_private.affiliate_revolut_late_completion_observations
           observation
@@ -11669,12 +11487,7 @@ begin
     and item.payout_reference is null
     and item.execution_adapter is null
     and item.amount_minor = execution.amount_minor
-    and item.currency = execution.currency
-    and not exists (
-      select 1
-      from affiliate_private.affiliate_payout_dispatches dispatch
-      where dispatch.payout_item_id = item.id
-    );
+    and item.currency = execution.currency;
   if exists (
     select 1
     from affiliate_private.affiliate_revolut_payout_executions execution
@@ -11685,11 +11498,6 @@ begin
       and (
         item.amount_minor is distinct from execution.amount_minor
         or item.currency is distinct from execution.currency
-        or exists (
-          select 1
-          from affiliate_private.affiliate_payout_dispatches dispatch
-          where dispatch.payout_item_id = item.id
-        )
       )
   ) then
     raise exception 'Revolut API payout claim snapshot changed'
@@ -13633,9 +13441,6 @@ revoke all on function
 from public, anon, authenticated, service_role;
 revoke all on function
   affiliate_private.guard_revolut_execution_adapter_exclusive()
-from public, anon, authenticated, service_role;
-revoke all on function
-  affiliate_private.guard_airwallex_dispatch_adapter_exclusive()
 from public, anon, authenticated, service_role;
 revoke all on function
   affiliate_private.reject_revolut_evidence_mutation()

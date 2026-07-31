@@ -192,7 +192,6 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   assert.match(section, /body:\s*JSON\.stringify\(\{\s*csv\s*\}\)/);
   assert.match(section, /\.csv,\.tsv,text\/csv,text\/tab-separated-values/);
   assert.doesNotMatch(section, /currencyExponents/);
-  assert.doesNotMatch(section, /airwallex/i);
   assert.doesNotMatch(section, /Provider \(wise, revolut ou stripe_connect\)/);
   assert.doesNotMatch(section, /catch\s*\([^)]*\)\s*\{[\s\S]{0,220}\.message/);
   assert.match(source, /\.partners-admin-toolbar input,[\s\S]{0,180}min-height:44px/);

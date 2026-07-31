@@ -89,13 +89,8 @@ PRIVATE_TABLES=(affiliate_accounts affiliate_events affiliate_attributions
                 affiliate_revolut_dispute_won_jobs
                 affiliate_revolut_dispute_won_conflicts
                 affiliate_commission_entries affiliate_payout_cycles
-                affiliate_payout_items affiliate_payout_dispatches
+                affiliate_payout_items
                 affiliate_worker_heartbeats
-                affiliate_airwallex_settlement_observations
-                affiliate_airwallex_settlement_reviews
-                affiliate_airwallex_settlement_decisions
-                affiliate_airwallex_report_contracts
-                affiliate_airwallex_report_runs
                 affiliate_revolut_manual_batches
                 affiliate_revolut_reference_allocations
                 affiliate_revolut_beneficiary_bindings
@@ -171,16 +166,13 @@ check "partners private tables"   "select count(*) from pg_class c join pg_names
 check "partners functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%partners%'"
 check "TRANSFER functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%revenuecat%transfer%'"
 check "DISPUTE_WON functions"     "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%revolut_dispute_won%'"
-check "Airwallex report functions" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%airwallex_report%'"
 check "Revolut incident functions" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%revolut_reconciliation_incident%'"
-check_zero "Airwallex direct observe grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname='partners_service_airwallex_settlement_observe' and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') or has_function_privilege('service_role',p.oid,'EXECUTE'))"
 check_zero "Revolut manual route violations" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and (provider<>'revolut' or execution_adapter<>'revolut_manual')"
 check_zero "Revolut API flag enabled" "select count(*) from public.admin_feature_flags where key='partners_revolut_api_enabled' and enabled"
 check_zero "Revolut API active routes" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and execution_adapter='revolut_api'"
 check_zero "Revolut API cron scheduled/active" "select count(*) from cron.job where active and jobname='norva-partners-revolut-api'"
 check_zero "Legacy payout cron active" "select count(*) from cron.job where active and jobname='norva-partners-payout'"
-check_zero "Airwallex report cron active" "select count(*) from cron.job where active and jobname='norva-partners-airwallex-reports'"
-check_zero "Inactive payout rails active" "select count(*) from cron.job where active and jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api')"
+check_zero "Inactive payout rails active" "select count(*) from cron.job where active and jobname in ('norva-partners-payout','norva-partners-revolut-api')"
 check_zero "Revolut payout reference violations" "select count(*) from affiliate_private.affiliate_revolut_payout_executions where payout_reference !~ '^NORVA-[A-F0-9]{12}$'"
 check_zero "Revolut payout reference duplicates" "select count(*) from (select payout_reference from affiliate_private.affiliate_revolut_payout_executions group by payout_reference having count(*)>1) duplicate"
 check_zero "Payout active route collisions" "select count(*) from (select 1 from affiliate_private.affiliate_payout_provider_configs where status='active' group by country_code,currency having count(*)>1) collision"

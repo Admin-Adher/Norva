@@ -13,10 +13,10 @@ nom, e-mail, UUID utilisateur, code public de parrainage, document KYC,
 identifiant de paiement, token ou payload fournisseur.
 
 Le format courant est `schema_version=5`. Les anciens journaux à preuves texte,
-au contrat Airwallex ou portant encore une preuve « sandbox » pour le rail
-manuel sont volontairement refusés : repartir du template v5 et rattacher les
-artefacts réels, sans convertir automatiquement des chaînes historiques non
-vérifiables.
+liés à un contrat provider obsolète ou portant encore une preuve « sandbox »
+pour le rail manuel sont volontairement refusés : repartir du template v5 et
+rattacher les artefacts réels, sans convertir automatiquement des chaînes
+historiques non vérifiables.
 Le schéma est fermé récursivement : toute clé inconnue est refusée, y compris
 dans un objet imbriqué. Le journal relie aussi la décision à
 `repository=Admin-Adher/Norva`, au `candidate_commit_sha` Git exact, à
@@ -161,11 +161,9 @@ surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
   après règlement ; son statut reste `not_verified` tant que ces cas ne sont
   pas tous résolus sans ajustement implicite de montant ou de devise. Le
   statut `legacy_provider_crons_status=inactive` doit en outre être lié à une
-  preuve montrant que les jobs `norva-partners-payout`,
-  `norva-partners-airwallex-reports` et `norva-partners-revolut-api` sont
-  absents ou inactifs. Le registre
-  bénéficiaire
-  porte en plus `revolut-beneficiary-binding-v1`, un statut
+  preuve montrant que les jobs `norva-partners-payout` et
+  `norva-partners-revolut-api` sont absents ou inactifs. Le registre
+  bénéficiaire porte en plus `revolut-beneficiary-binding-v1`, un statut
   `maker_checker_verified`, la version entière de la clé HMAC Edge et une
   preuve externe distincte démontrant proposition, contrôle par un second
   Finance et résolution sûre d'une révocation. Aucun secret, UUID bénéficiaire

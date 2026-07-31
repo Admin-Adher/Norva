@@ -40,12 +40,8 @@ on:
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
-      - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
-      - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
-      - 'ops/hetzner/scripts/disable-norva-partners-airwallex-crons.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
-      - 'scripts/verify-airwallex-report-contract.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -54,7 +50,6 @@ on:
       - 'supabase/functions/norva-partners/**'
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
-      - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-revolut-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
@@ -108,12 +103,8 @@ on:
       - 'ops/hetzner/scripts/05-verify-parity.sh'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
-      - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
-      - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
-      - 'ops/hetzner/scripts/disable-norva-partners-airwallex-crons.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
-      - 'scripts/verify-airwallex-report-contract.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -122,7 +113,6 @@ on:
       - 'supabase/functions/norva-partners/**'
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
-      - 'supabase/functions/norva-partners-payout/**'
       - 'supabase/functions/norva-partners-revolut-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
@@ -212,7 +202,6 @@ jobs:
           supabase/functions/norva-partners/index.ts
           supabase/functions/norva-partners-device/index.ts
           supabase/functions/norva-partners-kyc-webhook/index.ts
-          supabase/functions/norva-partners-payout/index.ts
           supabase/functions/norva-partners-revolut-payout/index.ts
           supabase/functions/norva-partners-referral/index.ts
           supabase/functions/norva-partners-worker/index.ts
@@ -223,13 +212,12 @@ jobs:
           supabase/functions/norva-revolut-webhook/index.ts
           supabase/functions/norva-revolut-billing/index.ts
 
-      - name: Test the disabled legacy Airwallex boundary
+      - name: Test the Didit Partners boundary
         run: >-
           deno test
           --config supabase/functions/deno.partners.json
           --frozen
           supabase/functions/_shared/didit-partners.test.ts
-          supabase/functions/norva-partners-payout/partners-airwallex.test.ts
 
   android-contracts:
     name: Android ${{ matrix.label }} compile and tests
@@ -352,7 +340,6 @@ jobs:
         run: >-
           supabase test db
           supabase/tests/affiliate_p0.sql
-          supabase/tests/affiliate_airwallex_reports.sql
           supabase/tests/affiliate_dispute_won.sql
           supabase/tests/affiliate_revolut_manual_hybrid.sql
           supabase/tests/revenuecat_transfer.sql

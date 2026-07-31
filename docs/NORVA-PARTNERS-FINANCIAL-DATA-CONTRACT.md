@@ -210,9 +210,10 @@ settlement.
 
 Le cron du worker financier Norva n'est pas seedé par migration. L'URL de
 production et son secret n'étant pas des constantes de schéma, l'opérateur
-l'enregistre seulement après déploiement et smoke test. Les anciens crons
-Airwallex et le futur cron Revolut API doivent au contraire être absents ou
-inactifs sous Basic ; leur absence est l'état attendu, pas `not_configured`.
+l'enregistre seulement après déploiement et smoke test. L'ancien cron de
+versement générique et le futur cron Revolut API doivent au contraire être
+absents ou inactifs sous Basic ; leur absence est l'état attendu, pas
+`not_configured`.
 
 ## Activation et enrichissement
 
@@ -220,8 +221,8 @@ L'ordre de déploiement est : migration DB, tests jetables/Advisors, fonctions
 productrices, workers, puis enregistrement manuel des crons. Les devises restent
 désactivées tant que Finance n'a pas configuré explicitement code ISO et
 exposant. Seuls les corridors `revolut_manual` peuvent être actifs au pilote.
-L'adaptateur Airwallex reste historique et désactivé ; `revolut_api` reste
-inerte tant que sa gate, son flag DB et son kill switch Edge sont faux.
+`revolut_api` reste inerte tant que sa gate, son flag DB et son kill switch
+Edge sont faux.
 
 Pour rendre un événement commissionnable, la source doit fournir de façon
 autoritative et cohérente :
@@ -275,8 +276,7 @@ indépendantes du simple déploiement du code.
   devise correspondent exactement. Une référence inconnue, un montant/devise
   différent, un doublon ou un paiement tardif crée un incident append-only et
   ne déplace aucune somme sans résolution maker-checker.
-- Les jobs `norva-partners-payout`,
-  `norva-partners-airwallex-reports` et `norva-partners-revolut-api` doivent
+- Les jobs `norva-partners-payout` et `norva-partners-revolut-api` doivent
   être absents ou inactifs sous Basic. Leur désactivation fait partie de la
   preuve de release.
 - Un settlement exige une revue Finance puis une décision d'un second acteur

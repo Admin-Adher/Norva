@@ -258,9 +258,6 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   );
   assert.match(parity, /affiliate_revolut_dispute_won_jobs/);
   assert.match(parity, /affiliate_revolut_dispute_won_conflicts/);
-  assert.match(parity, /affiliate_airwallex_settlement_observations/);
-  assert.match(parity, /affiliate_airwallex_report_runs/);
-  assert.match(parity, /Airwallex direct observe grants/);
   assert.match(parity, /affiliate_revolut_manual_batches/);
   assert.match(parity, /affiliate_revolut_statement_imports/);
   assert.match(parity, /Revolut manual route violations/);
@@ -293,14 +290,6 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(
     verifier,
     /partners_worker_revolut_dispute_won_enqueue\(text,text,text,text,uuid,text,bigint,timestamp with time zone\)/,
-  );
-  assert.match(
-    verifier,
-    /partners_worker_airwallex_report_apply\(text,text,text,text,integer,integer,integer,jsonb\)/,
-  );
-  assert.match(
-    verifier,
-    /admin_partners_airwallex_report_contract_set\(text,boolean,text,text,text\)/,
   );
   assert.match(verifier, /affiliate_revolut_manual_batches/);
   assert.match(verifier, /affiliate_revolut_payout_executions/);
@@ -342,15 +331,7 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     verifier,
     /partners_worker_revolut_payout_lease\(text,text,bigint,integer,integer\)/,
   );
-  assert.doesNotMatch(
-    verifier,
-    /config\.status = 'active'\s+and config\.provider <> 'airwallex'/,
-  );
   assert.match(verifier, /unexpected private Partners EXECUTE privilege/);
-  assert.match(
-    verifier,
-    /standalone Airwallex settlement observation remains callable/,
-  );
   assert.match(
     verifier,
     /restore omitted or left unvalidated DISPUTE_WON constraints/,
@@ -456,7 +437,6 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
     runbook,
     /REVOLUT_BUSINESS_CLIENT_ID[\s\S]*REVOLUT_BUSINESS_PRIVATE_KEY_PEM[\s\S]*REVOLUT_BUSINESS_REFRESH_TOKEN[\s\S]*restent absents en[\s\S]*`revolut_manual`/,
   );
-  assert.match(runbook, /Airwallex historique désactivé/);
   assert.match(runbook, /affiliate_private/);
   assert.match(runbook, /deux premiers cycles/i);
   assert.match(runbook, /aucune fonction privée exécutable par `anon`/i);
@@ -482,7 +462,8 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
   assert.match(observability, /400\/500/);
   assert.match(observability, /500\/500/);
   assert.match(observability, /financial_transfer_quarantined_recent/);
-  assert.match(observability, /revenuecat_transfer[\s\S]*payout_report/);
+  assert.match(observability, /revenuecat_transfer/);
+  assert.match(observability, /heartbeat provider `payout`/);
   assert.match(observability, /not_configured/);
 });
 
@@ -652,10 +633,6 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
   assert.match(
     workflow,
     /deno check[\s\S]*?--config supabase\/functions\/deno\.partners\.json[\s\S]*?--frozen/,
-  );
-  assert.match(
-    workflow,
-    /supabase\/functions\/norva-partners-payout\/index\.ts/,
   );
   assert.match(
     workflow,

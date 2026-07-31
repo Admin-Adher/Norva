@@ -425,14 +425,14 @@ test('Partners payout profile stays tokenized, masked and fail-closed', async ()
       account: { id: `prt_${'a'.repeat(24)}`, status: 'active' },
       fiscal: { status: 'verified', country_code: 'FR' },
       profile: {
-        provider: 'wise',
-        display_masked: 'Wise ·•• 8421',
+        provider: 'revolut',
+        display_masked: 'Revolut ·•• 8421',
         currency: 'EUR',
         status: 'active',
       },
       profiles: [{
-        provider: 'wise',
-        display_masked: 'Wise ·•• 8421',
+        provider: 'revolut',
+        display_masked: 'Revolut ·•• 8421',
         currency: 'EUR',
         status: 'active',
       }],
@@ -446,7 +446,7 @@ test('Partners payout profile stays tokenized, masked and fail-closed', async ()
     'https://api.norva.tv/functions/v1/norva-partners/payout-profile',
   );
   assert.equal(get.requests[0].options.method, 'GET');
-  assert.equal(profile.data.profile.display_masked, 'Wise ·•• 8421');
+  assert.equal(profile.data.profile.display_masked, 'Revolut ·•• 8421');
   assert.equal(JSON.stringify(profile).includes('beneficiaryTokenRef'), false);
 
   const savedPayload = {
@@ -490,25 +490,6 @@ test('Partners payout profile stays tokenized, masked and fail-closed', async ()
     (error) => error?.code === 'partners_payout_profile_invalid',
   );
 
-  const airwallexPayload = structuredClone(getPayload);
-  airwallexPayload.data.profile.provider = 'airwallex';
-  airwallexPayload.data.profile.display_masked = 'Airwallex ·•• 8421';
-  airwallexPayload.data.profiles[0].provider = 'airwallex';
-  airwallexPayload.data.profiles[0].display_masked = 'Airwallex ·•• 8421';
-  const airwallex = loadCloudApi(airwallexPayload);
-  const airwallexProfile = await airwallex.cloud.partners.payoutProfile();
-  assert.equal(airwallexProfile.data.profile.provider, 'airwallex');
-
-  assert.throws(
-    () => saved.cloud.partners.saveTokenizedPayoutProfile({
-      provider: 'airwallex',
-      beneficiaryTokenRef: 'ben_tok_opaque_0123456789',
-      displayMasked: 'Airwallex ·•• 8421',
-      currency: 'EUR',
-      idempotencyKey: 'payout:airwallex0123456789',
-    }),
-    (error) => error?.code === 'partners_payout_profile_invalid',
-  );
 });
 
 test('Partners user actions reject local business flows, weak idempotency and dashboard drift', async () => {

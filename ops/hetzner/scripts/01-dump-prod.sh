@@ -91,7 +91,7 @@ psql "$MANAGED_DB_URL" -At \
         union all
         select
           9223372036854775807::bigint,
-          'update cron.job set active=false where jobname in (''norva-partners-payout'',''norva-partners-airwallex-reports'',''norva-partners-revolut-api'');'
+          'update cron.job set active=false where jobname=''norva-partners-revolut-api'';'
       )
       select statement from replay order by jobid" \
   > "$OUT/ref-cron-jobs.sql" || echo "   (warn: could not read cron.job — export manually)"

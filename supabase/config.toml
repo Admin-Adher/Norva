@@ -146,14 +146,6 @@ verify_jwt = false
 [functions.norva-partners-worker]
 verify_jwt = false
 
-# Airwallex payout boundary. /beneficiaries verifies a current user JWT and
-# exact CORS allowlist, /cron/run verifies NORVA_CRON_SHARED_SECRET in
-# PostgreSQL, and /webhooks/airwallex verifies x-timestamp+x-signature before
-# an authenticated provider re-fetch. Missing provider secrets keep all three
-# routes fail-closed; no feature flag is enabled by this configuration.
-[functions.norva-partners-payout]
-verify_jwt = false
-
 # Revolut Business Partners payout boundary. The Basic/manual statement route
 # authenticates Finance users in-function. The future API cron verifies the
 # shared cron secret and additionally requires BOTH the managed DB flag and

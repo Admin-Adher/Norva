@@ -52,14 +52,6 @@ begin
     'affiliate_commission_postings',
     'affiliate_payout_cycles',
     'affiliate_payout_items',
-    'affiliate_airwallex_beneficiary_reservations',
-    'affiliate_payout_dispatches',
-    'affiliate_payout_provider_events',
-    'affiliate_airwallex_settlement_observations',
-    'affiliate_airwallex_settlement_reviews',
-    'affiliate_airwallex_settlement_decisions',
-    'affiliate_airwallex_report_contracts',
-    'affiliate_airwallex_report_runs',
     'affiliate_revolut_reference_allocations',
     'affiliate_revolut_beneficiary_bindings',
     'affiliate_revolut_beneficiary_binding_tickets',
@@ -203,10 +195,6 @@ begin
     'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'public.partners_service_kyc_binding_recover(integer)',
     'public.partners_worker_shadow_reconcile(text,timestamp with time zone,timestamp with time zone,boolean)',
-    'public.partners_service_airwallex_settlement_observe(text,text,text,text,bigint,text,date,timestamp with time zone,text)',
-    'public.admin_partners_airwallex_settlements(integer)',
-    'public.admin_partners_airwallex_settlement_review(text,text,text)',
-    'public.admin_partners_airwallex_settlement_decide(text,text,text,text)',
     'public.admin_partners_payout_route_set(text,text,text,text,text,text)',
     'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
     'public.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
@@ -260,14 +248,7 @@ begin
     'public.revenuecat_transfer_partner_job_complete(text,text,text,text,text)',
     'public.partners_worker_revolut_dispute_won_enqueue(text,text,text,text,uuid,text,bigint,timestamp with time zone)',
     'public.partners_worker_revolut_dispute_won_jobs_lease(text,text,integer,integer)',
-    'public.partners_worker_revolut_dispute_won_job_complete(text,text,text,text,text)',
-    'public.admin_partners_airwallex_report_contract_set(text,boolean,text,text,text)',
-    'public.partners_worker_airwallex_report_lease(text,text,text,integer,integer)',
-    'public.partners_worker_airwallex_report_provider_record(text,text,text,text,text,integer)',
-    'public.partners_worker_airwallex_report_candidates(text,text,text)',
-    'public.partners_worker_airwallex_report_apply(text,text,text,text,integer,integer,integer,jsonb)',
-    'public.partners_worker_airwallex_report_retry(text,text,text,text,integer,boolean)',
-    'public.admin_partners_airwallex_report_status()'
+    'public.partners_worker_revolut_dispute_won_job_complete(text,text,text,text,text)'
   ]
   loop
     if to_regprocedure(v_signature) is null then
@@ -283,9 +264,7 @@ begin
        or v_signature like
          'public.partners_worker_revolut_global_%'
        or v_signature like
-         'public.partners_worker_revolut_payout_%'
-       or v_signature like
-         'public.partners_worker_airwallex_report_%' then
+         'public.partners_worker_revolut_payout_%' then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
          or has_function_privilege('authenticated', v_signature, 'EXECUTE')
          or not has_function_privilege('service_role', v_signature, 'EXECUTE')
@@ -313,9 +292,7 @@ begin
           'retired split/manual Revolut routine remains callable: %',
           v_signature;
       end if;
-    elsif v_signature like
-      'public.admin_partners_airwallex_report_%'
-      or v_signature like 'public.admin_partners_revolut_%'
+    elsif v_signature like 'public.admin_partners_revolut_%'
       or v_signature like 'public.admin_partners_payout_route_%'
     then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
@@ -329,20 +306,6 @@ begin
         raise exception
           'invalid Partners Finance admin privileges for %',
           v_signature;
-      end if;
-    elsif v_signature =
-      'public.partners_service_airwallex_settlement_observe(text,text,text,text,bigint,text,date,timestamp with time zone,text)'
-    then
-      if has_function_privilege('anon', v_signature, 'EXECUTE')
-         or has_function_privilege(
-           'authenticated',
-           v_signature,
-           'EXECUTE'
-         )
-         or has_function_privilege('service_role', v_signature, 'EXECUTE')
-      then
-        raise exception
-          'standalone Airwallex settlement observation remains callable';
       end if;
     end if;
   end loop;
@@ -360,40 +323,6 @@ begin
   then
     raise exception
       'restored pre-binding Didit service overload remains callable';
-  end if;
-
-  if has_function_privilege(
-    'service_role',
-    'affiliate_private.partners_service_airwallex_settlement_observe(text,text,text,text,bigint,text,date,timestamp with time zone,text)',
-    'EXECUTE'
-  ) then
-    raise exception
-      'private standalone Airwallex settlement observation remains callable';
-  end if;
-
-  if position(
-      'auth.jwt()' in lower(pg_get_functiondef(
-        'affiliate_private.admin_partners_airwallex_settlement_review(text,text,text)'::regprocedure
-      ))
-    ) = 0
-    or position(
-      '''aal2''' in lower(pg_get_functiondef(
-        'affiliate_private.admin_partners_airwallex_settlement_review(text,text,text)'::regprocedure
-      ))
-    ) = 0
-    or position(
-      'auth.jwt()' in lower(pg_get_functiondef(
-        'affiliate_private.admin_partners_airwallex_settlement_decide(text,text,text,text)'::regprocedure
-      ))
-    ) = 0
-    or position(
-      '''aal2''' in lower(pg_get_functiondef(
-        'affiliate_private.admin_partners_airwallex_settlement_decide(text,text,text,text)'::regprocedure
-      ))
-    ) = 0
-  then
-    raise exception
-      'restored Airwallex Finance mutations lost the AAL2 step-up';
   end if;
 
   foreach v_signature in array array[
@@ -464,51 +393,14 @@ begin
   end loop;
 
   v_definition := pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_worker_airwallex_report_apply(text,text,text,text,integer,integer,integer,jsonb)'::regprocedure
-  );
-  if position(
-      'for update of run' in lower(v_definition)
-    ) = 0
-    or position(
-      'for update of dispatch' in lower(v_definition)
-    ) = 0
-    or position(
-      'partners_service_airwallex_settlement_observe' in
-        lower(v_definition)
-    ) = 0
-    or position(
-      'v_input_keys is distinct from v_candidate_keys' in
-        lower(v_definition)
-    ) = 0
-    or position(
-      'matched_count = p_candidate_count' in lower(v_definition)
-    ) = 0
-    or position(
-      'unmatched_count = 0' in lower(v_definition)
-    ) = 0
-  then
-    raise exception
-      'restored Airwallex report apply lost atomic exact-set semantics';
-  end if;
-
-  v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_ops_alert_snapshot_pre_revolut_basic()'::regprocedure
   );
-  if position('payout_report' in lower(v_definition)) = 0
+  if position('revenuecat_transfer' in lower(v_definition)) = 0
     or position(
       'chargeback_reversal_dead_letter' in lower(v_definition)
     ) = 0
     or position(
       'revenuecat_transfer_dead_letter' in lower(v_definition)
-    ) = 0
-    or position(
-      'airwallex_report_exception' in lower(v_definition)
-    ) = 0
-    or position(
-      'airwallex_report_stale' in lower(v_definition)
-    ) = 0
-    or position(
-      'airwallex_report_candidates_unmatched' in lower(v_definition)
     ) = 0
     or position(
       'kyc_provider_binding_quarantined_recent' in lower(v_definition)
@@ -532,10 +424,9 @@ begin
     ) = 0
     or position('revolut_manual_action_required' in lower(v_definition)) = 0
     or position(
-      'worker_item ->> ''worker'' not in (''payout'', ''payout_report'')'
+      'worker_item ->> ''worker'' <> ''payout'''
       in lower(v_definition)
     ) = 0
-    or position('airwallex_report_stale' in lower(v_definition)) = 0
   then
     raise exception
       'restored Basic/manual alert snapshot lost its inactive-rail filter';
@@ -667,11 +558,6 @@ begin
             'affiliate_private.admin_partners_commission_reverse(text,text,text)',
             'affiliate_private.admin_partners_payout_cycle_create(date,date,text,boolean,text,text)',
             'affiliate_private.admin_partners_payout_cycle_approve(text,text,text)',
-            'affiliate_private.admin_partners_airwallex_settlements(integer)',
-            'affiliate_private.admin_partners_airwallex_settlement_review(text,text,text)',
-            'affiliate_private.admin_partners_airwallex_settlement_decide(text,text,text,text)',
-            'affiliate_private.admin_partners_airwallex_report_contract_set(text,boolean,text,text,text)',
-            'affiliate_private.admin_partners_airwallex_report_status()',
             'affiliate_private.admin_partners_risk_queue(integer,integer,text)',
             'affiliate_private.admin_partners_finance_overview()',
             'affiliate_private.admin_partners_payout_cycles(integer,integer,text)',
@@ -787,40 +673,10 @@ begin
           false
         ),
         (
-          'affiliate_airwallex_settlement_observations_append_only',
-          'affiliate_airwallex_settlement_observations',
-          'reject_partners_finance_mutation',
-          false
-        ),
-        (
-          'affiliate_airwallex_settlement_reviews_append_only',
-          'affiliate_airwallex_settlement_reviews',
-          'reject_partners_finance_mutation',
-          false
-        ),
-        (
-          'affiliate_airwallex_settlement_decisions_append_only',
-          'affiliate_airwallex_settlement_decisions',
-          'reject_partners_finance_mutation',
-          false
-        ),
-        (
-          'affiliate_airwallex_settlement_decision_guard',
-          'affiliate_airwallex_settlement_decisions',
-          'guard_airwallex_settlement_decision',
-          false
-        ),
-        (
           'affiliate_payout_settlement_semantics',
           'affiliate_commission_entries',
           'assert_payout_settlement_semantics',
           true
-        ),
-        (
-          'affiliate_airwallex_post_settlement_dispatch_guard',
-          'affiliate_payout_dispatches',
-          'guard_airwallex_post_settlement_dispatch',
-          false
         ),
         (
           'affiliate_payout_provider_revolut_route_guard',
@@ -1109,7 +965,6 @@ begin
     where active
       and jobname in (
         'norva-partners-payout',
-        'norva-partners-airwallex-reports',
         'norva-partners-revolut-api'
       )
   ) then
@@ -1513,70 +1368,6 @@ begin
 
   select count(*)
   into v_bad_entries
-  from affiliate_private.affiliate_airwallex_settlement_decisions decision
-  join affiliate_private.affiliate_airwallex_settlement_observations observation
-    on observation.id = decision.observation_id
-    and observation.dispatch_id = decision.dispatch_id
-  left join affiliate_private.affiliate_airwallex_settlement_reviews review
-    on review.id = decision.review_id
-    and review.observation_id = decision.observation_id
-    and review.dispatch_id = decision.dispatch_id
-  join affiliate_private.affiliate_payout_dispatches dispatch
-    on dispatch.id = decision.dispatch_id
-  join affiliate_private.affiliate_payout_items item
-    on item.id = dispatch.payout_item_id
-  join affiliate_private.affiliate_payout_cycles cycle
-    on cycle.id = item.cycle_id
-  left join affiliate_private.affiliate_commission_entries settlement
-    on settlement.id = decision.settlement_entry_id
-  where review.id is null
-    or decision.decision_actor_pseudonym =
-      review.review_actor_pseudonym
-    or (
-      decision.decision = 'confirmed'
-      and (
-        observation.observation_kind <> 'settlement_evidence'
-        or observation.provider_state <> 'PAID'
-        or settlement.id is null
-        or settlement.entry_kind <> 'payout_settlement'
-        or settlement.related_entry_id is distinct from
-          item.allocation_entry_id
-        or settlement.account_id <> item.account_id
-        or settlement.amount_minor <> observation.amount_minor
-        or settlement.currency <> observation.currency
-        or settlement.currency_exponent <> cycle.currency_exponent
-        or (
-          select count(*)
-          from affiliate_private.affiliate_commission_postings posting
-          where posting.entry_id = settlement.id
-            and (
-              (
-                posting.ledger_account = 'partner_payout_clearing'
-                and posting.direction = 'debit'
-              )
-              or (
-                posting.ledger_account = 'partner_cash_settled'
-                and posting.direction = 'credit'
-              )
-            )
-            and posting.amount_minor = observation.amount_minor
-            and posting.currency = observation.currency
-        ) <> 2
-      )
-    )
-    or (
-      decision.decision = 'quarantined'
-      and decision.settlement_entry_id is not null
-    );
-
-  if v_bad_entries > 0 then
-    raise exception
-      'restored Airwallex reconciliation contains % invalid decisions',
-      v_bad_entries;
-  end if;
-
-  select count(*)
-  into v_bad_entries
   from affiliate_private.affiliate_revolut_manual_decisions decision
   join affiliate_private.affiliate_revolut_statement_rows statement_row
     on statement_row.id = decision.statement_row_id
@@ -1703,111 +1494,6 @@ begin
 
   select count(*)
   into v_bad_entries
-  from affiliate_private.affiliate_payout_dispatches dispatch
-  join affiliate_private.affiliate_payout_items item
-    on item.id = dispatch.payout_item_id
-  where dispatch.provider = 'airwallex'
-    and (
-      (
-        dispatch.reconciliation_status = 'confirmed'
-        and (
-          dispatch.provider_state <> 'PAID'
-          or dispatch.job_status <> 'settled'
-          or dispatch.provider_transfer_id is null
-          or dispatch.provider_transfer_hash is null
-          or item.status <> 'settled'
-          or not exists (
-            select 1
-            from affiliate_private.affiliate_airwallex_settlement_decisions
-              decision
-            where decision.dispatch_id = dispatch.id
-              and decision.decision = 'confirmed'
-          )
-        )
-      )
-      or (
-        item.status = 'settled'
-        and (
-          dispatch.reconciliation_status not in ('confirmed', 'exception')
-          or not exists (
-            select 1
-            from affiliate_private.affiliate_airwallex_settlement_decisions
-              settled_decision
-            where settled_decision.dispatch_id = dispatch.id
-              and settled_decision.decision = 'confirmed'
-          )
-        )
-      )
-      or (
-        dispatch.reconciliation_status = 'exception'
-        and dispatch.job_status is distinct from 'exception'
-      )
-      or (
-        exists (
-          select 1
-          from affiliate_private.affiliate_airwallex_settlement_decisions
-            quarantined
-          where quarantined.dispatch_id = dispatch.id
-            and quarantined.decision = 'quarantined'
-        )
-        and (
-          dispatch.reconciliation_status is distinct from 'exception'
-          or dispatch.job_status is distinct from 'exception'
-          or dispatch.last_error_code is distinct from
-            'settlement_quarantined'
-          or item.status = 'settled'
-        )
-      )
-      or (
-        (
-          select count(*)
-          from
-            affiliate_private.affiliate_airwallex_settlement_observations
-              conflicting_evidence
-          where conflicting_evidence.dispatch_id = dispatch.id
-            and conflicting_evidence.observation_kind =
-              'settlement_evidence'
-        ) > 1
-        and (
-          dispatch.reconciliation_status is distinct from 'exception'
-          or dispatch.job_status is distinct from 'exception'
-          or dispatch.last_error_code is distinct from
-            'settlement_evidence_conflict'
-        )
-      )
-      or (
-        dispatch.reconciliation_status = 'exception'
-        and exists (
-          select 1
-          from affiliate_private.affiliate_airwallex_settlement_decisions
-            confirmed
-          where confirmed.dispatch_id = dispatch.id
-            and confirmed.decision = 'confirmed'
-        )
-        and (
-          item.status <> 'settled'
-          or dispatch.job_status <> 'exception'
-          or not exists (
-            select 1
-            from
-              affiliate_private.affiliate_airwallex_settlement_observations
-                exception_observation
-            where exception_observation.dispatch_id = dispatch.id
-              and exception_observation.observation_kind =
-                'post_settlement_exception'
-          )
-        )
-      )
-    );
-
-  if v_bad_entries > 0 then
-    raise exception
-      'restored Airwallex reconciliation contains % invalid projections',
-      v_bad_entries;
-  end if;
-
-  select count(*)
-  into v_bad_entries
   from affiliate_private.affiliate_payout_cycles cycle
   where cycle.status = 'settled'
     and (
@@ -1847,67 +1533,6 @@ begin
       v_bad_entries;
   end if;
 
-  select count(*)
-  into v_bad_entries
-  from affiliate_private.affiliate_airwallex_report_contracts contract
-  where contract.contract_version <>
-      'transaction_recon_csv_1_1_0_preamble_v1'
-    or contract.api_version <> '2024-04-30'
-    or contract.report_version <> '1.1.0'
-    or (
-      contract.status = 'approved'
-      and (
-        contract.approved_evidence_hash !~ '^[0-9a-f]{64}$'
-        or contract.approved_by_pseudonym !~ '^[0-9a-f]{64}$'
-        or contract.approved_at is null
-      )
-    );
-  if v_bad_entries > 0
-    or (
-      select count(*)
-      from affiliate_private.affiliate_airwallex_report_contracts
-    ) <> 2
-  then
-    raise exception
-      'restored Airwallex Financial Reports contracts are invalid';
-  end if;
-
-  select count(*)
-  into v_bad_entries
-  from affiliate_private.affiliate_airwallex_report_runs run
-  where (
-      run.provider_report_id is not null
-      and run.provider_report_hash is distinct from encode(
-        extensions.digest(run.provider_report_id, 'sha256'),
-        'hex'
-      )
-    )
-    or (
-      run.status = 'completed'
-      and (
-        run.provider_status <> 'COMPLETED'
-        or run.content_sha256 !~ '^[0-9a-f]{64}$'
-        or run.content_bytes is null
-        or run.row_count is null
-        or run.candidate_count is null
-        or run.matched_count is null
-        or run.matched_count is distinct from run.candidate_count
-        or run.unmatched_count is distinct from 0
-        or run.completed_at is null
-      )
-    )
-    or (
-      run.status <> 'completed'
-      and (
-        run.content_sha256 is not null
-        or run.completed_at is not null
-      )
-    );
-  if v_bad_entries > 0 then
-    raise exception
-      'restored Airwallex Financial Reports contain % invalid runs',
-      v_bad_entries;
-  end if;
 end;
 $partners_restore_invariants$;
 
@@ -1939,29 +1564,6 @@ select jsonb_build_object(
   ),
   'payout_cycles', (
     select count(*) from affiliate_private.affiliate_payout_cycles
-  ),
-  'airwallex_dispatches', (
-    select count(*) from affiliate_private.affiliate_payout_dispatches
-  ),
-  'airwallex_settlement_observations', (
-    select count(*)
-    from affiliate_private.affiliate_airwallex_settlement_observations
-  ),
-  'airwallex_settlement_reviews', (
-    select count(*)
-    from affiliate_private.affiliate_airwallex_settlement_reviews
-  ),
-  'airwallex_settlement_decisions', (
-    select count(*)
-    from affiliate_private.affiliate_airwallex_settlement_decisions
-  ),
-  'airwallex_report_contracts', (
-    select count(*)
-    from affiliate_private.affiliate_airwallex_report_contracts
-  ),
-  'airwallex_report_runs', (
-    select count(*)
-    from affiliate_private.affiliate_airwallex_report_runs
   ),
   'revolut_manual_batches', (
     select count(*)
