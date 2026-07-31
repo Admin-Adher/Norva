@@ -261,6 +261,8 @@ begin
          'public.partners_worker_revolut_dispute_won_%'
        or v_signature like
          'public.partners_service_revolut_statement_%'
+       or v_signature =
+         'public.partners_service_revolut_beneficiary_binding_propose(text,text,text)'
        or v_signature like
          'public.partners_worker_revolut_global_%'
        or v_signature like
@@ -331,7 +333,6 @@ begin
     'affiliate_private.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
     'affiliate_private.admin_partners_revolut_profile_status(uuid)',
     'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize(uuid,text,text,text,text,integer,text,text)',
-    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
     'affiliate_private.admin_partners_revolut_beneficiary_binding_verify(text,text,text)',
     'affiliate_private.admin_partners_revolut_beneficiary_binding_reject(text,text,text)',
     'affiliate_private.admin_partners_revolut_beneficiary_binding_revoke(text,text,text)',
@@ -339,7 +340,6 @@ begin
     'affiliate_private.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
     'affiliate_private.admin_partners_revolut_manual_batch_export(text,text,text)',
     'affiliate_private.admin_partners_revolut_manual_batch_mark_submitted(text,jsonb,text,text)',
-    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
     'affiliate_private.admin_partners_revolut_statement_authorize()',
     'affiliate_private.admin_partners_revolut_statement_context()',
     'affiliate_private.admin_partners_revolut_reconciliation_review(text,text,text)',
@@ -373,6 +373,7 @@ begin
   end loop;
 
   foreach v_signature in array array[
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
     'affiliate_private.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
     'affiliate_private.partners_worker_revolut_global_lease_acquire(text,text,integer)',
     'affiliate_private.partners_worker_revolut_global_lease_renew(text,text,bigint,integer)',
@@ -391,6 +392,46 @@ begin
         v_signature;
     end if;
   end loop;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)'::regprocedure
+  );
+  if position('ticket_token_hash' in lower(v_definition)) = 0
+    or position('authorization_ticket_id' in lower(v_definition)) = 0
+    or position('mapping_attestation_hmac' in lower(v_definition)) = 0
+    or position('consumed_at' in lower(v_definition)) = 0
+    or position('expires_at' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored beneficiary proposal lost its AAL2-minted one-use ticket boundary';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)'::regprocedure
+  );
+  if position(
+      'direct statement ingestion is disabled' in lower(v_definition)
+    ) = 0
+    or position('0a000' in lower(v_definition)) = 0
+    or has_function_privilege(
+      'anon',
+      'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'authenticated',
+      'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'service_role',
+      'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+      'EXECUTE'
+    )
+  then
+    raise exception
+      'restored direct statement ingestion is not fully retired';
+  end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_ops_alert_snapshot_pre_revolut_basic()'::regprocedure

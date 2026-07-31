@@ -240,6 +240,96 @@ select extensions.ok(
   'late settlement has review, decision and queue RPCs'
 );
 select extensions.ok(
+  lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_profile_status(uuid)'::regprocedure
+  )) like '%auth.jwt()%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_profile_status(uuid)'::regprocedure
+  )) like '%''aal2''%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_profile_status(uuid)'::regprocedure
+  )) like '%payout profile status requires aal2%',
+  'the beneficiary and payout profile read model requires explicit Finance AAL2'
+);
+select extensions.ok(
+  lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)'::regprocedure
+  )) like '%auth.jwt()%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)'::regprocedure
+  )) like '%''aal2''%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)'::regprocedure
+  )) like '%revolut return queue requires aal2%',
+  'the returned-payment evidence queue requires explicit Finance AAL2'
+);
+select extensions.ok(
+  has_function_privilege(
+    'service_role',
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
+    'EXECUTE'
+  )
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)'::regprocedure
+  )) like '%ticket_token_hash%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)'::regprocedure
+  )) like '%mapping_attestation_hmac%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)'::regprocedure
+  )) like '%authorization_ticket_id%',
+  'the service proposal consumes the AAL2-minted one-use ticket without exposing it to clients'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+    'EXECUTE'
+  )
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)'::regprocedure
+  )) like '%direct statement ingestion is disabled%',
+  'the retired direct statement parser stays unreachable'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'affiliate_private.capture_revolut_reconciliation_incident()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.capture_revolut_reconciliation_incident()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'affiliate_private.guard_commission_entry_open_account()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.guard_commission_entry_open_account()',
+    'EXECUTE'
+  ),
+  'private trigger routines have no client execution path'
+);
+select extensions.ok(
   has_function_privilege(
     'service_role',
     'public.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
