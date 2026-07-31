@@ -95,7 +95,10 @@ test('generic feature flag CRUD cannot mutate or delete managed flags', () => {
     'create or replace function affiliate_private.guard_managed_partners_flags()',
     'drop trigger if exists affiliate_events_append_only',
   );
-  assert.match(guard, /current_user is distinct from v_table_owner/);
+  assert.match(
+    guard,
+    /pg_has_role\(current_user, v_table_owner, 'MEMBER'\)/,
+  );
   assert.match(guard, /current_setting\('norva\.partners_control', true\)/);
   assert.match(
     migration,

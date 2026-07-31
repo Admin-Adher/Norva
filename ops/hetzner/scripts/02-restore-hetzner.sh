@@ -34,12 +34,14 @@ done
 
 echo ">> 0) Ensure required extensions exist (idempotent)"
 psql "${PSQL_TARGET[@]}" -v ON_ERROR_STOP=1 <<'SQL'
+create schema if not exists extensions;
+revoke create on schema extensions from public;
 create extension if not exists "uuid-ossp";
 create extension if not exists pgcrypto;
-create extension if not exists pg_trgm;
-create extension if not exists unaccent;
-create extension if not exists http;
-create extension if not exists pgstattuple;
+create extension if not exists pg_trgm with schema extensions;
+create extension if not exists unaccent with schema extensions;
+create extension if not exists http with schema extensions;
+create extension if not exists pgstattuple with schema extensions;
 create extension if not exists pg_stat_statements;
 create extension if not exists pg_net;
 create extension if not exists pg_cron;

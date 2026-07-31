@@ -1489,7 +1489,11 @@ begin
   where n.nspname = 'public'
     and c.relname = 'admin_feature_flags';
 
-  if current_user is distinct from v_table_owner
+  -- A trusted migration role may be a member of the restored table owner
+  -- rather than the literal owner (self-hosted dumps preserve ownership).
+  -- Membership grants SET ROLE already, so accepting it here adds no
+  -- capability while keeping managed writes behind the explicit GUC.
+  if not pg_has_role(current_user, v_table_owner, 'MEMBER')
     or current_setting('norva.partners_control', true)
       is distinct from 'admin_partners_control'
   then

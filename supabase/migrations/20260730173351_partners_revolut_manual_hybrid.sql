@@ -70,37 +70,90 @@ as $$
   );
 $$;
 
+-- A self-hosted schema restore preserves public.admin_feature_flags ownership
+-- as postgres while migrations run as supabase_admin. That role is a trusted
+-- member of postgres and can already SET ROLE; accept equivalent membership
+-- without weakening the explicit managed-control GUC required by the trigger.
+create or replace function affiliate_private.guard_managed_partners_flags()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_managed boolean := case
+    when tg_op = 'INSERT'
+      then affiliate_private.is_managed_partners_flag(new.key)
+    when tg_op = 'DELETE'
+      then affiliate_private.is_managed_partners_flag(old.key)
+    else
+      affiliate_private.is_managed_partners_flag(old.key)
+      or affiliate_private.is_managed_partners_flag(new.key)
+  end;
+  v_table_owner text;
+begin
+  if not v_managed then
+    if tg_op = 'DELETE' then
+      return old;
+    end if;
+    return new;
+  end if;
+
+  select pg_get_userbyid(c.relowner)
+  into v_table_owner
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relname = 'admin_feature_flags';
+
+  if not pg_has_role(current_user, v_table_owner, 'MEMBER')
+    or current_setting('norva.partners_control', true)
+      is distinct from 'admin_partners_control'
+  then
+    raise exception 'managed Partners flags require admin_partners_control'
+      using errcode = '42501';
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
 -- The managed-flag trigger from the foundation migration intentionally blocks
--- direct writes. Migrations run as the table owner, but must still opt in to
--- the same narrow control context used by admin_partners_control().
-select set_config(
-  'norva.partners_control',
-  'admin_partners_control',
-  true
-);
+-- direct writes. Keep the transaction-local control context and the protected
+-- write in one statement: psql autocommit would otherwise end the transaction
+-- immediately after a standalone set_config(..., true).
+do $managed_flag$
+begin
+  perform set_config(
+    'norva.partners_control',
+    'admin_partners_control',
+    true
+  );
 
-insert into public.admin_feature_flags (
-  key,
-  enabled,
-  description,
-  updated_at,
-  updated_by
-)
-values (
-  'partners_revolut_api_enabled',
-  false,
-  'Allows the dormant Revolut Business API payout worker after its dedicated release gate is verified.',
-  now(),
-  'migration'
-)
-on conflict (key) do update
-set
-  enabled = false,
-  description = excluded.description,
-  updated_at = now(),
-  updated_by = 'migration';
-
-select set_config('norva.partners_control', '', true);
+  insert into public.admin_feature_flags (
+    key,
+    enabled,
+    description,
+    updated_at,
+    updated_by
+  )
+  values (
+    'partners_revolut_api_enabled',
+    false,
+    'Allows the dormant Revolut Business API payout worker after its dedicated release gate is verified.',
+    now(),
+    'migration'
+  )
+  on conflict (key) do update
+  set
+    enabled = false,
+    description = excluded.description,
+    updated_at = now(),
+    updated_by = 'migration';
+end;
+$managed_flag$;
 
 -- Extend the existing granular Admin control map so the new gates and flag are
 -- configurable without weakening any previous Support/Risk/Finance boundary.

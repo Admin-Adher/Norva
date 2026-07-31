@@ -17,6 +17,12 @@ const migration = fs.readFileSync(
 test('security hardening relocates extensions and preserves explicit lookup', () => {
   assert.match(migration, /alter extension pg_trgm set schema extensions/);
   assert.match(migration, /alter extension unaccent set schema extensions/);
+  assert.match(migration, /alter extension pgstattuple set schema extensions/);
+  assert.match(migration, /drop extension http restrict/);
+  assert.match(
+    migration,
+    /create extension http with schema extensions version %L/,
+  );
   assert.match(
     migration,
     /replace\([\s\S]*'public\.unaccent'[\s\S]*'extensions\.unaccent'/,
@@ -24,6 +30,21 @@ test('security hardening relocates extensions and preserves explicit lookup', ()
   assert.match(
     migration,
     /alter function public\.search_media_items\([\s\S]*set search_path = pg_catalog, public, extensions/,
+  );
+});
+
+test('self-host-only advisor drift is hardened without breaking blank replay', () => {
+  assert.match(
+    migration,
+    /to_regprocedure\('public\._norva_probe\(text,jsonb\)'\)/,
+  );
+  assert.match(
+    migration,
+    /historical _norva_probe definition drifted[\s\S]*drop function public\._norva_probe\(text, jsonb\)/,
+  );
+  assert.match(
+    migration,
+    /alter view public\.admin_provider_overview[\s\S]*security_invoker = true/,
   );
 });
 
@@ -58,4 +79,3 @@ test('every advisor-reported function receives one fixed search path', () => {
   }
   assert.doesNotMatch(migration, /set search_path\s*=\s*public\s*;/);
 });
-
