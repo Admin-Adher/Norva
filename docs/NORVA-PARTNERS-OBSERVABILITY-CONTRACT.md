@@ -58,10 +58,12 @@ donc pas rendus visibles à Support par défaut.
 - `DISPUTE_WON` : la correction `chargeback_reversal` et son
   `reinstatement` sont comptées séparément. Le net soustrait reversals et
   corrections manuelles, puis ajoute les reinstatements exacts.
-- settlement Airwallex : `PAID` reste une observation `pending`. Seule une
-  preuve de rapport normalisée, revue par un acteur Finance puis confirmée par
-  un second acteur distinct, rend l'item `settled`. Les décisions quarantinées
-  et exceptions post-settlement restent terminales et visibles.
+- settlement Revolut Basic : la confirmation de saisie par référence ne
+  constitue pas un règlement. Seule une ligne `COMPLETED` du relevé officiel,
+  rattachée par référence Norva, montant et devise exacts, puis revue et
+  confirmée par deux acteurs Finance distincts, rend l'item `settled`. Une
+  quarantaine reste révisable ; une résolution financière est terminale et
+  idempotente.
 
 ## Alertes stables
 
@@ -72,8 +74,9 @@ donc pas rendus visibles à Support par défaut.
 - conflit de fait financier : critique dès la première ligne ;
 - dernier rapprochement shadow en écart : critique ;
 - heartbeat commission/correction/maturation/reconciliation/
-  revenuecat_transfer/payout/payout_report attendu mais absent ou âgé de plus
-  de 15 minutes : critique ;
+  revenuecat_transfer attendu mais absent ou âgé de plus de 15 minutes :
+  critique. Les anciens heartbeats provider `payout` et `payout_report` ne sont
+  jamais attendus sous Revolut Basic ;
 - quota Didit sur 30 jours : warning à 400/500, critique à 500/500, toujours
   informatif et non bloquant ;
 - nouveau fait `TRANSFER` quarantiné créé dans les dernières 24 heures :
@@ -82,17 +85,26 @@ donc pas rendus visibles à Support par défaut.
   critique dès la première ligne ;
 - événement TRANSFER `partial` vieillissant ou quarantaine ancienne : warning
   avec compte et âge bornés, sans identifiant ;
-- evidence Airwallex en conflit/quarantaine, décision en attente ou exception
-  post-settlement : warning ou critique selon l'état, sans référence provider.
-- Financial Reports Airwallex : `airwallex_report_exception` est critique ;
-  `airwallex_report_stale` et `airwallex_report_candidates_unmatched` sont des
-  warnings distincts. L'absence totale du cron reste détectable par le
-  heartbeat `payout_report`, même sans run créé.
+- incident Revolut manuel ouvert, quarantiné ou revu sans décision : warning ;
+  montant/devise incorrects, référence inconnue, doublon `COMPLETED`, paiement
+  tardif, retour ou contrôle de lot en attente : critique selon la nature et
+  l'âge, sans identifiant bancaire brut ;
+- tout job `norva-partners-payout`,
+  `norva-partners-airwallex-reports` ou `norva-partners-revolut-api` actif sous
+  Basic : critique de configuration. L'absence de ces crons est l'état sain
+  attendu, pas un heartbeat manquant.
 
 La fenêtre de 24 heures évite une alerte éternelle sur un stock append-only.
 Le stock total reste visible dans analytics pour le suivi Risk/Finance. Un
 heartbeat ne devient attendu qu'après déploiement/activation du worker
 correspondant ; l'absence de configuration est `not_configured`, pas `healthy`.
+
+La file Admin d'incidents expose séparément `total` pour le filtre courant et
+`action_required` pour tout le stock ouvert/quarantiné. Elle est paginée avec
+`limit`/`offset`, triée par statut, priorité puis ancienneté, et chaque ligne
+porte `priority` et `observed_at` afin de calculer l'âge sans le confondre avec
+le volume. Une RPC indisponible ou une enveloppe invalide s'affiche
+`unavailable` ; elle ne devient jamais `0 incident`.
 
 ## Preuves runtime
 
@@ -107,9 +119,13 @@ Avant le pilote, conserver dans le journal de release :
    source expirée, nouvel achat préservé, égalité partielle et dead-letter ;
 7. `DISPUTE_LOST → maturation/release → DISPUTE_WON`, avec restauration exacte,
    replay et ordre inversé ;
-8. un Airwallex `PAID` encore pending, une double validation distincte, une
-   quarantaine monotone et un échec tardif post-settlement ;
-9. une réconciliation shadow propre.
+8. une saisie Revolut confirmée sans identifiant bancaire client, puis son
+   rattachement autoritaire par relevé et sa double validation ;
+9. chaque incident manuel : référence inconnue remappée exactement,
+   montant/devise incorrects libérés seulement après retour, quarantaine
+   réouverte, doublon ou paiement tardif produisant hold et récupération ;
+10. les trois crons provider/API absents ou inactifs sous Basic ;
+11. une réconciliation shadow propre.
 
 Les événements UX facultatifs côté client ne sont pas une source financière et
 ne sont pas déclarés actifs tant que leur instrumentation consentie et leur

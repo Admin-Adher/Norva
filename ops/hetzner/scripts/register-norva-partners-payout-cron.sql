@@ -1,5 +1,5 @@
 -- =============================================================================
--- Register the Norva Partners Airwallex dispatch/reconciliation worker.
+-- Register the legacy Norva Partners Airwallex dispatch/reconciliation worker.
 --
 -- DO NOT run this file merely because the code was deployed. Run manually as
 -- the cron owner only after:
@@ -13,6 +13,10 @@
 --
 -- Registration is deliberately operational, not a migration. This file
 -- activates no provider route and no feature flag.
+--
+-- Revolut Basic cutover note: the current Norva schema permits only Revolut
+-- routes in production. This script therefore fails closed unless a future
+-- migration deliberately restores an active Airwallex API route.
 -- =============================================================================
 
 \set ON_ERROR_STOP on
@@ -34,6 +38,16 @@ begin
     where flag.key = 'partners_payouts_live'
   ) then
     raise exception 'partners_payouts_live flag is not installed';
+  end if;
+  if not exists (
+    select 1
+    from affiliate_private.affiliate_payout_provider_configs config
+    where config.provider = 'airwallex'
+      and config.execution_adapter = 'airwallex_api'
+      and config.status = 'active'
+  ) then
+    raise exception
+      'no active Airwallex API payout route; legacy cron remains disabled';
   end if;
 end
 $preflight$;

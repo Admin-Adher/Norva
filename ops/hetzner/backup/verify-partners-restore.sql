@@ -60,6 +60,32 @@ begin
     'affiliate_airwallex_settlement_decisions',
     'affiliate_airwallex_report_contracts',
     'affiliate_airwallex_report_runs',
+    'affiliate_revolut_reference_allocations',
+    'affiliate_revolut_beneficiary_bindings',
+    'affiliate_revolut_beneficiary_binding_tickets',
+    'affiliate_revolut_beneficiary_revocations',
+    'affiliate_revolut_manual_batches',
+    'affiliate_revolut_payout_executions',
+    'affiliate_revolut_api_worker_lease',
+    'affiliate_revolut_payout_events',
+    'affiliate_revolut_statement_tickets',
+    'affiliate_revolut_statement_imports',
+    'affiliate_revolut_statement_rows',
+    'affiliate_revolut_manual_reviews',
+    'affiliate_revolut_manual_decisions',
+    'affiliate_revolut_manual_cancellations',
+    'affiliate_revolut_manual_unmapped_requests',
+    'affiliate_revolut_manual_unmapped_releases',
+    'affiliate_revolut_return_observations',
+    'affiliate_revolut_return_reviews',
+    'affiliate_revolut_return_decisions',
+    'affiliate_revolut_late_completion_observations',
+    'affiliate_revolut_late_completion_reviews',
+    'affiliate_revolut_late_completion_decisions',
+    'affiliate_revolut_reconciliation_incidents',
+    'affiliate_revolut_reconciliation_incident_reviews',
+    'affiliate_revolut_transaction_aliases',
+    'affiliate_revolut_reconciliation_incident_decisions',
     'affiliate_worker_heartbeats'
   ]
   loop
@@ -181,6 +207,48 @@ begin
     'public.admin_partners_airwallex_settlements(integer)',
     'public.admin_partners_airwallex_settlement_review(text,text,text)',
     'public.admin_partners_airwallex_settlement_decide(text,text,text,text)',
+    'public.admin_partners_payout_route_set(text,text,text,text,text,text)',
+    'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
+    'public.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
+    'public.admin_partners_revolut_profile_status(uuid)',
+    'public.admin_partners_revolut_beneficiary_binding_authorize(uuid,text,text,text,text,integer,text,text)',
+    'public.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
+    'public.admin_partners_revolut_beneficiary_binding_verify(text,text,text)',
+    'public.admin_partners_revolut_beneficiary_binding_reject(text,text,text)',
+    'public.admin_partners_revolut_beneficiary_binding_revoke(text,text,text)',
+    'public.admin_partners_revolut_manual_batch_prepare(text,text,text)',
+    'public.admin_partners_revolut_manual_batch_payload(text)',
+    'public.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
+    'public.admin_partners_revolut_manual_batch_export(text,text,text)',
+    'public.admin_partners_revolut_manual_batch_mark_submitted(text,jsonb,text,text)',
+    'public.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+    'public.admin_partners_revolut_statement_authorize()',
+    'public.admin_partners_revolut_statement_context()',
+    'public.admin_partners_revolut_reconciliation_review(text,text,text)',
+    'public.admin_partners_revolut_reconciliation_decide(text,text,text,text)',
+    'public.admin_partners_revolut_payout_status()',
+    'public.admin_partners_revolut_manual_batches(integer,integer,text)',
+    'public.admin_partners_revolut_reconciliation_queue(integer,integer,text)',
+    'public.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
+    'public.admin_partners_revolut_manual_control_reject(text,text,text)',
+    'public.admin_partners_revolut_manual_controls_queue(integer,integer,text)',
+    'public.admin_partners_revolut_manual_batch_cancel(text,text,text,timestamp with time zone,text,text)',
+    'public.admin_partners_revolut_manual_batch_release_unmapped(text,jsonb,text,timestamp with time zone,text,text)',
+    'public.admin_partners_revolut_reconciliation_incident_review(text,text,text,text,timestamp with time zone,text,text)',
+    'public.admin_partners_revolut_reconciliation_incident_decide(text,text,text,timestamp with time zone,text,text)',
+    'public.admin_partners_revolut_reconciliation_incidents(integer,integer,text)',
+    'public.admin_partners_revolut_return_review(text,text,text,text)',
+    'public.admin_partners_revolut_return_decide(text,text,text,text)',
+    'public.admin_partners_revolut_return_queue(integer,integer,text)',
+    'public.admin_partners_revolut_late_completion_review(text,text,text,text)',
+    'public.admin_partners_revolut_late_completion_decide(text,text,text,text)',
+    'public.admin_partners_revolut_late_completion_queue(integer,integer,text)',
+    'public.partners_worker_revolut_global_lease_acquire(text,text,integer)',
+    'public.partners_worker_revolut_global_lease_renew(text,text,bigint,integer)',
+    'public.partners_worker_revolut_global_lease_release(text,text,bigint)',
+    'public.partners_worker_revolut_payout_lease(text,text,bigint,integer,integer)',
+    'public.partners_worker_revolut_payout_retry(text,text,text,bigint,text,boolean)',
+    'public.partners_worker_revolut_payout_observe(text,text,text,text,timestamp with time zone,text,text,bigint)',
     'public.admin_partners_analytics(integer)',
     'public.admin_partners_monitoring()',
     'public.record_revenuecat_entitlement_transfer(text,timestamp with time zone,text,text,uuid,uuid[],integer,integer,text,text,boolean,boolean)',
@@ -211,6 +279,12 @@ begin
        or v_signature like
          'public.partners_worker_revolut_dispute_won_%'
        or v_signature like
+         'public.partners_service_revolut_statement_%'
+       or v_signature like
+         'public.partners_worker_revolut_global_%'
+       or v_signature like
+         'public.partners_worker_revolut_payout_%'
+       or v_signature like
          'public.partners_worker_airwallex_report_%' then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
          or has_function_privilege('authenticated', v_signature, 'EXECUTE')
@@ -220,8 +294,30 @@ begin
           'invalid service-only Partners routine privileges for %',
           v_signature;
       end if;
+    elsif v_signature = any (array[
+      'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
+      'public.admin_partners_revolut_manual_batch_payload(text)',
+      'public.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
+      'public.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)'
+    ]::text[])
+    then
+      if has_function_privilege('anon', v_signature, 'EXECUTE')
+         or has_function_privilege(
+           'authenticated',
+           v_signature,
+           'EXECUTE'
+         )
+         or has_function_privilege('service_role', v_signature, 'EXECUTE')
+      then
+        raise exception
+          'retired split/manual Revolut routine remains callable: %',
+          v_signature;
+      end if;
     elsif v_signature like
-      'public.admin_partners_airwallex_report_%' then
+      'public.admin_partners_airwallex_report_%'
+      or v_signature like 'public.admin_partners_revolut_%'
+      or v_signature like 'public.admin_partners_payout_route_%'
+    then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
          or not has_function_privilege(
            'authenticated',
@@ -231,7 +327,7 @@ begin
          or has_function_privilege('service_role', v_signature, 'EXECUTE')
       then
         raise exception
-          'invalid Airwallex Financial Reports admin privileges for %',
+          'invalid Partners Finance admin privileges for %',
           v_signature;
       end if;
     elsif v_signature =
@@ -300,6 +396,73 @@ begin
       'restored Airwallex Finance mutations lost the AAL2 step-up';
   end if;
 
+  foreach v_signature in array array[
+    'affiliate_private.admin_partners_payout_route_set(text,text,text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_profile_status(uuid)',
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize(uuid,text,text,text,text,integer,text,text)',
+    'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_verify(text,text,text)',
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_reject(text,text,text)',
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_revoke(text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_export(text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_mark_submitted(text,jsonb,text,text)',
+    'affiliate_private.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)',
+    'affiliate_private.admin_partners_revolut_statement_authorize()',
+    'affiliate_private.admin_partners_revolut_statement_context()',
+    'affiliate_private.admin_partners_revolut_reconciliation_review(text,text,text)',
+    'affiliate_private.admin_partners_revolut_reconciliation_decide(text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_control_reject(text,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_controls_queue(integer,integer,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_cancel(text,text,text,timestamp with time zone,text,text)',
+    'affiliate_private.admin_partners_revolut_manual_batch_release_unmapped(text,jsonb,text,timestamp with time zone,text,text)',
+    'affiliate_private.admin_partners_revolut_reconciliation_incident_review(text,text,text,text,timestamp with time zone,text,text)',
+    'affiliate_private.admin_partners_revolut_reconciliation_incident_decide(text,text,text,timestamp with time zone,text,text)',
+    'affiliate_private.admin_partners_revolut_reconciliation_incidents(integer,integer,text)',
+    'affiliate_private.admin_partners_revolut_return_review(text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_return_decide(text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)',
+    'affiliate_private.admin_partners_revolut_late_completion_review(text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_late_completion_decide(text,text,text,text)',
+    'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)'
+  ]
+  loop
+    if position(
+        'auth.jwt()' in lower(pg_get_functiondef(v_signature::regprocedure))
+      ) = 0
+      or position(
+        '''aal2''' in lower(pg_get_functiondef(v_signature::regprocedure))
+      ) = 0
+    then
+      raise exception
+        'restored Revolut manual Finance mutation lost AAL2: %',
+        v_signature;
+    end if;
+  end loop;
+
+  foreach v_signature in array array[
+    'affiliate_private.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
+    'affiliate_private.partners_worker_revolut_global_lease_acquire(text,text,integer)',
+    'affiliate_private.partners_worker_revolut_global_lease_renew(text,text,bigint,integer)',
+    'affiliate_private.partners_worker_revolut_global_lease_release(text,text,bigint)',
+    'affiliate_private.partners_worker_revolut_payout_lease(text,text,bigint,integer,integer)',
+    'affiliate_private.partners_worker_revolut_payout_retry(text,text,text,bigint,text,boolean)',
+    'affiliate_private.partners_worker_revolut_payout_observe(text,text,text,text,timestamp with time zone,text,text,bigint)'
+  ]
+  loop
+    if has_function_privilege('anon', v_signature, 'EXECUTE')
+      or has_function_privilege('authenticated', v_signature, 'EXECUTE')
+      or not has_function_privilege('service_role', v_signature, 'EXECUTE')
+    then
+      raise exception
+        'invalid private Revolut service routine privileges for %',
+        v_signature;
+    end if;
+  end loop;
+
   v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_worker_airwallex_report_apply(text,text,text,text,integer,integer,integer,jsonb)'::regprocedure
   );
@@ -329,7 +492,7 @@ begin
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
+    'affiliate_private.partners_ops_alert_snapshot_pre_revolut_basic()'::regprocedure
   );
   if position('payout_report' in lower(v_definition)) = 0
     or position(
@@ -360,6 +523,40 @@ begin
   then
     raise exception
       'restored cumulative Partners Ops snapshot is incomplete';
+  end if;
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_ops_alert_snapshot()'::regprocedure
+  );
+  if position(
+      'partners_ops_alert_snapshot_pre_revolut_basic' in lower(v_definition)
+    ) = 0
+    or position('revolut_manual_action_required' in lower(v_definition)) = 0
+    or position(
+      'worker_item ->> ''worker'' not in (''payout'', ''payout_report'')'
+      in lower(v_definition)
+    ) = 0
+    or position('airwallex_report_stale' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Basic/manual alert snapshot lost its inactive-rail filter';
+  end if;
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_revolut_payout_status()'::regprocedure
+  );
+  if position('api_adapter_verified' in lower(v_definition)) = 0
+    or position('manual_statement_pending' in lower(v_definition)) = 0
+    or position(
+      'statement_matched_review_pending' in lower(v_definition)
+    ) = 0
+    or position(
+      'review.target_execution_id = execution.id' in lower(v_definition)
+    ) = 0
+    or position(
+      'decision.action <> ''quarantine''' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Revolut payout status conflates API readiness or manual incidents';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
@@ -433,6 +630,36 @@ begin
             'affiliate_private.admin_partners_country_mapping_set(text,text,text,text)',
             'affiliate_private.admin_partners_currency_set(text,integer,text,text)',
             'affiliate_private.admin_partners_payout_provider_set(text,text,text,text,text)',
+            'affiliate_private.admin_partners_payout_route_set(text,text,text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_profile_status(uuid)',
+            'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize(uuid,text,text,text,text,integer,text,text)',
+            'affiliate_private.admin_partners_revolut_beneficiary_binding_verify(text,text,text)',
+            'affiliate_private.admin_partners_revolut_beneficiary_binding_reject(text,text,text)',
+            'affiliate_private.admin_partners_revolut_beneficiary_binding_revoke(text,text,text)',
+            'affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)',
+            'affiliate_private.admin_partners_revolut_manual_batch_export(text,text,text)',
+            'affiliate_private.admin_partners_revolut_manual_batch_mark_submitted(text,jsonb,text,text)',
+            'affiliate_private.admin_partners_revolut_statement_authorize()',
+            'affiliate_private.admin_partners_revolut_statement_context()',
+            'affiliate_private.admin_partners_revolut_reconciliation_review(text,text,text)',
+            'affiliate_private.admin_partners_revolut_reconciliation_decide(text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_payout_status()',
+            'affiliate_private.admin_partners_revolut_manual_batches(integer,integer,text)',
+            'affiliate_private.admin_partners_revolut_reconciliation_queue(integer,integer,text)',
+            'affiliate_private.admin_partners_revolut_manual_control_reject(text,text,text)',
+            'affiliate_private.admin_partners_revolut_manual_controls_queue(integer,integer,text)',
+            'affiliate_private.admin_partners_revolut_manual_batch_cancel(text,text,text,timestamp with time zone,text,text)',
+            'affiliate_private.admin_partners_revolut_manual_batch_release_unmapped(text,jsonb,text,timestamp with time zone,text,text)',
+            'affiliate_private.admin_partners_revolut_reconciliation_incident_review(text,text,text,text,timestamp with time zone,text,text)',
+            'affiliate_private.admin_partners_revolut_reconciliation_incident_decide(text,text,text,timestamp with time zone,text,text)',
+            'affiliate_private.admin_partners_revolut_reconciliation_incidents(integer,integer,text)',
+            'affiliate_private.admin_partners_revolut_return_review(text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_return_decide(text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)',
+            'affiliate_private.admin_partners_revolut_late_completion_review(text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_late_completion_decide(text,text,text,text)',
+            'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)',
             'affiliate_private.admin_partners_country_policy_set_available(text,text,text,boolean,text,text)',
             'affiliate_private.admin_partners_fiscal_review(uuid,text,text,text,text,text,text)',
             'affiliate_private.admin_partners_account_action(text,text,text,text)',
@@ -596,15 +823,153 @@ begin
           false
         ),
         (
-          'affiliate_airwallex_settled_payout_item_guard',
-          'affiliate_payout_items',
-          'guard_airwallex_settled_payout_item',
+          'affiliate_payout_provider_revolut_route_guard',
+          'affiliate_payout_provider_configs',
+          'guard_revolut_payout_route',
           false
         ),
         (
-          'affiliate_airwallex_settled_payout_cycle_guard',
+          'affiliate_payout_items_execution_snapshot_guard',
+          'affiliate_payout_items',
+          'guard_payout_item_execution_snapshot',
+          false
+        ),
+        (
+          'affiliate_revolut_payout_events_append_only',
+          'affiliate_revolut_payout_events',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_statement_rows_append_only',
+          'affiliate_revolut_statement_rows',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_manual_reviews_append_only',
+          'affiliate_revolut_manual_reviews',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_manual_decisions_append_only',
+          'affiliate_revolut_manual_decisions',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_statement_import_transition_guard',
+          'affiliate_revolut_statement_imports',
+          'guard_revolut_statement_import_transition',
+          false
+        ),
+        (
+          'affiliate_revolut_statement_import_delete_guard',
+          'affiliate_revolut_statement_imports',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_manual_batch_transition_guard',
+          'affiliate_revolut_manual_batches',
+          'guard_revolut_manual_batch_transition',
+          false
+        ),
+        (
+          'affiliate_revolut_manual_decision_guard',
+          'affiliate_revolut_manual_decisions',
+          'guard_revolut_manual_decision',
+          false
+        ),
+        (
+          'affiliate_partners_settled_payout_item_guard',
+          'affiliate_payout_items',
+          'guard_partners_settled_payout_item',
+          false
+        ),
+        (
+          'affiliate_partners_settled_payout_cycle_guard',
           'affiliate_payout_cycles',
-          'guard_airwallex_settled_payout_cycle',
+          'guard_partners_settled_payout_cycle',
+          false
+        ),
+        (
+          'affiliate_commission_entries_open_account_guard',
+          'affiliate_commission_entries',
+          'guard_commission_entry_open_account',
+          false
+        ),
+        (
+          'affiliate_payout_profiles_binding_and_hold_guard',
+          'affiliate_payout_profiles',
+          'guard_payout_profile_binding_and_hold',
+          false
+        ),
+        (
+          'affiliate_revolut_statement_row_incident_capture',
+          'affiliate_revolut_statement_rows',
+          'capture_revolut_reconciliation_incident',
+          false
+        ),
+        (
+          'affiliate_revolut_reconciliation_incidents_append_only',
+          'affiliate_revolut_reconciliation_incidents',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_reconciliation_incident_reviews_append_only',
+          'affiliate_revolut_reconciliation_incident_reviews',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_transaction_aliases_append_only',
+          'affiliate_revolut_transaction_aliases',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_reconciliation_decisions_append_only',
+          'affiliate_revolut_reconciliation_incident_decisions',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_return_observations_append_only',
+          'affiliate_revolut_return_observations',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_return_reviews_append_only',
+          'affiliate_revolut_return_reviews',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_return_decisions_append_only',
+          'affiliate_revolut_return_decisions',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_late_completion_observations_append_only',
+          'affiliate_revolut_late_completion_observations',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_late_completion_reviews_append_only',
+          'affiliate_revolut_late_completion_reviews',
+          'reject_revolut_evidence_mutation',
+          false
+        ),
+        (
+          'affiliate_revolut_late_completion_decisions_append_only',
+          'affiliate_revolut_late_completion_decisions',
+          'reject_revolut_evidence_mutation',
           false
         )
     ) expected(
@@ -658,7 +1023,21 @@ begin
       and constraint_info.contype = 'c'
       and constraint_info.convalidated
       and pg_catalog.pg_get_constraintdef(constraint_info.oid)
-        like '%status <> ''active''%provider = ''airwallex''%'
+        like
+          '%status <> ''active''%provider = ''revolut''%'
+          || 'execution_adapter%revolut_manual%revolut_api%'
+  )
+    or not exists (
+      select 1
+      from pg_catalog.pg_constraint constraint_info
+      where constraint_info.conrelid =
+          'affiliate_private.affiliate_payout_provider_configs'::regclass
+        and constraint_info.conname =
+          'affiliate_payout_provider_configs_execution_adapter'
+        and constraint_info.contype = 'c'
+        and constraint_info.convalidated
+        and pg_catalog.pg_get_constraintdef(constraint_info.oid)
+          like '%provider = ''revolut''%revolut_manual%revolut_api%'
   )
     or not exists (
       select 1
@@ -677,14 +1056,17 @@ begin
     )
   then
     raise exception
-      'restore omitted the payout pilot provider or route lock';
+      'restore omitted the Revolut payout provider, adapter or route lock';
   end if;
 
   if exists (
     select 1
     from affiliate_private.affiliate_payout_provider_configs config
     where config.status = 'active'
-      and config.provider <> 'airwallex'
+      and (
+        config.provider <> 'revolut'
+        or config.execution_adapter <> 'revolut_manual'
+      )
   )
     or exists (
       select 1
@@ -695,7 +1077,125 @@ begin
     )
   then
     raise exception
-      'restored payout provider configurations violate the pilot lock';
+      'restored payout provider configurations violate Revolut Basic/manual';
+  end if;
+
+  if not exists (
+    select 1
+    from public.admin_feature_flags flag
+    where flag.key = 'partners_revolut_api_enabled'
+      and not flag.enabled
+  )
+    or exists (
+      select 1
+      from affiliate_private.affiliate_revolut_api_worker_lease lease
+      where lease.worker_id is not null
+        or lease.lease_token_hash is not null
+        or lease.leased_until is not null
+    )
+    or exists (
+      select 1
+      from affiliate_private.affiliate_revolut_payout_executions execution
+      where execution.adapter = 'revolut_api'
+        and execution.job_status = 'leased'
+    )
+  then
+    raise exception
+      'restored Revolut API rail is not fail-closed';
+  end if;
+  if exists (
+    select 1
+    from cron.job
+    where active
+      and jobname in (
+        'norva-partners-payout',
+        'norva-partners-airwallex-reports',
+        'norva-partners-revolut-api'
+      )
+  ) then
+    raise exception
+      'restored Basic/manual payout mode still has an automated payout cron';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_info
+    join pg_catalog.pg_proc routine
+      on routine.oid = trigger_info.tgfoid
+    join pg_catalog.pg_namespace routine_namespace
+      on routine_namespace.oid = routine.pronamespace
+    where trigger_info.tgrelid = 'public.admin_feature_flags'::regclass
+      and trigger_info.tgname = 'admin_feature_flags_revolut_api_guard'
+      and not trigger_info.tgisinternal
+      and trigger_info.tgenabled <> 'D'
+      and routine_namespace.nspname = 'affiliate_private'
+      and routine.proname = 'guard_revolut_api_feature_flag'
+  ) then
+    raise exception
+      'restore omitted the Revolut API feature-flag guard';
+  end if;
+
+  if (
+    select count(*)
+    from pg_catalog.pg_constraint constraint_info
+    where constraint_info.connamespace =
+        'affiliate_private'::regnamespace
+      and constraint_info.convalidated
+      and constraint_info.conname in (
+        'affiliate_payout_items_execution_snapshot',
+        'affiliate_revolut_payout_executions_adapter',
+        'affiliate_revolut_payout_executions_reference',
+        'affiliate_revolut_payout_executions_money',
+        'affiliate_revolut_statement_rows_reference',
+        'affiliate_revolut_statement_rows_money',
+        'affiliate_revolut_manual_decisions_value'
+      )
+  ) <> 7
+    or not exists (
+      select 1
+      from pg_catalog.pg_index index_info
+      where index_info.indexrelid = to_regclass(
+          'affiliate_private.affiliate_payout_items_reference_idx'
+        )
+        and index_info.indisunique
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_index index_info
+      join pg_catalog.pg_class indexed_table
+        on indexed_table.oid = index_info.indrelid
+      join pg_catalog.pg_namespace indexed_namespace
+        on indexed_namespace.oid = indexed_table.relnamespace
+      where indexed_namespace.nspname = 'affiliate_private'
+        and indexed_table.relname = 'affiliate_revolut_payout_executions'
+        and index_info.indisunique
+        and pg_catalog.pg_get_indexdef(index_info.indexrelid)
+          like '%(payout_reference)%'
+    )
+  then
+    raise exception
+      'restore omitted Revolut exact-money or unique-reference constraints';
+  end if;
+
+  if exists (
+    select 1
+    from affiliate_private.affiliate_revolut_payout_executions execution
+    where execution.payout_reference !~ '^NORVA-[A-F0-9]{12}$'
+  )
+    or exists (
+      select 1
+      from affiliate_private.affiliate_payout_items item
+      where item.payout_reference is not null
+        and item.payout_reference !~ '^NORVA-[A-F0-9]{12}$'
+    )
+    or exists (
+      select 1
+      from affiliate_private.affiliate_revolut_statement_rows row
+      where row.payout_reference !~ '^NORVA-[A-F0-9]{12}$'
+    )
+  then
+    raise exception
+      'restored Revolut data contains an invalid Norva payout reference';
   end if;
 
   if (
@@ -1077,6 +1577,88 @@ begin
 
   select count(*)
   into v_bad_entries
+  from affiliate_private.affiliate_revolut_manual_decisions decision
+  join affiliate_private.affiliate_revolut_statement_rows statement_row
+    on statement_row.id = decision.statement_row_id
+  left join affiliate_private.affiliate_revolut_manual_reviews review
+    on review.id = decision.review_id
+    and review.statement_row_id = decision.statement_row_id
+    and review.execution_id = decision.execution_id
+  join affiliate_private.affiliate_revolut_payout_executions execution
+    on execution.id = decision.execution_id
+    and statement_row.execution_id = execution.id
+  join affiliate_private.affiliate_payout_items item
+    on item.id = execution.payout_item_id
+  join affiliate_private.affiliate_payout_cycles cycle
+    on cycle.id = item.cycle_id
+  left join affiliate_private.affiliate_commission_entries settlement
+    on settlement.id = decision.settlement_entry_id
+  where review.id is null
+    or decision.decision_actor_pseudonym =
+      review.review_actor_pseudonym
+    or statement_row.payout_reference is distinct from
+      execution.payout_reference
+    or (
+      decision.decision = 'confirmed'
+      and (
+        statement_row.match_status <> 'matched'
+        or statement_row.discrepancy_code is not null
+        or statement_row.provider_state <> 'COMPLETED'
+        or statement_row.provider_transaction_hash is distinct from
+          execution.provider_transaction_hash
+        or statement_row.amount_minor is distinct from item.amount_minor
+        or statement_row.currency is distinct from item.currency
+        or execution.state <> 'paid'
+        or execution.reconciliation_status <> 'confirmed'
+        or execution.job_status <> 'settled'
+        or item.status <> 'settled'
+        or item.provider_transfer_hash is distinct from
+          execution.provider_transaction_hash
+        or settlement.id is null
+        or settlement.entry_kind <> 'payout_settlement'
+        or settlement.related_entry_id is distinct from
+          item.allocation_entry_id
+        or settlement.account_id is distinct from item.account_id
+        or settlement.amount_minor is distinct from item.amount_minor
+        or settlement.currency is distinct from item.currency
+        or settlement.currency_exponent is distinct from
+          cycle.currency_exponent
+        or (
+          select count(*)
+          from affiliate_private.affiliate_commission_postings posting
+          where posting.entry_id = settlement.id
+            and posting.amount_minor = item.amount_minor
+            and posting.currency = item.currency
+            and (
+              (
+                posting.ledger_account = 'partner_payout_clearing'
+                and posting.direction = 'debit'
+              )
+              or (
+                posting.ledger_account = 'partner_cash_settled'
+                and posting.direction = 'credit'
+              )
+            )
+        ) <> 2
+      )
+    )
+    or (
+      decision.decision = 'quarantined'
+      and (
+        decision.settlement_entry_id is not null
+        or execution.reconciliation_status <> 'exception'
+        or execution.job_status <> 'exception'
+      )
+    );
+
+  if v_bad_entries > 0 then
+    raise exception
+      'restored Revolut reconciliation contains % invalid decisions',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
   from affiliate_private.affiliate_commission_entries settlement
   left join affiliate_private.affiliate_commission_entries allocation
     on allocation.id = settlement.related_entry_id
@@ -1251,31 +1833,17 @@ begin
         select 1
         from affiliate_private.affiliate_payout_items item
         where item.cycle_id = cycle.id
-          and not exists (
-            select 1
-            from affiliate_private.affiliate_payout_dispatches dispatch
-            where dispatch.payout_item_id = item.id
-              and dispatch.provider = 'airwallex'
-              and dispatch.provider_state = 'PAID'
-              and dispatch.reconciliation_status in (
-                'confirmed',
-                'exception'
-              )
-              and exists (
-                select 1
-                from
-                  affiliate_private.affiliate_airwallex_settlement_decisions
-                    decision
-                where decision.dispatch_id = dispatch.id
-                  and decision.decision = 'confirmed'
-              )
-          )
+          and not
+            affiliate_private.partners_payout_item_has_confirmed_settlement(
+              item.id,
+              item.provider_transfer_hash
+            )
       )
     );
 
   if v_bad_entries > 0 then
     raise exception
-      'restored Airwallex reconciliation contains % invalid settled cycles',
+      'restored payout reconciliation contains % invalid settled cycles',
       v_bad_entries;
   end if;
 
@@ -1394,6 +1962,38 @@ select jsonb_build_object(
   'airwallex_report_runs', (
     select count(*)
     from affiliate_private.affiliate_airwallex_report_runs
+  ),
+  'revolut_manual_batches', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_manual_batches
+  ),
+  'revolut_payout_executions', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_payout_executions
+  ),
+  'revolut_api_worker_leases', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_api_worker_lease
+  ),
+  'revolut_payout_events', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_payout_events
+  ),
+  'revolut_statement_imports', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_statement_imports
+  ),
+  'revolut_statement_rows', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_statement_rows
+  ),
+  'revolut_manual_reviews', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_manual_reviews
+  ),
+  'revolut_manual_decisions', (
+    select count(*)
+    from affiliate_private.affiliate_revolut_manual_decisions
   )
 ) as partners_restore_verification;
 

@@ -153,3 +153,10 @@ verify_jwt = false
 # routes fail-closed; no feature flag is enabled by this configuration.
 [functions.norva-partners-payout]
 verify_jwt = false
+
+# Revolut Business Partners payout boundary. The Basic/manual statement route
+# authenticates Finance users in-function. The future API cron verifies the
+# shared cron secret and additionally requires BOTH the managed DB flag and
+# NORVA_PARTNERS_REVOLUT_API_ENABLED=true; all API secrets default empty.
+[functions.norva-partners-revolut-payout]
+verify_jwt = false

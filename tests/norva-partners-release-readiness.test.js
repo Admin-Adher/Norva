@@ -90,9 +90,15 @@ function readyEvidence() {
     evidenceRef('play-signed-app-link');
   for (const [name, provider] of Object.entries(evidence.providers)) {
     provider.status = 'configured_and_verified';
-    provider.sandbox_evidence = evidenceRef(`${name}-sandbox`);
+    if (name === 'individual_payout') {
+      provider.production_evidence =
+        evidenceRef(`${name}-production`);
+    } else {
+      provider.sandbox_evidence = evidenceRef(`${name}-sandbox`);
+    }
   }
-  evidence.providers.individual_payout.provider = 'airwallex';
+  evidence.providers.individual_payout.provider = 'revolut';
+  evidence.providers.individual_payout.execution_adapter = 'revolut_manual';
   evidence.providers.didit.environment = 'live';
   evidence.providers.didit.config_fingerprint_sha256 =
     sha256('didit-live-config-fingerprint');
@@ -104,13 +110,34 @@ function readyEvidence() {
   evidence.feature_flags.partners_invite_only = true;
   evidence.feature_flags.partners_shadow_mode = true;
   evidence.feature_flags.partners_tv_relay_enabled = true;
-  evidence.payout_reconciliation.financial_reports_status =
+  evidence.payout_reconciliation.statement_status =
     'imported_and_reconciled';
-  evidence.payout_reconciliation.provider = 'airwallex';
+  evidence.payout_reconciliation.provider = 'revolut';
+  evidence.payout_reconciliation.execution_adapter = 'revolut_manual';
+  evidence.payout_reconciliation.manual_route_status = 'active';
+  evidence.payout_reconciliation.revolut_api_adapter_verified = false;
+  evidence.payout_reconciliation.revolut_api_edge_enabled = false;
   evidence.payout_reconciliation.contract_version =
-    'airwallex-financial-reports-2024-04-30-transaction-reconciliation-v1.1.0';
-  evidence.payout_reconciliation.financial_reports_completeness_evidence =
-    evidenceRef('financial-reports-completeness');
+    'revolut-manual-statement-v2';
+  evidence.payout_reconciliation.reference_contract =
+    'norva-payout-reference-v1';
+  evidence.payout_reconciliation.beneficiary_binding_contract =
+    'revolut-beneficiary-binding-v1';
+  evidence.payout_reconciliation.beneficiary_registry_status =
+    'maker_checker_verified';
+  evidence.payout_reconciliation.beneficiary_hmac_key_version = 1;
+  evidence.payout_reconciliation.beneficiary_registry_evidence =
+    evidenceRef('revolut-beneficiary-registry');
+  evidence.payout_reconciliation.statement_completeness_evidence =
+    evidenceRef('revolut-statement-completeness');
+  evidence.payout_reconciliation.incident_resolution_status =
+    'maker_checker_verified';
+  evidence.payout_reconciliation.incident_resolution_evidence =
+    evidenceRef('revolut-incident-resolution');
+  evidence.payout_reconciliation.legacy_provider_crons_status =
+    'inactive';
+  evidence.payout_reconciliation.legacy_provider_crons_evidence =
+    evidenceRef('legacy-provider-crons-inactive');
   evidence.quality = {
     partners_ci_run_evidence: evidenceRef('partners-ci'),
     security_advisors_passed: true,
@@ -186,6 +213,7 @@ test('the committed release evidence template is valid and fail-closed', () => {
   assert.equal(template.repository, 'Admin-Adher/Norva');
   assert.equal(template.target_environment, 'sandbox');
   assert.equal(template.feature_flags.partners_payouts_live, false);
+  assert.equal(template.feature_flags.partners_revolut_api_enabled, false);
   assert.equal(template.contains_personal_data, false);
   assert.equal(template.providers.didit.config_fingerprint_sha256, null);
   assert.equal(template.providers.didit.workflow_version, null);
@@ -197,7 +225,7 @@ test('legacy free-text evidence journals are rejected', () => {
   legacy.schema_version = 1;
   assert.throws(
     () => validateEvidence(legacy),
-    /schema_version must equal 2/,
+    /schema_version must equal 5/,
   );
 });
 
@@ -372,6 +400,17 @@ test('release approvals are causally newer than the evidence they approve', () =
     'an approval from before the final config/runtime proof must be stale',
   );
 
+  const lateManualControl = readyEvidence();
+  lateManualControl.status = 'draft';
+  lateManualControl.payout_reconciliation
+    .incident_resolution_evidence.verified_at = '2026-07-30T08:01:00Z';
+  assert.ok(
+    evaluateEvidence(lateManualControl).pilotBlockers.includes(
+      'finance_approval_predates_authoritative_evidence',
+    ),
+    'Finance approval must be newer than the final manual incident drill',
+  );
+
   const equalGeneral = generalizationEvidence();
   equalGeneral.status = 'draft';
   equalGeneral.release_gates.general_release_evidence.verified_at =
@@ -529,7 +568,7 @@ test('critical gates cannot reuse evidence and approvals/cycles are independent'
   );
 });
 
-test('pilot readiness gates Play App Links, DB snapshot, TV and reports', () => {
+test('pilot readiness gates Play App Links, DB snapshot, TV, statement and incidents', () => {
   const scenarios = [
     [
       (evidence) => {
@@ -555,21 +594,67 @@ test('pilot readiness gates Play App Links, DB snapshot, TV and reports', () => 
     [
       (evidence) => {
         evidence.providers.individual_payout.provider = null;
+        evidence.providers.individual_payout.execution_adapter = null;
         evidence.providers.individual_payout.status = 'not_selected';
-        evidence.providers.individual_payout.sandbox_evidence = null;
+        evidence.providers.individual_payout.production_evidence = null;
       },
       'provider_individual_payout_not_verified',
     ],
     [
       (evidence) => {
-        evidence.payout_reconciliation.financial_reports_status =
+        evidence.payout_reconciliation.statement_status =
           'not_verified';
         evidence.payout_reconciliation.provider = null;
+        evidence.payout_reconciliation.execution_adapter = null;
         evidence.payout_reconciliation.contract_version = null;
+        evidence.payout_reconciliation.reference_contract = null;
         evidence.payout_reconciliation
-          .financial_reports_completeness_evidence = null;
+          .statement_completeness_evidence = null;
+        evidence.payout_reconciliation.incident_resolution_status =
+          'not_verified';
+        evidence.payout_reconciliation.incident_resolution_evidence = null;
       },
-      'financial_reports_import_not_verified',
+      'revolut_manual_statement_import_not_verified',
+    ],
+    [
+      (evidence) => {
+        evidence.feature_flags.partners_revolut_api_enabled = true;
+      },
+      'partners_revolut_api_must_remain_false',
+    ],
+    [
+      (evidence) => {
+        evidence.payout_reconciliation.manual_route_status = 'not_verified';
+      },
+      'revolut_manual_route_not_verified',
+    ],
+    [
+      (evidence) => {
+        evidence.payout_reconciliation.revolut_api_adapter_verified = true;
+      },
+      'revolut_api_adapter_gate_must_remain_false',
+    ],
+    [
+      (evidence) => {
+        evidence.payout_reconciliation.revolut_api_edge_enabled = true;
+      },
+      'revolut_api_edge_kill_switch_must_remain_false',
+    ],
+    [
+      (evidence) => {
+        evidence.payout_reconciliation.incident_resolution_status =
+          'not_verified';
+        evidence.payout_reconciliation.incident_resolution_evidence = null;
+      },
+      'revolut_manual_incident_resolution_not_verified',
+    ],
+    [
+      (evidence) => {
+        evidence.payout_reconciliation.legacy_provider_crons_status =
+          'not_verified';
+        evidence.payout_reconciliation.legacy_provider_crons_evidence = null;
+      },
+      'legacy_provider_payout_crons_not_disabled',
     ],
   ];
   for (const [mutate, blocker] of scenarios) {
@@ -580,13 +665,21 @@ test('pilot readiness gates Play App Links, DB snapshot, TV and reports', () => 
   }
 });
 
-test('payout evidence is pinned to the implemented Airwallex pilot contract', () => {
+test('payout evidence pins Revolut manual, references and beneficiary registry', () => {
   const unsupportedProvider = readyEvidence();
   unsupportedProvider.status = 'draft';
-  unsupportedProvider.providers.individual_payout.provider = 'revolut';
+  unsupportedProvider.providers.individual_payout.provider = 'airwallex';
   assert.throws(
     () => validateEvidence(unsupportedProvider),
-    /individual payout provider must be null or airwallex/,
+    /individual payout provider must be null or revolut/,
+  );
+
+  const apiAdapter = readyEvidence();
+  apiAdapter.status = 'draft';
+  apiAdapter.providers.individual_payout.execution_adapter = 'revolut_api';
+  assert.throws(
+    () => validateEvidence(apiAdapter),
+    /execution_adapter must be null or revolut_manual/,
   );
 
   const missingContract = readyEvidence();
@@ -594,7 +687,15 @@ test('payout evidence is pinned to the implemented Airwallex pilot contract', ()
   missingContract.payout_reconciliation.contract_version = null;
   assert.throws(
     () => validateEvidence(missingContract),
-    /reconciled Financial Reports must be bound to the Airwallex pilot contract/,
+    /reconciled statement must use the Revolut manual and Norva reference contracts/,
+  );
+
+  const missingReferenceContract = readyEvidence();
+  missingReferenceContract.status = 'draft';
+  missingReferenceContract.payout_reconciliation.reference_contract = null;
+  assert.throws(
+    () => validateEvidence(missingReferenceContract),
+    /reconciled statement must use the Revolut manual and Norva reference contracts/,
   );
 
   const mismatchedProvider = readyEvidence();
@@ -602,7 +703,35 @@ test('payout evidence is pinned to the implemented Airwallex pilot contract', ()
   mismatchedProvider.payout_reconciliation.provider = null;
   assert.throws(
     () => validateEvidence(mismatchedProvider),
-    /reconciled Financial Reports must be bound to the Airwallex pilot contract/,
+    /reconciled statement must use the Revolut manual and Norva reference contracts/,
+  );
+
+  const missingBindingEvidence = readyEvidence();
+  missingBindingEvidence.status = 'draft';
+  missingBindingEvidence.payout_reconciliation
+    .beneficiary_registry_evidence = null;
+  assert.throws(
+    () => validateEvidence(missingBindingEvidence),
+    /verified beneficiary registry requires its contract, HMAC version and evidence/,
+  );
+
+  const unverifiedBinding = readyEvidence();
+  unverifiedBinding.status = 'draft';
+  unverifiedBinding.payout_reconciliation.beneficiary_registry_status =
+    'not_verified';
+  assert.ok(
+    evaluateEvidence(unverifiedBinding).pilotBlockers.includes(
+      'revolut_manual_statement_import_not_verified',
+    ),
+  );
+
+  const missingIncidentEvidence = readyEvidence();
+  missingIncidentEvidence.status = 'draft';
+  missingIncidentEvidence.payout_reconciliation
+    .incident_resolution_evidence = null;
+  assert.throws(
+    () => validateEvidence(missingIncidentEvidence),
+    /verified Revolut incident resolution requires the manual v2 contract and evidence/,
   );
 });
 

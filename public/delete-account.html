@@ -65,7 +65,8 @@
     </ul>
     <p><strong>This cannot be undone.</strong> Limited records may be retained where required by law or for security, fraud prevention and billing, as explained in our <a href="/privacy.html">Privacy Policy</a>. Downloads saved on your devices are removed when you
       delete them or uninstall the app. Subscriptions purchased through an app store must also be
-      cancelled in that store.</p>
+      cancelled in that store. If a Norva Partners payout, return or recovery is still open,
+      deletion remains pending until that account-specific financial closure is resolved.</p>
 
     <div id="signed-out" hidden>
       <div class="status">You need to sign in to delete your account.</div>
@@ -155,6 +156,11 @@
           if (code === 'mfa_verification_required') {
             deleteBtn.disabled = false;
             setStatus('Complete your second-factor verification, then return here to delete your account.', 'err');
+            return;
+          }
+          if (code === 'partners_financial_closure_pending') {
+            deleteBtn.disabled = false;
+            setStatus('Your deletion request is pending completion of a required Norva Partners financial operation. No amount is disclosed here. Open Support from Norva Settings for the next step.');
             return;
           }
           deleteBtn.disabled = false;

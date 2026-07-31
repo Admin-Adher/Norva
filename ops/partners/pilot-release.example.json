@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 5,
   "status": "draft",
   "release_key": "partners-pilot-draft",
   "candidate_commit_sha": null,
@@ -70,7 +70,8 @@
     "individual_payout": {
       "status": "not_selected",
       "provider": null,
-      "sandbox_evidence": null
+      "execution_adapter": null,
+      "production_evidence": null
     },
     "web_tax": {
       "status": "not_selected",
@@ -94,7 +95,8 @@
     "partners_invite_only": false,
     "partners_shadow_mode": false,
     "partners_payouts_live": false,
-    "partners_tv_relay_enabled": false
+    "partners_tv_relay_enabled": false,
+    "partners_revolut_api_enabled": false
   },
   "release_gates": {
     "general_release_approved": false,
@@ -102,9 +104,22 @@
   },
   "payout_reconciliation": {
     "provider": null,
+    "execution_adapter": null,
+    "manual_route_status": "not_verified",
+    "revolut_api_adapter_verified": false,
+    "revolut_api_edge_enabled": false,
     "contract_version": null,
-    "financial_reports_status": "not_verified",
-    "financial_reports_completeness_evidence": null
+    "reference_contract": null,
+    "beneficiary_binding_contract": null,
+    "beneficiary_registry_status": "not_verified",
+    "beneficiary_hmac_key_version": null,
+    "beneficiary_registry_evidence": null,
+    "statement_status": "not_verified",
+    "statement_completeness_evidence": null,
+    "incident_resolution_status": "not_verified",
+    "incident_resolution_evidence": null,
+    "legacy_provider_crons_status": "not_verified",
+    "legacy_provider_crons_evidence": null
   },
   "quality": {
     "partners_ci_run_evidence": null,

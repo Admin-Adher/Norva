@@ -514,6 +514,31 @@ Deno.serve(async (req) => {
   const partnersPreparation =
     (partnersPreparationData ?? {}) as JsonRecord;
   if (
+    !partnersPreparationError
+    && partnersPreparation.action
+      === "partners_account_deletion_pending_financial_closure"
+    && partnersPreparation.ready === false
+  ) {
+    if (deliveryKey) {
+      const { error: cancelError } = await admin.rpc(
+        "cancel_prepared_account_deletion_email",
+        { p_delivery_key: deliveryKey },
+      );
+      if (cancelError) {
+        console.error(
+          "[norva-account-delete] prepared confirmation cleanup failed",
+          cancelError.message,
+        );
+      }
+    }
+    return json(req, {
+      error:
+        "Account deletion is pending completion of required financial operations",
+      code: "partners_financial_closure_pending",
+      nextAction: "contact_support",
+    }, 409);
+  }
+  if (
     partnersPreparationError
     || partnersPreparation.action !== "partners_account_deletion_prepared"
     || partnersPreparation.ready !== true

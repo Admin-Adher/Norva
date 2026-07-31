@@ -36,6 +36,16 @@ begin
   end if;
   if not exists (
     select 1
+    from affiliate_private.affiliate_payout_provider_configs config
+    where config.provider = 'airwallex'
+      and config.execution_adapter = 'airwallex_api'
+      and config.status = 'active'
+  ) then
+    raise exception
+      'no active Airwallex API payout route; report cron remains disabled';
+  end if;
+  if not exists (
+    select 1
     from affiliate_private.affiliate_airwallex_report_contracts contract
     where contract.environment = v_environment
       and contract.status = 'approved'

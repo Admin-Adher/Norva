@@ -6,9 +6,13 @@ const path = require('node:path');
 
 const READY_PROVIDER_STATUS = 'configured_and_verified';
 const PAYOUT_CYCLE_COMPLETE = 'supervised_and_reconciled';
-const PILOT_PAYOUT_PROVIDER = 'airwallex';
+const PILOT_PAYOUT_PROVIDER = 'revolut';
+const PILOT_PAYOUT_EXECUTION_ADAPTER = 'revolut_manual';
 const PILOT_PAYOUT_RECONCILIATION_CONTRACT =
-  'airwallex-financial-reports-2024-04-30-transaction-reconciliation-v1.1.0';
+  'revolut-manual-statement-v2';
+const PILOT_PAYOUT_REFERENCE_CONTRACT = 'norva-payout-reference-v1';
+const PILOT_PAYOUT_BENEFICIARY_BINDING_CONTRACT =
+  'revolut-beneficiary-binding-v1';
 const SHA256 = /^[a-f0-9]{64}$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 const VERSION_KEY = /^[a-z0-9][a-z0-9._-]{2,63}$/;
@@ -471,6 +475,7 @@ function pilotAuthorityCutoff(evidence) {
   const providerEvidence = Object.values(evidence.providers)
     .flatMap((provider) => [
       provider.sandbox_evidence,
+      provider.production_evidence,
       provider.live_evidence,
       provider.environment_isolation_evidence,
     ]);
@@ -485,7 +490,13 @@ function pilotAuthorityCutoff(evidence) {
     evidence.app_links.android_phone.evidence,
     ...providerEvidence,
     evidence.payout_reconciliation
-      .financial_reports_completeness_evidence,
+      .statement_completeness_evidence,
+    evidence.payout_reconciliation
+      .beneficiary_registry_evidence,
+    evidence.payout_reconciliation
+      .incident_resolution_evidence,
+    evidence.payout_reconciliation
+      .legacy_provider_crons_evidence,
     evidence.quality.partners_ci_run_evidence,
     evidence.quality.offsite_backup_evidence,
     evidence.quality.restore_drill_evidence,
@@ -594,7 +605,7 @@ function validateEvidence(evidence, options = {}) {
   assert(evidence && typeof evidence === 'object', 'evidence must be an object');
   assertNoPersonalData(evidence);
   assertExactKeys(evidence, TOP_LEVEL_KEYS, 'evidence');
-  assert(evidence.schema_version === 2, 'schema_version must equal 2');
+  assert(evidence.schema_version === 5, 'schema_version must equal 5');
   assert(
     ['draft', 'pilot_ready', 'generalization_ready'].includes(evidence.status),
     'status must be draft, pilot_ready or generalization_ready',
@@ -847,7 +858,12 @@ function validateEvidence(evidence, options = {}) {
         'environment_isolation_evidence',
       ]
       : providerName === 'individual_payout'
-        ? ['status', 'provider', 'sandbox_evidence']
+        ? [
+          'status',
+          'provider',
+          'execution_adapter',
+          'production_evidence',
+        ]
         : ['status', 'sandbox_evidence'];
     assertExactKeys(provider, keys, `providers.${providerName}`);
     assert(
@@ -855,11 +871,19 @@ function validateEvidence(evidence, options = {}) {
         .includes(provider.status),
       `provider ${providerName} status is invalid`,
     );
-    assertOptionalEvidenceReference(
-      provider.sandbox_evidence,
-      `providers.${providerName}.sandbox_evidence`,
-      nowMs,
-    );
+    if (providerName === 'individual_payout') {
+      assertOptionalEvidenceReference(
+        provider.production_evidence,
+        `providers.${providerName}.production_evidence`,
+        nowMs,
+      );
+    } else {
+      assertOptionalEvidenceReference(
+        provider.sandbox_evidence,
+        `providers.${providerName}.sandbox_evidence`,
+        nowMs,
+      );
+    }
   }
   const didit = evidence.providers.didit;
   assert(
@@ -905,9 +929,24 @@ function validateEvidence(evidence, options = {}) {
     `individual payout provider must be null or ${PILOT_PAYOUT_PROVIDER}`,
   );
   assert(
+    individualPayout.execution_adapter === null
+      || individualPayout.execution_adapter
+        === PILOT_PAYOUT_EXECUTION_ADAPTER,
+    'individual payout execution_adapter must be null or revolut_manual',
+  );
+  assert(
+    (individualPayout.provider === null)
+      === (individualPayout.execution_adapter === null),
+    'individual payout provider and execution_adapter must be selected together',
+  );
+  assert(
     individualPayout.status !== READY_PROVIDER_STATUS
-      || individualPayout.provider === PILOT_PAYOUT_PROVIDER,
-    `verified individual payout must name ${PILOT_PAYOUT_PROVIDER}`,
+      || (
+        individualPayout.provider === PILOT_PAYOUT_PROVIDER
+        && individualPayout.execution_adapter
+          === PILOT_PAYOUT_EXECUTION_ADAPTER
+      ),
+    'verified individual payout must use revolut with revolut_manual',
   );
 
   assertExactKeys(evidence.feature_flags, [
@@ -916,6 +955,7 @@ function validateEvidence(evidence, options = {}) {
     'partners_shadow_mode',
     'partners_payouts_live',
     'partners_tv_relay_enabled',
+    'partners_revolut_api_enabled',
   ], 'feature_flags');
   for (const [key, value] of Object.entries(evidence.feature_flags)) {
     assert(typeof value === 'boolean', `feature flag ${key} must be boolean`);
@@ -937,14 +977,49 @@ function validateEvidence(evidence, options = {}) {
 
   assertExactKeys(evidence.payout_reconciliation, [
     'provider',
+    'execution_adapter',
+    'manual_route_status',
+    'revolut_api_adapter_verified',
+    'revolut_api_edge_enabled',
     'contract_version',
-    'financial_reports_status',
-    'financial_reports_completeness_evidence',
+    'reference_contract',
+    'beneficiary_binding_contract',
+    'beneficiary_registry_status',
+    'beneficiary_hmac_key_version',
+    'beneficiary_registry_evidence',
+    'statement_status',
+    'statement_completeness_evidence',
+    'incident_resolution_status',
+    'incident_resolution_evidence',
+    'legacy_provider_crons_status',
+    'legacy_provider_crons_evidence',
   ], 'payout_reconciliation');
   assert(
     evidence.payout_reconciliation.provider === null
       || evidence.payout_reconciliation.provider === PILOT_PAYOUT_PROVIDER,
     `payout reconciliation provider must be null or ${PILOT_PAYOUT_PROVIDER}`,
+  );
+  assert(
+    evidence.payout_reconciliation.execution_adapter === null
+      || evidence.payout_reconciliation.execution_adapter
+        === PILOT_PAYOUT_EXECUTION_ADAPTER,
+    'payout reconciliation execution_adapter must be null or revolut_manual',
+  );
+  assert(
+    ['not_verified', 'active'].includes(
+      evidence.payout_reconciliation.manual_route_status,
+    ),
+    'manual payout route status is invalid',
+  );
+  assert(
+    typeof evidence.payout_reconciliation.revolut_api_adapter_verified
+      === 'boolean',
+    'Revolut API adapter gate evidence must be boolean',
+  );
+  assert(
+    typeof evidence.payout_reconciliation.revolut_api_edge_enabled
+      === 'boolean',
+    'Revolut API Edge kill switch evidence must be boolean',
   );
   assert(
     evidence.payout_reconciliation.contract_version === null
@@ -953,27 +1028,123 @@ function validateEvidence(evidence, options = {}) {
     'payout reconciliation contract version is invalid',
   );
   assert(
-    ['not_verified', 'imported_and_reconciled'].includes(
-      evidence.payout_reconciliation.financial_reports_status,
+    evidence.payout_reconciliation.reference_contract === null
+      || evidence.payout_reconciliation.reference_contract
+        === PILOT_PAYOUT_REFERENCE_CONTRACT,
+    'payout reconciliation reference contract is invalid',
+  );
+  assert(
+    evidence.payout_reconciliation.beneficiary_binding_contract === null
+      || evidence.payout_reconciliation.beneficiary_binding_contract
+        === PILOT_PAYOUT_BENEFICIARY_BINDING_CONTRACT,
+    'payout beneficiary binding contract is invalid',
+  );
+  assert(
+    ['not_verified', 'maker_checker_verified'].includes(
+      evidence.payout_reconciliation.beneficiary_registry_status,
     ),
-    'Financial Reports status is invalid',
+    'payout beneficiary registry status is invalid',
+  );
+  assert(
+    evidence.payout_reconciliation.beneficiary_hmac_key_version === null
+      || (
+        Number.isSafeInteger(
+          evidence.payout_reconciliation.beneficiary_hmac_key_version,
+        )
+        && evidence.payout_reconciliation.beneficiary_hmac_key_version >= 1
+        && evidence.payout_reconciliation.beneficiary_hmac_key_version
+          <= 2147483646
+      ),
+    'payout beneficiary HMAC key version is invalid',
   );
   assertOptionalEvidenceReference(
-    evidence.payout_reconciliation.financial_reports_completeness_evidence,
-    'payout_reconciliation.financial_reports_completeness_evidence',
+    evidence.payout_reconciliation.beneficiary_registry_evidence,
+    'payout_reconciliation.beneficiary_registry_evidence',
     nowMs,
   );
   assert(
-    evidence.payout_reconciliation.financial_reports_status
+    evidence.payout_reconciliation.beneficiary_registry_status
+      !== 'maker_checker_verified'
+      || (
+        evidence.payout_reconciliation.beneficiary_binding_contract
+          === PILOT_PAYOUT_BENEFICIARY_BINDING_CONTRACT
+        && Number.isSafeInteger(
+          evidence.payout_reconciliation.beneficiary_hmac_key_version,
+        )
+        && evidence.payout_reconciliation
+          .beneficiary_registry_evidence !== null
+      ),
+    'verified beneficiary registry requires its contract, HMAC version and evidence',
+  );
+  assert(
+    ['not_verified', 'imported_and_reconciled'].includes(
+      evidence.payout_reconciliation.statement_status,
+    ),
+    'Revolut statement status is invalid',
+  );
+  assertOptionalEvidenceReference(
+    evidence.payout_reconciliation.statement_completeness_evidence,
+    'payout_reconciliation.statement_completeness_evidence',
+    nowMs,
+  );
+  assert(
+    evidence.payout_reconciliation.statement_status
       !== 'imported_and_reconciled'
       || (
         evidence.payout_reconciliation.provider === PILOT_PAYOUT_PROVIDER
+        && evidence.payout_reconciliation.execution_adapter
+          === PILOT_PAYOUT_EXECUTION_ADAPTER
+        && evidence.payout_reconciliation.contract_version
+          === PILOT_PAYOUT_RECONCILIATION_CONTRACT
+        && evidence.payout_reconciliation.reference_contract
+          === PILOT_PAYOUT_REFERENCE_CONTRACT
+        && evidence.payout_reconciliation
+          .statement_completeness_evidence !== null
+      ),
+    'reconciled statement must use the Revolut manual and Norva reference contracts',
+  );
+  assert(
+    ['not_verified', 'maker_checker_verified'].includes(
+      evidence.payout_reconciliation.incident_resolution_status,
+    ),
+    'Revolut incident resolution status is invalid',
+  );
+  assertOptionalEvidenceReference(
+    evidence.payout_reconciliation.incident_resolution_evidence,
+    'payout_reconciliation.incident_resolution_evidence',
+    nowMs,
+  );
+  assert(
+    evidence.payout_reconciliation.incident_resolution_status
+      !== 'maker_checker_verified'
+      || (
+        evidence.payout_reconciliation.provider === PILOT_PAYOUT_PROVIDER
+        && evidence.payout_reconciliation.execution_adapter
+          === PILOT_PAYOUT_EXECUTION_ADAPTER
         && evidence.payout_reconciliation.contract_version
           === PILOT_PAYOUT_RECONCILIATION_CONTRACT
         && evidence.payout_reconciliation
-          .financial_reports_completeness_evidence !== null
+          .incident_resolution_evidence !== null
       ),
-    'reconciled Financial Reports must be bound to the Airwallex pilot contract',
+    'verified Revolut incident resolution requires the manual v2 contract and evidence',
+  );
+  assert(
+    ['not_verified', 'inactive'].includes(
+      evidence.payout_reconciliation.legacy_provider_crons_status,
+    ),
+    'legacy payout cron status is invalid',
+  );
+  assertOptionalEvidenceReference(
+    evidence.payout_reconciliation.legacy_provider_crons_evidence,
+    'payout_reconciliation.legacy_provider_crons_evidence',
+    nowMs,
+  );
+  assert(
+    evidence.payout_reconciliation.legacy_provider_crons_status
+      !== 'inactive'
+      || evidence.payout_reconciliation
+        .legacy_provider_crons_evidence !== null,
+    'inactive legacy payout crons require evidence',
   );
 
   assertExactKeys(evidence.quality, [
@@ -1218,8 +1389,10 @@ function pilotReadinessBlockers(evidence, options = {}) {
     evidence.providers.individual_payout.status === READY_PROVIDER_STATUS
       && evidence.providers.individual_payout.provider
         === PILOT_PAYOUT_PROVIDER
+      && evidence.providers.individual_payout.execution_adapter
+        === PILOT_PAYOUT_EXECUTION_ADAPTER
       && isEvidenceReference(
-        evidence.providers.individual_payout.sandbox_evidence,
+        evidence.providers.individual_payout.production_evidence,
         nowMs,
       ),
     'provider_individual_payout_not_verified',
@@ -1235,19 +1408,69 @@ function pilotReadinessBlockers(evidence, options = {}) {
     'partners_payouts_live_must_remain_false');
   require(evidence.feature_flags.partners_tv_relay_enabled === true,
     'partners_tv_relay_not_enabled');
+  require(evidence.feature_flags.partners_revolut_api_enabled === false,
+    'partners_revolut_api_must_remain_false');
   require(
-    evidence.payout_reconciliation.financial_reports_status
+    evidence.payout_reconciliation.manual_route_status === 'active',
+    'revolut_manual_route_not_verified',
+  );
+  require(
+    evidence.payout_reconciliation.revolut_api_adapter_verified === false,
+    'revolut_api_adapter_gate_must_remain_false',
+  );
+  require(
+    evidence.payout_reconciliation.revolut_api_edge_enabled === false,
+    'revolut_api_edge_kill_switch_must_remain_false',
+  );
+  require(
+    evidence.payout_reconciliation.statement_status
       === 'imported_and_reconciled'
       && evidence.payout_reconciliation.provider
         === PILOT_PAYOUT_PROVIDER
+      && evidence.payout_reconciliation.execution_adapter
+        === PILOT_PAYOUT_EXECUTION_ADAPTER
       && evidence.payout_reconciliation.contract_version
         === PILOT_PAYOUT_RECONCILIATION_CONTRACT
+      && evidence.payout_reconciliation.reference_contract
+        === PILOT_PAYOUT_REFERENCE_CONTRACT
       && isEvidenceReference(
         evidence.payout_reconciliation
-          .financial_reports_completeness_evidence,
+          .statement_completeness_evidence,
+        nowMs,
+      )
+      && evidence.payout_reconciliation.beneficiary_registry_status
+        === 'maker_checker_verified'
+      && evidence.payout_reconciliation.beneficiary_binding_contract
+        === PILOT_PAYOUT_BENEFICIARY_BINDING_CONTRACT
+      && Number.isSafeInteger(
+        evidence.payout_reconciliation.beneficiary_hmac_key_version,
+      )
+      && isEvidenceReference(
+        evidence.payout_reconciliation
+          .beneficiary_registry_evidence,
+        nowMs,
+    ),
+    'revolut_manual_statement_import_not_verified',
+  );
+  require(
+    evidence.payout_reconciliation.incident_resolution_status
+      === 'maker_checker_verified'
+      && isEvidenceReference(
+        evidence.payout_reconciliation
+          .incident_resolution_evidence,
         nowMs,
       ),
-    'financial_reports_import_not_verified',
+    'revolut_manual_incident_resolution_not_verified',
+  );
+  require(
+    evidence.payout_reconciliation.legacy_provider_crons_status
+      === 'inactive'
+      && isEvidenceReference(
+        evidence.payout_reconciliation
+          .legacy_provider_crons_evidence,
+        nowMs,
+      ),
+    'legacy_provider_payout_crons_not_disabled',
   );
   require(isEvidenceReference(evidence.quality.partners_ci_run_evidence, nowMs),
     'partners_ci_evidence_missing');

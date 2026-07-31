@@ -227,7 +227,7 @@ test('terminal exceptions stay monotone under every later provider observation',
   );
 });
 
-test('restore verification covers the full Airwallex reconciliation surface and never prints credentials', () => {
+test('restore verification preserves Airwallex history behind provider-neutral settlement guards', () => {
   const verifier = read('ops/hetzner/backup/verify-partners-restore.sql');
   const restore = read('ops/hetzner/scripts/02-restore-hetzner.sh');
 
@@ -248,8 +248,8 @@ test('restore verification covers the full Airwallex reconciliation surface and 
     'affiliate_airwallex_settlement_decision_guard',
     'affiliate_payout_settlement_semantics',
     'affiliate_airwallex_post_settlement_dispatch_guard',
-    'affiliate_airwallex_settled_payout_item_guard',
-    'affiliate_airwallex_settled_payout_cycle_guard',
+    'affiliate_partners_settled_payout_item_guard',
+    'affiliate_partners_settled_payout_cycle_guard',
   ]) {
     assert.match(verifier, new RegExp(`'${trigger}'`));
   }
@@ -263,7 +263,11 @@ test('restore verification covers the full Airwallex reconciliation surface and 
   );
   assert.match(
     verifier,
-    /restored Airwallex reconciliation contains % invalid settled cycles/,
+    /restored payout reconciliation contains % invalid settled cycles/,
+  );
+  assert.match(
+    verifier,
+    /partners_payout_item_has_confirmed_settlement/,
   );
   assert.match(
     verifier,
@@ -406,26 +410,26 @@ test('only the automated cron report boundary can ingest provider settlements', 
   );
 });
 
-test('Admin settlement queue exposes redacted two-person actions with exact confirmations', () => {
+test('Admin payout queue exposes the redacted Revolut manual two-person workflow', () => {
   const admin = read('public/js/pages/AdminPage.js');
 
-  assert.match(admin, /admin_partners_airwallex_settlements/);
-  assert.match(admin, /admin_partners_airwallex_settlement_review/);
-  assert.match(admin, /admin_partners_airwallex_settlement_decide/);
+  assert.match(admin, /admin_partners_revolut_payout_status/);
+  assert.match(admin, /admin_partners_revolut_manual_batches/);
+  assert.match(admin, /admin_partners_revolut_reconciliation_queue/);
+  assert.match(admin, /admin_partners_revolut_reconciliation_review/);
+  assert.match(admin, /admin_partners_revolut_reconciliation_decide/);
   assert.match(
     admin,
-    /settlement-review[\s\S]*settlement-confirm[\s\S]*settlement-quarantine/,
+    /revolut-reconciliation-review[\s\S]*revolut-reconciliation-confirm[\s\S]*revolut-reconciliation-quarantine/,
   );
-  assert.match(
-    admin,
-    /`\$\{operation\}:\$\{observation\}`/,
-  );
+  assert.match(admin, /`REVIEW:\$\{statementRow\}`/);
+  assert.match(admin, /`\$\{operation\}:\$\{review\}`/);
   assert.match(
     admin,
     /Un second opérateur Finance distinct doit maintenant décider/,
   );
   assert.doesNotMatch(
     admin,
-    /partners-admin-settlements[\s\S]{0,3000}(?:providerTransferId|proofHash|settlementReference)/,
+    /partners-admin-settlements[\s\S]{0,4200}(?:provider_transaction_id|beneficiary_token_ref|proofHash)/,
   );
 });

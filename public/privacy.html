@@ -135,21 +135,35 @@
       <li><strong>RevenueCat</strong> — delivery and normalization of subscription lifecycle
         events used to maintain entitlement and initiate server-side financial reconciliation.</li>
       <li><strong>Revolut</strong> — web subscription checkout and authoritative settled,
-        refund and chargeback events where that payment rail is used.</li>
+        refund and chargeback events where that payment rail is used; Revolut Business also
+        executes individual Norva Partners payouts in supported corridors. Under the initial
+        manual workflow, Norva keeps the unique payout reference, exact amount/currency, masked
+        destination, provider beneficiary token, a keyed beneficiary fingerprint and mapping-proof
+        hash, opaque transaction identifier and hashes, and normalized statement status needed for
+        reconciliation. The keyed fingerprint is produced outside the database and cannot reveal
+        the underlying bank details by itself. Norva does not retain the raw bank statement or
+        unrelated statement transactions.</li>
       <li>Your <strong>media source</strong> — when you ask the Service to connect, requests are made
         to the host you configured. You are responsible for that source and its terms.</li>
     </ul>
     <p>We may disclose information if required by law or to protect the rights, safety and security
       of users and the Service.</p>
-    <p>No individual payout provider is enabled for the Partners pilot yet. Before one is enabled,
-      this policy and the applicable Partners Terms will identify the provider, data categories,
-      transfer safeguards and retention needed for onboarding and payment.</p>
+    <p>Revolut Business is the initial individual payout provider for supported Norva Partners
+      corridors. Availability remains jurisdiction- and currency-specific and is shown before a
+      payout profile can become active. Beneficiary details are managed in Revolut; Norva stores
+      the provider token, masked destination and opaque transfer identifier needed to prepare and
+      reconcile the payout, but not the beneficiary's full bank-account details.</p>
 
     <h2>5. Data retention</h2>
     <p>We keep account and usage data while your account is active. When you delete your account (see
       below) we delete or anonymize your personal data, except where we must retain limited records
       to comply with legal obligations. Downloaded media lives only on your device and is removed
       when you delete it or uninstall the app.</p>
+    <p>If a Partners payout, return, recovery or required financial review is still open, account
+      deletion is placed in a temporary financial-closure state instead of discarding or
+      anonymizing the records needed to resolve it. Norva does not expose the amount in the public
+      deletion response. The user is directed to Support, and deletion can complete once the
+      account-specific financial obligations are resolved.</p>
     <p>For sign-up context, city and region stop being available to administrators at 90 days and
       are physically erased by a retention job within the following 15 minutes. Country and
       product-origin fields may remain while the account is active so we can compare onboarding

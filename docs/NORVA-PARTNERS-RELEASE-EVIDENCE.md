@@ -12,9 +12,11 @@ des preuves conservées ailleurs. Ne jamais y inscrire
 nom, e-mail, UUID utilisateur, code public de parrainage, document KYC,
 identifiant de paiement, token ou payload fournisseur.
 
-Le format courant est `schema_version=2`. Un ancien journal v1 à preuves texte
-est volontairement refusé : repartir du template v2 et rattacher les artefacts
-réels, sans convertir automatiquement des chaînes historiques non vérifiables.
+Le format courant est `schema_version=5`. Les anciens journaux à preuves texte,
+au contrat Airwallex ou portant encore une preuve « sandbox » pour le rail
+manuel sont volontairement refusés : repartir du template v5 et rattacher les
+artefacts réels, sans convertir automatiquement des chaînes historiques non
+vérifiables.
 Le schéma est fermé récursivement : toute clé inconnue est refusée, y compris
 dans un objet imbriqué. Le journal relie aussi la décision à
 `repository=Admin-Adher/Norva`, au `candidate_commit_sha` Git exact, à
@@ -56,7 +58,8 @@ cycle satisfont `début <= fin <= maintenant`, et leur preuve doit être vérifi
 après la fin.
 Les quatre approbations du pilote doivent être strictement postérieures à la
 plus récente preuve juridique, de configuration fournisseur/DB, App Link,
-Financial Reports, CI/restore et runtime shadow. L'approbation de généralisation
+relevé Revolut et incidents, coupure des crons provider/API, CI/restore et
+runtime shadow. L'approbation de généralisation
 doit ensuite être strictement postérieure à la fin et à la preuve du pilote,
 aux deux cycles rapprochés et aux quatre approbations du pilote. Une ancienne
 décision, même syntaxiquement valide, ne peut donc pas approuver une nouvelle
@@ -148,10 +151,28 @@ surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
   l'allowlist contient 20 à 50 personnes, le snapshot DB couvre programme,
   policies, devises, routes, allowlist, flags et gates, les providers et preuves
   runtime sont vérifiés, l'App Link a été rejoué depuis l'AAB signé par Google
-  Play, `providers.individual_payout.provider` vaut explicitement `airwallex`,
-  l'import Financial Reports est lié au même provider et au contrat
-  `airwallex-financial-reports-2024-04-30-transaction-reconciliation-v1.1.0`,
-  puis a été rapproché, et
+  Play, `providers.individual_payout.provider` vaut explicitement `revolut` et
+  son `execution_adapter` vaut `revolut_manual`. L'import du relevé Revolut est
+  lié au même couple provider/adaptateur, au contrat
+  `revolut-manual-statement-v2` et au contrat de référence
+  `norva-payout-reference-v1`, puis a été rapproché. Une preuve distincte
+  `incident_resolution_evidence` doit rejouer le maker-checker des écarts,
+  quarantaines, retours et paiements tardifs, y compris un doublon observé
+  après règlement ; son statut reste `not_verified` tant que ces cas ne sont
+  pas tous résolus sans ajustement implicite de montant ou de devise. Le
+  statut `legacy_provider_crons_status=inactive` doit en outre être lié à une
+  preuve montrant que les jobs `norva-partners-payout`,
+  `norva-partners-airwallex-reports` et `norva-partners-revolut-api` sont
+  absents ou inactifs. Le registre
+  bénéficiaire
+  porte en plus `revolut-beneficiary-binding-v1`, un statut
+  `maker_checker_verified`, la version entière de la clé HMAC Edge et une
+  preuve externe distincte démontrant proposition, contrôle par un second
+  Finance et résolution sûre d'une révocation. Aucun secret, UUID bénéficiaire
+  ou HMAC n'est inscrit dans ce journal. La route vérifiée reste
+  `revolut_manual`, la gate `revolut_api_adapter_verified`, le flag
+  `partners_revolut_api_enabled` et le kill switch Edge
+  `NORVA_PARTNERS_REVOLUT_API_ENABLED` restent faux, et
   Didit porte trois preuves indépendantes — sandbox, live et isolation
   d'environnement — avec `environment=live`, le
   `config_fingerprint_sha256` exact de la configuration non secrète déployée et
@@ -161,7 +182,8 @@ surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
   environnement/fingerprint est mis en quarantaine. Le template `draft` garde
   ces trois nouveaux champs à `null`, et
   `partners_enabled`, `partners_invite_only`, `partners_shadow_mode` et
-  `partners_tv_relay_enabled` sont vrais. `partners_payouts_live` reste faux.
+  `partners_tv_relay_enabled` sont vrais. `partners_payouts_live` reste faux
+  dans ce snapshot de décision pré-bascule.
 - `generalization_ready` : les mêmes portes restent valides et les deux cycles
   de versement portent l'état `supervised_and_reconciled`, des périodes
   ordonnées non chevauchantes et des preuves de rapprochement distinctes ; le
@@ -198,19 +220,50 @@ Le dépôt ne peut pas créer ces preuves à la place de l'opérateur :
    métadonnées devise, routes payout, volume allowlist, flags et release gates ;
 6. contrat fiscal Web et rail de versement individuel sélectionnés et testés ;
    le champ `providers.individual_payout.provider` rend le choix vérifiable ;
-7. import autoritatif Airwallex Financial Reports, lié par
-   `payout_reconciliation.provider` et
-   `payout_reconciliation.contract_version`, contrôle de complétude
-   bancaire et rapprochement distinct ;
-8. livraisons sandbox Google Play, RevenueCat et Revolut vérifiées ;
-9. run GitHub Actions Partners du commit candidat vert, lint et Advisors verts ;
-10. backup offsite R2 récent, chiffré avec `BACKUP_AGE_RECIPIENT`, dont les
+7. registre Finance bénéficiaire, clé HMAC Edge versionnée, binding
+   maker-checker et révocation supervisée testés, avec une preuve ne contenant
+   ni identifiant bancaire, ni UUID bénéficiaire, ni secret ;
+8. export autoritatif du relevé Revolut Business Basic réel dans la langue
+   configurée, avec preuve du séparateur et des en-têtes effectivement servis ;
+   l'import sanitisé reste limité aux références
+   `NORVA-[A-F0-9]{12}`, lié par
+   `payout_reconciliation.provider`, `execution_adapter`,
+   `contract_version` et `reference_contract`, contrôle de complétude puis
+   rapprochement distinct par Finance. Une évolution de colonnes doit échouer
+   fermée et invalider cette preuve avant le prochain lot. La preuve couvre
+   également le registre Finance sécurisé qui résout chaque UUID bénéficiaire
+   opaque vers le bénéficiaire Revolut réel, sa preuve individuelle et le
+   contrôle de destination masquée, le ticket Finance/AAL2 à usage unique
+   (rejeu refusé), ainsi que le contrôle anti-double-virement par recherche de
+   la référence avant chaque saisie. Le TSV canonique termine par
+   `entered_in_revolut`, vide à l'export, et sa copie de travail accepte
+   seulement `YES`. Le RPC reçoit uniquement les références marquées ; aucun
+   identifiant ou hash bancaire n'est saisi manuellement. Seul l'import du
+   relevé attache l'identité opaque Revolut. La preuve rejoue aussi un refus
+   avant règlement et un retour après règlement :
+   observation append-only, revue et décision par deux acteurs Finance
+   distincts de l’auteur de la soumission, puis libération ou contre-écriture
+   exacte sans réécriture du paiement historique. Elle couvre aussi les
+   incidents `settle_exact`, `remap_exact_and_settle` et
+   `release_after_return`, ce dernier exigeant une observation terminale
+   indépendante exacte. Aucun ajustement partiel ou de change n'est accepté ;
+9. livraisons sandbox Google Play et RevenueCat vérifiées. Pour Revolut
+   Business API, le sandbox couvre uniquement l'authentification, l'idempotence
+   et les contrats disponibles : `/pay/fields` n'y est pas disponible. La gate
+   API exige en plus un micro-virement production supervisé, avec quote,
+   transaction canonique et rapprochement exact archivés, ainsi qu'une preuve
+   que `COMPLETED` reste observable jusqu'au rapprochement et qu'un relevé
+   tardif `REVERTED` produit la contre-écriture attendue ;
+10. run GitHub Actions Partners du commit candidat vert, lint et Advisors verts ;
+11. backup offsite R2 récent, chiffré avec `BACKUP_AGE_RECIPIENT`, dont les
    checksums ont été vérifiés ;
-11. restauration isolée réussie avec
+12. restauration isolée réussie avec
    `ops/hetzner/backup/verify-partners-restore.sql` ;
-12. cron, heartbeats, réconciliation shadow et cycle alerte/rétablissement
-   observés sur l'environnement déployé ;
-13. 45 jours calendaires de pilote, deux cycles rapprochés et approbations
+13. worker financier et heartbeats frais, réconciliation shadow et cycle
+    alerte/rétablissement observés sur l'environnement déployé ; preuve que la
+    route active est manuelle, que gate DB, flag DB et kill switch Edge API
+    restent faux, et que les trois crons provider/API sont absents ou inactifs ;
+14. 45 jours calendaires de pilote, deux cycles rapprochés et approbations
     distinctes Legal, Risk, Finance et Operations.
 
 Les quatre approbations et les deux rapprochements utilisent des URL, run IDs

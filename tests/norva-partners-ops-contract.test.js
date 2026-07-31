@@ -217,6 +217,10 @@ test('every logical application backup includes the private Partners schema and 
       `${script} must include affiliate_private in both schema-only and data-only dumps`,
     );
   }
+  const nightly = read('ops/hetzner/backup/backup-nightly.sh');
+  assert.match(nightly, /AFFILIATE_ACCOUNTS_COUNT="\$\([\s\S]*?to_regclass/);
+  assert.match(nightly, /affiliate_accounts=\$AFFILIATE_ACCOUNTS_COUNT/);
+  assert.doesNotMatch(nightly, /-Atc \\\\"select/);
 });
 
 test('restore procedures explicitly verify the Partners private schema', () => {
@@ -257,6 +261,23 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(parity, /affiliate_airwallex_settlement_observations/);
   assert.match(parity, /affiliate_airwallex_report_runs/);
   assert.match(parity, /Airwallex direct observe grants/);
+  assert.match(parity, /affiliate_revolut_manual_batches/);
+  assert.match(parity, /affiliate_revolut_statement_imports/);
+  assert.match(parity, /Revolut manual route violations/);
+  assert.match(
+    parity,
+    /provider<>'revolut' or execution_adapter<>'revolut_manual'/,
+  );
+  assert.match(parity, /Revolut API flag enabled/);
+  assert.match(parity, /partners_revolut_api_enabled' and enabled/);
+  assert.match(
+    parity,
+    /NORVA_PARTNERS_REVOLUT_API_ENABLED:-false[\s\S]*must be false/,
+  );
+  assert.match(parity, /Revolut API active routes/);
+  assert.match(parity, /execution_adapter='revolut_api'/);
+  assert.match(parity, /Revolut payout reference duplicates/);
+  assert.match(parity, /\^NORVA-\[A-F0-9\]\{12\}\$/);
   assert.match(verifier, /to_regnamespace\('affiliate_private'\)/);
   assert.match(verifier, /to_regclass\('affiliate_private\.' \|\| v_name\)/);
   assert.match(verifier, /and not c\.relrowsecurity/);
@@ -280,6 +301,50 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(
     verifier,
     /admin_partners_airwallex_report_contract_set\(text,boolean,text,text,text\)/,
+  );
+  assert.match(verifier, /affiliate_revolut_manual_batches/);
+  assert.match(verifier, /affiliate_revolut_payout_executions/);
+  assert.match(verifier, /affiliate_revolut_api_worker_lease/);
+  assert.match(verifier, /affiliate_revolut_statement_imports/);
+  assert.match(verifier, /affiliate_revolut_statement_rows/);
+  assert.match(
+    verifier,
+    /affiliate_payout_provider_configs_pilot_adapter[\s\S]*provider = ''revolut''[\s\S]*execution_adapter[\s\S]*revolut_manual[\s\S]*revolut_api/,
+  );
+  assert.match(
+    verifier,
+    /config\.provider <> 'revolut'[\s\S]*config\.execution_adapter <> 'revolut_manual'/,
+  );
+  assert.match(
+    verifier,
+    /partners_revolut_api_enabled'[\s\S]*not flag\.enabled/,
+  );
+  assert.match(verifier, /restored Revolut API rail is not fail-closed/);
+  assert.match(verifier, /admin_feature_flags_revolut_api_guard/);
+  assert.match(
+    verifier,
+    /affiliate_revolut_payout_executions_reference[\s\S]*affiliate_revolut_statement_rows_reference/,
+  );
+  assert.match(verifier, /\^NORVA-\[A-F0-9\]\{12\}\$/);
+  assert.match(
+    verifier,
+    /partners_payout_item_has_confirmed_settlement[\s\S]*invalid settled cycles/,
+  );
+  assert.match(
+    verifier,
+    /restored Revolut reconciliation contains % invalid decisions/,
+  );
+  assert.match(
+    verifier,
+    /admin_partners_revolut_manual_batch_prepare\(text,text,text\)/,
+  );
+  assert.match(
+    verifier,
+    /partners_worker_revolut_payout_lease\(text,text,bigint,integer,integer\)/,
+  );
+  assert.doesNotMatch(
+    verifier,
+    /config\.status = 'active'\s+and config\.provider <> 'airwallex'/,
   );
   assert.match(verifier, /unexpected private Partners EXECUTE privilege/);
   assert.match(
@@ -369,6 +434,29 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
 
   assert.match(runbook, /partners_payouts_live=false/);
   assert.match(runbook, /partners_shadow_mode=true/);
+  assert.match(runbook, /`revolut_manual` est le rail réel/i);
+  assert.match(
+    runbook,
+    /provider=revolut` et[\s\S]*execution_adapter=revolut_manual/,
+  );
+  assert.match(
+    runbook,
+    /NORVA-\[A-F0-9\]\{12\}[\s\S]*référence, montant mineur et devise/i,
+  );
+  assert.match(runbook, /relevé brut est traité en mémoire/i);
+  assert.match(
+    runbook,
+    /deux acteurs Finance distincts[\s\S]*revue[\s\S]*décision finale/i,
+  );
+  assert.match(
+    runbook,
+    /partners_revolut_api_enabled=false[\s\S]*NORVA_PARTNERS_REVOLUT_API_ENABLED=false/,
+  );
+  assert.match(
+    runbook,
+    /REVOLUT_BUSINESS_CLIENT_ID[\s\S]*REVOLUT_BUSINESS_PRIVATE_KEY_PEM[\s\S]*REVOLUT_BUSINESS_REFRESH_TOKEN[\s\S]*restent absents en[\s\S]*`revolut_manual`/,
+  );
+  assert.match(runbook, /Airwallex historique désactivé/);
   assert.match(runbook, /affiliate_private/);
   assert.match(runbook, /deux premiers cycles/i);
   assert.match(runbook, /aucune fonction privée exécutable par `anon`/i);
@@ -394,7 +482,7 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
   assert.match(observability, /400\/500/);
   assert.match(observability, /500\/500/);
   assert.match(observability, /financial_transfer_quarantined_recent/);
-  assert.match(observability, /revenuecat_transfer\/payout/);
+  assert.match(observability, /revenuecat_transfer[\s\S]*payout_report/);
   assert.match(observability, /not_configured/);
 });
 
@@ -410,6 +498,10 @@ test('Partners CI covers exact Google money, deletion and release evidence', () 
     /node scripts\/validate-partners-release-evidence\.js[\s\S]*?ops\/partners\/pilot-release\.example\.json/,
   );
   assert.match(workflow, /ops\/hetzner\/backup\/\*\*/);
+  assert.match(
+    workflow,
+    /bash -n[\s\S]*?backup-nightly\.sh[\s\S]*?01-dump-prod\.sh[\s\S]*?05-verify-parity\.sh/,
+  );
 });
 
 test('protected Partners release gate uses private evidence and exact commit', () => {
@@ -564,6 +656,14 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
   assert.match(
     workflow,
     /supabase\/functions\/norva-partners-payout\/index\.ts/,
+  );
+  assert.match(
+    workflow,
+    /supabase\/functions\/norva-partners-revolut-payout\/index\.ts/,
+  );
+  assert.match(
+    workflow,
+    /supabase\/tests\/affiliate_revolut_manual_hybrid\.sql/,
   );
   assert.match(
     workflow,

@@ -725,6 +725,7 @@ class AdminPage {
 #page-admin .partners-analytics-wide{grid-column:1/-1;}
 #page-admin .partners-risk-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
 #page-admin .partners-risk-actions .partners-action{min-height:36px;padding:6px 9px;font-size:10px;}
+#partners-admin-reconciliation-incidents .partners-risk-actions .partners-action{min-height:44px;padding:9px 12px;font-size:12px;}
 #page-admin .partner-row{display:grid;grid-template-columns:minmax(150px,1.4fr) repeat(4,minmax(100px,.8fr)) minmax(135px,.9fr);align-items:center;gap:12px;min-height:54px;padding:10px 12px;border-bottom:1px solid var(--adm-line);cursor:pointer;}
 #page-admin .partner-row:hover{background:var(--adm-card2);}
 #page-admin .partner-row.partner-head{min-height:38px;color:var(--adm-tx3);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;cursor:default;}
@@ -4175,6 +4176,21 @@ class AdminPage {
         const nav = this._nav;
         const status = this._partnersStatus || '';
         const search = this._partnersSearch || '';
+        const incidentFilters = new Set([
+            'action_required',
+            'open',
+            'quarantined',
+            'resolved',
+            'all'
+        ]);
+        const incidentFilter = incidentFilters.has(
+            this._partnersIncidentFilter
+        ) ? this._partnersIncidentFilter : 'action_required';
+        const incidentOffset = Number.isSafeInteger(
+            this._partnersIncidentOffset
+        ) && this._partnersIncidentOffset >= 0
+            ? this._partnersIncidentOffset
+            : 0;
         this._setCrumb('Partners');
         view.innerHTML = `
             <div class="crm-page">
@@ -4213,9 +4229,39 @@ class AdminPage {
                   </div>
                   <div class="ssub">Chargement…</div>
                 </section>
+                <section id="partners-admin-revolut" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Revolut Business</h2><p>Production Basic en exécution manuelle, avec références Norva uniques et API séparée par feature flag.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
                 <section id="partners-admin-settlements" class="partners-control-card" aria-busy="true">
                   <div class="partners-control-head">
-                    <div><h2>Rapprochement Airwallex</h2><p>Preuve technique, revue Finance puis décision d’un second opérateur Finance distinct.</p></div>
+                    <div><h2>Rapprochement des versements</h2><p>Import de relevé Revolut, revue Finance puis décision d’un second opérateur Finance distinct.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-reconciliation-incidents" class="partners-control-card" aria-busy="true" aria-live="polite">
+                  <div class="partners-control-head">
+                    <div><h2>Écarts de rapprochement Revolut</h2><p>File append-only priorisée : résolution exacte ou quarantaine, avec preuve fraîche et maker-checker Finance/AAL2.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-returns" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Retours et déblocages Revolut</h2><p>Les refus, annulations et retours sont observés sans réécrire l’historique, puis résolus par deux opérateurs Finance distincts.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-manual-controls" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Contrôles des lots manuels</h2><p>Annulations et déblocages exigent deux recherches Revolut indépendantes, deux opérateurs Finance et une preuve locale conservée.</p></div>
+                  </div>
+                  <div class="ssub">Chargement…</div>
+                </section>
+                <section id="partners-admin-late-completions" class="partners-control-card" aria-busy="true">
+                  <div class="partners-control-head">
+                    <div><h2>Paiements tardifs</h2><p>Un paiement observé après déblocage gèle les versements du compte jusqu’à une décision Finance à deux opérateurs.</p></div>
                   </div>
                   <div class="ssub">Chargement…</div>
                 </section>
@@ -4232,7 +4278,7 @@ class AdminPage {
                   <div class="ssub">Chargement…</div>
                 </section>
                 <section id="partners-admin-finance" class="partners-ops-card" aria-busy="true">
-                  <h2>Ledger et worker</h2><p>Backlogs, maturation et réconciliation shadow.</p>
+                  <h2>Ledger et worker</h2><p>Backlogs, maturation et cohérence du ledger interne.</p>
                   <div class="ssub">Chargement…</div>
                 </section>
                 <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true">
@@ -4240,7 +4286,7 @@ class AdminPage {
                   <div class="ssub">Chargement…</div>
                 </section>
                 <section id="partners-admin-payouts" class="partners-ops-card" aria-busy="true">
-                  <h2>Cycles de versement</h2><p>Dry-run et exécution restent séparés par les gates.</p>
+                  <h2>Cycles et lots manuels</h2><p>Norva prépare les lots ; un opérateur valide puis paie dans Revolut Business.</p>
                   <div class="ssub">Chargement…</div>
                 </section>
               </div>
@@ -4295,8 +4341,36 @@ class AdminPage {
                 this._rpc('admin_partners_monitoring'),
                 this._rpc('admin_partners_configuration'),
                 this._rpc('admin_partners_analytics', { p_days: 30 }),
-                this._rpc('admin_partners_airwallex_settlements', {
-                    p_limit: 25
+                this._rpc('admin_partners_revolut_payout_status'),
+                this._rpc('admin_partners_revolut_manual_batches', {
+                    p_limit: 25,
+                    p_offset: 0,
+                    p_status: 'all'
+                }),
+                this._rpc('admin_partners_revolut_reconciliation_queue', {
+                    p_limit: 25,
+                    p_offset: 0,
+                    p_status: 'all'
+                }),
+                this._rpc('admin_partners_revolut_return_queue', {
+                    p_limit: 25,
+                    p_offset: 0,
+                    p_status: 'all'
+                }),
+                this._rpc('admin_partners_revolut_manual_controls_queue', {
+                    p_limit: 50,
+                    p_offset: 0,
+                    p_status: 'all'
+                }),
+                this._rpc('admin_partners_revolut_late_completion_queue', {
+                    p_limit: 50,
+                    p_offset: 0,
+                    p_status: 'all'
+                }),
+                this._rpc('admin_partners_revolut_reconciliation_incidents', {
+                    p_limit: 25,
+                    p_offset: incidentOffset,
+                    p_status: incidentFilter
                 })
             ]);
             if (nav !== this._nav || this._route !== 'partners') return;
@@ -4350,11 +4424,16 @@ class AdminPage {
             this._renderPartnersKycQuota(value(3, null));
             this._renderPartnersFinance(value(4, null));
             this._renderPartnersRisk(value(5, null));
-            this._renderPartnersPayouts(value(6, null));
+            this._renderPartnersPayouts(value(6, null), value(11, null));
             this._renderPartnersMonitoring(value(7, null));
             this._renderPartnersConfiguration(value(8, null));
             this._renderPartnersAnalytics(value(9, null));
-            this._renderPartnersSettlements(value(10, null));
+            this._renderPartnersRevolutStatus(value(10, null));
+            this._renderPartnersRevolutReconciliation(value(12, null));
+            this._renderPartnersRevolutReturns(value(13, null));
+            this._renderPartnersRevolutManualControls(value(14, null));
+            this._renderPartnersRevolutLateCompletions(value(15, null));
+            this._renderPartnersRevolutIncidents(value(16, null));
         } catch (_) {
             if (nav !== this._nav || this._route !== 'partners') return;
             this._partnersCanManageCapabilities = false;
@@ -4369,11 +4448,16 @@ class AdminPage {
             this._renderPartnersKycQuota(null);
             this._renderPartnersFinance(null);
             this._renderPartnersRisk(null);
-            this._renderPartnersPayouts(null);
+            this._renderPartnersPayouts(null, null);
             this._renderPartnersMonitoring(null);
             this._renderPartnersConfiguration(null);
             this._renderPartnersAnalytics(null);
-            this._renderPartnersSettlements(null);
+            this._renderPartnersRevolutStatus(null);
+            this._renderPartnersRevolutReconciliation(null);
+            this._renderPartnersRevolutReturns(null);
+            this._renderPartnersRevolutManualControls(null);
+            this._renderPartnersRevolutLateCompletions(null);
+            this._renderPartnersRevolutIncidents(null);
         }
     }
 
@@ -4717,6 +4801,25 @@ class AdminPage {
         return names.every((name) => this._partnersCapabilities?.[name] === true);
     }
 
+    _partnersFormatMinor(value, currency, exponent = 2) {
+        const amount = Number(value);
+        const decimals = Number(exponent);
+        const code = String(currency || '').toUpperCase();
+        if (!Number.isSafeInteger(amount) || amount < 0
+            || !Number.isInteger(decimals) || decimals < 0 || decimals > 6
+            || !/^[A-Z]{3}$/.test(code)) return 'Montant indisponible';
+        try {
+            return new Intl.NumberFormat('fr-FR', {
+                style: 'currency',
+                currency: code,
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            }).format(amount / (10 ** decimals));
+        } catch (_) {
+            return `${AdminPage.n(amount)} ${code} en unités mineures`;
+        }
+    }
+
     _partnersCanUseConfigurationAction(action) {
         if (['program-create', 'program-activate'].includes(action)) {
             return this._partnersHasCapabilities('support', 'finance');
@@ -4745,7 +4848,9 @@ class AdminPage {
                 'financial_data_contract_approved',
                 'shadow_reconciliation_clean',
                 'backup_restore_verified',
-                'payout_execution_adapter_verified'
+                'payout_execution_adapter_verified',
+                'manual_payout_workflow_verified',
+                'revolut_api_adapter_verified'
             ].includes(key)) return this._partnersHasCapabilities('finance');
             if ([
                 'privacy_approved',
@@ -4763,6 +4868,13 @@ class AdminPage {
         if (key === 'partners_payouts_live') {
             return this._partnersHasCapabilities('finance')
                 && this._partnersCanManageRelease === true;
+        }
+        if (key === 'partners_revolut_api_enabled') {
+            return targetEnabled
+                ? this._partnersHasCapabilities('finance')
+                    && this._partnersCanManageRelease === true
+                : this._partnersHasCapabilities('finance')
+                    || this._partnersCanManageRelease === true;
         }
         if (key === 'partners_enabled') {
             return this._partnersCanManageRelease === true
@@ -4782,54 +4894,138 @@ class AdminPage {
         return false;
     }
 
-    _renderPartnersSettlements(data) {
+    _renderPartnersRevolutStatus(data) {
+        const el = document.getElementById('partners-admin-revolut');
+        if (!el) return;
+        if (data?.schema_version !== 1
+            || data?.provider !== 'revolut_business'
+            || data?.production_mode !== 'revolut_manual'
+            || data?.plan !== 'basic'
+            || typeof data?.api_enabled !== 'boolean'
+            || typeof data?.api_adapter_verified !== 'boolean'
+            || !Array.isArray(data?.routes)
+            || !data?.counts || typeof data.counts !== 'object') {
+            this._partnersOpsUnavailable(
+                'partners-admin-revolut',
+                'Revolut Business'
+            );
+            return;
+        }
+        const countValue = (value) => Number.isSafeInteger(Number(value))
+            && Number(value) >= 0 ? AdminPage.n(Number(value)) : 'inconnu';
+        const routes = data.routes.slice(0, 50).map((route) => {
+            const country = /^[A-Z]{2}$/.test(String(route?.country_code || ''))
+                ? route.country_code : '—';
+            const currency = /^[A-Z]{3}$/.test(String(route?.currency || ''))
+                ? route.currency : '—';
+            const status = route?.status === 'active' ? 'active' : 'disabled';
+            const adapter = route?.execution_adapter === 'revolut_api'
+                ? 'API'
+                : (route?.execution_adapter === 'revolut_manual'
+                    ? 'manuel Basic'
+                    : 'adaptateur inconnu');
+            return `<div class="partners-control-item">
+                <span>${AdminPage.esc(country)} · ${AdminPage.esc(currency)}
+                  <small>Exécution ${AdminPage.esc(adapter)} · mise à jour ${route?.updated_at ? AdminPage.esc(AdminPage.timeAgo(route.updated_at)) : 'indisponible'}</small>
+                </span>
+                <span class="partners-state${status === 'active' ? ' is-on' : ''}">${status === 'active' ? 'Route active' : 'Route désactivée'}</span>
+              </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Revolut Business · Basic</h2>
+              <p>Production en mode manuel : Norva prépare et contrôle les lots, puis un opérateur Finance valide et paie dans Revolut. Aucun virement n’est déclenché automatiquement.</p>
+            </div>
+            <div class="partners-action-row">
+              <span class="partners-state is-on">Production · manuel</span>
+              <span class="partners-state${data.api_enabled ? ' is-alert' : ''}">Flag DB API ${data.api_enabled ? 'activé' : 'désactivé'}</span>
+              <span class="partners-state${data.api_adapter_verified ? ' is-on' : ''}">Gate adaptateur API ${data.api_adapter_verified ? 'validé' : 'non validé'}</span>
+            </div>
+          </div>
+          <div class="partners-ops-stats">
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.manual_batches_open)}</strong><span>lots manuels ouverts</span></div>
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.manual_statement_pending)}</strong><span>saisies en attente de relevé</span></div>
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.statement_matched_review_pending)}</strong><span>relevés à valider</span></div>
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.reconciliation_pending)}</strong><span>rapprochements sans incident</span></div>
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.manual_batches_exception)}</strong><span>lots en exception</span></div>
+            <div class="partners-ops-stat"><strong>${countValue(data.counts.api_dead_letter)}</strong><span>API dead letter</span></div>
+          </div>
+          <div class="partners-control-grid" style="margin-top:12px">
+            ${routes || '<div class="ssub">Aucune route Revolut configurée.</div>'}
+          </div>`;
+    }
+
+    _renderPartnersRevolutReconciliation(data) {
         const el = document.getElementById('partners-admin-settlements');
         if (!el) return;
         if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
             || !Array.isArray(data.items)) {
             this._partnersOpsUnavailable(
                 'partners-admin-settlements',
-                'Rapprochement Airwallex'
+                'Rapprochement Revolut'
             );
             return;
         }
-        const stageLabels = {
-            needs_review: 'Revue Finance requise',
-            awaiting_independent_decision: 'Second opérateur requis',
-            needs_decision: 'Décision requise',
+        const statusLabels = {
+            matched: 'Correspondance exacte · revue requise',
+            unmatched: 'Référence Norva inconnue',
+            mismatch: 'Écart à résoudre',
+            reviewed: 'Second opérateur Finance requis',
             confirmed: 'Confirmé',
-            quarantined: 'Mis en quarantaine',
-            exception: 'Exception après règlement'
+            quarantined: 'Mis en quarantaine'
+        };
+        const discrepancyLabels = {
+            unknown_reference: 'Référence Norva inconnue',
+            amount_mismatch: 'Montant différent',
+            currency_mismatch: 'Devise différente',
+            transaction_mismatch: 'Transaction différente',
+            execution_state_mismatch: 'État du lot incompatible',
+            provider_not_completed: 'Transaction Revolut non terminée'
         };
         const rows = data.items.slice(0, 25).map((item) => {
-            const observation = String(item?.observation_key || '');
-            const dispatch = String(item?.dispatch_key || '');
+            const statementRow = String(item?.statement_row_key || '');
+            const review = String(item?.review_key || '');
+            const reference = String(item?.reference || '');
             const currency = String(item?.currency || '');
-            const stage = String(item?.stage || '');
-            const validKeys = /^aso_[0-9a-f]{24}$/.test(observation)
-                && /^pds_[0-9a-f]{24}$/.test(dispatch);
+            const destination = String(item?.destination_masked || '');
+            const status = String(item?.effective_status || '');
+            const validRow = /^rsr_[0-9a-f]{24}$/.test(statementRow);
+            const validReview = /^rmr_[0-9a-f]{24}$/.test(review);
+            const validReference = /^NORVA-[A-F0-9]{12}$/.test(reference);
+            const validDestination = destination.length >= 4
+                && destination.length <= 64
+                && /[*•]/u.test(destination)
+                && !/[\u0000-\u001f\u007f]/u.test(destination);
             const validMoney = Number.isSafeInteger(item?.amount_minor)
                 && item.amount_minor > 0
                 && /^[A-Z]{3}$/.test(currency);
             const actions = [];
-            if (validKeys && item?.can_review === true
+            if (validRow && status === 'matched' && !review
                 && this._partnersCapabilities.finance === true) {
                 actions.push(`<button type="button" class="partners-action"
-                    data-partners-action="settlement-review"
-                    data-partners-observation="${AdminPage.esc(observation)}">
+                    data-partners-action="revolut-reconciliation-review"
+                    data-partners-statement-row="${AdminPage.esc(statementRow)}"
+                    data-partners-reference="${AdminPage.esc(validReference ? reference : '')}"
+                    data-partners-destination="${AdminPage.esc(validDestination ? destination : '')}"
+                    data-partners-amount="${validMoney ? item.amount_minor : ''}"
+                    data-partners-currency="${AdminPage.esc(validMoney ? currency : '')}">
                     Effectuer la revue
                   </button>`);
             }
-            if (validKeys && item?.can_decide === true
+            if (validReview && status === 'reviewed'
                 && this._partnersCapabilities.finance === true) {
                 actions.push(`<button type="button" class="partners-action is-success"
-                    data-partners-action="settlement-confirm"
-                    data-partners-observation="${AdminPage.esc(observation)}">
+                    data-partners-action="revolut-reconciliation-confirm"
+                    data-partners-review="${AdminPage.esc(review)}"
+                    data-partners-reference="${AdminPage.esc(validReference ? reference : '')}"
+                    data-partners-destination="${AdminPage.esc(validDestination ? destination : '')}"
+                    data-partners-amount="${validMoney ? item.amount_minor : ''}"
+                    data-partners-currency="${AdminPage.esc(validMoney ? currency : '')}">
                     Confirmer
                   </button>`);
                 actions.push(`<button type="button" class="partners-action is-danger"
-                    data-partners-action="settlement-quarantine"
-                    data-partners-observation="${AdminPage.esc(observation)}">
+                    data-partners-action="revolut-reconciliation-quarantine"
+                    data-partners-review="${AdminPage.esc(review)}">
                     Quarantaine
                   </button>`);
             }
@@ -4840,23 +5036,741 @@ class AdminPage {
                 ? String(item.value_date)
                 : 'indisponible';
             return `<div class="partners-ops-row">
-              <span>${AdminPage.esc(validKeys ? dispatch : 'Rapprochement invalide')}
+              <span>${AdminPage.esc(validReference ? reference : 'Référence invalide')}
                 <small>${validMoney
                     ? `${AdminPage.n(item.amount_minor)} ${AdminPage.esc(currency)} en unités mineures`
-                    : 'Montant indisponible'} · valeur ${AdminPage.esc(valueDate)} · ${AdminPage.esc(observed)}</small>
+                    : 'Montant indisponible'} · valeur ${AdminPage.esc(valueDate)} · ${AdminPage.esc(observed)}
+                    ${item?.discrepancy_code ? ` · ${AdminPage.esc(discrepancyLabels[item.discrepancy_code] || 'Écart non reconnu')}` : ''}
+                    · destination attendue ${AdminPage.esc(validDestination ? destination : 'indisponible')} · à comparer dans Revolut</small>
               </span>
               <div class="partners-risk-actions">${actions.join('')
-                  || `<span class="partners-state">${AdminPage.esc(stageLabels[stage] || 'État indisponible')}</span>`}</div>
+                  || `<span class="partners-state${['unmatched', 'mismatch', 'quarantined'].includes(status) ? ' is-alert' : ''}">${AdminPage.esc(statusLabels[status] || 'État indisponible')}</span>`}</div>
             </div>`;
         }).join('');
         el.removeAttribute('aria-busy');
         el.innerHTML = `<div class="partners-control-head">
-            <div><h2>Rapprochement Airwallex</h2>
-              <p>${AdminPage.n(data.total)} preuve(s) minimisée(s). Aucun identifiant provider, hash de preuve ou document bancaire n’est affiché.</p>
+            <div><h2>Journal normalisé · correspondances exactes</h2>
+              <p>${AdminPage.n(data.total)} ligne(s) normalisée(s). Cette vue sert aux correspondances exactes historiques ; les écarts se résolvent exclusivement dans la file append-only ci-dessous. Le relevé brut n’est jamais conservé.</p>
             </div>
+            ${this._partnersCapabilities.finance === true ? `<button type="button" class="partners-action"
+              data-partners-action="revolut-statement-import">Importer un relevé CSV</button>` : ''}
           </div>
           <div class="partners-ops-list">${rows
               || '<div class="ssub">Aucun rapprochement à traiter.</div>'}</div>`;
+    }
+
+    _renderPartnersRevolutIncidents(data) {
+        const sectionId = 'partners-admin-reconciliation-incidents';
+        const el = document.getElementById(sectionId);
+        if (!el) return;
+        const filters = new Set([
+            'action_required',
+            'open',
+            'quarantined',
+            'resolved',
+            'all'
+        ]);
+        const statuses = new Set(['open', 'quarantined', 'resolved']);
+        const kinds = new Set([
+            'unknown_reference',
+            'provider_not_completed',
+            'amount_mismatch',
+            'currency_mismatch',
+            'transaction_mismatch',
+            'execution_state_mismatch'
+        ]);
+        const providerStates = new Set([
+            'CREATED',
+            'PENDING',
+            'PROCESSING',
+            'COMPLETED',
+            'FAILED',
+            'REVERTED',
+            'CANCELLED'
+        ]);
+        const resolutionActions = new Set([
+            'settle_exact',
+            'remap_exact_and_settle',
+            'release_after_return',
+            'quarantine'
+        ]);
+        const safeCount = (value) => Number.isSafeInteger(value) && value >= 0;
+        const requestedFilter = filters.has(this._partnersIncidentFilter)
+            ? this._partnersIncidentFilter
+            : 'action_required';
+        const requestedOffset = Number.isSafeInteger(
+            this._partnersIncidentOffset
+        ) && this._partnersIncidentOffset >= 0
+            ? this._partnersIncidentOffset
+            : 0;
+        if (data?.schema_version !== 1
+            || !filters.has(String(data?.filter || ''))
+            || data.filter !== requestedFilter
+            || !safeCount(data?.total)
+            || !safeCount(data?.action_required)
+            || !Number.isSafeInteger(data?.limit)
+            || data.limit < 1 || data.limit > 200
+            || !safeCount(data?.offset)
+            || data.offset !== requestedOffset
+            || !Array.isArray(data?.items)
+            || data.items.length > data.limit) {
+            this._partnersReconciliationIncidents = new Map();
+            this._partnersOpsUnavailable(
+                sectionId,
+                'Écarts de rapprochement Revolut'
+            );
+            return;
+        }
+        if (data.offset > 0 && data.items.length === 0
+            && data.offset >= data.total) {
+            this._partnersIncidentOffset = data.total > 0
+                ? Math.floor((data.total - 1) / data.limit) * data.limit
+                : 0;
+            if (this._route === 'partners') this._pagePartners();
+            return;
+        }
+
+        const normalized = [];
+        const contexts = new Map();
+        for (const raw of data.items) {
+            const key = String(raw?.key || '');
+            const status = String(raw?.status || '');
+            const kind = String(raw?.kind || '');
+            const reference = String(raw?.source_reference || '');
+            const fingerprint = String(
+                raw?.source_transaction_fingerprint || ''
+            );
+            const sourceState = String(raw?.source_state || '');
+            const amount = Number(raw?.source_amount_minor);
+            const currency = String(raw?.source_currency || '');
+            const exponent = raw?.source_currency_exponent == null
+                ? null
+                : Number(raw.source_currency_exponent);
+            const expectedReference = raw?.expected_reference == null
+                ? null
+                : String(raw.expected_reference);
+            const expectedAmount = raw?.expected_amount_minor == null
+                ? null
+                : Number(raw.expected_amount_minor);
+            const expectedCurrency = raw?.expected_currency == null
+                ? null
+                : String(raw.expected_currency);
+            const expectedExponent = raw?.expected_currency_exponent == null
+                ? null
+                : Number(raw.expected_currency_exponent);
+            const observedAt = String(raw?.observed_at || '');
+            const valueDate = String(raw?.value_date || '');
+            const eligible = Array.isArray(raw?.eligible_actions)
+                ? raw.eligible_actions.map(String)
+                : null;
+            const uniqueEligible = eligible
+                && new Set(eligible).size === eligible.length
+                && eligible.every((value) => resolutionActions.has(value));
+            const pendingRaw = raw?.pending_review;
+            let pendingReview = null;
+            if (pendingRaw != null) {
+                const reviewKey = String(pendingRaw?.key || '');
+                const proposedAction = String(
+                    pendingRaw?.proposed_action || ''
+                );
+                const targetReference = pendingRaw?.target_reference == null
+                    ? null
+                    : String(pendingRaw.target_reference);
+                const requestedAt = String(pendingRaw?.requested_at || '');
+                if (!/^rir_[0-9a-f]{24}$/.test(reviewKey)
+                    || !resolutionActions.has(proposedAction)
+                    || (
+                        targetReference !== null
+                        && !/^NORVA-[A-F0-9]{12}$/.test(targetReference)
+                    )
+                    || (
+                        (proposedAction === 'quarantine')
+                        !== (targetReference === null)
+                    )
+                    || !Number.isFinite(Date.parse(requestedAt))) {
+                    this._partnersReconciliationIncidents = new Map();
+                    this._partnersOpsUnavailable(
+                        sectionId,
+                        'Écarts de rapprochement Revolut'
+                    );
+                    return;
+                }
+                pendingReview = {
+                    key: reviewKey,
+                    proposedAction,
+                    targetReference,
+                    requestedAt
+                };
+            }
+            const aliasRaw = raw?.transaction_alias;
+            let transactionAlias = null;
+            if (aliasRaw != null) {
+                const aliasKey = String(aliasRaw?.key || '');
+                const superseded = aliasRaw
+                    ?.superseded_transaction_fingerprint == null
+                    ? null
+                    : String(aliasRaw.superseded_transaction_fingerprint);
+                const authoritative = String(
+                    aliasRaw?.authoritative_transaction_fingerprint || ''
+                );
+                if (!/^rta_[0-9a-f]{24}$/.test(aliasKey)
+                    || (
+                        superseded !== null
+                        && !/^[0-9a-f]{12}$/.test(superseded)
+                    )
+                    || !/^[0-9a-f]{12}$/.test(authoritative)) {
+                    this._partnersReconciliationIncidents = new Map();
+                    this._partnersOpsUnavailable(
+                        sectionId,
+                        'Écarts de rapprochement Revolut'
+                    );
+                    return;
+                }
+                transactionAlias = {
+                    key: aliasKey,
+                    superseded,
+                    authoritative
+                };
+            }
+            const resolution = raw?.resolution == null
+                ? null
+                : String(raw.resolution);
+            const resolvedAt = raw?.resolved_at == null
+                ? null
+                : String(raw.resolved_at);
+            const validExpected = (
+                expectedReference === null
+                && expectedAmount === null
+                && expectedCurrency === null
+                && expectedExponent === null
+            ) || (
+                /^NORVA-[A-F0-9]{12}$/.test(expectedReference || '')
+                && Number.isSafeInteger(expectedAmount)
+                && expectedAmount > 0
+                && /^[A-Z]{3}$/.test(expectedCurrency || '')
+                && (
+                    expectedExponent === null
+                    || (
+                        Number.isInteger(expectedExponent)
+                        && expectedExponent >= 0
+                        && expectedExponent <= 6
+                    )
+                )
+            );
+            if (!/^rri_[0-9a-f]{24}$/.test(key)
+                || contexts.has(key)
+                || !statuses.has(status)
+                || !Number.isInteger(raw?.priority)
+                || raw.priority < 1 || raw.priority > 4
+                || !kinds.has(kind)
+                || !/^NORVA-[A-F0-9]{12}$/.test(reference)
+                || !/^[0-9a-f]{12}$/.test(fingerprint)
+                || !providerStates.has(sourceState)
+                || !Number.isSafeInteger(amount) || amount < 1
+                || !/^[A-Z]{3}$/.test(currency)
+                || (
+                    exponent !== null
+                    && (
+                        !Number.isInteger(exponent)
+                        || exponent < 0 || exponent > 6
+                    )
+                )
+                || !validExpected
+                || !/^\d{4}-\d{2}-\d{2}$/.test(valueDate)
+                || !Number.isFinite(Date.parse(observedAt))
+                || !uniqueEligible
+                || (status === 'resolved' && eligible.length !== 0)
+                || (
+                    resolution !== null
+                    && !resolutionActions.has(resolution)
+                )
+                || (
+                    resolvedAt !== null
+                    && !Number.isFinite(Date.parse(resolvedAt))
+                )
+                || (
+                    status === 'resolved'
+                    && (
+                        resolution === null
+                        || resolution === 'quarantine'
+                        || resolvedAt === null
+                        || pendingReview !== null
+                    )
+                )
+                || (
+                    status !== 'resolved'
+                    && (resolution !== null || resolvedAt !== null)
+                )
+                || (
+                    transactionAlias !== null
+                    && (
+                        status !== 'resolved'
+                        || resolution !== 'remap_exact_and_settle'
+                    )
+                )
+                || (
+                    status === 'resolved'
+                    && resolution === 'remap_exact_and_settle'
+                    && transactionAlias === null
+                )) {
+                this._partnersReconciliationIncidents = new Map();
+                this._partnersOpsUnavailable(
+                    sectionId,
+                    'Écarts de rapprochement Revolut'
+                );
+                return;
+            }
+            const context = {
+                key,
+                status,
+                priority: raw.priority,
+                kind,
+                reference,
+                fingerprint,
+                sourceState,
+                amount,
+                currency,
+                exponent,
+                expectedReference,
+                expectedAmount,
+                expectedCurrency,
+                expectedExponent,
+                observedAt,
+                valueDate,
+                eligibleActions: eligible,
+                pendingReview,
+                transactionAlias,
+                resolution,
+                resolvedAt
+            };
+            contexts.set(key, context);
+            normalized.push(context);
+        }
+        this._partnersReconciliationIncidents = contexts;
+
+        const kindLabels = {
+            unknown_reference: 'Référence inconnue',
+            provider_not_completed: 'Transaction non terminée',
+            amount_mismatch: 'Montant différent',
+            currency_mismatch: 'Devise différente',
+            transaction_mismatch: 'Identité transaction différente',
+            execution_state_mismatch: 'État d’exécution incompatible'
+        };
+        const actionLabels = {
+            settle_exact: 'Comptabiliser exact',
+            remap_exact_and_settle: 'Remapper et comptabiliser',
+            release_after_return: 'Libérer après retour confirmé',
+            quarantine: 'Quarantaine'
+        };
+        const statusLabels = {
+            open: 'Action requise',
+            quarantined: 'Quarantaine révisable',
+            resolved: 'Résolu'
+        };
+        const formatMoney = (value, code, moneyExponent) => (
+            Number.isInteger(moneyExponent)
+                ? this._partnersFormatMinor(value, code, moneyExponent)
+                : `${AdminPage.n(value)} ${AdminPage.esc(code)} en unités mineures`
+        );
+        const rows = normalized.map((item) => {
+            const actions = [];
+            if (this._partnersCapabilities.finance === true
+                && item.status !== 'resolved') {
+                if (item.pendingReview) {
+                    actions.push(`<button type="button" class="partners-action is-success"
+                      data-partners-action="revolut-incident-decide-approve"
+                      data-partners-incident="${AdminPage.esc(item.key)}">
+                      Approuver le contrôle 2/2
+                    </button>`);
+                    actions.push(`<button type="button" class="partners-action is-danger"
+                      data-partners-action="revolut-incident-decide-quarantine"
+                      data-partners-incident="${AdminPage.esc(item.key)}">
+                      Refuser · quarantaine
+                    </button>`);
+                } else {
+                    for (const resolutionAction of item.eligibleActions) {
+                        const cls = resolutionAction === 'quarantine'
+                            || resolutionAction === 'release_after_return'
+                            ? ' is-danger'
+                            : ' is-success';
+                        actions.push(`<button type="button" class="partners-action${cls}"
+                          data-partners-action="revolut-incident-review"
+                          data-partners-incident="${AdminPage.esc(item.key)}"
+                          data-partners-resolution="${AdminPage.esc(resolutionAction)}">
+                          ${AdminPage.esc(actionLabels[resolutionAction])}
+                        </button>`);
+                    }
+                }
+            }
+            const expected = item.expectedReference
+                ? ` · attendu ${AdminPage.esc(item.expectedReference)} · ${formatMoney(item.expectedAmount, item.expectedCurrency, item.expectedExponent)}`
+                : '';
+            const review = item.pendingReview
+                ? `<small>Contrôle 1/2 enregistré : ${AdminPage.esc(actionLabels[item.pendingReview.proposedAction])}${item.pendingReview.targetReference ? ` vers ${AdminPage.esc(item.pendingReview.targetReference)}` : ''}. Un autre opérateur Finance doit décider.</small>`
+                : '';
+            const alias = item.transactionAlias
+                ? `<small>Alias append-only · empreinte autoritaire ${AdminPage.esc(item.transactionAlias.authoritative)}</small>`
+                : '';
+            return `<div class="partners-ops-row">
+              <span><strong>P${AdminPage.n(item.priority)} · ${AdminPage.esc(kindLabels[item.kind])}</strong>
+                <small>${AdminPage.esc(item.reference)} · ${formatMoney(item.amount, item.currency, item.exponent)}${expected}</small>
+                <small>État Revolut ${AdminPage.esc(item.sourceState)} · empreinte ${AdminPage.esc(item.fingerprint)} · valeur ${AdminPage.esc(item.valueDate)} · observé ${AdminPage.esc(AdminPage.timeAgo(item.observedAt))}</small>
+                ${review}${alias}
+              </span>
+              <div class="partners-risk-actions">${actions.join('')
+                  || `<span class="partners-state${item.status === 'resolved' ? ' is-on' : ' is-alert'}">${AdminPage.esc(statusLabels[item.status])}</span>`}</div>
+            </div>`;
+        }).join('');
+        const selectedFilter = String(data.filter);
+        const filterOptions = [
+            ['action_required', 'À traiter'],
+            ['open', 'Ouverts'],
+            ['quarantined', 'Quarantaines'],
+            ['resolved', 'Résolus'],
+            ['all', 'Tous']
+        ].map(([value, label]) => (
+            `<option value="${value}"${selectedFilter === value ? ' selected' : ''}>${label}</option>`
+        )).join('');
+        const hasPrevious = data.offset > 0;
+        const hasNext = data.offset + data.items.length < data.total;
+        const previousOffset = Math.max(0, data.offset - data.limit);
+        const nextOffset = data.offset + data.limit;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Écarts de rapprochement Revolut</h2>
+              <p>${AdminPage.n(data.action_required)} action(s) requise(s) au total · ${AdminPage.n(data.total)} résultat(s) dans ce filtre. Une valeur indisponible n’est jamais convertie en zéro.</p>
+            </div>
+            <label class="ssub">État
+              <select id="partners-revolut-incident-filter" aria-label="Filtrer les écarts Revolut">
+                ${filterOptions}
+              </select>
+            </label>
+          </div>
+          <div class="partners-ops-list">${rows
+              || '<div class="ssub">Aucun incident dans ce filtre.</div>'}</div>
+          <div class="partners-action-row" style="margin-top:12px">
+            <button type="button" class="partners-action"
+              data-partners-action="revolut-incident-page"
+              data-partners-offset="${previousOffset}"${hasPrevious ? '' : ' disabled'}>Précédent</button>
+            <span class="ssub">Résultats ${data.items.length ? data.offset + 1 : 0}–${data.offset + data.items.length}</span>
+            <button type="button" class="partners-action"
+              data-partners-action="revolut-incident-page"
+              data-partners-offset="${nextOffset}"${hasNext ? '' : ' disabled'}>Suivant</button>
+          </div>`;
+        const filter = document.getElementById(
+            'partners-revolut-incident-filter'
+        );
+        if (filter) filter.addEventListener('change', () => {
+            if (!filters.has(filter.value)) return;
+            this._partnersIncidentFilter = filter.value;
+            this._partnersIncidentOffset = 0;
+            if (this._route === 'partners') this._pagePartners();
+        });
+    }
+
+    _renderPartnersRevolutReturns(data) {
+        const el = document.getElementById('partners-admin-returns');
+        if (!el) return;
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable(
+                'partners-admin-returns',
+                'Retours et déblocages Revolut'
+            );
+            return;
+        }
+        const statusLabels = {
+            pending: 'Revue Finance requise',
+            reviewed: 'Décision d’un second opérateur requise',
+            confirmed: 'Résolution confirmée',
+            quarantined: 'Observation en quarantaine'
+        };
+        const kindLabels = {
+            pre_settlement_release: 'Déblocage avant règlement',
+            post_settlement_return: 'Retour après règlement'
+        };
+        const providerStates = {
+            FAILED: 'Échec',
+            DECLINED: 'Refusé',
+            CANCELLED: 'Annulé',
+            REVERTED: 'Retourné'
+        };
+        const rows = data.items.slice(0, 25).map((item) => {
+            const observation = String(item?.observation_key || '');
+            const review = String(item?.review_key || '');
+            const reference = String(item?.reference || '');
+            const destination = String(item?.destination_masked || '');
+            const currency = String(item?.currency || '');
+            const kind = String(item?.return_kind || '');
+            const state = String(item?.provider_state || '').toUpperCase();
+            const status = String(item?.status || '');
+            const conclusion = String(item?.review_conclusion || '');
+            const validObservation = /^rro_[0-9a-f]{24}$/.test(observation);
+            const validReview = /^rrv_[0-9a-f]{24}$/.test(review);
+            const validReference = /^NORVA-[A-F0-9]{12}$/.test(reference);
+            const validDestination = destination.length >= 4
+                && destination.length <= 64
+                && /[*•]/u.test(destination)
+                && !/[\u0000-\u001f\u007f]/u.test(destination);
+            const validMoney = Number.isSafeInteger(item?.amount_minor)
+                && item.amount_minor > 0
+                && /^[A-Z]{3}$/.test(currency);
+            const actions = [];
+            if (validObservation && status === 'pending'
+                && this._partnersCapabilities.finance === true) {
+                actions.push(`<button type="button" class="partners-action"
+                    data-partners-action="revolut-return-review-eligible"
+                    data-partners-observation="${AdminPage.esc(observation)}"
+                    data-partners-reference="${AdminPage.esc(validReference ? reference : '')}"
+                    data-partners-destination="${AdminPage.esc(validDestination ? destination : '')}"
+                    data-partners-amount="${validMoney ? item.amount_minor : ''}"
+                    data-partners-currency="${AdminPage.esc(validMoney ? currency : '')}">
+                    Valider la revue
+                  </button>`);
+                actions.push(`<button type="button" class="partners-action is-danger"
+                    data-partners-action="revolut-return-review-quarantine"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Revue en quarantaine
+                  </button>`);
+            }
+            if (validReview && status === 'reviewed'
+                && this._partnersCapabilities.finance === true) {
+                if (conclusion === 'eligible') {
+                    actions.push(`<button type="button" class="partners-action is-success"
+                        data-partners-action="revolut-return-decide-confirm"
+                        data-partners-review="${AdminPage.esc(review)}"
+                        data-partners-reference="${AdminPage.esc(validReference ? reference : '')}"
+                        data-partners-destination="${AdminPage.esc(validDestination ? destination : '')}"
+                        data-partners-amount="${validMoney ? item.amount_minor : ''}"
+                        data-partners-currency="${AdminPage.esc(validMoney ? currency : '')}">
+                        Confirmer la résolution
+                      </button>`);
+                } else if (conclusion === 'quarantine') {
+                    actions.push(`<button type="button" class="partners-action is-danger"
+                        data-partners-action="revolut-return-decide-quarantine"
+                        data-partners-review="${AdminPage.esc(review)}">
+                        Confirmer la quarantaine
+                      </button>`);
+                }
+            }
+            const observed = item?.observed_at
+                ? AdminPage.timeAgo(item.observed_at)
+                : 'date indisponible';
+            return `<div class="partners-ops-row">
+              <span>${AdminPage.esc(validReference ? reference : 'Référence invalide')}
+                <small>${AdminPage.esc(kindLabels[kind] || 'Nature indéterminée')}
+                  · ${AdminPage.esc(providerStates[state] || 'État provider inconnu')}
+                  · ${validMoney
+                    ? `${AdminPage.n(item.amount_minor)} ${AdminPage.esc(currency)} en unités mineures`
+                    : 'montant indisponible'}
+                  · observé ${AdminPage.esc(observed)}
+                  · destination attendue ${AdminPage.esc(validDestination ? destination : 'indisponible')}</small>
+              </span>
+              <div class="partners-risk-actions">${actions.join('')
+                  || `<span class="partners-state${['pending', 'reviewed', 'quarantined'].includes(status) ? ' is-alert' : ' is-on'}">${AdminPage.esc(statusLabels[status] || 'État indisponible')}</span>`}</div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Retours et déblocages Revolut</h2>
+              <p>${AdminPage.n(data.total)} observation(s) terminale(s). Une résolution confirmée crée une contre-écriture dédiée ; aucun paiement déjà confirmé n’est réécrit.</p>
+            </div>
+          </div>
+          <div class="partners-ops-list">${rows
+              || '<div class="ssub">Aucun retour ou déblocage à traiter.</div>'}</div>`;
+    }
+
+    _renderPartnersRevolutManualControls(data) {
+        const el = document.getElementById('partners-admin-manual-controls');
+        if (!el) return;
+        this._partnersManualControls = new Map();
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable(
+                'partners-admin-manual-controls',
+                'Contrôles des lots manuels'
+            );
+            return;
+        }
+        const rows = data.items.slice(0, 50).map((item) => {
+            const key = String(item?.key || '');
+            const type = String(item?.type || '');
+            const status = String(item?.status || '');
+            const batchKey = String(item?.batch_key || '');
+            const referenceSetHash = String(item?.reference_set_hash || '');
+            const references = Array.isArray(item?.references)
+                ? item.references.slice(0, 5000)
+                : [];
+            const validKey = type === 'batch_cancellation'
+                ? /^rmc_[0-9a-f]{24}$/.test(key)
+                : type === 'unmapped_release'
+                    && /^ruq_[0-9a-f]{24}$/.test(key);
+            const validReferences = references.length > 0
+                && references.every((row) => (
+                    /^NORVA-[A-F0-9]{12}$/.test(
+                        String(row?.reference || '')
+                    )
+                    && Number.isSafeInteger(row?.amount_minor)
+                    && row.amount_minor > 0
+                    && /^[A-Z]{3}$/.test(String(row?.currency || ''))
+                    && Number.isInteger(row?.currency_exponent)
+                    && row.currency_exponent >= 0
+                    && row.currency_exponent <= 6
+                ));
+            if (validKey && /^rmb_[0-9a-f]{24}$/.test(batchKey)
+                && /^[0-9a-f]{64}$/.test(referenceSetHash)
+                && validReferences
+                && ['pending', 'confirmed', 'rejected'].includes(status)) {
+                this._partnersManualControls.set(key, {
+                    key,
+                    type,
+                    status,
+                    batchKey,
+                    referenceSetHash,
+                    references: references.map((row) => row.reference)
+                });
+            }
+            const canConfirm = status === 'pending'
+                && this._partnersCapabilities.finance === true
+                && this._partnersManualControls.has(key);
+            const label = type === 'batch_cancellation'
+                ? 'Annulation intégrale du lot'
+                : 'Déblocage des virements non saisis';
+            const eligible = item?.eligible_at
+                ? new Date(item.eligible_at).toLocaleString('fr-FR')
+                : 'immédiatement';
+            return `<div class="partners-ops-row">
+              <span>${AdminPage.esc(label)} · ${AdminPage.esc(batchKey || 'lot indisponible')}
+                <small>${AdminPage.n(references.length)} référence(s) · demandé ${AdminPage.esc(item?.requested_at ? AdminPage.timeAgo(item.requested_at) : 'date indisponible')} · fenêtre de sûreté ${AdminPage.esc(eligible)}</small>
+              </span>
+              <div class="partners-risk-actions">${canConfirm
+                    ? `<button type="button" class="partners-action is-danger"
+                        data-partners-action="revolut-manual-control-confirm"
+                        data-partners-control="${AdminPage.esc(key)}">
+                        Contrôle indépendant et décision
+                      </button>
+                      <button type="button" class="partners-action"
+                        data-partners-action="revolut-manual-control-reject"
+                        data-partners-control="${AdminPage.esc(key)}">
+                        Rejeter la demande
+                      </button>`
+                    : `<span class="partners-state${status === 'confirmed' ? ' is-on' : ' is-alert'}">${status === 'confirmed' ? 'Confirmé' : status === 'rejected' ? 'Rejeté · lot dégelé' : 'Second opérateur requis'}</span>`}
+              </div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Contrôles des lots manuels</h2>
+              <p>${AdminPage.n(data.total)} contrôle(s). La preuve reste dans le registre Finance ; Norva n’en conserve que l’empreinte SHA‑256 et l’horodatage.</p>
+            </div>
+          </div>
+          <div class="partners-ops-list">${rows
+              || '<div class="ssub">Aucune annulation ou libération en attente.</div>'}</div>`;
+    }
+
+    _renderPartnersRevolutLateCompletions(data) {
+        const el = document.getElementById('partners-admin-late-completions');
+        if (!el) return;
+        this._partnersLateCompletionContexts = new Map();
+        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
+            || !Array.isArray(data.items)) {
+            this._partnersOpsUnavailable(
+                'partners-admin-late-completions',
+                'Paiements tardifs'
+            );
+            return;
+        }
+        const rows = data.items.slice(0, 50).map((item) => {
+            const observation = String(item?.observation_key || '');
+            const review = String(item?.review_key || '');
+            const reference = String(item?.reference || '');
+            const destination = String(item?.destination_masked || '');
+            const currency = String(item?.currency || '');
+            const status = String(item?.status || '');
+            const conclusion = String(item?.review_conclusion || '');
+            const validObservation = /^rlc_[0-9a-f]{24}$/.test(observation);
+            const validReview = /^rlv_[0-9a-f]{24}$/.test(review);
+            const validReference = /^NORVA-[A-F0-9]{12}$/.test(reference);
+            const validDestination = destination.length >= 4
+                && destination.length <= 64
+                && /[*•]/u.test(destination)
+                && !/[\u0000-\u001f\u007f]/u.test(destination);
+            const validMoney = Number.isSafeInteger(item?.amount_minor)
+                && item.amount_minor > 0
+                && /^[A-Z]{3}$/.test(currency);
+            const actions = [];
+            const verificationContext = {
+                reference,
+                destination,
+                amount: item?.amount_minor,
+                currency
+            };
+            if (validObservation && validReference && validDestination
+                && validMoney) {
+                this._partnersLateCompletionContexts.set(
+                    observation,
+                    verificationContext
+                );
+            }
+            if (validReview && validReference && validDestination
+                && validMoney) {
+                this._partnersLateCompletionContexts.set(
+                    review,
+                    verificationContext
+                );
+            }
+            if (validObservation && status === 'pending'
+                && this._partnersCapabilities.finance === true) {
+                actions.push(`<button type="button" class="partners-action"
+                    data-partners-action="revolut-late-review-eligible"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Revue éligible
+                  </button>`);
+                actions.push(`<button type="button" class="partners-action is-danger"
+                    data-partners-action="revolut-late-review-quarantine"
+                    data-partners-observation="${AdminPage.esc(observation)}">
+                    Revue en quarantaine
+                  </button>`);
+            }
+            if (validReview && status === 'reviewed'
+                && this._partnersCapabilities.finance === true) {
+                actions.push(`<button type="button" class="partners-action ${conclusion === 'eligible' ? 'is-success' : 'is-danger'}"
+                    data-partners-action="${conclusion === 'eligible'
+                        ? 'revolut-late-decide-confirm'
+                        : 'revolut-late-decide-quarantine'}"
+                    data-partners-review="${AdminPage.esc(review)}">
+                    ${conclusion === 'eligible'
+                        ? 'Confirmer la récupération'
+                        : 'Confirmer la quarantaine'}
+                  </button>`);
+            }
+            const recovered = status === 'confirmed'
+                ? ` · débit disponible ${AdminPage.n(Number(item?.available_debit_minor) || 0)} · créance ${AdminPage.n(Number(item?.recovery_due_minor) || 0)}`
+                : '';
+            return `<div class="partners-ops-row">
+              <span>${AdminPage.esc(validReference ? reference : 'Référence invalide')}
+                <small>${validMoney
+                    ? `${AdminPage.n(item.amount_minor)} ${AdminPage.esc(currency)} en unités mineures`
+                    : 'montant indisponible'} · ${AdminPage.esc(String(item?.adapter || 'rail inconnu'))} · destination ${AdminPage.esc(validDestination ? destination : 'indisponible')} · observé ${AdminPage.esc(item?.observed_at ? AdminPage.timeAgo(item.observed_at) : 'date indisponible')}${recovered}</small>
+              </span>
+              <div class="partners-risk-actions">${actions.join('')
+                    || `<span class="partners-state${['pending', 'reviewed', 'quarantined'].includes(status) ? ' is-alert' : ' is-on'}">${AdminPage.esc({
+                        pending: 'Revue requise',
+                        reviewed: 'Second opérateur requis',
+                        confirmed: 'Récupération comptabilisée',
+                        quarantined: 'Quarantaine maintenue'
+                    }[status] || 'État indisponible')}</span>`}
+              </div>
+            </div>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head">
+            <div><h2>Paiements tardifs après déblocage</h2>
+              <p>${AdminPage.n(data.total)} observation(s). Le ledger crée une écriture de récupération dédiée sans réécrire le déblocage historique.</p>
+            </div>
+          </div>
+          <div class="partners-ops-list">${rows
+              || '<div class="ssub">Aucun paiement tardif à traiter.</div>'}</div>`;
     }
 
     _renderPartnersConfiguration(data) {
@@ -4941,7 +5855,7 @@ class AdminPage {
             ['country-create', 'Nouvelle juridiction'],
             ['country-map', 'Mapping pays'],
             ['currency', 'Devise'],
-            ['payout-provider', 'Provider payout'],
+            ['payout-provider', 'Couverture Revolut'],
             ['allowlist', 'Pilote allowlist']
         ].filter(([action]) => this._partnersCanUseConfigurationAction(action))
             .map(([action, label]) => `<button type="button" class="partners-action"
@@ -5032,7 +5946,7 @@ class AdminPage {
             ).join('')}</div>
             <div class="partners-ops-list">
               ${queueRows.slice(6).map(([label, value]) => `<div class="partners-ops-row"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(Number(value) || 0)}</strong></div>`).join('')}
-              <div class="partners-ops-row"><span>Réconciliation · ${AdminPage.esc(String(data.reconciliation.last_status || 'inconnue'))} · ${AdminPage.esc(lastRun)}</span><strong>${AdminPage.n(Number(data.reconciliation.mismatches) || 0)} écart(s)</strong></div>
+              <div class="partners-ops-row"><span>Cohérence du ledger interne · ${AdminPage.esc(String(data.reconciliation.last_status || 'inconnue'))} · ${AdminPage.esc(lastRun)}</span><strong>${AdminPage.n(Number(data.reconciliation.mismatches) || 0)} écart(s)</strong></div>
               ${currencies || '<div class="ssub">Aucun solde financier observé.</div>'}
             </div>`;
     }
@@ -5077,36 +5991,188 @@ class AdminPage {
             <div class="partners-ops-list">${rows || '<div class="ssub">Aucune revue en attente.</div>'}</div>`;
     }
 
-    _renderPartnersPayouts(data) {
+    _renderPartnersPayouts(data, batchesData) {
         const el = document.getElementById('partners-admin-payouts');
         if (!el) return;
-        if (data?.schema_version !== 1 || !Number.isSafeInteger(data.total)
-            || !Array.isArray(data.items)) {
+        this._partnersManualBatchControls = new Map();
+        const cyclesAvailable = data?.schema_version === 1
+            && Number.isSafeInteger(data.total)
+            && Array.isArray(data.items);
+        const batchesAvailable = batchesData?.schema_version === 1
+            && Number.isSafeInteger(batchesData.total)
+            && Array.isArray(batchesData.items);
+        if (!cyclesAvailable && !batchesAvailable) {
             this._partnersOpsUnavailable('partners-admin-payouts', 'Cycles de versement');
             return;
         }
-        const rows = data.items.slice(0, 8).map((item) => {
+        const cycleRows = (cyclesAvailable ? data.items : []).slice(0, 8).map((item) => {
             const mode = item?.live_execution === true ? 'live' : 'dry-run';
             const key = String(item?.key || '');
-            const approve = item?.status === 'draft' && /^pay_[0-9a-f]{24}$/.test(key)
-                ? `<button type="button" class="partners-action is-success"
-                    data-partners-action="payout-approve"
-                    data-partners-key="${AdminPage.esc(key)}">Approuver</button>`
-                : `<span class="partners-state">${AdminPage.esc(String(item?.status || 'unknown'))}</span>`;
+            const actions = [];
+            if (this._partnersCapabilities.finance === true
+                && /^pay_[0-9a-f]{24}$/.test(key)
+                && item?.status === 'draft') {
+                actions.push(`<button type="button" class="partners-action is-success"
+                  data-partners-action="payout-approve"
+                  data-partners-key="${AdminPage.esc(key)}">Approuver</button>`);
+            }
+            if (this._partnersCapabilities.finance === true
+                && /^pay_[0-9a-f]{24}$/.test(key)
+                && item?.status === 'approved'
+                && item?.live_execution === true) {
+                actions.push(`<button type="button" class="partners-action is-success"
+                  data-partners-action="revolut-batch-prepare"
+                  data-partners-key="${AdminPage.esc(key)}">Préparer le lot</button>`);
+            }
             return `<div class="partners-ops-row">
                 <span>${AdminPage.esc(key || 'Cycle')} · ${AdminPage.esc(String(item?.currency || '—'))} · ${AdminPage.esc(mode)}
                   <small>${AdminPage.n(Number(item?.total_minor) || 0)} unités mineures · ${AdminPage.n(Number(item?.item_count) || 0)} item(s)</small>
                 </span>
-                <div class="partners-risk-actions">${approve}</div>
+                <div class="partners-risk-actions">${actions.join('')
+                    || `<span class="partners-state">${AdminPage.esc(String(item?.status || 'unknown'))}</span>`}</div>
             </div>`;
         }).join('');
+        const batchLabels = {
+            prepared: 'Préparé',
+            exported: 'Exporté',
+            partially_submitted: 'Saisie partielle dans Revolut',
+            submitted: 'Saisi dans Revolut',
+            partially_reconciled: 'Rapprochement partiel',
+            settled: 'Rapproché',
+            exception: 'Exception',
+            cancelled: 'Annulé'
+        };
+        const batchRows = (batchesAvailable ? batchesData.items : []).slice(0, 25).map((item) => {
+            const key = String(item?.key || '');
+            const cycleKey = String(item?.cycle_key || '');
+            const status = String(item?.status || '');
+            const currency = String(item?.currency || '');
+            const exponent = Number(item?.currency_exponent);
+            const validBatch = /^rmb_[0-9a-f]{24}$/.test(key);
+            const validCycle = /^pay_[0-9a-f]{24}$/.test(cycleKey);
+            const referenceSetHash = String(
+                item?.reference_set_hash || ''
+            );
+            const unmappedReferences = Array.isArray(
+                item?.unmapped_references
+            ) ? item.unmapped_references.slice(0, 5000) : [];
+            const validUnmapped = unmappedReferences.every((row) => (
+                /^NORVA-[A-F0-9]{12}$/.test(
+                    String(row?.reference || '')
+                )
+                && Number.isSafeInteger(row?.amount_minor)
+                && row.amount_minor > 0
+                && /^[A-Z]{3}$/.test(String(row?.currency || ''))
+                && Number.isInteger(row?.currency_exponent)
+                && row.currency_exponent >= 0
+                && row.currency_exponent <= 6
+            ));
+            const cancellationPending = item?.cancellation?.status
+                === 'pending';
+            const unmappedPending = Array.isArray(item?.unmapped_requests)
+                && item.unmapped_requests.some((request) => (
+                    request?.status === 'pending'
+                ));
+            const sevenDaysElapsed = item?.exported_at
+                && Number.isFinite(Date.parse(item.exported_at))
+                && Date.now() >= Date.parse(item.exported_at)
+                    + 7 * 24 * 60 * 60 * 1000;
+            const canRequestCancellation = validBatch
+                && /^[0-9a-f]{64}$/.test(referenceSetHash)
+                && !item?.cancellation
+                && Number(item?.mapped_count) === 0
+                && Number(item?.submitted_count) === 0
+                && (
+                    status === 'prepared'
+                    || (status === 'exported' && sevenDaysElapsed)
+                );
+            const canRequestUnmapped = validBatch
+                && status === 'partially_submitted'
+                && sevenDaysElapsed
+                && !unmappedPending
+                && validUnmapped
+                && unmappedReferences.length > 0;
+            if (canRequestCancellation || canRequestUnmapped) {
+                this._partnersManualBatchControls.set(key, {
+                    batchKey: key,
+                    referenceSetHash,
+                    unmappedReferences: unmappedReferences.map(
+                        (row) => row.reference
+                    )
+                });
+            }
+            const actions = [];
+            if (this._partnersCapabilities.finance === true && validBatch
+                && !cancellationPending && !unmappedPending
+                && ['prepared', 'exported', 'partially_submitted'].includes(status)) {
+                const exportLabel = status === 'prepared'
+                    ? 'Exporter le lot'
+                    : (status === 'partially_submitted'
+                        ? 'Télécharger le suivi'
+                        : 'Réexporter');
+                actions.push(`<button type="button" class="partners-action"
+                  data-partners-action="revolut-batch-export"
+                  data-partners-key="${AdminPage.esc(key)}"
+                  data-partners-status="${AdminPage.esc(status)}">${exportLabel}</button>`);
+            }
+            if (this._partnersCapabilities.finance === true && validBatch
+                && !cancellationPending && !unmappedPending
+                && ['exported', 'partially_submitted'].includes(status)) {
+                actions.push(`<button type="button" class="partners-action is-success"
+                  data-partners-action="revolut-batch-submit"
+                  data-partners-key="${AdminPage.esc(key)}">${status === 'partially_submitted'
+                    ? 'Enregistrer la progression'
+                    : 'Marquer saisi'}</button>`);
+            }
+            if (this._partnersCapabilities.finance === true
+                && canRequestCancellation) {
+                actions.push(`<button type="button" class="partners-action is-danger"
+                  data-partners-action="revolut-manual-control-request-cancel"
+                  data-partners-key="${AdminPage.esc(key)}">Demander l’annulation</button>`);
+            }
+            if (this._partnersCapabilities.finance === true
+                && canRequestUnmapped) {
+                actions.push(`<button type="button" class="partners-action is-danger"
+                  data-partners-action="revolut-manual-control-request-unmapped"
+                  data-partners-key="${AdminPage.esc(key)}">Libérer les non-saisis</button>`);
+            }
+            if (this._partnersCapabilities.finance === true
+                && (cancellationPending || unmappedPending)) {
+                actions.push('<span class="partners-state is-alert">Second contrôle Finance requis</span>');
+            }
+            const statusClass = ['exception', 'cancelled'].includes(status)
+                ? ' is-alert'
+                : (status === 'settled' ? ' is-on' : '');
+            return `<div class="partners-ops-row">
+                <span>${AdminPage.esc(validBatch ? key : 'Lot invalide')}
+                  <small>${AdminPage.esc(validCycle ? cycleKey : 'cycle indisponible')} · ${this._partnersFormatMinor(item?.total_minor, currency, exponent)} · ${AdminPage.n(Number(item?.submitted_count) || 0)}/${AdminPage.n(Number(item?.item_count) || 0)} saisi(s) · ${AdminPage.n(Number(item?.settled_count) || 0)} rapproché(s)</small>
+                </span>
+                <div class="partners-risk-actions">${actions.join('')
+                    || `<span class="partners-state${statusClass}">${AdminPage.esc(batchLabels[status] || 'État indisponible')}</span>`}</div>
+              </div>`;
+        }).join('');
         el.removeAttribute('aria-busy');
-        el.innerHTML = `<h2>Cycles de versement</h2>
-            <p>${AdminPage.n(data.total)} cycle(s). Aucune exécution provider n’est possible tant que les gates Finance et le flag live restent fermés.</p>
+        el.innerHTML = `<h2>Cycles et lots Revolut manuels</h2>
+            <p>Norva génère des références uniques, fige le lot et contrôle sa maturation. La validation et le paiement restent manuels dans Revolut Business Basic ; chaque mutation sensible exige Finance et AAL2 côté serveur.</p>
             <div class="partners-action-row" style="margin-bottom:10px">
-              <button type="button" class="partners-action" data-partners-action="payout-create">Créer un cycle contrôlé</button>
+              ${this._partnersCapabilities.finance === true
+                ? '<button type="button" class="partners-action" data-partners-action="payout-create">Créer un cycle contrôlé</button>'
+                : '<span class="partners-state">Lecture seule · Finance requis</span>'}
             </div>
-            <div class="partners-ops-list">${rows || '<div class="ssub">Aucun cycle créé.</div>'}</div>`;
+            <div class="partners-control-head">
+              <div><strong>Cycles</strong><p>${cyclesAvailable ? `${AdminPage.n(data.total)} cycle(s)` : 'Lecture indisponible'}</p></div>
+            </div>
+            <div class="partners-ops-list">${cycleRows
+                || (cyclesAvailable
+                    ? '<div class="ssub">Aucun cycle créé.</div>'
+                    : '<div class="admin-err" role="status">Cycles indisponibles.</div>')}</div>
+            <div class="partners-control-head" style="margin-top:14px">
+              <div><strong>Lots manuels</strong><p>${batchesAvailable ? `${AdminPage.n(batchesData.total)} lot(s)` : 'Lecture indisponible'}</p></div>
+            </div>
+            <div class="partners-ops-list">${batchRows
+                || (batchesAvailable
+                    ? '<div class="ssub">Aucun lot manuel préparé.</div>'
+                    : '<div class="admin-err" role="status">Lots manuels indisponibles.</div>')}</div>`;
     }
 
     _renderPartnersAdminAccounts(rows, total) {
@@ -5159,10 +6225,22 @@ class AdminPage {
             <div id="partners-admin-detail" class="card" aria-busy="true"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
-            const raw = await this._rpc('admin_partners_detail', { p_account_id: accountId });
+            const results = await Promise.allSettled([
+                this._rpc('admin_partners_detail', { p_account_id: accountId }),
+                this._partnersCapabilities.finance === true
+                    ? this._rpc('admin_partners_revolut_profile_status', {
+                        p_account_id: accountId
+                    })
+                    : Promise.resolve(null)
+            ]);
             if (nav !== this._nav || !this._route.startsWith('partner:')) return;
+            if (results[0]?.status !== 'fulfilled') throw new Error('partner_detail_unavailable');
+            const raw = results[0].value;
             const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-            this._renderPartnerDetail(data);
+            const revolut = results[1]?.status === 'fulfilled'
+                ? results[1].value
+                : null;
+            this._renderPartnerDetail(data, revolut);
         } catch (_) {
             if (nav !== this._nav || !this._route.startsWith('partner:')) return;
             const el = document.getElementById('partners-admin-detail');
@@ -5170,14 +6248,97 @@ class AdminPage {
         }
     }
 
-    _renderPartnerDetail(data) {
+    _renderPartnerDetail(data, revolutEnvelope = null) {
         const el = document.getElementById('partners-admin-detail');
         if (!el) return;
         const account = data.account && typeof data.account === 'object' ? data.account : {};
         const policy = data.policy && typeof data.policy === 'object' ? data.policy : {};
         const link = data.link && typeof data.link === 'object' ? data.link : {};
         const events = Array.isArray(data.activity) ? data.activity.slice(0, 100) : [];
+        const canManagePayout = this._partnersCapabilities.finance === true
+            && /^[0-9a-f-]{36}$/i.test(String(account.account_id || ''));
+        const payoutProfiles = revolutEnvelope?.schema_version === 1
+            && Array.isArray(revolutEnvelope.profiles)
+            ? revolutEnvelope.profiles.slice(0, 32)
+            : [];
+        const beneficiaryBindings = revolutEnvelope?.schema_version === 1
+            && Array.isArray(revolutEnvelope.bindings)
+            ? revolutEnvelope.bindings.slice(0, 64)
+            : [];
         const fact = (label, value) => `<div><dt>${AdminPage.esc(label)}</dt><dd>${AdminPage.esc(value == null || value === '' ? '—' : value)}</dd></div>`;
+        const payoutRows = payoutProfiles.map((profile) => {
+            const currency = /^[A-Z]{3}$/.test(String(profile?.currency || ''))
+                ? profile.currency : '—';
+            const status = String(profile?.status || 'unknown');
+            const destination = String(profile?.display_masked || 'Destination masquée indisponible');
+            const paymentMethod = profile?.payment_method_configured === true
+                ? 'Moyen de paiement API configuré'
+                : 'Mode manuel uniquement';
+            const binding = profile?.binding_verified === true
+                && Number.isSafeInteger(Number(profile?.binding_version))
+                ? `Binding vérifié · version ${AdminPage.n(Number(profile.binding_version))}`
+                : 'Binding à vérifier';
+            return `<div class="partners-event">
+                <strong>${AdminPage.esc(currency)} · ${AdminPage.esc(status)}</strong>
+                <span>${AdminPage.esc(destination)}</span>
+                <span>${AdminPage.esc(paymentMethod)} · ${AdminPage.esc(binding)}</span>
+            </div>`;
+        }).join('');
+        const bindingRows = beneficiaryBindings.map((binding) => {
+            const key = String(binding?.key || '');
+            const currency = String(binding?.currency || '');
+            const status = String(binding?.status || 'unknown');
+            const masked = String(
+                binding?.display_masked || 'Destination masquée indisponible'
+            );
+            const validKey = /^rbb_[0-9a-f]{24}$/.test(key);
+            const validCurrency = /^[A-Z]{3}$/.test(currency);
+            const version = Number(binding?.version);
+            const keyVersion = Number(binding?.fingerprint_key_version);
+            const revocation = binding?.revocation
+                && typeof binding.revocation === 'object'
+                ? binding.revocation
+                : null;
+            const revocationKey = String(revocation?.key || '');
+            let bindingActions = '';
+            if (validKey && status === 'pending') {
+                bindingActions = `<div class="partners-risk-actions">
+                    <button type="button" class="partners-action is-success"
+                      data-partners-action="revolut-binding-verify"
+                      data-partners-binding="${AdminPage.esc(key)}">Vérifier</button>
+                    <button type="button" class="partners-action is-danger"
+                      data-partners-action="revolut-binding-reject"
+                      data-partners-binding="${AdminPage.esc(key)}">Rejeter</button>
+                  </div>`;
+            } else if (validKey && status === 'active'
+                && /^rbr_[0-9a-f]{24}$/.test(revocationKey)
+                && revocation?.status === 'pending') {
+                bindingActions = `<button type="button" class="partners-action is-danger"
+                    data-partners-action="revolut-binding-revoke-confirm"
+                    data-partners-binding="${AdminPage.esc(key)}"
+                    data-partners-revocation="${AdminPage.esc(revocationKey)}">
+                    Confirmer la révocation
+                  </button>`;
+            } else if (validKey && status === 'active' && !revocation) {
+                bindingActions = `<button type="button" class="partners-action is-danger"
+                    data-partners-action="revolut-binding-revoke-request"
+                    data-partners-binding="${AdminPage.esc(key)}">
+                    Demander la révocation
+                  </button>`;
+            } else {
+                bindingActions = `<span class="partners-state${status === 'active' ? ' is-on' : status === 'rejected' || status === 'revoked' ? ' is-alert' : ''}">${AdminPage.esc(status)}</span>`;
+            }
+            return `<div class="partners-ops-row">
+                <span>${AdminPage.esc(validCurrency ? currency : 'Devise inconnue')}
+                  · binding ${AdminPage.esc(validKey ? key : 'invalide')}
+                  <small>version ${Number.isSafeInteger(version) && version > 0 ? AdminPage.n(version) : '—'}
+                    · clé HMAC ${Number.isSafeInteger(keyVersion) && keyVersion > 0 ? AdminPage.n(keyVersion) : '—'}
+                    · ${AdminPage.esc(masked)}
+                    · ${binding?.payment_method_configured === true ? 'API prête' : 'manuel Basic'}</small>
+                </span>
+                <div class="partners-risk-actions">${bindingActions}</div>
+              </div>`;
+        }).join('');
         const eventRows = events.map((event) => `<div class="partners-event">
             <strong>${AdminPage.esc(event.action || 'Événement')}</strong>
             <span>${AdminPage.esc(event.actor_type || 'Transition serveur auditée')}</span>
@@ -5221,6 +6382,17 @@ class AdminPage {
                       </div>`
                     : ''}
               </section>
+              ${canManagePayout ? `<section class="section">
+                <div class="sec-head"><h2>Bénéficiaire Revolut</h2><span class="pill">${AdminPage.n(payoutProfiles.length)}</span></div>
+                <div class="partners-event-list">${payoutRows || '<div class="ssub">Aucun profil de versement Revolut configuré.</div>'}</div>
+                <div class="partners-ops-list" style="margin-top:12px">${bindingRows || '<div class="ssub">Aucune proposition de binding bénéficiaire.</div>'}</div>
+                <p class="ssub">L’identifiant bénéficiaire et son empreinte restent secrets. Sous Basic, utilisez l’UUID opaque du registre Finance ; la proposition est signée dans l’Edge, puis activée uniquement par un second opérateur.</p>
+                <div class="partners-action-row">
+                  <button type="button" class="partners-action"
+                    data-partners-action="revolut-binding-propose"
+                    data-partners-account="${AdminPage.esc(account.account_id)}">Proposer un bénéficiaire</button>
+                </div>
+              </section>` : ''}
             </div>
             <section class="section"><div class="sec-head"><h2>Historique audité</h2><span class="pill">${AdminPage.n(events.length)}</span></div>
               <div class="partners-event-list">${eventRows || '<div class="ssub">Aucun événement audité pour ce compte.</div>'}</div>
@@ -5256,6 +6428,441 @@ class AdminPage {
         );
     }
 
+    async _partnersPickTextFile(accept, maxBytes = 5_000_000) {
+        return new Promise((resolve, reject) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = accept;
+            input.hidden = true;
+            let settled = false;
+            const finish = (value, error = null) => {
+                if (settled) return;
+                settled = true;
+                input.remove();
+                if (error) reject(error);
+                else resolve(value);
+            };
+            input.addEventListener('cancel', () => finish(null), { once: true });
+            input.addEventListener('change', async () => {
+                const file = input.files?.[0] || null;
+                if (!file) {
+                    finish(null);
+                    return;
+                }
+                if (!Number.isSafeInteger(file.size) || file.size < 1
+                    || file.size > maxBytes) {
+                    finish(null, new Error('invalid_file_size'));
+                    return;
+                }
+                try {
+                    finish({
+                        name: String(file.name || 'document'),
+                        text: await file.text()
+                    });
+                } catch (_) {
+                    finish(null, new Error('file_read_failed'));
+                }
+            }, { once: true });
+            document.body.appendChild(input);
+            input.click();
+        });
+    }
+
+    async _partnersPickEvidenceHash() {
+        return new Promise((resolve, reject) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.pdf,.png,.jpg,.jpeg,.webp,.csv,.tsv,.txt,application/pdf,image/png,image/jpeg,image/webp,text/plain,text/csv,text/tab-separated-values';
+            input.hidden = true;
+            let settled = false;
+            const finish = (value, error = null) => {
+                if (settled) return;
+                settled = true;
+                input.remove();
+                if (error) reject(error);
+                else resolve(value);
+            };
+            input.addEventListener('cancel', () => finish(null), { once: true });
+            input.addEventListener('change', async () => {
+                const file = input.files?.[0] || null;
+                if (!file) {
+                    finish(null);
+                    return;
+                }
+                if (!Number.isSafeInteger(file.size) || file.size < 1
+                    || file.size > 10_000_000) {
+                    finish(null, new Error('invalid_evidence_file_size'));
+                    return;
+                }
+                try {
+                    finish({
+                        hash: await this._partnersSha256Bytes(
+                            await file.arrayBuffer()
+                        ),
+                        observedAt: new Date().toISOString()
+                    });
+                } catch (_) {
+                    finish(null, new Error('evidence_hash_failed'));
+                }
+            }, { once: true });
+            document.body.appendChild(input);
+            input.click();
+        });
+    }
+
+    _partnersSpreadsheetSafe(value) {
+        const text = String(value ?? '');
+        return /^[=+\-@]/.test(text) ? `'${text}` : text;
+    }
+
+    _partnersReadExactCrlfTsv(text, expectedHeader, expectedRows, errorCode) {
+        if (typeof text !== 'string'
+            || !text.endsWith('\r\n')
+            || text.length < expectedHeader.length + 2
+            || text.length > 5_000_000
+            || /[\r\n]/.test(text.replace(/\r\n/g, ''))) {
+            throw new Error(errorCode);
+        }
+        const lines = text.split('\r\n');
+        if (lines.pop() !== ''
+            || lines.shift() !== expectedHeader
+            || lines.length !== expectedRows) {
+            throw new Error(errorCode);
+        }
+        return lines.map((line) => line.split('\t'));
+    }
+
+    async _partnersValidateRevolutBatchExport(payload, expectedKey) {
+        const batch = payload?.batch;
+        const items = payload?.items;
+        if (payload?.schema_version !== 1
+            || payload?.action !== 'revolut_manual_batch_export'
+            || typeof payload?.replayed !== 'boolean'
+            || !batch || batch.key !== expectedKey
+            || ![
+                'exported',
+                'partially_submitted',
+                'submitted',
+                'partially_reconciled',
+                'settled',
+                'exception'
+            ].includes(
+                String(batch.status || '')
+            )
+            || !Number.isSafeInteger(batch.item_count)
+            || batch.item_count < 1 || batch.item_count > 5000
+            || !Array.isArray(items) || items.length !== batch.item_count
+            || !/^[0-9a-f]{64}$/.test(
+                String(batch.canonical_manifest_hash || '')
+            )
+            || !/^[0-9a-f]{64}$/.test(String(batch.export_file_hash || ''))
+            || batch.file_name !== `norva-revolut-${expectedKey}.tsv`) {
+            throw new Error('invalid_manual_batch_export');
+        }
+        if (!payload.replayed && batch.status !== 'exported') {
+            throw new Error('invalid_initial_manual_batch_export');
+        }
+        const batchCurrency = String(batch.currency || '');
+        const batchExponent = Number(batch.currency_exponent);
+        const batchTotal = Number(batch.total_minor);
+        if (!/^[A-Z]{3}$/.test(batchCurrency)
+            || !Number.isInteger(batchExponent)
+            || batchExponent < 0 || batchExponent > 6
+            || !Number.isSafeInteger(batchTotal) || batchTotal < 1) {
+            throw new Error('invalid_manual_batch_totals');
+        }
+        const expectedHeader = 'norva_reference\tbeneficiary_token_ref\tdestination_masked\tamount_minor\tcurrency\tcurrency_exponent\tentered_in_revolut';
+        const rows = this._partnersReadExactCrlfTsv(
+            payload.tsv,
+            expectedHeader,
+            batch.item_count,
+            'invalid_manual_batch_tsv'
+        );
+        const itemByReference = new Map();
+        for (const item of items) {
+            const reference = String(item?.reference || '');
+            const executionKey = String(item?.execution_key || '');
+            if (!/^NORVA-[A-F0-9]{12}$/.test(reference)
+                || itemByReference.has(reference)
+                || !/^rpe_[0-9a-f]{24}$/.test(executionKey)
+                || typeof item?.entered_in_revolut !== 'boolean'
+                || typeof item?.statement_matched !== 'boolean'
+                || !/^[a-z][a-z0-9_]{1,63}$/.test(
+                    String(item?.state || '')
+                )) {
+                throw new Error('invalid_manual_batch_item');
+            }
+            itemByReference.set(reference, item);
+        }
+        const canonicalRows = new Map();
+        let computedTotal = 0;
+        for (const columns of rows) {
+            if (columns.length !== 7) {
+                throw new Error('invalid_manual_batch_row');
+            }
+            const reference = String(columns[0] || '');
+            const token = String(columns[1] || '');
+            const masked = String(columns[2] || '');
+            const amount = Number(columns[3]);
+            const currency = String(columns[4] || '');
+            const exponent = Number(columns[5]);
+            const entered = String(columns[6] || '');
+            const item = itemByReference.get(reference);
+            if (!/^NORVA-[A-F0-9]{12}$/.test(reference)
+                || canonicalRows.has(reference)
+                || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                    token
+                )
+                || masked.length < 4 || masked.length > 64
+                || /[\t\r\n\u0000-\u001f\u007f]/u.test(masked)
+                || !Number.isSafeInteger(amount) || amount < 1
+                || !/^[A-Z]{3}$/.test(currency)
+                || !Number.isInteger(exponent) || exponent < 0 || exponent > 6
+                || currency !== batchCurrency || exponent !== batchExponent
+                || !Number.isSafeInteger(computedTotal + amount)
+                || entered !== ''
+                || !item
+                || this._partnersSpreadsheetSafe(
+                    item.destination_masked
+                ) !== masked
+                || Number(item.amount_minor) !== amount
+                || String(item.currency || '') !== currency
+                || Number(item.currency_exponent) !== exponent) {
+                throw new Error('invalid_manual_batch_item');
+            }
+            computedTotal += amount;
+            canonicalRows.set(reference, {
+                columns: columns.slice(1, 6),
+                enteredInRevolut: false
+            });
+        }
+        if (computedTotal !== batchTotal
+            || canonicalRows.size !== itemByReference.size) {
+            throw new Error('invalid_manual_batch_total');
+        }
+        if (typeof TextEncoder !== 'function'
+            || new TextEncoder().encode(payload.tsv).byteLength > 5_000_000
+            || await this._partnersSha256Hex(payload.tsv)
+            !== batch.export_file_hash) {
+            throw new Error('manual_batch_export_hash_mismatch');
+        }
+
+        if (payload.replayed) {
+            const progressHeader = 'norva_reference\tentered_in_revolut\tstatement_matched\tstate\treconciliation_status';
+            const progressRows = this._partnersReadExactCrlfTsv(
+                payload.progress_tsv,
+                progressHeader,
+                batch.item_count,
+                'invalid_manual_batch_progress'
+            );
+            if (!/^[0-9a-f]{64}$/.test(
+                String(batch.progress_file_hash || '')
+            )
+                || batch.progress_file_name
+                    !== `norva-revolut-progress-${expectedKey}.tsv`
+                || new TextEncoder().encode(payload.progress_tsv).byteLength
+                    > 5_000_000
+                || await this._partnersSha256Hex(payload.progress_tsv)
+                    !== batch.progress_file_hash) {
+                throw new Error('manual_batch_progress_hash_mismatch');
+            }
+            const progressByReference = new Map();
+            for (const columns of progressRows) {
+                if (columns.length !== 5) {
+                    throw new Error('invalid_manual_batch_progress_row');
+                }
+                const reference = String(columns[0] || '');
+                const entered = String(columns[1] || '');
+                const matched = String(columns[2] || '');
+                const state = String(columns[3] || '');
+                const reconciliation = String(columns[4] || '');
+                const item = itemByReference.get(reference);
+                if (!item || progressByReference.has(reference)
+                    || !['', 'YES'].includes(entered)
+                    || !['', 'YES'].includes(matched)
+                    || !/^[a-z][a-z0-9_]{1,63}$/.test(state)
+                    || !/^[a-z][a-z0-9_]{1,63}$/.test(reconciliation)
+                    || state !== String(item.state || '')
+                    || item.entered_in_revolut !== (entered === 'YES')
+                    || item.statement_matched !== (matched === 'YES')) {
+                    throw new Error('invalid_manual_batch_progress_item');
+                }
+                progressByReference.set(reference, {
+                    entered: entered === 'YES',
+                    matched: matched === 'YES'
+                });
+                canonicalRows.get(reference).enteredInRevolut =
+                    entered === 'YES';
+            }
+            if (progressByReference.size !== canonicalRows.size) {
+                throw new Error('incomplete_manual_batch_progress');
+            }
+        } else if (batch.progress_file_hash != null
+            || batch.progress_file_name != null
+            || payload.progress_tsv != null) {
+            throw new Error('unexpected_manual_batch_progress');
+        }
+        return {
+            batch,
+            canonicalRows,
+            canonicalTsv: payload.tsv,
+            canonicalFileName: batch.file_name,
+            progressTsv: payload.replayed ? payload.progress_tsv : null,
+            progressFileName: payload.replayed
+                ? batch.progress_file_name
+                : null
+        };
+    }
+
+    _partnersParseRevolutSubmissionTsv(text, validatedExport) {
+        const expected = validatedExport?.canonicalRows;
+        if (!(expected instanceof Map) || !expected.size) {
+            throw new Error('invalid_submission_template');
+        }
+        const normalized = String(text || '')
+            .replace(/^\uFEFF/, '')
+            .replace(/(?:\r?\n)+$/, '');
+        const lines = normalized.split(/\r?\n/);
+        const expectedHeader = 'norva_reference\tbeneficiary_token_ref\tdestination_masked\tamount_minor\tcurrency\tcurrency_exponent\tentered_in_revolut';
+        if (lines.shift() !== expectedHeader || lines.length !== expected.size) {
+            throw new Error('invalid_submission_file');
+        }
+        const seen = new Set();
+        const transfers = lines.map((line) => {
+            const columns = line.split('\t');
+            if (columns.length !== 7) throw new Error('invalid_submission_row');
+            const reference = String(columns[0] || '');
+            const entered = String(columns[6] || '');
+            const template = expected.get(reference);
+            if (!template || seen.has(reference)
+                || columns.slice(1, 6).some(
+                    (value, index) => value !== template.columns[index]
+                )
+                || !['', 'YES'].includes(entered)
+                || (template.enteredInRevolut && entered !== 'YES')) {
+                throw new Error('invalid_submission_record');
+            }
+            seen.add(reference);
+            if (entered !== 'YES') return null;
+            return { reference };
+        }).filter(Boolean);
+        if (seen.size !== expected.size) throw new Error('incomplete_submission_file');
+        if (!transfers.length) throw new Error('empty_submission_file');
+        return transfers;
+    }
+
+    async _partnersSha256Hex(text) {
+        if (typeof TextEncoder !== 'function') {
+            throw new Error('secure_hash_unavailable');
+        }
+        return this._partnersSha256Bytes(
+            new TextEncoder().encode(String(text))
+        );
+    }
+
+    async _partnersSha256Bytes(value) {
+        if (!window.crypto?.subtle) {
+            throw new Error('secure_hash_unavailable');
+        }
+        const digest = await window.crypto.subtle.digest(
+            'SHA-256',
+            value
+        );
+        return Array.from(new Uint8Array(digest))
+            .map((value) => value.toString(16).padStart(2, '0'))
+            .join('');
+    }
+
+    _partnersDownloadText(filename, text, type) {
+        const blob = new Blob([text], {
+            type: type || 'text/tab-separated-values;charset=utf-8'
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.hidden = true;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    async _partnersImportRevolutStatement(csv) {
+        const res = await fetch(
+            `${this._sbUrl()}/functions/v1/norva-partners-revolut-payout/manual/statements`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${this._token()}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ csv })
+            }
+        );
+        if (!res.ok) throw new Error('revolut_statement_import_failed');
+        const body = await res.json();
+        const imported = body?.data?.import;
+        if (body?.data?.schema_version !== 1
+            || body?.data?.action !== 'revolut_statement_ingested'
+            || !imported || typeof imported !== 'object') {
+            throw new Error('invalid_revolut_statement_response');
+        }
+        const counts = [
+            imported.accepted,
+            imported.matched,
+            imported.unmatched,
+            imported.mismatch,
+            imported.duplicate,
+            body?.ignoredRows
+        ].map(Number);
+        if (counts.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+            throw new Error('invalid_revolut_statement_counts');
+        }
+        return {
+            accepted: counts[0],
+            matched: counts[1],
+            unmatched: counts[2],
+            mismatch: counts[3],
+            duplicate: counts[4],
+            ignored: counts[5]
+        };
+    }
+
+    async _partnersProposeRevolutBeneficiary(proposal) {
+        const res = await fetch(
+            `${this._sbUrl()}/functions/v1/norva-partners-revolut-payout/manual/beneficiaries/propose`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${this._token()}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(proposal)
+            }
+        );
+        if (!res.ok) throw new Error('revolut_beneficiary_proposal_failed');
+        const body = await res.json();
+        const data = body?.data;
+        const binding = data?.binding;
+        if (data?.schema_version !== 1
+            || data?.action !== 'revolut_beneficiary_binding_proposed'
+            || !binding || typeof binding !== 'object'
+            || !/^rbb_[0-9a-f]{24}$/.test(String(binding.key || ''))
+            || !/^[A-Z]{3}$/.test(String(binding.currency || ''))
+            || !Number.isSafeInteger(Number(binding.version))
+            || Number(binding.version) < 1
+            || !Number.isSafeInteger(Number(binding.fingerprint_key_version))
+            || Number(binding.fingerprint_key_version) < 1
+            || binding.status !== 'pending'
+            || typeof binding.display_masked !== 'string'
+            || binding.display_masked.length < 4
+            || typeof binding.payment_method_configured !== 'boolean') {
+            throw new Error('invalid_revolut_beneficiary_proposal_response');
+        }
+        return binding;
+    }
+
     async _partnersAdminAction(button) {
         if (!button || button.disabled) return;
         const previous = button.textContent;
@@ -5283,43 +6890,715 @@ class AdminPage {
     async _runPartnersAdminAction(button) {
         const action = String(button.dataset.partnersAction || '');
         const enabled = button.dataset.partnersEnabled === 'true';
-        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
         const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
         const isoCountry = /^[A-Z]{2}$/;
         const currencyCode = /^[A-Z]{3}$/;
 
-        if ([
-            'settlement-review',
-            'settlement-confirm',
-            'settlement-quarantine'
-        ].includes(action)) {
+        if (action === 'revolut-binding-propose') {
             if (this._partnersCapabilities.finance !== true) return false;
-            const observation = String(button.dataset.partnersObservation || '');
-            if (!/^aso_[0-9a-f]{24}$/.test(observation)) return false;
-            const operation = action === 'settlement-review'
-                ? 'REVIEW'
-                : (action === 'settlement-confirm' ? 'CONFIRM' : 'QUARANTINE');
+            const accountId = String(button.dataset.partnersAccount || '');
+            if (!uuid.test(accountId)) return false;
+            const currency = await this._partnersPrompt(
+                'Devise du profil bénéficiaire (ISO 4217) :',
+                'EUR',
+                (value) => currencyCode.test(value.toUpperCase()),
+                'Devise bénéficiaire invalide.'
+            );
+            if (!currency) return false;
+            const beneficiaryToken = await this._partnersPrompt(
+                'UUID opaque du bénéficiaire issu du registre Finance sécurisé (ou UUID counterparty Revolut pour le futur mode API) :',
+                '',
+                (value) => uuid.test(value),
+                'L’identifiant doit être un UUID valide et déjà relié au bénéficiaire réel dans le registre Finance.'
+            );
+            if (!beneficiaryToken) return false;
+            const paymentMethod = await this._partnersPrompt(
+                'UUID du moyen de paiement Revolut (laisser vide sous Basic manuel) :',
+                '',
+                (value) => value === '' || uuid.test(value),
+                'Le moyen de paiement doit être vide ou contenir un UUID valide.'
+            );
+            if (paymentMethod === null) return false;
+            const destinationMasked = await this._partnersPrompt(
+                'Libellé de contrôle masqué (ex. J. H. · FR76••••1234) :',
+                '',
+                (value) => value.length >= 4
+                    && value.length <= 64
+                    && /[*•]/.test(value)
+                    && !/[\u0000-\u001f\u007f]/u.test(value)
+                    && !/[0-9]{6,}/.test(value.replace(/[\s-]/g, '')),
+                'Le libellé doit être masqué, sans identifiant bancaire complet.'
+            );
+            if (!destinationMasked) return false;
+            const mappingEvidenceHash = await this._partnersPrompt(
+                'SHA-256 (64 caractères hexadécimaux) de la preuve de correspondance archivée dans le registre Finance sécurisé :',
+                '',
+                (value) => /^[0-9a-f]{64}$/i.test(value),
+                'L’empreinte de preuve doit être un SHA-256 hexadécimal.'
+            );
+            if (!mappingEvidenceHash) return false;
+            const normalizedCurrency = currency.toUpperCase();
             const confirmation = await this._partnersTypedConfirmation(
-                `${operation}:${observation}`
+                `PROPOSE-BENEFICIARY:${accountId}:${normalizedCurrency}`
             );
             if (!confirmation) return false;
             const justification = await this._partnersJustification(
-                `${operation.toLowerCase()} du rapprochement ${observation}`
+                `proposition du bénéficiaire ${normalizedCurrency}`
             );
             if (!justification) return false;
-            if (action === 'settlement-review') {
-                await this._rpc('admin_partners_airwallex_settlement_review', {
+            const binding = await this._partnersProposeRevolutBeneficiary({
+                account_id: accountId.toLowerCase(),
+                currency: normalizedCurrency,
+                beneficiary_token_ref: beneficiaryToken.toLowerCase(),
+                beneficiary_payment_method_ref: paymentMethod
+                    ? paymentMethod.toLowerCase()
+                    : null,
+                display_masked: destinationMasked,
+                mapping_evidence_hash: mappingEvidenceHash.toLowerCase(),
+                justification
+            });
+            return `Proposition ${binding.key} enregistrée. Un second opérateur Finance doit contrôler le registre sécurisé puis la vérifier ou la rejeter.`;
+        }
+
+        if (action === 'revolut-binding-verify'
+            || action === 'revolut-binding-reject') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const bindingKey = String(button.dataset.partnersBinding || '');
+            if (!/^rbb_[0-9a-f]{24}$/.test(bindingKey)) return false;
+            const verify = action === 'revolut-binding-verify';
+            const operation = verify ? 'VERIFY' : 'REJECT';
+            const confirmation = await this._partnersTypedConfirmation(
+                `${operation}:${bindingKey}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${verify ? 'vérification' : 'rejet'} du binding ${bindingKey}`
+            );
+            if (!justification) return false;
+            await this._rpc(
+                verify
+                    ? 'admin_partners_revolut_beneficiary_binding_verify'
+                    : 'admin_partners_revolut_beneficiary_binding_reject',
+                {
+                    p_binding_key: bindingKey,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            return verify
+                ? 'Binding bénéficiaire vérifié par un second opérateur et profil activé.'
+                : 'Proposition bénéficiaire rejetée sans activation du profil.';
+        }
+
+        if (action === 'revolut-binding-revoke-request'
+            || action === 'revolut-binding-revoke-confirm') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const bindingKey = String(button.dataset.partnersBinding || '');
+            if (!/^rbb_[0-9a-f]{24}$/.test(bindingKey)) return false;
+            const confirm = action === 'revolut-binding-revoke-confirm';
+            const revocationKey = String(
+                button.dataset.partnersRevocation || ''
+            );
+            if (confirm && !/^rbr_[0-9a-f]{24}$/.test(revocationKey)) {
+                return false;
+            }
+            const expected = confirm
+                ? `CONFIRM-REVOKE:${revocationKey}`
+                : `REQUEST-REVOKE:${bindingKey}`;
+            const confirmation = await this._partnersTypedConfirmation(expected);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${confirm ? 'confirmation' : 'demande'} de révocation du binding ${bindingKey}`
+            );
+            if (!justification) return false;
+            await this._rpc(
+                'admin_partners_revolut_beneficiary_binding_revoke',
+                {
+                    p_binding_key: bindingKey,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            return confirm
+                ? 'Binding révoqué par un second opérateur. Une nouvelle version vérifiée est obligatoire avant tout futur versement.'
+                : 'Révocation demandée et profil immédiatement placé en vérification. Un second opérateur doit confirmer.';
+        }
+
+        if ([
+            'revolut-return-review-eligible',
+            'revolut-return-review-quarantine',
+            'revolut-return-decide-confirm',
+            'revolut-return-decide-quarantine'
+        ].includes(action)) {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const isReview = action.startsWith('revolut-return-review-');
+            const isPositive = action.endsWith('-eligible')
+                || action.endsWith('-confirm');
+            const reference = String(button.dataset.partnersReference || '');
+            const destination = String(button.dataset.partnersDestination || '');
+            const amount = Number(button.dataset.partnersAmount);
+            const currency = String(button.dataset.partnersCurrency || '');
+            const hasVerificationContext = /^NORVA-[A-F0-9]{12}$/.test(reference)
+                && destination.length >= 4
+                && /[*•]/u.test(destination)
+                && Number.isSafeInteger(amount) && amount > 0
+                && /^[A-Z]{3}$/.test(currency);
+            if (isPositive && !hasVerificationContext) {
+                this._toast(
+                    'Le contexte de contrôle du virement retourné est incomplet. Aucune résolution financière n’a été enregistrée.',
+                    'err'
+                );
+                return false;
+            }
+            if (isReview) {
+                const observation = String(
+                    button.dataset.partnersObservation || ''
+                );
+                if (!/^rro_[0-9a-f]{24}$/.test(observation)) return false;
+                const expected = `REVIEW:${observation}`;
+                const confirmation = isPositive
+                    ? await this._partnersPrompt(
+                        `Contrôlez dans Revolut Business la référence ${reference}, la destination masquée ${destination}, le montant ${amount} ${currency} en unités mineures et l’état terminal.\n\nSaisissez ensuite exactement :\n${expected}`,
+                        '',
+                        (value) => value === expected,
+                        'La confirmation ne correspond pas. Aucune revue n’a été enregistrée.'
+                    )
+                    : await this._partnersTypedConfirmation(expected);
+                if (!confirmation) return false;
+                const conclusion = isPositive ? 'eligible' : 'quarantine';
+                const justification = await this._partnersJustification(
+                    `${conclusion === 'eligible' ? 'revue du retour' : 'quarantaine du retour'} ${observation}`
+                );
+                if (!justification) return false;
+                await this._rpc('admin_partners_revolut_return_review', {
                     p_observation_key: observation,
+                    p_conclusion: conclusion,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                });
+                return conclusion === 'eligible'
+                    ? 'Revue Finance enregistrée. Un second opérateur distinct doit confirmer la contre-écriture.'
+                    : 'Revue en quarantaine enregistrée. Un second opérateur distinct doit confirmer la décision.';
+            }
+            const review = String(button.dataset.partnersReview || '');
+            if (!/^rrv_[0-9a-f]{24}$/.test(review)) return false;
+            const decision = isPositive ? 'confirmed' : 'quarantined';
+            const expected = `${isPositive ? 'CONFIRM' : 'QUARANTINE'}:${review}`;
+            const confirmation = isPositive
+                ? await this._partnersPrompt(
+                    `Contrôle final dans Revolut Business : vérifiez la référence ${reference}, la destination masquée ${destination}, le montant ${amount} ${currency} en unités mineures et l’absence de règlement utilisable.\n\nSaisissez ensuite exactement :\n${expected}`,
+                    '',
+                    (value) => value === expected,
+                    'La confirmation ne correspond pas. Aucune contre-écriture n’a été créée.'
+                )
+                : await this._partnersTypedConfirmation(expected);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${decision === 'confirmed' ? 'résolution du retour' : 'quarantaine définitive'} ${review}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_revolut_return_decide', {
+                p_review_key: review,
+                p_decision: decision,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return decision === 'confirmed'
+                ? 'Retour confirmé : la contre-écriture dédiée a été créée sans modifier l’historique du paiement.'
+                : 'Observation maintenue en quarantaine sans contre-écriture.';
+        }
+
+        if ([
+            'revolut-manual-control-request-cancel',
+            'revolut-manual-control-request-unmapped'
+        ].includes(action)) {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const batchKey = String(button.dataset.partnersKey || '');
+            const batch = this._partnersManualBatchControls?.get(batchKey);
+            if (!batch) return false;
+            const isCancellation = action.endsWith('-cancel');
+            if (!isCancellation && !batch.unmappedReferences.length) {
+                return false;
+            }
+            const evidence = await this._partnersPickEvidenceHash();
+            if (!evidence || !/^[0-9a-f]{64}$/.test(evidence.hash)
+                || !Number.isFinite(Date.parse(evidence.observedAt))) {
+                return false;
+            }
+            const epoch = Math.floor(
+                Date.parse(evidence.observedAt) / 1000
+            );
+            const expected = isCancellation
+                ? `REQUEST-CANCEL:${batchKey}:${batch.referenceSetHash}:${evidence.hash}:${epoch}`
+                : `REQUEST-RELEASE-UNMAPPED:${batchKey}:${evidence.hash}:${epoch}`;
+            const confirmation = await this._partnersPrompt(
+                `Vérifiez dans Revolut Business chaque référence concernée et conservez la preuve sélectionnée dans le registre Finance. Un second opérateur devra refaire une recherche indépendante.\n\nSaisissez ensuite exactement :\n${expected}`,
+                '',
+                (value) => value === expected,
+                'La confirmation ne correspond pas. Aucune demande n’a été créée.'
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${isCancellation ? 'demande d’annulation' : 'demande de libération des non-saisis'} ${batchKey}`
+            );
+            if (!justification) return false;
+            if (isCancellation) {
+                await this._rpc(
+                    'admin_partners_revolut_manual_batch_cancel',
+                    {
+                        p_batch_key: batchKey,
+                        p_reference_set_hash: batch.referenceSetHash,
+                        p_provider_search_evidence_hash: evidence.hash,
+                        p_provider_search_observed_at: evidence.observedAt,
+                        p_confirmation: confirmation,
+                        p_justification: justification
+                    }
+                );
+                return 'Demande d’annulation enregistrée. Un second opérateur Finance doit refaire la recherche et confirmer.';
+            }
+            await this._rpc(
+                'admin_partners_revolut_manual_batch_release_unmapped',
+                {
+                    p_batch_key: batchKey,
+                    p_references: batch.unmappedReferences,
+                    p_provider_search_evidence_hash: evidence.hash,
+                    p_provider_search_observed_at: evidence.observedAt,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            return 'Demande de libération enregistrée. Un second opérateur Finance doit refaire la recherche et confirmer.';
+        }
+
+        if (action === 'revolut-manual-control-reject') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const controlKey = String(button.dataset.partnersControl || '');
+            const control = this._partnersManualControls?.get(controlKey);
+            if (!control || control.status !== 'pending') return false;
+            const confirmation = await this._partnersTypedConfirmation(
+                `REJECT-CONTROL:${controlKey}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `rejet du contrôle Revolut ${controlKey}`
+            );
+            if (!justification) return false;
+            await this._rpc(
+                'admin_partners_revolut_manual_control_reject',
+                {
+                    p_control_key: controlKey,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            return 'Demande rejetée par un second opérateur ; le lot est dégelé sans déplacement de fonds.';
+        }
+
+        if (action === 'revolut-manual-control-confirm') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const controlKey = String(button.dataset.partnersControl || '');
+            const control = this._partnersManualControls?.get(controlKey);
+            if (!control || control.status !== 'pending') return false;
+            const evidence = await this._partnersPickEvidenceHash();
+            if (!evidence || !/^[0-9a-f]{64}$/.test(evidence.hash)
+                || !Number.isFinite(Date.parse(evidence.observedAt))) {
+                return false;
+            }
+            const epoch = Math.floor(
+                Date.parse(evidence.observedAt) / 1000
+            );
+            const confirmation = control.type === 'batch_cancellation'
+                ? `CONFIRM-CANCEL:${control.key}:${evidence.hash}:${epoch}`
+                : `CONFIRM-RELEASE-UNMAPPED:${control.key}:${evidence.hash}:${epoch}`;
+            const typed = await this._partnersPrompt(
+                `Effectuez maintenant une nouvelle recherche exacte et indépendante de toutes les références du contrôle dans Revolut Business. Conservez la preuve sélectionnée dans le registre Finance.\n\nSaisissez ensuite exactement :\n${confirmation}`,
+                '',
+                (value) => value === confirmation,
+                'La confirmation ne correspond pas. Aucun fonds n’a été débloqué.'
+            );
+            if (!typed) return false;
+            const justification = await this._partnersJustification(
+                `second contrôle Revolut ${control.key}`
+            );
+            if (!justification) return false;
+            if (control.type === 'batch_cancellation') {
+                await this._rpc(
+                    'admin_partners_revolut_manual_batch_cancel',
+                    {
+                        p_batch_key: control.batchKey,
+                        p_reference_set_hash: control.referenceSetHash,
+                        p_provider_search_evidence_hash: evidence.hash,
+                        p_provider_search_observed_at: evidence.observedAt,
+                        p_confirmation: typed,
+                        p_justification: justification
+                    }
+                );
+                return 'Annulation confirmée par un second opérateur ; les fonds non envoyés ont été remis à disposition.';
+            }
+            await this._rpc(
+                'admin_partners_revolut_manual_batch_release_unmapped',
+                {
+                    p_batch_key: control.batchKey,
+                    p_references: control.references,
+                    p_provider_search_evidence_hash: evidence.hash,
+                    p_provider_search_observed_at: evidence.observedAt,
+                    p_confirmation: typed,
+                    p_justification: justification
+                }
+            );
+            return 'Références non saisies libérées après un second contrôle indépendant.';
+        }
+
+        if ([
+            'revolut-late-review-eligible',
+            'revolut-late-review-quarantine',
+            'revolut-late-decide-confirm',
+            'revolut-late-decide-quarantine'
+        ].includes(action)) {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const isReview = action.startsWith('revolut-late-review-');
+            const key = String(isReview
+                ? button.dataset.partnersObservation
+                : button.dataset.partnersReview || '');
+            if (isReview
+                ? !/^rlc_[0-9a-f]{24}$/.test(key)
+                : !/^rlv_[0-9a-f]{24}$/.test(key)) {
+                return false;
+            }
+            const isPositive = action.endsWith('-eligible')
+                || action.endsWith('-confirm');
+            const context = this._partnersLateCompletionContexts?.get(key);
+            if (isPositive && !context) {
+                this._toast(
+                    'Le contexte de contrôle du paiement tardif est incomplet. Aucune écriture financière n’a été créée.',
+                    'err'
+                );
+                return false;
+            }
+            const expected = isReview
+                ? `REVIEW-LATE:${key}`
+                : `${isPositive ? 'CONFIRM-LATE' : 'QUARANTINE-LATE'}:${key}`;
+            const confirmation = isPositive
+                ? await this._partnersPrompt(
+                    `Contrôlez dans Revolut Business la référence ${context.reference}, la destination masquée ${context.destination} et le montant ${context.amount} ${context.currency} en unités mineures.\n\nSaisissez ensuite exactement :\n${expected}`,
+                    '',
+                    (value) => value === expected,
+                    'La confirmation ne correspond pas. Aucune écriture financière n’a été créée.'
+                )
+                : await this._partnersTypedConfirmation(expected);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${isReview ? 'revue' : 'décision'} du paiement tardif ${key}`
+            );
+            if (!justification) return false;
+            if (isReview) {
+                await this._rpc(
+                    'admin_partners_revolut_late_completion_review',
+                    {
+                        p_observation_key: key,
+                        p_conclusion: isPositive
+                            ? 'eligible'
+                            : 'quarantine',
+                        p_confirmation: confirmation,
+                        p_justification: justification
+                    }
+                );
+                return 'Revue du paiement tardif enregistrée ; un second opérateur Finance doit décider.';
+            }
+            await this._rpc(
+                'admin_partners_revolut_late_completion_decide',
+                {
+                    p_review_key: key,
+                    p_decision: isPositive
+                        ? 'confirmed'
+                        : 'quarantined',
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            return isPositive
+                ? 'Paiement tardif confirmé et écriture de récupération créée.'
+                : 'Paiement tardif maintenu en quarantaine ; le gel des versements reste actif.';
+        }
+
+        if (action === 'revolut-incident-page') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const offset = Number(button.dataset.partnersOffset);
+            if (!Number.isSafeInteger(offset) || offset < 0) return false;
+            this._partnersIncidentOffset = offset;
+            if (this._route === 'partners') this._pagePartners();
+            return false;
+        }
+
+        if (action === 'revolut-incident-review') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const incidentKey = String(
+                button.dataset.partnersIncident || ''
+            );
+            const resolution = String(
+                button.dataset.partnersResolution || ''
+            );
+            const incident = this._partnersReconciliationIncidents?.get(
+                incidentKey
+            );
+            if (!incident || incident.status === 'resolved'
+                || incident.pendingReview
+                || !incident.eligibleActions.includes(resolution)) {
+                return false;
+            }
+            let targetReference = null;
+            if (resolution === 'settle_exact'
+                || resolution === 'release_after_return') {
+                targetReference = incident.expectedReference
+                    || incident.reference;
+                if (!/^NORVA-[A-F0-9]{12}$/.test(targetReference)) {
+                    return false;
+                }
+            } else if (resolution === 'remap_exact_and_settle') {
+                targetReference = await this._partnersPrompt(
+                    'Référence NORVA exacte de l’exécution non résolue à laquelle rattacher cette transaction :',
+                    incident.expectedReference || '',
+                    (value) => /^NORVA-[A-F0-9]{12}$/.test(value),
+                    'La cible doit être une référence NORVA exacte.'
+                );
+                if (!targetReference) return false;
+            } else if (resolution !== 'quarantine') {
+                return false;
+            }
+            const justification = await this._partnersJustification(
+                `revue de l’écart Revolut ${incidentKey}`
+            );
+            if (!justification) return false;
+            const readyForEvidence = await this._confirm(
+                'Effectuez maintenant la recherche exacte dans Revolut Business, exportez ou capturez sa preuve dans le registre Finance, puis sélectionnez ce fichier. Norva ne conservera que son SHA-256.',
+                { okLabel: 'Choisir la preuve' }
+            );
+            if (!readyForEvidence) return false;
+            const evidence = await this._partnersPickEvidenceHash();
+            if (!evidence || !/^[0-9a-f]{64}$/.test(evidence.hash)
+                || !Number.isFinite(Date.parse(evidence.observedAt))) {
+                return false;
+            }
+            const observedAt = new Date(
+                Math.floor(Date.parse(evidence.observedAt) / 1000) * 1000
+            ).toISOString();
+            const epoch = Math.floor(Date.parse(observedAt) / 1000);
+            const targetToken = targetReference || 'NONE';
+            const confirmation = [
+                'REVIEW-RECON',
+                incident.key,
+                resolution.toUpperCase(),
+                targetToken,
+                incident.fingerprint,
+                String(incident.amount),
+                incident.currency,
+                String(epoch)
+            ].join(':');
+            const typed = await this._partnersPrompt(
+                `Conservez le fichier sélectionné dans le registre Finance ; Norva n’en transmet que le SHA-256. Cette preuve doit correspondre à la recherche Revolut que vous venez d’effectuer. Un autre opérateur devra refaire le contrôle avec une preuve différente.\n\nSaisissez exactement :\n${confirmation}`,
+                '',
+                (value) => value === confirmation,
+                'La confirmation ne correspond pas. Aucun contrôle n’a été enregistré.'
+            );
+            if (!typed) return false;
+            const result = await this._rpc(
+                'admin_partners_revolut_reconciliation_incident_review',
+                {
+                    p_incident_key: incident.key,
+                    p_action: resolution,
+                    p_target_reference: targetReference || '',
+                    p_provider_search_evidence_hash: evidence.hash,
+                    p_provider_search_observed_at: observedAt,
+                    p_confirmation: typed,
+                    p_justification: justification
+                }
+            );
+            const review = result?.review;
+            if (result?.schema_version !== 1
+                || result?.action
+                    !== 'revolut_reconciliation_incident_reviewed'
+                || typeof result?.replayed !== 'boolean'
+                || !review
+                || !/^rir_[0-9a-f]{24}$/.test(String(review.key || ''))
+                || review.incident_key !== incident.key
+                || review.proposed_action !== resolution
+                || (review.target_reference || null)
+                    !== (targetReference || null)) {
+                throw new Error('invalid_reconciliation_incident_review');
+            }
+            return 'Contrôle 1/2 enregistré. Un autre opérateur Finance/AAL2 doit refaire une recherche indépendante et décider.';
+        }
+
+        if (action === 'revolut-incident-decide-approve'
+            || action === 'revolut-incident-decide-quarantine') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const incidentKey = String(
+                button.dataset.partnersIncident || ''
+            );
+            const incident = this._partnersReconciliationIncidents?.get(
+                incidentKey
+            );
+            const review = incident?.pendingReview;
+            if (!incident || incident.status === 'resolved' || !review) {
+                return false;
+            }
+            const decision = action.endsWith('-approve')
+                ? 'approved'
+                : 'quarantined';
+            const justification = await this._partnersJustification(
+                `${decision === 'approved' ? 'approbation' : 'refus'} du contrôle Revolut ${review.key}`
+            );
+            if (!justification) return false;
+            const readyForEvidence = await this._confirm(
+                'Refaites maintenant une recherche indépendante dans Revolut Business, exportez ou capturez une nouvelle preuve dans le registre Finance, puis sélectionnez ce fichier. Elle doit être différente et plus récente que celle du premier opérateur.',
+                { okLabel: 'Choisir la nouvelle preuve' }
+            );
+            if (!readyForEvidence) return false;
+            const evidence = await this._partnersPickEvidenceHash();
+            if (!evidence || !/^[0-9a-f]{64}$/.test(evidence.hash)
+                || !Number.isFinite(Date.parse(evidence.observedAt))) {
+                return false;
+            }
+            const observedAt = new Date(
+                Math.floor(Date.parse(evidence.observedAt) / 1000) * 1000
+            ).toISOString();
+            const epoch = Math.floor(Date.parse(observedAt) / 1000);
+            const confirmation = [
+                'DECIDE-RECON',
+                review.key,
+                decision === 'approved' ? 'APPROVE' : 'QUARANTINE',
+                review.proposedAction.toUpperCase(),
+                review.targetReference || 'NONE',
+                incident.fingerprint,
+                String(incident.amount),
+                incident.currency,
+                String(epoch)
+            ].join(':');
+            const typed = await this._partnersPrompt(
+                `Effectuez une nouvelle recherche indépendante dans Revolut et conservez le fichier sélectionné dans le registre Finance. Norva n’en transmet que le SHA-256.\n\nSaisissez exactement :\n${confirmation}`,
+                '',
+                (value) => value === confirmation,
+                'La confirmation ne correspond pas. Aucune décision n’a été enregistrée.'
+            );
+            if (!typed) return false;
+            const result = await this._rpc(
+                'admin_partners_revolut_reconciliation_incident_decide',
+                {
+                    p_review_key: review.key,
+                    p_decision: decision,
+                    p_provider_search_evidence_hash: evidence.hash,
+                    p_provider_search_observed_at: observedAt,
+                    p_confirmation: typed,
+                    p_justification: justification
+                }
+            );
+            const resolved = result?.decision;
+            const effectiveAction = decision === 'approved'
+                ? review.proposedAction
+                : 'quarantine';
+            const expectedStatus = effectiveAction === 'quarantine'
+                ? 'quarantined'
+                : 'resolved';
+            if (result?.schema_version !== 1
+                || result?.action
+                    !== 'revolut_reconciliation_incident_decided'
+                || typeof result?.replayed !== 'boolean'
+                || !resolved
+                || !/^rid_[0-9a-f]{24}$/.test(String(resolved.key || ''))
+                || resolved.incident_key !== incident.key
+                || resolved.status !== expectedStatus
+                || resolved.verdict !== decision
+                || resolved.resolution !== effectiveAction
+                || (resolved.target_reference || null)
+                    !== (review.targetReference || null)) {
+                throw new Error('invalid_reconciliation_incident_decision');
+            }
+            return decision === 'approved'
+                ? 'Contrôle 2/2 approuvé. La résolution append-only autorisée a été appliquée.'
+                : 'Proposition refusée et placée en quarantaine sans écriture financière ; un nouveau cycle de contrôle reste possible.';
+        }
+
+        if ([
+            'revolut-reconciliation-review',
+            'revolut-reconciliation-confirm',
+            'revolut-reconciliation-quarantine'
+        ].includes(action)) {
+            if (this._partnersCapabilities.finance !== true) return false;
+            if (action === 'revolut-reconciliation-review') {
+                const statementRow = String(button.dataset.partnersStatementRow || '');
+                if (!/^rsr_[0-9a-f]{24}$/.test(statementRow)) return false;
+                const reference = String(button.dataset.partnersReference || '');
+                const destination = String(button.dataset.partnersDestination || '');
+                const amount = Number(button.dataset.partnersAmount);
+                const currency = String(button.dataset.partnersCurrency || '');
+                if (!/^NORVA-[A-F0-9]{12}$/.test(reference)
+                    || destination.length < 4
+                    || !Number.isSafeInteger(amount) || amount < 1
+                    || !/^[A-Z]{3}$/.test(currency)) {
+                    this._toast(
+                        'Le contexte de contrôle du bénéficiaire est incomplet. Aucune revue n’a été enregistrée.',
+                        'err'
+                    );
+                    return false;
+                }
+                const expectedReview = `REVIEW:${statementRow}`;
+                const confirmation = await this._partnersPrompt(
+                    `Contrôle dans Revolut Business : comparez la référence ${reference}, la destination masquée ${destination} et le montant ${amount} ${currency} en unités mineures.\n\nSaisissez ensuite exactement :\n${expectedReview}`,
+                    '',
+                    (value) => value === expectedReview,
+                    'La confirmation ne correspond pas. Aucune revue n’a été enregistrée.'
+                );
+                if (!confirmation) return false;
+                const justification = await this._partnersJustification(
+                    `revue du rapprochement ${statementRow}`
+                );
+                if (!justification) return false;
+                await this._rpc('admin_partners_revolut_reconciliation_review', {
+                    p_statement_row_key: statementRow,
                     p_confirmation: confirmation,
                     p_justification: justification
                 });
                 return 'Revue Finance enregistrée. Un second opérateur Finance distinct doit maintenant décider.';
             }
-            const decision = action === 'settlement-confirm'
+            const review = String(button.dataset.partnersReview || '');
+            if (!/^rmr_[0-9a-f]{24}$/.test(review)) return false;
+            const operation = action === 'revolut-reconciliation-confirm'
+                ? 'CONFIRM' : 'QUARANTINE';
+            const expectedConfirmation = `${operation}:${review}`;
+            const reference = String(button.dataset.partnersReference || '');
+            const destination = String(button.dataset.partnersDestination || '');
+            const amount = Number(button.dataset.partnersAmount);
+            const currency = String(button.dataset.partnersCurrency || '');
+            const hasVerificationContext = /^NORVA-[A-F0-9]{12}$/.test(reference)
+                && destination.length >= 4
+                && Number.isSafeInteger(amount) && amount > 0
+                && /^[A-Z]{3}$/.test(currency);
+            if (operation === 'CONFIRM' && !hasVerificationContext) {
+                this._toast(
+                    'Le contexte de contrôle du bénéficiaire est incomplet. Aucun règlement n’a été comptabilisé.',
+                    'err'
+                );
+                return false;
+            }
+            const confirmation = operation === 'CONFIRM'
+                ? await this._partnersPrompt(
+                    `Contrôle final dans Revolut Business : vérifiez la référence ${reference}, la destination masquée ${destination} et le montant ${amount} ${currency} en unités mineures.\n\nSaisissez ensuite exactement :\n${expectedConfirmation}`,
+                    '',
+                    (value) => value === expectedConfirmation,
+                    'La confirmation ne correspond pas. Aucun règlement n’a été comptabilisé.'
+                )
+                : await this._partnersTypedConfirmation(expectedConfirmation);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${operation.toLowerCase()} du rapprochement ${review}`
+            );
+            if (!justification) return false;
+            const decision = action === 'revolut-reconciliation-confirm'
                 ? 'confirmed'
                 : 'quarantined';
-            await this._rpc('admin_partners_airwallex_settlement_decide', {
-                p_observation_key: observation,
+            await this._rpc('admin_partners_revolut_reconciliation_decide', {
+                p_review_key: review,
                 p_decision: decision,
                 p_confirmation: confirmation,
                 p_justification: justification
@@ -5327,6 +7606,161 @@ class AdminPage {
             return decision === 'confirmed'
                 ? 'Rapprochement confirmé et ledger de règlement créé.'
                 : 'Rapprochement placé en quarantaine sans écriture de règlement.';
+        }
+
+        if (action === 'revolut-statement-import') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const file = await this._partnersPickTextFile(
+                '.csv,.tsv,text/csv,text/tab-separated-values,text/plain',
+                5_000_000
+            );
+            if (!file) return false;
+            const imported = await this._partnersImportRevolutStatement(file.text);
+            return `Relevé normalisé : ${AdminPage.n(imported.accepted)} ligne(s) Norva, ${AdminPage.n(imported.matched)} correspondance(s), ${AdminPage.n(imported.mismatch)} écart(s), ${AdminPage.n(imported.unmatched)} référence(s) inconnue(s), ${AdminPage.n(imported.duplicate)} doublon(s), ${AdminPage.n(imported.ignored)} ligne(s) hors Norva ignorée(s).`;
+        }
+
+        if (action === 'revolut-batch-prepare') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const cycleKey = String(button.dataset.partnersKey || '');
+            if (!/^pay_[0-9a-f]{24}$/.test(cycleKey)) return false;
+            const confirmation = await this._partnersTypedConfirmation(
+                `PREPARE:${cycleKey}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `préparation du lot manuel ${cycleKey}`
+            );
+            if (!justification) return false;
+            await this._rpc('admin_partners_revolut_manual_batch_prepare', {
+                p_cycle_key: cycleKey,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            return 'Lot Revolut manuel préparé et références Norva figées.';
+        }
+
+        if (action === 'revolut-batch-export') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const batchKey = String(button.dataset.partnersKey || '');
+            if (!/^rmb_[0-9a-f]{24}$/.test(batchKey)) return false;
+            const isInitial = String(button.dataset.partnersStatus || '')
+                === 'prepared';
+            const confirmation = await this._partnersTypedConfirmation(
+                `${isInitial ? 'EXPORT' : 'ACCESS-EXPORT'}:${batchKey}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `${isInitial ? 'export contrôlé' : 'accès contrôlé à l’export'} du lot ${batchKey}`
+            );
+            if (!justification) return false;
+            const payload = await this._rpc(
+                'admin_partners_revolut_manual_batch_export',
+                {
+                    p_batch_key: batchKey,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                }
+            );
+            const validated = await this
+                ._partnersValidateRevolutBatchExport(payload, batchKey);
+            if (String(button.dataset.partnersStatus || '')
+                === 'partially_submitted') {
+                if (!validated.progressTsv) {
+                    throw new Error('missing_manual_batch_progress');
+                }
+                this._partnersDownloadText(
+                    validated.progressFileName,
+                    validated.progressTsv,
+                    'text/tab-separated-values;charset=utf-8'
+                );
+                return 'Progression Revolut vérifiée et téléchargée, sans jeton bénéficiaire.';
+            }
+            this._partnersDownloadText(
+                validated.canonicalFileName,
+                validated.canonicalTsv,
+                'text/tab-separated-values;charset=utf-8'
+            );
+            return payload.replayed
+                ? 'Export canonique réouvert et téléchargé après vérification de son empreinte.'
+                : 'Lot exporté atomiquement et empreinte vérifiée. Saisissez chaque virement dans Revolut avec sa référence NORVA, puis inscrivez YES dans la dernière colonne. L’identifiant bancaire viendra uniquement du relevé.';
+        }
+
+        if (action === 'revolut-batch-submit') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const batchKey = String(button.dataset.partnersKey || '');
+            if (!/^rmb_[0-9a-f]{24}$/.test(batchKey)) return false;
+            const accessConfirmation = await this._partnersTypedConfirmation(
+                `ACCESS-EXPORT:${batchKey}`
+            );
+            if (!accessConfirmation) return false;
+            const accessJustification = await this._partnersJustification(
+                `accès au lot avant enregistrement de la saisie ${batchKey}`
+            );
+            if (!accessJustification) return false;
+            const payload = await this._rpc(
+                'admin_partners_revolut_manual_batch_export',
+                {
+                    p_batch_key: batchKey,
+                    p_confirmation: accessConfirmation,
+                    p_justification: accessJustification
+                }
+            );
+            const validated = await this
+                ._partnersValidateRevolutBatchExport(payload, batchKey);
+            const file = await this._partnersPickTextFile(
+                '.tsv,text/tab-separated-values,text/plain',
+                5_000_000
+            );
+            if (!file) return false;
+            const transfers = this._partnersParseRevolutSubmissionTsv(
+                file.text,
+                validated
+            );
+            const confirmation = await this._partnersTypedConfirmation(
+                `SUBMIT:${batchKey}`
+            );
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(
+                `confirmation de saisie Revolut du lot ${batchKey}`
+            );
+            if (!justification) return false;
+            const result = await this._rpc(
+                'admin_partners_revolut_manual_batch_mark_submitted',
+                {
+                p_batch_key: batchKey,
+                p_transfers: transfers,
+                p_confirmation: confirmation,
+                p_justification: justification
+                }
+            );
+            const resultBatch = result?.batch;
+            const resultCounts = [
+                resultBatch?.entered_count,
+                resultBatch?.statement_matched_count,
+                resultBatch?.released_count,
+                resultBatch?.resolved_count,
+                resultBatch?.remaining_count
+            ].map(Number);
+            if (result?.schema_version !== 2
+                || ![
+                    'revolut_manual_batch_submission_progressed',
+                    'revolut_manual_batch_submitted'
+                ].includes(String(result?.action || ''))
+                || !resultBatch
+                || resultBatch.key !== batchKey
+                || resultCounts.some((value) => (
+                    !Number.isSafeInteger(value) || value < 0
+                ))
+                || resultCounts[0] < 1
+                || resultCounts[3] < resultCounts[0]
+                || resultCounts[3] < resultCounts[2]
+                || typeof resultBatch.completed !== 'boolean'
+                || resultBatch.completed !== (resultCounts[4] === 0)) {
+                throw new Error('invalid_manual_submission_response');
+            }
+            return resultBatch.completed === true
+                ? `Saisie Revolut complète enregistrée : ${AdminPage.n(resultCounts[0])} virement(s) déclaré(s), ${AdminPage.n(resultCounts[1])} déjà rapproché(s) par relevé.`
+                : `Progression enregistrée : ${AdminPage.n(resultCounts[0])} virement(s) saisi(s), ${AdminPage.n(resultCounts[1])} déjà rapproché(s), ${AdminPage.n(resultCounts[4])} restant(s).`;
         }
 
         if (action === 'capability') {
@@ -5642,15 +8076,8 @@ class AdminPage {
         }
 
         if (action === 'payout-provider') {
-            const provider = await this._partnersPrompt(
-                'Adaptateur technique disponible : airwallex uniquement. Revolut Business reste en évaluation et aucun versement live n’est activé ici.',
-                'airwallex',
-                (value) => value.toLowerCase() === 'airwallex',
-                'Seul l’adaptateur technique Airwallex est actuellement implémenté.'
-            );
-            if (!provider) return false;
             const country = await this._partnersPrompt(
-                'Pays couvert (ISO alpha-2) :',
+                'Pays couvert par la route Revolut Basic manuelle (ISO alpha-2) :',
                 '',
                 (value) => isoCountry.test(value.toUpperCase()),
                 'Code pays invalide.'
@@ -5663,18 +8090,27 @@ class AdminPage {
                 'Code devise invalide.'
             );
             if (!currency) return false;
+            const operation = await this._partnersPrompt(
+                'Action : ACTIVE ou DISABLED',
+                'ACTIVE',
+                (value) => ['ACTIVE', 'DISABLED'].includes(value.toUpperCase()),
+                'État de route invalide.'
+            );
+            if (!operation) return false;
+            const routeStatus = operation.toUpperCase() === 'ACTIVE'
+                ? 'active' : 'disabled';
             const justification = await this._partnersJustification(
-                `couverture payout ${provider.toLowerCase()}/${country.toUpperCase()}/${currency.toUpperCase()}`
+                `${routeStatus === 'active' ? 'activation' : 'désactivation'} de la route Revolut manuelle ${country.toUpperCase()}/${currency.toUpperCase()}`
             );
             if (!justification) return false;
             await this._rpc('admin_partners_payout_provider_set', {
-                p_provider: provider.toLowerCase(),
+                p_provider: 'revolut',
                 p_country_code: country.toUpperCase(),
                 p_currency: currency.toUpperCase(),
-                p_status: 'active',
+                p_status: routeStatus,
                 p_justification: justification
             });
-            return 'Couverture technique Airwallex enregistrée. Ce réglage ne constitue pas un choix commercial et n’active aucun versement live.';
+            return `Route Revolut Business Basic ${routeStatus === 'active' ? 'activée' : 'désactivée'} en mode manuel.`;
         }
 
         if (action === 'allowlist') {
@@ -6873,6 +9309,7 @@ class AdminPage {
             'partners_invite_only',
             'partners_shadow_mode',
             'partners_payouts_live',
+            'partners_revolut_api_enabled',
             'partners_tv_relay_enabled'
         ].includes(String(key || ''));
     }

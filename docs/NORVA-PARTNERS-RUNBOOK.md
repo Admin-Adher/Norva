@@ -57,28 +57,39 @@ NORVA_REVENUECAT_TRANSFER_WORKER_BATCH # 1..4, défaut 4
 NORVA_REVENUECAT_TRANSFER_WORKER_MAX_BATCHES # forcé à 1
 NORVA_REVENUECAT_TRANSFER_WORKER_LEASE_SECONDS # 120..300, défaut 120
 
-# Adaptateur technique Airwallex du pilote - aucun choix commercial définitif
-# Laisser le sélecteur vide jusqu'à une décision explicite et au pilote sandbox.
-NORVA_PARTNERS_PAYOUT_PROVIDER         # valeur autorisée : airwallex
-AIRWALLEX_ENVIRONMENT                  # sandbox | production
-AIRWALLEX_API_VERSION                  # doit rester 2025-06-30 pour ce contrat
+# Rail de production initial : Revolut Business Basic, exécution manuelle.
+NORVA_PARTNERS_PAYOUT_PROVIDER         # revolut
+NORVA_PARTNERS_REVOLUT_API_ENABLED     # kill switch Edge ; false sous Basic
+
+# Registre bénéficiaire du rail manuel. Ces secrets serveur sont nécessaires
+# au mode revolut_manual ; ils ne sont ni des identifiants Business API, ni des
+# secrets Merchant API.
+NORVA_PARTNERS_REVOLUT_BENEFICIARY_HMAC_KEYS_JSON
+                                       # objet version -> clé aléatoire base64url
+NORVA_PARTNERS_REVOLUT_BENEFICIARY_HMAC_ACTIVE_VERSION
+                                       # version de signature choisie côté serveur
+
+# Rail Revolut Business API dormant. Ces valeurs restent absentes en mode
+# revolut_manual et ne sont jamais des secrets Merchant API.
+NORVA_PARTNERS_REVOLUT_API_BATCH       # forcé à 1 (un seul lease financier)
+NORVA_PARTNERS_REVOLUT_API_MAX_BATCHES # 1..4, défaut 2
+NORVA_PARTNERS_REVOLUT_API_LEASE_SECONDS # 60..240, défaut 240
+REVOLUT_BUSINESS_ENVIRONMENT           # choix explicite : sandbox | production
+REVOLUT_BUSINESS_CLIENT_ID
+REVOLUT_BUSINESS_ISSUER
+REVOLUT_BUSINESS_PRIVATE_KEY_PEM
+REVOLUT_BUSINESS_REFRESH_TOKEN
+REVOLUT_BUSINESS_SOURCE_ACCOUNTS_JSON  # allowlist compte source par devise
+REVOLUT_BUSINESS_MAX_FEE_MINOR_JSON    # plafond Finance en unités mineures/devise
+REVOLUT_BUSINESS_TIMEOUT_MS
+
+# Héritage Airwallex : code et preuves historiques seulement. Ne configurer
+# aucune de ces variables et n'activer aucun cron Airwallex sous Revolut Basic.
+AIRWALLEX_ENVIRONMENT
 AIRWALLEX_CLIENT_ID
 AIRWALLEX_API_KEY
-AIRWALLEX_LOGIN_AS                     # optionnel, compte ciblé par clé scoped
-AIRWALLEX_WEBHOOK_SECRET               # secret propre à l'URL webhook
-AIRWALLEX_TRANSFER_REASON              # valeur validée pour le corridor pilote
-AIRWALLEX_TIMEOUT_MS                   # 1000..12000, défaut 7000
-AIRWALLEX_WEBHOOK_TOLERANCE_MS         # 30000..600000, défaut 300000
-AIRWALLEX_FINANCIAL_REPORTS_ENABLED    # false jusqu'à approbation Finance
-AIRWALLEX_FINANCIAL_REPORTS_API_VERSION # exactement 2024-04-30
-AIRWALLEX_TRANSACTION_REPORT_VERSION   # exactement 1.1.0
-AIRWALLEX_TRANSACTION_REPORT_CONTRACT  # transaction_recon_csv_1_1_0_preamble_v1
-AIRWALLEX_FINANCIAL_REPORTS_LOOKBACK_DAYS # 2..35, défaut 35
-AIRWALLEX_FINANCIAL_REPORTS_MAX_BYTES  # 65536..8388608
-AIRWALLEX_FINANCIAL_REPORTS_MAX_ROWS   # 1..25000
-AIRWALLEX_FINANCIAL_REPORTS_MAX_MATCHES # 1..250
-AIRWALLEX_FINANCIAL_REPORTS_LEASE_SECONDS # 60..300
-AIRWALLEX_FINANCIAL_REPORTS_BUDGET_MS  # 10000..50000
+AIRWALLEX_WEBHOOK_SECRET
+AIRWALLEX_FINANCIAL_REPORTS_ENABLED    # doit rester false
 ```
 
 Configurer séparément sur Cloudflare Pages :
@@ -137,102 +148,259 @@ est HTTPS, sous `*.norva.tv`, sans query ni fragment ; son TTL est compris entre
 120 et 600 secondes. Didit reçoit directement la `kyc.reservation_key` opaque
 émise par la DB comme `vendor_data` : aucun second secret vendor n'est requis.
 
-### Airwallex P0 : ordre d'activation
+### Revolut Business Basic : production manuelle
 
-Le code déployé ne suffit jamais à envoyer un versement. Respecter cet ordre :
+`revolut_manual` est le rail réel du démarrage commercial, pas un dry-run.
+Norva reste autoritaire pour le ledger append-only, la maturation J+45, les
+contrôles, les lots et leur état. Un acteur Finance valide ensuite le lot et
+saisit chaque virement dans Revolut Business Basic. Aucun appel Business API
+n'est nécessaire pour ce parcours.
 
-Airwallex est l'adaptateur d'exécution actuellement implémenté, pas un choix
-commercial irréversible. Revolut Business doit être évalué en priorité puisque
-Norva l'utilise déjà côté entreprise, mais son API Business, ses scopes et son
-authentification de versement sont distincts de la Merchant API utilisée pour
-les encaissements. Tant qu'un second adaptateur n'existe pas, la base refuse
-l'activation de toute autre famille de prestataire et le journal de release
-doit nommer explicitement `airwallex` et la version du contrat de
-rapprochement. Cette protection est réversible par une migration dédiée.
+Le contrat initial est strict :
 
-1. laisser `NORVA_PARTNERS_PAYOUT_PROVIDER` vide et conserver
-   `partners_payouts_live=false` ;
-2. créer une clé Airwallex sandbox scoped au strict nécessaire
-   (bénéficiaires et transferts), puis renseigner les secrets hors Git ;
-3. créer le webhook sandbox pour les événements `payout.transfer.scheduled`,
-   `processing`, `sent`, `paid`, `failed`, `cancelled` et
-   `payout.transfer.funding.reversed` ;
-4. vérifier le HMAC sur le corps brut, les doublons, le désordre des événements,
-   un timeout de création résolu par `request_id`, puis le scénario
-   `PAID -> FAILED` ;
-5. activer une route pays/devise Airwallex avec
-   `admin_partners_payout_provider_set`, sans ouvrir encore le flag global ;
-6. générer manuellement un Transaction Reconciliation Report sandbox CSV
-   v1.1.0 filtré `PAYOUT`/`SETTLED`, puis valider son contrat physique hors
-   ligne avec
-   `node scripts/verify-airwallex-report-contract.js <csv> <from> <to>` ;
-   ne conserver dans la preuve de release que le SHA-256 et les compteurs ;
-7. faire approuver le contrat `sandbox` par un acteur Finance en session
-   `aal2` avec `admin_partners_airwallex_report_contract_set`, renseigner les
-   variables Financial Reports hors Git, puis smoke-tester `/cron/reports` ;
-8. faire revoir chaque preuve de settlement par un acteur Finance et la
-   confirmer ou la
-   quarantainer avec un second acteur Finance distinct ; les deux actions
-   exigent une session Supabase `aal2` fraîche en plus de la capacité Finance ;
-9. répéter l'approbation du contrat sur un rapport `production` réel avant
-   d'enregistrer manuellement
-   `register-norva-partners-airwallex-reports-cron.sql` ;
-10. seulement après rapprochement sandbox, satisfaire
-    `payout_execution_adapter_verified`, puis ouvrir le pilote.
+- la route active porte `provider=revolut` et
+  `execution_adapter=revolut_manual` ;
+- `partners_revolut_api_enabled=false` en DB et
+  `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` dans l'Edge ;
+- chaque paiement possède une référence immuable et unique de forme
+  `NORVA-[A-F0-9]{12}` ; elle est copiée sans modification dans Revolut ;
+- référence, montant mineur et devise doivent tous correspondre exactement ;
+- le TSV opérateur fige l'identifiant d'exécution, la destination masquée, le
+  montant, la devise et la référence. Sa dernière colonne
+  `entered_in_revolut` est vide dans l'original et accepte uniquement `YES`
+  dans la copie de travail après saisie. Aucun identifiant ou hash de
+  transaction Revolut n'est copié manuellement dans Norva ;
+- le `beneficiary_token_ref` n'est jamais inventé au moment du lot. Il provient
+  d'un registre Finance sécurisé, distinct du dépôt, qui relie cet UUID opaque
+  au bénéficiaire Revolut réel. La destination masquée sert de second contrôle,
+  pas de mécanisme de recherche autonome. Sans mapping vérifié et accessible
+  aux opérateurs du jour, le profil reste `verification_required` et aucun lot
+  de production ne doit être préparé ;
+- la proposition du mapping passe uniquement par
+  `/manual/beneficiaries/propose`. Une autorisation Finance/AAL2 à usage unique
+  fournit au runtime Edge deux payloads canoniques ; l'Edge calcule une
+  empreinte stable et une attestation liée au ticket avec une clé HMAC
+  versionnée. Ni la clé, ni les HMAC, ni l'UUID bénéficiaire ne sont renvoyés
+  par le read model Admin. Un second opérateur Finance distinct vérifie ou
+  rejette ensuite le binding ;
+- l'exposant monétaire utilisé à l'import vient exclusivement du contexte SQL
+  Finance autoritaire ; il n'est jamais accepté depuis le fichier, le
+  navigateur ou un autre paramètre client ;
+- le relevé brut est traité en mémoire. Seuls la référence Norva, l'identifiant
+  de transaction opaque, le montant, la devise, la date de valeur et les
+  empreintes SHA-256 sont persistés ;
+- l'import Edge exige un ticket Finance/AAL2 aléatoire à usage unique, valable
+  cinq minutes. Seule son empreinte est persistée ; sa consommation atomique le
+  lie au hash du relevé et interdit sa réutilisation ;
+- deux acteurs Finance distincts réalisent la revue puis la décision finale ;
+  l'acteur qui a enregistré la soumission du virement concerné ne peut pas
+  prendre la décision finale, même si un autre acteur a terminé le lot.
 
-Le bénéficiaire envoyé à Airwallex est toujours `PERSONAL/BANK_ACCOUNT`. L'IBAN
-ou le numéro de compte traverse uniquement la requête TLS de l'Edge Function :
-PostgreSQL ne conserve que l'identifiant opaque Airwallex et un libellé masqué.
-La création est réservée avant l'appel externe ; toute issue ambiguë passe en
-revue manuelle au lieu de rejouer une création potentiellement réussie.
+Ordre d'activation du rail manuel :
 
-Chaque transfert utilise le `request_id` stable de la ligne de dispatch. Après
-un timeout ou un conflit 409, l'Edge Function recherche ce `request_id` avant
-toute nouvelle tentative. Le webhook signé ne décide jamais d'un état
-financier : il réveille une lecture autoritaire
-`GET /api/v1/transfers/{id}`. L'état `PAID` reste
-`reconciliation_status=pending`, car Airwallex documente qu'un échec tardif
-reste possible. Aucun posting de règlement ni contre-écriture automatique
-n'est créé avant un rapprochement financier séparé.
+1. appliquer les migrations, attribuer la capacité Finance et vérifier AAL2 ;
+2. configurer les corridors autorisés avec
+   `admin_partners_payout_route_set`, `provider=revolut` et
+   `execution_adapter=revolut_manual` ; le wrapper historique
+   `admin_partners_payout_provider_set` sélectionne toujours le mode manuel et
+   ne doit pas servir à préparer une future bascule API ;
+3. générer hors du dépôt une clé HMAC aléatoire d'au moins 32 octets, la placer
+   uniquement dans
+   `NORVA_PARTNERS_REVOLUT_BENEFICIARY_HMAC_KEYS_JSON` avec une version entière,
+   puis créer ou vérifier chaque bénéficiaire dans Revolut. Enregistrer son
+   mapping UUID opaque dans le registre Finance sécurisé, contrôler la
+   destination masquée et archiver le SHA-256 de la preuve hors du dépôt ;
+4. depuis l'Admin, proposer le binding via l'Edge. Un second opérateur Finance,
+   connecté en AAL2, contrôle le registre et appelle
+   `admin_partners_revolut_beneficiary_binding_verify`. Seule cette seconde
+   action active le profil. Un rejet n'active rien. Une révocation commence par
+   `REQUEST-REVOKE:<binding>` et place immédiatement le profil en
+   `verification_required`, puis un second opérateur confirme avec
+   `CONFIRM-REVOKE:<revocation>` ;
+5. rejouer capture, maturation J+45 et réconciliation shadow sans écart ;
+6. depuis le compte Revolut Business Basic réel et dans sa langue configurée,
+   exporter un relevé, vérifier que le parseur reconnaît sans ambiguïté son
+   séparateur (virgule, point-virgule ou tabulation) et ses en-têtes, puis
+   archiver la preuve et son SHA-256 hors du dépôt. Tout changement de colonnes
+   doit échouer fermé et bloque la gate ;
+7. faire approuver la gate `manual_payout_workflow_verified` et conserver la
+   route manuelle active, la gate adaptateur, le flag DB et le kill switch Edge
+   API dans leur état fail-closed ;
+8. ouvrir `partners_payouts_live=true` uniquement pour la fenêtre supervisée
+   de préparation, puis appeler
+   `admin_partners_revolut_manual_batch_prepare` ;
+9. saisir `EXPORT:<batch>`, justifier l'action puis appeler une seule fois
+   `admin_partners_revolut_manual_batch_export`. La transaction SQL construit
+   le TSV canonique en CRLF, calcule son SHA-256, fige le lot et journalise
+   l'export avant de renvoyer les octets exacts. L'Admin recalcule le SHA-256
+   sur ces octets UTF-8 avant le téléchargement. Les anciens RPC de lecture du
+   payload puis de marquage séparé sont révoqués ;
+10. pour chaque ligne, résoudre d'abord l'UUID opaque dans le registre Finance,
+    vérifier la destination masquée, puis rechercher la référence Norva exacte
+    dans Revolut. Si une transaction existe déjà, ne jamais la recréer. Sinon,
+    contrôler bénéficiaire masqué, montant, devise et référence, puis saisir un
+    seul virement. Dans les deux cas, inscrire uniquement `YES` dans
+    `entered_in_revolut` après constat de la saisie ; une référence refusée ou
+    altérée interdit l'enregistrement de cette ligne ;
+11. transmettre uniquement les objets `{reference}` des lignes marquées `YES`
+    à `admin_partners_revolut_manual_batch_mark_submitted`. Le lot passe alors
+    à `partially_submitted`. Aucun identifiant bancaire n'est accepté par ce
+    RPC. Pour reprendre, saisir
+    `ACCESS-EXPORT:<batch>` et justifier l'accès. Le serveur renvoie séparément
+    le TSV canonique immuable et un rapport de progression sans jeton
+    bénéficiaire, avec les colonnes `norva_reference`, `entered_in_revolut`,
+    `statement_matched`, `state` et `reconciliation_status` ; chacun possède son
+    propre SHA-256 audité. Ne jamais fusionner, normaliser ou réécrire ces deux
+    artefacts dans l'Admin. Reporter seulement les `YES` déjà constatés dans une
+    nouvelle copie de travail du TSV canonique, puis répéter jusqu'au statut
+    `submitted` et refermer `partners_payouts_live=false` ;
+12. exporter le relevé officiel Revolut couvrant exactement la période et la
+    devise, puis l'importer uniquement par l'endpoint Edge
+    `/manual/statements`. Celui-ci obtient les exposants depuis le contexte SQL
+    autoritaire avant de normaliser le fichier en mémoire, émet alors un ticket
+    à usage unique et le consomme dans la même opération d'import ;
+13. un premier acteur appelle
+    `admin_partners_revolut_reconciliation_review` et compare dans Revolut la
+    référence, le montant, la devise et la destination masquée. Un second acteur,
+    distinct du premier et de l’auteur de la soumission du virement, confirme ou met en
+    quarantaine avec `admin_partners_revolut_reconciliation_decide`.
+14. traiter tout écart depuis la file append-only
+    `admin_partners_revolut_reconciliation_incidents`. Le premier acteur
+    Finance/AAL2 choisit `settle_exact`, `remap_exact_and_settle`,
+    `release_after_return` ou `quarantine` via
+    `admin_partners_revolut_reconciliation_incident_review`, avec recherche
+    Revolut fraîche et SHA-256 de preuve. Un second acteur Finance/AAL2 distinct
+    refait une recherche plus récente avec une preuve différente, puis appelle
+    `admin_partners_revolut_reconciliation_incident_decide`. Aucun ajustement
+    partiel ou de change n'est autorisé. Une référence inconnue ne peut être
+    remappée que vers une exécution exacte et non résolue.
+15. `release_after_return` n'est proposé et accepté qu'après une observation
+    terminale append-only indépendante (`FAILED`, `CANCELLED` ou `REVERTED`)
+    portant la même référence, la même identité de transaction, le même montant
+    et la même devise, puis après le délai de sûreté. Un simple délai écoulé
+    n'autorise jamais une libération.
+16. pour un état terminal `FAILED`, `CANCELLED` ou `REVERTED`, traiter la file
+    `admin_partners_revolut_return_queue`. Un premier acteur qualifie la preuve
+    avec `admin_partners_revolut_return_review`; un second acteur, distinct du
+    reviewer et de l’auteur de la soumission du virement, appelle
+    `admin_partners_revolut_return_decide`. Une décision confirmée libère le
+    clearing avant règlement ou crée une contre-écriture après règlement. Une
+    décision en quarantaine ne déplace aucune somme.
+17. un lot jamais saisi ne peut être annulé, et les lignes jamais saisies d'un
+    lot partiel ne peuvent être libérées, qu'après la fenêtre de sûreté de sept
+    jours suivant l'export. Un premier opérateur recherche toutes les
+    références exactes dans Revolut, conserve la preuve hors de Norva et
+    transmet seulement son SHA-256 et l'horodatage. Un second opérateur Finance
+    distinct refait une recherche plus récente avec une preuve différente,
+    puis confirme depuis `admin_partners_revolut_manual_controls_queue`. Toute
+    demande pendante gèle export et soumission du lot. Si une preuve de
+    transaction rend la demande obsolète ou si son périmètre n'est plus sûr, le
+    second opérateur la termine sans mouvement de fonds avec
+    `REJECT-CONTROL:<control>` via
+    `admin_partners_revolut_manual_control_reject` ;
+18. si un `COMPLETED` est observé après une libération, ou si une seconde
+    transaction `COMPLETED` apparaît pour la même réalité économique, traiter
+    `admin_partners_revolut_late_completion_queue`. Tous les profils payout du
+    compte restent gelés. Un premier opérateur appelle
+    `admin_partners_revolut_late_completion_review`, puis un second opérateur,
+    distinct du reviewer et du checker qui avait libéré les fonds, appelle
+    `admin_partners_revolut_late_completion_decide`. Une confirmation crée une
+    écriture append-only `payout_late_settlement`, débite d'abord le disponible
+    puis porte le reliquat en `partner_recovery_due` ; aucune écriture passée
+    n'est réécrite. La clôture du compte reste bloquée tant qu'un incident,
+    une récupération, un lot ou un job financier n'est pas terminal.
 
-La route cron-authentifiée `/cron/reports` automatise désormais la création ou
-la récupération du rapport, son état asynchrone, le téléchargement direct
-depuis l'hôte Airwallex allowlisté, les bornes de taille/type/timeout, le
-contrôle de période/colonnes/complétude et l'appel idempotent de l'observation
-existante. Aucun URL ni contenu fourni par un client n'est accepté. Le format
-physique CSV complet n'étant pas contractualisé publiquement par Airwallex, les
-contrats `sandbox` et `production` démarrent toutefois en `draft` : le worker
-échoue fermé jusqu'à l'approbation Finance `aal2` d'un échantillon réel. Cela
-n'est pas encore une preuve de rapprochement bancaire en production. Une
-décision `quarantined` ou une exception post-settlement est monotone : un
-webhook `PAID` ultérieur ne peut pas la ramener à `pending`.
+Une ligne absente, dupliquée, d'une autre devise, d'un autre montant ou liée à
+une référence inconnue reste en exception. Aucun règlement n'est inscrit dans
+le ledger avant la décision `confirmed`. Le fichier bancaire brut, les lignes
+sans référence Norva, l'IBAN, le nom du bénéficiaire et les libellés libres ne
+sont ni journalisés ni conservés. Le hash du fichier, les compteurs et la
+preuve de complétude sont archivés dans le journal de release.
 
-L'application d'un rapport est transactionnelle : la DB reverrouille le run et
-l'ensemble exact des dispatches candidats, exige une observation pour chacun,
-puis écrit toutes les observations et termine le run dans une seule
-transaction. Un candidat absent, ajouté entre-temps ou invalide annule donc
-toutes les écritures du run, le remet en retry avec un nouveau rapport et
-déclenche l'alerte Finance `airwallex_report_candidates_unmatched`. Un run
-`completed` garantit `matched_count=candidate_count` et `unmatched_count=0`.
+### Revolut Business API : adaptateur dormant
 
-Réglages bornés du worker :
-`NORVA_PARTNERS_PAYOUT_BATCH` (1..25),
-`NORVA_PARTNERS_PAYOUT_MAX_BATCHES` (1..4) et
-`NORVA_PARTNERS_PAYOUT_LEASE_SECONDS` (30..300). Le worker de rapports a son
-propre lease, budget, limites de taille/lignes/matches, backoff `Retry-After`,
-état privé, heartbeat `payout_report` et snapshot d'alertes Finance. Le script
-cron est une action manuelle ; aucune migration ne l'active.
+`revolut_api` est implémenté pour une évolution ultérieure de plan, mais reste
+impossible sous Basic. Il exige simultanément :
 
-Références officielles qui figent ce contrat d'intégration :
+1. une route `provider=revolut`,
+   `execution_adapter=revolut_api` ;
+2. la gate DB `revolut_api_adapter_verified` ;
+3. le flag DB `partners_revolut_api_enabled=true` ;
+4. le kill switch Edge
+   `NORVA_PARTNERS_REVOLUT_API_ENABLED=true` ;
+5. les identifiants Business API dédiés et l'allowlist de comptes sources.
 
-- [authentification et jeton API](https://www.airwallex.com/docs/api/authentication/api_access_token) ;
-- [création des bénéficiaires](https://www.airwallex.com/docs/payouts/beneficiaries/create-beneficiaries) ;
-- [API Transfers et résolution par `request_id`](https://www.airwallex.com/docs/api/payouts/transfers) ;
-- [signature et traitement des webhooks](https://www.airwallex.com/docs/developer-tools/webhooks/listen-for-webhook-events) ;
-- [machine d'états des transferts](https://www.airwallex.com/docs/payouts/transfers/create-a-transfer/transfer-statuses) ;
-- [Transaction Reconciliation Report](https://www.airwallex.com/docs/banking-as-a-service/reporting/financial-reports/transaction-reconciliation-report) ;
-- [Financial Reports API](https://www.airwallex.com/docs/api/2024-04-30/finance/financial_reports) ;
-- [versionnement de l'API](https://www.airwallex.com/docs/api/versioning).
+Le rail ne réutilise jamais `REVOLUT_SECRET_KEY`, un access token statique ni
+les secrets de la Merchant API d'encaissement. L'authentification Business
+utilise un JWT client RS256 et un refresh OAuth à la demande. Les secrets
+`REVOLUT_BUSINESS_CLIENT_ID`, `REVOLUT_BUSINESS_ISSUER`,
+`REVOLUT_BUSINESS_PRIVATE_KEY_PEM`, `REVOLUT_BUSINESS_REFRESH_TOKEN` et
+`REVOLUT_BUSINESS_SOURCE_ACCOUNTS_JSON`, ainsi que le plafond
+`REVOLUT_BUSINESS_MAX_FEE_MINOR_JSON`, restent absents en `revolut_manual`.
+Avant toute activation future, le worker API doit quitter le runtime Edge
+mutualisé : service dédié, secrets dédiés, sortie réseau limitée aux hôtes
+Business Revolut officiels et politique IP validée dans Revolut. La présence
+des secrets dans le runtime générique ne constitue jamais une preuve de gate et
+reste interdite sous Basic.
+
+Le worker ne prend qu'un paiement à la fois. Son lease d'item vaut 240 secondes
+par défaut et le lease global fenced vaut 300 secondes ; ce dernier est
+renouvelé avant et après chaque échange avec Revolut, puis avant
+l'observation ou le retry SQL. `REVOLUT_BUSINESS_ENVIRONMENT` n'a aucun défaut
+implicite dans le runtime : une activation sans `sandbox` ou `production`
+explicite échoue fermée.
+
+Le client API protège aussi le montant net : lorsqu'un corridor expose
+`charge_bearer`, l'option `debtor` doit être disponible et est imposée au quote
+comme au paiement ; sinon le corridor est refusé. Le quote doit attester le
+montant, la devise, les frais et le total exacts. Finance doit définir
+`REVOLUT_BUSINESS_MAX_FEE_MINOR_JSON` par devise avant d'approuver la gate
+`revolut_api_adapter_verified` ; un plafond absent ou dépassé échoue fermé.
+L'implémentation n'invente aucune valeur.
+
+Une transaction `COMPLETED` reste sondée toutes les six heures, après les
+paiements non terminaux, tant que son rapprochement Finance est en attente et
+pendant au plus 90 jours après la première observation payée. Après
+confirmation ou au terme de cette fenêtre, les imports périodiques du relevé
+officiel deviennent l'autorité pour détecter un retour tardif `REVERTED`. Un
+timeout, un dead-letter ou une indisponibilité provider ne libèrent jamais
+automatiquement l'allocation : seule une preuve provider terminale et
+rapprochée peut déclencher la libération ou la contre-écriture append-only.
+
+Une future activation nécessite un change-control séparé et un upgrade
+explicite du plan Revolut. Le sandbox valide l'authentification, l'idempotence et
+les contrats que Revolut y expose, mais ne constitue pas une preuve de paiement
+de bout en bout : `/pay/fields` n'y est pas disponible et le client reste
+volontairement fail-closed. Avant la gate API, Finance réalise donc un
+micro-virement supervisé en production, vérifie `/pay/fields`, le quote, la
+transaction canonique puis son rapprochement exact. Activer un seul des deux
+verrous ne lance aucun job. Pour un rollback, passer d'abord le kill switch Edge
+à `false`, puis le flag DB à `false`, remettre les corridors en
+`revolut_manual` et traiter les jobs ambigus en revue manuelle.
+
+Sous Basic, aucun job `pg_cron` et aucun script d'enregistrement ne cible
+`norva-partners-revolut-payout/cron/run`. Le contrôle de parité exige zéro job
+nommé `norva-partners-revolut-api`. Le script de planification ne sera livré
+que dans le change-control d'upgrade, après tests sandbox disponibles,
+micro-virement production rapproché, plafond de frais, secrets Business API,
+route dédiée, gate adaptateur, flag DB et kill switch Edge ; il ne doit pas
+être préinstallé « inactif »
+pendant le pilote manuel.
+
+La gate API reste obligatoirement fausse tant que les dead letters ne disposent
+pas d'une résolution Finance maker-checker qui libère ou remet en file le
+clearing sans ambiguïté, et tant qu'une même réalité provider reçue par polling,
+webhook puis relevé ne se regroupe pas en un incident sémantique unique tout en
+conservant ses preuves sources append-only. Ces exigences n'affectent pas le
+rail `revolut_manual` Basic, mais bloquent toute activation de `revolut_api`.
+
+### Airwallex historique désactivé
+
+Le code, les migrations et les preuves Airwallex restent conservés pour
+l'audit, mais ne constituent plus un rail pilote. Les routes Airwallex restent
+`disabled`, leurs variables ne sont pas renseignées et aucun cron payout ou
+Financial Reports Airwallex n'est enregistré. Une ancienne preuve Airwallex ne
+peut jamais satisfaire le contrat de rapprochement Revolut manuel.
 
 Le workflow Didit doit être un workflow KYC individuel. Aucun module KYB ne doit
 être présent. Pour préserver le retour Web et Android App Link, configurer
@@ -286,7 +454,8 @@ reconstruire la taxe depuis RevenueCat.
 7. comptes pilotes ajoutés à l'allowlist ;
 8. `partners_enabled=true`, `partners_invite_only=true`,
    `partners_shadow_mode=true`, `partners_tv_relay_enabled=true`,
-   `partners_payouts_live=false` ;
+   `partners_payouts_live=false`,
+   `partners_revolut_api_enabled=false` et kill switch Edge API à `false` ;
 9. calcul shadow comparé au ledger financier pendant au moins un cycle complet ;
 10. deux cycles de versement supervisés avant toute extension.
 
@@ -295,7 +464,11 @@ Avant de déclarer `pilot_ready`, archiver également :
 - le replay `/r/{code}` depuis l'AAB installé par Google Play ;
 - un snapshot DB sanitisé couvrant programme, policies, devises, routes payout,
   volume allowlist, flags et release gates ;
-- l'import Financial Reports et son contrôle de complétude bancaire ;
+- un export de lot Revolut manuel puis l'import du relevé officiel, avec
+  références Norva, montants et devises exactement rapprochés et preuve de
+  complétude ; la preuve inclut un export réel du compte Basic dans sa langue
+  configurée, les en-têtes et le séparateur reconnus, sans conserver les
+  données bancaires brutes dans le dépôt ;
 - les références strictes URL/run/SHA-256 décrites dans
   `NORVA-PARTNERS-RELEASE-EVIDENCE.md`.
 - une session Didit sandbox complète puis une session live contrôlée, avec deux
@@ -400,7 +573,11 @@ shadow. Ne jamais inscrire cette cible par migration.
   séparée qui préserve tout achat strictement postérieur ;
 - maturation impossible avant J+45 ;
 - shadow reconciliation retrouve chaque fait et chaque écriture ;
-- `partners_payouts_live=false` interdit tout débit provider.
+- `partners_payouts_live=false` interdit la préparation de nouveaux lots et
+  tout lease API. Il n'annule jamais un virement déjà saisi manuellement dans
+  Revolut : l'opérateur cesse toute nouvelle saisie, conserve le lot et ses
+  références immuables, puis rapproche les virements déjà créés avant toute
+  reprise supervisée.
 
 ## 5. KYC, quota et circuit
 
@@ -433,9 +610,11 @@ idempotente, des retries exponentiels bornés et une dead-letter. Alerter sur :
 
 Les workers publient des heartbeats réels et indépendants :
 `commission`, `maturation`, `reconciliation`, `revenuecat_transfer` et, lorsque
-l'adaptateur Airwallex est effectivement exécuté, `payout`. Un worker non
-configuré reste `not_configured` ; aucun simple succès HTTP/cron ne fabrique un
-état sain.
+`revolut_api` est effectivement exécuté, `payout`. Le mode `revolut_manual`
+n'invente pas de heartbeat provider : le dashboard expose séparément lots
+préparés/exportés/soumis, imports de relevé, lignes non rapprochées,
+quarantaines et décisions Finance en attente. Un worker non configuré reste
+`not_configured` ; aucun simple succès HTTP/cron ne fabrique un état sain.
 
 Une alerte « cron sain » ne prouve jamais que le travail asynchrone est terminé.
 Le dashboard mesure les lignes leased/processed/dead-letter et les observations
@@ -480,10 +659,18 @@ Le drill trimestriel vérifie au minimum :
 4. générer un dry-run de lot ;
 5. double approbation Finance, avec séparation créateur/approbateur ;
 6. vérifier KYC, fiscalité, token payout et seuil ;
-7. autoriser temporairement le rail et envoyer ;
-8. consommer le webhook provider ;
-9. rapprocher montants envoyés/rejetés/retournés ;
-10. refermer la gate et archiver le rapport.
+7. autoriser temporairement la préparation du lot `revolut_manual`, exporter
+   le TSV et vérifier son SHA-256 ;
+8. saisir les virements dans Revolut Business avec leur référence Norva
+   exacte, puis marquer uniquement `YES` dans `entered_in_revolut` par
+   sous-ensembles si nécessaire, sans copier d'identifiant bancaire ni modifier
+   les colonnes figées du TSV ;
+9. refermer `partners_payouts_live`, importer le relevé officiel et rapprocher
+   référence, montant, devise et destination masquée avec l'exposant obtenu du
+   contexte SQL autoritaire ;
+10. faire revoir puis décider chaque ligne par deux acteurs Finance distincts,
+    le décideur final étant aussi distinct du finalisateur du lot, puis archiver
+    la preuve de complétude.
 
 Les deux premiers cycles restent supervisés manuellement. Aucun bouton Admin ne
 peut contourner une gate DB ou modifier une écriture existante.
@@ -492,13 +679,16 @@ peut contourner une gate DB ou modifier une écriture existante.
 
 Ordre de réduction du risque :
 
-1. `partners_payouts_live=false` ;
-2. suspendre le worker concerné sans supprimer la file ;
-3. `partners_shadow_mode=true` ;
-4. désactiver la création de nouvelles sessions KYC ou claims ;
-5. si nécessaire `partners_enabled=false`, sans effacer comptes/ledger ;
-6. conserver les preuves, correlation IDs et événements sanitisés ;
-7. corriger par contre-écriture ou reprise idempotente, jamais par édition
+1. `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` ;
+2. `partners_revolut_api_enabled=false`, puis
+   `partners_payouts_live=false` ;
+3. suspendre le worker et tout paiement manuel du lot concerné sans supprimer
+   la file ni le lot ;
+4. `partners_shadow_mode=true` ;
+5. désactiver la création de nouvelles sessions KYC ou claims ;
+6. si nécessaire `partners_enabled=false`, sans effacer comptes/ledger ;
+7. conserver les preuves, correlation IDs et événements sanitisés ;
+8. corriger par contre-écriture ou reprise idempotente, jamais par édition
    manuelle d'un montant canonique.
 
 La restauration de base est un dernier recours. Un incident métier normal se
@@ -516,7 +706,7 @@ répare par machines d'états, reprises et contre-écritures.
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
 | RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; Web reste incomplet sans ventilation fiscale | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé et aucun `tax=0` supposé | activer les événements provider et secrets par environnement ; sélectionner un moteur/contrat fiscal Web avant commission |
 | `DISPUTE_WON` | contre-correction append-only livrée | LOST/WON rejoués, WON avant LOST, reversal/release partiels, restauration exacte et réconciliation propre | activer l'événement Revolut et vérifier la lecture autoritative sur l'environnement disponible |
-| Payout onboarding/dispatch | adaptateur Airwallex P0 et worker Financial Reports 2024-04-30/v1.1.0 livrés, **inactifs/fail-closed** sans configuration et contrat Finance | création `PERSONAL` sans IBAN en DB, idempotence, timeout ambigu, webhook signé, `PAID -> FAILED`, téléchargement first-party borné, parseur strict, quarantaine monotone et double validation testés | contractualiser Airwallex, injecter les secrets hors Git, configurer un corridor, approuver le contrat CSV sandbox puis production à partir de preuves réelles, exécuter smoke/restore/Advisors et conserver `partners_payouts_live=false` avant toute ouverture |
+| Payout onboarding/dispatch | `revolut_manual` livré pour Basic : lots exacts, référence `NORVA-[A-F0-9]{12}`, acquittement `YES` sans identifiant bancaire saisi, import de relevé sanitisé, incidents append-only, double validation et ledger de règlement ; `revolut_api` livré mais multi-gated | cycle J+45 → lot → export/hash → saisie manuelle → relevé → rapprochement exact, doublon/montant/devise inconnus quarantainés, deux acteurs Finance distincts ; route manuelle active, gate DB API, flag DB API et kill switch Edge à `false`, aucun cron API/provider | configurer uniquement les corridors Revolut manuels, réaliser deux cycles supervisés et conserver les secrets Business API absents tant qu'aucun upgrade n'est décidé |
 | Admin/alertes | surfaces, heartbeats et relais Ops Telegram/e-mail livrés | capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
 | Pilote mondial | gates/policies livrées mais vides/fail-closed ; première preuve technique des pages juridiques archivée le 30 juillet | avant ouverture : artefacts juridiques normalisés, pages HTTP directes, snapshot DB, App Link signé Play, pays approuvés et restore drill ; après ouverture contrôlée : 45 jours observés avant généralisation | configurer juridictions, programme, devises/routes, allowlist et invitations ; laisser invite-only |
 

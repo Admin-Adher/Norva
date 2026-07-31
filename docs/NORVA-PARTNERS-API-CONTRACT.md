@@ -308,9 +308,12 @@ pose un cookie `__Host-norva_referral` `HttpOnly; Secure; SameSite=Lax`, puis
 
 Lit ou enregistre uniquement une référence bénéficiaire tokenisée par un
 provider de versement ainsi qu'un libellé déjà masqué. Aucun IBAN, numéro de
-compte ou donnée fiscale brute n'entre dans une réponse publique. Le contrat
-est implémenté, mais l'UI de saisie reste fermée tant qu'un parcours hébergé de
-tokenisation provider n'a pas été choisi et vérifié.
+compte ou donnée fiscale brute n'entre dans une réponse publique. Sous
+`revolut_manual`, le token opaque est proposé par l'Edge depuis le registre
+Finance, lié par une attestation HMAC serveur versionnée, puis activé uniquement
+après contrôle d'un second acteur Finance/AAL2. Le client et le read model ne
+reçoivent que l'état et la destination masquée ; ni UUID bénéficiaire interne,
+ni empreinte HMAC ne sont publics.
 
 ### `POST /tv-relays/consume`
 
@@ -380,8 +383,8 @@ seules une activation production :
 | Didit | `/kyc/sessions` renvoie `provider_not_configured` sans workflow, clés et webhook configurés |
 | Referral Web | `/r/{code}` et la consommation refusent de fonctionner sans secrets HMAC/cookie distincts |
 | Relais TV | les créations/consommations restent indisponibles sans secret relais et flag actif |
-| Payout provider | aucune saisie manuelle ; tokenisation hébergée à intégrer avant d'activer le profil |
-| Exécution payout | tout cycle `LIVE` exige le flag live, une couverture provider active et le gate `payout_execution_adapter_verified=true` |
+| Payout provider | registre Finance/HMAC `revolut_manual` requis, binding maker-checker et destination masquée ; aucune coordonnée bancaire brute côté client |
+| Exécution payout | `partners_payouts_live=false` bloque préparation et nouveaux leases Norva, mais n'annule jamais un virement déjà saisi ; le relevé et les incidents restent traitables |
 
 Le parcours entreprise ne réutilisera aucune de ces mutations P0. Une demande
 `accountType=business` devra répondre :
@@ -467,10 +470,15 @@ Les cycles passent par
 La transition `DRY → LIVE` promeut atomiquement le même cycle en le replaçant
 en `draft` avec un snapshot reconstruit ; elle n'envoie jamais de versement et
 exige ensuite un second acteur pour l'approbation.
-Le P0 interdit tout débit réel tant que `partners_payouts_live=false`, qu'aucun
-provider actif ne couvre le pays/la devise, ou que le gate
-`payout_execution_adapter_verified` reste faux. Les cycles `DRY` servent à la
-réconciliation shadow et ne constituent jamais un versement.
+Le P0 interdit la préparation d'un nouveau lot et la prise d'un nouveau lease
+tant que `partners_payouts_live=false` ou qu'aucune route manuelle active ne
+couvre le pays/la devise. Une fois un virement saisi dans Revolut, fermer ce
+flag ne peut pas l'annuler : Norva doit continuer l'import du relevé, le
+rapprochement et la résolution des incidents. L'état `submitted` signifie que
+l'opérateur a déclaré `entered_in_revolut=YES`, pas que le paiement est réglé ;
+seule la preuve du relevé suivie du contrôle Finance crée le settlement. Les
+cycles `DRY` servent à la réconciliation shadow et ne constituent jamais un
+versement.
 
 ## 9. Trois frontières qui ne se mélangent pas
 

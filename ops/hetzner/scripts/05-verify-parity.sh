@@ -20,9 +20,63 @@ SRC="${SRC:-${MANAGED_DB_URL:-}}"
 DST="${DST:-postgresql://postgres:${POSTGRES_PASSWORD:-}@127.0.0.1:5432/${POSTGRES_DB:-postgres}}"
 : "${SRC:?Set SRC or MANAGED_DB_URL (managed connection string)}"
 
+if [[ "${NORVA_PARTNERS_REVOLUT_API_ENABLED:-false}" != "false" ]]; then
+  echo "Refusing Basic/manual parity: NORVA_PARTNERS_REVOLUT_API_ENABLED must be false." >&2
+  exit 1
+fi
+
 q() { psql "$1" -At -c "$2" 2>/dev/null; }
 
 hr() { printf '%.0s-' {1..60}; echo; }
+
+FAILURES=0
+
+verify_edge_runtime_revolut_flag() {
+  local runtime=""
+  local container=""
+  local injected=""
+  local inspected=0
+
+  if command -v docker >/dev/null 2>&1; then
+    runtime="docker"
+  elif command -v podman >/dev/null 2>&1; then
+    runtime="podman"
+  else
+    echo "Edge runtime env: SKIP (no container CLI; DB parity remains available)"
+    return 0
+  fi
+  if ! "$runtime" info >/dev/null 2>&1; then
+    echo "Edge runtime env: SKIP ($runtime daemon unavailable)"
+    return 0
+  fi
+
+  for container in norva-edge-functions norva-edge-functions-2; do
+    if ! "$runtime" inspect "$container" >/dev/null 2>&1; then
+      continue
+    fi
+    inspected=$((inspected + 1))
+    injected="$(
+      "$runtime" inspect \
+        --format '{{range .Config.Env}}{{println .}}{{end}}' \
+        "$container" \
+        | awk -F= \
+          '$1 == "NORVA_PARTNERS_REVOLUT_API_ENABLED" {
+            print substr($0, index($0, "=") + 1)
+          }'
+    )"
+    if [[ "$injected" == "false" ]]; then
+      printf "%-32s %14s\n" "Edge env: $container" "OK"
+    else
+      printf "%-32s %14s\n" "Edge env: $container" "FAIL"
+      echo "  NORVA_PARTNERS_REVOLUT_API_ENABLED is absent or not false." >&2
+      FAILURES=$((FAILURES + 1))
+    fi
+  done
+
+  if [[ "$inspected" -eq 0 ]]; then
+    echo "Edge runtime env: SKIP (Norva Edge containers are not present)"
+  fi
+}
 
 # The tables whose counts must match exactly after restore.
 TABLES=(cloud_media_items cloud_titles cloud_title_variants cloud_sources
@@ -41,7 +95,33 @@ PRIVATE_TABLES=(affiliate_accounts affiliate_events affiliate_attributions
                 affiliate_airwallex_settlement_reviews
                 affiliate_airwallex_settlement_decisions
                 affiliate_airwallex_report_contracts
-                affiliate_airwallex_report_runs)
+                affiliate_airwallex_report_runs
+                affiliate_revolut_manual_batches
+                affiliate_revolut_reference_allocations
+                affiliate_revolut_beneficiary_bindings
+                affiliate_revolut_beneficiary_binding_tickets
+                affiliate_revolut_beneficiary_revocations
+                affiliate_revolut_payout_executions
+                affiliate_revolut_api_worker_lease
+                affiliate_revolut_payout_events
+                affiliate_revolut_statement_tickets
+                affiliate_revolut_statement_imports
+                affiliate_revolut_statement_rows
+                affiliate_revolut_manual_reviews
+                affiliate_revolut_manual_decisions
+                affiliate_revolut_manual_cancellations
+                affiliate_revolut_manual_unmapped_requests
+                affiliate_revolut_manual_unmapped_releases
+                affiliate_revolut_return_observations
+                affiliate_revolut_return_reviews
+                affiliate_revolut_return_decisions
+                affiliate_revolut_late_completion_observations
+                affiliate_revolut_late_completion_reviews
+                affiliate_revolut_late_completion_decisions
+                affiliate_revolut_reconciliation_incidents
+                affiliate_revolut_reconciliation_incident_reviews
+                affiliate_revolut_transaction_aliases
+                affiliate_revolut_reconciliation_incident_decisions)
 
 echo "PARITY CHECK  $(date -u +%FT%TZ)"
 hr
@@ -51,16 +131,28 @@ hr
 check() { # label, sql
   local label="$1" sql="$2" a b ok
   a="$(q "$SRC" "$sql")"; b="$(q "$DST" "$sql")"
-  [[ "$a" == "$b" ]] && ok="✓" || ok="✗"
+  if [[ "$a" == "$b" ]]; then
+    ok="OK"
+  else
+    ok="FAIL"
+    FAILURES=$((FAILURES + 1))
+  fi
   printf "%-32s %14s %14s %4s\n" "$label" "${a:-?}" "${b:-?}" "$ok"
 }
 
 check_zero() { # label, sql expected to return an invariant-violation count
   local label="$1" sql="$2" a b ok
   a="$(q "$SRC" "$sql")"; b="$(q "$DST" "$sql")"
-  [[ "$a" == "0" && "$b" == "0" ]] && ok="âœ“" || ok="âœ—"
+  if [[ "$a" == "0" && "$b" == "0" ]]; then
+    ok="OK"
+  else
+    ok="FAIL"
+    FAILURES=$((FAILURES + 1))
+  fi
   printf "%-32s %14s %14s %4s\n" "$label" "${a:-?}" "${b:-?}" "$ok"
 }
+
+verify_edge_runtime_revolut_flag
 
 for t in "${TABLES[@]}"; do
   check "rows: $t" "select count(*) from public.$t"
@@ -80,8 +172,17 @@ check "partners functions"        "select count(*) from pg_proc p join pg_namesp
 check "TRANSFER functions"        "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%revenuecat%transfer%'"
 check "DISPUTE_WON functions"     "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%revolut_dispute_won%'"
 check "Airwallex report functions" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%airwallex_report%'"
+check "Revolut incident functions" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname like '%revolut_reconciliation_incident%'"
 check_zero "Airwallex direct observe grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('affiliate_private','public') and p.proname='partners_service_airwallex_settlement_observe' and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('authenticated',p.oid,'EXECUTE') or has_function_privilege('service_role',p.oid,'EXECUTE'))"
-check_zero "Payout pilot adapter violations" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and provider<>'airwallex'"
+check_zero "Revolut manual route violations" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and (provider<>'revolut' or execution_adapter<>'revolut_manual')"
+check_zero "Revolut API flag enabled" "select count(*) from public.admin_feature_flags where key='partners_revolut_api_enabled' and enabled"
+check_zero "Revolut API active routes" "select count(*) from affiliate_private.affiliate_payout_provider_configs where status='active' and execution_adapter='revolut_api'"
+check_zero "Revolut API cron scheduled/active" "select count(*) from cron.job where active and jobname='norva-partners-revolut-api'"
+check_zero "Legacy payout cron active" "select count(*) from cron.job where active and jobname='norva-partners-payout'"
+check_zero "Airwallex report cron active" "select count(*) from cron.job where active and jobname='norva-partners-airwallex-reports'"
+check_zero "Inactive payout rails active" "select count(*) from cron.job where active and jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api')"
+check_zero "Revolut payout reference violations" "select count(*) from affiliate_private.affiliate_revolut_payout_executions where payout_reference !~ '^NORVA-[A-F0-9]{12}$'"
+check_zero "Revolut payout reference duplicates" "select count(*) from (select payout_reference from affiliate_private.affiliate_revolut_payout_executions group by payout_reference having count(*)>1) duplicate"
 check_zero "Payout active route collisions" "select count(*) from (select 1 from affiliate_private.affiliate_payout_provider_configs where status='active' group by country_code,currency having count(*)>1) collision"
 check "Didit binding columns"      "select count(*) from information_schema.columns where table_schema='affiliate_private' and table_name in ('affiliate_kyc_sessions','affiliate_kyc_webhook_events') and column_name in ('provider_environment','provider_config_fingerprint')"
 check_zero "Didit legacy RPC grants" "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and ((p.proname='partners_service_kyc_session_record' and pg_get_function_identity_arguments(p.oid)='p_user_id uuid, p_idempotency_key text, p_provider_session_id text, p_provider_workflow_id text, p_provider_workflow_version integer, p_provider_status text, p_expires_at timestamp with time zone, p_reservation_key text') or (p.proname='partners_service_kyc_webhook_apply' and pg_get_function_identity_arguments(p.oid)='p_provider_event_id text, p_provider_session_id text, p_provider_workflow_id text, p_provider_workflow_version integer, p_provider_status text, p_event_created_at timestamp with time zone, p_document_age integer, p_document_country_iso3 text, p_id_check_approved boolean, p_liveness_approved boolean, p_face_match_approved boolean, p_payload_hash text')) and has_function_privilege('service_role',p.oid,'EXECUTE')"
@@ -105,5 +206,10 @@ echo "    managed : $(q "$SRC" "select current_setting('app.norva_catalog_dual_w
 echo "    selfhost: $(q "$DST" "select current_setting('app.norva_catalog_dual_write', true)")"
 
 hr
-echo "Any ✗ above = investigate before cutover. Row-count drift on cloud_* usually"
+echo "Any FAIL above = investigate before cutover. Row-count drift on cloud_* usually"
 echo "means the dump ran while imports were still live — re-freeze and re-dump."
+
+if [[ "$FAILURES" -ne 0 ]]; then
+  echo "Parity verification failed with $FAILURES blocking difference(s)." >&2
+  exit 1
+fi

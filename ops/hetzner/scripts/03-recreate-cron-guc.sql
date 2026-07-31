@@ -45,17 +45,17 @@ select vault.create_secret(:'NORVA_CRON_SHARED_SECRET', 'norva_cron_shared_secre
 --    self-host endpoint. NOT done here: cron commands are MULTI-LINE, so the
 --    old `\copy from ref-cron-jobs.tsv` import was corrupt (286 lines for 49
 --    jobs at the 2026-07-11 cutover). Use dump/ref-cron-jobs.sql from
---    01-dump-prod.sh instead — replayable `cron.schedule(%L,…)` statements:
+--    01-dump-prod.sh instead. Each replay statement schedules the job and then
+--    restores its exact active bit:
 --
 --      sed 's#https://oupsceccxsonaalhueff.supabase.co/functions/v1#https://api.norva.tv/functions/v1#g' \
 --        dump/ref-cron-jobs.sql | psql "$TARGET" -v ON_ERROR_STOP=0 -f -
 --
 --    (Or regenerate live from the managed DB — see CUTOVER-LOG-2026-07-11.md §9.)
---    Jobs come back ACTIVE; stage them if the flip isn't now:
---      update cron.job set active = false;
---    At the flip, mirror prod's inactive set:
---      update cron.job set active =
---        (jobname not in ('norva-audio-airo-ninja','norva-audio-airo-ninja-series'));
+--    The exported file ends with a fail-closed guard for all provider/API
+--    Partners payout jobs. Before traffic, run the cutover guard again:
+--      \i scripts/disable-norva-partners-airwallex-crons.sql
+--    Never infer a safe state from cron.schedule's ACTIVE default.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

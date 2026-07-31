@@ -74,12 +74,26 @@ pg_dump --dbname="$MANAGED_DB_URL" --data-only --no-owner --no-privileges \
 #    produced a corrupt 286-line file for 49 jobs during the 2026-07-11 cutover).
 #    Rewrite the functions host before replaying, e.g.:
 #      sed 's#https://<ref>.supabase.co/functions/v1#https://api.norva.tv/functions/v1#g'
-#    then pipe into psql on the target. Jobs are created ACTIVE by cron.schedule —
-#    stage them with `update cron.job set active=false;` if the flip isn't now.
+#    then pipe into psql on the target. Every replay statement restores the exact
+#    active bit. A final fail-closed statement always disables provider/API
+#    Partners payout jobs under the Revolut Basic manual architecture.
 echo "   [ref] exporting cron jobs (replayable SQL) + extension list"
 psql "$MANAGED_DB_URL" -At \
-  -c "select format('select cron.schedule(%L,%L,%L);', jobname, schedule, command)
-      from cron.job where jobname is not null and jobname<>'' order by jobid" \
+  -c "with replay as (
+        select
+          jobid,
+          format(
+            'select cron.schedule(%L,%L,%L); update cron.job set active=%s where jobname=%L;',
+            jobname, schedule, command, active::text, jobname
+          ) as statement
+        from cron.job
+        where jobname is not null and jobname<>''
+        union all
+        select
+          9223372036854775807::bigint,
+          'update cron.job set active=false where jobname in (''norva-partners-payout'',''norva-partners-airwallex-reports'',''norva-partners-revolut-api'');'
+      )
+      select statement from replay order by jobid" \
   > "$OUT/ref-cron-jobs.sql" || echo "   (warn: could not read cron.job — export manually)"
 psql "$MANAGED_DB_URL" -At \
   -c "select extname||' '||extversion from pg_extension order by extname" \

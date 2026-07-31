@@ -8,6 +8,9 @@ const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\
 const migration = read('supabase/migrations/20260721235200_account_deletion_email_outbox.sql');
 const hardening = read('supabase/migrations/20260721235300_account_deletion_email_delivery_hardening.sql');
 const partners = read('supabase/migrations/20260729201447_partners_tv_admin_analytics.sql');
+const revolut = read(
+  'supabase/migrations/20260730173351_partners_revolut_manual_hybrid.sql',
+);
 const source = read('supabase/functions/norva-account-delete/index.ts');
 const config = read('supabase/config.toml');
 const deletePage = read('public/delete-account.html');
@@ -101,9 +104,52 @@ test('Partners deletion preparation is service-only, idempotent and fail-closed'
   const failure = source.indexOf(
     'return json(req, { error: "Deletion preparation failed" }, 500)',
   );
-  assert.ok(edgePrepare >= 0 && failure > edgePrepare && edgeDelete > failure);
+  const financialClosure = source.indexOf(
+    'partners_account_deletion_pending_financial_closure',
+  );
+  assert.ok(
+    edgePrepare >= 0
+    && financialClosure > edgePrepare
+    && failure > financialClosure
+    && edgeDelete > failure,
+  );
   assert.match(source, /partnersPreparation\.ready !== true/);
   assert.match(source, /partnersPreparation\.action !== "partners_account_deletion_prepared"/);
+  assert.match(source, /code: "partners_financial_closure_pending"/);
+  assert.match(source, /nextAction: "contact_support"/);
+  assert.match(
+    source,
+    /partners_account_deletion_pending_financial_closure"[\s\S]*\}, 409\)/,
+  );
+  assert.doesNotMatch(
+    source.slice(financialClosure, failure),
+    /available_minor|recovery_due_minor|open_batch_count/,
+  );
+});
+
+test('Partners deletion defers only for the target account financial closure', () => {
+  assert.match(
+    revolut,
+    /partners_account_deletion_pending_financial_closure/,
+  );
+  assert.match(revolut, /pending_financial_closure/);
+  assert.match(
+    revolut,
+    /pg_advisory_xact_lock[\s\S]*norva:partners:payout-approval-configuration/,
+  );
+  assert.match(
+    revolut,
+    /affiliate_payout_items item[\s\S]*item\.account_id = v_account\.id/,
+  );
+  assert.match(deletePage, /partners_financial_closure_pending/);
+  assert.match(
+    deletePage,
+    /pending completion of a required Norva Partners financial operation/,
+  );
+  assert.doesNotMatch(
+    deletePage,
+    /available_minor|recovery_due_minor|open_batch_count/,
+  );
 });
 
 test('retained Partners finance replaces auth UUIDs with bounded pseudonyms', () => {

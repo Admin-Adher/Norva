@@ -42,6 +42,7 @@ on:
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
+      - 'ops/hetzner/scripts/disable-norva-partners-airwallex-crons.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
       - 'scripts/verify-airwallex-report-contract.js'
@@ -54,6 +55,7 @@ on:
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
       - 'supabase/functions/norva-partners-payout/**'
+      - 'supabase/functions/norva-partners-revolut-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
       - 'supabase/functions/norva-revenuecat-transfer-worker/**'
@@ -108,6 +110,7 @@ on:
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-payout-cron.sql'
       - 'ops/hetzner/scripts/register-norva-partners-airwallex-reports-cron.sql'
+      - 'ops/hetzner/scripts/disable-norva-partners-airwallex-crons.sql'
       - 'ops/partners/**'
       - 'scripts/validate-partners-release-evidence.js'
       - 'scripts/verify-airwallex-report-contract.js'
@@ -120,6 +123,7 @@ on:
       - 'supabase/functions/norva-partners-device/**'
       - 'supabase/functions/norva-partners-kyc-webhook/**'
       - 'supabase/functions/norva-partners-payout/**'
+      - 'supabase/functions/norva-partners-revolut-payout/**'
       - 'supabase/functions/norva-partners-referral/**'
       - 'supabase/functions/norva-partners-worker/**'
       - 'supabase/functions/norva-revenuecat-transfer-worker/**'
@@ -171,6 +175,13 @@ jobs:
           tests/google-play-orders-partners.test.js
           tests/android-phone-partners-contract.test.js
 
+      - name: Validate Partners backup and parity shell syntax
+        run: >-
+          bash -n
+          ops/hetzner/backup/backup-nightly.sh
+          ops/hetzner/scripts/01-dump-prod.sh
+          ops/hetzner/scripts/05-verify-parity.sh
+
       - name: Validate the fail-closed pilot evidence template
         run: >-
           node scripts/validate-partners-release-evidence.js
@@ -202,6 +213,7 @@ jobs:
           supabase/functions/norva-partners-device/index.ts
           supabase/functions/norva-partners-kyc-webhook/index.ts
           supabase/functions/norva-partners-payout/index.ts
+          supabase/functions/norva-partners-revolut-payout/index.ts
           supabase/functions/norva-partners-referral/index.ts
           supabase/functions/norva-partners-worker/index.ts
           supabase/functions/norva-revenuecat-transfer-worker/index.ts
@@ -211,7 +223,7 @@ jobs:
           supabase/functions/norva-revolut-webhook/index.ts
           supabase/functions/norva-revolut-billing/index.ts
 
-      - name: Test the Airwallex payout boundary
+      - name: Test the disabled legacy Airwallex boundary
         run: >-
           deno test
           --config supabase/functions/deno.partners.json
@@ -342,6 +354,7 @@ jobs:
           supabase/tests/affiliate_p0.sql
           supabase/tests/affiliate_airwallex_reports.sql
           supabase/tests/affiliate_dispute_won.sql
+          supabase/tests/affiliate_revolut_manual_hybrid.sql
           supabase/tests/revenuecat_transfer.sql
           --local
 

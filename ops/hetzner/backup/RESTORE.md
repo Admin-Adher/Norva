@@ -27,11 +27,15 @@ dpsql -v ON_ERROR_STOP=0 -f - < 03-auth-data.sql      # users/identities (confli
 dpsql -v ON_ERROR_STOP=0 -f - < 04-storage-data.sql
 dpsql -c "vacuum analyze;"
 
-# 3) crons (rejouables, URLs déjà self-host). cron.schedule les crée ACTIFS ;
-#    remettre l'état actif/inactif d'origine en s'aidant de ref-cron-active.txt :
-dpsql -v ON_ERROR_STOP=0 -f - < ref-cron-jobs.sql
-grep 'active=f' ref-cron-active.txt   # → jobs à désactiver, puis :
-dpsql -c "update cron.job set active=false where jobname in ('<jobs listés ci-dessus>');"
+# 3) crons (rejouables, URLs déjà self-host). Chaque instruction restaure son
+#    état active exact ; le fichier finit aussi par la coupure fail-closed des
+#    trois anciens/futurs rails provider/API Partners :
+dpsql -v ON_ERROR_STOP=1 -f - < ref-cron-jobs.sql
+dpsql -v ON_ERROR_STOP=1 -c \
+  "update cron.job set active=false where jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api');"
+dpsql -Atc \
+  "select count(*) from cron.job where active and jobname in ('norva-partners-payout','norva-partners-airwallex-reports','norva-partners-revolut-api');" \
+  | grep -qx '0'
 
 # 4) vérifier vs MANIFEST.txt et les invariants Partners
 dpsql -Atc "select count(*) from public.cloud_media_items;"

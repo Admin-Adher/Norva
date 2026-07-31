@@ -34,8 +34,21 @@ pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
 
 log "[2/5] reference exports (crons as replayable SQL, extensions)"
 pgtool psql -h $H -U $U -d $D -At \
-  -c "select format('select cron.schedule(%L,%L,%L);', jobname, schedule, command)
-      from cron.job where jobname is not null and jobname<>'' order by jobid" \
+  -c "with replay as (
+        select
+          jobid,
+          format(
+            'select cron.schedule(%L,%L,%L); update cron.job set active=%s where jobname=%L;',
+            jobname, schedule, command, active::text, jobname
+          ) as statement
+        from cron.job
+        where jobname is not null and jobname<>''
+        union all
+        select
+          9223372036854775807::bigint,
+          'update cron.job set active=false where jobname in (''norva-partners-payout'',''norva-partners-airwallex-reports'',''norva-partners-revolut-api'');'
+      )
+      select statement from replay order by jobid" \
   > "$OUT/ref-cron-jobs.sql" || true
 pgtool psql -h $H -U $U -d $D -At \
   -c "select jobname||' active='||active from cron.job order by jobid" \
@@ -45,13 +58,17 @@ pgtool psql -h $H -U $U -d $D -At \
   > "$OUT/ref-extensions.txt" || true
 
 log "[3/5] manifest + checksums"
+AFFILIATE_ACCOUNTS_COUNT="$(
+  pgtool psql -h "$H" -U "$U" -d "$D" -Atc \
+    "select case when to_regclass('affiliate_private.affiliate_accounts') is null then -1 else (select count(*) from affiliate_private.affiliate_accounts) end"
+)"
 {
   echo "created_utc=$(date -u +%FT%TZ)"
   echo "stamp=$STAMP"
   echo "server_version=$(pgtool psql -h $H -U $U -d $D -Atc 'show server_version')"
   echo "cloud_media_items=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from public.cloud_media_items')"
   echo "auth_users=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from auth.users')"
-  echo "affiliate_accounts=$(pgtool psql -h $H -U $U -d $D -Atc \"select case when to_regclass('affiliate_private.affiliate_accounts') is null then -1 else (select count(*) from affiliate_private.affiliate_accounts) end\")"
+  echo "affiliate_accounts=$AFFILIATE_ACCOUNTS_COUNT"
 } > "$OUT/MANIFEST.txt"
 ( cd "$OUT" && sha256sum ./* > SHA256SUMS )
 

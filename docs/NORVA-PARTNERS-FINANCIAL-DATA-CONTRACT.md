@@ -202,22 +202,26 @@ déjà mis en quarantaine par la base, est terminal et ne bloque pas les droits.
 
 Le worker RevenueCat TRANSFER possède son propre heartbeat
 `revenuecat_transfer`, un budget global inférieur au timeout du cron et des
-compteurs bornés pour partiels, quarantaines et dead-letters. Le worker payout
-Airwallex publie séparément son exécution réelle ; un simple webhook `PAID`
-reste une observation en attente et ne fabrique jamais un settlement.
+compteurs bornés pour partiels, quarantaines et dead-letters. Sous Revolut
+Business Basic, aucun worker provider n'exécute les versements : Finance les
+saisit manuellement avec la référence Norva, puis le relevé officiel devient la
+preuve autoritaire. Une confirmation de saisie seule ne fabrique jamais un
+settlement.
 
-Le cron n'est pas seedé par migration. L'URL de production et son secret n'étant
-pas des constantes de schéma, l'opérateur l'enregistre seulement après
-déploiement et smoke test. L'absence du schedule doit apparaître comme
-`not_configured`, jamais comme un cron sain.
+Le cron du worker financier Norva n'est pas seedé par migration. L'URL de
+production et son secret n'étant pas des constantes de schéma, l'opérateur
+l'enregistre seulement après déploiement et smoke test. Les anciens crons
+Airwallex et le futur cron Revolut API doivent au contraire être absents ou
+inactifs sous Basic ; leur absence est l'état attendu, pas `not_configured`.
 
 ## Activation et enrichissement
 
 L'ordre de déploiement est : migration DB, tests jetables/Advisors, fonctions
 productrices, workers, puis enregistrement manuel des crons. Les devises restent
 désactivées tant que Finance n'a pas configuré explicitement code ISO et
-exposant. L'adaptateur Airwallex reste inactif et fail-closed tant que son
-contrat, son corridor sandbox, ses secrets et ses gates ne sont pas configurés.
+exposant. Seuls les corridors `revolut_manual` peuvent être actifs au pilote.
+L'adaptateur Airwallex reste historique et désactivé ; `revolut_api` reste
+inerte tant que sa gate, son flag DB et son kill switch Edge sont faux.
 
 Pour rendre un événement commissionnable, la source doit fournir de façon
 autoritative et cohérente :
@@ -263,25 +267,18 @@ indépendantes du simple déploiement du code.
 - Le monitoring doit alerter sur conflit, incomplete, plus vieux job prêt,
   retry, dead-letter, lease expiré, TRANSFER partiel/ancien et mismatch shadow
   avant le pilote.
-- Airwallex est codé comme adaptateur individuel et conserve seulement des
-  références opaques. Le worker cron-authentifié Financial Reports crée ou
-  récupère un Transaction Reconciliation Report CSV v1.1.0 via l'API
-  `2024-04-30`, suit `PENDING/COMPLETED`, télécharge uniquement le contenu
-  first-party, contrôle taille/type/période/colonnes/compteurs et produit des
-  observations minimisées idempotentes. Il n'accepte aucun URL, CSV ou
-  identifiant de rapport fourni par un client.
-- La complétude est un invariant transactionnel : le run et les dispatches sont
-  verrouillés, l'ensemble d'identifiants doit correspondre exactement, et les
-  observations sont appliquées dans la même transaction que la clôture du run.
-  La moindre ligne absente ou invalide annule tout le lot et alerte Finance ;
-  seul `matched_count=candidate_count` avec `unmatched_count=0` peut devenir
-  `completed`.
-- Airwallex ne publie pas le contrat complet de disposition physique du CSV.
-  Norva utilise donc le mapping versionné
-  `transaction_recon_csv_1_1_0_preamble_v1`, dont les lignes `sandbox` et
-  `production` restent `draft` jusqu'à une approbation Finance `aal2` fondée
-  sur le SHA-256 d'un fichier réel validé hors ligne. Le code livré n'est pas
-  une preuve de complétude bancaire ou de production.
+- Le rail Revolut manuel exige un registre bénéficiaire HMAC versionné, une
+  route devise/pays explicitement approuvée et un relevé réel dont le format a
+  été validé hors ligne. L'export brut est traité en mémoire ; Norva ne conserve
+  que les observations minimisées et leur empreinte.
+- La complétude est un invariant transactionnel : référence, montant mineur et
+  devise correspondent exactement. Une référence inconnue, un montant/devise
+  différent, un doublon ou un paiement tardif crée un incident append-only et
+  ne déplace aucune somme sans résolution maker-checker.
+- Les jobs `norva-partners-payout`,
+  `norva-partners-airwallex-reports` et `norva-partners-revolut-api` doivent
+  être absents ou inactifs sous Basic. Leur désactivation fait partie de la
+  preuve de release.
 - Un settlement exige une revue Finance puis une décision d'un second acteur
   Finance distinct. `partners_payouts_live=false`, l'absence de corridor réel et
   l'absence de deux cycles supervisés empêchent tout statut live.
