@@ -314,7 +314,7 @@ test('pgTAP executes confirmation, competing-writer and late-failure behavior', 
   );
   assert.match(
     sql,
-    /admin_partners_payout_provider_set\(\s*'wise'[\s\S]*?'disabled'[\s\S]*?reset role;[\s\S]*?from affiliate_private\.affiliate_payout_provider_configs[\s\S]*?set local role authenticated;[\s\S]*?admin_partners_payout_provider_set\(\s*'airwallex'/,
+    /admin_partners_payout_provider_set\(\s*'wise'[\s\S]*?invalid legacy payout route disable request[\s\S]*?admin_partners_payout_route_set\(\s*'revolut',\s*'revolut_manual'[\s\S]*?revolut_beneficiary_binding_verified/,
   );
   assert.match(
     sql,

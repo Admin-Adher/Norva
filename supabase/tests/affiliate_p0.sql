@@ -716,7 +716,8 @@ begin
     'individual_payout_coverage_confirmed',
     'country_policy_approved',
     'financial_data_contract_approved',
-    'backup_restore_verified'
+    'backup_restore_verified',
+    'manual_payout_workflow_verified'
   ]::text[]
   loop
     perform public.admin_partners_control(
@@ -2279,7 +2280,7 @@ where entry.entry_key = (
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select extensions.is(
   public.admin_partners_commission_reverse(
@@ -2361,7 +2362,7 @@ select extensions.is(
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 
 select extensions.is(
@@ -2443,8 +2444,8 @@ select extensions.is(
   jsonb_array_length(
     public.admin_partners_configuration() -> 'release_flags'
   ),
-  5,
-  'Admin configuration exposes the five managed flags without audit actors'
+  6,
+  'Admin configuration exposes the six managed flags without audit actors'
 );
 select extensions.ok(
   exists (
@@ -2671,7 +2672,7 @@ select public.admin_partners_capability_set(
 
 reset role;
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select extensions.throws_ok(
   $$
@@ -2683,36 +2684,29 @@ select extensions.throws_ok(
       'P0 payout pilot must reject an unimplemented execution adapter.'
     )
   $$,
-  '23514',
-  'new row for relation "affiliate_payout_provider_configs" violates check constraint "affiliate_payout_provider_configs_pilot_adapter"',
-  'the pilot cannot activate a provider without an execution adapter'
-);
-select public.admin_partners_payout_provider_set(
-  'wise',
-  'US',
-  'USD',
-  'disabled',
-  'P0 payout pilot keeps future provider configuration dormant.'
+  '22023',
+  'invalid legacy payout route disable request',
+  'the compatibility wrapper cannot activate a legacy payout provider'
 );
 reset role;
 select extensions.ok(
-  exists (
+  not exists (
     select 1
     from affiliate_private.affiliate_payout_provider_configs config
     where config.provider = 'wise'
       and config.country_code = 'US'
       and config.currency = 'USD'
-      and config.status = 'disabled'
   ),
-  'dormant future-provider configurations remain available'
+  'unsupported future-provider corridors are not materialized'
 );
 set local role authenticated;
-select public.admin_partners_payout_provider_set(
-  'airwallex',
+select public.admin_partners_payout_route_set(
+  'revolut',
+  'revolut_manual',
   'US',
   'USD',
   'active',
-  'P0 payout pilot exact Airwallex USD corridor.'
+  'P0 payout pilot exact Revolut manual USD corridor.'
 );
 select public.admin_partners_fiscal_review(
   (
@@ -2729,40 +2723,65 @@ select public.admin_partners_fiscal_review(
 );
 
 reset role;
+insert into partners_test_state (state_key, state_value)
+select
+  'revolut_binding_ticket_usd',
+  authorized.result ->> 'binding_ticket'
+from (
+  select public.admin_partners_revolut_beneficiary_binding_authorize(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_account'
+    ),
+    'USD',
+    '11111111-1111-4111-8111-111111111111',
+    null,
+    'Bank •••• 8421',
+    1,
+    repeat('b', 64),
+    'P0 payout integration tokenized USD beneficiary authorization.'
+  ) as result
+) authorized;
+
+reset role;
 set local role service_role;
 insert into partners_test_state (state_key, state_value)
 select
-  'payout_beneficiary_usd',
-  prepared.result #>> '{beneficiary,reservation_key}'
+  'revolut_binding_usd',
+  proposed.result #>> '{binding,key}'
 from (
-  select public.partners_service_airwallex_beneficiary_prepare(
-    '10000000-0000-4000-8000-000000000002',
-    'airwallex.beneficiary.usd.0001',
-    'USD',
-    'LOCAL'
-  ) as result
-) prepared;
-select public.partners_service_airwallex_beneficiary_start(
-  '10000000-0000-4000-8000-000000000002',
-  (
-    select state_value
-    from partners_test_state
-    where state_key = 'payout_beneficiary_usd'
-  )
-);
-select extensions.is(
-  public.partners_service_airwallex_beneficiary_record(
-    '10000000-0000-4000-8000-000000000002',
+  select public.partners_service_revolut_beneficiary_binding_propose(
+    repeat('c', 64),
+    repeat('d', 64),
     (
       select state_value
       from partners_test_state
-      where state_key = 'payout_beneficiary_usd'
+      where state_key = 'revolut_binding_ticket_usd'
+    )
+  ) as result
+) proposed;
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select extensions.is(
+  public.admin_partners_revolut_beneficiary_binding_verify(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'revolut_binding_usd'
     ),
-    'awx_beneficiary_test_usd_0001',
-    'Bank ending 8421'
+    'VERIFY:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'revolut_binding_usd'
+    ),
+    'P0 payout integration independent USD beneficiary verification.'
   ) ->> 'action',
-  'airwallex_beneficiary_recorded',
-  'the implemented adapter records a tokenized Airwallex USD destination'
+  'revolut_beneficiary_binding_verified',
+  'the released manual adapter records a verified tokenized USD destination'
 );
 
 reset role;
@@ -3018,7 +3037,7 @@ values (
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select public.admin_partners_control(
   'set_gate',
@@ -3060,7 +3079,7 @@ where cycle.period_start = current_date - 30
   and cycle.period_end = current_date - 1
   and cycle.currency = 'USD';
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select extensions.ok(
   (
@@ -3130,7 +3149,7 @@ select extensions.ok(
   'dry-to-live promotion appends a redacted audit transition'
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select extensions.throws_ok(
   format(
@@ -3177,7 +3196,7 @@ where accrual.id = (
   where state_key = 'payout_accrual_1'
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 do $probe$
 begin
@@ -3207,7 +3226,7 @@ select extensions.is(
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select extensions.is(
   public.admin_partners_payout_cycle_approve(
@@ -3348,7 +3367,7 @@ values (
   )::text
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select public.admin_partners_payout_cycle_create(
   current_date - 29,
@@ -3367,7 +3386,7 @@ where cycle.period_start = current_date - 29
   and cycle.period_end = current_date - 1
   and cycle.currency = 'USD';
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select public.admin_partners_payout_cycle_approve(
   (
@@ -3968,7 +3987,7 @@ select extensions.is(
   'late failure appends one auditable post-settlement exception observation'
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select extensions.ok(
   public.admin_partners_airwallex_settlements(25) -> 'items'
@@ -4060,7 +4079,7 @@ values (
   )::text
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select public.admin_partners_payout_cycle_create(
   current_date - 28,
@@ -4148,21 +4167,22 @@ values (
   'P0 payout integration EUR metadata.'
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
-select public.admin_partners_payout_provider_set(
-  'airwallex',
+select public.admin_partners_payout_route_set(
+  'revolut',
+  'revolut_manual',
   'US',
   'EUR',
   'active',
-  'P0 payout pilot exact Airwallex EUR corridor.'
+  'P0 payout pilot exact Revolut manual EUR corridor.'
 );
 reset role;
 select extensions.ok(
   (
     select count(*) = 2
       and count(distinct config.provider) = 1
-      and min(config.provider) = 'airwallex'
+      and min(config.provider) = 'revolut'
     from affiliate_private.affiliate_payout_provider_configs config
     where config.status = 'active'
       and config.country_code = 'US'
@@ -4170,6 +4190,65 @@ select extensions.ok(
   ),
   'one active provider can serve several pilot payout corridors'
 );
+
+insert into partners_test_state (state_key, state_value)
+select
+  'revolut_binding_ticket_eur',
+  authorized.result ->> 'binding_ticket'
+from (
+  select public.admin_partners_revolut_beneficiary_binding_authorize(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'payout_account'
+    ),
+    'EUR',
+    '22222222-2222-4222-8222-222222222222',
+    null,
+    'Bank •••• 1932',
+    1,
+    repeat('e', 64),
+    'P0 payout integration tokenized EUR beneficiary authorization.'
+  ) as result
+) authorized;
+
+reset role;
+set local role service_role;
+insert into partners_test_state (state_key, state_value)
+select
+  'revolut_binding_eur',
+  proposed.result #>> '{binding,key}'
+from (
+  select public.partners_service_revolut_beneficiary_binding_propose(
+    repeat('f', 64),
+    repeat('1', 64),
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'revolut_binding_ticket_eur'
+    )
+  ) as result
+) proposed;
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+select public.admin_partners_revolut_beneficiary_binding_verify(
+  (
+    select state_value
+    from partners_test_state
+    where state_key = 'revolut_binding_eur'
+  ),
+  'VERIFY:' || (
+    select state_value
+    from partners_test_state
+    where state_key = 'revolut_binding_eur'
+  ),
+  'P0 payout integration independent EUR beneficiary verification.'
+);
+
+reset role;
 insert into partners_test_state (state_key, state_value)
 values (
   'payout_accrual_eur',
@@ -4179,28 +4258,6 @@ values (
     2000,
     now() - interval '2 days'
   )::text
-);
-insert into affiliate_private.affiliate_payout_profiles (
-  account_id,
-  provider,
-  beneficiary_token_ref,
-  display_masked,
-  currency,
-  transfer_method,
-  status
-)
-values (
-  (
-    select state_value::uuid
-    from partners_test_state
-    where state_key = 'payout_account'
-  ),
-  'airwallex',
-  'awx_beneficiary_test_eur_0001',
-  'Bank ending 1932',
-  'EUR',
-  'LOCAL',
-  'active'
 );
 insert into partners_test_state (state_key, state_value)
 values (
@@ -4221,7 +4278,7 @@ where profile.account_id = (
   )
   and profile.currency = 'USD';
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_release_manager":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
 select public.admin_partners_payout_cycle_create(
   current_date - 27,
@@ -4680,7 +4737,7 @@ select extensions.ok(
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
 select extensions.ok(
   (
@@ -4885,7 +4942,7 @@ select extensions.throws_ok(
   'a stale Finance review cannot overwrite terminal conflict with quarantine'
 );
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 select extensions.ok(
   (
     select count(*) = 2
