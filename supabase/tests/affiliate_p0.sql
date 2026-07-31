@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(186);
+select extensions.plan(187);
 
 select extensions.ok(
   exists (
@@ -3933,6 +3933,35 @@ select extensions.is(
   ),
   6::bigint,
   'all immutable financial facts survive referred-user deletion'
+);
+
+set local role service_role;
+
+select extensions.is(
+  public.partners_service_prepare_account_deletion(
+    '10000000-0000-4000-8000-000000000002'
+  ) ->> 'state',
+  'pending_financial_closure',
+  'service preparation refuses account closure while balances remain'
+);
+
+reset role;
+
+select pg_temp.partners_test_recover_commission(
+  (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_accrual_eur'
+  ),
+  2000
+);
+select pg_temp.partners_test_recover_commission(
+  (
+    select state_value::uuid
+    from partners_test_state
+    where state_key = 'payout_accrual_4'
+  ),
+  2000
 );
 
 set local role service_role;
