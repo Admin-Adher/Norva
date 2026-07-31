@@ -10912,7 +10912,12 @@ as $$
     where dispatch.payout_item_id = p_item_id
       and dispatch.provider = 'airwallex'
       and dispatch.provider_state = 'PAID'
-      and dispatch.reconciliation_status = 'confirmed'
+      -- The immutable Finance decision and its settlement ledger entry are the
+      -- authoritative evidence for the item transition. The legacy Airwallex
+      -- decision RPC then projects the dispatch to confirmed in the same
+      -- transaction; requiring that projection here would create a circular
+      -- dependency with its dispatch guard, which first requires a settled
+      -- item.
       and dispatch.provider_transfer_hash is not distinct from
         p_provider_transfer_hash
       and settlement.related_entry_id is not distinct from

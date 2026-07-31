@@ -2444,8 +2444,8 @@ select extensions.is(
   jsonb_array_length(
     public.admin_partners_configuration() -> 'release_flags'
   ),
-  6,
-  'Admin configuration exposes the six managed flags without audit actors'
+  5,
+  'Admin configuration exposes the five managed flags without audit actors'
 );
 select extensions.ok(
   exists (
@@ -2625,7 +2625,7 @@ select extensions.ok(
     )
   ) > 0
   and position(
-    'partners_route_commission_recovery' in pg_get_functiondef(
+    'partners_balance_lock' in pg_get_functiondef(
       'affiliate_private.partners_worker_commission_job_complete(text,text,text,text,text)'::regprocedure
     )
   ) > 0
