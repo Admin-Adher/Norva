@@ -396,6 +396,8 @@ test('Partners legal surfaces disclose KYC minimization and commission reversals
   assert.match(partnersTerms, /not currently a\s+business\/KYB programme/i);
   assert.match(partnersTerms, /Minimum plain-language disclosure/);
   assert.match(partnersTerms, /separately itemized discount is optional context/i);
+  assert.match(partnersTerms, /USD 10\.00 \(1,000 minor units\)/);
+  assert.match(partnersTerms, /transfer fees charged to Norva[\s\S]*paid\s+by Norva[\s\S]*not deducted/i);
   assert.ok(
     partnersTerms.replace(/\s+/g, ' ').includes(disclosure),
     'repository Partners Terms must carry the exact versioned disclosure before publication',
@@ -443,6 +445,10 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
   assert.match(runbook, /aucun accès direct table ou séquence/i);
   assert.match(runbook, /NORVA-PARTNERS-RELEASE-EVIDENCE\.md/);
   assert.match(runbook, /NORVA-PARTNERS-OBSERVABILITY-CONTRACT\.md/);
+  assert.match(runbook, /Matrice mondiale candidate sous Revolut Basic/);
+  assert.match(runbook, /`candidate_disabled`[\s\S]*`unsupported_provider`[\s\S]*`active`/);
+  assert.match(runbook, /EUR\/SEPA reste nécessaire[\s\S]*Google Play restent dans leur devise autoritative/);
+  assert.match(runbook, /aucune promesse de disponibilité/);
   assert.match(
     runbook,
     /DIDIT_SESSION_EXPIRATION_SECONDS[\s\S]*3600[\s\S]*2419200[\s\S]*604800/,
@@ -465,6 +471,10 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
   assert.match(observability, /revenuecat_transfer/);
   assert.match(observability, /heartbeat provider `payout`/);
   assert.match(observability, /not_configured/);
+  assert.match(observability, /`payout_thresholds\.USD = 1000`/);
+  assert.match(observability, /chaque devise de\s+règlement autorisée possède aussi son propre seuil entier/i);
+  assert.match(observability, /toujours `borne_by = platform`/);
+  assert.match(observability, /aucun total multi-devise n'est publié sans preuve FX autoritative/i);
 });
 
 test('Partners CI covers exact Google money, deletion and release evidence', () => {
@@ -758,4 +768,67 @@ test('self-hosted Edge runtimes receive the complete fail-closed Partners config
     /^DIDIT_CALLBACK_URL=.*(?:app\.html|#partners|\?)/m,
   );
   assert.match(example, /Generate two different values/);
+});
+
+test('USD reference and absorbed payout costs stay exact-money and fail-closed', () => {
+  const migration = read(
+    'supabase/migrations/20260801202253_partners_usd_reference_fx_payout.sql',
+  );
+
+  assert.match(
+    migration,
+    /threshold_reference_currency set default 'USD'/,
+  );
+  assert.match(
+    migration,
+    /threshold_reference_minor set default 1000/,
+  );
+  assert.match(
+    migration,
+    /payout_fee_policy set default 'platform_absorbed'/,
+  );
+  assert.match(
+    migration,
+    /partners_fx_value_floor\([\s\S]*floor\(/,
+  );
+  assert.match(
+    migration,
+    /affiliate_payout_cost_facts_platform_only[\s\S]*borne_by = 'platform'/,
+  );
+  assert.match(
+    migration,
+    /affiliate_currency_metadata_identity_immutable[\s\S]*guard_affiliate_currency_identity/,
+  );
+  assert.match(
+    migration,
+    /entry\.currency_exponent is distinct from v_balance_exponent/,
+  );
+  assert.match(
+    migration,
+    /rate\.source_exponent = v_balance_exponent[\s\S]*rate\.target_exponent = v_reference_exponent/,
+  );
+  assert.match(
+    migration,
+    /rate\.source_currency = v_payout_currency[\s\S]*rate\.target_currency = v_cost_currency[\s\S]*rate\.valid_until >= p_observed_at/,
+  );
+  assert.match(
+    migration,
+    /p_observed_at < now\(\) - interval '5 minutes'/,
+  );
+  assert.match(
+    migration,
+    /FX evidence requires AAL2/,
+  );
+  assert.match(
+    migration,
+    /payout cost evidence requires AAL2/,
+  );
+  assert.match(
+    migration,
+    /These record evidence only; no RPC below can[\s\S]*move ledger balances or call Revolut/,
+  );
+  assert.doesNotMatch(
+    migration,
+    /partners_payouts_live[^\n]*true|partners_revolut_api_enabled[^\n]*true/,
+  );
 });

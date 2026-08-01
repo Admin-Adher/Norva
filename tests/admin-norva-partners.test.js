@@ -197,6 +197,10 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   assert.match(source, /\.partners-admin-toolbar input,[\s\S]{0,180}min-height:44px/);
   assert.match(source, /\.partners-action\{[^}]*min-height:44px/);
   assert.match(source, /\.partner-row:focus-visible|\.user-row:focus-visible,[\s\S]{0,260}\.crm-nav-item:focus-visible/);
+  assert.match(source, /Référence mondiale : 10,00 USD = \{"USD":1000\}/);
+  assert.doesNotMatch(source, /\{"EUR":5000,"USD":5000\}/);
+  assert.match(source, /parsed\.USD === 1000/);
+  assert.match(source, /chaque devise de règlement doit avoir un entier positif explicite/);
 
   const page = new AdminPage({});
   const capabilityState = { support: true, risk: false, finance: false };

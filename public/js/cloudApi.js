@@ -1174,6 +1174,7 @@
         const entries = Object.entries(value);
         return entries.length >= 1
             && entries.length <= 32
+            && value.USD === 1000
             && entries.every(([currency, amount]) => (
                 /^[A-Z]{3}$/.test(currency)
                 && Number.isSafeInteger(amount)
@@ -1273,6 +1274,11 @@
                 || !isBoundedString(policy.terms_version, { max: 128 })
                 || !isBoundedString(policy.disclosure_version, { max: 128 })) invalid();
         }
+
+        if (data.program !== null && data.policy !== null
+            && data.policy.payout_currencies.some(
+                (currency) => data.program.payout_thresholds[currency] === undefined
+            )) invalid();
 
         if (!hasExactKeys(data.allowlist, ['required', 'included'])
             || typeof data.allowlist.required !== 'boolean'

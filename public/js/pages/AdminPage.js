@@ -7827,13 +7827,14 @@ class AdminPage {
             );
             if (!key) return false;
             const thresholdsRaw = await this._partnersPrompt(
-                'Seuils de versement JSON en unités mineures (ex. {"EUR":5000,"USD":5000}) :',
-                '{"EUR":5000,"USD":5000}',
+                'Seuils de versement par devise en unités mineures. Référence mondiale : 10,00 USD = {"USD":1000}. Ajoutez une valeur figée pour chaque devise de règlement autorisée ; aucune conversion implicite :',
+                '{"USD":1000}',
                 (value) => {
                     try {
                         const parsed = JSON.parse(value);
                         const entries = parsed && !Array.isArray(parsed) ? Object.entries(parsed) : [];
                         return entries.length > 0 && entries.length <= 32
+                            && parsed.USD === 1000
                             && entries.every(([code, amount]) =>
                                 currencyCode.test(code)
                                 && Number.isSafeInteger(amount)
@@ -7841,7 +7842,7 @@ class AdminPage {
                             );
                     } catch (_) { return false; }
                 },
-                'Seuils invalides : utilisez un objet JSON devise → entier positif.'
+                'Seuils invalides : USD doit valoir exactement 1000 et chaque devise de règlement doit avoir un entier positif explicite.'
             );
             if (!thresholdsRaw) return false;
             const terms = await this._partnersPrompt(

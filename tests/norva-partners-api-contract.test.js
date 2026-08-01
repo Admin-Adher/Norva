@@ -52,7 +52,7 @@ function validBootstrap() {
       commission_rate_bps: 2000,
       attribution_window_days: 30,
       maturation_days: 45,
-      payout_thresholds: { EUR: 5000 },
+      payout_thresholds: { USD: 1000, EUR: 1000 },
       effective_from: '2026-07-29T00:00:00Z',
       effective_until: null,
     },
@@ -375,6 +375,27 @@ test('bootstrap data is copied through a strict schema and enum allowlist', () =
     countryCode: 'FR',
     subdivisionCode: null,
   }), 'an active programme must expose at least one payout threshold');
+
+  const missingUsdReference = validBootstrap();
+  delete missingUsdReference.program.payout_thresholds.USD;
+  assert.throws(() => sanitizeBootstrapData(missingUsdReference, {
+    countryCode: 'FR',
+    subdivisionCode: null,
+  }), 'the programme must expose the immutable 10 USD reference threshold');
+
+  const driftedUsdReference = validBootstrap();
+  driftedUsdReference.program.payout_thresholds.USD = 999;
+  assert.throws(() => sanitizeBootstrapData(driftedUsdReference, {
+    countryCode: 'FR',
+    subdivisionCode: null,
+  }), 'the programme must fail closed when the USD reference drifts');
+
+  const missingSettlementThreshold = validBootstrap();
+  delete missingSettlementThreshold.program.payout_thresholds.EUR;
+  assert.throws(() => sanitizeBootstrapData(missingSettlementThreshold, {
+    countryCode: 'FR',
+    subdivisionCode: null,
+  }), 'every payout currency exposed by policy needs an exact threshold');
 
   const unsupportedKycLevel = validBootstrap();
   unsupportedKycLevel.policy.kyc_level = 'standard';
@@ -855,4 +876,7 @@ test('contract clearly separates implemented user, referral and TV boundaries', 
   assert.match(contractSource, /### Utilisateur/);
   assert.match(contractSource, /### Referral Web/);
   assert.match(contractSource, /### Appareil TV/);
+  assert.match(contractSource, /"USD": 1000/);
+  assert.match(contractSource, /seuil mondial de référence de\s+10,00 USD/i);
+  assert.match(contractSource, /ne calculent pas eux-mêmes un équivalent FX/i);
 });

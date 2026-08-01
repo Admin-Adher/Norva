@@ -308,6 +308,72 @@ sans référence Norva, l'IBAN, le nom du bénéficiaire et les libellés libres
 sont ni journalisés ni conservés. Le hash du fichier, les compteurs et la
 preuve de complétude sont archivés dans le journal de release.
 
+### Matrice mondiale candidate sous Revolut Basic
+
+USD est la devise commerciale et le seuil mondial de référence est de
+`10,00 USD` (`1000` unités mineures). Ce choix ne remplace pas les devises
+transactionnelles ou de règlement : EUR/SEPA reste nécessaire et les achats
+Google Play restent dans leur devise autoritative. Pour une devise de règlement
+autre que USD, Finance fige un seuil équivalent dans la version de programme ;
+aucun lot ne calcule un taux FX à la volée.
+
+Les statuts opérationnels sont stricts :
+
+| Statut | Sens |
+|---|---|
+| `candidate_disabled` | Devise/destination documentée ou plausible, mais aucune promesse de disponibilité. Route fermée jusqu'à validation juridique/KYC/fiscale, contrôle dans le compte Revolut Norva et premier virement supervisé rapproché. |
+| `unsupported_provider` | Destination explicitement refusée par Revolut ou devise de destination absente. Aucun bénéficiaire, profil ou lot ne doit être activé. |
+| `active` | Autorisé uniquement après bénéficiaire réel validé, frais/charge bearer contrôlés, virement supervisé `COMPLETED`, relevé exact, rapprochement maker-checker et preuve de release. |
+
+Tous les groupes ci-dessous commencent en `candidate_disabled`. La liste
+officielle des devises d'envoi ne garantit pas qu'un couple pays/devise précis
+sera proposé au compte Norva ; l'interface Revolut réelle reste l'autorité pour
+le pilote manuel.
+
+| Destination candidate | Devise(s) de règlement candidate(s) | Note de validation obligatoire |
+|---|---|---|
+| UE/EEE éligible SEPA | EUR | Conserver EUR/SEPA même si USD est la référence commerciale ; vérifier IBAN, éligibilité SEPA et frais dans le compte réel. |
+| États-Unis | USD | Tester ACH et, si proposé, FedWire séparément ; ne pas confondre disponibilité de USD et rail domestique. |
+| Canada | CAD | Vérifier champs bénéficiaire, rail et frais réels. |
+| Royaume-Uni | GBP | Vérifier compte local ou transfert international selon le bénéficiaire. |
+| Suisse | CHF | Vérifier rail local/international et charge bearer. |
+| Australie / Nouvelle-Zélande | AUD / NZD | Un micro-virement supervisé distinct est requis par pays/devise. |
+| Danemark / Norvège / Suède | DKK / NOK / SEK | Conserver EUR comme autre candidat uniquement si le bénéficiaire et Revolut le proposent explicitement. |
+| Tchéquie / Hongrie / Pologne / Roumanie | CZK / HUF / PLN / RON | Ne pas substituer automatiquement EUR à la devise locale. |
+| Japon | JPY | Exposant 0 à confirmer dans les métadonnées Finance avant tout lot. |
+| Hong Kong / Singapour | HKD / SGD | Valider séparément destination, champs et frais. |
+| Chine / Inde | CNY / INR | CNY uniquement vers la Chine et INR uniquement vers l'Inde selon la documentation Revolut ; contrôle réel obligatoire. |
+| Indonésie / Corée du Sud / Sri Lanka / Malaisie / Népal / Philippines / Thaïlande / Vietnam | IDR / KRW / LKR / MYR / NPR / PHP / THB / VND | Chaque devise est limitée à sa destination documentée ; vérifier exposant, champs locaux et réception nette. |
+| Brésil / Chili / Colombie / Mexique | BRL / CLP / COP / MXN | BRL, CLP et COP sont limités à leur pays documenté ; valider MXN et le rail réel séparément. |
+| Émirats arabes unis / Israël / Arabie saoudite | AED / ILS / SAR | Contrôles sanctions, bénéficiaire, motif et charge bearer obligatoires. |
+| Turquie / Afrique du Sud | TRY / ZAR | Vérifier disponibilité du corridor et frais dans le compte réel. |
+| Maroc | USD ou EUR, uniquement si proposés au bénéficiaire réel | MAD n'est pas une devise d'envoi documentée. Le pays n'est pas présenté comme garanti ; aucun corridor avant quote et micro-virement réels. |
+
+Les destinations suivantes sont marquées `unsupported_provider` tant qu'elles
+figurent dans la liste de destinations non prises en charge par Revolut :
+Afghanistan, Algérie, Angola, Biélorussie, Burkina Faso, Burundi, Cambodge,
+République centrafricaine, Congo, République démocratique du Congo, Cuba, Côte
+d'Ivoire, Égypte, Érythrée, Guinée, Guinée-Bissau, Guyana, Haïti, Iran, Irak,
+Corée du Nord, Laos, Liban, Libye, Myanmar, Nigeria, Panama, Russie, Sierra Leone,
+Somalie, Soudan du Sud, Soudan, Eswatini, Syrie, Tunisie, Trinité-et-Tobago,
+Ouganda, Vanuatu, Venezuela, Yémen et Zimbabwe, ainsi que les territoires
+palestiniens occupés et les régions ukrainiennes explicitement exclues par le
+provider. Cette liste doit être relue avant chaque release ; une évolution
+provider n'active jamais automatiquement une route.
+
+Norva absorbe les frais de transfert facturés par le provider ou la banque
+émettrice pour un corridor pris en charge. En manuel, Finance choisit `OUR` ou
+l'équivalent débiteur lorsque disponible. Un transfert `SHA`, une retenue
+intermédiaire ou un montant reçu inférieur à l'attendu reste non rapproché et ne
+permet pas de promouvoir le corridor en `active` tant que Norva n'a pas corrigé
+le versement.
+
+Références officielles à revérifier au moment de l'activation :
+[pays et devises pris en charge](https://help.revolut.com/fr-FR/business/help/receiving-payments/sending-money-to-an-external-bank-account/where-can-i-transfer-money/),
+[frais des virements Business](https://help.revolut.com/fr-FR/help/receiving-payments/sending-money-to-an-external-bank-account/transfer-fee/business/),
+[frais SWIFT et charge bearer](https://help.revolut.com/fr-FR/business/help/receiving-payments/sending-money-to-an-external-bank-account/question-fees-swift-transfers/) et
+[grille Business Basic France](https://www.revolut.com/fr-FR/legal/business-basic-fees/).
+
 ### Revolut Business API : adaptateur dormant
 
 `revolut_api` est implémenté pour une évolution ultérieure de plan, mais reste

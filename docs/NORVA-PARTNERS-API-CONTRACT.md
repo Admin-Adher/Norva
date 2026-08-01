@@ -145,7 +145,7 @@ Réponse `data` :
     "attribution_window_days": 30,
     "maturation_days": 45,
     "payout_thresholds": {
-      "USD": 5000
+      "USD": 1000
     },
     "effective_from": "2026-07-29T00:00:00Z",
     "effective_until": null
@@ -175,6 +175,13 @@ Réponse `data` :
   }
 }
 ```
+
+`payout_thresholds.USD = 1000` exprime le seuil mondial de référence de
+10,00 USD. L'objet reste indexé par devise de règlement, car le ledger ne
+convertit jamais implicitement une commission. Lorsqu'une policy autorise une
+autre devise, la version de programme doit aussi fournir son seuil exact,
+préalablement figé et documenté par Finance. Les clients affichent la devise
+retournée par le serveur ; ils ne calculent pas eux-mêmes un équivalent FX.
 
 Cet exemple illustre seulement la forme globale du contrat. Il ne constitue
 aucune activation de marché : aucune juridiction, y compris les États-Unis,

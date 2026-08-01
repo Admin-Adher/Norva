@@ -38,7 +38,7 @@ function validEnvelope() {
         commission_rate_bps: 2000,
         attribution_window_days: 30,
         maturation_days: 45,
-        payout_thresholds: { EUR: 5000 },
+        payout_thresholds: { USD: 1000, EUR: 1000 },
         effective_from: '2026-07-29T00:00:00Z',
         effective_until: null,
       },
@@ -553,6 +553,9 @@ test('Partners bootstrap rejects drift, unknown fields and inconsistent states',
     (value) => { value.data.program.maturation_days = 44; },
     (value) => { value.data.program.payout_thresholds = { EUR: 0 }; },
     (value) => { value.data.program.payout_thresholds = {}; },
+    (value) => { value.data.program.payout_thresholds.USD = 999; },
+    (value) => { delete value.data.program.payout_thresholds.USD; },
+    (value) => { delete value.data.program.payout_thresholds.EUR; },
     (value) => { value.data.visibility.visible = false; },
     (value) => { value.data.eligibility.eligible = false; },
     (value) => { value.data.program = null; },
@@ -1133,6 +1136,19 @@ test('Partners is a secondary, server-gated route with exact user actions and no
   assert.match(pageSource, /window\.NorvaCloud\.partners\.apply/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.acceptTerms/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.rotateLink/);
+  assert.match(pageSource, /payout_thresholds\?\.USD/);
+  assert.match(pageSource, /Reference payout threshold/);
+  assert.match(pageSource, /Payout thresholds before you accept/);
+  assert.match(pageSource, /Exact settlement payout thresholds for your policy/);
+  assert.match(pageSource, /policy\?\.payout_currencies/);
+  assert.match(pageSource, /'discovery'/);
+  assert.match(pageSource, /'pending'/);
+  assert.match(pageSource, /'dashboard'/);
+  assert.match(pageSource, /Each threshold is exact in its named settlement currency/);
+  assert.match(pageSource, /Norva covers payout-transfer fees on supported routes/);
+  assert.match(pageSource, /never silently converted/);
+  assert.match(cloudSource, /value\.USD === 1000/);
+  assert.match(cloudSource, /data\.policy\.payout_currencies\.some/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.dashboard/);
   const partnersNamespace = cloudSource.match(
     /partners:\s*Object\.freeze\(\{([\s\S]{0,1200}?)\}\),/,

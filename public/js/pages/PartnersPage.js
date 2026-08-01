@@ -892,6 +892,7 @@ class PartnersPage {
         const region = this.regionLabel(policy);
         const age = policy.minimum_age;
         const eligibility = region ? `Eligible policy · ${region}` : 'Eligible individual account';
+        const referenceThreshold = this.referencePayoutThreshold(program);
 
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
@@ -902,6 +903,7 @@ class PartnersPage {
                         <h1 id="partners-title" class="partners-display" tabindex="-1">Earn ${rate} while they stay subscribed.</h1>
                         <p class="partners-lead">Receive ${rate} of each eligible payment from people who join through your link, for as long as their subscription remains active.</p>
                         <span class="partners-status-pill partners-status-success">${this.escape(eligibility)}</span>
+                        ${this.payoutThresholdDisclosure(program, policy, 'discovery')}
                         <form class="partners-join-form" data-partners-join-form novalidate>
                             <label class="partners-consent-check">
                                 <input type="checkbox" data-partners-individual-confirm>
@@ -918,7 +920,7 @@ class PartnersPage {
                             </div>
                             <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
                         </form>
-                        <p class="partners-disclosure">Earnings vary and are not guaranteed. Commission is ${rate} of the amount excluding tax actually paid after discounts. Refunds and chargebacks are reversed. Payment-processing fees do not reduce the commission base.</p>
+                        <p class="partners-disclosure">Earnings vary and are not guaranteed. Commission is ${rate} of the amount excluding tax actually paid after discounts. Refunds and chargebacks are reversed. Payment-processing fees do not reduce the commission base, and Norva covers payout-transfer fees on supported routes. Balances remain in their authoritative transaction and settlement currencies; they are never silently converted.</p>
                     </div>
                     <aside class="partners-program-card" aria-labelledby="partners-program-title">
                         <h2 id="partners-program-title">Programme rules</h2>
@@ -926,6 +928,7 @@ class PartnersPage {
                             <div><dt>Recurring commission</dt><dd>${rate}</dd></div>
                             <div><dt>Attribution window</dt><dd>${program.attribution_window_days} days</dd></div>
                             <div><dt>Validation period</dt><dd>${maturity} days</dd></div>
+                            <div><dt>Reference payout threshold</dt><dd>${this.escape(referenceThreshold)}</dd></div>
                             <div><dt>Referral model</dt><dd>Direct only</dd></div>
                             <div><dt>Verification</dt><dd>Individual KYC</dd></div>
                         </dl>
@@ -998,6 +1001,7 @@ class PartnersPage {
                         <div><dt>Terms</dt><dd>${this.escape(contract)}</dd></div>
                         <div><dt>Referral link</dt><dd>${this.escape(link)}</dd></div>
                     </dl>
+                    ${needsTerms ? this.payoutThresholdDisclosure(data.program, data.policy, 'pending') : ''}
                     ${pendingAction}
                     <p id="partners-verification-note" class="partners-action-note">${
                         canAcceptTerms
@@ -1349,6 +1353,7 @@ class PartnersPage {
             <strong>${this.escape(title)}</strong>
             ${destinations}
             <span>Fiscal profile: ${this.escape(fiscal?.status || 'missing')}${fiscal?.country_code ? ` · ${this.escape(fiscal.country_code)}` : ''}</span>
+            <span>Norva covers transfer fees on supported payout routes; they are not deducted from your commission.</span>
             <span>${data.readiness.payouts_live
                 ? 'Live payout gate enabled.'
                 : 'Live payouts remain disabled. No bank, card or tax identifier is collected on this page.'}</span>`;
@@ -1523,8 +1528,10 @@ class PartnersPage {
                         <div><dt>Identity</dt><dd>${this.escape(this.statusLabel(dashboard.account.verification_status, 'Identity verification'))}</dd></div>
                         <div><dt>Terms</dt><dd>${this.escape(this.statusLabel(dashboard.account.contract_status, 'Programme terms'))}</dd></div>
                         <div><dt>Jurisdiction</dt><dd>${this.escape([dashboard.account.country_code, dashboard.account.subdivision_code].filter(Boolean).join(' · '))}</dd></div>
+                        <div><dt>Reference payout threshold</dt><dd>${this.escape(this.referencePayoutThreshold(bootstrap.program))}</dd></div>
                         <div><dt>Payouts</dt><dd>${bootstrap.flags.partners_payouts_live ? 'Release gate enabled' : 'Not live'}</dd></div>
                     </dl>
+                    ${this.payoutThresholdDisclosure(bootstrap.program, bootstrap.policy, 'dashboard')}
                     <div class="partners-payout-summary" data-partners-payout-summary role="status" aria-live="polite">
                         <strong>Checking payout readiness…</strong>
                         <span>No financial identifier is loaded into this page.</span>
@@ -1612,7 +1619,7 @@ class PartnersPage {
         return ({
             available: 'Authoritative commission ledger',
             no_financial_activity: 'No commission activity yet',
-            multiple_currencies: 'Amounts are kept separate by currency'
+            multiple_currencies: 'Amounts are kept separate by authoritative currency'
         })[reason] || 'Financial reporting unavailable';
     }
 
@@ -1636,6 +1643,41 @@ class PartnersPage {
         return currencies
             .map((balance) => this.formatMinor(balance?.[field], balance?.currency))
             .join(' · ');
+    }
+
+    referencePayoutThreshold(program) {
+        const value = program?.payout_thresholds?.USD;
+        if (!Number.isSafeInteger(value) || value <= 0) return 'Not configured';
+        return `${this.formatMinor(value, 'USD')} · USD reference`;
+    }
+
+    payoutThresholdDisclosure(program, policy, surface) {
+        const thresholds = program?.payout_thresholds;
+        if (!thresholds || typeof thresholds !== 'object' || Array.isArray(thresholds)) return '';
+        const currencies = Array.isArray(policy?.payout_currencies)
+            ? policy.payout_currencies
+            : [];
+        const entries = currencies
+            .map((currency) => [currency, thresholds[currency]])
+            .filter(([currency, amount]) => (
+                /^[A-Z]{3}$/.test(String(currency || ''))
+                && Number.isSafeInteger(amount)
+                && amount > 0
+            ))
+            .sort(([left], [right]) => left.localeCompare(right));
+        const headingId = `partners-payout-thresholds-${surface}`;
+        return `
+            <section class="partners-program-card" aria-labelledby="${this.escape(headingId)}">
+                <h2 id="${this.escape(headingId)}">Payout thresholds before you accept</h2>
+                <p><strong>Programme reference:</strong> ${this.escape(this.referencePayoutThreshold(program))}.</p>
+                ${entries.length
+                    ? `<dl class="partners-program-facts" aria-label="Exact settlement payout thresholds for your policy">
+                        ${entries.map(([currency, amount]) => `
+                            <div><dt>${this.escape(currency)} settlement</dt><dd>${this.escape(this.formatMinor(amount, currency))}</dd></div>`).join('')}
+                      </dl>`
+                    : '<p>No settlement currency is enabled for this policy.</p>'}
+                <p>Each threshold is exact in its named settlement currency; Norva does not calculate a hidden FX equivalent. Norva absorbs payout-transfer fees on supported routes.</p>
+            </section>`;
     }
 
     historyLabel(type) {

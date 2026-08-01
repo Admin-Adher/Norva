@@ -94,7 +94,7 @@ async function mountPartners(page, initialState) {
             commission_rate_bps: 2000,
             attribution_window_days: 30,
             maturation_days: 45,
-            payout_thresholds: { EUR: 5000 },
+            payout_thresholds: { USD: 1000, EUR: 1000 },
             effective_from: '2026-07-29T00:00:00Z',
             effective_until: null,
           },
@@ -260,6 +260,21 @@ test('individual application stays gated by explicit confirmations and ends pend
   await expect(page.getByRole('heading', {
     name: /Earn 20% while they stay subscribed/i,
   })).toBeVisible();
+  await expect(page.getByRole('heading', {
+    name: 'Payout thresholds before you accept',
+  })).toBeVisible();
+  await expect(page.locator('section[aria-labelledby="partners-payout-thresholds-discovery"]'))
+    .toContainText('USD reference');
+  await expect(page.locator('dl[aria-label="Exact settlement payout thresholds for your policy"]'))
+    .toContainText('EUR settlement');
+  await expect(page.locator('dl[aria-label="Exact settlement payout thresholds for your policy"]'))
+    .not.toContainText('USD settlement');
+  expect(await page.locator('section[aria-labelledby="partners-payout-thresholds-discovery"]')
+    .evaluate((element) => Boolean(
+      element.compareDocumentPosition(
+        document.querySelector('[data-partners-join-form]')
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ))).toBe(true);
 
   const join = page.locator('[data-partners-join]');
   await expect(join).toBeDisabled();
@@ -307,7 +322,7 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
   await expect(page.locator('[data-partners-link]')).toHaveValue(
     `https://norva.tv/r/${'A'.repeat(32)}`,
   );
-  await expect(page.locator('.partners-program-facts')).toContainText(
+  await expect(page.locator('.partners-dashboard-grid aside > .partners-program-facts')).toContainText(
     'Not live',
   );
   await expect(page.getByText('Application submitted')).toBeVisible();

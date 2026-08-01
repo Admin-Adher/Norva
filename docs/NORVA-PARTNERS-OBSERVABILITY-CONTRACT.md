@@ -41,10 +41,26 @@ donc pas rendus visibles à Support par défaut.
   `rail + currency + currency_exponent`. Les refunds et chargebacks sont
   soustraits du revenu éligible ; les contre-écritures sont soustraites de la
   commission nette.
+- seuil de référence : le programme P0 contient obligatoirement
+  `payout_thresholds.USD = 1000`, soit 10,00 USD. Cette valeur est une référence
+  commerciale mondiale, pas une instruction de change. Chaque devise de
+  règlement autorisée possède aussi son propre seuil entier, figé et affiché
+  avant acceptation ; un client ne calcule jamais lui-même un équivalent FX.
+- éligibilité au versement : une observation conserve la devise et le montant
+  exacts du solde, le seuil exact de cette même devise et, lorsqu'une comparaison
+  de référence est nécessaire, l'identifiant du snapshot de taux autoritatif.
+  Une donnée de taux absente, périmée ou incohérente rend l'observation
+  `unavailable` ; elle ne produit ni conversion implicite ni faux « éligible ».
+- frais de versement : les coûts provider, banque émettrice et change sont des
+  faits append-only séparés, toujours `borne_by = platform`. Ils ne débitent ni
+  la commission ni le ledger du partenaire. Les frais restent ventilés par
+  devise ; aucun total multi-devise n'est publié sans preuve FX autoritative.
 - contribution : revenu éligible net moins commission partenaire nette. Elle
   devient `unavailable` si un fait financier attendu n'a pas encore son
-  écriture. La vraie marge reste `unavailable`, car frais provider, change,
-  infrastructure et autres coûts ne sont pas modélisés.
+  écriture. Une contribution après frais de versement n'est publiée que lorsque
+  les faits de coût provider et change sont complets et autoritatifs. La marge
+  finale reste `unavailable`, car fiscalité propre à Norva, infrastructure,
+  support et autres coûts d'exploitation ne sont pas encore tous modélisés.
 - premier versement : premier item et cycle tous deux `settled`. Les médianes
   partent de la première activation et du premier accrual. Toute la section
   reste `unavailable` tant que le provider, sa gate et
@@ -124,7 +140,12 @@ Avant le pilote, conserver dans le journal de release :
    montant/devise incorrects libérés seulement après retour, quarantaine
    réouverte, doublon ou paiement tardif produisant hold et récupération ;
 10. les trois crons provider/API absents ou inactifs sous Basic ;
-11. une réconciliation shadow propre.
+11. `payout_thresholds.USD = 1000`, puis le refus de tout payload où cette
+    référence dérive ou lorsqu'une devise de règlement n'a pas de seuil exact ;
+12. un frais de versement absorbé par Norva, visible comme coût plateforme sans
+    réduction du solde partenaire, puis un snapshot FX absent rendu
+    `unavailable` ;
+13. une réconciliation shadow propre.
 
 Les événements UX facultatifs côté client ne sont pas une source financière et
 ne sont pas déclarés actifs tant que leur instrumentation consentie et leur

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(187);
+select extensions.plan(211);
 
 select extensions.ok(
   exists (
@@ -306,7 +306,7 @@ values (
   2000,
   30,
   45,
-  '{"USD":1000}'::jsonb,
+  '{"USD":1000,"EUR":900}'::jsonb,
   'partners-terms-v1',
   'partners-disclosure-v1',
   now() - interval '1 minute'
@@ -4080,6 +4080,587 @@ select extensions.is(
   'pending_verification',
   'legacy active accounts traverse guarded held state into self-service re-verification'
 );
+
+select extensions.is(
+  (
+    select program.threshold_reference_currency
+    from affiliate_private.affiliate_program_versions program
+    where program.version_key = 'p0-test-v1'
+  ),
+  'USD',
+  'the P0 programme persists USD as its commercial threshold reference'
+);
+
+select extensions.is(
+  (
+    select program.threshold_reference_minor
+    from affiliate_private.affiliate_program_versions program
+    where program.version_key = 'p0-test-v1'
+  ),
+  1000::bigint,
+  'the P0 programme persists the worldwide 10 USD reference threshold'
+);
+
+select extensions.is(
+  (
+    select program.payout_fee_policy
+    from affiliate_private.affiliate_program_versions program
+    where program.version_key = 'p0-test-v1'
+  ),
+  'platform_absorbed',
+  'the P0 programme makes payout fees a platform expense'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_program_versions'::regclass
+      and constraint_row.conname =
+        'affiliate_program_versions_threshold_reference_currency'
+      and constraint_row.convalidated
+      and pg_get_constraintdef(constraint_row.oid) like '%= ''USD''%'
+  )
+  and exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_program_versions'::regclass
+      and constraint_row.conname =
+        'affiliate_program_versions_threshold_reference_minor'
+      and constraint_row.convalidated
+      and pg_get_constraintdef(constraint_row.oid) like '%= 1000%'
+  ),
+  'every programme version is constrained to the worldwide USD 10 reference'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_payout_eligibility_snapshots'::regclass
+      and constraint_row.conname =
+        'affiliate_payout_eligibility_snapshots_result'
+      and constraint_row.convalidated
+      and pg_get_constraintdef(constraint_row.oid)
+        like '%balance_minor >= settlement_threshold_minor%'
+  ),
+  'payout eligibility uses the exact settlement threshold, not shadow FX value'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid =
+      'affiliate_private.affiliate_currency_metadata'::regclass
+      and trigger_row.tgname =
+        'affiliate_currency_metadata_identity_immutable'
+      and not trigger_row.tgisinternal
+  ),
+  'currency identity and minor-unit exponent are immutable exact-money facts'
+);
+
+select extensions.is(
+  affiliate_private.partners_fx_value_floor(12345, 100000, 91320),
+  11273::bigint,
+  'reference valuation uses conservative integer floor arithmetic'
+);
+
+select extensions.throws_ok(
+  $$
+    select affiliate_private.partners_fx_value_floor(-1, 100000, 91320)
+  $$,
+  '22023',
+  'invalid exact-money FX valuation input',
+  'negative FX valuation inputs fail closed'
+);
+
+select extensions.ok(
+  (
+    select count(*) = 3
+    from pg_class relation
+    join pg_namespace namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'affiliate_private'
+      and relation.relname in (
+        'affiliate_fx_rate_snapshots',
+        'affiliate_payout_eligibility_snapshots',
+        'affiliate_payout_cost_facts'
+      )
+      and relation.relrowsecurity
+  ),
+  'every FX and payout-cost evidence table has RLS enabled'
+);
+
+select extensions.is(
+  (
+    select count(*)::bigint
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid in (
+      'affiliate_private.affiliate_fx_rate_snapshots'::regclass,
+      'affiliate_private.affiliate_payout_eligibility_snapshots'::regclass,
+      'affiliate_private.affiliate_payout_cost_facts'::regclass
+    )
+      and trigger_row.tgname in (
+        'affiliate_fx_rate_snapshots_append_only',
+        'affiliate_payout_eligibility_snapshots_append_only',
+        'affiliate_payout_cost_facts_append_only'
+      )
+      and not trigger_row.tgisinternal
+  ),
+  3::bigint,
+  'FX, eligibility and payout-cost evidence is append-only'
+);
+
+select extensions.ok(
+  not has_table_privilege(
+    'authenticated',
+    'affiliate_private.affiliate_fx_rate_snapshots',
+    'SELECT'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'affiliate_private.affiliate_payout_eligibility_snapshots',
+    'SELECT'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'affiliate_private.affiliate_payout_cost_facts',
+    'SELECT'
+  ),
+  'authenticated clients cannot read private FX or payout-cost evidence'
+);
+
+select extensions.ok(
+  to_regprocedure(
+    'public.admin_partners_fx_rate_record(text,bigint,text,bigint,text,timestamptz,timestamptz,text,text,text)'
+  ) is not null
+  and to_regprocedure(
+    'public.admin_partners_payout_eligibility_record(uuid,text,text,timestamptz,text,text)'
+  ) is not null
+  and to_regprocedure(
+    'public.admin_partners_payout_cost_record(text,text,text,text,bigint,text,text,bigint,uuid,text,text,timestamptz,text,text)'
+  ) is not null,
+  'the audited FX, eligibility and payout-cost RPC surface is installed'
+);
+
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_fx_rate_record(text,bigint,text,bigint,text,timestamptz,timestamptz,text,text,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_payout_eligibility_record(uuid,text,text,timestamptz,text,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_payout_cost_record(text,text,text,text,bigint,text,text,bigint,uuid,text,text,timestamptz,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated Finance operators can call only the guarded public wrappers'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_payout_cost_facts'::regclass
+      and constraint_row.conname =
+        'affiliate_payout_cost_facts_platform_only'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and pg_get_constraintdef(constraint_row.oid)
+        like '%borne_by = ''platform''%'
+  ),
+  'payout costs can only be borne by Norva and never by the partner'
+);
+
+-- Runtime FX/eligibility regression coverage. The surrounding transaction and
+-- transaction-stable now() keep every observation deterministic and isolated.
+reset role;
+
+select extensions.throws_ok(
+  $$
+    update affiliate_private.affiliate_currency_metadata
+    set exponent = 3
+    where currency_code = 'EUR'
+  $$,
+  '55000',
+  'currency code and minor-unit exponent are immutable; add a new versioned currency contract',
+  'a recorded currency exponent cannot be reinterpreted in place'
+);
+
+insert into auth.users (
+  id,
+  instance_id,
+  aud,
+  role,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at
+)
+values (
+  '10000000-0000-4000-8000-000000000006',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated',
+  'authenticated',
+  'partners-fx-runtime@example.invalid',
+  '',
+  now(),
+  '{"provider":"email","providers":["email"]}'::jsonb,
+  '{}'::jsonb,
+  now(),
+  now()
+);
+
+insert into affiliate_private.affiliate_accounts (
+  user_id,
+  user_pseudonym,
+  status,
+  program_version_id,
+  country_policy_id,
+  country_code
+)
+select
+  '10000000-0000-4000-8000-000000000006',
+  repeat('f', 64),
+  'pending_verification',
+  program.id,
+  (
+    select policy.id
+    from affiliate_private.affiliate_country_policies policy
+    where policy.program_version_id = program.id
+      and policy.country_code = 'US'
+      and policy.subdivision_code is null
+    order by policy.effective_from desc
+    limit 1
+  ),
+  'US'
+from affiliate_private.affiliate_program_versions program
+where program.version_key = 'p0-test-v1';
+
+insert into partners_test_state (state_key, state_value)
+select 'fx_runtime_account', account.id::text
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000006';
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+
+select public.admin_partners_fx_rate_record(
+  'EUR',
+  100,
+  'USD',
+  110,
+  'finance_manual',
+  now() - interval '1 minute',
+  now() + interval '30 minutes',
+  repeat('a', 64),
+  'fx.pgtap.valid.0001',
+  'pgTAP current EUR to USD evidence.'
+);
+select public.admin_partners_fx_rate_record(
+  'EUR',
+  100,
+  'USD',
+  110,
+  'finance_manual',
+  now() - interval '20 minutes',
+  now() - interval '10 minutes',
+  repeat('b', 64),
+  'fx.pgtap.stale.0001',
+  'pgTAP stale EUR to USD evidence.'
+);
+select public.admin_partners_fx_rate_record(
+  'USD',
+  110,
+  'EUR',
+  100,
+  'finance_manual',
+  now() - interval '1 minute',
+  now() + interval '30 minutes',
+  repeat('c', 64),
+  'fx.pgtap.reverse.0001',
+  'pgTAP current reverse USD to EUR evidence.'
+);
+
+reset role;
+insert into partners_test_state (state_key, state_value)
+select 'fx_runtime_rate_valid', rate.snapshot_key
+from affiliate_private.affiliate_fx_rate_snapshots rate
+where rate.idempotency_key = 'fx.pgtap.valid.0001';
+insert into partners_test_state (state_key, state_value)
+select 'fx_runtime_rate_stale', rate.snapshot_key
+from affiliate_private.affiliate_fx_rate_snapshots rate
+where rate.idempotency_key = 'fx.pgtap.stale.0001';
+insert into partners_test_state (state_key, state_value)
+select 'fx_runtime_rate_reverse', rate.snapshot_key
+from affiliate_private.affiliate_fx_rate_snapshots rate
+where rate.idempotency_key = 'fx.pgtap.reverse.0001';
+set local role authenticated;
+
+select extensions.is(
+  public.admin_partners_payout_eligibility_record(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'fx_runtime_account'
+    ),
+    'USD',
+    null,
+    now(),
+    'eligibility.pgtap.same.0001',
+    'pgTAP same-currency eligibility evidence.'
+  ) ->> 'replayed',
+  'false',
+  'same-currency eligibility records without FX evidence'
+);
+
+select extensions.is(
+  public.admin_partners_payout_eligibility_record(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'fx_runtime_account'
+    ),
+    'EUR',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'fx_runtime_rate_valid'
+    ),
+    now(),
+    'eligibility.pgtap.cross.0001',
+    'pgTAP cross-currency eligibility evidence.'
+  ) #>> '{snapshot,settlement_threshold_minor}',
+  '900',
+  'cross-currency eligibility preserves the local settlement threshold'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_eligibility_record(
+      (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'fx_runtime_account'
+      ),
+      'EUR',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'fx_runtime_rate_stale'
+      ),
+      now(),
+      'eligibility.pgtap.stale.0001',
+      'pgTAP rejects stale eligibility FX evidence.'
+    )
+  $$,
+  'P0001',
+  'FX evidence is unavailable or stale',
+  'stale FX evidence cannot authorize payout eligibility'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_eligibility_record(
+      (
+        select state_value::uuid
+        from partners_test_state
+        where state_key = 'fx_runtime_account'
+      ),
+      'EUR',
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'fx_runtime_rate_reverse'
+      ),
+      now(),
+      'eligibility.pgtap.reverse.0001',
+      'pgTAP rejects reversed eligibility FX evidence.'
+    )
+  $$,
+  'P0001',
+  'FX evidence is unavailable or stale',
+  'a reversed FX pair cannot authorize payout eligibility'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_cost_record(
+      'revolut',
+      'revolut_manual',
+      'US',
+      'EUR',
+      1000,
+      'fx_fee',
+      'USD',
+      500,
+      null,
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'fx_runtime_rate_stale'
+      ),
+      repeat('d', 64),
+      now(),
+      'cost.pgtap.stale.0001',
+      'pgTAP rejects stale payout-cost FX evidence.'
+    )
+  $$,
+  'P0001',
+  'FX evidence is unavailable, stale or mismatched',
+  'stale FX evidence cannot support a payout cost fact'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_cost_record(
+      'revolut',
+      'revolut_manual',
+      'US',
+      'EUR',
+      1000,
+      'fx_fee',
+      'USD',
+      500,
+      null,
+      (
+        select state_value
+        from partners_test_state
+        where state_key = 'fx_runtime_rate_reverse'
+      ),
+      repeat('e', 64),
+      now(),
+      'cost.pgtap.reverse.0001',
+      'pgTAP rejects reversed payout-cost FX evidence.'
+    )
+  $$,
+  'P0001',
+  'FX evidence is unavailable, stale or mismatched',
+  'a reversed FX pair cannot support a payout cost fact'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_payout_cost_record(
+      'revolut',
+      'revolut_manual',
+      'US',
+      'USD',
+      1000,
+      'fx_fee',
+      'USD',
+      500,
+      null,
+      null,
+      repeat('f', 64),
+      now(),
+      'cost.pgtap.same-fx.0001',
+      'pgTAP rejects a same-currency FX fee.'
+    )
+  $$,
+  'P0001',
+  'FX payout costs require exact FX evidence',
+  'same-currency costs cannot be classified as FX fees'
+);
+
+select extensions.is(
+  public.admin_partners_payout_cost_record(
+    'revolut',
+    'revolut_manual',
+    'US',
+    'EUR',
+    1000,
+    'fx_fee',
+    'USD',
+    500,
+    null,
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'fx_runtime_rate_valid'
+    ),
+    repeat('0', 64),
+    now(),
+    'cost.pgtap.valid.0001',
+    'pgTAP valid payout-cost FX evidence.'
+  ) #>> '{cost,borne_by}',
+  'platform',
+  'a valid FX payout cost remains a Norva platform expense'
+);
+
+reset role;
+insert into affiliate_private.affiliate_commission_entries (
+  id,
+  account_id,
+  entry_kind,
+  currency,
+  currency_exponent,
+  amount_minor
+)
+select
+  '91000000-0000-4000-8000-000000000001',
+  account.id,
+  'payout_allocation',
+  'USD',
+  2,
+  100
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000006';
+insert into affiliate_private.affiliate_commission_postings (
+  entry_id,
+  ledger_account,
+  direction,
+  amount_minor,
+  currency
+)
+values
+  (
+    '91000000-0000-4000-8000-000000000001',
+    'partner_commission_available',
+    'debit',
+    100,
+    'USD'
+  ),
+  (
+    '91000000-0000-4000-8000-000000000001',
+    'partner_payout_clearing',
+    'credit',
+    100,
+    'USD'
+  );
+
+set local role authenticated;
+select extensions.is(
+  public.admin_partners_payout_eligibility_record(
+    (
+      select state_value::uuid
+      from partners_test_state
+      where state_key = 'fx_runtime_account'
+    ),
+    'USD',
+    null,
+    now(),
+    'eligibility.pgtap.same.0001',
+    'pgTAP same-currency eligibility evidence.'
+  ) ->> 'replayed',
+  'true',
+  'an identical eligibility retry replays after later ledger evolution'
+);
+reset role;
 
 select * from extensions.finish();
 

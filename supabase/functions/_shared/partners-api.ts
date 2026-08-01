@@ -557,6 +557,16 @@ export function sanitizeBootstrapData(
       : expected,
   );
 
+  if (program && policy) {
+    const thresholds = program.payout_thresholds as Record<string, number>;
+    const settlementCurrencies = policy.payout_currencies as string[];
+    if (
+      settlementCurrencies.some((currency) => thresholds[currency] === undefined)
+    ) {
+      throw new BootstrapContractError();
+    }
+  }
+
   const allowlist = exactRecord(root.allowlist, ["required", "included"]);
   const cleanAllowlist = {
     required: strictBoolean(allowlist.required),
@@ -1219,6 +1229,9 @@ function sanitizeThresholds(value: unknown): Record<string, number> {
     if (!CURRENCY_PATTERN.test(currency)) throw new BootstrapContractError();
     clean[currency] = integerBetween(amount, 1, Number.MAX_SAFE_INTEGER);
   }
+  // P0 uses USD as its immutable commercial reference. Settlement still
+  // remains exact in each configured currency and is never inferred by FX.
+  if (clean.USD !== 1_000) throw new BootstrapContractError();
   return clean;
 }
 

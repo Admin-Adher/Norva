@@ -20,6 +20,20 @@ décider si ce fait est suffisamment complet pour créer une commission.
   « deux décimales ».
 - Un champ inconnu reste `NULL`. Le fait devient `incomplete` et aucun job de
   commission n'est créé : ce blocage n'est jamais remplacé par un zéro.
+- USD est la devise commerciale, de comparaison et de seuil de référence du
+  programme (`10,00 USD`, soit `1000` unités mineures). Elle ne remplace jamais
+  le champ `currency` autoritatif d'un paiement, d'une commission ou d'un
+  règlement. Les transactions Google Play localisées et les règlements SEPA
+  conservent notamment leur devise et leur exposant exacts.
+- Le code ISO et l'exposant d'une devise configurée sont immuables. Une
+  observation FX n'est recevable que pour la paire, la direction, les exposants
+  et la fenêtre de validité exacts. L'éligibilité autoritative compare toujours
+  le solde et son seuil figé dans la même devise ; sa valorisation USD reste une
+  observation de pilotage et ne peut ni créer un lot ni déplacer un ledger.
+- Les frais de payout facturés à Norva par le provider ou la banque émettrice
+  sont des charges de plateforme distinctes. Le lot conserve le montant exact de
+  commission à verser ; ces frais ne sont ni soustraits de ce montant ni injectés
+  dans le ledger de commission.
 - Un événement financier `transfer` est toujours `quarantined` et ne crée
   jamais de commission. La continuité d'entitlement RevenueCat suit une machine
   d'états séparée, sans déplacer de fait financier ni de ledger Partners.
@@ -223,6 +237,13 @@ désactivées tant que Finance n'a pas configuré explicitement code ISO et
 exposant. Seuls les corridors `revolut_manual` peuvent être actifs au pilote.
 `revolut_api` reste inerte tant que sa gate, son flag DB et son kill switch
 Edge sont faux.
+
+L'activation de USD comme devise de référence ne désactive pas EUR ni les autres
+devises autoritatives. Chaque corridor reste un couple pays/devise explicite et
+chaque seuil hors USD est une valeur versionnée ; aucune conversion FX n'est
+effectuée pendant la création du lot. Les frais de transfert réellement payés
+par Norva doivent rester observables et rapprochables comme coûts de plateforme,
+sans modifier le montant partenaire attendu.
 
 Pour rendre un événement commissionnable, la source doit fournir de façon
 autoritative et cohérente :

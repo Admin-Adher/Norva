@@ -7,6 +7,8 @@ et les preuves runtime ne sont pas configurés et validés
 **Marché cible :** mondial
 **Modèle :** affiliation directe, 20 % récurrents, sans multiniveau
 **Type de partenaire P0 :** personne physique uniquement, KYC sans KYB
+**Devise commerciale et de référence :** USD
+**Seuil mondial de référence :** 10,00 USD, soit 1 000 unités mineures
 **Déploiement initial :** invitation, 20 à 50 partenaires dans une allowlist de
 pays couverts à la fois par le prestataire KYC et le rail de versement individuel
 
@@ -213,7 +215,10 @@ L'assiette est le montant réellement encaissé après remise, hors taxes
 indirectes. Les frais Google Play, RevenueCat, Revolut ou bancaires sont
 enregistrés séparément et ne diminuent pas la commission.
 
-Exemple illustratif en EUR, sans valeur contractuelle pour les autres devises :
+USD est la devise commerciale, de comparaison et de pilotage du programme. Ce
+choix ne réécrit jamais la devise autoritative d'une transaction : un paiement
+Google Play encaissé en EUR, GBP ou INR reste comptabilisé dans cette devise,
+avec son exposant exact. Exemple illustratif en EUR :
 
 ```text
 4,99 € TTC - 0,83 € de taxe = 4,16 € éligibles
@@ -264,8 +269,18 @@ held → pending | available | reversed
 
 - Délai de validation : 45 jours après paiement confirmé.
 - Versement : mensuel.
-- Seuil : valeur configurée par devise de versement et version de programme,
-  jamais conversion implicite d'un seuil en euros.
+- Seuil mondial de référence : 10,00 USD, soit `1000` unités mineures.
+- Pour chaque autre devise de règlement autorisée, Finance fige dans la version
+  du programme un seuil équivalent documenté. La sélection du lot compare le
+  solde et le seuil dans la même devise ; elle n'effectue aucune conversion FX
+  implicite ou flottante au moment du versement.
+- USD comme référence ne remplace ni la devise de transaction ni la devise de
+  règlement. EUR reste notamment nécessaire aux transactions Google Play en EUR
+  et aux règlements SEPA ; les soldes de devises différentes restent séparés.
+- Les frais de transfert facturés à Norva par le provider ou la banque émettrice
+  sont une charge de la plateforme. Ils sont enregistrés et rapprochés
+  séparément, sans être déduits de la commission ni du montant de versement du
+  partenaire sur un corridor pris en charge.
 - Solde inférieur au seuil : reporté.
 - Profil incomplet : solde conservé mais bloqué.
 - Remboursement avant validation : réduction/annulation de la commission en
@@ -367,7 +382,8 @@ Créer un schéma non exposé, par exemple `affiliate_private`.
 ### 10.1 Tables
 
 - `affiliate_program_versions` : taux en points de base, fenêtre, maturation,
-  seuil par devise, juridiction, conditions et dates d'effet.
+  seuil USD de référence et seuil exact par devise de règlement, juridiction,
+  conditions et dates d'effet.
 - `affiliate_country_policies` : pays/subdivision, disponibilité, âge minimum,
   capacité requise, niveau KYC individuel, prestataire, devises de versement,
   contrat et disclosures applicables.
@@ -377,8 +393,8 @@ Créer un schéma non exposé, par exemple `affiliate_private`.
 - `affiliate_link_claims` : hash du claim, expiration, consommation et campagne.
 - `affiliate_attributions` : filleul unique, partenaire, claim, version du
   programme, taux figé et motif de rejet.
-- `affiliate_financial_facts` : brut, taxe, HT, devise, exposant, origine et
-  snapshot immuable.
+- `affiliate_financial_facts` : brut, taxe, HT, devise transactionnelle
+  autoritative, exposant, origine et snapshot immuable.
 - `affiliate_commission_jobs` : outbox transactionnelle, lease, retries et dead
   letter.
 - `affiliate_commission_entries` : journal append-only des accruals, reversals et
@@ -543,7 +559,8 @@ Le P0 est accepté lorsque :
    bloquant explicite.
 3. La commission vaut 20 % du montant HT réellement payé après remise.
 4. La formule est testée sur plusieurs taxes, devises et exposants monétaires.
-5. Les frais du rail sont séparés et ne réduisent pas l'assiette.
+5. Les frais du rail sont séparés, supportés par Norva pour les corridors pris
+   en charge et ne réduisent ni l'assiette ni le versement partenaire.
 6. Essais, sandbox, auto-parrainage, comptes internes et montants nuls rapportent
    zéro.
 7. Web → Play et Play → Web conservent l'attribution.
