@@ -841,6 +841,399 @@ test('foreground loading times out to a sanitized retry state, while navigation 
   assert.doesNotMatch(navigated.container.innerHTML, /temporarily unavailable/);
 });
 
+test('dashboard and payout modules time out independently and fail closed', async () => {
+  const attributes = new Map();
+  const content = {
+    innerHTML: '',
+    setAttribute(name, value) { attributes.set(`content:${name}`, value); },
+    removeAttribute(name) { attributes.delete(`content:${name}`); },
+    querySelector: () => null,
+  };
+  const metrics = {
+    innerHTML: '<article><strong>€999.00</strong></article>',
+    setAttribute(name, value) { attributes.set(`metrics:${name}`, value); },
+    removeAttribute(name) { attributes.delete(`metrics:${name}`); },
+  };
+  const payoutSummary = { innerHTML: '' };
+  const payoutButton = {
+    disabled: true,
+    textContent: '',
+    title: '',
+    removeAttribute(name) { attributes.delete(`payout:${name}`); },
+  };
+  const shell = {
+    scrollTop: 120,
+    addEventListener() {},
+  };
+  const container = {
+    querySelector(selector) {
+      return ({
+        '[data-partners-dashboard-content]': content,
+        '[data-partners-dashboard-metrics]': metrics,
+        '[data-partners-payout-summary]': payoutSummary,
+        '[data-partners-payout-button]': payoutButton,
+        '.partners-shell': shell,
+      })[selector] || null;
+    },
+    querySelectorAll: () => [],
+  };
+  const never = ({ signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => {
+      const error = new Error('raw timeout detail');
+      error.name = 'AbortError';
+      reject(error);
+    }, { once: true });
+  });
+  const window = {
+    NorvaCloud: {
+      partners: {
+        dashboard: never,
+        payoutProfile: never,
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: {
+      activeElement: null,
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+      querySelector: () => null,
+    },
+    navigator: { language: 'en-US', onLine: true },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  page._dashboardTimeoutMs = 10;
+  page._payoutTimeoutMs = 10;
+  let status = '';
+  page.setActionStatus = (message) => { status = message; };
+
+  await Promise.all([
+    page.loadDashboard(validEnvelope().data, { reset: true }),
+    page.loadPayoutProfile(),
+  ]);
+
+  assert.match(content.innerHTML, /Dashboard temporarily unavailable/);
+  assert.match(content.innerHTML, /secure request took too long/);
+  assert.doesNotMatch(content.innerHTML, /raw timeout detail/);
+  assert.match(metrics.innerHTML, /Available payout/);
+  assert.match(metrics.innerHTML, /Unavailable/);
+  assert.doesNotMatch(metrics.innerHTML, /€999\.00/);
+  assert.equal(payoutButton.disabled, false);
+  assert.equal(payoutButton.textContent, 'Retry payout status');
+  assert.match(payoutSummary.innerHTML, /secure status check took too long/);
+  assert.doesNotMatch(payoutSummary.innerHTML, /raw timeout detail/);
+  assert.match(status, /could not complete this action securely/i);
+  assert.equal(page._dashboardAbort, null);
+  assert.equal(page._payoutAbort, null);
+});
+
+test('partial join completion keeps idempotency and reloads the authoritative state', async () => {
+  const listeners = new Map();
+  const makeControl = ({ checked = false, textContent = '' } = {}) => ({
+    checked,
+    disabled: false,
+    isConnected: true,
+    textContent,
+    attributes: new Map(),
+    addEventListener(name, listener) { listeners.set(`${textContent || 'form'}:${name}`, listener); },
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); },
+    focus() {},
+  });
+  const individual = makeControl({ checked: true, textContent: 'individual' });
+  const terms = makeControl({ checked: true, textContent: 'terms' });
+  const button = makeControl({ textContent: 'Join Norva Partners' });
+  const form = makeControl({ textContent: 'join-form' });
+  form.querySelector = (selector) => ({
+    '[data-partners-individual-confirm]': individual,
+    '[data-partners-terms-confirm]': terms,
+    '[data-partners-join]': button,
+  })[selector] || null;
+  const status = {
+    textContent: '',
+    setAttribute() {},
+  };
+  const shell = {
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const container = {
+    querySelector(selector) {
+      return ({
+        '[data-partners-join-form]': form,
+        '[data-partners-action-status]': status,
+        '.partners-shell': shell,
+      })[selector] || null;
+    },
+  };
+  let applyCalls = 0;
+  let acceptCalls = 0;
+  const window = {
+    NorvaCloud: {
+      partners: {
+        apply: async () => { applyCalls += 1; },
+        acceptTerms: async () => {
+          acceptCalls += 1;
+          const error = new Error('raw provider response');
+          error.code = 'provider_temporarily_unavailable';
+          throw error;
+        },
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: { getElementById: (id) => (id === 'page-partners' ? container : null) },
+    navigator: { language: 'en-US', onLine: true },
+    crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000001' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  let reloads = 0;
+  page.show = async () => { reloads += 1; };
+  page.bindDiscoveryActions(validEnvelope().data);
+
+  await listeners.get('join-form:submit')({ preventDefault() {} });
+
+  assert.equal(applyCalls, 1);
+  assert.equal(acceptCalls, 1);
+  assert.equal(reloads, 1);
+  assert.equal(page._actionKeys.has('application'), true);
+  assert.equal(page._actionKeys.has('terms'), true);
+  assert.match(status.textContent, /identity provider is temporarily unavailable/i);
+  assert.doesNotMatch(status.textContent, /raw provider response/);
+});
+
+test('pending partner states always expose the authoritative recovery action', () => {
+  const container = {
+    innerHTML: '',
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  };
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: {
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+      querySelector: () => null,
+    },
+    navigator: { language: 'en-US' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  const data = validEnvelope().data;
+  data.visibility = { visible: true, reason: 'existing_account' };
+  data.account = {
+    exists: true,
+    status: 'pending_verification',
+    account_type: 'individual',
+    verification_status: 'failed',
+    contract_status: 'accepted',
+    link_status: 'none',
+  };
+
+  page.renderPending(data);
+  assert.match(container.innerHTML, /Verification incomplete/);
+  assert.match(container.innerHTML, /data-partners-start-kyc disabled/);
+  assert.match(container.innerHTML, />Retry identity verification</);
+
+  data.account.verification_status = 'expired';
+  page.renderPending(data);
+  assert.match(container.innerHTML, /Verification expired/);
+  assert.match(container.innerHTML, />Retry identity verification</);
+
+  data.account.verification_status = 'verified';
+  page.renderPending(data);
+  assert.match(container.innerHTML, /Activation in progress/);
+  assert.match(container.innerHTML, /data-partners-refresh-verification/);
+  assert.match(container.innerHTML, />Check activation status</);
+
+  data.account.contract_status = 'expired';
+  page.renderPending(data);
+  assert.match(container.innerHTML, /Application received/);
+  assert.match(container.innerHTML, /data-partners-accept-terms/);
+  assert.doesNotMatch(container.innerHTML, /Secure next step unavailable/);
+});
+
+test('hosted Didit hand-off requires both confirmations and preserves its retry key', async () => {
+  const listeners = new Map();
+  const makeControl = ({ checked = false, textContent = '' } = {}) => ({
+    checked,
+    disabled: false,
+    isConnected: true,
+    textContent,
+    attributes: new Map(),
+    addEventListener(name, listener) { listeners.set(`${textContent || 'form'}:${name}`, listener); },
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    removeAttribute(name) { this.attributes.delete(name); },
+    focus() {},
+  });
+  const consent = makeControl({ checked: true, textContent: 'kyc-consent' });
+  const capacity = makeControl({ checked: true, textContent: 'capacity' });
+  const button = makeControl({ textContent: 'Verify my identity securely' });
+  const form = makeControl({ textContent: 'kyc-form' });
+  form.querySelector = (selector) => ({
+    '[data-partners-kyc-consent]': consent,
+    '[data-partners-capacity-confirm]': capacity,
+    '[data-partners-start-kyc]': button,
+  })[selector] || null;
+  const status = { textContent: '', setAttribute() {} };
+  const shell = { setAttribute() {}, removeAttribute() {} };
+  const container = {
+    querySelector(selector) {
+      return ({
+        '[data-partners-accept-terms]': null,
+        '[data-partners-kyc-form]': form,
+        '[data-partners-action-status]': status,
+        '[data-partners-refresh-verification]': null,
+        '.partners-shell': shell,
+      })[selector] || null;
+    },
+  };
+  const calls = [];
+  let assigned = '';
+  const window = {
+    location: { assign(value) { assigned = value; } },
+    NorvaCloud: {
+      partners: {
+        async startKyc(input) {
+          calls.push({ ...input });
+          return {
+            data: {
+              verification: { url: 'https://verify.didit.me/session/opaque-result' },
+            },
+          };
+        },
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: {
+      documentElement: { lang: 'en' },
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+    },
+    navigator: { language: 'en-US', onLine: true },
+    crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000002' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  const data = validEnvelope().data;
+  data.account = {
+    exists: true,
+    status: 'pending_verification',
+    account_type: 'individual',
+    verification_status: 'not_started',
+    contract_status: 'accepted',
+    link_status: 'none',
+  };
+  page.bindPendingActions(data);
+
+  await listeners.get('kyc-form:submit')({ preventDefault() {} });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].language, 'en');
+  assert.equal(calls[0].consentVersion, 'partners-fr-v1');
+  assert.equal(calls[0].capacityConfirmed, true);
+  assert.match(calls[0].idempotencyKey, /^norva\.kyc-session\./);
+  assert.equal(assigned, 'https://verify.didit.me/session/opaque-result');
+  assert.equal(page._actionKeys.has('kyc-session'), true);
+  assert.match(status.textContent, /Opening Didit/);
+});
+
+test('an active account without a link can create one from the server', async () => {
+  const listeners = new Map();
+  const button = {
+    disabled: false,
+    isConnected: true,
+    textContent: 'Create referral link',
+    addEventListener(name, listener) { listeners.set(name, listener); },
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const status = { textContent: '', setAttribute() {} };
+  const shell = { setAttribute() {}, removeAttribute() {} };
+  const container = {
+    querySelector(selector) {
+      return ({
+        '[data-partners-create-link]': button,
+        '[data-partners-action-status]': status,
+        '[data-partners-history-more]': null,
+        '.partners-shell': shell,
+      })[selector] || null;
+    },
+    querySelectorAll: () => [],
+  };
+  const rotateCalls = [];
+  const window = {
+    NorvaCloud: {
+      partners: {
+        async rotateLink(input) { rotateCalls.push({ ...input }); },
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: { getElementById: (id) => (id === 'page-partners' ? container : null) },
+    navigator: { language: 'en-US', onLine: true },
+    crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000003' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  let dashboardReloads = 0;
+  page.loadDashboard = async () => { dashboardReloads += 1; };
+  page.bindDashboardActions(validEnvelope().data, { link: null });
+
+  await listeners.get('click')({ currentTarget: button });
+
+  assert.equal(rotateCalls.length, 1);
+  assert.match(rotateCalls[0].idempotencyKey, /^norva\.link-rotation\./);
+  assert.equal(dashboardReloads, 1);
+  assert.match(status.textContent, /Referral link created/);
+  assert.equal(page._actionKeys.has('link-rotation'), false);
+});
+
 test('strict account states resolve to active, pending, attention and terminal views', () => {
   const window = {};
   const context = vm.createContext({
@@ -875,12 +1268,21 @@ test('strict account states resolve to active, pending, attention and terminal v
   assert.equal(page.resolveView(data), 'pending');
 
   data.account.verification_status = 'failed';
-  assert.equal(page.resolveView(data), 'attention');
+  assert.equal(page.resolveView(data), 'pending');
   data.account.verification_status = 'expired';
-  assert.equal(page.resolveView(data), 'attention');
+  assert.equal(page.resolveView(data), 'pending');
   data.account.verification_status = 'verified';
   data.account.contract_status = 'expired';
-  assert.equal(page.resolveView(data), 'attention');
+  assert.equal(page.resolveView(data), 'pending');
+
+  data.account.contract_status = 'accepted';
+  data.account.status = 'active';
+  data.account.link_status = 'revoked';
+  assert.equal(
+    page.resolveView(data),
+    'active',
+    'an otherwise active account can securely create a replacement link',
+  );
 
   data.account.status = 'suspended';
   assert.equal(page.resolveView(data), 'disabled');
@@ -1136,6 +1538,10 @@ test('Partners is a secondary, server-gated route with exact user actions and no
   assert.match(pageSource, /window\.NorvaCloud\.partners\.apply/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.acceptTerms/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.rotateLink/);
+  assert.match(pageSource, /openPayoutDialog\(this\._payoutProfile, button\)/);
+  assert.match(pageSource, /Manual Revolut destinations are provisioned by Norva Finance/);
+  assert.match(pageSource, /This page never accepts an IBAN, card number, tax identifier or beneficiary token/);
+  assert.doesNotMatch(pageSource, /saveTokenizedPayoutProfile/);
   assert.match(pageSource, /payout_thresholds\?\.USD/);
   assert.match(pageSource, /Reference payout threshold/);
   assert.match(pageSource, /Payout thresholds before you accept/);
@@ -1206,6 +1612,12 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
   assert.doesNotMatch(pageSource, /(?:error|err)\?*\.message/);
   assert.match(pageSource, /aria-live="\$\{politeness\}"/);
   assert.match(pageSource, /aria-busy="true"/);
+  assert.match(pageSource, /_dashboardTimeoutMs\s*=\s*10000/);
+  assert.match(pageSource, /_payoutTimeoutMs\s*=\s*8000/);
+  assert.match(pageSource, /captureDashboardContext/);
+  assert.match(pageSource, /restoreDashboardContext/);
+  assert.match(pageSource, /isolateOverlayBackground/);
+  assert.match(pageSource, /trapDialogFocus/);
   assert.match(pageSource, /opener\?\.isConnected/);
   assert.match(pageSource, /history\.back\(\)/);
   assert.match(

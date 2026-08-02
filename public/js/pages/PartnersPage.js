@@ -18,6 +18,8 @@ class PartnersPage {
         this._opener = null;
         this._visibilityTimeoutMs = 4500;
         this._showTimeoutMs = 10000;
+        this._dashboardTimeoutMs = 10000;
+        this._payoutTimeoutMs = 8000;
         this._bootstrapTtlMs = 30000;
         this._sessionIdentityKey = '';
         this._jurisdiction = { countryCode: '', subdivisionCode: '' };
@@ -25,6 +27,9 @@ class PartnersPage {
         this._dashboardAbort = null;
         this._payoutAbort = null;
         this._payoutProfile = null;
+        this._payoutLoadState = 'idle';
+        this._closeQrDialog = null;
+        this._closePayoutDialog = null;
         this._dashboardFilter = 'all';
         this._dashboardCursor = null;
         this._dashboardPages = [];
@@ -261,6 +266,10 @@ class PartnersPage {
             await this.showTvRelay();
             return;
         }
+        this._closeQrDialog?.({ restoreFocus: false });
+        this._closeQrDialog = null;
+        this._closePayoutDialog?.({ restoreFocus: false });
+        this._closePayoutDialog = null;
         const returnedFromKyc = this.app?.consumePartnersKycReturnNotice?.() === true;
         this.ensureSessionContext();
         const jurisdiction = this.normalizeJurisdiction(
@@ -337,6 +346,10 @@ class PartnersPage {
     hide() {
         this._closeCountryPicker?.({ restoreFocus: false });
         this._closeCountryPicker = null;
+        this._closeQrDialog?.({ restoreFocus: false });
+        this._closeQrDialog = null;
+        this._closePayoutDialog?.({ restoreFocus: false });
+        this._closePayoutDialog = null;
         this._dashboardAbort?.abort();
         this._dashboardAbort = null;
         this._payoutAbort?.abort();
@@ -385,6 +398,10 @@ class PartnersPage {
     }
 
     async showTvRelay({ forceAvailability = false } = {}) {
+        this._closeQrDialog?.({ restoreFocus: false });
+        this._closeQrDialog = null;
+        this._closePayoutDialog?.({ restoreFocus: false });
+        this._closePayoutDialog = null;
         this._visible = true;
         const token = ++this._showToken;
         this.stopTvRelayPolling();
@@ -702,6 +719,7 @@ class PartnersPage {
                 title: 'Norva Partners is invitation-only',
                 copy: 'The pilot is opening gradually in supported jurisdictions. This account is not currently included.',
                 tone: 'neutral',
+                retry: true,
                 program: data.program
             });
             return;
@@ -733,8 +751,7 @@ class PartnersPage {
             // terminal/account-review states before global eligibility reasons:
             // the RPC deliberately reports held as account_blocked.
             if (account.status === 'suspended'
-                || account.status === 'closed'
-                || account.link_status === 'revoked') return 'disabled';
+                || account.status === 'closed') return 'disabled';
             if (account.status === 'held') return 'attention';
             if (data.eligibility.reason === 'account_attention_required') return 'attention';
             if (['country_required', 'country_not_supported', 'subdivision_not_supported']
@@ -744,9 +761,6 @@ class PartnersPage {
                 || data.visibility.reason === 'disabled'
                 || data.eligibility.reason === 'disabled'
                 || data.eligibility.reason === 'account_blocked') return 'disabled';
-            if (account.verification_status === 'failed'
-                || account.verification_status === 'expired'
-                || account.contract_status === 'expired') return 'attention';
             if (account.status === 'active'
                 && account.verification_status === 'verified'
                 && account.contract_status === 'accepted') return 'active';
@@ -964,10 +978,54 @@ class PartnersPage {
         const canAcceptTerms = needsTerms
             && Boolean(data.policy?.terms_version)
             && Boolean(data.policy?.disclosure_version);
+        const verificationRetry = ['failed', 'expired'].includes(
+            data.account.verification_status
+        );
         const canStartKyc = !needsTerms
-            && data.account.verification_status === 'not_started'
+            && ['not_started', 'failed', 'expired'].includes(
+                data.account.verification_status
+            )
             && Boolean(data.policy?.disclosure_version);
         const verificationPending = data.account.verification_status === 'pending';
+        const activationPending = !needsTerms
+            && data.account.verification_status === 'verified'
+            && data.account.status !== 'active';
+        const stateCopy = needsTerms
+            ? {
+                badge: 'Application received',
+                title: 'Review the current programme terms to continue.',
+                copy: 'Your application is saved. Identity verification stays locked until the current terms and disclosure are accepted.',
+                announcement: 'Your Norva Partners application is ready for the current programme terms.'
+            }
+            : (verificationRetry
+                ? {
+                    badge: data.account.verification_status === 'expired'
+                        ? 'Verification expired'
+                        : 'Verification incomplete',
+                    title: 'Start a fresh secure identity check.',
+                    copy: 'The previous hosted check did not complete. Review the confirmations below to start a fresh Didit session; no identity document is uploaded to this page.',
+                    announcement: 'A fresh Norva Partners identity check is available.'
+                }
+                : (data.account.verification_status === 'not_started'
+                    ? {
+                        badge: 'Verification required',
+                        title: 'Verify your identity to activate your partner link.',
+                        copy: 'Complete the secure hosted identity check. Norva unlocks the referral link only after the signed provider result is confirmed.',
+                        announcement: 'Norva Partners identity verification is ready to start.'
+                    }
+                    : (activationPending
+                        ? {
+                            badge: 'Activation in progress',
+                            title: 'Your identity is verified. Activation is finishing.',
+                            copy: 'Norva is confirming the final programme checks and preparing your referral link. No extra identity action is required.',
+                            announcement: 'Norva Partners activation is in progress.'
+                        }
+                        : {
+                            badge: 'Verification pending',
+                            title: 'Your individual partner profile is being checked.',
+                            copy: 'Norva waits for authoritative server confirmation before enabling a referral link. Refreshing this page cannot bypass verification.',
+                            announcement: 'Norva Partners identity verification is pending.'
+                        })));
         const pendingAction = canAcceptTerms
             ? `<button class="btn btn-primary partners-primary-action" type="button"
                     data-partners-accept-terms>Accept current programme terms</button>`
@@ -982,20 +1040,20 @@ class PartnersPage {
                         <span>I confirm that I meet the ${Number(data.policy.minimum_age)}+ policy and have legal capacity to join as an individual.</span>
                     </label>
                     <button class="btn btn-primary partners-primary-action" type="submit"
-                        data-partners-start-kyc disabled aria-describedby="partners-verification-note">Verify my identity securely</button>
+                        data-partners-start-kyc disabled aria-describedby="partners-verification-note">${verificationRetry ? 'Retry identity verification' : 'Verify my identity securely'}</button>
                   </form>`
-                : (verificationPending
+                : (verificationPending || activationPending
                     ? `<button class="btn btn-secondary partners-primary-action" type="button"
-                        data-partners-refresh-verification aria-describedby="partners-verification-note">Check verification status</button>`
+                        data-partners-refresh-verification aria-describedby="partners-verification-note">${activationPending ? 'Check activation status' : 'Check verification status'}</button>`
                     : `<button class="btn btn-secondary partners-primary-action" type="button" disabled
                         aria-describedby="partners-verification-note">Identity verification unavailable</button>`));
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
                 ${this.header('Norva Partners')}
                 <section class="partners-state-card partners-state-wide">
-                    <span class="partners-status-pill partners-status-warning">Verification pending</span>
-                    <h1 id="partners-title" tabindex="-1">Your individual partner profile is being checked.</h1>
-                    <p>Norva waits for authoritative server confirmation before enabling a referral link. Refreshing this page cannot bypass verification.</p>
+                    <span class="partners-status-pill partners-status-warning">${this.escape(stateCopy.badge)}</span>
+                    <h1 id="partners-title" tabindex="-1">${this.escape(stateCopy.title)}</h1>
+                    <p>${this.escape(stateCopy.copy)}</p>
                     <dl class="partners-checklist">
                         <div><dt>Identity</dt><dd>${this.escape(verification)}</dd></div>
                         <div><dt>Terms</dt><dd>${this.escape(contract)}</dd></div>
@@ -1012,12 +1070,14 @@ class PartnersPage {
                                     ? `You will continue on Didit's secure hosted verification. Norva records consent version ${this.escape(data.policy.disclosure_version)} and receives only the verification result needed for programme eligibility.`
                                     : (verificationPending
                                         ? 'Your hosted verification was started. Norva will unlock the next step only after the signed provider result is received.'
-                                        : 'The authoritative server has not enabled a new identity-verification action for this account.')))
+                                        : (activationPending
+                                            ? 'Your verified result is recorded. Refreshing checks only the authoritative activation state; it cannot create a link locally.'
+                                            : 'The authoritative server has not enabled a new identity-verification action for this account.'))))
                     }</p>
                     <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
                     ${this.programWindowNote(data.program)}
                 </section>
-                ${this.liveRegion('Norva Partners identity verification is pending.')}
+                ${this.liveRegion(stateCopy.announcement)}
             </main>`;
         this.bindCommonActions();
         this.bindPendingActions(data);
@@ -1070,6 +1130,7 @@ class PartnersPage {
         this._payoutAbort?.abort();
         this._payoutAbort = null;
         this._payoutProfile = null;
+        this._payoutLoadState = 'idle';
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
                 ${this.header('Norva Partners')}
@@ -1100,6 +1161,19 @@ class PartnersPage {
         this.bindCommonActions();
         this.container.querySelector('[data-partners-dashboard-retry]')
             ?.addEventListener('click', () => this.loadDashboard(data, { reset: true }));
+        this.container.querySelector('[data-partners-payout-button]')
+            ?.addEventListener('click', async (event) => {
+                const button = event.currentTarget;
+                if (this._payoutLoadState === 'ready' && this._payoutProfile) {
+                    this.openPayoutDialog(this._payoutProfile, button);
+                    return;
+                }
+                const profile = await this.loadPayoutProfile();
+                if (profile && button.isConnected) this.openPayoutDialog(profile, button);
+                else if (button.isConnected) {
+                    try { button.focus({ preventScroll: true }); } catch (_) { button.focus?.(); }
+                }
+            });
         this.focusTitle();
         this.loadDashboard(data, { reset: true });
         this.loadPayoutProfile();
@@ -1130,12 +1204,21 @@ class PartnersPage {
                     subdivisionCode: data.policy.subdivision_code || undefined,
                     idempotencyKey: this.actionKey('application')
                 });
+                try {
+                    await window.NorvaCloud.partners.acceptTerms({
+                        termsVersion: data.policy.terms_version,
+                        disclosureVersion: data.policy.disclosure_version,
+                        idempotencyKey: this.actionKey('terms')
+                    });
+                } catch (error) {
+                    // Applying and accepting terms are two authoritative writes.
+                    // If the second write fails, reload before another action so
+                    // the application is never posted with a fresh key twice.
+                    this.bootstrapEnvelope = null;
+                    await this.show();
+                    throw error;
+                }
                 this.clearActionKey('application');
-                await window.NorvaCloud.partners.acceptTerms({
-                    termsVersion: data.policy.terms_version,
-                    disclosureVersion: data.policy.disclosure_version,
-                    idempotencyKey: this.actionKey('terms')
-                });
                 this.clearActionKey('terms');
                 this.setActionStatus('Application submitted. Loading the authoritative account state.');
                 this.bootstrapEnvelope = null;
@@ -1189,8 +1272,10 @@ class PartnersPage {
                         capacityConfirmed: true,
                         idempotencyKey: this.actionKey('kyc-session')
                     });
-                    this.clearActionKey('kyc-session');
                     this.setActionStatus('Secure verification ready. Opening Didit.');
+                    // Keep the key until this document unloads. If Android or
+                    // the browser blocks the hosted hand-off, retrying must
+                    // reopen the same reserved KYC session.
                     window.location.assign(envelope.data.verification.url);
                 });
             });
@@ -1290,29 +1375,48 @@ class PartnersPage {
 
     async loadPayoutProfile() {
         if (!this._visible || typeof window.NorvaCloud?.partners?.payoutProfile !== 'function') {
-            this.renderPayoutProfile(null);
-            return;
+            this._payoutLoadState = 'unavailable';
+            this.renderPayoutProfile(null, { state: this._payoutLoadState });
+            return null;
         }
         this._payoutAbort?.abort();
         this._payoutAbort = new AbortController();
         const controller = this._payoutAbort;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            if (this._visible && this._payoutAbort === controller) {
+                timedOut = true;
+                controller.abort();
+            }
+        }, this._payoutTimeoutMs);
+        this._payoutLoadState = 'loading';
+        this.renderPayoutProfile(this._payoutProfile, { state: this._payoutLoadState });
         try {
             const envelope = await window.NorvaCloud.partners.payoutProfile({
                 signal: controller.signal
             });
-            if (!this._visible || controller.signal.aborted) return;
+            if (!this._visible || controller.signal.aborted || this._payoutAbort !== controller) return null;
             this._payoutProfile = envelope.data;
-            this.renderPayoutProfile(envelope.data);
+            this._payoutLoadState = 'ready';
+            this.renderPayoutProfile(envelope.data, { state: this._payoutLoadState });
+            return envelope.data;
         } catch (error) {
-            if (error?.name === 'AbortError' || controller.signal.aborted || !this._visible) return;
+            if (!this._visible || this._payoutAbort !== controller) return null;
+            if ((error?.name === 'AbortError' || controller.signal.aborted) && !timedOut) return null;
             this._payoutProfile = null;
-            this.renderPayoutProfile(null);
+            this._payoutLoadState = 'error';
+            this.renderPayoutProfile(null, {
+                state: this._payoutLoadState,
+                timedOut
+            });
+            return null;
         } finally {
+            clearTimeout(timeout);
             if (this._payoutAbort === controller) this._payoutAbort = null;
         }
     }
 
-    renderPayoutProfile(data) {
+    renderPayoutProfile(data, { state = this._payoutLoadState, timedOut = false } = {}) {
         const target = this.container?.querySelector('[data-partners-payout-summary]');
         const button = this.container?.querySelector('[data-partners-payout-button]');
         const reasonCopy = {
@@ -1322,10 +1426,28 @@ class PartnersPage {
             provider_not_configured: 'No individual payout provider is configured for this policy.',
             payouts_not_live: 'The payout release gate is not live.'
         };
+        if (state === 'loading') {
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Checking payout setup…';
+                button.removeAttribute('title');
+            }
+            if (target) target.innerHTML = `<strong>Checking payout readiness…</strong>
+                <span>No financial identifier is loaded while the authoritative status is checked.</span>`;
+            return;
+        }
         if (!data) {
-            if (button) button.textContent = 'Payout status unavailable';
+            if (button) {
+                button.disabled = state === 'unavailable';
+                button.textContent = state === 'error' ? 'Retry payout status' : 'Payout status unavailable';
+                button.title = state === 'error'
+                    ? 'Retry the secure payout-profile request'
+                    : 'The secure payout-profile service is unavailable';
+            }
             if (target) target.innerHTML = `<strong>Payout readiness unavailable</strong>
-                <span>No payout state or zero balance is inferred while the authoritative service is unavailable.</span>`;
+                <span>${timedOut
+                    ? 'The secure status check took too long. Retry without entering any financial identifier.'
+                    : 'No payout state or zero balance is inferred while the authoritative service is unavailable.'}</span>`;
             return;
         }
         const profile = data.profile;
@@ -1336,11 +1458,12 @@ class PartnersPage {
             ? 'Ready for the next supervised payout cycle'
             : (reasonCopy[reason] || 'Payout setup is not ready.');
         if (button) {
+            button.disabled = false;
             button.textContent = profiles.length > 1
                 ? `${profiles.length} payout destinations`
                 : profile
                     ? `${this.payoutProviderLabel(profile.provider)} · ${profile.display_masked}`
-                    : 'Payout setup unavailable';
+                    : 'Review payout setup';
             button.title = title;
         }
         if (!target) return;
@@ -1367,11 +1490,63 @@ class PartnersPage {
         })[provider] || 'Payout provider';
     }
 
+    captureDashboardContext() {
+        const scroller = this.getScrollElement();
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        let focus = null;
+        if (active?.matches?.('[data-partners-history-filter]')) {
+            focus = {
+                type: 'filter',
+                value: active.dataset.partnersHistoryFilter
+            };
+        } else if (active?.matches?.('[data-partners-history-more]')) {
+            focus = { type: 'load-more' };
+        }
+        return {
+            focus,
+            scrollTop: Number.isFinite(scroller?.scrollTop) ? scroller.scrollTop : 0
+        };
+    }
+
+    restoreDashboardContext(context) {
+        if (!context) return;
+        requestAnimationFrame(() => {
+            if (!this._visible) return;
+            const scroller = this.getScrollElement();
+            let target = null;
+            if (context.focus?.type === 'filter') {
+                target = Array.from(this.container?.querySelectorAll?.('[data-partners-history-filter]') || [])
+                    .find((button) => button.dataset.partnersHistoryFilter === context.focus.value);
+            } else if (context.focus?.type === 'load-more') {
+                target = this.container?.querySelector('[data-partners-history-more]')
+                    || this.container?.querySelector('#partners-history-title');
+            }
+            try { target?.focus({ preventScroll: true }); } catch (_) { target?.focus?.(); }
+            if (scroller) scroller.scrollTop = context.scrollTop;
+        });
+    }
+
     async loadDashboard(bootstrap, { reset = false, append = false } = {}) {
-        if (!this._visible || !window.NorvaCloud?.partners?.dashboard) return;
+        if (!this._visible) return;
+        if (typeof window.NorvaCloud?.partners?.dashboard !== 'function') {
+            this.renderDashboardFailure(bootstrap, { unavailable: true });
+            this.setActionStatus(
+                'The secure partner dashboard is unavailable. No financial or referral value was inferred.',
+                'error'
+            );
+            return;
+        }
+        const interactionContext = this.captureDashboardContext();
         this._dashboardAbort?.abort();
         this._dashboardAbort = new AbortController();
         const controller = this._dashboardAbort;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            if (this._visible && this._dashboardAbort === controller) {
+                timedOut = true;
+                controller.abort();
+            }
+        }, this._dashboardTimeoutMs);
         const content = this.container?.querySelector('[data-partners-dashboard-content]');
         const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
         if (reset) {
@@ -1388,7 +1563,7 @@ class PartnersPage {
                 cursor: append ? this._dashboardCursor : undefined,
                 signal: controller.signal
             });
-            if (!this._visible || controller.signal.aborted) return;
+            if (!this._visible || controller.signal.aborted || this._dashboardAbort !== controller) return;
             const page = envelope.data;
             if (append && this._dashboardPages.length) {
                 this._dashboardPages.push(page);
@@ -1406,26 +1581,53 @@ class PartnersPage {
             };
             this._dashboardCursor = page.history.next_cursor;
             this.renderDashboardData(bootstrap, combined);
+            this.restoreDashboardContext(interactionContext);
             this.setActionStatus('Partner dashboard updated.');
         } catch (error) {
-            if (error?.name === 'AbortError' || controller.signal.aborted || !this._visible) return;
-            if (content) {
-                content.innerHTML = `<section class="partners-history-card">
-                    <div class="partners-empty-state" role="alert">
-                        <strong>Dashboard temporarily unavailable</strong>
-                        <span>No financial or referral value was guessed. Retry the authoritative server request.</span>
-                        <button class="btn btn-primary" type="button" data-partners-dashboard-inline-retry>Try again</button>
-                    </div>
-                </section>`;
-                content.querySelector('[data-partners-dashboard-inline-retry]')
-                    ?.addEventListener('click', () => this.loadDashboard(bootstrap, { reset: true }));
-            }
+            if (!this._visible || this._dashboardAbort !== controller) return;
+            if ((error?.name === 'AbortError' || controller.signal.aborted) && !timedOut) return;
+            this.renderDashboardFailure(bootstrap, { timedOut });
+            this.restoreDashboardContext(interactionContext);
             this.setActionStatus(this.partnerErrorMessage(error), 'error');
         } finally {
-            if (this._dashboardAbort === controller) this._dashboardAbort = null;
-            content?.removeAttribute('aria-busy');
-            metrics?.removeAttribute('aria-busy');
+            clearTimeout(timeout);
+            if (this._dashboardAbort === controller) {
+                this._dashboardAbort = null;
+                content?.removeAttribute('aria-busy');
+                metrics?.removeAttribute('aria-busy');
+            }
         }
+    }
+
+    renderDashboardFailure(bootstrap, { timedOut = false, unavailable = false } = {}) {
+        const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
+        const content = this.container?.querySelector('[data-partners-dashboard-content]');
+        if (metrics) {
+            metrics.innerHTML = [
+                this.metric('Available payout', 'Unavailable', 'Secure reporting unavailable'),
+                this.metric('In validation', 'Unavailable', 'Secure reporting unavailable'),
+                this.metric('Paid to date', 'Unavailable', 'Secure reporting unavailable'),
+                this.metric('Attributed referrals', 'Unavailable', 'Secure reporting unavailable')
+            ].join('');
+            metrics.removeAttribute?.('aria-busy');
+        }
+        if (!content) return;
+        content.innerHTML = `<section class="partners-history-card">
+            <div class="partners-empty-state" role="alert">
+                <strong>Dashboard temporarily unavailable</strong>
+                <span>${timedOut
+                    ? 'The secure request took too long. Previously displayed values were cleared; no financial or referral value was guessed.'
+                    : (unavailable
+                        ? 'This app version cannot reach the secure dashboard service. No financial or referral value was inferred.'
+                        : 'Previously displayed values were cleared. Retry the authoritative server request.')}</span>
+                ${unavailable
+                    ? ''
+                    : '<button class="btn btn-primary" type="button" data-partners-dashboard-inline-retry>Try again</button>'}
+            </div>
+        </section>`;
+        content.removeAttribute?.('aria-busy');
+        content.querySelector?.('[data-partners-dashboard-inline-retry]')
+            ?.addEventListener('click', () => this.loadDashboard(bootstrap, { reset: true }));
     }
 
     renderDashboardData(bootstrap, dashboard) {
@@ -1491,7 +1693,8 @@ class PartnersPage {
                 <div>
                     <span class="partners-eyebrow">Referral link</span>
                     <h2>No active link was returned.</h2>
-                    <p>The dashboard did not invent a local code. Refresh the secure account state.</p>
+                    <p>Create a fresh opaque link from the authoritative server. No code is generated in this browser.</p>
+                    <button class="btn btn-primary" type="button" data-partners-create-link>Create referral link</button>
                 </div>
               </div>`;
 
@@ -1541,7 +1744,7 @@ class PartnersPage {
             </section>
             <section class="partners-history-card" aria-labelledby="partners-history-title">
                 <div class="partners-history-heading">
-                    <div><h2 id="partners-history-title">Partner history</h2>
+                    <div><h2 id="partners-history-title" tabindex="-1">Partner history</h2>
                     <p>Commission state changes are shown without customer identity, payment references or private amounts.</p></div>
                     <div class="partners-history-filters" role="group" aria-label="Filter partner history">${filters}</div>
                 </div>
@@ -1550,7 +1753,7 @@ class PartnersPage {
                     ? '<button class="btn btn-secondary partners-load-more" type="button" data-partners-history-more>Load more</button>'
                     : ''}
             </section>`;
-        this.renderPayoutProfile(this._payoutProfile);
+        this.renderPayoutProfile(this._payoutProfile, { state: this._payoutLoadState });
         this.bindDashboardActions(bootstrap, dashboard);
     }
 
@@ -1571,8 +1774,12 @@ class PartnersPage {
                     event.currentTarget,
                     'Opening share…',
                     async () => {
-                        await this.shareReferral(link.share_url, bootstrap);
-                        this.setActionStatus('Share sheet opened with the required disclosure.');
+                        const outcome = await this.shareReferral(link.share_url, bootstrap);
+                        this.setActionStatus(({
+                            cancelled: 'Sharing cancelled. Your referral link was not changed.',
+                            copied: 'Sharing is unavailable here, so the link and required disclosure were copied.',
+                            shared: 'Share sheet opened with the required disclosure.'
+                        })[outcome] || 'Referral link is ready to share.');
                     }
                 ));
             this.container?.querySelector('[data-partners-qr]')
@@ -1603,6 +1810,20 @@ class PartnersPage {
                     });
                 });
             }
+        } else {
+            this.container?.querySelector('[data-partners-create-link]')
+                ?.addEventListener('click', (event) => this.runPartnerAction(
+                    event.currentTarget,
+                    'Creating securely…',
+                    async () => {
+                        await window.NorvaCloud.partners.rotateLink({
+                            idempotencyKey: this.actionKey('link-rotation')
+                        });
+                        this.clearActionKey('link-rotation');
+                        this.setActionStatus('Referral link created. Loading the server-issued link.');
+                        await this.loadDashboard(bootstrap, { reset: true });
+                    }
+                ));
         }
         this.container?.querySelectorAll('[data-partners-history-filter]')
             .forEach((button) => button.addEventListener('click', () => {
@@ -1732,13 +1953,13 @@ class PartnersPage {
         const disclosure = this.shareDisclosure(bootstrap);
         const native = window.NorvaShareNative;
         if (native && typeof native.postMessage === 'function') {
-            await this.postNativeShare('shareReferral', {
+            const result = await this.postNativeShare('shareReferral', {
                 url,
                 message,
                 disclosure,
                 chooserTitle: 'Share Norva'
             });
-            return;
+            return result?.status === 'cancelled' ? 'cancelled' : 'shared';
         }
         if (navigator.share) {
             try {
@@ -1748,11 +1969,13 @@ class PartnersPage {
                     url
                 });
             } catch (error) {
-                if (error?.name !== 'AbortError') throw error;
+                if (error?.name === 'AbortError') return 'cancelled';
+                throw error;
             }
-            return;
+            return 'shared';
         }
         await this.copyText(`${message}\n\n${disclosure}\n${url}`);
+        return 'copied';
     }
 
     postNativeShare(method, payload) {
@@ -1811,8 +2034,169 @@ class PartnersPage {
         this._nativeShareListenerBound = true;
     }
 
+    isolateOverlayBackground(overlay) {
+        const candidates = new Set();
+        let node = overlay;
+        while (node?.parentElement) {
+            const parent = node.parentElement;
+            Array.from(parent.children).forEach((sibling) => {
+                if (sibling !== node && !sibling.matches?.('script, style, link')) {
+                    candidates.add(sibling);
+                }
+            });
+            if (parent === document.body) break;
+            node = parent;
+        }
+        const snapshot = Array.from(candidates).map((element) => ({
+            element,
+            inert: element.inert,
+            ariaHidden: element.getAttribute('aria-hidden')
+        }));
+        snapshot.forEach(({ element }) => {
+            element.inert = true;
+            element.setAttribute('aria-hidden', 'true');
+        });
+        return () => snapshot.forEach(({ element, inert, ariaHidden }) => {
+            if (!element?.isConnected) return;
+            element.inert = inert;
+            if (ariaHidden == null) element.removeAttribute('aria-hidden');
+            else element.setAttribute('aria-hidden', ariaHidden);
+        });
+    }
+
+    trapDialogFocus(dialog, event, close) {
+        if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
+            event.preventDefault();
+            event.stopPropagation();
+            close();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(dialog.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+        )).filter((element) => !element.hidden && element.getClientRects().length > 0);
+        if (!focusable.length) {
+            event.preventDefault();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    openPayoutDialog(data, opener) {
+        if (!data) return;
+        this._closePayoutDialog?.({ restoreFocus: false });
+        const profiles = Array.isArray(data.profiles) ? data.profiles : [];
+        const primary = data.profile;
+        const destinations = profiles.length ? profiles : (primary ? [primary] : []);
+        const reasonCopy = {
+            account_not_active: 'Partner account activation is required.',
+            kyc_not_verified: 'Identity verification is required.',
+            fiscal_profile_required: 'A verified individual fiscal profile is required.',
+            provider_not_configured: 'No individual payout provider is configured for this policy.',
+            payouts_not_live: 'The payout release gate is not live.'
+        };
+        const readiness = data.readiness.ready
+            ? 'Ready for the next supervised payout cycle'
+            : (reasonCopy[data.readiness.reason] || 'Payout setup is not ready.');
+        const destinationRows = destinations.length
+            ? destinations.map((destination) => `
+                <div><dt>${this.escape(destination.currency)} destination</dt>
+                <dd>${this.escape(this.payoutProviderLabel(destination.provider))} · ${this.escape(destination.display_masked)} · ${this.escape(destination.status)}</dd></div>`).join('')
+            : '<div><dt>Destination</dt><dd>Not provisioned</dd></div>';
+        const manualRevolut = !destinations.length
+            || destinations.some((destination) => destination.provider === 'revolut');
+        const overlay = document.createElement('div');
+        overlay.className = 'partners-country-picker-overlay partners-qr-overlay partners-payout-overlay';
+        overlay.setAttribute('data-region-picker', '');
+        overlay.setAttribute('data-partners-payout-overlay', '');
+        overlay.innerHTML = `
+            <section class="partners-qr-dialog partners-payout-dialog" role="dialog" aria-modal="true"
+                aria-labelledby="partners-payout-title" aria-describedby="partners-payout-copy">
+                <header class="partners-country-dialog-header">
+                    <div><span class="partners-eyebrow">Secure payout profile</span>
+                    <h2 id="partners-payout-title">Payout readiness</h2></div>
+                    <button class="partners-country-close" type="button"
+                        data-partners-payout-close aria-label="Close payout profile">×</button>
+                </header>
+                <div class="partners-payout-summary">
+                    <strong>${this.escape(readiness)}</strong>
+                    <span>${data.readiness.payouts_live
+                        ? 'The live release gate is enabled.'
+                        : 'The live release gate remains disabled; no transfer is triggered from this page.'}</span>
+                </div>
+                <dl class="partners-program-facts" aria-label="Masked payout destinations">
+                    ${destinationRows}
+                    <div><dt>Fiscal profile</dt><dd>${this.escape(data.fiscal?.status || 'missing')}${data.fiscal?.country_code ? ` · ${this.escape(data.fiscal.country_code)}` : ''}</dd></div>
+                </dl>
+                <p id="partners-payout-copy">${manualRevolut
+                    ? 'Manual Revolut destinations are provisioned by Norva Finance through the secured beneficiary registry and a second-operator check.'
+                    : 'Tokenized destinations are provisioned through the secure payout-provider onboarding flow.'} This page never accepts an IBAN, card number, tax identifier or beneficiary token.</p>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-secondary" type="button" data-partners-payout-refresh>Refresh secure status</button>
+                    <button class="btn btn-primary" type="button" data-partners-payout-close>Close</button>
+                </div>
+                <div class="partners-form-status" data-partners-payout-dialog-status role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>`;
+        this.container.appendChild(overlay);
+        const dialog = overlay.querySelector('[role="dialog"]');
+        const closeButton = overlay.querySelector('[data-partners-payout-close]');
+        const refreshButton = overlay.querySelector('[data-partners-payout-refresh]');
+        const dialogStatus = overlay.querySelector('[data-partners-payout-dialog-status]');
+        this.container.classList.add('partners-picker-open');
+        try { closeButton?.focus({ preventScroll: true }); } catch (_) { closeButton?.focus?.(); }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (!overlay.isConnected) return false;
+            restoreBackground();
+            overlay.remove();
+            this.container?.classList.remove('partners-picker-open');
+            if (this._closePayoutDialog === close) this._closePayoutDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            return true;
+        };
+        overlay.__regionClose = () => close();
+        this._closePayoutDialog = close;
+        overlay.querySelectorAll('[data-partners-payout-close]')
+            .forEach((button) => button.addEventListener('click', () => close()));
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        refreshButton?.addEventListener('click', async () => {
+            refreshButton.disabled = true;
+            refreshButton.setAttribute('aria-busy', 'true');
+            refreshButton.textContent = 'Refreshing…';
+            if (dialogStatus) dialogStatus.textContent = 'Refreshing the authoritative payout profile.';
+            const refreshed = await this.loadPayoutProfile();
+            if (!overlay.isConnected) return;
+            if (refreshed) {
+                close({ restoreFocus: false });
+                this.openPayoutDialog(refreshed, opener);
+                return;
+            }
+            refreshButton.disabled = false;
+            refreshButton.removeAttribute('aria-busy');
+            refreshButton.textContent = 'Retry secure status';
+            if (dialogStatus) {
+                dialogStatus.setAttribute('role', 'alert');
+                dialogStatus.setAttribute('aria-live', 'assertive');
+                dialogStatus.textContent = 'Payout status is still unavailable. No financial value was inferred.';
+            }
+        });
+    }
+
     openQrDialog(url, opener) {
-        this.container?.querySelector('[data-partners-qr-overlay]')?.remove();
+        this._closeQrDialog?.({ restoreFocus: false });
         const overlay = document.createElement('div');
         overlay.className = 'partners-country-picker-overlay partners-qr-overlay';
         overlay.setAttribute('data-region-picker', '');
@@ -1832,41 +2216,29 @@ class PartnersPage {
                 <code>${this.escape(url)}</code>
             </section>`;
         this.container.appendChild(overlay);
-        const shell = this.container.querySelector('.partners-shell');
+        const dialog = overlay.querySelector('[role="dialog"]');
         const closeButton = overlay.querySelector('[data-partners-qr-close]');
-        const previousInert = shell?.hasAttribute('inert') || false;
-        if (shell) shell.setAttribute('inert', '');
         this.container.classList.add('partners-picker-open');
-        const close = () => {
+        try { closeButton?.focus({ preventScroll: true }); } catch (_) { closeButton?.focus?.(); }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (!overlay.isConnected) return false;
+            restoreBackground();
             overlay.remove();
             this.container?.classList.remove('partners-picker-open');
-            if (shell && !previousInert) shell.removeAttribute('inert');
-            try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            if (this._closeQrDialog === close) this._closeQrDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            return true;
         };
-        overlay.__regionClose = close;
-        closeButton?.addEventListener('click', close);
+        overlay.__regionClose = () => close();
+        this._closeQrDialog = close;
+        closeButton?.addEventListener('click', () => close());
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) close();
         });
-        overlay.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack') {
-                event.preventDefault();
-                close();
-                return;
-            }
-            if (event.key !== 'Tab') return;
-            const focusable = Array.from(overlay.querySelectorAll('button:not([disabled]), [href]'));
-            if (!focusable.length) return;
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-            }
-        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
         const target = overlay.querySelector('[data-partners-qr-code]');
         try {
             if (typeof window.qrcode !== 'function') throw new Error('qrcode_unavailable');
@@ -1877,7 +2249,6 @@ class PartnersPage {
         } catch (_) {
             target.innerHTML = '<span>QR rendering unavailable. Copy or share the secure link instead.</span>';
         }
-        requestAnimationFrame(() => closeButton?.focus());
     }
 
     renderUnavailable({ title, copy, tone, retry = false, program = null }) {
@@ -2221,6 +2592,7 @@ class PartnersPage {
         closeButton.addEventListener('click', () => close());
         manualButton.addEventListener('click', enterManualCode);
         listButton?.addEventListener('click', () => {
+            updateSelection(countryInput.value);
             manual.hidden = true;
             standard.hidden = false;
             trigger.focus();

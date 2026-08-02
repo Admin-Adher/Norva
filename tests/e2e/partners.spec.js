@@ -33,7 +33,9 @@ async function mountPartners(page, initialState) {
       bootstrap: [],
       apply: [],
       acceptTerms: [],
+      startKyc: [],
       dashboard: [],
+      payoutProfile: [],
       rotateLink: [],
       share: [],
       navigation: [],
@@ -56,6 +58,26 @@ async function mountPartners(page, initialState) {
           status: 'pending_verification',
           account_type: 'individual',
           verification_status: 'pending',
+          contract_status: 'accepted',
+          link_status: 'none',
+        };
+      }
+      if (current === 'applied') {
+        return {
+          exists: true,
+          status: 'pending_verification',
+          account_type: 'individual',
+          verification_status: 'not_started',
+          contract_status: 'not_accepted',
+          link_status: 'none',
+        };
+      }
+      if (current === 'kyc-ready') {
+        return {
+          exists: true,
+          status: 'pending_verification',
+          account_type: 'individual',
+          verification_status: 'not_started',
           contract_status: 'accepted',
           link_status: 'none',
         };
@@ -177,7 +199,7 @@ async function mountPartners(page, initialState) {
         },
         async apply(input) {
           window.__partnerCalls.apply.push({ ...input });
-          window.__partnerState = 'pending';
+          window.__partnerState = 'applied';
           return {
             version: '2026-07-29',
             correlationId: 'e2e-application',
@@ -185,13 +207,14 @@ async function mountPartners(page, initialState) {
               schema_version: 1,
               action: 'application_submitted',
               replayed: false,
-              account: accountFor('pending'),
+              account: accountFor('applied'),
               next_action: 'start_verification',
             },
           };
         },
         async acceptTerms(input) {
           window.__partnerCalls.acceptTerms.push({ ...input });
+          window.__partnerState = 'kyc-ready';
           return {
             version: '2026-07-29',
             correlationId: 'e2e-terms',
@@ -199,8 +222,27 @@ async function mountPartners(page, initialState) {
               schema_version: 1,
               action: 'terms_accepted',
               replayed: false,
-              account: accountFor('pending'),
-              next_action: 'await_verification',
+              account: accountFor('kyc-ready'),
+              next_action: 'start_verification',
+            },
+          };
+        },
+        async startKyc(input) {
+          window.__partnerCalls.startKyc.push({ ...input });
+          window.__partnerState = 'pending';
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-kyc-session',
+            data: {
+              schema_version: 1,
+              action: 'kyc_session_created',
+              replayed: false,
+              verification: {
+                provider: 'didit',
+                status: 'pending',
+                url: 'https://verify.didit.me/session/opaque-result',
+                expires_at: null,
+              },
             },
           };
         },
@@ -211,6 +253,31 @@ async function mountPartners(page, initialState) {
             cursor: input.cursor || null,
           });
           return dashboardEnvelope(input.status || 'all');
+        },
+        async payoutProfile(input = {}) {
+          window.__partnerCalls.payoutProfile.push({ hasSignal: Boolean(input.signal) });
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-payout-profile',
+            data: {
+              schema_version: 1,
+              account: { id: `prt_${'a'.repeat(24)}`, status: 'active' },
+              fiscal: { status: 'verified', country_code: 'FR' },
+              profile: {
+                provider: 'revolut',
+                display_masked: 'Revolut ·•• 8421',
+                currency: 'USD',
+                status: 'active',
+              },
+              profiles: [{
+                provider: 'revolut',
+                display_masked: 'Revolut ·•• 8421',
+                currency: 'USD',
+                status: 'active',
+              }],
+              readiness: { ready: false, payouts_live: false, reason: 'payouts_not_live' },
+            },
+          };
         },
         async rotateLink(input) {
           window.__partnerCalls.rotateLink.push({ ...input });
@@ -252,7 +319,7 @@ async function mountPartners(page, initialState) {
   }, initialState);
 }
 
-test('individual application stays gated by explicit confirmations and ends pending KYC', async ({
+test('individual application stays gated and reaches the explicit hosted-KYC step', async ({
   page,
 }) => {
   await mountPartners(page, 'discovery');
@@ -290,8 +357,9 @@ test('individual application stays gated by explicit confirmations and ends pend
 
   await join.click();
   await expect(page.getByRole('heading', {
-    name: /partner profile is being checked/i,
+    name: /Verify your identity to activate your partner link/i,
   })).toBeVisible();
+  await expect(page.locator('[data-partners-start-kyc]')).toBeDisabled();
   await expect(page.locator('[data-partners-action-status]')).not.toContainText(
     /provider|token|uuid|sql/i,
   );
@@ -310,6 +378,73 @@ test('individual application stays gated by explicit confirmations and ends pend
     disclosureVersion: 'partners-fr-v1',
   });
   expect(JSON.stringify(calls)).not.toMatch(/userId|user_id|verification_reference/i);
+});
+
+test('Didit hand-off requires fresh identity and capacity confirmations', async ({ page }) => {
+  await page.route('https://verify.didit.me/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: '<!doctype html><title>Didit hosted verification</title><h1>Secure identity verification</h1>',
+    });
+  });
+  await mountPartners(page, 'kyc-ready');
+
+  const start = page.locator('[data-partners-start-kyc]');
+  await expect(start).toBeDisabled();
+  await page.locator('[data-partners-kyc-consent]').check();
+  await expect(start).toBeDisabled();
+  await page.locator('[data-partners-capacity-confirm]').check();
+  await expect(start).toBeEnabled();
+
+  await Promise.all([
+    page.waitForURL('https://verify.didit.me/session/opaque-result'),
+    start.click(),
+  ]);
+  await expect(page.getByRole('heading', { name: 'Secure identity verification' }))
+    .toBeVisible();
+
+  const calls = await page.evaluate(() => window.__partnerCalls.startKyc);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({
+    language: 'en',
+    consentVersion: 'partners-fr-v1',
+    capacityConfirmed: true,
+  });
+  expect(calls[0].idempotencyKey).toMatch(/^norva\.kyc-session\./);
+  expect(JSON.stringify(calls[0])).not.toMatch(/document|selfie|userId|user_id/i);
+});
+
+test('a partial application failure reloads authoritative state without posting the application twice', async ({
+  page,
+}) => {
+  await mountPartners(page, 'discovery');
+  await page.evaluate(() => {
+    window.NorvaCloud.partners.acceptTerms = async (input) => {
+      window.__partnerCalls.acceptTerms.push({ ...input });
+      const error = new Error('private provider detail');
+      error.code = 'provider_temporarily_unavailable';
+      throw error;
+    };
+  });
+
+  await page.locator('[data-partners-individual-confirm]').check();
+  await page.locator('[data-partners-terms-confirm]').check();
+  await page.locator('[data-partners-join]').click();
+
+  await expect(page.getByRole('heading', {
+    name: /Review the current programme terms to continue/i,
+  })).toBeVisible();
+  await expect(page.locator('[data-partners-action-status]')).toContainText(
+    'identity provider is temporarily unavailable',
+  );
+  await expect(page.locator('[data-partners-action-status]')).not.toContainText(
+    'private provider detail',
+  );
+  expect(await page.evaluate(() => window.__partnerCalls.apply.length)).toBe(1);
+  expect(await page.evaluate(
+    () => window.__partnersPage._actionKeys.has('application'),
+  )).toBe(true);
 });
 
 test('active dashboard exposes the real link, disclosure, filters and accessible QR', async ({
@@ -355,6 +490,7 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
   await expect(page.getByText('No events in this view')).toBeVisible();
   await expect(page.locator('[data-partners-history-filter="pending"]'))
     .toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-partners-history-filter="pending"]')).toBeFocused();
   const lastDashboardCall = await page.evaluate(
     () => window.__partnerCalls.dashboard.at(-1),
   );
@@ -376,4 +512,126 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
     );
     expect(horizontalOverflow).toBeLessThanOrEqual(2);
   }
+});
+
+test('an active account can recover a missing or revoked referral link', async ({ page }) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(async () => {
+    const originalDashboard = window.NorvaCloud.partners.dashboard;
+    window.NorvaCloud.partners.dashboard = async (input) => {
+      const envelope = await originalDashboard(input);
+      envelope.data.account.link_status = 'revoked';
+      envelope.data.link = null;
+      return envelope;
+    };
+    await window.__partnersPage.loadDashboard(
+      window.__partnersPage.bootstrapEnvelope.envelope.data,
+      { reset: true },
+    );
+  });
+
+  const create = page.locator('[data-partners-create-link]');
+  await expect(create).toBeVisible();
+  await create.click();
+  await expect(page.locator('[data-partners-action-status]')).toContainText(
+    'Referral link created',
+  );
+  const calls = await page.evaluate(() => window.__partnerCalls.rotateLink);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].idempotencyKey).toMatch(/^norva\.link-rotation\./);
+});
+
+test('cancelling the platform share sheet is reported without implying success', async ({ page }) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async () => {
+        const error = new Error('user cancelled');
+        error.name = 'AbortError';
+        throw error;
+      },
+    });
+  });
+
+  await page.locator('[data-partners-share]').click();
+  await expect(page.locator('[data-partners-action-status]')).toContainText(
+    'Sharing cancelled',
+  );
+  await expect(page.locator('[data-partners-action-status]')).not.toContainText(
+    'Share sheet opened',
+  );
+});
+
+test('masked manual payout status is independently retryable in an accessible mobile-safe sheet', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+
+  const payout = page.locator('[data-partners-payout-button]');
+  await expect(payout).toBeEnabled();
+  await expect(payout).toContainText('Revolut');
+  await payout.focus();
+  await payout.click();
+
+  const dialog = page.getByRole('dialog', { name: 'Payout readiness' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Revolut ·•• 8421');
+  await expect(dialog).toContainText('Manual Revolut destinations are provisioned by Norva Finance');
+  await expect(dialog).not.toContainText(/IBAN\s+[A-Z0-9]|beneficiaryTokenRef|ben_tok_/i);
+  await expect(dialog.locator('input, select, textarea')).toHaveCount(0);
+  await expect(page.locator('.partners-shell')).toHaveAttribute('inert', '');
+  await expect(page.locator('[data-partners-payout-close]').first()).toBeFocused();
+
+  await page.evaluate(() => {
+    window.__partnersPage._payoutTimeoutMs = 20;
+    window.NorvaCloud.partners.payoutProfile = ({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        const error = new Error('provider timeout detail');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    });
+  });
+  await dialog.locator('[data-partners-payout-refresh]').click();
+  await expect(dialog.locator('[data-partners-payout-dialog-status]')).toContainText(
+    'still unavailable',
+  );
+  await expect(dialog).not.toContainText('provider timeout detail');
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(payout).toBeFocused();
+  await expect(page.locator('.partners-shell')).not.toHaveAttribute('inert', '');
+});
+
+test('dashboard timeout fails closed and exposes a local retry without blocking payout status', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.__partnersPage._dashboardTimeoutMs = 20;
+    window.NorvaCloud.partners.dashboard = ({ signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        const error = new Error('raw dashboard timeout');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    });
+  });
+
+  await page.locator('[data-partners-dashboard-retry]').click();
+  await expect(page.getByText('Dashboard temporarily unavailable')).toBeVisible();
+  await expect(page.getByText(/secure request took too long/i)).toBeVisible();
+  await expect(page.locator('[data-partners-dashboard-metrics]')).toContainText(
+    'Unavailable',
+  );
+  await expect(page.locator('[data-partners-dashboard-metrics]')).not.toContainText(
+    'Loading',
+  );
+  await expect(page.locator('[data-partners-dashboard-inline-retry]')).toBeVisible();
+  await expect(page.locator('[data-partners-payout-button]')).toBeEnabled();
+  await expect(page.locator('[data-partners-action-status]')).not.toContainText(
+    'raw dashboard timeout',
+  );
 });

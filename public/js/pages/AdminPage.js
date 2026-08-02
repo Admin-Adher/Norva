@@ -32,6 +32,8 @@ class AdminPage {
         this._partnersRouteSearch = '';
         this._partnersRouteStatus = 'all';
         this._partnersRoutes = [];
+        this._partnersPolicyPage = 0;
+        this._partnersPolicyLimit = 12;
         this._partnersRequestSeq = 0;
         this._partnersPageGeneration = 0;
         this._partnersRequests = new Map();
@@ -695,8 +697,8 @@ class AdminPage {
 #page-admin .flag-managed-state.is-on{color:var(--adm-green);border-color:rgba(52,211,153,.25);background:rgba(52,211,153,.06);}
 #page-admin .partners-admin-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,260px);gap:12px;margin:16px 0;}
 #page-admin .partners-admin-toolbar input,#page-admin .partners-admin-toolbar select{min-height:44px;padding:9px 12px;border:1px solid var(--adm-line);border-radius:9px;background:var(--adm-card2);color:var(--adm-tx1);font:inherit;}
-#page-admin .partners-workspace-nav{position:sticky;top:71px;z-index:4;display:flex;gap:6px;margin:16px 0;padding:7px;overflow-x:auto;scrollbar-width:thin;border:1px solid var(--adm-line);border-radius:12px;background:rgba(10,13,22,.94);backdrop-filter:blur(12px);box-shadow:0 12px 30px rgba(0,0,0,.2);}
-#page-admin .partners-workspace-tab{min-height:44px;flex:0 0 auto;padding:9px 13px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--adm-tx2);font:inherit;font-size:12px;font-weight:750;cursor:pointer;white-space:nowrap;}
+#page-admin .partners-workspace-nav{position:sticky;top:71px;z-index:4;display:flex;gap:6px;margin:16px 0;padding:7px;overflow-x:auto;overscroll-behavior-inline:contain;scroll-padding-inline:7px;scrollbar-width:thin;border:1px solid var(--adm-line);border-radius:12px;background:rgba(10,13,22,.94);backdrop-filter:blur(12px);box-shadow:0 12px 30px rgba(0,0,0,.2);}
+#page-admin .partners-workspace-tab{min-height:44px;flex:0 0 auto;padding:9px 13px;scroll-margin-inline:7px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--adm-tx2);font:inherit;font-size:12px;font-weight:750;cursor:pointer;white-space:nowrap;}
 #page-admin .partners-workspace-tab:hover{color:var(--adm-tx);background:var(--adm-card2);}
 #page-admin .partners-workspace-tab[aria-selected="true"]{color:var(--adm-tx);border-color:rgba(91,124,250,.35);background:linear-gradient(135deg,rgba(91,124,250,.18),rgba(168,85,247,.1));box-shadow:inset 0 0 0 1px rgba(124,150,255,.08);}
 #page-admin #crm-refresh:focus-visible,#page-admin .partners-workspace-tab:focus-visible,#page-admin .partners-action:focus-visible,#page-admin .partners-page-btn:focus-visible,#page-admin .partners-overview-item:focus-visible,#page-admin .partner-open:focus-visible{outline:2px solid #7c96ff;outline-offset:2px;}
@@ -722,6 +724,7 @@ class AdminPage {
 #page-admin .partners-route-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:12px 0;}
 #page-admin .partners-routes-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) minmax(150px,220px);gap:10px;margin:12px 0;}
 #page-admin .partners-routes-toolbar input,#page-admin .partners-routes-toolbar select{min-height:44px;padding:9px 12px;border:1px solid var(--adm-line);border-radius:9px;background:var(--adm-card2);color:var(--adm-tx);font:inherit;}
+#page-admin .partners-admin-toolbar input:focus-visible,#page-admin .partners-admin-toolbar select:focus-visible,#page-admin .partners-routes-toolbar input:focus-visible,#page-admin .partners-routes-toolbar select:focus-visible,#page-admin .partners-control-head select:focus-visible{outline:2px solid #7c96ff;outline-offset:2px;border-color:#7c96ff;}
 #page-admin .partners-route-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:0;padding:0;list-style:none;}
 #page-admin .partners-route-list .partners-control-item{min-width:0;}
 #page-admin .partners-pagination{display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:12px;}
@@ -751,8 +754,9 @@ class AdminPage {
 #page-admin .partners-control-stack{display:grid;gap:16px;margin:16px 0;}
 #page-admin .partners-control-card{padding:17px;border:1px solid var(--adm-line);border-radius:12px;background:linear-gradient(145deg,var(--adm-card),rgba(91,124,250,.025));}
 #page-admin .partners-control-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px;}
-#page-admin .partners-control-head h2{margin:0 0 4px;color:var(--adm-tx1);font-size:15px;}
+#page-admin .partners-control-head h2,#page-admin .partners-control-head h3{margin:0 0 4px;color:var(--adm-tx1);font-size:15px;}
 #page-admin .partners-control-head p{margin:0;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .partners-control-head select{min-height:44px;padding:8px 10px;border:1px solid var(--adm-line);border-radius:8px;background:var(--adm-card2);color:var(--adm-tx);font:inherit;}
 #page-admin .partners-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
 #page-admin .partners-control-item{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:10px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
 #page-admin .partners-control-item > span{min-width:0;color:var(--adm-tx2);font-size:12px;overflow-wrap:anywhere;}
@@ -816,9 +820,9 @@ class AdminPage {
 #page-admin .crm-modal{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 24px 70px #000b;}
 #page-admin .crm-modal h3{margin:0 0 8px;font-size:16px;color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal p{margin:0 0 16px;font-size:13.5px;color:var(--color-text-secondary,#9aa);line-height:1.55;white-space:pre-wrap;word-break:break-word;}
-#page-admin .crm-modal-input{width:100%;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:16px;}
+#page-admin .crm-modal-input{width:100%;min-height:44px;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:16px;}
 #page-admin .crm-modal .mrow{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
-#page-admin .crm-modal button{border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
+#page-admin .crm-modal button{min-height:44px;border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
 #page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
 @media(max-width:900px){
@@ -827,7 +831,7 @@ class AdminPage {
   #page-admin .crm-nav-item{justify-content:center;gap:0;position:relative;}
   /* .lb (with its ticket count) is hidden on the rail — surface a red dot on the icon instead. */
   #page-admin .crm-nav-item.has-alerts::after{content:"";position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#e50914;box-shadow:0 0 0 2px var(--color-bg-primary,#0d0d0f);}
-  #page-admin .crm-page{padding:20px 16px 80px;}
+  #page-admin .crm-page{padding:20px 16px max(80px,calc(24px + env(safe-area-inset-bottom,0px)));}
   #page-admin .crm-topbar{padding:12px 16px;}
   #page-admin .tk-back-bar{top:66px;}  /* mobile topbar measures ~66px */
   #page-admin .crm-crumb{max-width:56vw;}
@@ -957,9 +961,21 @@ class AdminPage {
                 this._renderPartnersRoutes({ focusControl: routesPage.dataset.partnersRoutePage });
                 return;
             }
+            const policyPage = e.target.closest('[data-partners-policy-page]');
+            if (policyPage && !policyPage.disabled) {
+                this._partnersPolicyPage = Math.max(0, this._partnersPolicyPage
+                    + (policyPage.dataset.partnersPolicyPage === 'next' ? 1 : -1));
+                const configuration = this._partnersCache.get('configuration');
+                if (configuration) {
+                    this._renderPartnersConfiguration(configuration, {
+                        focusControl: policyPage.dataset.partnersPolicyPage
+                    });
+                }
+                return;
+            }
             const retry = e.target.closest('[data-partners-retry]');
             if (retry) {
-                this._partnersRetryModule(retry.dataset.partnersRetry);
+                this._partnersRetryModule(retry.dataset.partnersRetry, retry);
                 return;
             }
             const partnersAction = e.target.closest('[data-partners-action]');
@@ -1219,7 +1235,13 @@ class AdminPage {
 
     _navigate(route) {
         const from = this._route;
-        if (from === 'partners' && route !== 'partners') this._partnersAbortAll?.();
+        if (from === 'partners' && route !== 'partners') {
+            clearTimeout(this._partnersSearchDebounce);
+            clearTimeout(this._partnersRoutesDebounce);
+            this._partnersSearchDebounce = null;
+            this._partnersRoutesDebounce = null;
+            this._partnersAbortAll?.();
+        }
         // Remember where a fiche was opened from so its back button returns there (not always Clients).
         // Keep the original entry across chained fiche→fiche hops (source row → another fiche).
         if ((route.startsWith('client:') || route.startsWith('partner:'))
@@ -4374,12 +4396,12 @@ class AdminPage {
         const paneAttrs = (key) => `id="partners-pane-${key}" class="partners-pane" role="tabpanel"
             aria-labelledby="partners-tab-${key}" tabindex="-1"${this._partnersView === key ? '' : ' hidden'}`;
         view.innerHTML = `<div class="crm-page partners-admin-page">
-          <h1 class="crm-h1">P Norva Partners</h1>
+          <h1 class="crm-h1">Norva Partners</h1>
           <p class="crm-sub">Comptes individuels, alertes et opérations financières — chaque donnée reste autoritative et sanitisée.</p>
           <div id="partners-admin-summary" class="cockpit-summary is-loading" aria-busy="true">
             <div class="ssub">Chargement des métriques autoritatives…</div>
           </div>
-          <nav class="partners-workspace-nav" role="tablist" aria-label="Vues Norva Partners">${tabs}</nav>
+          <nav class="partners-workspace-nav" role="tablist" aria-orientation="horizontal" aria-label="Vues Norva Partners">${tabs}</nav>
           <p id="partners-view-status" class="partners-sr-only" role="status" aria-live="polite"></p>
 
           <section ${paneAttrs('overview')}>
@@ -4462,7 +4484,9 @@ class AdminPage {
                 if (this._route !== 'partners' || generation !== this._partnersPageGeneration) return;
                 const main = document.querySelector('#page-admin .crm-main');
                 if (main) main.scrollTop = Number(restore.scrollTop) || 0;
-                this._partnersRestoreFocus(restore.focus);
+                if (!this._partnersRestoreFocus(restore.focus)) {
+                    document.getElementById(`partners-tab-${this._partnersView}`)?.focus?.({ preventScroll: true });
+                }
             }, 0));
         }
         return completion;
@@ -4476,7 +4500,10 @@ class AdminPage {
 
     _partnersAbortAll() {
         if (!(this._partnersRequests instanceof Map)) this._partnersRequests = new Map();
-        this._partnersRequests.forEach((request) => request?.controller?.abort?.());
+        this._partnersRequests.forEach((request) => {
+            if (typeof request?.cancel === 'function') request.cancel();
+            else request?.controller?.abort?.();
+        });
         this._partnersRequests.clear();
     }
 
@@ -4488,24 +4515,59 @@ class AdminPage {
         if (options.force) this._partnersCache.delete(key);
         if (!options.force && this._partnersCache.has(key)) {
             const cached = this._partnersCache.get(key);
-            render(cached);
-            return cached;
+            try {
+                render(cached);
+                return cached;
+            } catch (_) {
+                this._partnersCache.delete(key);
+                this._partnersRenderModuleError(options.targetId, options.title, key);
+                return null;
+            }
         }
         const previous = this._partnersRequests.get(key);
-        previous?.controller?.abort?.();
+        if (typeof previous?.cancel === 'function') previous.cancel();
+        else previous?.controller?.abort?.();
         const controller = this._partnersCreateController();
         const token = ++this._partnersRequestSeq;
         const generation = this._partnersPageGeneration;
-        const request = { token, generation, controller, timedOut: false };
+        let rejectCancellation;
+        const cancellation = new Promise((_, reject) => { rejectCancellation = reject; });
+        const request = {
+            token,
+            generation,
+            controller,
+            timedOut: false,
+            cancelled: false,
+            cancel() {
+                if (this.cancelled) return;
+                this.cancelled = true;
+                this.controller?.abort?.();
+                const error = new Error('partners_module_cancelled');
+                error.name = 'AbortError';
+                rejectCancellation(error);
+            }
+        };
         this._partnersRequests.set(key, request);
         const target = options.targetId && document.getElementById(options.targetId);
         if (target) target.setAttribute('aria-busy', 'true');
+        const requestedTimeout = Number(options.timeoutMs);
+        const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+            ? Math.min(requestedTimeout, 60_000) : 12_000;
+        let rejectTimeout;
+        const timeoutFailure = new Promise((_, reject) => { rejectTimeout = reject; });
         const timeout = setTimeout(() => {
             request.timedOut = true;
             controller.abort?.();
-        }, Number(options.timeoutMs) || 12000);
+            const error = new Error('partners_module_timeout');
+            error.name = 'TimeoutError';
+            rejectTimeout(error);
+        }, timeoutMs);
         try {
-            const data = await this._rpc(fn, params, { signal: controller.signal });
+            const data = await Promise.race([
+                this._rpc(fn, params, { signal: controller.signal }),
+                cancellation,
+                timeoutFailure
+            ]);
             const current = this._partnersRequests.get(key);
             if (current?.token !== token || generation !== this._partnersPageGeneration
                 || this._route !== 'partners') return null;
@@ -4519,7 +4581,12 @@ class AdminPage {
             const aborted = error?.name === 'AbortError' && !request.timedOut;
             if (!aborted) {
                 this._partnersCache.delete(key);
-                this._partnersRenderModuleError(options.targetId, options.title, key);
+                if (typeof options.onError === 'function') {
+                    try { options.onError(); }
+                    catch (_) { this._partnersRenderModuleError(options.targetId, options.title, key); }
+                } else {
+                    this._partnersRenderModuleError(options.targetId, options.title, key);
+                }
             }
             return null;
         } finally {
@@ -4603,17 +4670,25 @@ class AdminPage {
     }
 
     async _partnersLoadAccounts({ force = false, preserveFocus = '' } = {}) {
+        const generation = this._partnersPageGeneration;
+        const requestedView = this._partnersView;
         const data = await this._partnersLoadModule('accounts', 'admin_partners_accounts', {
             p_limit: this._partnersLimit,
             p_offset: this._partnersPage * this._partnersLimit,
             p_status: this._partnersStatus || null,
             p_search: this._partnersSearch || null
         }, (raw) => {
-            const rows = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
-            const total = Number.isSafeInteger(raw?.total) ? raw.total : rows.length;
-            this._renderPartnersAdminAccounts(rows, total);
+            if (raw?.schema_version !== 1 || !Array.isArray(raw.items)
+                || !Number.isSafeInteger(raw.total) || raw.total < 0
+                || !Number.isSafeInteger(raw.limit) || raw.limit < 1 || raw.limit > 100
+                || !Number.isSafeInteger(raw.offset) || raw.offset < 0) {
+                throw new Error('invalid_partners_accounts_response');
+            }
+            this._renderPartnersAdminAccounts(raw.items, raw.total);
         }, { force, targetId: 'partners-admin-list', title: 'Liste des partenaires' });
-        if (preserveFocus) setTimeout(() => {
+        if (preserveFocus && this._route === 'partners'
+            && generation === this._partnersPageGeneration
+            && requestedView === this._partnersView) setTimeout(() => {
             let target = preserveFocus === 'search' ? document.getElementById('partners-admin-search')
                 : (preserveFocus === 'status' ? document.getElementById('partners-admin-status')
                     : document.querySelector(`[data-partners-account-page="${preserveFocus}"]`));
@@ -4622,7 +4697,7 @@ class AdminPage {
                 target = document.querySelector(`[data-partners-account-page="${fallback}"]:not(:disabled)`)
                     || document.getElementById('partners-admin-search');
             }
-            target?.focus?.({ preventScroll: true });
+            this._partnersFocusElement(target);
         }, 0);
         return data;
     }
@@ -4655,16 +4730,40 @@ class AdminPage {
         return Promise.resolve();
     }
 
+    _partnersIsPagedEnvelope(data) {
+        return data?.schema_version === 1
+            && Number.isSafeInteger(data.total)
+            && data.total >= 0
+            && Array.isArray(data.items);
+    }
+
     _partnersLoadFinanceView({ force = false } = {}) {
-        const load = (key, fn, params, render, targetId, title) => this._partnersLoadModule(
-            key, fn, params, render, { force, targetId, title }
+        const load = (key, fn, params, render, targetId, title, extra = {}) => this._partnersLoadModule(
+            key, fn, params, render, { force, targetId, title, ...extra }
+        );
+        const renderPayoutCycles = (data) => {
+            if (!this._partnersIsPagedEnvelope(data)) {
+                throw new Error('invalid_partners_payout_cycles_response');
+            }
+            this._renderPartnersPayouts(data, this._partnersCache.get('manualBatches'));
+        };
+        const renderManualBatches = (data) => {
+            if (!this._partnersIsPagedEnvelope(data)) {
+                throw new Error('invalid_partners_manual_batches_response');
+            }
+            this._renderPartnersPayouts(this._partnersCache.get('payoutCycles'), data);
+        };
+        const payoutError = (key) => () => this._renderPartnersPayouts(
+            key === 'payoutCycles' ? null : this._partnersCache.get('payoutCycles'),
+            key === 'manualBatches' ? null : this._partnersCache.get('manualBatches'),
+            { failedKey: key }
         );
         return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
             load('finance', 'admin_partners_finance_overview', {}, (d) => this._renderPartnersFinance(d), 'partners-admin-finance', 'Ledger Partners'),
-            load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, (d) => { this._partnersCache.set('payoutCycles', d); this._renderPartnersPayouts(d, this._partnersCache.get('manualBatches')); }, 'partners-admin-payouts', 'Cycles de versement'),
+            load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, renderPayoutCycles, 'partners-admin-payouts', 'Cycles de versement', { onError: payoutError('payoutCycles') }),
             load('revolut', 'admin_partners_revolut_payout_status', {}, (d) => this._renderPartnersRevolutStatus(d), 'partners-admin-revolut', 'Revolut Business'),
-            load('manualBatches', 'admin_partners_revolut_manual_batches', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => { this._partnersCache.set('manualBatches', d); this._renderPartnersPayouts(this._partnersCache.get('payoutCycles'), d); }, 'partners-admin-payouts', 'Lots manuels'),
+            load('manualBatches', 'admin_partners_revolut_manual_batches', { p_limit: 25, p_offset: 0, p_status: 'all' }, renderManualBatches, 'partners-admin-payouts', 'Lots manuels', { onError: payoutError('manualBatches') }),
             load('settlements', 'admin_partners_revolut_reconciliation_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutReconciliation(d), 'partners-admin-settlements', 'Rapprochement Revolut'),
             load('returns', 'admin_partners_revolut_return_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutReturns(d), 'partners-admin-returns', 'Retours Revolut'),
             load('manualControls', 'admin_partners_revolut_manual_controls_queue', { p_limit: 50, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutManualControls(d), 'partners-admin-manual-controls', 'Contrôles manuels'),
@@ -4674,6 +4773,8 @@ class AdminPage {
     }
 
     async _partnersLoadIncidents({ force = false, preserveFocus = '' } = {}) {
+        const generation = this._partnersPageGeneration;
+        const requestedView = this._partnersView;
         const filter = ['action_required', 'open', 'quarantined', 'resolved', 'all']
             .includes(this._partnersIncidentFilter) ? this._partnersIncidentFilter : 'action_required';
         const offset = Number.isSafeInteger(this._partnersIncidentOffset)
@@ -4685,12 +4786,20 @@ class AdminPage {
             (value) => this._renderPartnersRevolutIncidents(value),
             { force, targetId: 'partners-admin-reconciliation-incidents', title: 'Écarts de rapprochement' }
         );
-        if (preserveFocus) setTimeout(() => {
-            const target = preserveFocus === 'filter'
+        if (preserveFocus && this._route === 'partners'
+            && generation === this._partnersPageGeneration
+            && requestedView === this._partnersView) setTimeout(() => {
+            let target = preserveFocus === 'filter'
                 ? document.getElementById('partners-revolut-incident-filter')
                 : Array.from(document.querySelectorAll('[data-partners-action="revolut-incident-page"]'))
-                    .find((button) => button.dataset.partnersOffset === String(preserveFocus));
-            target?.focus?.({ preventScroll: true });
+                    .find((button) => button.dataset.partnersPageDirection === preserveFocus);
+            if (target?.disabled && ['prev', 'next'].includes(preserveFocus)) {
+                const fallback = preserveFocus === 'next' ? 'prev' : 'next';
+                target = Array.from(document.querySelectorAll('[data-partners-action="revolut-incident-page"]'))
+                    .find((button) => button.dataset.partnersPageDirection === fallback && !button.disabled)
+                    || document.getElementById('partners-revolut-incident-filter');
+            }
+            this._partnersFocusElement(target);
         }, 0);
         return data;
     }
@@ -4716,7 +4825,9 @@ class AdminPage {
         this._partnersLoadView(view);
         setTimeout(() => {
             if (main && restoreScroll) main.scrollTop = this._partnersScrollByView.get(view) || 0;
-            if (focusTab) active?.focus?.({ preventScroll: true });
+            if (focusTab && this._partnersFocusElement(active)) {
+                active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+            }
         }, 0);
     }
 
@@ -4727,17 +4838,33 @@ class AdminPage {
             .filter((key) => (key.startsWith('partners') || key === 'partnerId')
                 && !['partnersBusy', 'partnersEnabled'].includes(key))
             .forEach((key) => { data[key] = element.dataset[key]; });
-        return { id: element.id || '', data };
+        const fallback = element.closest?.('[id^="partners-admin-"],[id^="partners-pane-"]');
+        const descriptor = { id: element.id || '', data };
+        if (fallback?.id) descriptor.fallbackId = fallback.id;
+        return descriptor;
+    }
+
+    _partnersFocusElement(target) {
+        if (!target || target.disabled || target.closest?.('[hidden]')) return false;
+        const tag = String(target.tagName || '').toLowerCase();
+        const naturallyFocusable = ['a', 'button', 'input', 'select', 'textarea', 'summary']
+            .includes(tag) || target.hasAttribute?.('tabindex');
+        if (!naturallyFocusable) target.setAttribute?.('tabindex', '-1');
+        target.focus?.({ preventScroll: true });
+        return typeof target.focus === 'function';
     }
 
     _partnersRestoreFocus(descriptor) {
-        if (!descriptor) return;
+        if (!descriptor) return false;
         let target = descriptor.id ? document.getElementById(descriptor.id) : null;
         if (!target && descriptor.data && Object.keys(descriptor.data).length) {
-            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-account-page],[data-partners-route-page],[data-partner-id]'))
+            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-retry],[data-partners-view],[data-partners-account-page],[data-partners-route-page],[data-partners-policy-page],[data-partner-id]'))
                 .find((candidate) => Object.entries(descriptor.data).every(([key, value]) => candidate.dataset[key] === value));
         }
-        target?.focus?.({ preventScroll: true });
+        if (this._partnersFocusElement(target)) return true;
+        const fallback = descriptor.fallbackId
+            ? document.getElementById(descriptor.fallbackId) : null;
+        return this._partnersFocusElement(fallback);
     }
 
     _partnersRememberContext(element) {
@@ -4749,23 +4876,47 @@ class AdminPage {
         };
     }
 
-    async _partnersRefreshVisibleView() {
+    async _partnersRefreshVisibleView({ focusDescriptor = null } = {}) {
         if (this._route !== 'partners') return;
+        const generation = this._partnersPageGeneration;
+        const view = this._partnersView;
         const main = document.querySelector('#page-admin .crm-main');
         const scrollTop = main?.scrollTop || 0;
-        const focus = this._partnersCaptureFocus();
+        const focus = focusDescriptor || this._partnersCaptureFocus();
         const loads = [
             this._partnersLoadOverview({ force: true }),
-            this._partnersLoadView(this._partnersView, { force: true })
+            this._partnersLoadView(view, { force: true })
         ];
         await Promise.allSettled(loads);
+        if (this._route !== 'partners' || generation !== this._partnersPageGeneration
+            || view !== this._partnersView) return;
         if (main) main.scrollTop = scrollTop;
-        this._partnersRestoreFocus(focus);
+        if (!this._partnersRestoreFocus(focus)) {
+            document.getElementById(`partners-tab-${view}`)?.focus?.({ preventScroll: true });
+        }
     }
 
-    _partnersRetryModule(key) {
-        const load = (moduleKey, fn, params, render, targetId, title) => this._partnersLoadModule(
-            moduleKey, fn, params, render, { force: true, targetId, title }
+    async _partnersRetryModule(key, element = document.activeElement) {
+        const focus = this._partnersCaptureFocus(element);
+        const load = (moduleKey, fn, params, render, targetId, title, extra = {}) => this._partnersLoadModule(
+            moduleKey, fn, params, render, { force: true, targetId, title, ...extra }
+        );
+        const renderPayoutCycles = (data) => {
+            if (!this._partnersIsPagedEnvelope(data)) {
+                throw new Error('invalid_partners_payout_cycles_response');
+            }
+            this._renderPartnersPayouts(data, this._partnersCache.get('manualBatches'));
+        };
+        const renderManualBatches = (data) => {
+            if (!this._partnersIsPagedEnvelope(data)) {
+                throw new Error('invalid_partners_manual_batches_response');
+            }
+            this._renderPartnersPayouts(this._partnersCache.get('payoutCycles'), data);
+        };
+        const payoutError = (moduleKey) => () => this._renderPartnersPayouts(
+            moduleKey === 'payoutCycles' ? null : this._partnersCache.get('payoutCycles'),
+            moduleKey === 'manualBatches' ? null : this._partnersCache.get('manualBatches'),
+            { failedKey: moduleKey }
         );
         const map = {
             overview: () => this._partnersLoadOverview({ force: true }),
@@ -4778,15 +4929,21 @@ class AdminPage {
             configuration: () => load('configuration', 'admin_partners_configuration', {}, (d) => this._renderPartnersConfiguration(d), 'partners-admin-configuration', 'Configuration Partners'),
             revolut: () => load('revolut', 'admin_partners_revolut_payout_status', {}, (d) => this._renderPartnersRevolutStatus(d), this._partnersView === 'configuration' ? 'partners-admin-routes' : 'partners-admin-revolut', 'Revolut Business'),
             finance: () => load('finance', 'admin_partners_finance_overview', {}, (d) => this._renderPartnersFinance(d), 'partners-admin-finance', 'Ledger Partners'),
-            payoutCycles: () => load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersPayouts(d, this._partnersCache.get('manualBatches')), 'partners-admin-payouts', 'Cycles de versement'),
-            manualBatches: () => load('manualBatches', 'admin_partners_revolut_manual_batches', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersPayouts(this._partnersCache.get('payoutCycles'), d), 'partners-admin-payouts', 'Lots manuels'),
+            payoutCycles: () => load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, renderPayoutCycles, 'partners-admin-payouts', 'Cycles de versement', { onError: payoutError('payoutCycles') }),
+            manualBatches: () => load('manualBatches', 'admin_partners_revolut_manual_batches', { p_limit: 25, p_offset: 0, p_status: 'all' }, renderManualBatches, 'partners-admin-payouts', 'Lots manuels', { onError: payoutError('manualBatches') }),
             settlements: () => load('settlements', 'admin_partners_revolut_reconciliation_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutReconciliation(d), 'partners-admin-settlements', 'Rapprochement Revolut'),
             returns: () => load('returns', 'admin_partners_revolut_return_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutReturns(d), 'partners-admin-returns', 'Retours Revolut'),
             manualControls: () => load('manualControls', 'admin_partners_revolut_manual_controls_queue', { p_limit: 50, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutManualControls(d), 'partners-admin-manual-controls', 'Contrôles manuels'),
             lateCompletions: () => load('lateCompletions', 'admin_partners_revolut_late_completion_queue', { p_limit: 50, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutLateCompletions(d), 'partners-admin-late-completions', 'Paiements tardifs'),
             incidents: () => this._partnersLoadIncidents({ force: true })
         };
-        if (map[key]) map[key](); else this._partnersLoadView(this._partnersView, { force: true });
+        const result = map[key]
+            ? map[key]()
+            : this._partnersLoadView(this._partnersView, { force: true });
+        await Promise.resolve(result);
+        if (!this._partnersRestoreFocus(focus)) {
+            document.getElementById(`partners-tab-${this._partnersView}`)?.focus?.({ preventScroll: true });
+        }
     }
 
     _renderPartnersAdminSummary(overview, capabilityEnvelope = null) {
@@ -5211,6 +5368,18 @@ class AdminPage {
         return false;
     }
 
+    _partnersCanUseOperationalAction(action) {
+        const required = {
+            'account-action': ['risk'],
+            'job-retry': ['finance'],
+            'commission-reverse': ['finance', 'risk'],
+            'payout-create': ['finance'],
+            'payout-approve': ['finance'],
+            'fiscal-review': ['support', 'finance']
+        }[action];
+        return Array.isArray(required) && this._partnersHasCapabilities(...required);
+    }
+
     _partnersCanUseReleaseControl(kind, key, targetEnabled) {
         if (kind === 'gate') {
             if ([
@@ -5269,13 +5438,20 @@ class AdminPage {
         const el = document.getElementById('partners-admin-revolut');
         const routesEl = document.getElementById('partners-admin-routes');
         if (!el && !routesEl) return;
+        const routesValid = Array.isArray(data?.routes) && data.routes.every((route) => (
+            /^[A-Z]{2}$/.test(String(route?.country_code || ''))
+            && /^[A-Z]{3}$/.test(String(route?.currency || ''))
+            && ['active', 'disabled'].includes(String(route?.status || ''))
+            && ['revolut_manual', 'revolut_api'].includes(String(route?.execution_adapter || ''))
+            && (route?.updated_at == null || Number.isFinite(Date.parse(route.updated_at)))
+        ));
         if (data?.schema_version !== 1
             || data?.provider !== 'revolut_business'
             || data?.production_mode !== 'revolut_manual'
             || data?.plan !== 'basic'
             || typeof data?.api_enabled !== 'boolean'
             || typeof data?.api_adapter_verified !== 'boolean'
-            || !Array.isArray(data?.routes)
+            || !routesValid
             || !data?.counts || typeof data.counts !== 'object') {
             this._partnersOpsUnavailable(
                 'partners-admin-revolut',
@@ -5290,16 +5466,12 @@ class AdminPage {
         const countValue = (value) => Number.isSafeInteger(Number(value))
             && Number(value) >= 0 ? AdminPage.n(Number(value)) : 'inconnu';
         this._partnersRoutes = data.routes.map((route) => {
-            const country = /^[A-Z]{2}$/.test(String(route?.country_code || ''))
-                ? route.country_code : '—';
-            const currency = /^[A-Z]{3}$/.test(String(route?.currency || ''))
-                ? route.currency : '—';
-            const status = route?.status === 'active' ? 'active' : 'disabled';
+            const country = route.country_code;
+            const currency = route.currency;
+            const status = route.status;
             const adapter = route?.execution_adapter === 'revolut_api'
                 ? 'API'
-                : (route?.execution_adapter === 'revolut_manual'
-                    ? 'manuel Basic'
-                    : 'adaptateur inconnu');
+                : 'manuel Basic';
             return { country, currency, status, adapter, updatedAt: route?.updated_at || null };
         });
         if (el) {
@@ -5388,7 +5560,10 @@ class AdminPage {
                 target = document.querySelector(`[data-partners-route-page="${fallback}"]:not(:disabled)`)
                     || document.getElementById('partners-routes-search');
             }
-            target?.focus?.({ preventScroll: true });
+            if (this._partnersFocusElement(target) && focusControl === 'search') {
+                const end = String(target.value || '').length;
+                target.setSelectionRange?.(end, end);
+            }
         }, 0);
     }
 
@@ -5887,16 +6062,18 @@ class AdminPage {
               </select>
             </label>
           </div>
-          <div class="partners-ops-list">${rows
+          <div id="partners-revolut-incidents-list" class="partners-ops-list">${rows
               || '<div class="ssub">Aucun incident dans ce filtre.</div>'}</div>
           <div class="partners-action-row" style="margin-top:12px">
             <button type="button" class="partners-action"
               data-partners-action="revolut-incident-page"
-              data-partners-offset="${previousOffset}"${hasPrevious ? '' : ' disabled'}>Précédent</button>
-            <span class="ssub">Résultats ${data.items.length ? data.offset + 1 : 0}–${data.offset + data.items.length}</span>
+              data-partners-page-direction="prev" data-partners-offset="${previousOffset}"
+              aria-controls="partners-revolut-incidents-list"${hasPrevious ? '' : ' disabled'}>Précédent</button>
+            <span class="ssub" role="status" aria-live="polite" aria-atomic="true">Résultats ${data.items.length ? data.offset + 1 : 0}–${data.offset + data.items.length}</span>
             <button type="button" class="partners-action"
               data-partners-action="revolut-incident-page"
-              data-partners-offset="${nextOffset}"${hasNext ? '' : ' disabled'}>Suivant</button>
+              data-partners-page-direction="next" data-partners-offset="${nextOffset}"
+              aria-controls="partners-revolut-incidents-list"${hasNext ? '' : ' disabled'}>Suivant</button>
           </div>`;
     }
 
@@ -6205,7 +6382,7 @@ class AdminPage {
               || '<div class="ssub">Aucun paiement tardif à traiter.</div>'}</div>`;
     }
 
-    _renderPartnersConfiguration(data) {
+    _renderPartnersConfiguration(data, { focusControl = '' } = {}) {
         const el = document.getElementById('partners-admin-configuration');
         if (!el) return;
         if (data?.schema_version !== 1 || !Array.isArray(data.programs)
@@ -6228,7 +6405,11 @@ class AdminPage {
                 </div>
               </div>`;
         }).join('');
-        const policies = data.policies.map((policy) => {
+        const policyPageCount = Math.max(1, Math.ceil(data.policies.length / this._partnersPolicyLimit));
+        this._partnersPolicyPage = Math.min(Math.max(0, this._partnersPolicyPage), policyPageCount - 1);
+        const policyStart = this._partnersPolicyPage * this._partnersPolicyLimit;
+        const policyPage = data.policies.slice(policyStart, policyStart + this._partnersPolicyLimit);
+        const policies = policyPage.map((policy) => {
             const programKey = String(policy?.program_version_key || '');
             const country = String(policy?.country_code || '');
             const subdivision = String(policy?.subdivision_code || '');
@@ -6307,12 +6488,32 @@ class AdminPage {
             <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_currencies) || 0)}</strong><span>devises actives</span></div>
             <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_payout_providers) || 0)}</strong><span>couvertures payout</span></div>
           </div>
-          <div class="partners-control-grid" style="margin-top:12px">
-            ${programs || '<div class="ssub">Aucun programme configuré.</div>'}
-            ${policies || '<div class="ssub">Aucune juridiction configurée.</div>'}
-          </div>
-          ${releaseRows ? `<div class="partners-control-grid" style="margin-top:12px">${releaseRows}</div>` : '<div class="ssub" style="margin-top:12px">États de release indisponibles dans ce déploiement.</div>'}
+          <section aria-labelledby="partners-programs-title">
+            <div class="partners-control-head" style="margin-top:14px"><div><h3 id="partners-programs-title">Programmes</h3><p>${AdminPage.n(data.programs.length)} version(s) configurée(s)</p></div></div>
+            <div class="partners-control-grid">${programs || '<div class="ssub">Aucun programme configuré.</div>'}</div>
+          </section>
+          <section aria-labelledby="partners-policies-title">
+            <div class="partners-control-head" style="margin-top:14px"><div><h3 id="partners-policies-title">Juridictions</h3><p>Configuration paginée, sans tronquer la liste autoritative.</p></div></div>
+            <div id="partners-policy-list" class="partners-control-grid">${policies || '<div class="ssub">Aucune juridiction configurée.</div>'}</div>
+            <nav class="partners-pagination" aria-label="Pagination des juridictions">
+              <span class="partners-pagination-status" role="status" aria-live="polite" aria-atomic="true">${data.policies.length ? AdminPage.n(policyStart + 1) : 0}–${AdminPage.n(Math.min(policyStart + this._partnersPolicyLimit, data.policies.length))} sur ${AdminPage.n(data.policies.length)}</span>
+              <button type="button" class="partners-page-btn" data-partners-policy-page="prev" aria-controls="partners-policy-list" aria-label="Page précédente des juridictions"${this._partnersPolicyPage === 0 ? ' disabled' : ''}>Précédente</button>
+              <button type="button" class="partners-page-btn" data-partners-policy-page="next" aria-controls="partners-policy-list" aria-label="Page suivante des juridictions"${this._partnersPolicyPage >= policyPageCount - 1 ? ' disabled' : ''}>Suivante</button>
+            </nav>
+          </section>
+          <section aria-labelledby="partners-release-title">
+            <div class="partners-control-head" style="margin-top:14px"><div><h3 id="partners-release-title">Release</h3><p>Flags et gates autoritatifs.</p></div></div>
+            ${releaseRows ? `<div class="partners-control-grid">${releaseRows}</div>` : '<div class="ssub">États de release indisponibles dans ce déploiement.</div>'}
+          </section>
           <div class="ssub" style="margin-top:10px">${AdminPage.n(Number(counts.active_allowlist_entries) || 0)} compte(s) pilote autorisé(s).</div>`;
+        if (focusControl) setTimeout(() => {
+            let target = document.querySelector(`[data-partners-policy-page="${focusControl}"]`);
+            if ((!target || target.disabled) && ['prev', 'next'].includes(focusControl)) {
+                const fallback = focusControl === 'next' ? 'prev' : 'next';
+                target = document.querySelector(`[data-partners-policy-page="${fallback}"]:not(:disabled)`);
+            }
+            this._partnersFocusElement(target);
+        }, 0);
     }
 
     _renderPartnersKycQuota(data) {
@@ -6366,12 +6567,17 @@ class AdminPage {
         }).join('');
         const lastRun = data.reconciliation.last_run_at
             ? AdminPage.timeAgo(data.reconciliation.last_run_at) : 'jamais observée';
+        const financeActions = [
+            this._partnersCanUseOperationalAction('job-retry')
+                ? '<button type="button" class="partners-action" data-partners-action="job-retry">Relancer un dead letter</button>' : '',
+            this._partnersCanUseOperationalAction('commission-reverse')
+                ? '<button type="button" class="partners-action is-danger" data-partners-action="commission-reverse">Contre-écriture contrôlée</button>' : ''
+        ].filter(Boolean).join('');
         el.removeAttribute('aria-busy');
         el.innerHTML = `<h2>Ledger et worker</h2>
             <p>Montants en unités mineures par devise. Aucune conversion ni taxe n’est inférée.</p>
             <div class="partners-action-row" style="margin-bottom:10px">
-              <button type="button" class="partners-action" data-partners-action="job-retry">Relancer un dead letter</button>
-              <button type="button" class="partners-action is-danger" data-partners-action="commission-reverse">Contre-écriture contrôlée</button>
+              ${financeActions || '<span class="partners-state">Lecture seule · capacité Finance requise</span>'}
             </div>
             <div class="partners-ops-stats">${queueRows.slice(0, 6).map(([label, value]) =>
                 `<div class="partners-ops-stat"><strong>${AdminPage.n(Number(value) || 0)}</strong><span>${AdminPage.esc(label)}</span></div>`
@@ -6391,10 +6597,25 @@ class AdminPage {
             this._partnersOpsUnavailable('partners-admin-risk', 'Risque');
             return;
         }
+        const reasonLabels = {
+            financial_fact_conflict: 'Conflit de faits financiers',
+            risk_hold: 'Revue risque',
+            suspended: 'Compte suspendu',
+            dead_letter: 'Traitement en échec terminal',
+            review: 'Revue requise'
+        };
+        const statusLabels = {
+            held: 'En revue',
+            suspended: 'Suspendu',
+            active: 'Actif',
+            closed: 'Clôturé'
+        };
         const rows = data.items.slice(0, 8).map((item) => {
             const accountId = String(item?.account_id || '');
             const status = String(item?.status || '');
-            const actions = /^prt_[0-9a-f]{24}$/.test(accountId)
+            const reason = reasonLabels[String(item?.reason || '')] || 'Revue opérationnelle';
+            const actions = this._partnersCanUseOperationalAction('account-action')
+                && /^prt_[0-9a-f]{24}$/.test(accountId)
                 ? [
                     ...(status === 'held'
                         ? [['release', 'Libérer', 'is-success']]
@@ -6411,8 +6632,8 @@ class AdminPage {
                 ).join('')
                 : '';
             return `<div class="partners-ops-row">
-              <span>${AdminPage.esc(accountId || 'Partenaire')} · ${AdminPage.esc(String(item?.reason || 'review_required'))}
-                <small>${AdminPage.n(Number(item?.dead_letter_jobs) || 0)} dead letter · statut ${AdminPage.esc(status || 'inconnu')}</small>
+              <span>${AdminPage.esc(accountId || 'Partenaire')} · ${AdminPage.esc(reason)}
+                <small>${AdminPage.n(Number(item?.dead_letter_jobs) || 0)} échec(s) terminal(aux) · ${AdminPage.esc(statusLabels[status] || 'État inconnu')}</small>
               </span>
               <div class="partners-risk-actions">${actions || '<span class="partners-state">Lecture seule</span>'}</div>
             </div>`;
@@ -6423,20 +6644,25 @@ class AdminPage {
             <div class="partners-ops-list">${rows || '<div class="ssub">Aucune revue en attente.</div>'}</div>`;
     }
 
-    _renderPartnersPayouts(data, batchesData) {
+    _renderPartnersPayouts(data, batchesData, { failedKey = '' } = {}) {
         const el = document.getElementById('partners-admin-payouts');
         if (!el) return;
+        const displayCount = (value) => (
+            Number.isSafeInteger(value) && value >= 0
+                ? AdminPage.n(value)
+                : '—'
+        );
         this._partnersManualBatchControls = new Map();
-        const cyclesAvailable = data?.schema_version === 1
-            && Number.isSafeInteger(data.total)
-            && Array.isArray(data.items);
-        const batchesAvailable = batchesData?.schema_version === 1
-            && Number.isSafeInteger(batchesData.total)
-            && Array.isArray(batchesData.items);
-        if (!cyclesAvailable && !batchesAvailable) {
-            this._partnersOpsUnavailable('partners-admin-payouts', 'Cycles de versement');
-            return;
-        }
+        const cyclesAvailable = this._partnersIsPagedEnvelope(data);
+        const batchesAvailable = this._partnersIsPagedEnvelope(batchesData);
+        const cyclesInvalid = data != null && !cyclesAvailable;
+        const batchesInvalid = batchesData != null && !batchesAvailable;
+        const cyclesPending = !cyclesAvailable && !cyclesInvalid
+            && failedKey !== 'payoutCycles'
+            && this._partnersRequests?.has?.('payoutCycles');
+        const batchesPending = !batchesAvailable && !batchesInvalid
+            && failedKey !== 'manualBatches'
+            && this._partnersRequests?.has?.('manualBatches');
         const cycleRows = (cyclesAvailable ? data.items : []).slice(0, 8).map((item) => {
             const mode = item?.live_execution === true ? 'live' : 'dry-run';
             const key = String(item?.key || '');
@@ -6458,7 +6684,7 @@ class AdminPage {
             }
             return `<div class="partners-ops-row">
                 <span>${AdminPage.esc(key || 'Cycle')} · ${AdminPage.esc(String(item?.currency || '—'))} · ${AdminPage.esc(mode)}
-                  <small>${AdminPage.n(Number(item?.total_minor) || 0)} unités mineures · ${AdminPage.n(Number(item?.item_count) || 0)} item(s)</small>
+                  <small>${displayCount(item?.total_minor)} unités mineures · ${displayCount(item?.item_count)} item(s)</small>
                 </span>
                 <div class="partners-risk-actions">${actions.join('')
                     || `<span class="partners-state">${AdminPage.esc(String(item?.status || 'unknown'))}</span>`}</div>
@@ -6577,34 +6803,41 @@ class AdminPage {
                 : (status === 'settled' ? ' is-on' : '');
             return `<div class="partners-ops-row">
                 <span>${AdminPage.esc(validBatch ? key : 'Lot invalide')}
-                  <small>${AdminPage.esc(validCycle ? cycleKey : 'cycle indisponible')} · ${this._partnersFormatMinor(item?.total_minor, currency, exponent)} · ${AdminPage.n(Number(item?.submitted_count) || 0)}/${AdminPage.n(Number(item?.item_count) || 0)} saisi(s) · ${AdminPage.n(Number(item?.settled_count) || 0)} rapproché(s)</small>
+                  <small>${AdminPage.esc(validCycle ? cycleKey : 'cycle indisponible')} · ${this._partnersFormatMinor(item?.total_minor, currency, exponent)} · ${displayCount(item?.submitted_count)}/${displayCount(item?.item_count)} saisi(s) · ${displayCount(item?.settled_count)} rapproché(s)</small>
                 </span>
                 <div class="partners-risk-actions">${actions.join('')
                     || `<span class="partners-state${statusClass}">${AdminPage.esc(batchLabels[status] || 'État indisponible')}</span>`}</div>
               </div>`;
         }).join('');
-        el.removeAttribute('aria-busy');
+        if (cyclesPending || batchesPending) el.setAttribute('aria-busy', 'true');
+        else el.removeAttribute('aria-busy');
         el.innerHTML = `<h2>Cycles et lots Revolut manuels</h2>
             <p>Norva génère des références uniques, fige le lot et contrôle sa maturation. La validation et le paiement restent manuels dans Revolut Business Basic ; chaque mutation sensible exige Finance et AAL2 côté serveur.</p>
             <div class="partners-action-row" style="margin-bottom:10px">
-              ${this._partnersCapabilities.finance === true
-                ? '<button type="button" class="partners-action" data-partners-action="payout-create">Créer un cycle contrôlé</button>'
-                : '<span class="partners-state">Lecture seule · Finance requis</span>'}
+              ${cyclesAvailable
+                ? (this._partnersCapabilities.finance === true
+                    ? '<button type="button" class="partners-action" data-partners-action="payout-create">Créer un cycle contrôlé</button>'
+                    : '<span class="partners-state">Lecture seule · capacité Finance requise</span>')
+                : `<span class="partners-state">${cyclesPending ? 'Cycles en cours de chargement' : 'Cycles indisponibles'}</span>`}
             </div>
             <div class="partners-control-head">
-              <div><strong>Cycles</strong><p>${cyclesAvailable ? `${AdminPage.n(data.total)} cycle(s)` : 'Lecture indisponible'}</p></div>
+              <div><strong>Cycles</strong><p>${cyclesAvailable ? `${AdminPage.n(data.total)} cycle(s)` : (cyclesPending ? 'Chargement…' : 'Lecture indisponible')}</p></div>
             </div>
             <div class="partners-ops-list">${cycleRows
                 || (cyclesAvailable
                     ? '<div class="ssub">Aucun cycle créé.</div>'
-                    : '<div class="admin-err" role="status">Cycles indisponibles.</div>')}</div>
+                    : (cyclesPending
+                        ? '<div class="ssub" role="status">Chargement des cycles…</div>'
+                        : '<div class="admin-err" role="status">Cycles indisponibles. <button type="button" class="partners-action" data-partners-retry="payoutCycles">Réessayer</button></div>'))}</div>
             <div class="partners-control-head" style="margin-top:14px">
-              <div><strong>Lots manuels</strong><p>${batchesAvailable ? `${AdminPage.n(batchesData.total)} lot(s)` : 'Lecture indisponible'}</p></div>
+              <div><strong>Lots manuels</strong><p>${batchesAvailable ? `${AdminPage.n(batchesData.total)} lot(s)` : (batchesPending ? 'Chargement…' : 'Lecture indisponible')}</p></div>
             </div>
             <div class="partners-ops-list">${batchRows
                 || (batchesAvailable
                     ? '<div class="ssub">Aucun lot manuel préparé.</div>'
-                    : '<div class="admin-err" role="status">Lots manuels indisponibles.</div>')}</div>`;
+                    : (batchesPending
+                        ? '<div class="ssub" role="status">Chargement des lots manuels…</div>'
+                        : '<div class="admin-err" role="status">Lots manuels indisponibles. <button type="button" class="partners-action" data-partners-retry="manualBatches">Réessayer</button></div>'))}</div>`;
     }
 
     _renderPartnersAdminAccounts(rows, total) {
@@ -6623,13 +6856,13 @@ class AdminPage {
         const labels = {
             active: 'Actif', pending_verification: 'Vérification en attente', held: 'En revue',
             suspended: 'Suspendu', closed: 'Clôturé', verified: 'Vérifiée', pending: 'En attente',
-            not_started: 'Non commencée', accepted: 'Accepté', current: 'À jour', none: 'Aucun',
-            expired: 'Expiré', revoked: 'Révoqué', unknown: 'Inconnu'
+            invited: 'Invité', not_started: 'Non commencée', accepted: 'Accepté', rejected: 'Rejeté',
+            current: 'À jour', none: 'Aucun', expired: 'Expiré', revoked: 'Révoqué', unknown: 'Inconnu'
         };
-        const valueLabel = (value) => labels[String(value || 'unknown')] || String(value || 'Inconnu');
+        const valueLabel = (value) => labels[String(value || 'unknown')] || 'Inconnu';
         const cleanRows = rows.map((row) => {
             const id = String(row.account_id || '');
-            if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null;
             const ref = String(row.partner_key || 'Partenaire');
             const accountStatus = valueLabel(row.status);
             const verification = valueLabel(row.verification_status);
@@ -6638,6 +6871,7 @@ class AdminPage {
             const created = row.created_at ? AdminPage.timeAgo(row.created_at) : '—';
             return { id, ref, accountStatus, verification, contract, link, created };
         }).filter(Boolean);
+        if (cleanRows.length !== rows.length) throw new Error('invalid_partners_accounts_items');
         const tableRows = cleanRows.map((row) => `<tr class="partner-row" data-partner-id="${AdminPage.esc(row.id)}">
             <td><button type="button" class="partner-open" data-partner-id="${AdminPage.esc(row.id)}"
               aria-label="Ouvrir ${AdminPage.esc(row.ref)}, compte ${AdminPage.esc(row.accountStatus)}, identité ${AdminPage.esc(row.verification)}">${AdminPage.esc(row.ref)}</button></td>
@@ -6690,7 +6924,7 @@ class AdminPage {
         this._setCrumb('Partners · fiche individuelle');
         view.innerHTML = `<div class="crm-page">
             <button class="crm-back" type="button">← ${AdminPage.esc(AdminPage.routeLabel(this._ficheReturn || 'partners'))}</button>
-            <h1 class="crm-h1">P Fiche partenaire</h1>
+            <h1 class="crm-h1">Fiche partenaire</h1>
             <p class="crm-sub">Chargement de la vue sanitisée…</p>
             <div id="partners-admin-detail" class="card" aria-busy="true"><div class="ssub">Chargement…</div></div>
         </div>`;
@@ -6848,7 +7082,8 @@ class AdminPage {
               </section>
               <section class="section"><div class="sec-head"><h2>Capacités opérationnelles</h2></div>
                 <div class="partners-admin-readiness">${this._partnersCapabilityCards(data.readiness || {})}</div>
-                ${/^[0-9a-f-]{36}$/i.test(String(account.account_id || ''))
+                ${this._partnersCanUseOperationalAction('fiscal-review')
+                    && /^[0-9a-f-]{36}$/i.test(String(account.account_id || ''))
                     && /^[A-Z]{2}$/.test(String(account.country_code || policy.country_code || ''))
                     ? `<div class="partners-action-row">
                         <button type="button" class="partners-action is-success"
@@ -7348,6 +7583,7 @@ class AdminPage {
     async _partnersAdminAction(button) {
         if (!button || button.disabled || button.dataset.partnersBusy === 'true') return;
         const previous = button.textContent;
+        const focus = this._partnersCaptureFocus(button);
         button.dataset.partnersBusy = 'true';
         button.setAttribute('aria-disabled', 'true');
         button.setAttribute('aria-busy', 'true');
@@ -7357,12 +7593,15 @@ class AdminPage {
             if (!success) return;
             this._toast(success, 'ok');
             if (this._route === 'partners') {
-                await this._partnersRefreshVisibleView();
+                await this._partnersRefreshVisibleView({ focusDescriptor: focus });
             } else if (this._route.startsWith('partner:')) {
                 const main = document.querySelector('#page-admin .crm-main');
                 const scrollTop = main?.scrollTop || 0;
                 await this._pagePartnerDetail(this._route.slice(8));
                 if (main) main.scrollTop = scrollTop;
+                if (!this._partnersRestoreFocus(focus)) {
+                    document.querySelector('#page-admin .crm-back')?.focus?.({ preventScroll: true });
+                }
             }
         } catch (_) {
             this._toast('Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.', 'err');
@@ -7383,6 +7622,9 @@ class AdminPage {
         const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
         const isoCountry = /^[A-Z]{2}$/;
         const currencyCode = /^[A-Z]{3}$/;
+        if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
+            'payout-approve', 'fiscal-review'].includes(action)
+            && !this._partnersCanUseOperationalAction(action)) return false;
 
         if (action === 'revolut-binding-propose') {
             if (this._partnersCapabilities.finance !== true) return false;
@@ -7815,9 +8057,10 @@ class AdminPage {
             if (this._partnersCapabilities.finance !== true) return false;
             const offset = Number(button.dataset.partnersOffset);
             if (!Number.isSafeInteger(offset) || offset < 0) return false;
+            const direction = button.dataset.partnersPageDirection === 'prev' ? 'prev' : 'next';
             this._partnersIncidentOffset = offset;
             if (this._route === 'partners') {
-                await this._partnersLoadIncidents({ force: true, preserveFocus: String(offset) });
+                await this._partnersLoadIncidents({ force: true, preserveFocus: direction });
             }
             return false;
         }

@@ -73,20 +73,25 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function sortDiditJson(value) {
+  if (Array.isArray(value)) return value.map(sortDiditJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortDiditJson(value[key])]),
+  );
+}
+
+function diditCanonicalPayload(payload) {
+  return JSON.stringify(sortDiditJson(payload));
+}
+
 function diditSemanticPayloadHash(payload) {
-  function sortJson(value) {
-    if (Array.isArray(value)) return value.map(sortJson);
-    if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortJson(value[key])]),
-    );
-  }
   const semantic = { ...payload };
   delete semantic.timestamp;
   return cryptoNode.createHash('sha256')
-    .update(JSON.stringify(sortJson(semantic)))
+    .update(diditCanonicalPayload(semantic))
     .digest('hex');
 }
 
@@ -338,13 +343,13 @@ test('Didit session creation sends no identity, contact, document or biometric d
   );
   const created = plain(sanitizeDiditCreatedSession({
     session_id: sessionId,
-    session_kind: 'user',
     session_token: 'must-never-be-copied',
     url: 'https://verify.didit.me/fr/session/opaque-token',
     vendor_data: vendorData,
     status: 'Not Started',
     workflow_id: workflowId,
     workflow_version: 4,
+    callback: 'https://norva.tv/partners-kyc-return',
   }, config, vendorData));
   assert.deepEqual(created, {
     sessionId,
@@ -355,9 +360,12 @@ test('Didit session creation sends no identity, contact, document or biometric d
   });
   for (const mutation of [
     { session_kind: 'business' },
+    { business_session_id: sessionId },
+    { vendor_business_id: 'business-opaque' },
     { workflow_id: applicationId },
     { status: 'Approved' },
     { url: 'https://evil.example/session/token' },
+    { callback: 'https://evil.example/verification-return' },
   ]) {
     assert.throws(() => sanitizeDiditCreatedSession({
       session_id: sessionId,
@@ -367,12 +375,13 @@ test('Didit session creation sends no identity, contact, document or biometric d
       status: 'Not Started',
       workflow_id: workflowId,
       workflow_version: 4,
+      callback: 'https://norva.tv/partners-kyc-return',
       ...mutation,
     }, config, vendorData));
   }
 });
 
-test('Didit raw-body HMAC authenticates the full decision and stores only normalized minimum', async () => {
+test('Didit V2 and raw-body HMAC authenticate the full decision and store only normalized minimum', async () => {
   const {
     diditConfigFingerprint,
     loadDiditConfig,
@@ -399,7 +408,7 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
         status: 'Approved',
         age: 28,
         issuing_state: 'ESP',
-        full_name: 'Must Be Discarded',
+        full_name: 'José Must Be Discarded',
         front_image: 'https://private.example/document.jpg',
       }],
       liveness_checks: [{
@@ -414,11 +423,13 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
       }],
     },
   };
-  const raw = Buffer.from(JSON.stringify(payload));
-  const signature = cryptoNode.createHmac('sha256', webhookSecret).update(raw).digest('hex');
+  const raw = Buffer.from(JSON.stringify(payload, null, 2));
+  const signatureV2 = cryptoNode.createHmac('sha256', webhookSecret)
+    .update(diditCanonicalPayload(payload))
+    .digest('hex');
   const headers = new Headers({
     'X-Timestamp': String(timestamp),
-    'X-Signature': signature,
+    'X-Signature-V2': signatureV2,
     'X-Signature-Simple': 'must-not-be-trusted',
   });
   const result = plain(await verifyAndNormalizeDiditWebhook(
@@ -446,7 +457,7 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
   });
   assert.doesNotMatch(
     JSON.stringify(result),
-    /full_name|document\.jpg|liveness\.mp4|face\.jpg|vendor_data|decision/i,
+    /José|full_name|document\.jpg|liveness\.mp4|face\.jpg|vendor_data|decision/i,
   );
 
   const retryTimestamp = timestamp + 120;
@@ -501,7 +512,7 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
   );
 
   const tampered = new Headers(headers);
-  tampered.set('X-Signature', `${signature.slice(0, 63)}0`);
+  tampered.set('X-Signature-V2', `${signatureV2.slice(0, 63)}0`);
   await assert.rejects(() => verifyAndNormalizeDiditWebhook(
     new Uint8Array(raw),
     tampered,
@@ -513,6 +524,28 @@ test('Didit raw-body HMAC authenticates the full decision and stores only normal
     headers,
     config,
     timestamp + 301,
+  ));
+
+  const simpleOnly = new Headers({
+    'X-Timestamp': String(timestamp),
+    'X-Signature-Simple': cryptoNode.createHmac('sha256', webhookSecret)
+      .update(`${timestamp}:${sessionId}:Approved:status.updated`)
+      .digest('hex'),
+  });
+  await assert.rejects(() => verifyAndNormalizeDiditWebhook(
+    new Uint8Array(raw),
+    simpleOnly,
+    config,
+    timestamp,
+  ));
+
+  const mismatchedTimestampHeaders = new Headers(headers);
+  mismatchedTimestampHeaders.set('X-Timestamp', String(timestamp + 1));
+  await assert.rejects(() => verifyAndNormalizeDiditWebhook(
+    new Uint8Array(raw),
+    mismatchedTimestampHeaders,
+    config,
+    timestamp + 1,
   ));
 
   const crossEnvironmentPayload = {
@@ -966,6 +999,7 @@ test('phase 2 security boundaries are separately configured and never trust simp
   const member = read('supabase/functions/norva-partners/index.ts');
   assert.match(config, /\[functions\.norva-partners-kyc-webhook\]\nverify_jwt = false/);
   assert.match(config, /\[functions\.norva-partners-referral\]\nverify_jwt = false/);
+  assert.match(didit, /headers\.get\("X-Signature-V2"\)/);
   assert.match(didit, /headers\.get\("X-Signature"\)/);
   assert.doesNotMatch(didit, /X-Signature-Simple/);
   assert.match(
@@ -983,6 +1017,15 @@ test('Didit Edge and SQL boundaries require immutable environment bindings', () 
   const member = read('supabase/functions/norva-partners/index.ts');
   const webhook = read(
     'supabase/functions/norva-partners-kyc-webhook/index.ts',
+  );
+  assert.ok(
+    webhook.indexOf('admin.rpc(') < webhook.indexOf('X-Didit-Test-Webhook'),
+    'the unsigned console-test marker may be considered only after the authenticated event reaches SQL',
+  );
+  assert.match(
+    webhook,
+    /error\.code === "P0006"[\s\S]*X-Didit-Test-Webhook[\s\S]*test_acknowledged/,
+    'only an authenticated unknown synthetic session may be acknowledged as a console test',
   );
   const migration = read(
     'supabase/migrations/20260730100500_partners_didit_environment_binding.sql',

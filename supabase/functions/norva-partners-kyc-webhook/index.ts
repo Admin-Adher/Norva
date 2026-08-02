@@ -67,17 +67,6 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    // Didit's console tester marks synthetic payloads explicitly. Authenticate
-    // them, acknowledge them, but never mutate live partner state.
-    if (req.headers.get("X-Didit-Test-Webhook") === "true") {
-      log("info", correlationId, "test_acknowledged");
-      return json(
-        200,
-        { received: true, test: true },
-        correlationId,
-      );
-    }
-
     const { data, error } = await admin.rpc(
       "partners_service_kyc_webhook_apply",
       {
@@ -103,6 +92,18 @@ Deno.serve(async (req) => {
         return problem(409, "webhook_conflict", correlationId);
       }
       if (error.code === "P0006") {
+        // The console's test marker is not part of the signed body. It may
+        // therefore convert only an already authenticated, unknown synthetic
+        // session into a successful probe. A known session always reaches the
+        // reducer even if an intermediary adds this unsigned header.
+        if (req.headers.get("X-Didit-Test-Webhook") === "true") {
+          log("info", correlationId, "test_acknowledged");
+          return json(
+            200,
+            { received: true, test: true },
+            correlationId,
+          );
+        }
         log("warn", correlationId, "resource_unknown");
         // Didit retries only unknown/not-found and server failures. A valid,
         // signed event can arrive before the session-record transaction is

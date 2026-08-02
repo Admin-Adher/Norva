@@ -1373,9 +1373,12 @@ test('Admin Partners exposes five persistent internal views in the required orde
     assert.ok(next > cursor, `${label} must keep its requested position`);
     cursor = next;
   }
-  assert.match(section, /role="tablist" aria-label="Vues Norva Partners"/);
+  assert.match(section, /role="tablist" aria-orientation="horizontal" aria-label="Vues Norva Partners"/);
   assert.match(section, /role="tabpanel"/);
   assert.match(source, /\.partners-workspace-nav\{position:sticky/);
+  assert.match(source, /overscroll-behavior-inline:contain/);
+  assert.match(source, /env\(safe-area-inset-bottom,0px\)/);
+  assert.match(source, /\.partners-routes-toolbar input:focus-visible/);
   assert.match(source, /\['ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
 });
 
@@ -1564,7 +1567,7 @@ test('Admin Partners filters and actions refresh modules without rebuilding the 
   );
   assert.doesNotMatch(section, /if \(this\._route === 'partners'\) this\._pagePartners\(\)/);
   assert.match(source, /this\._partnersLoadAccounts\(\{ force: true, preserveFocus: 'search' \}\)/);
-  assert.match(source, /await this\._partnersRefreshVisibleView\(\)/);
+  assert.match(source, /await this\._partnersRefreshVisibleView\(\{ focusDescriptor: focus \}\)/);
   assert.match(section, /this\._partnersRequests\.get\(key\)\?\.token === token/);
   assert.match(section, /controller\.abort\?\.\(\)/);
 });
@@ -1610,4 +1613,431 @@ test('Admin Partners focus descriptors ignore transient action state', () => {
       partnersCapability: 'finance',
     },
   }));
+});
+
+test('Admin Partners restores focus to the originating module when an action disappears', () => {
+  const attributes = new Map();
+  let focused = false;
+  const module = {
+    id: 'partners-admin-payouts',
+    tagName: 'SECTION',
+    disabled: false,
+    closest() { return null; },
+    hasAttribute(name) { return attributes.has(name); },
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    focus() { focused = true; },
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === module.id ? module : null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const descriptor = page._partnersCaptureFocus({
+    id: '',
+    dataset: {
+      partnersAction: 'payout-approve',
+      partnersKey: 'pay_0123456789abcdef01234567',
+      partnersBusy: 'true',
+    },
+    closest() { return module; },
+  });
+
+  assert.equal(descriptor.fallbackId, module.id);
+  assert.equal(page._partnersRestoreFocus(descriptor), true);
+  assert.equal(focused, true);
+  assert.equal(attributes.get('tabindex'), '-1');
+});
+
+test('Admin Partners keeps the selected mobile workspace tab visible and restores its scroll', async () => {
+  const main = { scrollTop: 120 };
+  const status = { textContent: '' };
+  let financeFocused = false;
+  let financeScrolled = false;
+  const tabs = ['overview', 'partners', 'risk', 'finance', 'configuration'].map((view) => ({
+    id: `partners-tab-${view}`,
+    tagName: 'BUTTON',
+    dataset: { partnersView: view },
+    tabIndex: view === 'overview' ? 0 : -1,
+    attributes: new Map(),
+    setAttribute(name, value) { this.attributes.set(name, String(value)); },
+    closest() { return null; },
+    focus() { if (view === 'finance') financeFocused = true; },
+    scrollIntoView(options) {
+      if (view === 'finance'
+        && options.block === 'nearest'
+        && options.inline === 'nearest') financeScrolled = true;
+    },
+    get textContent() { return view; },
+  }));
+  const panes = ['overview', 'partners', 'risk', 'finance', 'configuration'].map((view) => ({
+    id: `partners-pane-${view}`,
+    hidden: view !== 'overview',
+  }));
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      if (id === 'partners-view-status') return status;
+      return tabs.find((tab) => tab.id === id) || null;
+    },
+    querySelector(selector) {
+      return selector === '#page-admin .crm-main' ? main : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '#page-admin .partners-workspace-tab') return tabs;
+      if (selector === '#page-admin .partners-pane') return panes;
+      return [];
+    },
+  });
+  const page = new AdminPage({});
+  page._partnersView = 'overview';
+  page._partnersScrollByView.set('finance', 44);
+  page._partnersLoadView = () => Promise.resolve();
+
+  page._partnersSelectView('finance', { focusTab: true });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(main.scrollTop, 44);
+  assert.equal(financeFocused, true);
+  assert.equal(financeScrolled, true);
+  assert.equal(tabs[3].attributes.get('aria-selected'), 'true');
+  assert.equal(tabs[3].tabIndex, 0);
+  assert.equal(panes[3].hidden, false);
+});
+
+test('Admin Partners distinguishes malformed and pending payout modules', () => {
+  const attributes = new Map();
+  const payouts = {
+    innerHTML: '',
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-payouts' ? payouts : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersRequests.set('manualBatches', {});
+
+  page._renderPartnersPayouts({ schema_version: 1, total: -1, items: [] }, null);
+  assert.equal(attributes.get('aria-busy'), 'true');
+  assert.match(payouts.innerHTML, /data-partners-retry="payoutCycles"/);
+  assert.match(payouts.innerHTML, /Chargement des lots manuels/);
+
+  page._partnersRequests.clear();
+  page._renderPartnersPayouts({ schema_version: 1, total: 0, items: [] }, {
+    schema_version: 1,
+    total: 1,
+    items: null,
+  });
+  assert.equal(attributes.has('aria-busy'), false);
+  assert.match(payouts.innerHTML, /data-partners-retry="manualBatches"/);
+  assert.equal(page._partnersIsPagedEnvelope({ schema_version: 1, total: 0, items: [] }), true);
+  assert.equal(page._partnersIsPagedEnvelope({ schema_version: 1, total: -1, items: [] }), false);
+});
+
+test('Admin Partners timeout settles even when the transport ignores AbortSignal', async () => {
+  const attributes = new Map();
+  const host = {
+    innerHTML: '',
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-monitoring' ? host : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersPageGeneration = 1;
+  page._rpc = () => new Promise(() => {});
+
+  const result = await page._partnersLoadModule(
+    'monitoring',
+    'admin_partners_monitoring',
+    {},
+    () => assert.fail('an ignored abort must not render stale data'),
+    {
+      force: true,
+      timeoutMs: 5,
+      targetId: 'partners-admin-monitoring',
+      title: 'Supervision',
+    },
+  );
+
+  assert.equal(result, null);
+  assert.equal(attributes.has('aria-busy'), false);
+  assert.match(host.innerHTML, /Supervision indisponible/);
+  assert.doesNotMatch(host.innerHTML, /partners_module_timeout/);
+});
+
+test('Admin Partners cancellation settles immediately and never paints an error', async () => {
+  const host = {
+    innerHTML: '<div>Chargement</div>',
+    setAttribute() {},
+    removeAttribute() {},
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-monitoring' ? host : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersPageGeneration = 1;
+  let signal;
+  page._rpc = (_fn, _params, options) => {
+    signal = options.signal;
+    return new Promise(() => {});
+  };
+
+  const pending = page._partnersLoadModule(
+    'monitoring',
+    'admin_partners_monitoring',
+    {},
+    () => assert.fail('a cancelled module must not render'),
+    {
+      force: true,
+      timeoutMs: 10_000,
+      targetId: 'partners-admin-monitoring',
+      title: 'Supervision',
+    },
+  );
+  page._partnersAbortAll();
+
+  assert.equal(signal.aborted, true);
+  assert.equal(await pending, null);
+  assert.equal(host.innerHTML, '<div>Chargement</div>');
+  assert.equal(page._partnersRequests.size, 0);
+});
+
+test('Admin Partners operational actions are hidden and rejected without exact capabilities', async () => {
+  const risk = { innerHTML: '', removeAttribute() {} };
+  const finance = { innerHTML: '', removeAttribute() {} };
+  const detail = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-risk': risk,
+        'partners-admin-finance': finance,
+        'partners-admin-detail': detail,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const riskEnvelope = {
+    schema_version: 1,
+    total: 1,
+    items: [{
+      account_id: 'prt_0123456789abcdef01234567',
+      status: 'held',
+      reason: 'risk_hold',
+      dead_letter_jobs: 0,
+    }],
+  };
+  const financeEnvelope = {
+    schema_version: 1,
+    queues: {},
+    reconciliation: { last_run_at: null, last_status: 'clean', mismatches: 0 },
+    currencies: [],
+  };
+  const detailEnvelope = {
+    account: {
+      account_id: '11111111-1111-4111-8111-111111111111',
+      partner_key: 'partner-01',
+      status: 'active',
+      verification_status: 'verified',
+      contract_status: 'accepted',
+      country_code: 'FR',
+    },
+    policy: {},
+    link: { status: 'active' },
+    activity: [],
+    readiness: {},
+  };
+
+  page._renderPartnersRisk(riskEnvelope);
+  page._renderPartnersFinance(financeEnvelope);
+  page._renderPartnerDetail(detailEnvelope);
+  assert.doesNotMatch(risk.innerHTML, /data-partners-action="account-action"/);
+  assert.doesNotMatch(finance.innerHTML, /data-partners-action="job-retry"/);
+  assert.doesNotMatch(finance.innerHTML, /data-partners-action="commission-reverse"/);
+  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review"/);
+
+  page._partnersCapabilities = { support: true, risk: true, finance: true };
+  page._renderPartnersRisk(riskEnvelope);
+  page._renderPartnersFinance(financeEnvelope);
+  page._renderPartnerDetail(detailEnvelope);
+  assert.match(risk.innerHTML, /data-partners-action="account-action"/);
+  assert.match(finance.innerHTML, /data-partners-action="job-retry"/);
+  assert.match(finance.innerHTML, /data-partners-action="commission-reverse"/);
+  assert.match(detail.innerHTML, /data-partners-action="fiscal-review"/);
+
+  page._partnersCapabilities = { support: false, risk: false, finance: false };
+  page._partnersPrompt = () => assert.fail('permission denial must happen before prompting');
+  page._rpc = () => assert.fail('permission denial must happen before RPC');
+  assert.equal(await page._runPartnersAdminAction({
+    dataset: { partnersAction: 'job-retry' },
+  }), false);
+});
+
+test('Admin Partners paginates jurisdiction configuration without truncating it', () => {
+  const configuration = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-configuration' ? configuration : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: true, finance: true };
+  const countries = Array.from({ length: 30 }, (_, index) => (
+    String.fromCharCode(65 + Math.floor(index / 26))
+    + String.fromCharCode(65 + (index % 26))
+  ));
+  const envelope = {
+    schema_version: 1,
+    programs: [{
+      version_key: 'individual-global-v1',
+      status: 'active',
+      attribution_window_days: 30,
+      maturation_days: 45,
+      terms_version: 'v1',
+    }],
+    policies: countries.map((country) => ({
+      program_version_key: 'individual-global-v1',
+      country_code: country,
+      subdivision_code: null,
+      individual_available: false,
+      minimum_age: 18,
+      payout_currencies: ['USD'],
+      kyc_attempt_policy: { status: 'active' },
+    })),
+    configuration_counts: {
+      active_country_mappings: 0,
+      active_currencies: 1,
+      active_payout_providers: 0,
+      active_allowlist_entries: 0,
+    },
+    release_flags: [],
+    release_gates: [],
+  };
+
+  page._renderPartnersConfiguration(envelope);
+  assert.equal((configuration.innerHTML.match(/data-partners-action="kyc-policy"/g) || []).length, 12);
+  assert.match(configuration.innerHTML, /1–12 sur 30/);
+  assert.match(configuration.innerHTML, /aria-controls="partners-policy-list"/);
+  page._partnersPolicyPage = 2;
+  page._renderPartnersConfiguration(envelope);
+  assert.equal((configuration.innerHTML.match(/data-partners-action="kyc-policy"/g) || []).length, 6);
+  assert.match(configuration.innerHTML, /25–30 sur 30/);
+});
+
+test('Admin Partners keeps payout observations independent and retryable', () => {
+  const payouts = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-payouts' ? payouts : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._renderPartnersPayouts({
+    schema_version: 1,
+    total: 1,
+    items: [{
+      key: 'pay_0123456789abcdef01234567',
+      status: 'draft',
+      currency: 'USD',
+      live_execution: false,
+      total_minor: 1000,
+      item_count: 1,
+    }],
+  }, null);
+
+  assert.match(payouts.innerHTML, /pay_0123456789abcdef01234567/);
+  assert.match(payouts.innerHTML, /data-partners-retry="manualBatches"/);
+  assert.doesNotMatch(payouts.innerHTML, /data-partners-retry="payoutCycles"/);
+});
+
+test('Admin Partners never presents malformed payout counters as zero', () => {
+  const payouts = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-payouts' ? payouts : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._renderPartnersPayouts({
+    schema_version: 1,
+    total: 1,
+    items: [{
+      key: 'pay_0123456789abcdef01234567',
+      status: 'draft',
+      currency: 'USD',
+      live_execution: false,
+      total_minor: 'invalid',
+      item_count: null,
+    }],
+  }, {
+    schema_version: 1,
+    total: 1,
+    items: [{
+      key: 'rmb_0123456789abcdef01234567',
+      cycle_key: 'pay_0123456789abcdef01234567',
+      status: 'prepared',
+      currency: 'USD',
+      currency_exponent: 2,
+      total_minor: 1000,
+      submitted_count: 'invalid',
+      item_count: null,
+      settled_count: -1,
+    }],
+  });
+
+  assert.match(payouts.innerHTML, /— unités mineures · — item\(s\)/);
+  assert.match(payouts.innerHTML, /—\/— saisi\(s\) · — rapproché\(s\)/);
+  assert.doesNotMatch(payouts.innerHTML, /0 unités mineures/);
+  assert.doesNotMatch(payouts.innerHTML, /0\/0 saisi\(s\)/);
+});
+
+test('Admin Partners rejects malformed route status instead of inferring disabled', () => {
+  const revolut = { innerHTML: '', removeAttribute() {} };
+  const routes = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-revolut': revolut,
+        'partners-admin-routes': routes,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  new AdminPage({})._renderPartnersRevolutStatus({
+    schema_version: 1,
+    provider: 'revolut_business',
+    production_mode: 'revolut_manual',
+    plan: 'basic',
+    api_enabled: false,
+    api_adapter_verified: false,
+    routes: [{
+      country_code: 'FR',
+      currency: 'USD',
+      status: 'paused',
+      execution_adapter: 'revolut_manual',
+      updated_at: '2026-08-01T10:00:00Z',
+    }],
+    counts: {},
+  });
+
+  assert.match(routes.innerHTML, /Observation autoritative indisponible/);
+  assert.doesNotMatch(routes.innerHTML, /Route désactivée/);
+});
+
+test('Admin Partners incident pagination exposes direction, controlled content and live range', () => {
+  assert.match(source, /data-partners-page-direction="prev"/);
+  assert.match(source, /data-partners-page-direction="next"/);
+  assert.match(source, /aria-controls="partners-revolut-incidents-list"/);
+  assert.match(source, /preserveFocus: direction/);
 });

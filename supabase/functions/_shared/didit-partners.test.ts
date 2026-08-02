@@ -2,8 +2,11 @@ import {
   DIDIT_PARTNERS_CALLBACK_URL,
   type DiditConfig,
   diditConfigFingerprint,
+  sanitizeDiditCreatedSession,
   sanitizeKycWebhookRpc,
+  verifyAndNormalizeDiditWebhook,
 } from "./didit-partners.ts";
+import { hmacSha256Hex } from "./partners-crypto.ts";
 
 const baseConfig: DiditConfig = {
   apiKey: "didit-api-key-at-least-sixteen",
@@ -89,3 +92,135 @@ Deno.test("Didit RPC states cannot disguise sandbox as authoritative", () => {
   }
   assert(rejected, "live cannot use the sandbox observation contract");
 });
+
+Deno.test("Didit session response accepts the v3 OpenAPI shape but rejects KYB markers", () => {
+  const reservation = `kyr_${"a".repeat(24)}`;
+  const response = {
+    session_id: "99999999-8888-4777-8666-555555555555",
+    session_token: "provider-secret",
+    url: "https://verify.didit.me/fr/session/opaque-token",
+    vendor_data: reservation,
+    status: "Not Started",
+    workflow_id: baseConfig.workflowId,
+    workflow_version: 4,
+    callback: DIDIT_PARTNERS_CALLBACK_URL,
+  };
+  const sanitized = sanitizeDiditCreatedSession(
+    response,
+    baseConfig,
+    reservation,
+  );
+  assert(sanitized.workflowVersion === 4, "workflow version must survive");
+  assert(
+    !JSON.stringify(sanitized).includes("provider-secret"),
+    "the hosted session token must never leave the provider sanitizer",
+  );
+
+  let rejected = false;
+  try {
+    sanitizeDiditCreatedSession(
+      { ...response, session_kind: "business" },
+      baseConfig,
+      reservation,
+    );
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "an explicit business session must fail closed");
+});
+
+Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects envelope-only signatures", async () => {
+  const now = 1_774_970_000;
+  const payload = {
+    event_id: "12345678-1234-4234-8234-123456789abc",
+    webhook_type: "status.updated",
+    timestamp: now,
+    created_at: now - 4,
+    application_id: baseConfig.applicationId,
+    environment: "sandbox",
+    session_id: "99999999-8888-4777-8666-555555555555",
+    status: "Approved",
+    workflow_id: baseConfig.workflowId,
+    workflow_version: 4,
+    decision: {
+      id_verifications: [{
+        node_id: baseConfig.idVerificationNodeId,
+        status: "Approved",
+        age: 28,
+        issuing_state: "ESP",
+        full_name: "José must be discarded",
+      }],
+      liveness_checks: [{
+        node_id: baseConfig.livenessNodeId,
+        status: "Approved",
+      }],
+      face_matches: [{
+        node_id: baseConfig.faceMatchNodeId,
+        status: "Approved",
+      }],
+    },
+  };
+  const raw = new TextEncoder().encode(JSON.stringify(payload, null, 2));
+  const canonical = JSON.stringify(sortJson(payload));
+  const v2Headers = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      canonical,
+    ),
+  });
+  const verifiedV2 = await verifyAndNormalizeDiditWebhook(
+    raw,
+    v2Headers,
+    baseConfig,
+    now,
+  );
+  assert(verifiedV2.documentAge === 28, "V2 authenticates the full decision");
+  assert(
+    !JSON.stringify(verifiedV2).includes("José"),
+    "raw identity data must not cross the sanitizer",
+  );
+
+  const rawHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature": await hmacSha256Hex(baseConfig.webhookSecret, raw),
+  });
+  const verifiedRaw = await verifyAndNormalizeDiditWebhook(
+    raw,
+    rawHeaders,
+    baseConfig,
+    now,
+  );
+  assert(
+    verifiedRaw.payloadHash === verifiedV2.payloadHash,
+    "both full-body signature variants must normalize identically",
+  );
+
+  let rejected = false;
+  try {
+    await verifyAndNormalizeDiditWebhook(
+      raw,
+      new Headers({
+        "X-Timestamp": String(now),
+        "X-Signature-Simple": await hmacSha256Hex(
+          baseConfig.webhookSecret,
+          `${now}:${payload.session_id}:${payload.status}:${payload.webhook_type}`,
+        ),
+      }),
+      baseConfig,
+      now,
+    );
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "the envelope-only signature must never authorize KYC data");
+});
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record).sort().map((key) => [key, sortJson(record[key])]),
+  );
+}

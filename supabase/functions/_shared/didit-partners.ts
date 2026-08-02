@@ -515,11 +515,18 @@ export function sanitizeDiditCreatedSession(
   const workflowVersion = positiveInteger(raw.workflow_version);
   const providerStatus = normalizeDiditStatus(raw.status);
   const hostedUrl = diditHostedUrl(raw.url);
+  const sessionKind = raw.session_kind;
 
   if (
-    raw.session_kind !== "user" ||
+    // Didit's v3 OpenAPI response schema does not currently declare
+    // session_kind, although newer KYC responses can include "user". Accept
+    // that documented omission, but fail closed on every explicit KYB marker.
+    (sessionKind !== undefined && sessionKind !== "user") ||
+    Object.hasOwn(raw, "business_session_id") ||
+    Object.hasOwn(raw, "vendor_business_id") ||
     workflowId !== config.workflowId ||
     raw.vendor_data !== expectedVendorData ||
+    raw.callback !== config.callbackUrl ||
     ![
       "not_started",
       "in_progress",
@@ -551,11 +558,15 @@ export async function verifyAndNormalizeDiditWebhook(
     throw new DiditContractError();
   }
   const timestampHeader = headers.get("X-Timestamp");
-  const signature = headers.get("X-Signature")?.toLowerCase() ?? "";
+  const signatureV2 = headers.get("X-Signature-V2")?.toLowerCase() ?? "";
+  const rawSignature = headers.get("X-Signature")?.toLowerCase() ?? "";
   if (
     !timestampHeader ||
     !/^\d{10}$/.test(timestampHeader) ||
-    !HEX_SHA256_PATTERN.test(signature)
+    (
+      !HEX_SHA256_PATTERN.test(signatureV2) &&
+      !HEX_SHA256_PATTERN.test(rawSignature)
+    )
   ) {
     throw new DiditContractError();
   }
@@ -566,13 +577,6 @@ export async function verifyAndNormalizeDiditWebhook(
   ) {
     throw new DiditContractError();
   }
-  const expectedSignature = await hmacSha256Hex(
-    config.webhookSecret,
-    rawBody,
-  );
-  if (!timingSafeEqualText(expectedSignature, signature)) {
-    throw new DiditContractError();
-  }
 
   let raw: unknown;
   try {
@@ -581,6 +585,29 @@ export async function verifyAndNormalizeDiditWebhook(
     throw new DiditContractError();
   }
   if (!isRecord(raw)) throw new DiditContractError();
+
+  // Prefer Didit's middleware-safe v2 signature over recursively sorted,
+  // compact, Unicode-preserved JSON. Retain the exact raw-body signature as a
+  // fully authenticated fallback. The envelope-only signature variant is
+  // deliberately never accepted because it does not authenticate the KYC
+  // decision.
+  let signatureVerified = false;
+  if (HEX_SHA256_PATTERN.test(signatureV2)) {
+    const expectedV2 = await hmacSha256Hex(
+      config.webhookSecret,
+      JSON.stringify(sortJsonValue(raw)),
+    );
+    signatureVerified = timingSafeEqualText(expectedV2, signatureV2);
+  }
+  if (!signatureVerified && HEX_SHA256_PATTERN.test(rawSignature)) {
+    const expectedRaw = await hmacSha256Hex(
+      config.webhookSecret,
+      rawBody,
+    );
+    signatureVerified = timingSafeEqualText(expectedRaw, rawSignature);
+  }
+  if (!signatureVerified) throw new DiditContractError();
+
   if (
     raw.webhook_type !== "status.updated" ||
     raw.timestamp !== timestamp ||
