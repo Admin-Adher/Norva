@@ -416,10 +416,13 @@ select extensions.throws_ok(
   $$
     select public.admin_partners_access_request_decide(
       (
-        select id
-        from affiliate_private.affiliate_access_requests
-        where user_id = '21000000-0000-4000-8000-000000000002'
-      ),
+        public.admin_partners_access_requests(
+          1,
+          0,
+          'requested',
+          'access-member@example.invalid'
+        ) #>> '{items,0,request_id}'
+      )::uuid,
       'approve',
       now() + interval '7 days',
       'Approve the supervised Partners access-request fixture.'
@@ -436,10 +439,13 @@ set local request.jwt.claims =
 select extensions.is(
   public.admin_partners_access_request_decide(
     (
-      select id
-      from affiliate_private.affiliate_access_requests
-      where user_id = '21000000-0000-4000-8000-000000000002'
-    ),
+      public.admin_partners_access_requests(
+        1,
+        0,
+        'requested',
+        'access-member@example.invalid'
+      ) #>> '{items,0,request_id}'
+    )::uuid,
     'approve',
     now() + interval '7 days',
     'Approve the supervised Partners access-request fixture.'
@@ -450,10 +456,13 @@ select extensions.is(
 select extensions.is(
   public.admin_partners_access_request_decide(
     (
-      select id
-      from affiliate_private.affiliate_access_requests
-      where user_id = '21000000-0000-4000-8000-000000000002'
-    ),
+      public.admin_partners_access_requests(
+        1,
+        0,
+        'approved',
+        'access-member@example.invalid'
+      ) #>> '{items,0,request_id}'
+    )::uuid,
     'approve',
     now() + interval '7 days',
     'Replay the supervised Partners access-request decision.'
@@ -461,6 +470,26 @@ select extensions.is(
   'false',
   'repeating the same decision is idempotent'
 );
+select extensions.is(
+  public.admin_partners_access_request_decide(
+    (
+      public.admin_partners_access_requests(
+        1,
+        0,
+        'requested',
+        'access-decline@example.invalid'
+      ) #>> '{items,0,request_id}'
+    )::uuid,
+    'decline',
+    null,
+    'Decline the supervised Partners access-request fixture.'
+  ) ->> 'status',
+  'declined',
+  'Risk with AAL2 can decline a request'
+);
+
+reset role;
+
 select extensions.ok(
   exists (
     select 1
@@ -469,20 +498,6 @@ select extensions.ok(
       and allowlist_row.status = 'active'
   ),
   'approval atomically creates the audited pilot allowlist entry'
-);
-select extensions.is(
-  public.admin_partners_access_request_decide(
-    (
-      select id
-      from affiliate_private.affiliate_access_requests
-      where user_id = '21000000-0000-4000-8000-000000000003'
-    ),
-    'decline',
-    null,
-    'Decline the supervised Partners access-request fixture.'
-  ) ->> 'status',
-  'declined',
-  'Risk with AAL2 can decline a request'
 );
 select extensions.ok(
   not exists (
