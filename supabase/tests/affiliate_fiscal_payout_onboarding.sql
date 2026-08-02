@@ -1208,22 +1208,25 @@ select extensions.throws_ok(
 );
 
 reset role;
-insert into affiliate_private.affiliate_service_idempotency (
+insert into affiliate_private.affiliate_member_write_reservations (
   operation,
   user_id,
   idempotency_key,
   request_hash,
-  response,
-  created_at
+  reserved_at,
+  last_seen_at
 )
 select
   'fiscal_profile_self_attestation',
   '22000000-0000-4000-8000-000000000001',
-  'fiscal.throttle.' || lpad(series.value::text, 8, '0'),
+  case
+    when series.value = 0 then 'fiscal.attestation.00000001'
+    else 'fiscal.throttle.' || lpad(series.value::text, 8, '0')
+  end,
   repeat('9', 64),
-  '{"schema_version":1}'::jsonb,
+  now(),
   now()
-from generate_series(1, 7) as series(value);
+from generate_series(0, 7) as series(value);
 
 set local role service_role;
 select extensions.is(
@@ -1239,12 +1242,11 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$
-    select public.partners_service_fiscal_profile_self_attest(
+    select public.partners_service_member_write_reserve(
       '22000000-0000-4000-8000-000000000001',
-      'US',
-      'partners-tax-self-certification-v1',
-      true,
-      'fiscal.attestation.00000002'
+      'fiscal_profile_self_attestation',
+      'fiscal.attestation.00000002',
+      repeat('8', 64)
     )
   $$,
   'P0008',
@@ -1281,14 +1283,16 @@ select extensions.is(
   'pending',
   'a member self-attestation is immediately discoverable in the fiscal queue'
 );
-select extensions.like(
-  public.admin_partners_fiscal_profiles(
-    25,
-    0,
-    'pending',
-    null
-  ) #>> '{items,0,partner_key}',
-  'prt_%',
+select extensions.ok(
+  left(
+    public.admin_partners_fiscal_profiles(
+      25,
+      0,
+      'pending',
+      null
+    ) #>> '{items,0,partner_key}',
+    4
+  ) = 'prt_',
   'the fiscal queue uses a public partner key instead of an account UUID'
 );
 select extensions.is(
@@ -2249,22 +2253,26 @@ select extensions.ok(
 );
 reset role;
 
-insert into affiliate_private.affiliate_service_idempotency (
+insert into affiliate_private.affiliate_member_write_reservations (
   operation,
   user_id,
   idempotency_key,
   request_hash,
-  response,
-  created_at
+  reserved_at,
+  last_seen_at
 )
 select
   'payout_onboarding',
   '22000000-0000-4000-8000-000000000001',
-  'payout.throttle.' || lpad(series.value::text, 8, '0'),
+  case series.value
+    when 1 then 'payout.onboarding.00000003'
+    when 2 then 'payout.onboarding.00000004'
+    else 'payout.throttle.' || lpad(series.value::text, 8, '0')
+  end,
   repeat('7', 64),
-  '{"schema_version":1}'::jsonb,
+  now(),
   now()
-from generate_series(1, 6) as series(value);
+from generate_series(1, 8) as series(value);
 
 set local role service_role;
 select extensions.is(
@@ -2279,11 +2287,11 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$
-    select public.partners_service_payout_onboarding_request(
+    select public.partners_service_member_write_reserve(
       '22000000-0000-4000-8000-000000000001',
-      'USD',
-      true,
-      'payout.onboarding.00000005'
+      'payout_onboarding',
+      'payout.onboarding.00000005',
+      repeat('6', 64)
     )
   $$,
   'P0008',
