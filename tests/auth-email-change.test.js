@@ -25,7 +25,10 @@ test('authentication email transport is bounded, deterministic and provider-ackn
   assert.match(source, /crypto\.subtle\.digest\("SHA-256"/);
   assert.match(source, /"Idempotency-Key": request\.idempotencyKey/);
   assert.match(source, /https:\/\/api\.resend\.com\/emails\/batch/);
-  assert.match(source, /signal: AbortSignal\.timeout\(8_000\)/);
+  assert.match(source, /signal: AbortSignal\.timeout\(4_000\)/);
+  assert.match(source, /crypto\.subtle\.digest\("SHA-256", new TextEncoder\(\)\.encode\(body\)\)/);
+  assert.doesNotMatch(source, /upstreamDeliveryId|svix-id/);
+  assert.match(source, /"Retry-After": "2"/);
   assert.match(source, /acknowledgedResendIds\(response, request\.batch, request\.expectedIds\)/);
   assert.doesNotMatch(source, /String\(response\.message/);
 });

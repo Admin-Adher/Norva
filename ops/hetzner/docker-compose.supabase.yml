@@ -150,12 +150,27 @@ services:
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-true}
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS:-false}
       GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-false}
-      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
-      GOTRUE_SMTP_HOST: ${SMTP_HOST}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
-      GOTRUE_SMTP_USER: ${SMTP_USER}
-      GOTRUE_SMTP_PASS: ${SMTP_PASS}
-      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Norva}
+      # Auth mail has one authoritative transport: the signed HTTP Send Email
+      # Hook. Required interpolation makes `docker compose config` fail before a
+      # recreate when either half is absent, rather than accepting /otp and then
+      # falling through to an empty SMTP configuration.
+      # GoTrue 2.189 permits HTTP only for loopback hosts, so the hook must use
+      # the public HTTPS function URL (not http://kong or http://functions).
+      GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"
+      GOTRUE_HOOK_SEND_EMAIL_URI: ${AUTH_SEND_EMAIL_HOOK_URI:?AUTH_SEND_EMAIL_HOOK_URI is required for Auth email}
+      GOTRUE_HOOK_SEND_EMAIL_SECRETS: ${SEND_EMAIL_HOOK_SECRET:?SEND_EMAIL_HOOK_SECRET is required for Auth email}
+      GOTRUE_MAILER_EXTERNAL_HOSTS: ${GOTRUE_MAILER_EXTERNAL_HOSTS:-api.norva.tv}
+      GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: "true"
+      # Norva owns security-event delivery through its durable branded outbox.
+      # Keep GoTrue's separate notification-preview templates off to avoid
+      # duplicate/generic messages entering the Auth hook.
+      GOTRUE_MAILER_NOTIFICATIONS_PASSWORD_CHANGED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_EMAIL_CHANGED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_PHONE_CHANGED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_LINKED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_IDENTITY_UNLINKED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_ENROLLED_ENABLED: "false"
+      GOTRUE_MAILER_NOTIFICATIONS_MFA_FACTOR_UNENROLLED_ENABLED: "false"
       GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE:-/auth/v1/verify}
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION:-/auth/v1/verify}
       GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY:-/auth/v1/verify}
@@ -445,7 +460,12 @@ services:
       DIDIT_ID_VERIFICATION_NODE_ID: ${DIDIT_ID_VERIFICATION_NODE_ID:-}
       DIDIT_LIVENESS_NODE_ID: ${DIDIT_LIVENESS_NODE_ID:-}
       DIDIT_FACE_MATCH_NODE_ID: ${DIDIT_FACE_MATCH_NODE_ID:-}
-      SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
+      # Shared verbatim with GOTRUE_HOOK_SEND_EMAIL_SECRETS above. Both the
+      # signer and verifier are mandatory; there is deliberately no SMTP path.
+      SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:?SEND_EMAIL_HOOK_SECRET is required for Auth email}
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-Norva <noreply@norva.tv>}
+      AUTH_EMAIL_REPLY_TO: ${AUTH_EMAIL_REPLY_TO:-support@norva.tv}
+      PUBLIC_SITE_URL: ${SITE_URL:?SITE_URL is required for Auth email links}
       # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
       # WITHOUT these the edge silently falls back to enforce+legacy — a migrated
       # non-active subscription then hard-blocks the user to the paywall. Keep

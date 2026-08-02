@@ -12,6 +12,8 @@ OLD_SEND_KEY_ID="${1:-}"
 ENV_FILE="${ENV_FILE:-.env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.supabase.yml}"
 DOMAIN_NAME="${RESEND_SENDING_DOMAIN:-norva.tv}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AUTH_EMAIL_PREFLIGHT="${AUTH_EMAIL_PREFLIGHT:-$SCRIPT_DIR/check-auth-email-transport.sh}"
 
 if [[ "$OLD_SEND_KEY_ID" != "none" && ! "$OLD_SEND_KEY_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
   echo "usage: $0 <old-sending-key-id|none>" >&2
@@ -28,7 +30,6 @@ trap 'rm -rf "$work"' EXIT
 
 management_key="$(sed -n 's/^RESEND_MANAGEMENT_API_KEY=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
 old_send_key="$(sed -n 's/^RESEND_API_KEY=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
-smtp_pass="$(sed -n 's/^SMTP_PASS=//p' "$ENV_FILE" | head -n1 | tr -d '\r')"
 if [[ ! "$management_key" =~ ^re_[A-Za-z0-9_-]+$ ]]; then
   echo "RESEND_MANAGEMENT_API_KEY is empty or invalid" >&2
   exit 1
@@ -37,6 +38,11 @@ if [[ ! "$old_send_key" =~ ^re_[A-Za-z0-9_-]+$ ]]; then
   echo "RESEND_API_KEY is empty or invalid" >&2
   exit 1
 fi
+
+# Refuse key work while Auth still relies on an incomplete/legacy SMTP path.
+# The preflight is read-only and never prints any credential.
+ENV_FILE="$ENV_FILE" COMPOSE_FILE="$COMPOSE_FILE" \
+  bash "$AUTH_EMAIL_PREFLIGHT" --config-only >/dev/null
 
 api_management_read() {
   local endpoint="$1"
@@ -133,16 +139,23 @@ replace_env_key() {
 }
 
 replace_env_key RESEND_API_KEY "$new_key"
-smtp_rotated=false
-if [[ -n "$smtp_pass" && "$smtp_pass" == "$old_send_key" ]]; then
-  replace_env_key SMTP_PASS "$new_key"
-  smtp_rotated=true
-fi
 
-docker compose -f "$COMPOSE_FILE" up -d --force-recreate functions functions2 >/dev/null
-if [[ "$smtp_rotated" == true ]]; then
-  docker compose -f "$COMPOSE_FILE" up -d --force-recreate auth >/dev/null
-fi
+wait_healthy() {
+  local container="$1" attempt health
+  for attempt in $(seq 1 30); do
+    health="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+    [[ "$health" == "healthy" || "$health" == "running" ]] && return 0
+    sleep 1
+  done
+  echo "$container did not become healthy after Resend key rotation" >&2
+  return 1
+}
+
+# Keep one Edge replica serving while the other receives the new sending key.
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate functions >/dev/null
+wait_healthy norva-edge-functions
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate functions2 >/dev/null
+wait_healthy norva-edge-functions-2
 
 edge_key="$(docker inspect norva-edge-functions --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | sed -n 's/^RESEND_API_KEY=//p' | head -n1)"
@@ -159,14 +172,10 @@ for container in norva-edge-functions norva-edge-functions-2; do
     exit 1
   fi
 done
-if [[ "$smtp_rotated" == true ]]; then
-  auth_key="$(docker inspect norva-auth --format '{{range .Config.Env}}{{println .}}{{end}}' \
-    | sed -n 's/^GOTRUE_SMTP_PASS=//p' | head -n1)"
-  if [[ "$auth_key" != "$new_key" ]]; then
-    echo "replacement sending key did not reach GoTrue SMTP" >&2
-    exit 1
-  fi
-fi
+
+# Also verifies Auth/Edge hook-secret parity and rejects an unsigned live probe.
+ENV_FILE="$ENV_FILE" COMPOSE_FILE="$COMPOSE_FILE" \
+  bash "$AUTH_EMAIL_PREFLIGHT" --runtime >/dev/null
 
 # A sending-only key must be denied access to account resources. This checks the
 # permission boundary without sending a message or printing any credential.
@@ -189,6 +198,6 @@ rm -f -- "$backup"
 echo "resend_sending_key_rotated=true"
 echo "new_key_id=$new_key_id"
 echo "domain=$DOMAIN_NAME"
-echo "smtp_rotated=$smtp_rotated"
+echo "auth_hook_verified=true"
 echo "old_key_revoked=$([[ "$OLD_SEND_KEY_ID" == "none" ]] && echo false || echo true)"
 echo "rollback_copy_removed=true"

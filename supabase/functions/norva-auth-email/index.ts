@@ -27,11 +27,19 @@ const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
 // raw supabase.co verify URL. Override with PUBLIC_SITE_URL if the domain changes.
 const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
 
-// The hook secret comes as "v1,whsec_<base64>" — keep just the base64 payload.
-const HOOK_SECRET_B64 = HOOK_SECRET_RAW.replace(/^v1,whsec_/, "").replace(/^whsec_/, "");
+// GoTrue separates HTTP-hook rotation secrets with `|` and signs with the
+// active one. Accept every valid HMAC secret during the bounded overlap so
+// Auth and Edge can be rolled independently without dropping mail.
+const HOOK_SECRET_B64S = HOOK_SECRET_RAW
+  .split("|")
+  .map((secret) => secret.trim().replace(/^v1,whsec_/, "").replace(/^whsec_/, ""))
+  .filter(Boolean);
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...headers },
+  });
 
 function esc(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (char) =>
@@ -47,7 +55,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 // Standard Webhooks verification (the scheme Supabase uses for auth hooks).
 async function verifySignature(headers: Headers, body: string): Promise<boolean> {
-  if (!HOOK_SECRET_B64) return false;
+  if (HOOK_SECRET_B64S.length === 0) return false;
   const id = headers.get("webhook-id");
   const ts = headers.get("webhook-timestamp");
   const sigHeader = headers.get("webhook-signature");
@@ -58,23 +66,32 @@ async function verifySignature(headers: Headers, body: string): Promise<boolean>
   const tsNum = Number(ts);
   if (!Number.isFinite(tsNum) || Math.abs(now - tsNum) > 300) return false;
 
-  const signedContent = `${id}.${ts}.${body}`;
-  const keyBytes = Uint8Array.from(atob(HOOK_SECRET_B64), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedContent));
-  const expected = btoa(String.fromCharCode(...new Uint8Array(mac)));
-
   // webhook-signature is space-separated "v1,<base64sig>" entries.
-  return sigHeader
+  const signatures = sigHeader
     .split(" ")
     .map((part) => part.split(",")[1] ?? part)
-    .some((sig) => timingSafeEqual(sig, expected));
+    .filter(Boolean);
+  const signedContent = new TextEncoder().encode(`${id}.${ts}.${body}`);
+
+  for (const secret of HOOK_SECRET_B64S) {
+    try {
+      const keyBytes = Uint8Array.from(atob(secret), (c) => c.charCodeAt(0));
+      const key = await crypto.subtle.importKey(
+        "raw",
+        keyBytes,
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const mac = await crypto.subtle.sign("HMAC", key, signedContent);
+      const expected = btoa(String.fromCharCode(...new Uint8Array(mac)));
+      if (signatures.some((sig) => timingSafeEqual(sig, expected))) return true;
+    } catch {
+      // A malformed candidate must not prevent a still-valid rotation key from
+      // authenticating the request. Deployment preflight rejects this state.
+    }
+  }
+  return false;
 }
 
 export interface EmailData {
@@ -442,15 +459,13 @@ Deno.serve(async (req) => {
     return json({ error: detail }, 400);
   }
 
-  const upstreamDeliveryId = String(req.headers.get("webhook-id") ?? req.headers.get("svix-id") ?? "")
-    .replace(/[^A-Za-z0-9_-]/g, "").slice(0, 120);
-  // Supabase normally supplies a stable webhook id. Hash the signed body as a
-  // deterministic fallback so a retry after an ambiguous network response cannot
-  // create a duplicate authentication email.
+  // GoTrue creates a fresh Standard Webhooks id for each retry, so webhook-id
+  // cannot be the provider idempotency authority. The signed Auth payload stays
+  // stable across retries; hashing it prevents a timeout/ambiguous response from
+  // creating a duplicate authentication email.
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
-  const bodyDeliveryId = Array.from(new Uint8Array(digest))
+  const deliveryId = Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 48);
-  const deliveryId = upstreamDeliveryId || bodyDeliveryId;
   const request = buildResendAuthRequest(emails, deliveryId);
   try {
     const res = await fetch(request.endpoint, {
@@ -462,7 +477,9 @@ Deno.serve(async (req) => {
         "Idempotency-Key": request.idempotencyKey,
       },
       body: JSON.stringify(request.body),
-      signal: AbortSignal.timeout(8_000),
+      // GoTrue's HTTP hook deadline is 5 seconds in v2.189. Leave one second
+      // for Edge/Kong response propagation so Auth receives a retryable failure.
+      signal: AbortSignal.timeout(4_000),
     });
     const response = await res.json().catch(() => ({})) as unknown;
     const acknowledgedIds = res.ok
@@ -480,14 +497,18 @@ Deno.serve(async (req) => {
         expected_ids: request.expectedIds,
         acknowledged_ids: acknowledgedIds?.length ?? 0,
       });
-      return json({ error: "Email send failed", retryable }, retryable ? 503 : 502);
+      return json(
+        { error: "Email send failed", retryable },
+        retryable ? 503 : 502,
+        retryable ? { "Retry-After": "2" } : {},
+      );
     }
   } catch (error) {
     console.error("[norva-auth-email] Resend transport failed", {
       code: error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "transport_error",
       retryable: true,
     });
-    return json({ error: "Email send failed", retryable: true }, 503);
+    return json({ error: "Email send failed", retryable: true }, 503, { "Retry-After": "2" });
   }
 
   return json({});

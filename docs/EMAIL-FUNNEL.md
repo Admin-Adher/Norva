@@ -66,6 +66,43 @@ Go-live requires edge `RESEND_API_KEY` plus each sender's authentication secret
 `RESEND_WEBHOOK_SECRET` for delivery events). A missing email transport key leaves
 branded-email rows pending without consuming attempts.
 
+### Self-hosted Auth transport invariant
+
+Hetzner GoTrue has exactly one Auth-email transport: the signed HTTPS Send Email
+Hook at `https://api.norva.tv/functions/v1/norva-auth-email`. Direct GoTrue SMTP
+is deliberately not wired. The production Compose file requires the complete
+configuration before it can render:
+
+- `AUTH_SEND_EMAIL_HOOK_URI` is HTTPS, shares the `SUPABASE_PUBLIC_URL` origin,
+  and targets `/functions/v1/norva-auth-email` exactly;
+- `SEND_EMAIL_HOOK_SECRET` is the same full `v1,whsec_...` value in GoTrue and
+  both Edge replicas. A bounded rotation may use `old|new`, matching GoTrue's
+  `HTTPHookSecrets` separator, until every replica has the new value;
+- `RESEND_API_KEY` is a domain-scoped `sending_access` key available to both
+  Edge replicas;
+- GoTrue keeps `GOTRUE_HOOK_SEND_EMAIL_ENABLED=true` and never falls back to an
+  empty SMTP host.
+
+Run the read-only preflight before any recreate:
+
+```bash
+cd /home/adrien/norva/ops/hetzner
+bash ./scripts/check-auth-email-transport.sh --config-only
+```
+
+Recreate the two Edge replicas one at a time and verify health, then recreate
+Auth. Afterwards, run `bash ./scripts/check-auth-email-transport.sh --runtime`. The
+runtime check verifies secret parity without printing values and sends only an
+unsigned probe, which the function must reject with HTTP 401. A real supervised
+canary remains required for each release: request a magic link to an internal
+mailbox, confirm an Auth hook invocation, a Resend provider ID, and the signed
+`sent` then `delivered` webhook events.
+
+The account UI intentionally returns the same confirmation for an existing and
+an unknown address to prevent account enumeration. That neutral message is not
+a delivery receipt; operational health must come from the hook/provider/webhook
+chain above.
+
 ## Delivery telemetry retention
 
 The signed webhook never stores message bodies, click URLs, IP addresses or user
