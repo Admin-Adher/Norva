@@ -36,7 +36,7 @@ export async function onRequest({ request, env }) {
       secret: config.edgeHmacSecret,
     });
   } catch {
-    return unavailable();
+    return unavailable('30', request, 'request-signing');
   }
 
   let upstream;
@@ -48,7 +48,7 @@ export async function onRequest({ request, env }) {
       redirect: 'error',
     });
   } catch {
-    return unavailable();
+    return unavailable('30', request, 'upstream-fetch');
   }
   if (!upstream.ok) {
     try {
@@ -56,11 +56,15 @@ export async function onRequest({ request, env }) {
     } catch {
       // Public response remains generic.
     }
-    return unavailable(upstream.status === 429 ? '60' : '30');
+    return unavailable(
+      upstream.status === 429 ? '60' : '30',
+      request,
+      `upstream-${upstream.status}`,
+    );
   }
   const contentType = upstream.headers.get('Content-Type') || '';
   if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
-    return unavailable();
+    return unavailable('30', request, 'upstream-content-type');
   }
   let result;
   try {
@@ -70,7 +74,7 @@ export async function onRequest({ request, env }) {
     }
     result = sanitizeResolveResponse(JSON.parse(text));
   } catch {
-    return unavailable();
+    return unavailable('30', request, 'upstream-contract');
   }
   if (!result.accepted) {
     return redirect(config.redirectUrl, 'unavailable');
@@ -90,9 +94,19 @@ function redirect(base, state, extra = {}) {
   });
 }
 
-function unavailable(retryAfter = '30') {
+function unavailable(retryAfter = '30', request = null, reason = '') {
+  const extra = { 'Retry-After': retryAfter };
+  try {
+    const hostname = new URL(request?.url || '').hostname;
+    if (/^[a-f0-9]{8}\.norva-web\.pages\.dev$/i.test(hostname)
+      && /^[a-z0-9-]{1,32}$/.test(reason)) {
+      extra['X-Norva-Referral-Probe'] = reason;
+    }
+  } catch {
+    // Diagnostics are optional and never change the public failure contract.
+  }
   return new Response('Referral attribution is temporarily unavailable.', {
     status: 503,
-    headers: publicHeaders({ 'Retry-After': retryAfter }),
+    headers: publicHeaders(extra),
   });
 }
