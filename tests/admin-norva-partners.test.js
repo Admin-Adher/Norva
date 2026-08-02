@@ -14,8 +14,8 @@ const source = fs.readFileSync(
   'utf8',
 );
 
-function loadAdminPage(documentOverride = null, fetchOverride = null) {
-  const window = { crypto: webcrypto };
+function loadAdminPage(documentOverride = null, fetchOverride = null, windowOverride = {}) {
+  const window = { crypto: webcrypto, ...windowOverride };
   const context = vm.createContext({
     window,
     document: documentOverride || {
@@ -692,6 +692,7 @@ test('Admin Partners binds incident evidence to exact maker-checker confirmation
   const AdminPage = loadAdminPage();
   const page = new AdminPage({});
   page._partnersCapabilities = { support: false, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
   const incidentKey = 'rri_0123456789abcdef01234567';
   const reviewKey = 'rir_0123456789abcdef01234567';
   const evidenceHash = 'a'.repeat(64);
@@ -823,6 +824,7 @@ test('Admin Partners checker quarantine uses an exact typed decision and validat
   const AdminPage = loadAdminPage();
   const page = new AdminPage({});
   page._partnersCapabilities = { support: false, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
   const incidentKey = 'rri_0123456789abcdef01234567';
   const reviewKey = 'rir_0123456789abcdef01234567';
   const observedAt = '2026-07-30T10:02:03.000Z';
@@ -2071,4 +2073,141 @@ test('Admin Partners incident pagination exposes direction, controlled content a
   assert.match(source, /data-partners-page-direction="next"/);
   assert.match(source, /aria-controls="partners-revolut-incidents-list"/);
   assert.match(source, /preserveFocus: direction/);
+});
+
+test('Admin Partners identifies only explicit AAL2 authorization failures', () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  assert.equal(page._partnersIsAal2Error({
+    status: 403,
+    message: 'manual payout batch list requires AAL2',
+  }), true);
+  assert.equal(page._partnersIsAal2Error({
+    status: 400,
+    message: 'AAL2 required for this operation',
+  }), true);
+  assert.equal(page._partnersIsAal2Error({
+    status: 403,
+    message: 'finance capability required',
+  }), false);
+  assert.equal(page._partnersIsAal2Error({
+    status: 500,
+    message: 'requires AAL2',
+  }), false);
+});
+
+test('Admin Partners elevates Finance through the verified TOTP flow without exposing factor ids', async () => {
+  const calls = [];
+  const authRuntime = {
+    NorvaAuth: {
+      async getMfaStatus() {
+        return {
+          currentLevel: 'aal1',
+          nextLevel: 'aal2',
+          factors: [{ id: 'private-factor-id', type: 'totp' }],
+        };
+      },
+      async challengeAndVerifyMfa(input) { calls.push(input); },
+    },
+  };
+  const AdminPage = loadAdminPage(null, null, authRuntime);
+  const page = new AdminPage({});
+  page._partnersAal2Required = true;
+  page._partnersAal2FailedKeys.add('manualBatches');
+  page._modal = async (options) => {
+    assert.equal(options.autocomplete, 'one-time-code');
+    assert.equal(options.inputMode, 'numeric');
+    assert.equal(options.maxLength, 6);
+    assert.doesNotMatch(options.message, /private-factor-id/);
+    return '012345';
+  };
+  page._toast = () => {};
+  page._partnersRenderAal2Gate = () => {};
+
+  const result = await page._partnersElevateAal2();
+  assert.match(result, /AAL2/);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { code: '012345', factorId: 'private-factor-id' },
+  ]);
+  assert.equal(page._partnersAal2Required, false);
+  assert.equal(page._partnersAal2FailedKeys.size, 0);
+});
+
+test('Admin Partners chooses among sanitized TOTP labels without rendering factor ids', async () => {
+  const calls = [];
+  const authRuntime = {
+    NorvaAuth: {
+      async getMfaStatus() {
+        return {
+          currentLevel: 'aal1',
+          nextLevel: 'aal2',
+          factors: [
+            { id: 'private-first-id', type: 'totp', label: 'Téléphone' },
+            { id: 'private-second-id', type: 'totp', label: 'Clé Finance' },
+          ],
+        };
+      },
+      async challengeAndVerifyMfa(input) { calls.push(input); },
+    },
+  };
+  const AdminPage = loadAdminPage(null, null, authRuntime);
+  const page = new AdminPage({});
+  const prompts = [];
+  page._modal = async (options) => {
+    prompts.push(options);
+    return prompts.length === 1 ? '2' : '654321';
+  };
+  page._toast = () => {};
+  page._partnersRenderAal2Gate = () => {};
+
+  assert.equal(await page._partnersEnsureAal2(), true);
+  assert.match(prompts[0].message, /1 — Téléphone/);
+  assert.match(prompts[0].message, /2 — Clé Finance/);
+  assert.doesNotMatch(prompts[0].message, /private-(?:first|second)-id/);
+  assert.equal(prompts[1].autocomplete, 'one-time-code');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { code: '654321', factorId: 'private-second-id' },
+  ]);
+});
+
+test('Admin Partners preflights AAL2 before a sensitive action and then resumes it', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const order = [];
+  page._partnersCanManageCapabilities = true;
+  page._meId = () => '11111111-1111-4111-8111-111111111111';
+  page._partnersEnsureAal2 = async () => { order.push('aal2'); return true; };
+  page._partnersJustification = async () => { order.push('justification'); return 'Contrôle approuvé'; };
+  page._rpc = async (fn) => { order.push(fn); return {}; };
+
+  const result = await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'capability',
+      partnersCapability: 'finance',
+      partnersEnabled: 'true',
+    },
+  });
+
+  assert.deepEqual(order, [
+    'aal2',
+    'justification',
+    'admin_partners_capability_set',
+  ]);
+  assert.match(result, /Capacité finance activée/);
+});
+
+test('Admin Partners maps MFA failures into distinct sanitized user guidance', () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  assert.match(page._partnersMfaFailureMessage({ status: 401 }), /session a expiré/);
+  assert.match(page._partnersMfaFailureMessage({ status: 429 }), /Trop de tentatives/);
+  assert.match(page._partnersMfaFailureMessage({
+    status: 400,
+    payload: { error_code: 'mfa_factor_not_found' },
+  }), /configuration de sécurité/);
+  assert.match(page._partnersMfaFailureMessage({ status: 503 }), /indisponible/);
+  assert.match(page._partnersMfaFailureMessage({
+    status: 422,
+    payload: { error_code: 'otp_expired' },
+  }), /incorrect ou expiré/);
 });

@@ -210,8 +210,9 @@ déjà mis en quarantaine par la base, est terminal et ne bloque pas les droits.
   transitoires en retry et laisse expirer un lease perdu ; la DB borne les
   retries à 12 leases puis bascule en dead-letter, avec backoff plafonné à 1 h ;
 - exécute une réconciliation shadow `dry_run=true` sur une fenêtre bornée ;
-- publie des heartbeats sanitisés distincts pour `commission`, `maturation` et
-  `reconciliation`, y compris un état `degraded` en cas d'échec ;
+- publie des heartbeats sanitisés distincts pour `commission`, `correction`,
+  `maturation` et `reconciliation`, y compris un état `degraded` en cas
+  d'échec ;
 - ne contacte aucune autre Edge Function ni aucun provider de versement.
 
 Le worker RevenueCat TRANSFER possède son propre heartbeat

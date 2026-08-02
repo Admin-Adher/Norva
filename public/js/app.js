@@ -3525,7 +3525,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=102';
+                s.src = '/js/pages/AdminPage.js?v=103';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);
@@ -3594,6 +3594,29 @@ class App {
         }
     }
 }
+
+// Admin dialogs are created lazily and intentionally do not use the generic
+// `.modal-overlay.active` contract handled by standalone.js. Consume native
+// Android Back through their own Cancel control so the modal keeps ownership
+// of inert cleanup, Promise resolution and exact focus restoration.
+function closeAdminModalForNativeBack() {
+    const modal = document.querySelector('#page-admin .crm-modal-back');
+    if (!modal) return false;
+    const cancelButton = modal.querySelector('button.cancel');
+    if (!cancelButton || typeof cancelButton.click !== 'function') return true;
+    cancelButton.click();
+    return true;
+}
+
+const norvaHandleBackFallback = window.__norvaHandleBack;
+window.__norvaHandleBack = function () {
+    try {
+        if (closeAdminModalForNativeBack()) return 'handled';
+    } catch (_) { /* delegate to the established overlay / route contract */ }
+    return typeof norvaHandleBackFallback === 'function'
+        ? norvaHandleBackFallback()
+        : 'exit';
+};
 
 // Start app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {

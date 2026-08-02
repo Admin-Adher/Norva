@@ -3,9 +3,11 @@
 --
 -- Run manually as the cron owner only AFTER:
 --   1) deploying norva-partners-worker;
---   2) applying all five Partners migrations and passing pgTAP;
+--   2) applying all pending Partners migrations through
+--      20260802135202_partners_sensitive_mutations_aal2.sql and passing pgTAP;
 --   3) confirming the existing norva_cron_shared_secret in Vault;
---   4) invoking /cron/run once and reviewing all three fresh heartbeats.
+--   4) invoking /cron/run once and reviewing fresh commission, correction,
+--      maturation and reconciliation heartbeats.
 --
 -- The endpoint is intentionally not installed by a migration: a code deploy
 -- must be smoke-tested before scheduling traffic. cron.schedule(jobname, ...)

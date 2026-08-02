@@ -260,7 +260,9 @@ Le dépôt ne peut pas créer ces preuves à la place de l'opérateur :
 13. worker financier et heartbeats frais, réconciliation shadow et cycle
     alerte/rétablissement observés sur l'environnement déployé ; preuve que la
     route active est manuelle, que gate DB, flag DB et kill switch Edge API
-    restent faux, et que les trois crons provider/API sont absents ou inactifs ;
+    restent faux, et que les crons provider/API interdits
+    (`norva-partners-payout` et `norva-partners-revolut-api`) sont absents ou
+    inactifs ;
 14. 45 jours calendaires de pilote, deux cycles rapprochés et approbations
     distinctes Legal, Risk, Finance et Operations.
 

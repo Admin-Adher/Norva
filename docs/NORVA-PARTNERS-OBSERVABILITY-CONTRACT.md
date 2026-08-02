@@ -139,7 +139,8 @@ Avant le pilote, conserver dans le journal de release :
 9. chaque incident manuel : référence inconnue remappée exactement,
    montant/devise incorrects libérés seulement après retour, quarantaine
    réouverte, doublon ou paiement tardif produisant hold et récupération ;
-10. les trois crons provider/API absents ou inactifs sous Basic ;
+10. les crons provider/API interdits sous Basic (`norva-partners-payout` et
+    `norva-partners-revolut-api`) absents ou inactifs ;
 11. `payout_thresholds.USD = 1000`, puis le refus de tout payload où cette
     référence dérive ou lorsqu'une devise de règlement n'a pas de seuil exact ;
 12. un frais de versement absorbé par Norva, visible comme coût plateforme sans

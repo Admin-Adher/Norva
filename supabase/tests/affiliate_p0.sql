@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(225);
+select extensions.plan(229);
 
 select extensions.ok(
   exists (
@@ -2445,7 +2445,7 @@ select extensions.ok(
   ) > 0
   and position(
     'partners_balance_lock' in pg_get_functiondef(
-      'affiliate_private.admin_partners_payout_cycle_approve(text,text,text)'::regprocedure
+      'affiliate_private.admin_partners_payout_cycle_approve_pre_aal2_20260802(text,text,text)'::regprocedure
     )
   ) > 0,
   'refund routing and payout approval share one account-currency transaction lock'
@@ -4674,6 +4674,63 @@ select extensions.is(
 reset role;
 
 -- P0 operator-read and AAL2 regression matrix.
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_capability_set_pre_aal2_20260802(uuid,text,boolean,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_program_create_pre_aal2_20260802(text,jsonb,text,text,timestamptz,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_payout_cycle_create_pre_aal2_20260802(date,date,text,boolean,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.admin_partners_payout_cycle_approve_pre_aal2_20260802(text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot execute version-pinned sensitive implementations'
+);
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_capability_set(uuid,text,boolean,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_program_create(text,jsonb,text,text,timestamptz,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_program_activate(text,text,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_payout_cycle_create(date,date,text,boolean,text,text)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_payout_cycle_approve(text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients retain only the guarded sensitive RPC surface'
+);
+
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
 set local role authenticated;
@@ -4834,9 +4891,26 @@ select extensions.throws_ok(
     'AAL1 live payout creation regression probe.'
   ),
   '42501',
-  'live payout cycle creation requires AAL2',
+  'Partners payout cycle creation requires AAL2',
   'Finance cannot create a live payout cycle in AAL1'
 );
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_payout_cycle_create(%L,%L,%L,false,%L,%L)',
+    current_date - 100,
+    current_date - 71,
+    'USD',
+    'CREATE:' || (current_date - 100)::text || ':'
+      || (current_date - 71)::text || ':USD:DRY',
+    'AAL1 dry payout cycle regression probe.'
+  ),
+  '42501',
+  'Partners payout cycle creation requires AAL2',
+  'Finance cannot create a dry-run payout cycle in AAL1'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 select extensions.is(
   public.admin_partners_payout_cycle_create(
     current_date - 100,
@@ -4845,10 +4919,10 @@ select extensions.is(
     false,
     'CREATE:' || (current_date - 100)::text || ':'
       || (current_date - 71)::text || ':USD:DRY',
-    'AAL1 dry payout cycle regression probe.'
+    'AAL2 dry payout cycle regression probe.'
   ) ->> 'action',
   'payout_cycle_created',
-  'Finance can still create a dry-run payout cycle in AAL1'
+  'Finance can create a dry-run payout cycle after AAL2 elevation'
 );
 
 reset role;
@@ -4861,7 +4935,31 @@ where cycle.period_start = current_date - 100
 on conflict (state_key) do update
 set state_value = excluded.state_value;
 
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
 set local role authenticated;
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_payout_cycle_approve(%L,%L,%L)',
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_aal2_dry_cycle'
+    ),
+    'APPROVE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_aal2_dry_cycle'
+    ),
+    'AAL1 dry payout approval regression probe.'
+  ),
+  '42501',
+  'Partners payout cycle approval requires AAL2',
+  'Finance cannot approve a dry-run payout cycle in AAL1'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 select extensions.is(
   public.admin_partners_payout_cycle_approve(
     (
@@ -4874,11 +4972,14 @@ select extensions.is(
       from partners_test_state
       where state_key = 'payout_aal2_dry_cycle'
     ),
-    'AAL1 dry payout approval regression probe.'
+    'AAL2 dry payout approval regression probe.'
   ) ->> 'action',
   'payout_cycle_approved',
-  'Finance can still approve a dry-run payout cycle in AAL1'
+  'Finance can approve a dry-run payout cycle after AAL2 elevation'
 );
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
 select extensions.throws_ok(
   format(
     'select public.admin_partners_payout_cycle_create(%L,%L,%L,true,%L,%L)',
@@ -4890,7 +4991,7 @@ select extensions.throws_ok(
     'AAL1 live promotion regression probe.'
   ),
   '42501',
-  'live payout cycle promotion requires AAL2',
+  'Partners payout cycle creation requires AAL2',
   'Finance cannot promote a dry payout cycle to live in AAL1'
 );
 

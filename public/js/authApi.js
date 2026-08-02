@@ -314,6 +314,176 @@
         return user;
     }
 
+    function decodeJwtClaims(token) {
+        try {
+            const part = String(token || '').split('.')[1] || '';
+            const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+            const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+            return JSON.parse(atob(padded));
+        } catch (_) {
+            return {};
+        }
+    }
+
+    async function withSessionMutationLock(fn) {
+        try {
+            if (navigator.locks?.request) {
+                return navigator.locks.request('norva-session-refresh', fn);
+            }
+        } catch (_) { /* fall through to the strict lease fallback */ }
+
+        // MFA verification rotates the refresh token just like /token. Unlike
+        // the refresh fallback above, this path must eventually execute the
+        // mutation rather than merely adopt another tab's session. Wait for the
+        // existing lease, acquire a unique numeric lease, and only release our
+        // own value so a late tab can never remove a newer owner's lock.
+        try {
+            const deadline = Date.now() + 10_000;
+            while (Date.now() < deadline) {
+                const now = Date.now();
+                const held = Number(localStorage.getItem(KEY_REFRESH_LOCK) || 0);
+                if (!held || now - Math.floor(held) >= 10_000) {
+                    const lease = String(now + Math.random());
+                    localStorage.setItem(KEY_REFRESH_LOCK, lease);
+                    if (localStorage.getItem(KEY_REFRESH_LOCK) === lease) {
+                        try {
+                            return await fn();
+                        } finally {
+                            try {
+                                if (localStorage.getItem(KEY_REFRESH_LOCK) === lease) {
+                                    localStorage.removeItem(KEY_REFRESH_LOCK);
+                                }
+                            } catch (_) { /* noop */ }
+                        }
+                    }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            const error = new Error('Session mutation lock unavailable');
+            error.code = 'mfa_session_lock_timeout';
+            throw error;
+        } catch (error) {
+            if (error?.code === 'mfa_session_lock_timeout') throw error;
+            // Storage can be unavailable in hardened WebViews. JavaScript's
+            // single-threaded execution still protects this tab; modern web
+            // browsers use navigator.locks above for the cross-tab guarantee.
+            return Promise.resolve().then(fn);
+        }
+    }
+
+    function verifiedTotpFactors(user) {
+        return Array.isArray(user?.factors)
+            ? user.factors.filter((factor) => factor?.status === 'verified'
+                && (factor?.factor_type === 'totp' || factor?.factorType === 'totp')
+                && typeof factor?.id === 'string' && factor.id.length > 0)
+            : [];
+    }
+
+    function sanitizedFactorLabel(value, index) {
+        const clean = String(value || '')
+            .replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 48);
+        return clean || `Authenticator ${index + 1}`;
+    }
+
+    /**
+     * Return the current session assurance level and the verified TOTP factors
+     * available for an interactive elevation. Factor identifiers stay internal
+     * to the auth flow and are never rendered by Norva's UI.
+     */
+    async function getMfaStatus() {
+        if (!(await getAccessToken())) {
+            const error = new Error('Authentication required');
+            error.code = 'mfa_authentication_required';
+            throw error;
+        }
+        const user = await getUser();
+        const token = await getAccessToken();
+        if (!token) {
+            const error = new Error('Authentication required');
+            error.code = 'mfa_authentication_required';
+            throw error;
+        }
+        const factors = verifiedTotpFactors(user);
+        return {
+            currentLevel: decodeJwtClaims(token)?.aal === 'aal2' ? 'aal2' : 'aal1',
+            nextLevel: factors.length ? 'aal2' : 'aal1',
+            factors: factors.map((factor, index) => ({
+                id: factor.id,
+                type: 'totp',
+                label: sanitizedFactorLabel(factor.friendly_name || factor.friendlyName, index)
+            }))
+        };
+    }
+
+    /**
+     * Create and verify a TOTP challenge against an already enrolled factor.
+     * GoTrue returns a fresh session whose JWT carries aal=aal2; setSession()
+     * atomically replaces the browser token used by PostgREST and Edge calls.
+     */
+    async function challengeAndVerifyMfa({ code, factorId } = {}) {
+        const normalizedCode = String(code || '').trim();
+        if (!/^\d{6}$/.test(normalizedCode)) {
+            const error = new Error('Invalid authenticator code');
+            error.code = 'mfa_code_invalid';
+            throw error;
+        }
+        if (!(await getAccessToken())) {
+            const error = new Error('Authentication required');
+            error.code = 'mfa_authentication_required';
+            throw error;
+        }
+        const user = await getUser();
+        if (!(await getAccessToken())) {
+            const error = new Error('Authentication required');
+            error.code = 'mfa_authentication_required';
+            throw error;
+        }
+        const factors = verifiedTotpFactors(user);
+        const factor = factors.find((candidate) => !factorId || candidate.id === factorId);
+        if (!factor) {
+            const error = new Error('No verified authenticator factor');
+            error.code = 'mfa_factor_unavailable';
+            throw error;
+        }
+        return withSessionMutationLock(async () => {
+            // Never call getAccessToken()/refreshSession() while holding the same
+            // lock: the session was refreshed before entry and is re-read here.
+            const lockedSession = getSession();
+            const token = lockedSession?.access_token || '';
+            if (!token) {
+                const error = new Error('Authentication required');
+                error.code = 'mfa_authentication_required';
+                throw error;
+            }
+            if (decodeJwtClaims(token)?.aal === 'aal2') return lockedSession;
+
+            const challenge = await request(`/auth/v1/factors/${encodeURIComponent(factor.id)}/challenge`, {
+                method: 'POST',
+                token,
+                body: { factorId: factor.id }
+            });
+            if (!challenge?.id) {
+                const error = new Error('Authenticator challenge unavailable');
+                error.code = 'mfa_challenge_unavailable';
+                throw error;
+            }
+            const verified = await request(`/auth/v1/factors/${encodeURIComponent(factor.id)}/verify`, {
+                method: 'POST',
+                token,
+                body: { challenge_id: challenge.id, code: normalizedCode }
+            });
+            if (!verified?.access_token || decodeJwtClaims(verified.access_token)?.aal !== 'aal2') {
+                const error = new Error('Authenticator verification did not elevate the session');
+                error.code = 'mfa_elevation_failed';
+                throw error;
+            }
+            return setSession(verified);
+        });
+    }
+
     async function signOut() {
         const token = await getAccessToken();
         if (token) {
@@ -406,6 +576,8 @@
         refreshSession,
         getAccessToken,
         getUser,
+        getMfaStatus,
+        challengeAndVerifyMfa,
         captureSessionFromUrl,
         verifyOtp,
         signInWithOAuth,

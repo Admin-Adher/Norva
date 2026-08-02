@@ -40,6 +40,8 @@ class AdminPage {
         this._partnersCache = new Map();
         this._partnersScrollByView = new Map();
         this._partnersRestoreContext = null;
+        this._partnersAal2Required = false;
+        this._partnersAal2FailedKeys = new Set();
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -76,7 +78,10 @@ class AdminPage {
         });
         if (!res.ok) {
             const t = await res.text().catch(() => '');
-            throw new Error(`${fn}: ${res.status} ${t.slice(0, 140)}`);
+            const error = new Error(`${fn}: ${res.status} ${t.slice(0, 140)}`);
+            error.status = res.status;
+            try { error.payload = JSON.parse(t); } catch (_) { error.payload = {}; }
+            throw error;
         }
         return res.json();
     }
@@ -712,6 +717,10 @@ class AdminPage {
 #page-admin .partners-priority-strip.is-alert{border-left-color:var(--adm-red);background:linear-gradient(135deg,rgba(248,113,113,.08),var(--adm-card));}
 #page-admin .partners-priority-strip strong,#page-admin .partners-priority-strip span{display:block;}
 #page-admin .partners-priority-strip span{margin-top:4px;color:var(--adm-tx2);font-size:12px;line-height:1.45;}
+#page-admin .partners-aal2-gate{display:flex;align-items:center;justify-content:space-between;gap:16px;border-left-color:var(--adm-amber);background:linear-gradient(135deg,rgba(251,191,36,.09),var(--adm-card));}
+#page-admin .partners-aal2-gate[hidden]{display:none!important;}
+#page-admin .partners-aal2-gate .partners-action{flex:0 0 auto;min-height:44px;}
+@media(max-width:820px){#page-admin .partners-aal2-gate{align-items:stretch;flex-direction:column;}#page-admin .partners-aal2-gate .partners-action{width:100%;}}
 #page-admin .partners-overview-list{padding:0;overflow:hidden;}
 #page-admin .partners-overview-list-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--adm-line);}
 #page-admin .partners-overview-list-head h2{margin:0;color:var(--adm-tx);font-size:15px;}
@@ -1182,7 +1191,18 @@ class AdminPage {
             back.setAttribute('aria-modal', 'true');
             back.setAttribute('aria-labelledby', uid + 't');
             back.setAttribute('aria-describedby', uid + 'd');
-            const promptHtml = o.prompt ? `<input type="text" class="crm-modal-input" aria-labelledby="${uid}d" value="${AdminPage.esc(o.def || '')}" />` : '';
+            const promptAttrs = o.prompt ? [
+                `type="${AdminPage.esc(o.inputType || 'text')}"`,
+                'class="crm-modal-input"',
+                `aria-label="${AdminPage.esc(o.inputLabel || o.message || 'Saisie')}"`,
+                `value="${AdminPage.esc(o.def || '')}"`,
+                `autocomplete="${AdminPage.esc(o.autocomplete || 'off')}"`,
+                o.inputMode ? `inputmode="${AdminPage.esc(o.inputMode)}"` : '',
+                Number.isSafeInteger(o.maxLength) && o.maxLength > 0
+                    ? `maxlength="${o.maxLength}"` : '',
+                o.pattern ? `pattern="${AdminPage.esc(o.pattern)}"` : ''
+            ].filter(Boolean).join(' ') : '';
+            const promptHtml = o.prompt ? `<input ${promptAttrs} />` : '';
             back.innerHTML = `<div class="crm-modal"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
                 <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
             root.appendChild(back);
@@ -1196,12 +1216,13 @@ class AdminPage {
             const finish = (val) => {
                 document.removeEventListener('keydown', onKey, true);
                 if (shell) shell.removeAttribute('inert');
+                if (input) input.value = '';
                 back.remove();
                 if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } }
                 resolve(val);
             };
             const onKey = (e) => {
-                if (e.key === 'Escape') { e.preventDefault(); finish(cancelVal); return; }
+                if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') { e.preventDefault(); finish(cancelVal); return; }
                 if (e.key === 'Tab') {
                     const f = focusables(); if (!f.length) return;
                     const first = f[0], last = f[f.length - 1], a = document.activeElement;
@@ -4448,6 +4469,7 @@ class AdminPage {
 
           <section ${paneAttrs('finance')}>
             <div class="partners-pane-intro"><div><h2>Finance et Revolut</h2><p>Les écarts et actions requises sont affichés avant les historiques sains.</p></div></div>
+            <section id="partners-admin-aal2" class="partners-priority-strip partners-aal2-gate" aria-labelledby="partners-admin-aal2-title" hidden></section>
             <div class="partners-control-stack">
               <section id="partners-admin-reconciliation-incidents" class="partners-control-card" aria-busy="true">
                 <div id="partners-admin-incidents-status" class="partners-sr-only" role="status" aria-live="polite"></div>
@@ -4572,6 +4594,11 @@ class AdminPage {
             if (current?.token !== token || generation !== this._partnersPageGeneration
                 || this._route !== 'partners') return null;
             this._partnersCache.set(key, data);
+            if (this._partnersAal2FailedKeys.delete(key)
+                && this._partnersAal2FailedKeys.size === 0) {
+                this._partnersAal2Required = false;
+                this._partnersRenderAal2Gate();
+            }
             render(data);
             return data;
         } catch (error) {
@@ -4581,6 +4608,11 @@ class AdminPage {
             const aborted = error?.name === 'AbortError' && !request.timedOut;
             if (!aborted) {
                 this._partnersCache.delete(key);
+                if (this._partnersIsAal2Error(error)) {
+                    this._partnersAal2Required = true;
+                    this._partnersAal2FailedKeys.add(key);
+                    this._partnersRenderAal2Gate();
+                }
                 if (typeof options.onError === 'function') {
                     try { options.onError(); }
                     catch (_) { this._partnersRenderModuleError(options.targetId, options.title, key); }
@@ -4619,6 +4651,140 @@ class AdminPage {
                 priority.innerHTML = '<strong>Priorités indisponibles</strong><span>Aucune conclusion de santé n’est déduite.</span>';
             }
         }
+    }
+
+    _partnersIsAal2Error(error) {
+        const code = String(error?.payload?.code || error?.payload?.error_code || error?.code || '');
+        return [400, 403].includes(Number(error?.status))
+            && (/(requires\s+AAL2|AAL2\s+required|aal2_required)/i.test(String(error?.message || ''))
+                || /aal2_required/i.test(code));
+    }
+
+    _partnersMfaFailureMessage(error) {
+        const status = Number(error?.status || 0);
+        const code = String(
+            error?.payload?.error_code
+            || error?.payload?.code
+            || error?.code
+            || ''
+        ).toLowerCase();
+        if (status === 401 || /authentication_required|session|jwt/.test(code)) {
+            return 'Votre session a expiré. Reconnectez-vous avant de valider avec Authenticator.';
+        }
+        if (status === 429 || /rate|too_many|over_request/.test(code)) {
+            return 'Trop de tentatives Authenticator. Attendez un instant avant de réessayer.';
+        }
+        if (/factor_unavailable|factor_not_found|mfa_disabled|not_enabled|hook/.test(code)) {
+            return 'Authenticator n’est pas disponible pour ce compte. Vérifiez sa configuration de sécurité.';
+        }
+        if ([400, 422].includes(status)
+            || /code_invalid|invalid_totp|otp_expired|verification_failed|elevation_failed/.test(code)) {
+            return 'Code incorrect ou expiré. Aucun accès sensible n’a été ouvert.';
+        }
+        if (status >= 500 || status === 0 || /network|lock_timeout|challenge|unavailable/.test(code)) {
+            return 'Le service Authenticator est momentanément indisponible. Aucun accès sensible n’a été ouvert.';
+        }
+        return 'La validation Authenticator a échoué. Aucun accès sensible n’a été ouvert.';
+    }
+
+    _partnersRenderAal2Gate() {
+        const gate = document.getElementById('partners-admin-aal2');
+        if (!gate) return;
+        if (!this._partnersAal2Required) {
+            gate.hidden = true;
+            gate.innerHTML = '';
+            return;
+        }
+        gate.hidden = false;
+        gate.innerHTML = `<div><strong id="partners-admin-aal2-title">Validation Finance requise</strong>
+          <span>Cette session est connectée, mais les données sensibles restent verrouillées tant que le code à 6 chiffres de votre application Authenticator n’a pas élevé la session à AAL2.</span></div>
+          <span class="partners-sr-only" role="status" aria-live="polite">Validation Authenticator requise pour les données Finance.</span>
+          <button type="button" class="partners-action" data-partners-action="aal2-elevate">Vérifier avec Authenticator</button>`;
+    }
+
+    async _partnersChooseMfaFactor(factors) {
+        if (!Array.isArray(factors) || !factors.length) return null;
+        if (factors.length === 1) return factors[0];
+        const choices = factors.map((factor, index) => (
+            `${index + 1} — ${String(factor?.label || `Authenticator ${index + 1}`).slice(0, 48)}`
+        )).join(' · ');
+        const selection = await this._modal({
+            title: 'Choisir Authenticator',
+            message: `Plusieurs facteurs vérifiés sont disponibles : ${choices}`,
+            prompt: true,
+            inputMode: 'numeric',
+            autocomplete: 'off',
+            maxLength: String(factors.length).length,
+            pattern: '[0-9]+',
+            inputLabel: `Numéro du facteur, de 1 à ${factors.length}`,
+            okLabel: 'Continuer'
+        });
+        if (selection === null) return null;
+        const index = Number(selection) - 1;
+        if (!Number.isSafeInteger(index) || index < 0 || index >= factors.length) {
+            this._toast('Choisissez le numéro d’un Authenticator affiché.', 'err');
+            return null;
+        }
+        return factors[index];
+    }
+
+    async _partnersEnsureAal2() {
+        const auth = window.NorvaAuth;
+        if (!auth?.getMfaStatus || !auth?.challengeAndVerifyMfa) {
+            this._toast('La validation Authenticator n’est pas disponible dans cette version. Rechargez Norva.', 'err');
+            return false;
+        }
+        let status;
+        try {
+            status = await auth.getMfaStatus();
+        } catch (error) {
+            this._toast(this._partnersMfaFailureMessage(error), 'err');
+            return false;
+        }
+        if (status?.currentLevel === 'aal2') {
+            this._partnersAal2Required = false;
+            this._partnersAal2FailedKeys.clear();
+            this._partnersRenderAal2Gate();
+            return true;
+        }
+        if (status?.nextLevel !== 'aal2' || !Array.isArray(status?.factors) || !status.factors.length) {
+            this._toast('Aucun facteur TOTP vérifié n’est associé à ce compte Admin. Configurez Authenticator avant d’ouvrir Finance.', 'err');
+            return false;
+        }
+        const factor = await this._partnersChooseMfaFactor(status.factors);
+        if (!factor) return false;
+        const code = await this._modal({
+            title: 'Validation Authenticator',
+            message: 'Saisissez le code actuel à 6 chiffres de votre application Authenticator. Norva ne conserve jamais ce code.',
+            prompt: true,
+            inputMode: 'numeric',
+            autocomplete: 'one-time-code',
+            maxLength: 6,
+            pattern: '[0-9]{6}',
+            inputLabel: 'Code Authenticator à 6 chiffres',
+            okLabel: 'Vérifier et continuer'
+        });
+        if (code === null) return false;
+        if (!/^\d{6}$/.test(code)) {
+            this._toast('Saisissez exactement les 6 chiffres affichés par Authenticator.', 'err');
+            return false;
+        }
+        try {
+            await auth.challengeAndVerifyMfa({ code, factorId: factor.id });
+        } catch (error) {
+            this._toast(this._partnersMfaFailureMessage(error), 'err');
+            return false;
+        }
+        this._partnersAal2Required = false;
+        this._partnersAal2FailedKeys.clear();
+        this._partnersRenderAal2Gate();
+        return true;
+    }
+
+    async _partnersElevateAal2() {
+        return (await this._partnersEnsureAal2())
+            ? 'Session sécurisée à AAL2. Les données Finance sont maintenant déverrouillées.'
+            : false;
     }
 
     _partnersApplyCapabilities(data) {
@@ -7627,6 +7793,10 @@ class AdminPage {
         const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
         const isoCountry = /^[A-Z]{2}$/;
         const currencyCode = /^[A-Z]{3}$/;
+        if (action === 'aal2-elevate') return this._partnersElevateAal2();
+        if (action !== 'revolut-incident-page' && !(await this._partnersEnsureAal2())) {
+            return false;
+        }
         if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
             'payout-approve', 'fiscal-review'].includes(action)
             && !this._partnersCanUseOperationalAction(action)) return false;

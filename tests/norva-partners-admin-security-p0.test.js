@@ -22,6 +22,24 @@ const revolutMigration = fs.readFileSync(
   ),
   'utf8',
 );
+const sensitiveMutationMigration = fs.readFileSync(
+  path.join(
+    root,
+    'supabase',
+    'migrations',
+    '20260802135202_partners_sensitive_mutations_aal2.sql',
+  ),
+  'utf8',
+);
+const adminFoundationMigration = fs.readFileSync(
+  path.join(
+    root,
+    'supabase',
+    'migrations',
+    '20260729201447_partners_tv_admin_analytics.sql',
+  ),
+  'utf8',
+);
 
 function section(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -58,43 +76,78 @@ test('shared Partners reads authorize Support, Risk or Finance operators', () =>
 });
 
 test('capability and programme mutations enforce AAL2 at the private boundary', () => {
-  const boundary = section(
+  const helper = section(
     migration,
     'create or replace function affiliate_private.partners_require_aal2(',
-    '-- ---------------------------------------------------------------------------\n-- Payout AAL2 audit',
+    'alter function affiliate_private.admin_partners_capability_set(',
+  );
+  const boundary = section(
+    sensitiveMutationMigration,
+    'create or replace function affiliate_private.admin_partners_capability_set(',
+    '-- ---------------------------------------------------------------------------\n-- Version-pin the existing payout implementations',
   );
 
-  assert.match(boundary, /auth\.jwt\(\) ->> 'aal'/);
-  assert.match(boundary, /<> 'aal2'/);
-  assert.match(boundary, /using errcode = '42501'/);
+  assert.match(helper, /auth\.jwt\(\) ->> 'aal'/);
+  assert.match(helper, /<> 'aal2'/);
+  assert.match(helper, /using errcode = '42501'/);
   assert.match(
     boundary,
-    /admin_partners_capability_set[\s\S]*Partners capability mutation/,
+    /admin_partners_capability_set[\s\S]*partners_require_aal2\([\s\S]*Partners capability mutation/,
   );
   assert.match(
     boundary,
-    /admin_partners_program_create[\s\S]*Partners program mutation/,
+    /admin_partners_program_create[\s\S]*partners_require_aal2\([\s\S]*Partners program mutation/,
   );
   assert.match(
     boundary,
-    /admin_partners_program_activate[\s\S]*Partners program mutation/,
+    /admin_partners_program_activate[\s\S]*partners_require_aal2\([\s\S]*Partners program mutation/,
   );
-  assert.match(boundary, /security invoker/g);
 
-  const privileges = migration.slice(
-    migration.indexOf('-- Explicit privilege matrix.'),
+  const privileges = sensitiveMutationMigration.slice(
+    sensitiveMutationMigration.indexOf('-- Explicit privilege matrix:'),
   );
   assert.match(
     privileges,
-    /admin_partners_capability_set_pre_aal2_20260802[\s\S]*from public, anon, authenticated, service_role/,
+    /admin_partners_payout_cycle_create_pre_aal2_20260802[\s\S]*admin_partners_payout_cycle_approve_pre_aal2_20260802[\s\S]*from public, anon, authenticated, service_role/,
   );
   assert.match(
     privileges,
-    /grant execute on function[\s\S]*public\.admin_partners_capability_set[\s\S]*public\.admin_partners_program_create[\s\S]*public\.admin_partners_program_activate[\s\S]*to authenticated/,
+    /grant execute on function[\s\S]*public\.admin_partners_capability_set[\s\S]*public\.admin_partners_program_create[\s\S]*public\.admin_partners_program_activate[\s\S]*public\.admin_partners_payout_cycle_create[\s\S]*public\.admin_partners_payout_cycle_approve[\s\S]*to authenticated/,
   );
 });
 
-test('live payout AAL2 guards cover create, promotion and approval without dry-run checks', () => {
+test('payout cycle RPCs require AAL2 before both dry and live execution', () => {
+  const createWrapper = section(
+    sensitiveMutationMigration,
+    'create function affiliate_private.admin_partners_payout_cycle_create(',
+    'alter function affiliate_private.admin_partners_payout_cycle_approve(',
+  );
+  const approveWrapper = section(
+    sensitiveMutationMigration,
+    'create function affiliate_private.admin_partners_payout_cycle_approve(',
+    '-- Renaming keeps the old function OIDs.',
+  );
+
+  assert.match(
+    createWrapper,
+    /partners_require_aal2\([\s\S]*Partners payout cycle creation/,
+  );
+  assert.match(
+    createWrapper,
+    /admin_partners_payout_cycle_create_pre_aal2_20260802\(/,
+  );
+  assert.doesNotMatch(createWrapper, /if p_live_execution/);
+  assert.match(
+    approveWrapper,
+    /partners_require_aal2\([\s\S]*Partners payout cycle approval/,
+  );
+  assert.match(
+    approveWrapper,
+    /admin_partners_payout_cycle_approve_pre_aal2_20260802\(/,
+  );
+});
+
+test('payout AAL2 wrappers preserve live trigger defenses and maker-checker', () => {
   const promotion = section(
     migration,
     'affiliate_private.guard_partners_payout_live_promotion_aal2()',
@@ -116,4 +169,18 @@ test('live payout AAL2 guards cover create, promotion and approval without dry-r
   );
   assert.match(existingGuard, /live payout cycle creation requires AAL2/);
   assert.match(existingGuard, /live payout cycle approval requires AAL2/);
+
+  const approvalImplementation = section(
+    adminFoundationMigration,
+    'affiliate_private.admin_partners_payout_cycle_approve(',
+    'create or replace function affiliate_private.admin_partners_risk_queue(',
+  );
+  assert.match(
+    approvalImplementation,
+    /v_actor = coalesce\([\s\S]*v_cycle\.live_promoted_by_pseudonym,[\s\S]*v_cycle\.created_by_pseudonym/,
+  );
+  assert.match(
+    approvalImplementation,
+    /live payout approval controls are incomplete/,
+  );
 });

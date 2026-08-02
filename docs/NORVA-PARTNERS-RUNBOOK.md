@@ -577,9 +577,9 @@ select cron.schedule(
 );
 ```
 
-Remplacer `<project-ref>`, confirmer qu'une seule ligne porte ce nom et vérifier
-les compteurs leased/succeeded/retry/dead-letter ainsi que la réconciliation
-shadow. Ne jamais inscrire cette cible par migration.
+Confirmer qu'un seul job porte ce nom et vérifier les compteurs
+leased/succeeded/retry/dead-letter ainsi que la réconciliation shadow. Ne
+jamais inscrire cette cible par migration.
 
 ## 4. Smoke tests
 
@@ -662,8 +662,9 @@ idempotente, des retries exponentiels bornés et une dead-letter. Alerter sur :
 - capacité Admin attendue mais non configurée.
 
 Les workers publient des heartbeats réels et indépendants :
-`commission`, `maturation`, `reconciliation`, `revenuecat_transfer` et, lorsque
-`revolut_api` est effectivement exécuté, `payout`. Le mode `revolut_manual`
+`commission`, `correction`, `maturation`, `reconciliation`,
+`revenuecat_transfer` et, lorsque `revolut_api` est effectivement exécuté,
+`payout`. Le mode `revolut_manual`
 n'invente pas de heartbeat provider : le dashboard expose séparément lots
 préparés/exportés/soumis, imports de relevé, lignes non rapprochées,
 quarantaines et décisions Finance en attente. Un worker non configuré reste
