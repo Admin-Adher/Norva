@@ -92,6 +92,9 @@ NORVA_REFERRAL_EDGE_HMAC_SECRET
 NORVA_PARTNERS_API_URL
 ```
 
+Toute modification de ces variables doit être suivie d'un nouveau déploiement
+Pages : les déploiements existants conservent leur instantané d'environnement.
+
 `NORVA_REFERRAL_COOKIE_SECRET` reste exclusivement côté serveur : il ne doit
 jamais être injecté dans Pages. Le worker financier réutilise le secret cron
 Norva existant (`NORVA_CRON_SHARED_SECRET`, conservé dans Vault) et ne possède
