@@ -83,8 +83,9 @@ Le preflight accepte seulement :
 - headers `authorization`, `apikey`, `content-type`, `idempotency-key`,
   `x-client-info` ;
 - route existante parmi `/bootstrap`, `/access-request`, `/applications`,
-  `/activate`, `/links`, `/dashboard`, `/kyc/sessions`, `/referral/claim`,
-  `/payout-profile` et `/tv-relays/consume` ;
+  `/activate`, `/activation/reconcile`, `/links`, `/dashboard`, `/kyc/sessions`, `/referral/claim`,
+  `/fiscal-profile`, `/payout-onboarding`, `/payout-profile` et
+  `/tv-relays/consume` ;
 - origine présente et autorisée.
 
 Les clients Android natifs sans header `Origin` restent autorisés. Dès qu'un
@@ -440,6 +441,45 @@ ne peut jamais forcer une activation. La RPC n'active le compte que si le KYC
 stocké côté serveur est déjà `verified`, l'e-mail est confirmé, la politique et
 le programme sont actifs, et les gates/allowlists sont satisfaites.
 
+### `POST /activation/reconcile`
+
+Relance l'évaluation serveur après un KYC asynchrone lorsque le webhook a
+enregistré `verified` pendant qu'une gate, l'allowlist ou une version de contrat
+était indisponible. Le body exact est `{}`. Cette route n'utilise volontairement
+pas `Idempotency-Key` : elle verrouille le compte et ne réalise que la transition
+conditionnelle `pending_verification → active`. Un retry est donc un no-op et ne
+peut émettre qu'un seul événement `account_activated`.
+
+```json
+{
+  "schema_version": 1,
+  "action": "activation_reconciled",
+  "changed": false,
+  "account": {
+    "exists": true,
+    "status": "pending_verification",
+    "verification_status": "verified",
+    "contract_status": "accepted",
+    "link_status": "none"
+  },
+  "next_action": "activate_account"
+}
+```
+
+Chaque appel relit le programme P0 `20 % / 30 jours / J+45`, la politique et ses
+dates, le provider/résultat KYC, les versions de conditions/divulgation, la
+confirmation e-mail, les release gates et l'allowlist. `changed=false` est un
+état normal si une condition reste fermée ou si le compte était déjà actif. Un
+drift de version retourne `next_action=accept_terms`; une activation réussie
+retourne `changed=true`, `status=active` et `next_action=share_link`. Les clients
+doivent piloter l'état depuis `next_action`, y compris `start_verification` si le
+provider ou la capacité exigée par la politique a changé, sans déduire une
+activation du seul statut KYC.
+Un compte déjà actif est relu comme un no-op `share_link` uniquement si son
+programme, sa politique, ses preuves et son e-mail restent cohérents. Une
+incohérence active échoue fermée vers le support ; fermer une launch gate seule
+ne suspend toutefois pas rétroactivement un compte valide.
+
 ### `POST /links`
 
 Crée le premier lien ou effectue une rotation atomique. Le body exact est `{}`.
@@ -488,16 +528,166 @@ préexistante. Sur le Web, la route Pages `/r/{code}` résout le lien côté ser
 pose un cookie `__Host-norva_referral` `HttpOnly; Secure; SameSite=Lax`, puis
 `POST /api/partners/claim` transmet le claim sans l'exposer au JavaScript.
 
-### `GET|PUT /payout-profile`
+### `GET|POST /fiscal-profile`
 
-Lit ou enregistre uniquement une référence bénéficiaire tokenisée par un
-provider de versement ainsi qu'un libellé déjà masqué. Aucun IBAN, numéro de
-compte ou donnée fiscale brute n'entre dans une réponse publique. Sous
-`revolut_manual`, le token opaque est proposé par l'Edge depuis le registre
-Finance, lié par une attestation HMAC serveur versionnée, puis activé uniquement
-après contrôle d'un second acteur Finance/AAL2. Le client et le read model ne
-reçoivent que l'état et la destination masquée ; ni UUID bénéficiaire interne,
-ni empreinte HMAC ne sont publics.
+Cette route ne collecte aucun identifiant fiscal, formulaire brut ou champ
+libre. `GET` retourne toujours un objet stable. Sans profil :
+
+```json
+{
+  "schema_version": 1,
+  "action": "fiscal_profile_loaded",
+  "fiscal_profile": {
+    "exists": false,
+    "status": "missing",
+    "country_code": null,
+    "declaration_version": null,
+    "submitted_at": null,
+    "reviewed_at": null
+  }
+}
+```
+
+`POST` exige `Idempotency-Key` et le body exact :
+
+```json
+{
+  "countryCode": "FR",
+  "declarationAccepted": true,
+  "declarationVersion": "partners-tax-self-certification-v1"
+}
+```
+
+Le pays doit être strictement celui du compte actif, KYC vérifié et contrat
+accepté. La déclaration et sa version sont figées par le serveur. La mutation
+peut uniquement créer ou remettre le profil en `pending`; elle ne peut jamais
+produire `verified`. La revue autoritative reste
+`admin_partners_fiscal_review_by_public_id(p_account_public_id,p_status,p_provider,p_reference_hash,p_tax_form_type,p_justification)`,
+protégée par les capacités Support et Finance ainsi que par une session AAL2.
+La file paginée
+`admin_partners_fiscal_profiles(p_limit,p_offset,p_status,p_search)` expose
+uniquement `partner_key`, pays, statut et horodatages de soumission/revue. Elle
+ne renvoie ni UUID de compte, ni e-mail, ni référence provider, ni valeur
+fiscale. Les anciens points d'entrée Admin basés sur l'UUID ne sont plus
+exécutables par `authenticated`.
+
+Lors de la migration, tout ancien état `verified|pending|rejected` dépourvu de
+preuve d'auto-attestation est placé en `expired`, sans inventer de déclaration
+ni d'horodatage. Cet unique état de récupération peut donc être retourné avec
+`declaration_version=null` et `submitted_at=null`; un nouveau `POST` explicite
+le remet en `pending`. `pending` et `verified` exigent toujours la déclaration
+v1 et `self_attested_at`. L'ancien RPC service de résultat fiscal ne peut plus
+créer de profil ni écrire `verified`.
+
+Le replay exact est évalué avant le quota. Une nouvelle clé est limitée à une
+tentative par 60 secondes et huit sur 24 heures, avec `429 rate_limited` et
+`Retry-After: 60`. Les clés d'idempotence âgées de plus de 30 jours sont
+purgeables par lots bornés ; le profil fiscal et son audit ne sont pas purgés.
+
+### `GET|POST /payout-onboarding`
+
+Cette route ouvre une demande de contact pour le rail manuel sans accepter de
+provider client, IBAN, token bénéficiaire, destination masquée, nom, e-mail ou
+champ libre. `POST` exige `Idempotency-Key` et exactement :
+
+```json
+{
+  "currency": "USD",
+  "contactConsent": true
+}
+```
+
+`revolut_manual` est implicite côté serveur. Le compte doit être actif, KYC
+vérifié et contractuellement accepté. Son profil fiscal doit déjà être
+`verified`, porter la déclaration figée v1, la preuve d'auto-attestation, la
+revue horodatée et la provenance tokenisée de cette revue, dans le même pays
+que le compte. La route pays/devise, la devise et la policy doivent toutes être
+actives et cohérentes. `GET` retourne l'état le plus récent et
+`allowed_currencies`, calculé uniquement à partir de ces corridors.
+Sans demande, l'état vaut :
+
+```json
+{
+  "exists": false,
+  "status": "not_started",
+  "currency": null,
+  "execution_adapter": "revolut_manual",
+  "reconfiguration_required": false,
+  "requested_at": null,
+  "updated_at": null,
+  "reason_code": null
+}
+```
+
+Les états persistants sont `pending|in_progress|rejected|completed`. Les
+transitions Admin sont append-only et auditables. Une nouvelle révision peut
+être créée après rejet, ou après `completed` si le binding/profil a depuis été
+révoqué ou désactivé ; une seule révision peut rester ouverte par compte.
+Une ligne `rejected` ne peut jamais revenir à `pending` : la resoumission crée
+obligatoirement une nouvelle révision immuable. Le même quota 60 secondes,
+huit nouvelles clés par 24 heures et la même rétention d'idempotence de 30
+jours s'appliquent à cette mutation, après vérification du replay exact.
+
+`reconfiguration_required` est toujours présent. Il vaut `true` uniquement
+pour un état historique `completed` dont le profil ou le binding Revolut actif
+n'est plus valable. Le client doit alors relire l'état autoritatif, afficher la
+reconfiguration et autoriser un nouveau `POST`, lequel crée `revision + 1` en
+`pending`. Pour `not_started|pending|in_progress|rejected`, et pour un
+`completed` encore prêt, il vaut `false`. Une réponse idempotente reste
+immuable ; après toute réponse `replayed=true`, le client effectue donc un GET
+avant de rendre l'état courant.
+
+La file Finance est exposée par
+`admin_partners_payout_onboarding_requests(p_limit,p_offset,p_status,p_search)`
+et la décision par
+`admin_partners_payout_onboarding_request_decide(p_request_key,p_action,p_reason_code,p_justification)`.
+Les deux exigent Admin + capacité Finance + AAL2 dans la RPC. Les actions sont
+`start|reject|complete`; `complete` exige un profil Revolut actif relié au
+binding actif du registre maker-checker existant. Immédiatement avant chaque
+completion, y compris un retry déjà `completed`, la base reverrouille et
+revalide : compte actif, KYC et contrat courants, programme P0 et policy encore
+effectifs, versions de conditions acceptées, profil fiscal `verified` avec
+attestation v1 et provenance, devise active, puis corridor Revolut
+`revolut_manual` actif. Un compte held, une policy expirée, un profil fiscal
+expiré, une route désactivée ou `revolut_api` ferment donc la completion. La
+file expose uniquement la
+clé publique `por_…`, la clé partenaire `prt_…`, pays, devise, révision, états,
+horodatages et indicateurs de disponibilité du binding/profil. Pour ouvrir la
+fiche sans UUID interne, l'Admin utilise
+`admin_partners_detail_by_public_id(p_account_public_id)`.
+
+Après `start`, la proposition du bénéficiaire passe par l'Edge
+`POST /manual/beneficiaries/propose` avec `request_key` et jamais avec
+`account_id` ou `currency` fournis par le navigateur. La RPC
+`admin_partners_revolut_beneficiary_binding_authorize_by_request(...)` résout
+ces deux valeurs, exige la dernière révision `in_progress`, le consentement de
+contact, l'éligibilité courante et le corridor manuel exact. Le payload signé
+utilise la clé publique `por_…` et ne contient pas l'UUID du compte.
+
+Le contact opérationnel est audité par
+`admin_partners_payout_onboarding_contact(p_request_key,p_template_key,p_idempotency_key)`.
+Il réutilise `cloud_support_tickets`, `cloud_support_messages` et l'outbox e-mail
+existante, en résolvant l'adresse confirmée uniquement côté serveur. Les seuls
+modèles sont `secure_setup_invitation`, `setup_follow_up` et
+`reconfiguration_required`; aucun texte libre n'est accepté. Tous rappellent
+de ne jamais transmettre par e-mail des coordonnées bancaires/fiscales, des
+documents d'identité, un mot de passe ou un code MFA. Le replay est idempotent,
+la cadence est bornée à un envoi par minute et trois par 24 heures et la réponse
+ne contient ni e-mail ni UUID utilisateur/compte.
+
+### `GET /payout-profile`
+
+Cette surface membre est strictement en lecture seule. Elle retourne seulement
+l'état et la destination déjà masquée. Le navigateur ne peut transmettre ni
+provider, ni token bénéficiaire, ni libellé masqué, ni IBAN, ni numéro de compte,
+ni donnée fiscale. Sous `revolut_manual`, le token opaque est proposé uniquement
+par l'Edge Finance depuis le registre serveur, lié par une attestation HMAC
+versionnée, puis activé après contrôle d'un second acteur Finance/AAL2. Ni UUID
+bénéficiaire interne ni empreinte HMAC ne sont publics.
+L'ancien setter public
+`partners_service_payout_profile_set(uuid,text,text,text,text,text)` n'est plus
+exécutable par `service_role`; seul le registre Finance maker-checker peut
+préparer la destination.
 
 ### `POST /tv-relays/consume`
 
@@ -704,6 +894,10 @@ La découverte et `GET|POST /access-request` restent accessibles à tout compte
 Cloud utilisateur Web/mobile, Admin inclus, même quand le programme est fermé.
 Cette demande pré-pilote est isolée de l'adhésion, du KYC, des liens et de la
 finance.
+Une vérification KYC asynchrone se termine par un refresh puis, pour un compte
+`pending_verification + verified`, par `POST /activation/reconcile`. Le client
+rend ensuite strictement le `next_action` sanitisé ; il ne considère jamais le
+webhook ou le retour navigateur Didit comme une activation.
 
 ### Referral Web
 

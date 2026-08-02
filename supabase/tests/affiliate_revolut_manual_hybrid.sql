@@ -343,7 +343,7 @@ select extensions.ok(
   'statement ingestion uses the signed seven-argument service contract'
 );
 select extensions.ok(
-  has_function_privilege(
+  not has_function_privilege(
     'service_role',
     'public.partners_service_payout_profile_set(uuid,text,text,text,text,text)',
     'EXECUTE'
@@ -353,7 +353,7 @@ select extensions.ok(
     'affiliate_private.partners_service_payout_profile_set(uuid,text,text,text,text,text)',
     'EXECUTE'
   ),
-  'generic payout setup can only cross its hardened public boundary'
+  'legacy generic payout setup is unreachable; Finance maker-checker owns setup'
 );
 select extensions.ok(
   has_function_privilege(

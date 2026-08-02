@@ -659,6 +659,14 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
   );
   assert.match(
     workflow,
+    /supabase\/tests\/affiliate_member_write_rate_limits\.sql/,
+  );
+  assert.match(
+    workflow,
+    /ops\/hetzner\/volumes\/api\/kong\.yml/,
+  );
+  assert.match(
+    workflow,
     /supabase\/functions\/_shared\/didit-partners\.test\.ts/,
   );
   assert.equal(denoConfig.lock.path, './deno.partners.lock');

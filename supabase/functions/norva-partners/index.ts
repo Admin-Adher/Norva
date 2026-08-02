@@ -21,31 +21,35 @@ import {
   corsHeaders,
   isUuid,
   mapDatabaseError,
-  parseAccessRequestInput,
   parseAcceptTermsInput,
+  parseAccessRequestInput,
   parseAllowedOrigins,
   parseApplicationInput,
   parseBearerToken,
   parseBootstrapQuery,
   parseDashboardQuery,
   parseEmptyMutationInput,
+  parseFiscalProfileInput,
   parseIdempotencyKey,
+  parsePayoutOnboardingInput,
   PARTNERS_API_VERSION,
   PARTNERS_RPC,
+  partnersMemberWriteRequestHash,
   PublicApiError,
   routeFromPath,
-  sanitizeBootstrapData,
   sanitizeAccessRequestData,
   sanitizeAccessRequestMutationData,
+  sanitizeActivationReconcile,
+  sanitizeBootstrapData,
   sanitizeDashboardData,
+  sanitizeFiscalProfileGet,
+  sanitizeFiscalProfileMutation,
+  sanitizeMemberWriteReservation,
   sanitizeMutationData,
+  sanitizePayoutOnboardingGet,
+  sanitizePayoutOnboardingMutation,
 } from "../_shared/partners-api.ts";
-import {
-  parsePayoutProfileInput,
-  PayoutContractError,
-  sanitizePayoutProfileGet,
-  sanitizePayoutProfileSet,
-} from "../_shared/partners-payout.ts";
+import { sanitizePayoutProfileGet } from "../_shared/partners-payout.ts";
 import {
   claimHashFromSignedToken,
   loadReferralSecrets,
@@ -199,6 +203,16 @@ Deno.serve(async (req) => {
         "mutation",
       );
       cleanData = sanitizeMutationData(data, "terms_accepted");
+    } else if (route === "/activation/reconcile") {
+      assertNoQueryParameters(url);
+      parseEmptyMutationInput(await readJsonBody(req));
+      cleanData = sanitizeActivationReconcile(
+        await callRpc(
+          PARTNERS_RPC.activationReconcile,
+          { p_user_id: userId },
+          "mutation",
+        ),
+      );
     } else if (route === "/links") {
       assertNoQueryParameters(url);
       const idempotencyKey = parseIdempotencyKey(
@@ -340,9 +354,16 @@ Deno.serve(async (req) => {
       );
     } else if (route === "/payout-profile") {
       assertNoQueryParameters(url);
+      cleanData = sanitizePayoutProfileGet(
+        await callRpc(PARTNERS_RPC.payoutProfileGet, {
+          p_user_id: userId,
+        }),
+      );
+    } else if (route === "/fiscal-profile") {
+      assertNoQueryParameters(url);
       if (req.method === "GET") {
-        cleanData = sanitizePayoutProfileGet(
-          await callRpc(PARTNERS_RPC.payoutProfileGet, {
+        cleanData = sanitizeFiscalProfileGet(
+          await callRpc(PARTNERS_RPC.fiscalProfileGet, {
             p_user_id: userId,
           }),
         );
@@ -350,34 +371,85 @@ Deno.serve(async (req) => {
         const idempotencyKey = parseIdempotencyKey(
           req.headers.get("Idempotency-Key"),
         );
-        let input;
-        try {
-          input = parsePayoutProfileInput(await readJsonBody(req));
-        } catch (error) {
-          if (error instanceof PublicApiError) throw error;
-          if (error instanceof PayoutContractError) {
-            throw new PublicApiError(
-              400,
-              "invalid_request",
-              "The request payload is invalid.",
-            );
-          }
-          throw error;
-        }
-        cleanData = sanitizePayoutProfileSet(
+        const input = parseFiscalProfileInput(await readJsonBody(req));
+        const operation = "fiscal_profile_self_attestation" as const;
+        const requestHash = await partnersMemberWriteRequestHash(operation, [
+          input.countryCode,
+          input.declarationVersion,
+          "accepted",
+        ]);
+        sanitizeMemberWriteReservation(
           await callRpc(
-            PARTNERS_RPC.payoutProfileSet,
+            PARTNERS_RPC.memberWriteReserve,
             {
               p_user_id: userId,
+              p_operation: operation,
               p_idempotency_key: idempotencyKey,
-              p_provider: input.provider,
-              p_beneficiary_token_ref: input.beneficiaryTokenRef,
-              p_display_masked: input.displayMasked,
-              p_currency: input.currency,
+              p_request_hash: requestHash,
+            },
+            "mutation",
+          ),
+          operation,
+        );
+        cleanData = sanitizeFiscalProfileMutation(
+          await callRpc(
+            PARTNERS_RPC.fiscalProfileSelfAttest,
+            {
+              p_user_id: userId,
+              p_country_code: input.countryCode,
+              p_declaration_version: input.declarationVersion,
+              p_declaration_accepted: input.declarationAccepted,
+              p_idempotency_key: idempotencyKey,
             },
             "mutation",
           ),
         );
+        status = 201;
+      }
+    } else if (route === "/payout-onboarding") {
+      assertNoQueryParameters(url);
+      if (req.method === "GET") {
+        cleanData = sanitizePayoutOnboardingGet(
+          await callRpc(PARTNERS_RPC.payoutOnboardingGet, {
+            p_user_id: userId,
+          }),
+        );
+      } else {
+        const idempotencyKey = parseIdempotencyKey(
+          req.headers.get("Idempotency-Key"),
+        );
+        const input = parsePayoutOnboardingInput(await readJsonBody(req));
+        const operation = "payout_onboarding" as const;
+        const requestHash = await partnersMemberWriteRequestHash(operation, [
+          input.currency,
+          "contact-consent",
+        ]);
+        sanitizeMemberWriteReservation(
+          await callRpc(
+            PARTNERS_RPC.memberWriteReserve,
+            {
+              p_user_id: userId,
+              p_operation: operation,
+              p_idempotency_key: idempotencyKey,
+              p_request_hash: requestHash,
+            },
+            "mutation",
+          ),
+          operation,
+        );
+        cleanData = sanitizePayoutOnboardingMutation(
+          await callRpc(
+            PARTNERS_RPC.payoutOnboardingRequest,
+            {
+              p_user_id: userId,
+              p_currency: input.currency,
+              p_contact_consent: input.contactConsent,
+              p_idempotency_key: idempotencyKey,
+            },
+            "mutation",
+          ),
+        );
+        status = 201;
       }
     } else if (route === "/tv-relays/consume") {
       assertNoQueryParameters(url);
@@ -596,8 +668,38 @@ async function readJsonBody(req: Request): Promise<unknown> {
 
   let text: string;
   try {
-    text = await req.text();
-  } catch {
+    const reader = req.body?.getReader();
+    if (!reader) throw new Error("missing_body");
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      received += value.byteLength;
+      if (received > 4_096) {
+        try {
+          await reader.cancel("payload_too_large");
+        } catch {
+          // Best-effort cancellation only; the public response remains 413.
+        }
+        throw new PublicApiError(
+          413,
+          "payload_too_large",
+          "The request payload is too large.",
+        );
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (error instanceof PublicApiError) throw error;
     throw new PublicApiError(
       400,
       "invalid_request",

@@ -20,6 +20,7 @@ class PartnersPage {
         this._showTimeoutMs = 10000;
         this._dashboardTimeoutMs = 10000;
         this._payoutTimeoutMs = 8000;
+        this._payoutSetupTimeoutMs = 8000;
         this._accessRequestTimeoutMs = 8000;
         this._bootstrapTtlMs = 30000;
         this._sessionIdentityKey = '';
@@ -332,9 +333,31 @@ class PartnersPage {
                 ...jurisdiction
             });
             if (!this._visible || token !== this._showToken) return;
+            let renderData = envelope.data;
+            let activationNextAction = null;
+            const account = renderData.account;
+            if (account.exists && account.status === 'pending_verification') {
+                const reconcile = window.NorvaCloud?.partners?.activation?.reconcile;
+                if (typeof reconcile !== 'function') {
+                    throw new Error('partners_activation_reconcile_unavailable');
+                }
+                const reconciled = await reconcile({ signal: this._showAbort.signal });
+                if (!this._visible || token !== this._showToken) return;
+                activationNextAction = reconciled.data.next_action;
+                renderData = {
+                    ...renderData,
+                    account: {
+                        ...renderData.account,
+                        ...reconciled.data.account
+                    }
+                };
+                // Reconciliation can activate the account. Never retain the
+                // pre-reconcile bootstrap snapshot for a later visibility read.
+                this.bootstrapEnvelope = null;
+            }
             this._jurisdiction = jurisdiction;
-            this.setEntryVisibility(envelope.data.visibility.visible === true);
-            this.renderBootstrap(envelope.data);
+            this.setEntryVisibility(renderData.visibility.visible === true);
+            this.renderBootstrap(renderData, { nextAction: activationNextAction });
             if (returnedFromKyc) {
                 window.NorvaModal?.toast?.(
                     'Identity check submitted. Norva is confirming the signed provider result.',
@@ -718,14 +741,14 @@ class PartnersPage {
         this.bindCommonActions();
     }
 
-    renderBootstrap(data) {
+    renderBootstrap(data, { nextAction = null } = {}) {
         const view = this.resolveView(data);
         if (view === 'discovery') {
             this.renderDiscovery(data);
             return;
         }
         if (view === 'pending') {
-            this.renderPending(data);
+            this.renderPending(data, { nextAction });
             return;
         }
         if (view === 'attention') {
@@ -1519,11 +1542,13 @@ class PartnersPage {
         this.focusTitle();
     }
 
-    renderPending(data) {
+    renderPending(data, { nextAction = null } = {}) {
         const verification = this.statusLabel(data.account.verification_status, 'Identity verification');
         const contract = this.statusLabel(data.account.contract_status, 'Programme terms');
         const link = this.statusLabel(data.account.link_status, 'Referral link');
-        const needsTerms = data.account.contract_status !== 'accepted';
+        const needsTerms = nextAction
+            ? nextAction === 'accept_terms'
+            : data.account.contract_status !== 'accepted';
         const canAcceptTerms = needsTerms
             && Boolean(data.policy?.terms_version)
             && Boolean(data.policy?.disclosure_version);
@@ -1531,14 +1556,20 @@ class PartnersPage {
             data.account.verification_status
         );
         const canStartKyc = !needsTerms
-            && ['not_started', 'failed', 'expired'].includes(
-                data.account.verification_status
-            )
+            && (nextAction
+                ? nextAction === 'start_verification'
+                : ['not_started', 'failed', 'expired'].includes(
+                    data.account.verification_status
+                ))
             && Boolean(data.policy?.disclosure_version);
-        const verificationPending = data.account.verification_status === 'pending';
+        const verificationPending = nextAction
+            ? nextAction === 'await_verification'
+            : data.account.verification_status === 'pending';
         const activationPending = !needsTerms
             && data.account.verification_status === 'verified'
-            && data.account.status !== 'active';
+            && data.account.status !== 'active'
+            && (!nextAction || nextAction === 'activate_account');
+        const supportRequired = nextAction === 'contact_support';
         const stateCopy = needsTerms
             ? {
                 badge: 'Application received',
@@ -1546,7 +1577,14 @@ class PartnersPage {
                 copy: 'Your application is saved. Identity verification stays locked until the current terms and disclosure are accepted.',
                 announcement: 'Your Norva Partners application is ready for the current programme terms.'
             }
-            : (verificationRetry
+            : (supportRequired
+                ? {
+                    badge: 'Support required',
+                    title: 'Your verified partner profile needs a secure review.',
+                    copy: 'Norva cannot complete activation automatically from this state. Contact Support; no referral or financial action has been enabled locally.',
+                    announcement: 'Norva Partners requires a secure Support review.'
+                }
+                : (verificationRetry
                 ? {
                     badge: data.account.verification_status === 'expired'
                         ? 'Verification expired'
@@ -1574,7 +1612,7 @@ class PartnersPage {
                             title: 'Your individual partner profile is being checked.',
                             copy: 'Norva waits for authoritative server confirmation before enabling a referral link. Refreshing this page cannot bypass verification.',
                             announcement: 'Norva Partners identity verification is pending.'
-                        })));
+                        }))));
         const pendingAction = canAcceptTerms
             ? `<button class="btn btn-primary partners-primary-action" type="button"
                     data-partners-accept-terms>Accept current programme terms</button>`
@@ -1591,11 +1629,14 @@ class PartnersPage {
                     <button class="btn btn-primary partners-primary-action" type="submit"
                         data-partners-start-kyc disabled aria-describedby="partners-verification-note">${verificationRetry ? 'Retry identity verification' : 'Verify my identity securely'}</button>
                   </form>`
-                : (verificationPending || activationPending
+                : (supportRequired
+                    ? `<a class="btn btn-secondary partners-primary-action"
+                        href="/support.html?returnTo=%2Fapp%23partners">Contact support</a>`
+                    : (verificationPending || activationPending
                     ? `<button class="btn btn-secondary partners-primary-action" type="button"
                         data-partners-refresh-verification aria-describedby="partners-verification-note">${activationPending ? 'Check activation status' : 'Check verification status'}</button>`
                     : `<button class="btn btn-secondary partners-primary-action" type="button" disabled
-                        aria-describedby="partners-verification-note">Identity verification unavailable</button>`));
+                        aria-describedby="partners-verification-note">Identity verification unavailable</button>`)));
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
                 ${this.header('Norva Partners')}
@@ -1617,11 +1658,13 @@ class PartnersPage {
                                 ? 'The authoritative programme policy is unavailable. Terms cannot be accepted until the server restores it.'
                                 : (canStartKyc
                                     ? `You will continue on Didit's secure hosted verification. Norva records consent version ${this.escape(data.policy.disclosure_version)} and receives only the verification result needed for programme eligibility.`
-                                    : (verificationPending
+                                    : (supportRequired
+                                        ? 'Support will review the authoritative account state. Do not send identity documents, bank details or tax identifiers in a support message.'
+                                        : (verificationPending
                                         ? 'Your hosted verification was started. Norva will unlock the next step only after the signed provider result is received.'
                                         : (activationPending
                                             ? 'Your verified result is recorded. Refreshing checks only the authoritative activation state; it cannot create a link locally.'
-                                            : 'The authoritative server has not enabled a new identity-verification action for this account.'))))
+                                            : 'The authoritative server has not enabled a new identity-verification action for this account.')))))
                     }</p>
                     <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
                     ${this.programWindowNote(data.program)}
@@ -1906,6 +1949,12 @@ class PartnersPage {
             partners_access_requests_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_action_not_allowed: 'This action is not available for the current verified account state.',
             partners_kyc_consent_invalid: 'Review and confirm the current verification statements before continuing.',
+            partners_fiscal_declaration_invalid: 'Review and confirm the current tax-residence statement before continuing.',
+            partners_fiscal_country_mismatch: 'Your tax-residence country must match the authoritative country on your Norva account.',
+            partners_payout_onboarding_invalid: 'Choose an available payout currency and confirm secure account contact.',
+            partners_payout_currency_unavailable: 'This payout currency is not available for your current account policy.',
+            partners_request_timeout: 'Norva did not confirm this secure action in time. Its state is unknown, so retrying will resume the same idempotent request.',
+            fiscal_profile_required: 'The tax-residence review must be completed before payout setup can begin.',
             authentication_required: 'Sign in again to continue securely.',
             invalid_access_token: 'Your session expired. Sign in again to continue.',
             partners_user_session_required: 'Open Norva Partners from a signed-in cloud account.'
@@ -2643,13 +2692,387 @@ class PartnersPage {
         }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
+        // Async step rendering can briefly detach the focused control and move
+        // focus to <body>. Keep the modal boundary authoritative during that
+        // frame instead of allowing Tab to escape into the inert background.
+        if (!dialog.contains(document.activeElement)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
             event.preventDefault();
             last.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
             event.preventDefault();
             first.focus();
         }
+    }
+
+    mountPayoutSetup(overlay, accountCountry) {
+        const fiscalTarget = overlay?.querySelector('[data-partners-fiscal-step]');
+        const payoutTarget = overlay?.querySelector('[data-partners-onboarding-step]');
+        const dialogStatus = overlay?.querySelector('[data-partners-payout-dialog-status]');
+        if (!fiscalTarget || !payoutTarget) return () => {};
+
+        const setup = {
+            fiscal: {
+                phase: 'loading', data: null, timedOut: false,
+                controller: null, token: 0
+            },
+            payout: {
+                phase: 'loading', data: null, allowedCurrencies: [], timedOut: false,
+                controller: null, token: 0
+            }
+        };
+        let active = true;
+
+        const focusSetup = (selector) => requestAnimationFrame(() => {
+            if (!active || !overlay.isConnected || !selector) return;
+            const target = overlay.querySelector(selector);
+            try { target?.focus({ preventScroll: true }); } catch (_) { target?.focus?.(); }
+        });
+        const setStatus = (message, tone = 'status') => {
+            if (!dialogStatus) return;
+            dialogStatus.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+            dialogStatus.setAttribute('aria-live', tone === 'error' ? 'assertive' : 'polite');
+            dialogStatus.textContent = message;
+        };
+        const formatDate = (value) => {
+            if (!value) return '';
+            try {
+                return new Intl.DateTimeFormat(undefined, {
+                    dateStyle: 'medium',
+                    timeStyle: 'short'
+                }).format(new Date(value));
+            } catch (_) { return ''; }
+        };
+        const reasonMessage = (reason) => ({
+            route_unavailable: 'The manual payout route is not available for this account country.',
+            beneficiary_setup_required: 'Finance still needs to configure the secure beneficiary destination.',
+            identity_mismatch: 'The verified identity does not match the payout setup information.',
+            unsupported_destination: 'This payout destination is not supported by the current manual route.',
+            compliance_review: 'A compliance review is required before Finance can continue.',
+            duplicate_request: 'Another payout setup request already covers this destination.'
+        })[reason] || 'Finance could not complete this request. Contact support before trying again.';
+        const runAction = async (button, loadingLabel, action) => {
+            if (!button || button.disabled || typeof action !== 'function') return;
+            const previous = button.textContent;
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = loadingLabel;
+            setStatus(loadingLabel);
+            try {
+                await action();
+            } catch (error) {
+                if (!active || !overlay.isConnected) return;
+                setStatus(this.partnerErrorMessage(error), 'error');
+                if (button.isConnected) {
+                    button.disabled = false;
+                    button.removeAttribute('aria-busy');
+                    button.textContent = previous;
+                    try { button.focus({ preventScroll: true }); } catch (_) { button.focus?.(); }
+                }
+            }
+        };
+
+        const renderFiscal = ({ focus = '' } = {}) => {
+            fiscalTarget.removeAttribute('aria-busy');
+            if (setup.fiscal.phase === 'loading') {
+                fiscalTarget.setAttribute('aria-busy', 'true');
+                fiscalTarget.innerHTML = `<div class="partners-setup-heading"><span>1</span><div>
+                    <h3>Tax residence</h3><p>Checking your secure self-certification status…</p>
+                </div></div><div class="partners-setup-skeleton" aria-hidden="true"></div>`;
+                return;
+            }
+            if (setup.fiscal.phase === 'error' || setup.fiscal.phase === 'unavailable') {
+                fiscalTarget.innerHTML = `<div class="partners-setup-heading"><span>1</span><div>
+                    <h3 tabindex="-1" data-partners-fiscal-heading>Tax residence</h3>
+                    <p>No status was inferred and no attestation was submitted.</p></div></div>
+                    <div class="partners-setup-notice is-error" role="alert">
+                        <strong>Secure status unavailable</strong>
+                        <span>${setup.fiscal.timedOut
+                            ? 'The request took too long. You can retry safely.'
+                            : 'This app cannot load the authoritative tax-residence status right now.'}</span>
+                    </div>
+                    <button class="btn btn-secondary partners-setup-action" type="button" data-partners-fiscal-retry>Retry tax status</button>`;
+                fiscalTarget.querySelector('[data-partners-fiscal-retry]')?.addEventListener(
+                    'click', () => loadSetup('fiscal', { focus: '[data-partners-fiscal-heading]' })
+                );
+                focusSetup(focus);
+                return;
+            }
+            const fiscal = setup.fiscal.data;
+            if (!fiscal) return;
+            const countryLabel = accountCountry
+                ? this.regionLabel({ country_code: accountCountry })
+                : '';
+            if (fiscal.status === 'pending') {
+                fiscalTarget.innerHTML = `<div class="partners-setup-heading"><span class="is-complete">1</span><div>
+                    <h3 tabindex="-1" data-partners-fiscal-heading>Tax residence attestation received</h3>
+                    <p>Submitted ${this.escape(formatDate(fiscal.submitted_at) || 'securely')}.</p></div></div>
+                    <div class="partners-setup-notice is-pending" role="status">
+                        <strong>Finance review pending</strong>
+                        <span>This is a self-attestation, not a tax validation. No tax identifier or document was collected.</span>
+                    </div>`;
+                focusSetup(focus);
+                renderPayout();
+                return;
+            }
+            if (fiscal.status === 'verified') {
+                fiscalTarget.innerHTML = `<div class="partners-setup-heading"><span class="is-complete">1</span><div>
+                    <h3 tabindex="-1" data-partners-fiscal-heading>Tax residence review complete</h3>
+                    <p>${this.escape(this.regionLabel({ country_code: fiscal.country_code }))} · reviewed ${this.escape(formatDate(fiscal.reviewed_at) || 'securely')}</p></div></div>
+                    <div class="partners-setup-notice is-success" role="status">
+                        <strong>Ready for payout setup</strong>
+                        <span>Only the reviewed country and status are shown here. No tax identifier is stored in this browser.</span>
+                    </div>`;
+                focusSetup(focus);
+                renderPayout();
+                return;
+            }
+            const canAttest = /^[A-Z]{2}$/.test(accountCountry);
+            const renewal = fiscal.status === 'rejected' || fiscal.status === 'expired';
+            fiscalTarget.innerHTML = `<div class="partners-setup-heading"><span>1</span><div>
+                <h3 tabindex="-1" data-partners-fiscal-heading>${renewal ? 'Renew your tax residence attestation' : 'Confirm your tax residence'}</h3>
+                <p>This statement is reviewed before payout setup can begin.</p></div></div>
+                ${canAttest ? `<form class="partners-setup-form" data-partners-fiscal-form>
+                    <div class="partners-setup-value"><span>Country on your Norva account</span><strong>${this.escape(countryLabel)} · ${this.escape(accountCountry)}</strong></div>
+                    <label class="partners-consent-row">
+                        <input type="checkbox" data-partners-fiscal-confirm>
+                        <span>I certify that this is my current country of tax residence and that this statement is accurate.</span>
+                    </label>
+                    <p class="partners-setup-privacy">Do not enter a tax ID or upload a document. Norva does not request either in this flow. If the country is wrong, update your account before continuing.</p>
+                    <button class="btn btn-primary partners-setup-action" type="submit" data-partners-fiscal-submit disabled>${renewal ? 'Submit a new attestation' : 'Submit self-certification'}</button>
+                </form>` : `<div class="partners-setup-notice is-error" role="alert">
+                    <strong>Account country unavailable</strong><span>Norva cannot safely create an attestation until the account country is authoritative.</span>
+                </div>`}`;
+            const form = fiscalTarget.querySelector('[data-partners-fiscal-form]');
+            const confirmation = form?.querySelector('[data-partners-fiscal-confirm]');
+            const submit = form?.querySelector('[data-partners-fiscal-submit]');
+            confirmation?.addEventListener('change', () => {
+                if (submit) submit.disabled = confirmation.checked !== true;
+            });
+            form?.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!confirmation?.checked || !submit) {
+                    confirmation?.focus();
+                    setStatus('Confirm the tax-residence statement before submitting.', 'error');
+                    return;
+                }
+                await runAction(submit, 'Submitting securely…', async () => {
+                    const idempotencyKey = this.actionKey('fiscal-profile');
+                    const submitAttestation = () => window.NorvaCloud.partners.submitFiscalProfile({
+                        countryCode: accountCountry,
+                        declarationAccepted: true,
+                        declarationVersion: 'partners-tax-self-certification-v1',
+                        idempotencyKey
+                    });
+                    let envelope;
+                    try {
+                        envelope = await submitAttestation();
+                    } catch (error) {
+                        if (error?.code === 'partners_request_timeout') {
+                            // The first result is unknown. Re-submit the exact
+                            // payload with the same key; a GET could describe an
+                            // older rejected/expired attestation.
+                            envelope = await submitAttestation();
+                        }
+                        if (!envelope) throw error;
+                    }
+                    if (!active || !overlay.isConnected) return;
+                    setup.fiscal.data = envelope.data.fiscal_profile;
+                    setup.fiscal.phase = 'ready';
+                    this.clearActionKey('fiscal-profile');
+                    renderFiscal({ focus: '[data-partners-fiscal-heading]' });
+                    setStatus(envelope.data.replayed
+                        ? 'Tax residence submission confirmed by Norva.'
+                        : 'Tax residence self-certification submitted for review.');
+                });
+            });
+            focusSetup(focus);
+            renderPayout();
+        };
+
+        const renderPayout = ({ focus = '' } = {}) => {
+            payoutTarget.removeAttribute('aria-busy');
+            if (setup.payout.phase === 'loading') {
+                payoutTarget.setAttribute('aria-busy', 'true');
+                payoutTarget.innerHTML = `<div class="partners-setup-heading"><span>2</span><div>
+                    <h3>Payout destination</h3><p>Checking the supervised Revolut setup queue…</p>
+                </div></div><div class="partners-setup-skeleton" aria-hidden="true"></div>`;
+                return;
+            }
+            if (setup.payout.phase === 'error' || setup.payout.phase === 'unavailable') {
+                payoutTarget.innerHTML = `<div class="partners-setup-heading"><span>2</span><div>
+                    <h3 tabindex="-1" data-partners-onboarding-heading>Payout destination</h3>
+                    <p>No setup state was inferred and no request was created.</p></div></div>
+                    <div class="partners-setup-notice is-error" role="alert"><strong>Secure queue unavailable</strong>
+                    <span>${setup.payout.timedOut ? 'The request took too long. You can retry safely.' : 'Norva cannot load the Finance queue status right now.'}</span></div>
+                    <button class="btn btn-secondary partners-setup-action" type="button" data-partners-onboarding-retry>Retry payout status</button>`;
+                payoutTarget.querySelector('[data-partners-onboarding-retry]')?.addEventListener(
+                    'click', () => loadSetup('payout', { focus: '[data-partners-onboarding-heading]' })
+                );
+                focusSetup(focus);
+                return;
+            }
+            const onboarding = setup.payout.data;
+            if (!onboarding) return;
+            if (onboarding.status === 'pending' || onboarding.status === 'in_progress') {
+                const inProgress = onboarding.status === 'in_progress';
+                payoutTarget.innerHTML = `<div class="partners-setup-heading"><span class="is-complete">2</span><div>
+                    <h3 tabindex="-1" data-partners-onboarding-heading>${inProgress ? 'Finance is configuring your payout' : 'Configuration request received'}</h3>
+                    <p>${this.escape(onboarding.currency)} · Revolut Business manual</p></div></div>
+                    <div class="partners-setup-notice is-pending" role="status">
+                        <strong>${inProgress ? 'Secure setup in progress' : 'Waiting for Finance review'}</strong>
+                        <span>Expected review window: 1–3 business days. This is a service target, not a guaranteed transfer date.</span>
+                    </div>
+                    <p class="partners-setup-privacy">Finance completes the destination in Revolut. No IBAN, beneficiary token or bank detail is collected here.</p>`;
+                focusSetup(focus);
+                return;
+            }
+            const needsReconfiguration = onboarding.status === 'completed'
+                && onboarding.reconfiguration_required === true;
+            if (onboarding.status === 'completed' && !needsReconfiguration) {
+                payoutTarget.innerHTML = `<div class="partners-setup-heading"><span class="is-complete">2</span><div>
+                    <h3 tabindex="-1" data-partners-onboarding-heading>Payout destination configured</h3>
+                    <p>${this.escape(onboarding.currency)} · Revolut Business manual</p></div></div>
+                    <div class="partners-setup-notice is-success" role="status"><strong>Setup complete</strong>
+                    <span>Your destination was finalized by Finance. Transfers still follow balance, maturation and release controls.</span></div>`;
+                focusSetup(focus);
+                return;
+            }
+            const fiscalVerified = setup.fiscal.data?.status === 'verified';
+            if (!fiscalVerified) {
+                payoutTarget.innerHTML = `<div class="partners-setup-heading"><span>2</span><div>
+                    <h3 tabindex="-1" data-partners-onboarding-heading>Payout destination</h3><p>Supervised Revolut configuration</p></div></div>
+                    <div class="partners-setup-notice" role="status"><strong>Waiting for tax-residence review</strong>
+                    <span>Once step 1 is reviewed, you can request secure setup without entering any bank details.</span></div>`;
+                focusSetup(focus);
+                return;
+            }
+            const currencies = setup.payout.allowedCurrencies;
+            const rejected = onboarding.status === 'rejected';
+            payoutTarget.innerHTML = `<div class="partners-setup-heading"><span>2</span><div>
+                <h3 tabindex="-1" data-partners-onboarding-heading>${needsReconfiguration
+                    ? 'Reconfigure your payout destination'
+                    : (rejected ? 'Request needs attention' : 'Request payout configuration')}</h3>
+                <p>Finance completes the destination manually in Revolut Business.</p></div></div>
+                ${needsReconfiguration ? `<div class="partners-setup-notice is-pending" role="status"><strong>Previous destination is no longer active</strong>
+                    <span>Request a new supervised configuration. No old bank or beneficiary detail is exposed in Norva.</span></div>` : ''}
+                ${rejected ? `<div class="partners-setup-notice is-error" role="alert"><strong>Previous request not completed</strong>
+                    <span>${this.escape(reasonMessage(onboarding.reason_code))}</span></div>` : ''}
+                ${currencies.length ? `<form class="partners-setup-form" data-partners-onboarding-form>
+                    <label class="partners-setup-field"><span>Payout currency</span>
+                        <select data-partners-onboarding-currency>${currencies.map((currency) => `<option value="${this.escape(currency)}">${this.escape(currency)}</option>`).join('')}</select>
+                    </label>
+                    <label class="partners-consent-row"><input type="checkbox" data-partners-onboarding-consent>
+                        <span>I agree that Norva Finance may contact me through my verified Norva account channel to complete this manual setup.</span>
+                    </label>
+                    <p class="partners-setup-privacy">This request contains only your selected currency and consent. Never enter an IBAN, tax ID, card number or beneficiary token in Norva.</p>
+                    <button class="btn btn-primary partners-setup-action" type="submit" data-partners-onboarding-submit disabled>${needsReconfiguration ? 'Request secure reconfiguration' : 'Request secure configuration'}</button>
+                </form>` : `<div class="partners-setup-notice is-error" role="alert"><strong>No supported currency</strong>
+                    <span>Finance has not opened a payout currency for this account policy. No request can be created.</span></div>`}`;
+            const form = payoutTarget.querySelector('[data-partners-onboarding-form]');
+            const consent = form?.querySelector('[data-partners-onboarding-consent]');
+            const currency = form?.querySelector('[data-partners-onboarding-currency]');
+            const submit = form?.querySelector('[data-partners-onboarding-submit]');
+            consent?.addEventListener('change', () => {
+                if (submit) submit.disabled = consent.checked !== true;
+            });
+            form?.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (!consent?.checked || !submit || !currency?.value) {
+                    (consent?.checked ? currency : consent)?.focus();
+                    setStatus('Choose a currency and confirm secure account contact first.', 'error');
+                    return;
+                }
+                await runAction(submit, 'Sending request…', async () => {
+                    const selectedCurrency = currency.value;
+                    const idempotencyKey = this.actionKey('payout-onboarding');
+                    const requestOnboarding = () => window.NorvaCloud.partners.requestPayoutOnboarding({
+                        currency: selectedCurrency,
+                        contactConsent: true,
+                        idempotencyKey
+                    });
+                    let envelope;
+                    try {
+                        envelope = await requestOnboarding();
+                    } catch (error) {
+                        if (error?.code === 'partners_request_timeout') {
+                            // Only the replay of this exact mutation can prove
+                            // that this request—not an older rejected/completed
+                            // row—was accepted by Finance.
+                            envelope = await requestOnboarding();
+                        }
+                        if (!envelope) throw error;
+                    }
+                    if (!active || !overlay.isConnected) return;
+                    setup.payout.data = envelope.data.payout_onboarding;
+                    setup.payout.phase = 'ready';
+                    this.clearActionKey('payout-onboarding');
+                    renderPayout({ focus: '[data-partners-onboarding-heading]' });
+                    setStatus(envelope.data.replayed
+                        ? 'Payout configuration request confirmed by Norva.'
+                        : 'Secure payout configuration request sent to Finance.');
+                });
+            });
+            focusSetup(focus);
+        };
+
+        const loadSetup = async (kind, { focus = '' } = {}) => {
+            const state = kind === 'fiscal' ? setup.fiscal : setup.payout;
+            const api = kind === 'fiscal'
+                ? window.NorvaCloud?.partners?.fiscalProfile
+                : window.NorvaCloud?.partners?.payoutOnboarding;
+            state.controller?.abort();
+            state.token += 1;
+            const token = state.token;
+            state.timedOut = false;
+            if (typeof api !== 'function') {
+                state.phase = 'unavailable';
+                (kind === 'fiscal' ? renderFiscal : renderPayout)({ focus });
+                return null;
+            }
+            state.phase = 'loading';
+            (kind === 'fiscal' ? renderFiscal : renderPayout)();
+            const controller = new AbortController();
+            state.controller = controller;
+            const timeout = setTimeout(() => {
+                state.timedOut = true;
+                controller.abort();
+            }, this._payoutSetupTimeoutMs);
+            try {
+                const envelope = await api({ signal: controller.signal });
+                if (!active || !overlay.isConnected || state.token !== token
+                    || controller.signal.aborted) return null;
+                state.phase = 'ready';
+                if (kind === 'fiscal') state.data = envelope.data.fiscal_profile;
+                else {
+                    state.data = envelope.data.payout_onboarding;
+                    state.allowedCurrencies = envelope.data.allowed_currencies;
+                }
+                (kind === 'fiscal' ? renderFiscal : renderPayout)({ focus });
+                return state.data;
+            } catch (error) {
+                if (!active || !overlay.isConnected || state.token !== token) return null;
+                if (error?.name === 'AbortError' && !state.timedOut) return null;
+                state.phase = 'error';
+                state.data = null;
+                if (kind === 'payout') state.allowedCurrencies = [];
+                (kind === 'fiscal' ? renderFiscal : renderPayout)({ focus });
+                setStatus(this.partnerErrorMessage(error), 'error');
+                return null;
+            } finally {
+                clearTimeout(timeout);
+                if (state.token === token) state.controller = null;
+            }
+        };
+
+        Promise.allSettled([loadSetup('fiscal'), loadSetup('payout')]);
+        return () => {
+            active = false;
+            setup.fiscal.controller?.abort();
+            setup.payout.controller?.abort();
+        };
     }
 
     openPayoutDialog(data, opener) {
@@ -2673,8 +3096,11 @@ class PartnersPage {
                 <div><dt>${this.escape(destination.currency)} destination</dt>
                 <dd>${this.escape(this.payoutProviderLabel(destination.provider))} · ${this.escape(destination.display_masked)} · ${this.escape(destination.status)}</dd></div>`).join('')
             : '<div><dt>Destination</dt><dd>Not provisioned</dd></div>';
-        const manualRevolut = !destinations.length
-            || destinations.some((destination) => destination.provider === 'revolut');
+        const accountCountry = String(
+            this._dashboardPages?.[0]?.account?.country_code
+            || this.bootstrapEnvelope?.envelope?.data?.policy?.country_code
+            || ''
+        ).trim().toUpperCase();
         const overlay = document.createElement('div');
         overlay.className = 'partners-country-picker-overlay partners-qr-overlay partners-payout-overlay';
         overlay.setAttribute('data-region-picker', '');
@@ -2698,9 +3124,11 @@ class PartnersPage {
                     ${destinationRows}
                     <div><dt>Fiscal profile</dt><dd>${this.escape(data.fiscal?.status || 'missing')}${data.fiscal?.country_code ? ` · ${this.escape(data.fiscal.country_code)}` : ''}</dd></div>
                 </dl>
-                <p id="partners-payout-copy">${manualRevolut
-                    ? 'Manual Revolut destinations are provisioned by Norva Finance through the secured beneficiary registry and a second-operator check.'
-                    : 'Tokenized destinations are provisioned through the secure payout-provider onboarding flow.'} This page never accepts an IBAN, card number, tax identifier or beneficiary token.</p>
+                <p id="partners-payout-copy">Manual Revolut destinations are provisioned by Norva Finance after your request. Revolut Business Basic remains a supervised manual process. This page never accepts an IBAN, card number, tax identifier or beneficiary token.</p>
+                <div class="partners-payout-setup" aria-label="Payout setup steps">
+                    <section class="partners-setup-step" data-partners-fiscal-step aria-busy="true"></section>
+                    <section class="partners-setup-step" data-partners-onboarding-step aria-busy="true"></section>
+                </div>
                 <div class="partners-actions partners-actions-row">
                     <button class="btn btn-secondary" type="button" data-partners-payout-refresh>Refresh secure status</button>
                     <button class="btn btn-primary" type="button" data-partners-payout-close>Close</button>
@@ -2712,11 +3140,20 @@ class PartnersPage {
         const closeButton = overlay.querySelector('[data-partners-payout-close]');
         const refreshButton = overlay.querySelector('[data-partners-payout-refresh]');
         const dialogStatus = overlay.querySelector('[data-partners-payout-dialog-status]');
+        let cleanupSetup = () => {};
+        let closed = false;
         this.container.classList.add('partners-picker-open');
         try { closeButton?.focus({ preventScroll: true }); } catch (_) { closeButton?.focus?.(); }
         const restoreBackground = this.isolateOverlayBackground(overlay);
+        const handleDialogKeydown = (event) => {
+            if (!overlay.isConnected || closed) return;
+            this.trapDialogFocus(dialog, event, close);
+        };
         const close = ({ restoreFocus = true } = {}) => {
-            if (!overlay.isConnected) return false;
+            if (closed || !overlay.isConnected) return false;
+            closed = true;
+            document.removeEventListener('keydown', handleDialogKeydown, true);
+            cleanupSetup();
             restoreBackground();
             overlay.remove();
             this.container?.classList.remove('partners-picker-open');
@@ -2733,7 +3170,11 @@ class PartnersPage {
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) close();
         });
-        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        // Capture at document level while the overlay is mounted. A fiscal or
+        // payout rerender may remove the focused control before the next frame;
+        // Escape/Android Back must still close, and Tab must remain trapped.
+        document.addEventListener('keydown', handleDialogKeydown, true);
+        cleanupSetup = this.mountPayoutSetup(overlay, accountCountry);
         let refreshInFlight = false;
         refreshButton?.addEventListener('click', async () => {
             if (refreshInFlight) return;

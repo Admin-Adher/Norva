@@ -30,6 +30,14 @@ class AdminPage {
         this._partnersAccessRequestPage = 0;
         this._partnersAccessRequestLimit = 12;
         this._partnersAccessRequestStatus = 'requested';
+        this._partnersPayoutOnboardingOffset = 0;
+        this._partnersPayoutOnboardingLimit = 20;
+        this._partnersPayoutOnboardingStatus = 'pending';
+        this._partnersPayoutOnboardingSearch = '';
+        this._partnersFiscalOffset = 0;
+        this._partnersFiscalLimit = 20;
+        this._partnersFiscalStatus = 'pending';
+        this._partnersFiscalSearch = '';
         this._partnersRoutePage = 0;
         this._partnersRouteLimit = 12;
         this._partnersRouteSearch = '';
@@ -45,6 +53,7 @@ class AdminPage {
         this._partnersRestoreContext = null;
         this._partnersAal2Required = false;
         this._partnersAal2FailedKeys = new Set();
+        this._partnersContactKeys = new Map();
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -113,18 +122,23 @@ class AdminPage {
     hide() {
         clearTimeout(this._partnersSearchDebounce);
         clearTimeout(this._partnersRoutesDebounce);
+        clearTimeout(this._partnersPayoutOnboardingDebounce);
+        clearTimeout(this._partnersFiscalDebounce);
         this._partnersAbortAll?.();
     }
 
     // Whitelist CRM routes coming from the URL (never trust a raw hash): static pages by
-    // name, entity pages only as client:<uuid> / ticket:<uuid>.
+    // name, entity pages only as client:<uuid> / ticket:<uuid> / partner:<uuid>
+    // or the sanitized Finance-only partner-public:prt_<opaque> route.
     static validRoute(r) {
         r = String(r || '');
         if (['cockpit', 'finance', 'finance/vat', 'finance/promos', 'finance/paiements', 'finance/analyse',
             'marketing', 'marketing/promos', 'marketing/notifs',
             'clients', 'partners', 'support', 'providers', 'identites', 'moteur', 'systeme', 'telemetrie'].includes(r)) return r;
         const m = r.match(/^(client|ticket|partner):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-        return m ? (m[1] + ':' + m[2]) : null;
+        if (m) return m[1] + ':' + m[2];
+        const publicPartner = r.match(/^partner-public:(prt_[0-9a-f]{24})$/);
+        return publicPartner ? `partner-public:${publicPartner[1]}` : null;
     }
 
     // ── CRM shell ──
@@ -964,6 +978,16 @@ class AdminPage {
                 this._partnersSelectView(partnersView.dataset.partnersView, { focusTab: true });
                 return;
             }
+            const payoutPartner = e.target.closest('[data-partners-onboarding-open-partner]');
+            if (payoutPartner) {
+                const partnerKey = String(
+                    payoutPartner.dataset.partnersOnboardingOpenPartner || ''
+                );
+                if (!/^prt_[0-9a-f]{24}$/.test(partnerKey)) return;
+                this._ficheReturn = 'partners';
+                this._navigate(`partner-public:${partnerKey}`);
+                return;
+            }
             const partnersPage = e.target.closest('[data-partners-account-page]');
             if (partnersPage && !partnersPage.disabled) {
                 this._partnersPage = Math.max(0, this._partnersPage
@@ -977,6 +1001,38 @@ class AdminPage {
                 this._partnersAccessRequestPage = Math.max(0, this._partnersAccessRequestPage
                     + (direction === 'next' ? 1 : -1));
                 this._partnersLoadAccessRequests({ force: true, preserveFocus: direction });
+                return;
+            }
+            const payoutOnboardingPage = e.target.closest('[data-partners-payout-onboarding-page]');
+            if (payoutOnboardingPage && !payoutOnboardingPage.disabled) {
+                const direction = payoutOnboardingPage.dataset.partnersPayoutOnboardingPage;
+                this._partnersPayoutOnboardingOffset = Math.max(
+                    0,
+                    this._partnersPayoutOnboardingOffset
+                        + (direction === 'next'
+                            ? this._partnersPayoutOnboardingLimit
+                            : -this._partnersPayoutOnboardingLimit)
+                );
+                this._partnersLoadPayoutOnboardingRequests({
+                    force: true,
+                    preserveFocus: direction
+                });
+                return;
+            }
+            const fiscalPage = e.target.closest('[data-partners-fiscal-page]');
+            if (fiscalPage && !fiscalPage.disabled) {
+                const direction = fiscalPage.dataset.partnersFiscalPage;
+                this._partnersFiscalOffset = Math.max(
+                    0,
+                    this._partnersFiscalOffset
+                        + (direction === 'next'
+                            ? this._partnersFiscalLimit
+                            : -this._partnersFiscalLimit)
+                );
+                this._partnersLoadFiscalProfiles({
+                    force: true,
+                    preserveFocus: direction
+                });
                 return;
             }
             const routesPage = e.target.closest('[data-partners-route-page]');
@@ -1074,6 +1130,20 @@ class AdminPage {
                 this._partnersAccessRequestPage = 0;
                 this._partnersLoadAccessRequests({ force: true, preserveFocus: 'status' });
             }
+            if (e.target.id === 'partners-payout-onboarding-status') {
+                const allowed = ['pending', 'in_progress', 'rejected', 'completed', 'all'];
+                this._partnersPayoutOnboardingStatus = allowed.includes(e.target.value)
+                    ? e.target.value : 'pending';
+                this._partnersPayoutOnboardingOffset = 0;
+                this._partnersLoadPayoutOnboardingRequests({ force: true, preserveFocus: 'status' });
+            }
+            if (e.target.id === 'partners-fiscal-status') {
+                const allowed = ['pending', 'verified', 'rejected', 'expired', 'all'];
+                this._partnersFiscalStatus = allowed.includes(e.target.value)
+                    ? e.target.value : 'pending';
+                this._partnersFiscalOffset = 0;
+                this._partnersLoadFiscalProfiles({ force: true, preserveFocus: 'status' });
+            }
             if (e.target.id === 'partners-routes-status') {
                 this._partnersRouteStatus = ['all', 'active', 'disabled'].includes(e.target.value)
                     ? e.target.value : 'all';
@@ -1109,6 +1179,36 @@ class AdminPage {
                     this._partnersRoutePage = 0;
                     this._renderPartnersRoutes({ focusControl: 'search' });
                 }, 120);
+            }
+            if (e.target.id === 'partners-payout-onboarding-search') {
+                clearTimeout(this._partnersPayoutOnboardingDebounce);
+                const input = e.target;
+                this._partnersPayoutOnboardingDebounce = setTimeout(() => {
+                    this._partnersPayoutOnboardingSearch = input.value.trim().toLowerCase()
+                        .replace(/[^a-z0-9_]/g, '').slice(0, 64);
+                    this._partnersPayoutOnboardingOffset = 0;
+                    if (this._route === 'partners' && this._partnersView === 'finance') {
+                        this._partnersLoadPayoutOnboardingRequests({
+                            force: true,
+                            preserveFocus: 'search'
+                        });
+                    }
+                }, 250);
+            }
+            if (e.target.id === 'partners-fiscal-search') {
+                clearTimeout(this._partnersFiscalDebounce);
+                const input = e.target;
+                this._partnersFiscalDebounce = setTimeout(() => {
+                    this._partnersFiscalSearch = input.value.trim().toLowerCase()
+                        .replace(/[^a-z0-9_]/g, '').slice(0, 64);
+                    this._partnersFiscalOffset = 0;
+                    if (this._route === 'partners' && this._partnersView === 'risk') {
+                        this._partnersLoadFiscalProfiles({
+                            force: true,
+                            preserveFocus: 'search'
+                        });
+                    }
+                }, 250);
             }
         });
         this.built = true;
@@ -1271,7 +1371,7 @@ class AdminPage {
         if (!route) return 'Retour';
         if (route.startsWith('ticket:')) return 'Retour au ticket';
         if (route.startsWith('client:')) return 'Retour à la fiche';
-        if (route.startsWith('partner:')) return 'Retour au partenaire';
+        if (route.startsWith('partner:') || route.startsWith('partner-public:')) return 'Retour au partenaire';
         return ({ clients: 'Retour aux clients', finance: 'Retour à la finance', cockpit: 'Retour au cockpit',
             systeme: 'Retour au système', identites: 'Retour aux identités', providers: 'Retour aux providers',
             moteur: 'Retour au moteur', support: 'Retour au support', partners: 'Retour à Partners' })[route] || 'Retour';
@@ -1282,16 +1382,22 @@ class AdminPage {
         if (from === 'partners' && route !== 'partners') {
             clearTimeout(this._partnersSearchDebounce);
             clearTimeout(this._partnersRoutesDebounce);
+            clearTimeout(this._partnersPayoutOnboardingDebounce);
+            clearTimeout(this._partnersFiscalDebounce);
             this._partnersSearchDebounce = null;
             this._partnersRoutesDebounce = null;
+            this._partnersPayoutOnboardingDebounce = null;
+            this._partnersFiscalDebounce = null;
             this._partnersAbortAll?.();
         }
         // Remember where a fiche was opened from so its back button returns there (not always Clients).
         // Keep the original entry across chained fiche→fiche hops (source row → another fiche).
-        if ((route.startsWith('client:') || route.startsWith('partner:'))
+        if ((route.startsWith('client:') || route.startsWith('partner:')
+            || route.startsWith('partner-public:'))
             && from
             && !from.startsWith('client:')
-            && !from.startsWith('partner:')) this._ficheReturn = from;
+            && !from.startsWith('partner:')
+            && !from.startsWith('partner-public:')) this._ficheReturn = from;
         // Same for tickets: opened from a fiche (panel tickets) → back returns to that fiche,
         // not to the Support inbox (the back target used to be hardcoded 'support').
         if (route.startsWith('ticket:') && from && !from.startsWith('ticket:')) this._ticketReturn = from.startsWith('client:') ? from : 'support';
@@ -1327,6 +1433,7 @@ class AdminPage {
         }
         else if (route === 'clients') this._pageClients();
         else if (route === 'partners') this._pagePartners();
+        else if (route.startsWith('partner-public:')) this._pagePartnerDetailByPublicId(route.slice(15));
         else if (route.startsWith('partner:')) this._pagePartnerDetail(route.slice(8));
         else if (route === 'support') this._pageSupport();
         else if (route.startsWith('ticket:')) this._pageTicket(route.slice(7));
@@ -4506,12 +4613,22 @@ class AdminPage {
               <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true"><h2>KYC individuel</h2><p>Quota informatif et capacité réelle.</p><div class="ssub">Chargement…</div></section>
               <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true"><h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p><div class="ssub">Chargement…</div></section>
             </div>
+            <section id="partners-admin-fiscal-profiles" class="partners-control-card" aria-busy="true">
+              <div class="partners-control-head"><div><h2>Résidences fiscales à examiner</h2>
+                <p>File sanitisée Support + Finance. Aucun identifiant fiscal, document, e-mail ou UUID interne n’est affiché.</p></div></div>
+              <div class="ssub">Chargement…</div>
+            </section>
           </section>
 
           <section ${paneAttrs('finance')}>
             <div class="partners-pane-intro"><div><h2>Finance et Revolut</h2><p>Les écarts et actions requises sont affichés avant les historiques sains.</p></div></div>
             <section id="partners-admin-aal2" class="partners-priority-strip partners-aal2-gate" aria-labelledby="partners-admin-aal2-title" hidden></section>
             <div class="partners-control-stack">
+              <section id="partners-admin-payout-onboarding" class="partners-control-card" aria-busy="true">
+                <div class="partners-control-head"><div><h2>Demandes de configuration de versement</h2>
+                  <p>File sanitisée Revolut Business Basic. Aucune donnée bancaire, fiscale ou bénéficiaire n’est affichée.</p></div></div>
+                <div class="ssub">Chargement…</div>
+              </section>
               <section id="partners-admin-reconciliation-incidents" class="partners-control-card" aria-busy="true">
                 <div id="partners-admin-incidents-status" class="partners-sr-only" role="status" aria-live="polite"></div>
                 <div class="partners-control-head"><div><h2>Écarts de rapprochement Revolut</h2><p>File append-only priorisée, preuve fraîche et maker-checker Finance/AAL2.</p></div></div><div class="ssub">Chargement…</div>
@@ -4847,8 +4964,12 @@ class AdminPage {
         if (cached('accessRequests')) this._renderPartnersAccessRequests(cached('accessRequests'));
         if (cached('kyc')) this._renderPartnersKycQuota(cached('kyc'));
         if (cached('risk')) this._renderPartnersRisk(cached('risk'));
+        if (cached('fiscalProfiles')) this._renderPartnersFiscalProfiles(cached('fiscalProfiles'));
         if (cached('configuration')) this._renderPartnersConfiguration(cached('configuration'));
         if (cached('finance')) this._renderPartnersFinance(cached('finance'));
+        if (cached('payoutOnboardingRequests')) {
+            this._renderPartnersPayoutOnboardingRequests(cached('payoutOnboardingRequests'));
+        }
         if (cached('revolut')) this._renderPartnersRevolutStatus(cached('revolut'));
         if (cached('settlements')) this._renderPartnersRevolutReconciliation(cached('settlements'));
         if (cached('returns')) this._renderPartnersRevolutReturns(cached('returns'));
@@ -4974,7 +5095,8 @@ class AdminPage {
         if (view === 'risk') return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
             load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
-            load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque')
+            load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
+            this._partnersLoadFiscalProfiles({ force })
         ]);
         if (view === 'finance') return this._partnersLoadFinanceView({ force });
         if (view === 'configuration') return Promise.allSettled([
@@ -5015,6 +5137,7 @@ class AdminPage {
         );
         return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
+            this._partnersLoadPayoutOnboardingRequests({ force }),
             load('finance', 'admin_partners_finance_overview', {}, (d) => this._renderPartnersFinance(d), 'partners-admin-finance', 'Ledger Partners'),
             load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, renderPayoutCycles, 'partners-admin-payouts', 'Cycles de versement', { onError: payoutError('payoutCycles') }),
             load('revolut', 'admin_partners_revolut_payout_status', {}, (d) => this._renderPartnersRevolutStatus(d), 'partners-admin-revolut', 'Revolut Business'),
@@ -5025,6 +5148,96 @@ class AdminPage {
             load('lateCompletions', 'admin_partners_revolut_late_completion_queue', { p_limit: 50, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutLateCompletions(d), 'partners-admin-late-completions', 'Paiements tardifs'),
             this._partnersLoadIncidents({ force })
         ]);
+    }
+
+    async _partnersLoadPayoutOnboardingRequests({ force = false, preserveFocus = '' } = {}) {
+        const generation = this._partnersPageGeneration;
+        const requestedView = this._partnersView;
+        const status = ['pending', 'in_progress', 'rejected', 'completed', 'all']
+            .includes(this._partnersPayoutOnboardingStatus)
+            ? this._partnersPayoutOnboardingStatus : 'pending';
+        const search = String(this._partnersPayoutOnboardingSearch || '')
+            .toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 64);
+        const data = await this._partnersLoadModule(
+            'payoutOnboardingRequests',
+            'admin_partners_payout_onboarding_requests',
+            {
+                p_limit: this._partnersPayoutOnboardingLimit,
+                p_offset: this._partnersPayoutOnboardingOffset,
+                p_status: status,
+                p_search: search || null
+            },
+            (value) => this._renderPartnersPayoutOnboardingRequests(value),
+            {
+                force,
+                targetId: 'partners-admin-payout-onboarding',
+                title: 'Demandes de configuration de versement'
+            }
+        );
+        if (preserveFocus && this._route === 'partners'
+            && generation === this._partnersPageGeneration
+            && requestedView === this._partnersView) setTimeout(() => {
+            let target = preserveFocus === 'search'
+                ? document.getElementById('partners-payout-onboarding-search')
+                : (preserveFocus === 'status'
+                    ? document.getElementById('partners-payout-onboarding-status')
+                    : Array.from(document.querySelectorAll('[data-partners-payout-onboarding-page]'))
+                        .find((button) => button.dataset.partnersPayoutOnboardingPage === preserveFocus));
+            if (target?.disabled && ['prev', 'next'].includes(preserveFocus)) {
+                const fallback = preserveFocus === 'next' ? 'prev' : 'next';
+                target = Array.from(document.querySelectorAll('[data-partners-payout-onboarding-page]'))
+                    .find((button) => button.dataset.partnersPayoutOnboardingPage === fallback
+                        && !button.disabled)
+                    || document.getElementById('partners-payout-onboarding-search');
+            }
+            this._partnersFocusElement(target);
+        }, 0);
+        return data;
+    }
+
+    async _partnersLoadFiscalProfiles({ force = false, preserveFocus = '' } = {}) {
+        const generation = this._partnersPageGeneration;
+        const requestedView = this._partnersView;
+        const status = ['pending', 'verified', 'rejected', 'expired', 'all']
+            .includes(this._partnersFiscalStatus)
+            ? this._partnersFiscalStatus : 'pending';
+        const search = String(this._partnersFiscalSearch || '')
+            .toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 64);
+        const data = await this._partnersLoadModule(
+            'fiscalProfiles',
+            'admin_partners_fiscal_profiles',
+            {
+                p_limit: this._partnersFiscalLimit,
+                p_offset: this._partnersFiscalOffset,
+                p_status: status,
+                p_search: search || null
+            },
+            (value) => this._renderPartnersFiscalProfiles(value),
+            {
+                force,
+                targetId: 'partners-admin-fiscal-profiles',
+                title: 'Résidences fiscales à examiner'
+            }
+        );
+        if (preserveFocus && this._route === 'partners'
+            && generation === this._partnersPageGeneration
+            && requestedView === this._partnersView) setTimeout(() => {
+            let target = preserveFocus === 'search'
+                ? document.getElementById('partners-fiscal-search')
+                : (preserveFocus === 'status'
+                    ? document.getElementById('partners-fiscal-status')
+                    : Array.from(document.querySelectorAll('[data-partners-fiscal-page]'))
+                        .find((button) => button.dataset.partnersFiscalPage === preserveFocus));
+            if (target?.disabled && ['prev', 'next'].includes(preserveFocus)) {
+                const fallback = preserveFocus === 'next' ? 'prev' : 'next';
+                target = Array.from(document.querySelectorAll('[data-partners-fiscal-page]'))
+                    .find((button) => button.dataset.partnersFiscalPage === fallback
+                        && !button.disabled)
+                    || document.getElementById('partners-fiscal-search');
+            }
+            this._partnersFocusElement(target);
+        }, 0);
+        return data;
     }
 
     async _partnersLoadIncidents({ force = false, preserveFocus = '' } = {}) {
@@ -5113,7 +5326,7 @@ class AdminPage {
         if (!descriptor) return false;
         let target = descriptor.id ? document.getElementById(descriptor.id) : null;
         if (!target && descriptor.data && Object.keys(descriptor.data).length) {
-            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-retry],[data-partners-view],[data-partners-account-page],[data-partners-access-request-page],[data-partners-route-page],[data-partners-policy-page],[data-partner-id]'))
+            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-retry],[data-partners-view],[data-partners-account-page],[data-partners-access-request-page],[data-partners-payout-onboarding-page],[data-partners-fiscal-page],[data-partners-route-page],[data-partners-policy-page],[data-partner-id]'))
                 .find((candidate) => Object.entries(descriptor.data).every(([key, value]) => candidate.dataset[key] === value));
         }
         if (this._partnersFocusElement(target)) return true;
@@ -5182,9 +5395,11 @@ class AdminPage {
             analytics: () => load('analytics', 'admin_partners_analytics', { p_days: 30 }, (d) => this._renderPartnersAnalytics(d), 'partners-admin-analytics', 'Performance Partners'),
             kyc: () => load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
             risk: () => load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
+            fiscalProfiles: () => this._partnersLoadFiscalProfiles({ force: true }),
             configuration: () => load('configuration', 'admin_partners_configuration', {}, (d) => this._renderPartnersConfiguration(d), 'partners-admin-configuration', 'Configuration Partners'),
             revolut: () => load('revolut', 'admin_partners_revolut_payout_status', {}, (d) => this._renderPartnersRevolutStatus(d), this._partnersView === 'configuration' ? 'partners-admin-routes' : 'partners-admin-revolut', 'Revolut Business'),
             finance: () => load('finance', 'admin_partners_finance_overview', {}, (d) => this._renderPartnersFinance(d), 'partners-admin-finance', 'Ledger Partners'),
+            payoutOnboardingRequests: () => this._partnersLoadPayoutOnboardingRequests({ force: true }),
             payoutCycles: () => load('payoutCycles', 'admin_partners_payout_cycles', { p_limit: 8, p_offset: 0, p_status: null }, renderPayoutCycles, 'partners-admin-payouts', 'Cycles de versement', { onError: payoutError('payoutCycles') }),
             manualBatches: () => load('manualBatches', 'admin_partners_revolut_manual_batches', { p_limit: 25, p_offset: 0, p_status: 'all' }, renderManualBatches, 'partners-admin-payouts', 'Lots manuels', { onError: payoutError('manualBatches') }),
             settlements: () => load('settlements', 'admin_partners_revolut_reconciliation_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersRevolutReconciliation(d), 'partners-admin-settlements', 'Rapprochement Revolut'),
@@ -5631,7 +5846,7 @@ class AdminPage {
             'commission-reverse': ['finance', 'risk'],
             'payout-create': ['finance'],
             'payout-approve': ['finance'],
-            'fiscal-review': ['support', 'finance']
+            'fiscal-review-public': ['support', 'finance']
         }[action];
         return Array.isArray(required) && this._partnersHasCapabilities(...required);
     }
@@ -7096,6 +7311,314 @@ class AdminPage {
                         : '<div class="admin-err" role="status">Lots manuels indisponibles. <button type="button" class="partners-action" data-partners-retry="manualBatches">Réessayer</button></div>'))}</div>`;
     }
 
+    _renderPartnersFiscalProfiles(data) {
+        const el = document.getElementById('partners-admin-fiscal-profiles');
+        if (!el) return;
+        const statuses = new Set(['missing', 'pending', 'verified', 'rejected', 'expired']);
+        const exactRowKeys = [
+            'country_code', 'partner_key', 'reviewed_at', 'status', 'submitted_at'
+        ];
+        const validEnvelope = data?.schema_version === 1
+            && Number.isSafeInteger(data.total) && data.total >= 0
+            && Number.isSafeInteger(data.limit) && data.limit >= 1 && data.limit <= 100
+            && Number.isSafeInteger(data.offset) && data.offset >= 0
+            && Array.isArray(data.items) && data.items.length <= data.limit;
+        if (!validEnvelope) throw new Error('invalid_partners_fiscal_profiles_response');
+        const rows = data.items.map((row) => {
+            if (!row || typeof row !== 'object' || Array.isArray(row)
+                || Object.keys(row).sort().join('|') !== exactRowKeys.join('|')) return null;
+            const partnerKey = String(row.partner_key || '');
+            const country = String(row.country_code || '');
+            const status = String(row.status || '');
+            const submittedAt = row.submitted_at === null
+                ? null : String(row.submitted_at || '');
+            const reviewedAt = row.reviewed_at === null
+                ? null : String(row.reviewed_at || '');
+            if (!/^prt_[0-9a-f]{24}$/.test(partnerKey)
+                || !/^[A-Z]{2}$/.test(country)
+                || !statuses.has(status)
+                || (submittedAt !== null && !Number.isFinite(Date.parse(submittedAt)))
+                || (reviewedAt !== null && !Number.isFinite(Date.parse(reviewedAt)))
+                || (status === 'pending' && (submittedAt === null || reviewedAt !== null))
+                || (status === 'verified' && (submittedAt === null || reviewedAt === null))) {
+                return null;
+            }
+            return { partnerKey, country, status, submittedAt, reviewedAt };
+        }).filter(Boolean);
+        if (rows.length !== data.items.length) {
+            throw new Error('invalid_partners_fiscal_profiles_items');
+        }
+        if (!rows.length && data.total > 0 && this._partnersFiscalOffset > 0) {
+            this._partnersFiscalOffset = Math.max(
+                0,
+                this._partnersFiscalOffset - this._partnersFiscalLimit
+            );
+            void this._partnersLoadFiscalProfiles({ force: true });
+            return;
+        }
+        const labels = {
+            missing: 'À renouveler',
+            pending: 'À examiner',
+            verified: 'Validée',
+            rejected: 'Rejetée',
+            expired: 'Expirée'
+        };
+        const canReview = this._partnersCanUseOperationalAction('fiscal-review-public');
+        const cards = rows.map((row) => {
+            const actions = canReview && row.status === 'pending'
+                ? `<div class="partners-action-row">
+                    <button type="button" class="partners-action is-success"
+                      data-partners-action="fiscal-review-public"
+                      data-partners-partner-key="${AdminPage.esc(row.partnerKey)}"
+                      data-partners-country="${AdminPage.esc(row.country)}"
+                      data-partners-status="verified">Valider</button>
+                    <button type="button" class="partners-action is-danger"
+                      data-partners-action="fiscal-review-public"
+                      data-partners-partner-key="${AdminPage.esc(row.partnerKey)}"
+                      data-partners-country="${AdminPage.esc(row.country)}"
+                      data-partners-status="rejected">Rejeter</button>
+                    <button type="button" class="partners-action"
+                      data-partners-onboarding-open-partner="${AdminPage.esc(row.partnerKey)}">Ouvrir la fiche</button>
+                  </div>`
+                : '<span class="partners-state">Aucune action en attente</span>';
+            return `<article class="partners-control-item"
+                data-partners-fiscal-partner-key="${AdminPage.esc(row.partnerKey)}">
+                <div class="partners-access-request-main">
+                  <strong>${AdminPage.esc(row.partnerKey)}</strong>
+                  <span class="pill${row.status === 'pending' ? ' is-alert' : ''}">${AdminPage.esc(labels[row.status])}</span>
+                </div>
+                <p class="partners-access-request-copy">${AdminPage.esc(row.country)}${row.submittedAt ? ` · soumise ${AdminPage.esc(AdminPage.timeAgo(row.submittedAt))}` : ''}${row.reviewedAt ? ` · revue ${AdminPage.esc(AdminPage.timeAgo(row.reviewedAt))}` : ''}</p>
+                ${actions}
+              </article>`;
+        }).join('');
+        const first = data.total ? data.offset + 1 : 0;
+        const last = Math.min(data.total, data.offset + rows.length);
+        const hasPrevious = data.offset > 0;
+        const hasNext = data.offset + rows.length < data.total;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head"><div>
+              <h2>Résidences fiscales à examiner</h2>
+              <p>File minimale Support + Finance · actions AAL2 · aucune donnée fiscale brute.</p>
+            </div><span class="pill">${AdminPage.n(data.total)}</span></div>
+            <div class="partners-admin-toolbar" role="search" aria-label="Filtrer les résidences fiscales">
+              <input id="partners-fiscal-search" type="search" maxlength="64"
+                value="${AdminPage.esc(this._partnersFiscalSearch)}"
+                placeholder="Clé partenaire ou pays" aria-label="Rechercher une clé partenaire ou un pays"
+                autocapitalize="none" autocomplete="off" spellcheck="false">
+              <select id="partners-fiscal-status" aria-label="Filtrer les résidences fiscales par statut">
+                ${[
+                    ['pending', 'À examiner'],
+                    ['verified', 'Validées'],
+                    ['rejected', 'Rejetées'],
+                    ['expired', 'Expirées'],
+                    ['all', 'Tous les statuts']
+                ].map(([value, label]) => `<option value="${value}"${this._partnersFiscalStatus === value ? ' selected' : ''}>${label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="partners-ops-list">${cards || '<div class="partners-empty-state"><strong>Aucune attestation</strong><span>Aucune résidence fiscale ne correspond à ce filtre.</span></div>'}</div>
+            <p class="ssub">Cette file contient uniquement une clé partenaire opaque, un pays et des timestamps de revue.</p>
+            <nav class="partners-pagination" aria-label="Pagination des résidences fiscales">
+              <span class="partners-pagination-status" role="status" aria-live="polite" aria-atomic="true">${AdminPage.n(first)}–${AdminPage.n(last)} sur ${AdminPage.n(data.total)}</span>
+              <button type="button" class="partners-page-btn" data-partners-fiscal-page="prev"
+                aria-label="Page précédente des résidences fiscales"${hasPrevious ? '' : ' disabled'}>Précédente</button>
+              <button type="button" class="partners-page-btn" data-partners-fiscal-page="next"
+                aria-label="Page suivante des résidences fiscales"${hasNext ? '' : ' disabled'}>Suivante</button>
+            </nav>`;
+    }
+
+    _renderPartnersPayoutOnboardingRequests(data) {
+        const el = document.getElementById('partners-admin-payout-onboarding');
+        if (!el) return;
+        const statuses = new Set(['pending', 'in_progress', 'rejected', 'completed']);
+        const reasonCodes = new Set([
+            'route_unavailable',
+            'beneficiary_setup_required',
+            'identity_mismatch',
+            'unsupported_destination',
+            'compliance_review',
+            'duplicate_request'
+        ]);
+        const validEnvelope = data?.schema_version === 1
+            && Number.isSafeInteger(data.total) && data.total >= 0
+            && Number.isSafeInteger(data.limit) && data.limit >= 1 && data.limit <= 100
+            && Number.isSafeInteger(data.offset) && data.offset >= 0
+            && Array.isArray(data.items) && data.items.length <= data.limit;
+        if (!validEnvelope) throw new Error('invalid_partners_payout_onboarding_response');
+        const rows = data.items.map((row) => {
+            const requestKey = String(row?.request_key || '');
+            const partnerKey = String(row?.partner_key || '');
+            const country = String(row?.country_code || '');
+            const currency = String(row?.currency || '');
+            const status = String(row?.status || '');
+            const revision = Number(row?.revision);
+            const executionAdapter = String(row?.execution_adapter || '');
+            const requestedAt = String(row?.requested_at || '');
+            const updatedAt = String(row?.updated_at || '');
+            const startedAt = row?.started_at === null ? null : String(row?.started_at || '');
+            const rejectedAt = row?.rejected_at === null ? null : String(row?.rejected_at || '');
+            const completedAt = row?.completed_at === null ? null : String(row?.completed_at || '');
+            const reasonCode = row?.reason_code === null
+                ? null : String(row?.reason_code || '');
+            if (!/^por_[0-9a-f]{24}$/.test(requestKey)
+                || !/^prt_[0-9a-f]{24}$/.test(partnerKey)
+                || !/^[A-Z]{2}$/.test(country)
+                || !/^[A-Z]{3}$/.test(currency)
+                || !statuses.has(status)
+                || !Number.isSafeInteger(revision) || revision < 1
+                || executionAdapter !== 'revolut_manual'
+                || !Number.isFinite(Date.parse(requestedAt))
+                || !Number.isFinite(Date.parse(updatedAt))
+                || (startedAt !== null && !Number.isFinite(Date.parse(startedAt)))
+                || (rejectedAt !== null && !Number.isFinite(Date.parse(rejectedAt)))
+                || (completedAt !== null && !Number.isFinite(Date.parse(completedAt)))
+                || typeof row?.binding_ready !== 'boolean'
+                || typeof row?.profile_ready !== 'boolean'
+                || typeof row?.reconfiguration_required !== 'boolean'
+                || (reasonCode !== null && !reasonCodes.has(reasonCode))
+                || ((status === 'rejected') !== (reasonCode !== null))
+                || (status === 'pending' && (
+                    startedAt !== null || rejectedAt !== null || completedAt !== null
+                ))
+                || (status === 'in_progress' && (
+                    startedAt === null || rejectedAt !== null || completedAt !== null
+                ))
+                || (status === 'rejected' && (
+                    rejectedAt === null || completedAt !== null
+                ))
+                || (status === 'completed' && (
+                    completedAt === null
+                ))
+                || (row.reconfiguration_required && status !== 'completed')
+                || (status === 'completed'
+                    && (!row.binding_ready || !row.profile_ready)
+                    && !row.reconfiguration_required)) return null;
+            return {
+                requestKey,
+                partnerKey,
+                country,
+                currency,
+                status,
+                revision,
+                executionAdapter,
+                requestedAt,
+                updatedAt,
+                startedAt,
+                rejectedAt,
+                completedAt,
+                reasonCode,
+                bindingReady: row.binding_ready,
+                profileReady: row.profile_ready,
+                reconfigurationRequired: row.reconfiguration_required
+            };
+        }).filter(Boolean);
+        if (rows.length !== data.items.length) {
+            throw new Error('invalid_partners_payout_onboarding_items');
+        }
+        if (!rows.length && data.total > 0 && this._partnersPayoutOnboardingOffset > 0) {
+            this._partnersPayoutOnboardingOffset = Math.max(
+                0,
+                this._partnersPayoutOnboardingOffset - this._partnersPayoutOnboardingLimit
+            );
+            void this._partnersLoadPayoutOnboardingRequests({ force: true });
+            return;
+        }
+        const labels = {
+            pending: 'À examiner',
+            in_progress: 'Configuration en cours',
+            rejected: 'Rejetée',
+            completed: 'Configurée'
+        };
+        const reasons = {
+            route_unavailable: 'Corridor non disponible',
+            beneficiary_setup_required: 'Bénéficiaire à configurer',
+            identity_mismatch: 'Identité non concordante',
+            unsupported_destination: 'Destination non prise en charge',
+            compliance_review: 'Revue de conformité requise',
+            duplicate_request: 'Demande déjà couverte'
+        };
+        const cards = rows.map((row) => {
+            const completionHintId = `partners-onboarding-completion-${row.requestKey}`;
+            const canComplete = row.status === 'in_progress'
+                && row.bindingReady && row.profileReady;
+            const canContact = this._partnersHasCapabilities('support', 'finance');
+            const actions = this._partnersCapabilities.finance === true
+                ? `<div class="partners-action-row">
+                    ${row.status === 'pending' ? `<button type="button" class="partners-action is-success"
+                      data-partners-action="payout-onboarding-decide"
+                      data-partners-request-key="${AdminPage.esc(row.requestKey)}"
+                      data-partners-decision="start">Commencer</button>` : ''}
+                    ${['pending', 'in_progress'].includes(row.status) ? `<button type="button" class="partners-action is-danger"
+                      data-partners-action="payout-onboarding-decide"
+                      data-partners-request-key="${AdminPage.esc(row.requestKey)}"
+                      data-partners-decision="reject">Rejeter</button>` : ''}
+                    ${row.status === 'in_progress' ? `<button type="button" class="partners-action is-success"
+                      data-partners-action="payout-onboarding-decide"
+                      data-partners-request-key="${AdminPage.esc(row.requestKey)}"
+                      data-partners-decision="complete"
+                      data-partners-binding-ready="${row.bindingReady ? 'true' : 'false'}"
+                      data-partners-profile-ready="${row.profileReady ? 'true' : 'false'}"
+                      aria-describedby="${AdminPage.esc(completionHintId)}"${canComplete ? '' : ' disabled'}>Finaliser</button>` : ''}
+                    ${row.status === 'in_progress' && canContact ? `<button type="button" class="partners-action"
+                      data-partners-action="payout-onboarding-contact"
+                      data-partners-request-key="${AdminPage.esc(row.requestKey)}">Contacter via le compte Norva</button>` : ''}
+                    ${row.status === 'in_progress' && !row.bindingReady ? `<button type="button" class="partners-action"
+                      data-partners-action="revolut-binding-propose-request"
+                      data-partners-request-key="${AdminPage.esc(row.requestKey)}">Proposer le bénéficiaire</button>` : ''}
+                    <button type="button" class="partners-action"
+                      data-partners-onboarding-open-partner="${AdminPage.esc(row.partnerKey)}">Ouvrir la fiche</button>
+                  </div>`
+                : '<span class="partners-state">Capacité Finance requise</span>';
+            return `<article class="partners-control-item partners-onboarding-item"
+                data-partners-onboarding-request-key="${AdminPage.esc(row.requestKey)}">
+                <div class="partners-access-request-main">
+                  <strong>${AdminPage.esc(row.partnerKey)}</strong>
+                  <span class="pill${row.reconfigurationRequired ? ' is-alert' : ''}">${AdminPage.esc(row.reconfigurationRequired ? 'Reconfiguration requise' : labels[row.status])}</span>
+                </div>
+                <p class="partners-access-request-copy">${AdminPage.esc(row.country)} · ${AdminPage.esc(row.currency)} · révision ${AdminPage.n(row.revision)} · demande ${AdminPage.esc(AdminPage.timeAgo(row.requestedAt))} · mise à jour ${AdminPage.esc(AdminPage.timeAgo(row.updatedAt))}</p>
+                <p class="partners-access-request-copy">Binding ${row.bindingReady ? 'prêt' : 'en attente'} · profil ${row.profileReady ? 'prêt' : 'en attente'}${row.completedAt ? ` · finalisé ${AdminPage.esc(AdminPage.timeAgo(row.completedAt))}` : ''}</p>
+                ${row.reconfigurationRequired ? '<p class="partners-access-request-copy" role="status">La configuration finalisée ne satisfait plus tous les contrôles actuels (policy, fiscalité, corridor ou destination). Une nouvelle demande sera proposée à l’utilisateur dès que son éligibilité le permet.</p>' : ''}
+                ${row.status === 'in_progress' ? `<p class="partners-access-request-copy" id="${AdminPage.esc(completionHintId)}">${canComplete
+                    ? 'Le binding actif et le profil vérifié permettent la finalisation contrôlée.'
+                    : 'Finalisation verrouillée : un binding actif et un profil vérifié sont requis côté serveur.'}</p>` : ''}
+                ${row.reasonCode ? `<p class="partners-access-request-copy">Motif sanitisé : ${AdminPage.esc(reasons[row.reasonCode] || 'Action Finance requise')}</p>` : ''}
+                ${actions}
+              </article>`;
+        }).join('');
+        const first = data.total ? data.offset + 1 : 0;
+        const last = Math.min(data.total, data.offset + rows.length);
+        const hasPrevious = data.offset > 0;
+        const hasNext = data.offset + rows.length < data.total;
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head"><div>
+              <h2>Demandes de configuration de versement</h2>
+              <p>Revolut Business Basic · file sanitisée · actions Finance protégées par AAL2.</p>
+            </div><span class="pill">${AdminPage.n(data.total)}</span></div>
+            <div class="partners-admin-toolbar" role="search" aria-label="Filtrer les demandes de versement">
+              <input id="partners-payout-onboarding-search" type="search" maxlength="64"
+                value="${AdminPage.esc(this._partnersPayoutOnboardingSearch)}"
+                placeholder="Clé partenaire" aria-label="Rechercher une clé partenaire"
+                autocapitalize="none" autocomplete="off" spellcheck="false">
+              <select id="partners-payout-onboarding-status" aria-label="Filtrer les demandes par statut">
+                ${[
+                    ['pending', 'À examiner'],
+                    ['in_progress', 'En cours'],
+                    ['rejected', 'Rejetées'],
+                    ['completed', 'Configurées'],
+                    ['all', 'Tous les statuts']
+                ].map(([value, label]) => `<option value="${value}"${this._partnersPayoutOnboardingStatus === value ? ' selected' : ''}>${label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="partners-ops-list">${cards || '<div class="partners-empty-state"><strong>Aucune demande</strong><span>Aucune demande de configuration ne correspond à ce filtre.</span></div>'}</div>
+            <p class="ssub">La finalisation est dérivée du binding Revolut actif côté serveur. Cette file ne contient aucune donnée bancaire, fiscale ou bénéficiaire.</p>
+            <nav class="partners-pagination" aria-label="Pagination des demandes de versement">
+              <span class="partners-pagination-status" role="status" aria-live="polite" aria-atomic="true">${AdminPage.n(first)}–${AdminPage.n(last)} sur ${AdminPage.n(data.total)}</span>
+              <button type="button" class="partners-page-btn" data-partners-payout-onboarding-page="prev"
+                aria-label="Page précédente des demandes de versement"${hasPrevious ? '' : ' disabled'}>Précédente</button>
+              <button type="button" class="partners-page-btn" data-partners-payout-onboarding-page="next"
+                aria-label="Page suivante des demandes de versement"${hasNext ? '' : ' disabled'}>Suivante</button>
+            </nav>`;
+    }
+
     _renderPartnersAccessRequests(data) {
         const el = document.getElementById('partners-admin-access-requests');
         const count = document.getElementById('partners-access-request-count');
@@ -7321,12 +7844,65 @@ class AdminPage {
         }
     }
 
+    async _pagePartnerDetailByPublicId(accountPublicId) {
+        const view = document.getElementById('crm-view');
+        const partnerKey = String(accountPublicId || '').toLowerCase();
+        if (!view || !/^prt_[0-9a-f]{24}$/.test(partnerKey)) {
+            this._navigate('partners');
+            return;
+        }
+        const route = `partner-public:${partnerKey}`;
+        const nav = this._nav;
+        this._setCrumb('Partners · fiche Finance');
+        view.innerHTML = `<div class="crm-page">
+            <button class="crm-back" type="button">← ${AdminPage.esc(AdminPage.routeLabel(this._ficheReturn || 'partners'))}</button>
+            <h1 class="crm-h1">Fiche partenaire</h1>
+            <p class="crm-sub">Vue sanitisée ouverte depuis la file Finance. Aucun identifiant interne n’est exposé.</p>
+            <div id="partners-admin-detail" class="card" aria-busy="true"><div class="ssub">Chargement sécurisé…</div></div>
+        </div>`;
+        try {
+            const capabilities = await this._rpc('admin_partners_capabilities');
+            if (nav !== this._nav || this._route !== route) return;
+            this._partnersApplyCapabilities(capabilities);
+            if (this._partnersCapabilities.finance !== true) {
+                throw new Error('partners_finance_capability_required');
+            }
+            if (!(await this._partnersEnsureAal2())) {
+                if (nav !== this._nav || this._route !== route) return;
+                const target = document.getElementById('partners-admin-detail');
+                if (target) {
+                    target.removeAttribute('aria-busy');
+                    target.innerHTML = '<div class="admin-err" role="status">La fiche Finance reste verrouillée. Validez cette session avec Authenticator puis réessayez.</div>';
+                }
+                return;
+            }
+            const data = await this._rpc('admin_partners_detail_by_public_id', {
+                p_account_public_id: partnerKey
+            });
+            if (nav !== this._nav || this._route !== route) return;
+            if (data?.schema_version !== 1
+                || data?.account?.account_public_id !== partnerKey
+                || data?.account?.partner_key !== partnerKey) {
+                throw new Error('invalid_partner_public_detail_response');
+            }
+            this._renderPartnerDetail(data, null);
+        } catch (_) {
+            if (nav !== this._nav || this._route !== route) return;
+            const target = document.getElementById('partners-admin-detail');
+            if (target) {
+                target.removeAttribute('aria-busy');
+                target.innerHTML = '<div class="admin-err" role="alert">Cette fiche Finance n’est pas disponible. Aucune donnée brute n’a été affichée.</div>';
+            }
+        }
+    }
+
     _renderPartnerDetail(data, revolutEnvelope = null) {
         const el = document.getElementById('partners-admin-detail');
         if (!el) return;
         const account = data.account && typeof data.account === 'object' ? data.account : {};
         const policy = data.policy && typeof data.policy === 'object' ? data.policy : {};
         const link = data.link && typeof data.link === 'object' ? data.link : {};
+        const fiscal = data.fiscal && typeof data.fiscal === 'object' ? data.fiscal : {};
         const events = Array.isArray(data.activity) ? data.activity.slice(0, 100) : [];
         const canManagePayout = this._partnersCapabilities.finance === true
             && /^[0-9a-f-]{36}$/i.test(String(account.account_id || ''));
@@ -7431,6 +8007,7 @@ class AdminPage {
                   ${fact('Identité', account.verification_status)}
                   ${fact('Contrat', account.contract_status)}
                   ${fact('Lien', link.status || 'none')}
+                  ${fact('Résidence fiscale', fiscal.status || 'missing')}
                   ${fact('Juridiction', [
                       account.country_code || policy.country_code,
                       account.subdivision_code || policy.subdivision_code
@@ -7439,33 +8016,12 @@ class AdminPage {
               </section>
               <section class="section"><div class="sec-head"><h2>Capacités opérationnelles</h2></div>
                 <div class="partners-admin-readiness">${this._partnersCapabilityCards(data.readiness || {})}</div>
-                ${this._partnersCanUseOperationalAction('fiscal-review')
-                    && /^[0-9a-f-]{36}$/i.test(String(account.account_id || ''))
-                    && /^[A-Z]{2}$/.test(String(account.country_code || policy.country_code || ''))
-                    ? `<div class="partners-action-row">
-                        <button type="button" class="partners-action is-success"
-                          data-partners-action="fiscal-review"
-                          data-partners-account="${AdminPage.esc(account.account_id)}"
-                          data-partners-country="${AdminPage.esc(account.country_code || policy.country_code)}"
-                          data-partners-status="verified">Valider le profil fiscal</button>
-                        <button type="button" class="partners-action is-danger"
-                          data-partners-action="fiscal-review"
-                          data-partners-account="${AdminPage.esc(account.account_id)}"
-                          data-partners-country="${AdminPage.esc(account.country_code || policy.country_code)}"
-                          data-partners-status="rejected">Rejeter le profil fiscal</button>
-                      </div>`
-                    : ''}
               </section>
               ${canManagePayout ? `<section class="section">
                 <div class="sec-head"><h2>Bénéficiaire Revolut</h2><span class="pill">${AdminPage.n(payoutProfiles.length)}</span></div>
                 <div class="partners-event-list">${payoutRows || '<div class="ssub">Aucun profil de versement Revolut configuré.</div>'}</div>
                 <div class="partners-ops-list" style="margin-top:12px">${bindingRows || '<div class="ssub">Aucune proposition de binding bénéficiaire.</div>'}</div>
-                <p class="ssub">L’identifiant bénéficiaire et son empreinte restent secrets. Sous Basic, utilisez l’UUID opaque du registre Finance ; la proposition est signée dans l’Edge, puis activée uniquement par un second opérateur.</p>
-                <div class="partners-action-row">
-                  <button type="button" class="partners-action"
-                    data-partners-action="revolut-binding-propose"
-                    data-partners-account="${AdminPage.esc(account.account_id)}">Proposer un bénéficiaire</button>
-                </div>
+                <p class="ssub">L’identifiant bénéficiaire et son empreinte restent secrets. Toute nouvelle proposition part de la demande publique sanitisée dans la file Finance, puis doit être activée par un second opérateur.</p>
               </section>` : ''}
             </div>
             <section class="section"><div class="sec-head"><h2>Historique audité</h2><span class="pill">${AdminPage.n(events.length)}</span></div>
@@ -7904,17 +8460,25 @@ class AdminPage {
     }
 
     async _partnersProposeRevolutBeneficiary(proposal) {
-        const res = await fetch(
-            `${this._sbUrl()}/functions/v1/norva-partners-revolut-payout/manual/beneficiaries/propose`,
-            {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${this._token()}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(proposal)
-            }
-        );
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+        let res;
+        try {
+            res = await fetch(
+                `${this._sbUrl()}/functions/v1/norva-partners-revolut-payout/manual/beneficiaries/propose`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${this._token()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(proposal),
+                    signal: controller.signal
+                }
+            );
+        } finally {
+            clearTimeout(timeout);
+        }
         if (!res.ok) throw new Error('revolut_beneficiary_proposal_failed');
         const body = await res.json();
         const data = body?.data;
@@ -7937,6 +8501,16 @@ class AdminPage {
         return binding;
     }
 
+    _partnersRandomUuid() {
+        if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0'));
+        return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`;
+    }
+
     async _partnersAdminAction(button) {
         if (!button || button.disabled || button.dataset.partnersBusy === 'true') return;
         const previous = button.textContent;
@@ -7950,11 +8524,53 @@ class AdminPage {
             if (!success) return;
             this._toast(success, 'ok');
             if (this._route === 'partners') {
-                await this._partnersRefreshVisibleView({ focusDescriptor: focus });
-            } else if (this._route.startsWith('partner:')) {
+                if (['payout-onboarding-decide', 'payout-onboarding-contact',
+                    'revolut-binding-propose-request'].includes(
+                    button.dataset.partnersAction
+                )) {
+                    const main = document.querySelector('#page-admin .crm-main');
+                    const scrollTop = main?.scrollTop || 0;
+                    const requestKey = String(button.dataset.partnersRequestKey || '');
+                    await this._partnersLoadPayoutOnboardingRequests({ force: true });
+                    if (main) main.scrollTop = scrollTop;
+                    const requestCard = Array.from(document.querySelectorAll(
+                        '[data-partners-onboarding-request-key]'
+                    )).find((card) => (
+                        card.dataset.partnersOnboardingRequestKey === requestKey
+                    ));
+                    if (!this._partnersFocusElement(requestCard)) {
+                        this._partnersFocusElement(document.getElementById(
+                            'partners-admin-payout-onboarding'
+                        ));
+                    }
+                } else if (button.dataset.partnersAction === 'fiscal-review-public') {
+                    const main = document.querySelector('#page-admin .crm-main');
+                    const scrollTop = main?.scrollTop || 0;
+                    const partnerKey = String(button.dataset.partnersPartnerKey || '');
+                    await this._partnersLoadFiscalProfiles({ force: true });
+                    if (main) main.scrollTop = scrollTop;
+                    const fiscalCard = Array.from(document.querySelectorAll(
+                        '[data-partners-fiscal-partner-key]'
+                    )).find((card) => (
+                        card.dataset.partnersFiscalPartnerKey === partnerKey
+                    ));
+                    if (!this._partnersFocusElement(fiscalCard)) {
+                        this._partnersFocusElement(document.getElementById(
+                            'partners-admin-fiscal-profiles'
+                        ));
+                    }
+                } else {
+                    await this._partnersRefreshVisibleView({ focusDescriptor: focus });
+                }
+            } else if (this._route.startsWith('partner:')
+                || this._route.startsWith('partner-public:')) {
                 const main = document.querySelector('#page-admin .crm-main');
                 const scrollTop = main?.scrollTop || 0;
-                await this._pagePartnerDetail(this._route.slice(8));
+                if (this._route.startsWith('partner-public:')) {
+                    await this._pagePartnerDetailByPublicId(this._route.slice(15));
+                } else {
+                    await this._pagePartnerDetail(this._route.slice(8));
+                }
                 if (main) main.scrollTop = scrollTop;
                 if (!this._partnersRestoreFocus(focus)) {
                     document.querySelector('#page-admin .crm-back')?.focus?.({ preventScroll: true });
@@ -7984,7 +8600,7 @@ class AdminPage {
             return false;
         }
         if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
-            'payout-approve', 'fiscal-review'].includes(action)
+            'payout-approve', 'fiscal-review-public'].includes(action)
             && !this._partnersCanUseOperationalAction(action)) return false;
 
         if (['access-request-approve', 'access-request-decline'].includes(action)) {
@@ -8038,17 +8654,165 @@ class AdminPage {
                 : 'Demande refusée sans créer d’accès partenaire.';
         }
 
-        if (action === 'revolut-binding-propose') {
+        if (action === 'payout-onboarding-decide') {
             if (this._partnersCapabilities.finance !== true) return false;
-            const accountId = String(button.dataset.partnersAccount || '');
-            if (!uuid.test(accountId)) return false;
-            const currency = await this._partnersPrompt(
-                'Devise du profil bénéficiaire (ISO 4217) :',
-                'EUR',
-                (value) => currencyCode.test(value.toUpperCase()),
-                'Devise bénéficiaire invalide.'
+            const requestKey = String(button.dataset.partnersRequestKey || '');
+            const decision = String(button.dataset.partnersDecision || '');
+            if (!/^por_[0-9a-f]{24}$/.test(requestKey)
+                || !['start', 'reject', 'complete'].includes(decision)) return false;
+            if (decision === 'complete'
+                && (button.dataset.partnersBindingReady !== 'true'
+                    || button.dataset.partnersProfileReady !== 'true')) {
+                this._toast(
+                    'La finalisation reste verrouillée tant que le binding actif et le profil vérifié ne sont pas prêts côté serveur.',
+                    'err'
+                );
+                return false;
+            }
+            const labels = {
+                start: 'commencer la configuration manuelle',
+                reject: 'rejeter cette demande',
+                complete: 'finaliser la configuration contrôlée'
+            };
+            const confirmed = await this._confirm(
+                `Confirmer : ${labels[decision]} pour ${requestKey} ?`,
+                {
+                    danger: decision === 'reject',
+                    okLabel: decision === 'start'
+                        ? 'Commencer'
+                        : (decision === 'reject' ? 'Rejeter' : 'Finaliser')
+                }
             );
-            if (!currency) return false;
+            if (!confirmed) return false;
+            let reasonCode = null;
+            if (decision === 'reject') {
+                const reasons = [
+                    ['route_unavailable', 'Corridor non disponible'],
+                    ['beneficiary_setup_required', 'Bénéficiaire à configurer'],
+                    ['identity_mismatch', 'Identité non concordante'],
+                    ['unsupported_destination', 'Destination non prise en charge'],
+                    ['compliance_review', 'Revue de conformité requise'],
+                    ['duplicate_request', 'Demande déjà couverte']
+                ];
+                const choice = await this._partnersPrompt(
+                    `Choisissez le motif contrôlé (1–6) : ${reasons.map(
+                        ([, label], index) => `${index + 1} — ${label}`
+                    ).join(' · ')}`,
+                    '1',
+                    (value) => /^[1-6]$/.test(value),
+                    'Choisissez un nombre de 1 à 6.'
+                );
+                if (choice === null) return false;
+                reasonCode = reasons[Number(choice) - 1][0];
+            }
+            const justification = await this._partnersJustification(
+                `${labels[decision]} pour ${requestKey}`
+            );
+            if (!justification) return false;
+            const result = await this._rpc(
+                'admin_partners_payout_onboarding_request_decide',
+                {
+                    p_request_key: requestKey,
+                    p_action: decision,
+                    p_reason_code: reasonCode,
+                    p_justification: justification
+                }
+            );
+            const expectedStatus = {
+                start: 'in_progress',
+                reject: 'rejected',
+                complete: 'completed'
+            }[decision];
+            if (result?.schema_version !== 1
+                || result?.action !== 'payout_onboarding_decided'
+                || typeof result?.changed !== 'boolean'
+                || result?.request_key !== requestKey
+                || !/^prt_[0-9a-f]{24}$/.test(String(result?.partner_key || ''))
+                || result?.status !== expectedStatus) {
+                throw new Error('invalid_partners_payout_onboarding_decision_response');
+            }
+            return {
+                start: 'Configuration manuelle commencée. La demande reste traçable dans Finance.',
+                reject: 'Demande rejetée avec un motif contrôlé et audité.',
+                complete: 'Configuration finalisée après validation du binding et du profil.'
+            }[decision];
+        }
+
+        if (action === 'payout-onboarding-contact') {
+            if (!this._partnersHasCapabilities('support', 'finance')) return false;
+            const requestKey = String(button.dataset.partnersRequestKey || '');
+            if (!/^por_[0-9a-f]{24}$/.test(requestKey)) return false;
+            const templates = [
+                ['secure_setup_invitation', 'Invitation à démarrer la configuration sécurisée'],
+                ['setup_follow_up', 'Relance de la configuration en cours'],
+                ['reconfiguration_required', 'Nouvelle destination requise']
+            ];
+            const pendingContact = this._partnersContactKeys.get(requestKey) || null;
+            let templateKey = pendingContact?.templateKey || '';
+            if (!templateKey) {
+                const choice = await this._partnersPrompt(
+                    `Choisissez le modèle contrôlé (1–3) : ${templates.map(
+                        ([, label], index) => `${index + 1} — ${label}`
+                    ).join(' · ')}`,
+                    '1',
+                    (value) => /^[1-3]$/.test(value),
+                    'Choisissez un nombre de 1 à 3.'
+                );
+                if (!choice) return false;
+                templateKey = templates[Number(choice) - 1][0];
+            }
+            const templateLabel = templates.find(([key]) => key === templateKey)?.[1];
+            if (!templateLabel) return false;
+            const confirmed = await this._confirm(
+                `${pendingContact ? 'Reprendre sans doublon' : 'Envoyer'} le modèle « ${templateLabel} » au canal vérifié pour ${requestKey} ? L’adresse e-mail ne sera pas révélée.`,
+                { okLabel: pendingContact ? 'Reprendre' : 'Envoyer le message' }
+            );
+            if (!confirmed) return false;
+            const idempotencyKey = pendingContact?.idempotencyKey
+                || this._partnersRandomUuid();
+            this._partnersContactKeys.set(requestKey, { templateKey, idempotencyKey });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 20000);
+            let result;
+            try {
+                result = await this._rpc(
+                    'admin_partners_payout_onboarding_contact',
+                    {
+                        p_request_key: requestKey,
+                        p_template_key: templateKey,
+                        p_idempotency_key: idempotencyKey
+                    },
+                    { signal: controller.signal }
+                );
+            } finally {
+                clearTimeout(timeout);
+            }
+            const exactKeys = ['action', 'changed', 'channel', 'contact_key',
+                'delivery_state', 'partner_key', 'request_key', 'schema_version',
+                'template_key'];
+            if (!result || typeof result !== 'object' || Array.isArray(result)
+                || Object.keys(result).sort().join('|') !== exactKeys.join('|')
+                || result.schema_version !== 1
+                || result.action !== 'payout_onboarding_contact_sent'
+                || typeof result.changed !== 'boolean'
+                || result.request_key !== requestKey
+                || !/^poc_[0-9a-f]{24}$/.test(String(result.contact_key || ''))
+                || result.channel !== 'verified_account_email'
+                || result.template_key !== templateKey
+                || !/^[a-z][a-z0-9_]{1,31}$/.test(String(result.delivery_state || ''))
+                || !/^prt_[0-9a-f]{24}$/.test(String(result.partner_key || ''))) {
+                throw new Error('invalid_partners_payout_onboarding_contact_response');
+            }
+            this._partnersContactKeys.delete(requestKey);
+            return result.changed
+                ? 'Message audité remis à la file du canal e-mail vérifié.'
+                : 'Ce message avait déjà été enregistré ; aucun doublon n’a été créé.';
+        }
+
+        if (action === 'revolut-binding-propose-request') {
+            if (this._partnersCapabilities.finance !== true) return false;
+            const requestKey = String(button.dataset.partnersRequestKey || '');
+            if (!/^por_[0-9a-f]{24}$/.test(requestKey)) return false;
             const beneficiaryToken = await this._partnersPrompt(
                 'UUID opaque du bénéficiaire issu du registre Finance sécurisé (ou UUID counterparty Revolut pour le futur mode API) :',
                 '',
@@ -8081,18 +8845,16 @@ class AdminPage {
                 'L’empreinte de preuve doit être un SHA-256 hexadécimal.'
             );
             if (!mappingEvidenceHash) return false;
-            const normalizedCurrency = currency.toUpperCase();
             const confirmation = await this._partnersTypedConfirmation(
-                `PROPOSE-BENEFICIARY:${accountId}:${normalizedCurrency}`
+                `PROPOSE-BENEFICIARY:${requestKey}`
             );
             if (!confirmation) return false;
             const justification = await this._partnersJustification(
-                `proposition du bénéficiaire ${normalizedCurrency}`
+                `proposition du bénéficiaire pour ${requestKey}`
             );
             if (!justification) return false;
             const binding = await this._partnersProposeRevolutBeneficiary({
-                account_id: accountId.toLowerCase(),
-                currency: normalizedCurrency,
+                request_key: requestKey,
                 beneficiary_token_ref: beneficiaryToken.toLowerCase(),
                 beneficiary_payment_method_ref: paymentMethod
                     ? paymentMethod.toLowerCase()
@@ -8101,7 +8863,7 @@ class AdminPage {
                 mapping_evidence_hash: mappingEvidenceHash.toLowerCase(),
                 justification
             });
-            return `Proposition ${binding.key} enregistrée. Un second opérateur Finance doit contrôler le registre sécurisé puis la vérifier ou la rejeter.`;
+            return `Proposition ${binding.key} enregistrée depuis la demande publique. Un second opérateur Finance doit contrôler le registre sécurisé puis la vérifier ou la rejeter.`;
         }
 
         if (action === 'revolut-binding-verify'
@@ -9459,11 +10221,11 @@ class AdminPage {
             return 'Cycle de versement approuvé.';
         }
 
-        if (action === 'fiscal-review') {
-            const account = String(button.dataset.partnersAccount || '');
+        if (action === 'fiscal-review-public') {
+            const partnerKey = String(button.dataset.partnersPartnerKey || '');
             const country = String(button.dataset.partnersCountry || '');
             const status = String(button.dataset.partnersStatus || '');
-            if (!uuid.test(account) || !isoCountry.test(country)
+            if (!/^prt_[0-9a-f]{24}$/.test(partnerKey) || !isoCountry.test(country)
                 || !['verified', 'rejected'].includes(status)) return false;
             let provider = null;
             let reference = null;
@@ -9495,15 +10257,26 @@ class AdminPage {
                 `${status === 'verified' ? 'validation' : 'rejet'} du profil fiscal`
             );
             if (!justification) return false;
-            await this._rpc('admin_partners_fiscal_review', {
-                p_account_id: account,
+            const result = await this._rpc('admin_partners_fiscal_review_by_public_id', {
+                p_account_public_id: partnerKey,
                 p_status: status,
-                p_residence_country_code: country,
                 p_provider: provider,
                 p_reference_hash: reference ? reference.toLowerCase() : null,
                 p_tax_form_type: form || null,
                 p_justification: justification
             });
+            const keys = [
+                'action', 'country_code', 'partner_key', 'schema_version', 'status'
+            ];
+            if (!result || typeof result !== 'object' || Array.isArray(result)
+                || Object.keys(result).sort().join('|') !== keys.join('|')
+                || result.schema_version !== 1
+                || result.action !== 'fiscal_profile_reviewed'
+                || result.partner_key !== partnerKey
+                || result.country_code !== country
+                || result.status !== status) {
+                throw new Error('invalid_partners_fiscal_review_response');
+            }
             return `Profil fiscal ${status === 'verified' ? 'validé' : 'rejeté'} sans donnée brute.`;
         }
 

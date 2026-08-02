@@ -81,13 +81,19 @@ function revolutIncident(overrides = {}) {
   };
 }
 
-test('Admin Partners has a whitelisted overview and UUID-bounded detail route', () => {
+test('Admin Partners has whitelisted UUID and sanitized public-key detail routes', () => {
   const AdminPage = loadAdminPage();
   const id = '11111111-1111-4111-8111-111111111111';
+  const partnerKey = `prt_${'a'.repeat(24)}`;
 
   assert.equal(AdminPage.validRoute('partners'), 'partners');
   assert.equal(AdminPage.validRoute(`partner:${id}`), `partner:${id}`);
+  assert.equal(
+    AdminPage.validRoute(`partner-public:${partnerKey}`),
+    `partner-public:${partnerKey}`,
+  );
   assert.equal(AdminPage.validRoute('partner:not-an-id'), null);
+  assert.equal(AdminPage.validRoute('partner-public:prt_not-safe'), null);
   assert.equal(AdminPage.validRoute('partners/../../systeme'), null);
   assert.equal(AdminPage.NAV().some((item) => (
     item.key === 'partners'
@@ -102,6 +108,9 @@ test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.match(source, /'admin_partners_access_requests'/);
   assert.match(source, /admin_partners_access_request_decide/);
   assert.match(source, /this\._rpc\('admin_partners_detail',\s*\{\s*p_account_id:\s*accountId\s*\}\)/);
+  assert.match(source, /this\._rpc\('admin_partners_detail_by_public_id',\s*\{/);
+  assert.match(source, /'admin_partners_payout_onboarding_requests'/);
+  assert.match(source, /'admin_partners_payout_onboarding_request_decide'/);
   assert.match(source, /'monitoring', 'admin_partners_monitoring'/);
   assert.match(source, /revenuecat_transfer:\s*'Transferts RevenueCat'/);
   assert.match(source, /revenuecat_transfer_dead_letter/);
@@ -126,6 +135,7 @@ test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.match(source, /ACCESS-EXPORT:/);
   assert.match(source, /manual_batch_export_hash_mismatch/);
   assert.match(source, /else if \(route === 'partners'\) this\._pagePartners\(\)/);
+  assert.match(source, /else if \(route\.startsWith\('partner-public:'\)\) this\._pagePartnerDetailByPublicId/);
   assert.match(source, /else if \(route\.startsWith\('partner:'\)\) this\._pagePartnerDetail/);
 
   const section = source.slice(
@@ -371,7 +381,7 @@ test('Admin partner detail renders only sanitized Revolut profile status', () =>
   assert.match(detail.innerHTML, /Bénéficiaire Revolut/);
   assert.match(detail.innerHTML, /J\. H\. · FR76••••1234/);
   assert.match(detail.innerHTML, /Mode manuel uniquement/);
-  assert.match(detail.innerHTML, /data-partners-action="revolut-binding-propose"/);
+  assert.doesNotMatch(detail.innerHTML, /data-partners-action="revolut-binding-propose"/);
   assert.match(detail.innerHTML, /data-partners-action="revolut-binding-verify"/);
   assert.match(detail.innerHTML, /data-partners-action="revolut-binding-reject"/);
   assert.match(detail.innerHTML, /data-partners-action="revolut-binding-revoke-request"/);
@@ -406,8 +416,7 @@ test('Admin beneficiary proposal uses only the trusted Edge binding route', asyn
   page._sbUrl = () => 'https://example.supabase.co';
   page._token = () => 'user-access-token';
   const proposal = {
-    account_id: '11111111-1111-4111-8111-111111111111',
-    currency: 'EUR',
+    request_key: `por_${'1'.repeat(24)}`,
     beneficiary_token_ref: '22222222-2222-4222-8222-222222222222',
     beneficiary_payment_method_ref: null,
     display_masked: 'J. H. · ****1234',
@@ -1976,7 +1985,7 @@ test('Admin Partners operational actions are hidden and rejected without exact c
   const detailEnvelope = {
     account: {
       account_id: '11111111-1111-4111-8111-111111111111',
-      partner_key: 'partner-01',
+      partner_key: `prt_${'1'.repeat(24)}`,
       status: 'active',
       verification_status: 'verified',
       contract_status: 'accepted',
@@ -1984,6 +1993,12 @@ test('Admin Partners operational actions are hidden and rejected without exact c
     },
     policy: {},
     link: { status: 'active' },
+    fiscal: {
+      status: 'pending',
+      country_code: 'FR',
+      submitted_at: '2026-08-02T10:00:00Z',
+      reviewed_at: null,
+    },
     activity: [],
     readiness: {},
   };
@@ -1994,7 +2009,7 @@ test('Admin Partners operational actions are hidden and rejected without exact c
   assert.doesNotMatch(risk.innerHTML, /data-partners-action="account-action"/);
   assert.doesNotMatch(finance.innerHTML, /data-partners-action="job-retry"/);
   assert.doesNotMatch(finance.innerHTML, /data-partners-action="commission-reverse"/);
-  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review"/);
+  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review-public"/);
 
   page._partnersCapabilities = { support: true, risk: true, finance: true };
   page._renderPartnersRisk(riskEnvelope);
@@ -2003,7 +2018,8 @@ test('Admin Partners operational actions are hidden and rejected without exact c
   assert.match(risk.innerHTML, /data-partners-action="account-action"/);
   assert.match(finance.innerHTML, /data-partners-action="job-retry"/);
   assert.match(finance.innerHTML, /data-partners-action="commission-reverse"/);
-  assert.match(detail.innerHTML, /data-partners-action="fiscal-review"/);
+  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review-public"/);
+  assert.doesNotMatch(detail.innerHTML, /data-partners-account=/);
 
   page._partnersCapabilities = { support: false, risk: false, finance: false };
   page._partnersPrompt = () => assert.fail('permission denial must happen before prompting');
@@ -2307,4 +2323,408 @@ test('Admin Partners maps MFA failures into distinct sanitized user guidance', (
     status: 422,
     payload: { error_code: 'otp_expired' },
   }), /incorrect ou expiré/);
+});
+
+test('Admin Partners payout onboarding queue exposes controlled Finance actions only', () => {
+  const queue = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-payout-onboarding' ? queue : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: false, finance: true };
+  const base = {
+    partner_key: `prt_${'a'.repeat(24)}`,
+    country_code: 'FR',
+    currency: 'USD',
+    revision: 1,
+    execution_adapter: 'revolut_manual',
+    reason_code: null,
+    requested_at: '2026-08-02T10:00:00Z',
+    updated_at: '2026-08-02T10:01:00Z',
+    rejected_at: null,
+    completed_at: null,
+    reconfiguration_required: false,
+  };
+  page._renderPartnersPayoutOnboardingRequests({
+    schema_version: 1,
+    total: 5,
+    limit: 20,
+    offset: 0,
+    items: [
+      {
+        ...base,
+        request_key: `por_${'1'.repeat(24)}`,
+        status: 'pending',
+        started_at: null,
+        binding_ready: false,
+        profile_ready: false,
+      },
+      {
+        ...base,
+        request_key: `por_${'2'.repeat(24)}`,
+        status: 'in_progress',
+        started_at: '2026-08-02T10:02:00Z',
+        binding_ready: true,
+        profile_ready: true,
+      },
+      {
+        ...base,
+        request_key: `por_${'3'.repeat(24)}`,
+        status: 'in_progress',
+        started_at: '2026-08-02T10:02:00Z',
+        binding_ready: false,
+        profile_ready: true,
+      },
+      {
+        ...base,
+        request_key: `por_${'4'.repeat(24)}`,
+        status: 'completed',
+        started_at: '2026-08-02T10:02:00Z',
+        completed_at: '2026-08-02T10:05:00Z',
+        binding_ready: false,
+        profile_ready: true,
+        reconfiguration_required: true,
+      },
+      {
+        ...base,
+        request_key: `por_${'5'.repeat(24)}`,
+        status: 'completed',
+        started_at: '2026-08-02T10:02:00Z',
+        completed_at: '2026-08-02T10:05:00Z',
+        binding_ready: true,
+        profile_ready: true,
+        reconfiguration_required: true,
+      },
+    ],
+  });
+
+  assert.match(queue.innerHTML, /data-partners-decision="start"/);
+  assert.match(queue.innerHTML, /data-partners-decision="reject"/);
+  assert.match(queue.innerHTML, /data-partners-decision="complete"/);
+  assert.match(queue.innerHTML, /Finalisation verrouillée/);
+  assert.match(
+    queue.innerHTML,
+    /data-partners-request-key="por_333333333333333333333333"[\s\S]*?data-partners-decision="complete"[\s\S]*?disabled/,
+  );
+  assert.match(queue.innerHTML, /data-partners-onboarding-open-partner="prt_/);
+  assert.match(queue.innerHTML, /data-partners-action="payout-onboarding-contact"/);
+  assert.match(queue.innerHTML, /data-partners-action="revolut-binding-propose-request"/);
+  assert.match(queue.innerHTML, /Reconfiguration requise/);
+  assert.match(queue.innerHTML, /ne satisfait plus tous les contrôles actuels/);
+  assert.doesNotMatch(queue.innerHTML, /account_id|user_id|provider_reference|bank|tax identifier/i);
+});
+
+test('Admin Partners payout onboarding decisions are Finance+AAL2 gated and typed', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const requestKey = `por_${'4'.repeat(24)}`;
+  const partnerKey = `prt_${'b'.repeat(24)}`;
+  const calls = [];
+  page._partnersCapabilities = { support: false, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersPrompt = async () => '5';
+  page._partnersJustification = async () => 'Contrôle Finance supervisé';
+  page._toast = () => {};
+  page._rpc = async (fn, args) => {
+    calls.push({ fn, args });
+    const status = {
+      start: 'in_progress',
+      reject: 'rejected',
+      complete: 'completed',
+    }[args.p_action];
+    return {
+      schema_version: 1,
+      action: 'payout_onboarding_decided',
+      changed: true,
+      request_key: requestKey,
+      partner_key: partnerKey,
+      status,
+    };
+  };
+
+  for (const decision of ['start', 'reject', 'complete']) {
+    const result = await page._runPartnersAdminAction({
+      dataset: {
+        partnersAction: 'payout-onboarding-decide',
+        partnersRequestKey: requestKey,
+        partnersDecision: decision,
+        partnersBindingReady: decision === 'complete' ? 'true' : 'false',
+        partnersProfileReady: decision === 'complete' ? 'true' : 'false',
+      },
+    });
+    assert.equal(typeof result, 'string');
+  }
+
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    {
+      fn: 'admin_partners_payout_onboarding_request_decide',
+      args: {
+        p_request_key: requestKey,
+        p_action: 'start',
+        p_reason_code: null,
+        p_justification: 'Contrôle Finance supervisé',
+      },
+    },
+    {
+      fn: 'admin_partners_payout_onboarding_request_decide',
+      args: {
+        p_request_key: requestKey,
+        p_action: 'reject',
+        p_reason_code: 'compliance_review',
+        p_justification: 'Contrôle Finance supervisé',
+      },
+    },
+    {
+      fn: 'admin_partners_payout_onboarding_request_decide',
+      args: {
+        p_request_key: requestKey,
+        p_action: 'complete',
+        p_reason_code: null,
+        p_justification: 'Contrôle Finance supervisé',
+      },
+    },
+  ]);
+
+  page._rpc = () => assert.fail('locked completion must not call the decision RPC');
+  assert.equal(await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'payout-onboarding-decide',
+      partnersRequestKey: requestKey,
+      partnersDecision: 'complete',
+      partnersBindingReady: 'false',
+      partnersProfileReady: 'true',
+    },
+  }), false);
+});
+
+test('Admin Partners public-key fiche uses only the sanitized Finance RPC', async () => {
+  const view = { innerHTML: '' };
+  const detail = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return { 'crm-view': view, 'partners-admin-detail': detail }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const partnerKey = `prt_${'c'.repeat(24)}`;
+  const calls = [];
+  let rendered = null;
+  page._route = `partner-public:${partnerKey}`;
+  page._nav = 9;
+  page._partnersEnsureAal2 = async () => true;
+  page._renderPartnerDetail = (data) => { rendered = data; };
+  page._rpc = async (fn, args) => {
+    calls.push({ fn, args: args || null });
+    if (fn === 'admin_partners_capabilities') {
+      return {
+        schema_version: 1,
+        can_manage: false,
+        can_manage_release: false,
+        capabilities: { support: false, risk: false, finance: true },
+      };
+    }
+    return {
+      schema_version: 1,
+      account: {
+        account_public_id: partnerKey,
+        partner_key: partnerKey,
+        status: 'active',
+      },
+      policy: null,
+      link: null,
+      activity: [],
+    };
+  };
+
+  await page._pagePartnerDetailByPublicId(partnerKey);
+  assert.equal(rendered.account.account_public_id, partnerKey);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { fn: 'admin_partners_capabilities', args: null },
+    {
+      fn: 'admin_partners_detail_by_public_id',
+      args: { p_account_public_id: partnerKey },
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(rendered), /[0-9a-f]{8}-[0-9a-f-]{27}/i);
+});
+
+test('Admin Partners fiscal queue is public-keyed, reviewable and privacy-minimized', () => {
+  const queue = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-fiscal-profiles' ? queue : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: false, finance: true };
+  const partnerKey = `prt_${'d'.repeat(24)}`;
+  page._renderPartnersFiscalProfiles({
+    schema_version: 1,
+    total: 1,
+    limit: 20,
+    offset: 0,
+    items: [{
+      partner_key: partnerKey,
+      country_code: 'US',
+      status: 'pending',
+      submitted_at: '2026-08-02T11:00:00Z',
+      reviewed_at: null,
+    }],
+  });
+
+  assert.match(queue.innerHTML, new RegExp(partnerKey));
+  assert.match(queue.innerHTML, /data-partners-action="fiscal-review-public"/);
+  assert.match(queue.innerHTML, /data-partners-partner-key="prt_/);
+  assert.doesNotMatch(
+    queue.innerHTML,
+    /account_id|user_id|email|tax_form|reference_hash|document_number/i,
+  );
+  assert.throws(() => page._renderPartnersFiscalProfiles({
+    schema_version: 1,
+    total: 1,
+    limit: 20,
+    offset: 0,
+    items: [{
+      partner_key: partnerKey,
+      country_code: 'US',
+      status: 'pending',
+      submitted_at: '2026-08-02T11:00:00Z',
+      reviewed_at: null,
+      email: 'must-not-cross-boundary@example.com',
+    }],
+  }), /invalid_partners_fiscal_profiles_items/);
+});
+
+test('Admin Partners fiscal review resolves only the public partner key', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const partnerKey = `prt_${'e'.repeat(24)}`;
+  const calls = [];
+  const prompts = ['manual_review', 'a'.repeat(64), ''];
+  page._partnersCapabilities = { support: true, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
+  page._partnersPrompt = async () => prompts.shift();
+  page._partnersJustification = async () => 'Revue fiscale manuelle contrôlée';
+  page._rpc = async (fn, args) => {
+    calls.push({ fn, args });
+    return {
+      schema_version: 1,
+      action: 'fiscal_profile_reviewed',
+      status: 'verified',
+      partner_key: partnerKey,
+      country_code: 'US',
+    };
+  };
+
+  const result = await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'fiscal-review-public',
+      partnersPartnerKey: partnerKey,
+      partnersCountry: 'US',
+      partnersStatus: 'verified',
+    },
+  });
+  assert.match(result, /validé/);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+    fn: 'admin_partners_fiscal_review_by_public_id',
+    args: {
+      p_account_public_id: partnerKey,
+      p_status: 'verified',
+      p_provider: 'manual_review',
+      p_reference_hash: 'a'.repeat(64),
+      p_tax_form_type: null,
+      p_justification: 'Revue fiscale manuelle contrôlée',
+    },
+  }]);
+  assert.doesNotMatch(JSON.stringify(calls), /account_id|p_account_id/);
+});
+
+test('Admin payout contact replays the same opaque idempotency key after an unknown result', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const requestKey = `por_${'5'.repeat(24)}`;
+  const partnerKey = `prt_${'f'.repeat(24)}`;
+  const idempotencyKey = '11111111-1111-4111-8111-111111111111';
+  const calls = [];
+  let promptCalls = 0;
+  page._partnersCapabilities = { support: true, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
+  page._partnersPrompt = async () => { promptCalls += 1; return '1'; };
+  page._confirm = async () => true;
+  page._partnersRandomUuid = () => idempotencyKey;
+  page._rpc = async (fn, args) => {
+    calls.push({ fn, args });
+    if (calls.length === 1) throw new DOMException('timeout', 'AbortError');
+    return {
+      schema_version: 1,
+      action: 'payout_onboarding_contact_sent',
+      changed: false,
+      contact_key: `poc_${'1'.repeat(24)}`,
+      request_key: requestKey,
+      partner_key: partnerKey,
+      template_key: 'secure_setup_invitation',
+      channel: 'verified_account_email',
+      delivery_state: 'ready',
+    };
+  };
+  const button = {
+    dataset: {
+      partnersAction: 'payout-onboarding-contact',
+      partnersRequestKey: requestKey,
+    },
+  };
+
+  await assert.rejects(() => page._runPartnersAdminAction(button), /timeout/);
+  const result = await page._runPartnersAdminAction(button);
+  assert.match(result, /aucun doublon/);
+  assert.equal(promptCalls, 1);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args, calls[1].args);
+  assert.equal(calls[1].args.p_idempotency_key, idempotencyKey);
+  assert.equal(page._partnersContactKeys.has(requestKey), false);
+});
+
+test('Admin beneficiary proposal is bound to the sanitized payout request key', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const requestKey = `por_${'6'.repeat(24)}`;
+  const prompts = [
+    '22222222-2222-4222-8222-222222222222',
+    '',
+    'J. H. · ****1234',
+    'b'.repeat(64),
+  ];
+  let proposal = null;
+  page._partnersCapabilities = { support: false, risk: false, finance: true };
+  page._partnersEnsureAal2 = async () => true;
+  page._partnersPrompt = async () => prompts.shift();
+  page._partnersTypedConfirmation = async (expected) => {
+    assert.equal(expected, `PROPOSE-BENEFICIARY:${requestKey}`);
+    return expected;
+  };
+  page._partnersJustification = async () => 'Registre Finance vérifié manuellement';
+  page._partnersProposeRevolutBeneficiary = async (value) => {
+    proposal = value;
+    return { key: `rbb_${'7'.repeat(24)}` };
+  };
+
+  const result = await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'revolut-binding-propose-request',
+      partnersRequestKey: requestKey,
+    },
+  });
+  assert.match(result, /Proposition rbb_/);
+  assert.equal(proposal.request_key, requestKey);
+  assert.equal(proposal.beneficiary_payment_method_ref, null);
+  assert.doesNotMatch(JSON.stringify(proposal), /account_id|currency/);
 });

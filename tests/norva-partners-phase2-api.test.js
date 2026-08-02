@@ -95,6 +95,43 @@ function diditSemanticPayloadHash(payload) {
     .digest('hex');
 }
 
+test('Didit webhook body reader cancels chunked payloads at the hard byte cap', async () => {
+  const {
+    readDiditWebhookBody,
+    DiditPayloadTooLargeError,
+  } = bundled('supabase/functions/_shared/didit-partners.ts');
+  let cancelled = false;
+  let emitted = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      emitted += 1;
+      controller.enqueue(new Uint8Array(6).fill(emitted));
+      if (emitted >= 4) controller.close();
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const request = new Request('https://api.norva.tv/functions/v1/norva-partners-kyc-webhook', {
+    method: 'POST',
+    body: stream,
+    duplex: 'half',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  assert.equal(request.headers.has('content-length'), false);
+  await assert.rejects(
+    () => readDiditWebhookBody(request, 10),
+    (error) => error instanceof DiditPayloadTooLargeError && error.name === 'DiditPayloadTooLargeError',
+  );
+  assert.equal(cancelled, true);
+
+  const exact = new Request('https://api.norva.tv/functions/v1/norva-partners-kyc-webhook', {
+    method: 'POST',
+    body: new Uint8Array(10).fill(7),
+  });
+  assert.equal((await readDiditWebhookBody(exact, 10)).byteLength, 10);
+});
+
 test('Didit configuration is complete, KYC-only and fail-closed', () => {
   const { loadDiditConfig } = bundled('supabase/functions/_shared/didit-partners.ts');
   const values = diditConfig();
@@ -247,7 +284,7 @@ test('Didit return boundary drops provider query before app history or referrer'
   assert.equal(response.status, 303);
   assert.equal(
     response.headers.get('Location'),
-    '/app.html?mobile=1#partners',
+    '/app.html#partners',
   );
   assert.equal(
     response.headers.get('Cache-Control'),
@@ -277,7 +314,16 @@ test('Didit return boundary drops provider query before app history or referrer'
     ),
   });
   assert.equal(head.status, 303);
-  assert.equal(head.headers.get('Location'), '/app.html?mobile=1#partners');
+  assert.equal(head.headers.get('Location'), '/app.html#partners');
+
+  const android = await callback.onRequest({
+    request: new Request(
+      'https://norva.tv/partners-kyc-return?status=approved',
+      { headers: { 'User-Agent': 'Chrome Mobile NorvaTV-AndroidPhone/1.0' } },
+    ),
+  });
+  assert.equal(android.status, 303);
+  assert.equal(android.headers.get('Location'), '/app.html?mobile=1#partners');
 
   const rejected = await callback.onRequest({
     request: new Request(
@@ -989,26 +1035,10 @@ test('same-origin post-auth claim reads HttpOnly cookie in Pages and clears only
   assert.equal(retry.headers.get('Set-Cookie'), null, 'retryable failures keep the claim cookie');
 });
 
-test('payout profile accepts only opaque provider tokens and never returns them', () => {
+test('payout profile is read-only and never accepts or returns provider tokens', () => {
   const payout = bundled('supabase/functions/_shared/partners-payout.ts');
-  const input = {
-    provider: 'wise',
-    beneficiaryTokenRef: 'recipient_tok_abC123-opaque',
-    displayMasked: '•••• 1234',
-    currency: 'EUR',
-  };
-  assert.deepEqual(plain(payout.parsePayoutProfileInput(input)), input);
-  for (const invalid of [
-    { ...input, provider: 'crypto' },
-    { ...input, currency: 'eur' },
-    { ...input, beneficiaryTokenRef: 'FR7630006000011234567890189' },
-    { ...input, beneficiaryTokenRef: '4111111111111111' },
-    { ...input, beneficiaryTokenRef: '123456789:1234567890' },
-    { ...input, beneficiaryTokenRef: 'person@example.test' },
-    { ...input, iban: 'FR7630006000011234567890189' },
-  ]) {
-    assert.throws(() => payout.parsePayoutProfileInput(invalid));
-  }
+  assert.equal(payout.parsePayoutProfileInput, undefined);
+  assert.equal(payout.sanitizePayoutProfileSet, undefined);
 
   const readResult = plain(payout.sanitizePayoutProfileGet({
     schema_version: 1,
@@ -1032,22 +1062,11 @@ test('payout profile accepts only opaque provider tokens and never returns them'
     JSON.stringify(readResult),
     /beneficiary|token_ref|iban|account_number|routing/i,
   );
-  const saved = plain(payout.sanitizePayoutProfileSet({
-    schema_version: 1,
-    action: 'payout_profile_saved',
-    replayed: false,
-    profile: {
-      provider: 'wise',
-      display_masked: '•••• 1234',
-      currency: 'EUR',
-      status: 'active',
-    },
-  }));
-  assert.equal(saved.profile.display_masked, '•••• 1234');
 });
 
 test('phase 2 security boundaries are separately configured and never trust simple webhook signatures', () => {
   const config = read('supabase/config.toml');
+  const kong = read('ops/hetzner/volumes/api/kong.yml');
   const didit = read('supabase/functions/_shared/didit-partners.ts');
   const webhook = read('supabase/functions/norva-partners-kyc-webhook/index.ts');
   const referral = read('supabase/functions/norva-partners-referral/index.ts');
@@ -1062,10 +1081,16 @@ test('phase 2 security boundaries are separately configured and never trust simp
     /error\.code === "P0006"[\s\S]*problem\(404, "webhook_resource_unknown"/,
     'a signed event racing session persistence must receive a retryable not-found response',
   );
+  assert.match(webhook, /readDiditWebhookBody/);
+  assert.match(webhook, /DiditPayloadTooLargeError/);
+  assert.doesNotMatch(webhook, /req\.arrayBuffer\(\)/);
+  assert.match(
+    kong,
+    /functions-v1-didit-kyc-webhook[\s\S]*request-size-limiting[\s\S]*allowed_payload_size: 2[\s\S]*size_unit: megabytes[\s\S]*require_content_length: false/,
+  );
   assert.doesNotMatch(webhook, /console\[[^\]]+\]\([^)]*(?:rawBody|event|session|decision|document|payload)/s);
   assert.doesNotMatch(referral, /console\[[^\]]+\]\([^)]*(?:code|claim|network|userAgent|nonce)/s);
-  assert.match(member, /p_beneficiary_token_ref: input\.beneficiaryTokenRef/);
-  assert.doesNotMatch(member, /beneficiaryTokenRef[\s\S]*cleanData\s*=\s*\{/, 'token refs are never constructed into public responses');
+  assert.doesNotMatch(member, /beneficiaryTokenRef|p_beneficiary_token_ref/);
 });
 
 test('Didit Edge and SQL boundaries require immutable environment bindings', () => {

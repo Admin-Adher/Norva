@@ -325,6 +325,17 @@ public class MainActivity extends Activity {
             return false;
         }
         if ("https".equals(data.getScheme()) && "norva.tv".equals(data.getHost())) {
+            if ("/partners-kyc-return".equals(data.getPath())) {
+                String kycReturnUrl = PartnersContract.canonicalKycReturnDestination(
+                        data.toString());
+                intent.setAction(null);
+                prefs().edit().putString(PREF_MODE, "cloud").apply();
+                connectCloud(kycReturnUrl == null
+                        ? Uri.parse(CLOUD_WATCH_URL).buildUpon()
+                                .fragment("partners").build().toString()
+                        : kycReturnUrl);
+                return true;
+            }
             String partnersRelayUrl = partnersRelayAppLinkDestination(data);
             if (partnersRelayUrl != null) {
                 // The relay fragment is a short-lived bearer-like value. Consume

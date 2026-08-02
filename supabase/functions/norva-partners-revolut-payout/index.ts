@@ -25,9 +25,9 @@ import {
 } from "../_shared/partners-revolut-beneficiary.mjs";
 import {
   readRevolutBusinessConfig,
+  revolutApiEnvironmentEnabled,
   RevolutBusinessClient,
   RevolutBusinessContractError,
-  revolutApiEnvironmentEnabled,
   sha256Hex,
 } from "../_shared/partners-revolut-business.mjs";
 import {
@@ -78,7 +78,8 @@ const serviceDb = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 let BENEFICIARY_HMAC_CONFIG:
-  ReturnType<typeof readRevolutBeneficiaryHmacConfig> | null = null;
+  | ReturnType<typeof readRevolutBeneficiaryHmacConfig>
+  | null = null;
 let BENEFICIARY_HMAC_CONFIG_ERROR = false;
 let REVOLUT_CONFIG: ReturnType<typeof readRevolutBusinessConfig> = null;
 let REVOLUT_CONFIG_ERROR = false;
@@ -115,8 +116,7 @@ Deno.serve(async (req) => {
     "",
   ) || "/";
   const isStatement = route === "/manual/statements";
-  const isBeneficiaryProposal =
-    route === "/manual/beneficiaries/propose";
+  const isBeneficiaryProposal = route === "/manual/beneficiaries/propose";
   const isBrowserRoute = isStatement || isBeneficiaryProposal;
   try {
     if (req.method === "OPTIONS" && isBrowserRoute) {
@@ -157,9 +157,11 @@ Deno.serve(async (req) => {
 
 async function handleCron(req: Request) {
   await requireCron(req);
-  if (!revolutApiEnvironmentEnabled(
-    { get: (name: string) => Deno.env.get(name) } as typeof Deno.env,
-  )) {
+  if (
+    !revolutApiEnvironmentEnabled(
+      { get: (name: string) => Deno.env.get(name) } as typeof Deno.env,
+    )
+  ) {
     return json({
       ok: true,
       mode: "revolut_api",
@@ -543,13 +545,11 @@ async function handleBeneficiaryProposal(req: Request) {
   const authorization = recordOrEmpty(
     await authenticatedRpc(
       userDb,
-      "admin_partners_revolut_beneficiary_binding_authorize",
+      "admin_partners_revolut_beneficiary_binding_authorize_by_request",
       {
-        p_account_id: proposal.accountId,
-        p_currency: proposal.currency,
+        p_request_key: proposal.requestKey,
         p_beneficiary_token_ref: proposal.beneficiaryTokenRef,
-        p_beneficiary_payment_method_ref:
-          proposal.beneficiaryPaymentMethodRef,
+        p_beneficiary_payment_method_ref: proposal.beneficiaryPaymentMethodRef,
         p_display_masked: proposal.displayMasked,
         p_fingerprint_key_version: activeKeyVersion,
         p_mapping_evidence_hash: proposal.mappingEvidenceHash,
@@ -565,6 +565,7 @@ async function handleBeneficiaryProposal(req: Request) {
     authorization.attestation_payload ?? "",
   );
   const keyVersion = Number(authorization.fingerprint_key_version);
+  const authorizedCurrency = String(authorization.currency ?? "");
   const expiresAt = Date.parse(String(authorization.expires_at ?? ""));
   const now = Date.now();
   if (
@@ -576,6 +577,12 @@ async function handleBeneficiaryProposal(req: Request) {
     !attestationPayload ||
     new TextEncoder().encode(attestationPayload).length > 4096 ||
     keyVersion !== activeKeyVersion ||
+    !/^[A-Z]{3}$/.test(authorizedCurrency) ||
+    authorization.request_key !== proposal.requestKey ||
+    typeof authorization.partner_key !== "string" ||
+    !/^prt_[0-9a-f]{24}$/.test(authorization.partner_key) ||
+    attestationPayload.includes("account_id=") ||
+    !attestationPayload.includes(`request_key=${proposal.requestKey}`) ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= now ||
     expiresAt > now + 5 * 60_000 + 10_000
@@ -612,7 +619,7 @@ async function handleBeneficiaryProposal(req: Request) {
     proposed.schema_version !== 1 ||
     proposed.action !== "revolut_beneficiary_binding_proposed" ||
     !/^rbb_[0-9a-f]{24}$/.test(String(binding.key ?? "")) ||
-    binding.currency !== proposal.currency ||
+    binding.currency !== authorizedCurrency ||
     !Number.isSafeInteger(Number(binding.version)) ||
     Number(binding.version) < 1 ||
     Number(binding.fingerprint_key_version) !== keyVersion ||
@@ -638,8 +645,7 @@ function parseBeneficiaryProposal(body: unknown) {
     );
   }
   const allowedKeys = new Set([
-    "account_id",
-    "currency",
+    "request_key",
     "beneficiary_token_ref",
     "beneficiary_payment_method_ref",
     "display_masked",
@@ -658,8 +664,7 @@ function parseBeneficiaryProposal(body: unknown) {
   }
   const uuid =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const accountId = String(body.account_id ?? "").trim().toLowerCase();
-  const currency = String(body.currency ?? "").trim().toUpperCase();
+  const requestKey = String(body.request_key ?? "").trim().toLowerCase();
   const beneficiaryTokenRef = String(
     body.beneficiary_token_ref ?? "",
   ).trim().toLowerCase();
@@ -675,8 +680,7 @@ function parseBeneficiaryProposal(body: unknown) {
   const justification = String(body.justification ?? "").trim();
   const compactMasked = displayMasked.replace(/[\s-]/g, "");
   if (
-    !uuid.test(accountId) ||
-    !/^[A-Z]{3}$/.test(currency) ||
+    !/^por_[0-9a-f]{24}$/.test(requestKey) ||
     !uuid.test(beneficiaryTokenRef) ||
     (
       beneficiaryPaymentMethodRef !== null &&
@@ -699,8 +703,7 @@ function parseBeneficiaryProposal(body: unknown) {
     );
   }
   return {
-    accountId,
-    currency,
+    requestKey,
     beneficiaryTokenRef,
     beneficiaryPaymentMethodRef,
     displayMasked,
@@ -791,13 +794,48 @@ async function serviceRpc(name: string, args: JsonRecord): Promise<unknown> {
 }
 
 async function readJsonBody(req: Request, maxBytes: number) {
-  const declared = Number(req.headers.get("Content-Length") ?? "0");
-  if (Number.isFinite(declared) && declared > maxBytes) {
+  const contentLength = req.headers.get("Content-Length");
+  if (
+    contentLength !== null &&
+    (!/^\d{1,9}$/.test(contentLength) || Number(contentLength) > maxBytes)
+  ) {
     throw new EdgeError(413, "payload_too_large", "Payload too large.");
   }
-  const text = await req.text();
-  if (new TextEncoder().encode(text).length > maxBytes) {
-    throw new EdgeError(413, "payload_too_large", "Payload too large.");
+  const reader = req.body?.getReader();
+  if (!reader) throw new EdgeError(400, "invalid_json", "Invalid JSON.");
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        try {
+          await reader.cancel("payload_too_large");
+        } catch {
+          // Best-effort cancellation only; the public response remains 413.
+        }
+        throw new EdgeError(413, "payload_too_large", "Payload too large.");
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof EdgeError) throw error;
+    throw new EdgeError(400, "invalid_json", "Invalid JSON.");
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new EdgeError(400, "invalid_json", "Invalid JSON.");
   }
   try {
     return JSON.parse(text);

@@ -35,9 +35,12 @@ on:
       - 'ops/backup/**'
       - 'ops/hetzner/backup/**'
       - 'ops/hetzner/docker-compose.supabase.yml'
+      - 'ops/hetzner/volumes/api/kong.yml'
       - 'ops/hetzner/scripts/01-dump-prod.sh'
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh'
+      - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/partners/**'
@@ -98,9 +101,12 @@ on:
       - 'ops/backup/**'
       - 'ops/hetzner/backup/**'
       - 'ops/hetzner/docker-compose.supabase.yml'
+      - 'ops/hetzner/volumes/api/kong.yml'
       - 'ops/hetzner/scripts/01-dump-prod.sh'
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh'
+      - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/partners/**'
@@ -171,6 +177,7 @@ jobs:
           ops/hetzner/backup/backup-nightly.sh
           ops/hetzner/scripts/01-dump-prod.sh
           ops/hetzner/scripts/05-verify-parity.sh
+          ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh
 
       - name: Validate the fail-closed pilot evidence template
         run: >-
@@ -342,6 +349,8 @@ jobs:
           supabase/tests/affiliate_p0.sql
           supabase/tests/affiliate_access_requests.sql
           supabase/tests/affiliate_dispute_won.sql
+          supabase/tests/affiliate_fiscal_payout_onboarding.sql
+          supabase/tests/affiliate_member_write_rate_limits.sql
           supabase/tests/affiliate_revolut_manual_hybrid.sql
           supabase/tests/revenuecat_transfer.sql
           --local

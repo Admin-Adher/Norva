@@ -2,10 +2,12 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   DIDIT_WEBHOOK_MAX_BYTES,
   DiditContractError,
+  DiditPayloadTooLargeError,
   loadDiditConfig,
+  readDiditWebhookBody,
   sanitizeKycWebhookRpc,
-  verifyDiditConsoleTestWebhook,
   verifyAndNormalizeDiditWebhook,
+  verifyDiditConsoleTestWebhook,
 } from "../_shared/didit-partners.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -52,7 +54,19 @@ Deno.serve(async (req) => {
       return problem(413, "payload_too_large", correlationId);
     }
 
-    const rawBody = new Uint8Array(await req.arrayBuffer());
+    let rawBody: Uint8Array;
+    try {
+      rawBody = await readDiditWebhookBody(
+        req,
+        DIDIT_WEBHOOK_MAX_BYTES,
+      );
+    } catch (error) {
+      if (error instanceof DiditPayloadTooLargeError) {
+        log("warn", correlationId, "payload_too_large");
+        return problem(413, "payload_too_large", correlationId);
+      }
+      throw error;
+    }
     let event;
     try {
       if (

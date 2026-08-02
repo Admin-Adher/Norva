@@ -212,7 +212,9 @@ Le contrat initial est strict :
   aux opérateurs du jour, le profil reste `verification_required` et aucun lot
   de production ne doit être préparé ;
 - la proposition du mapping passe uniquement par
-  `/manual/beneficiaries/propose`. Une autorisation Finance/AAL2 à usage unique
+  `/manual/beneficiaries/propose`. Le navigateur transmet la clé publique
+  `request_key`, jamais l'UUID du compte ni la devise. Une autorisation
+  Finance/AAL2 à usage unique résout ces valeurs côté serveur et
   fournit au runtime Edge deux payloads canoniques ; l'Edge calcule une
   empreinte stable et une attestation liée au ticket avec une clé HMAC
   versionnée. Ni la clé, ni les HMAC, ni l'UUID bénéficiaire ne sont renvoyés
@@ -252,6 +254,11 @@ Ordre d'activation du rail manuel :
    `REQUEST-REVOKE:<binding>` et place immédiatement le profil en
    `verification_required`, puis un second opérateur confirme avec
    `CONFIRM-REVOKE:<revocation>` ;
+   si le partenaire doit être contacté, utiliser uniquement
+   `admin_partners_payout_onboarding_contact` avec l'un des modèles serveur
+   `secure_setup_invitation|setup_follow_up|reconfiguration_required`. Le ticket
+   Support et l'outbox e-mail sont créés idempotemment. Aucun texte libre ni
+   collecte de coordonnées bancaires/fiscales par e-mail n'est autorisé ;
 5. rejouer capture, maturation J+45 et réconciliation shadow sans écart ;
 6. depuis le compte Revolut Business Basic réel et dans sa langue configurée,
    exporter un relevé, vérifier que le parseur reconnaît sans ambiguïté son
@@ -500,8 +507,10 @@ Le workflow Didit doit être un workflow KYC individuel. Aucun module KYB ne doi
 exactement `DIDIT_CALLBACK_URL=https://norva.tv/partners-kyc-return`, sans query
 string ni fragment. Didit ajoute ses paramètres de session et statut à cette
 URL : la Pages Function dédiée les ignore sans les lire, journaliser, stocker
-ou refléter, puis répond `303` vers `/app.html?mobile=1#partners` avec
-`Cache-Control: private, no-store` et `Referrer-Policy: no-referrer`. Le Service
+ou refléter, puis répond `303` vers `/app.html#partners` sur navigateur Web et
+vers `/app.html?mobile=1#partners` uniquement pour le client Android Norva. La
+réponse conserve `Cache-Control: private, no-store` et
+`Referrer-Policy: no-referrer`. Le Service
 Worker ne met jamais en cache cet endpoint ni une requête portant les
 paramètres Didit sensibles. Le chargeur de configuration compare cette URL
 canonique octet pour octet et reste `not_configured` pour toute autre valeur.
@@ -641,6 +650,117 @@ jamais inscrire cette cible par migration.
 
 ## 4. Smoke tests
 
+### Préflight pilote : corridor explicite, sans activation
+
+Le préflight ne choisit jamais un pays, une devise, un exposant monétaire, un
+seuil local ou un âge minimum à la place de l'opérateur. Ces six valeurs sont
+obligatoires à chaque exécution :
+
+```bash
+cd /home/adrien/norva
+export NORVA_PARTNERS_PILOT_COUNTRY='<ISO2>'
+export NORVA_PARTNERS_PILOT_COUNTRY_ISO3='<ISO3>'
+export NORVA_PARTNERS_PILOT_CURRENCY='<ISO4217>'
+export NORVA_PARTNERS_PILOT_CURRENCY_EXPONENT='<0-6>'
+export NORVA_PARTNERS_PILOT_THRESHOLD_MINOR='<minor-units>'
+export NORVA_PARTNERS_PILOT_MINIMUM_AGE='<18-99>'
+bash ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh
+```
+
+Les placeholders échouent volontairement. Pour un corridor payé en USD, le
+contrat impose `PILOT_CURRENCY=USD`, exposant `2` et seuil `1000`. Pour toute
+autre devise de règlement, le seuil local doit être décidé et figé
+explicitement ; aucune conversion USD implicite n'est autorisée.
+
+Le script inspecte en mémoire les deux conteneurs Edge sans afficher les
+secrets, puis exécute une transaction PostgreSQL `READ ONLY`. Tout manque
+devient un bloqueur nommé et la commande termine avec un code non nul. Elle ne
+source pas `ops/hetzner/.env`, ne change aucun flag ou gate, n'active aucune
+route et ne planifie aucun cron.
+
+L'état sûr attendu juste avant la promotion finale est :
+
+- `partners_enabled=false`, `partners_tv_relay_enabled=false` ;
+- `partners_invite_only=true`, `partners_shadow_mode=true` ;
+- `partners_payouts_live=false`, `partners_revolut_api_enabled=false` et
+  `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` sur les deux réplicas ;
+- aucune credential Revolut Business API et aucun cron payout/API ;
+- exactement un programme individuel actif à 20 %, attribution 30 jours,
+  maturation J+45, frais absorbés par Norva, référence commerciale immuable
+  `USD=1000` et seuil exact pour la devise pilote fournie ;
+- exactement une policy nationale disponible pour le pays fourni, son mapping
+  ISO3 vers ISO2, KYC Didit individuel, métadonnée monétaire active et unique
+  route `revolut_manual` active pour le couple pays/devise fourni ;
+- 20 à 50 comptes confirmés, tous explicitement allowlistés pour ce pays ;
+- deux opérateurs Finance Admin distincts avec TOTP vérifié pour le
+  maker-checker et au moins un release manager Admin avec TOTP vérifié ;
+- les workers commission, correction, maturation, réconciliation et
+  RevenueCat TRANSFER sains et frais, avec exactement un cron Partners et un
+  cron RevenueCat TRANSFER.
+
+Le brouillon historique ne doit pas être édité ni réinterprété. Si son objet
+`payout_thresholds` ne contient pas la devise sélectionnée et son seuil exact,
+créer via l'Admin/AAL2 une nouvelle version, puis l'activer par la RPC auditée.
+
+Ordre de configuration, exclusivement depuis les RPC/contrôles Admin audités :
+
+1. provisionner un release manager côté serveur et deux opérateurs Finance
+   Admin distincts ; chacun enrôle puis vérifie son TOTP, sans partager de
+   session ;
+2. faire approuver `legal_and_tax_approved` et `privacy_approved`, puis créer
+   et activer la nouvelle version avec `admin_partners_program_create` et
+   `admin_partners_program_activate` ;
+3. enregistrer USD et la devise pilote avec `admin_partners_currency_set`, puis
+   le mapping ISO3 vers ISO2 avec `admin_partners_country_mapping_set` ;
+4. créer la policy nationale encore indisponible via
+   `admin_partners_country_policy_create`, puis sa policy de tentatives Didit
+   via `admin_partners_kyc_attempt_policy_set` ;
+5. après les tests maker-checker/réconciliation externes, satisfaire
+   `manual_payout_workflow_verified` et enregistrer uniquement la route
+   `revolut / revolut_manual / <ISO2> / <ISO4217> / active` avec
+   `admin_partners_payout_route_set` ;
+6. rendre cette policy disponible avec
+   `admin_partners_country_policy_set_available`, puis traiter 20 à 50 demandes
+   d'accès du même pays par la décision Risk+AAL2. Cette décision est le seul
+   chemin normal d'ajout à l'allowlist ;
+7. lever les autres gates uniquement avec leur preuve, activer
+   `partners_invite_only` puis `partners_shadow_mode`, enregistrer le cron
+   RevenueCat TRANSFER et attendre les cinq heartbeats frais ;
+8. exécuter le préflight avec le corridor explicite. Ne promouvoir ni
+   `partners_enabled` ni le relais TV tant qu'une seule ligne reste en `FAIL`.
+
+Ce contrôle ne crée aucune preuve fournisseur. Avant que le pilote puisse être
+déclaré prêt, l'opérateur doit encore fournir et archiver hors Git :
+
+1. l'approbation juridique et fiscale écrite pour la juridiction sélectionnée,
+   les versions et hashes des documents publics ;
+2. les trois preuves Didit distinctes (sandbox non autoritaire, live lié au
+   fingerprint/version, conflit mis en quarantaine) ;
+3. un App Link signé par Google Play rejoué depuis l'AAB publié ;
+4. l'identifiant exact de chaque application RevenueCat autorisée, une clé API
+   secrète serveur permettant le re-fetch TRANSFER et la preuve du webhook
+   HMAC ;
+5. un compte de service Google Play dédié, autorisé côté Play Console pour la
+   lecture autoritative des commandes du seul package `tv.norva.phone` ;
+6. la preuve maker-checker du registre bénéficiaire, de la révocation, du lot
+   manuel Revolut, du relevé et du rapprochement sans secret ni identité
+   bancaire dans le journal ;
+7. le restore drill, les Advisors, le snapshot DB sanitisé, le run CI vert et
+   le journal privé `pilot_ready` validé dans l'environnement GitHub protégé
+   **Partners Release**.
+
+Après un préflight vert et seulement quand ces preuves sont corrélées,
+promouvoir par l'interface/RPC auditée `partners_enabled=true`, puis
+`partners_tv_relay_enabled=true`, capturer immédiatement le snapshot et lancer
+le workflow protégé. Si sa validation échoue, remettre immédiatement ces deux
+flags à `false`. Pendant tout le pilote, `partners_invite_only=true`, le flag et
+le kill switch Revolut API restent faux. L'état de repos et le snapshot de
+décision conservent `partners_shadow_mode=true` et
+`partners_payouts_live=false`. Une fenêtre de lot manuel supervisée suit le
+cycle dédié du chapitre 8 : elle ne peut changer ces deux flags que le temps
+strictement nécessaire, avec maker-checker et rollback immédiat vers l'état de
+repos. Aucun versement n'est déclenché par ce préflight.
+
 ### Membre Web/Android
 
 - entrée utilisateur Partners visible pour tout compte Cloud authentifié,
@@ -657,6 +777,30 @@ jamais inscrire cette cible par migration.
   `429 rate_limited` et exposent `Retry-After: 60` ;
 - une clé âgée de plus de 30 jours devient purgeable sans supprimer la demande
   ni son audit ;
+- fiscalité : aucun `verified` sans déclaration v1 et `self_attested_at` ; les
+  anciens états sans consentement deviennent `expired` sans consentement
+  synthétique, restent lisibles, puis reviennent à `pending` uniquement après
+  une nouvelle auto-attestation explicite ;
+- file fiscale : auto-attestation membre -> ligne `pending` par `partner_key`
+  -> revue AAL2 par clé publique -> GET membre `verified` -> devise manuelle
+  autorisée, sans UUID/e-mail/référence provider dans la file ;
+- fiscalité et onboarding payout : replay exact avant quota, une nouvelle clé
+  par 60 secondes, huit sur 24 heures, neuvième clé en `429 rate_limited`, clés
+  d'idempotence purgeables après 30 jours sans supprimer l'état ni l'audit ;
+- l'ancien setter membre de profil payout est inaccessible à `service_role` ;
+  le navigateur ne peut soumettre ni token, ni IBAN, ni provider ;
+- onboarding manuel : `rejected -> pending` dans la même révision est refusé ;
+  une resoumission produit une nouvelle révision ;
+- contact payout : modèle serveur allowlisté, ticket Support/outbox `ready`,
+  replay idempotent et aucune adresse/UUID dans la réponse ; tout texte libre
+  ou quatrième envoi sur 24 heures est refusé ;
+- concurrence payout : toutes les mutations registre suivent
+  `global -> account -> request`; rejouer en concurrence demande/completion et
+  autorisation/proposition bénéficiaire sans deadlock `40P01` ;
+- avant `complete`, rejouer séparément compte `held`, fiscal `expired`, policy
+  ou programme expiré, devise/route désactivée et route `revolut_api` : tous
+  doivent échouer avant le contrôle du binding, puis le corridor manuel restauré
+  doit encore exiger le profil et le binding maker-checker actifs ;
 - décision `approved|declined` affichée sans réouverture ni resoumission ;
 - pays absent/inactif : aucune adhésion ;
 - adhésion individuelle `/applications` idempotente et distincte de la demande
@@ -664,6 +808,8 @@ jamais inscrire cette cible par migration.
 - entreprise : waitlist, aucun KYC/KYB ;
 - session Didit absente de config : message public, aucun changement d'état ;
 - webhook falsifié, expiré ou rejoué : rejet sans mutation ;
+- webhook Didit chunked sans `Content-Length` au-delà de 2 MiB : lecture
+  interrompue/cancelée et `413`, sans allocation du corps complet ;
 - KYC approuvé signé : résultat minimal seulement, aucune image/payload brut ;
 - conditions obsolètes : lien bloqué ;
 - rotation : exactement un lien actif ;
@@ -833,6 +979,32 @@ Ordre de réduction du risque :
 
 La restauration de base est un dernier recours. Un incident métier normal se
 répare par machines d'états, reprises et contre-écritures.
+
+### Reprise d'une activation après KYC asynchrone
+
+Si Didit a signé un résultat vérifié pendant que `partners_enabled`, une gate ou
+l'allowlist était fermée, le compte doit rester `pending_verification` avec son
+évidence KYC persistée. Après correction de la configuration, le client appelle
+une fois `POST /functions/v1/norva-partners/activation/reconcile` avec le body
+exact `{}`. La route n'accepte ni user ID ni clé d'idempotence ; elle relit
+l'identité du JWT, verrouille le compte et revalide le programme, la politique,
+les contrats, l'e-mail, les gates et l'allowlist.
+
+Contrôles obligatoires sur une restauration isolée puis pendant le pilote :
+
+1. gate fermée + compte KYC `verified` → `changed=false`, compte toujours
+   `pending_verification`, `next_action=activate_account` ;
+2. ouverture autorisée de la gate → `changed=true`, compte `active`,
+   `next_action=share_link` ;
+3. retry exact → `changed=false` et toujours un seul événement
+   `account_activated` ;
+4. version conditions/divulgation périmée → aucune activation et
+   `next_action=accept_terms` ;
+5. compte held/suspended → aucune réactivation et
+   `next_action=contact_support`.
+
+Ne rejouez pas le webhook et ne modifiez jamais directement le statut du compte
+pour débloquer ce parcours.
 
 Fermer `partners_enabled` ou une release gate ne doit pas masquer l'entrée
 utilisateur Partners ni interrompre GET ; tant que le kill switch dédié reste à

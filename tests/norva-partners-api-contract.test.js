@@ -14,6 +14,12 @@ const contractSource = read('docs/NORVA-PARTNERS-API-CONTRACT.md');
 const foundationMigration = read(
   'supabase/migrations/20260729173015_norva_partners_foundation.sql',
 );
+const fiscalPayoutMigration = read(
+  'supabase/migrations/20260802190000_partners_fiscal_payout_onboarding.sql',
+);
+const memberWriteRateMigration = read(
+  'supabase/migrations/20260802193000_partners_member_write_rate_limits.sql',
+);
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -295,16 +301,288 @@ test('member mutation inputs, idempotency keys and dashboard filters are strictl
   assert.deepEqual(plain(allowedMethodsForRoute('/dashboard')), ['GET']);
   assert.deepEqual(plain(allowedMethodsForRoute('/applications')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/activate')), ['POST']);
+  assert.deepEqual(plain(allowedMethodsForRoute('/activation/reconcile')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/links')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/kyc/sessions')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/referral/claim')), ['POST']);
-  assert.deepEqual(plain(allowedMethodsForRoute('/payout-profile')), ['GET', 'PUT']);
+  assert.deepEqual(plain(allowedMethodsForRoute('/payout-profile')), ['GET']);
+  assert.deepEqual(plain(allowedMethodsForRoute('/fiscal-profile')), ['GET', 'POST']);
+  assert.deepEqual(plain(allowedMethodsForRoute('/payout-onboarding')), ['GET', 'POST']);
   assert.doesNotThrow(() => assertNoQueryParameters(
     new URL('https://example.test/applications'),
   ));
   assert.throws(() => assertNoQueryParameters(
     new URL('https://example.test/applications?userId=forbidden'),
   ));
+});
+
+test('fiscal self-attestation and manual payout onboarding expose no user-controlled verification or bank data', () => {
+  const {
+    parseFiscalProfileInput,
+    parsePayoutOnboardingInput,
+    sanitizeFiscalProfileGet,
+    sanitizeFiscalProfileMutation,
+    sanitizePayoutOnboardingGet,
+    sanitizePayoutOnboardingMutation,
+  } = helpers();
+
+  assert.deepEqual(plain(parseFiscalProfileInput({
+    countryCode: 'fr',
+    declarationAccepted: true,
+    declarationVersion: 'partners-tax-self-certification-v1',
+  })), {
+    countryCode: 'FR',
+    declarationAccepted: true,
+    declarationVersion: 'partners-tax-self-certification-v1',
+  });
+  for (const invalid of [
+    {
+      countryCode: 'FR',
+      declarationAccepted: false,
+      declarationVersion: 'partners-tax-self-certification-v1',
+    },
+    {
+      countryCode: 'FR',
+      declarationAccepted: true,
+      declarationVersion: 'partners-tax-self-certification-v2',
+    },
+    {
+      countryCode: 'FR',
+      declarationAccepted: true,
+      declarationVersion: 'partners-tax-self-certification-v1',
+      status: 'verified',
+    },
+    {
+      countryCode: 'FR',
+      declarationAccepted: true,
+      declarationVersion: 'partners-tax-self-certification-v1',
+      taxIdentifier: 'FR123456789',
+    },
+  ]) assert.throws(() => parseFiscalProfileInput(invalid));
+
+  const pendingFiscal = {
+    schema_version: 1,
+    action: 'fiscal_profile_submitted',
+    replayed: false,
+    fiscal_profile: {
+      exists: true,
+      status: 'pending',
+      country_code: 'FR',
+      declaration_version: 'partners-tax-self-certification-v1',
+      submitted_at: '2026-08-02T17:00:00Z',
+      reviewed_at: null,
+    },
+  };
+  assert.deepEqual(
+    plain(sanitizeFiscalProfileMutation(pendingFiscal)),
+    pendingFiscal,
+  );
+  assert.throws(() => sanitizeFiscalProfileMutation({
+    ...pendingFiscal,
+    fiscal_profile: {
+      ...pendingFiscal.fiscal_profile,
+      status: 'verified',
+      reviewed_at: '2026-08-02T17:01:00Z',
+    },
+  }), 'the member mutation can never return a user-declared verified state');
+  assert.deepEqual(plain(sanitizeFiscalProfileGet({
+    schema_version: 1,
+    action: 'fiscal_profile_loaded',
+    fiscal_profile: {
+      exists: false,
+      status: 'missing',
+      country_code: null,
+      declaration_version: null,
+      submitted_at: null,
+      reviewed_at: null,
+    },
+  })).fiscal_profile.status, 'missing');
+  assert.deepEqual(plain(sanitizeFiscalProfileGet({
+    schema_version: 1,
+    action: 'fiscal_profile_loaded',
+    fiscal_profile: {
+      exists: true,
+      status: 'expired',
+      country_code: 'US',
+      declaration_version: null,
+      submitted_at: null,
+      reviewed_at: '2026-08-02T16:00:00Z',
+    },
+  })).fiscal_profile, {
+    exists: true,
+    status: 'expired',
+    country_code: 'US',
+    declaration_version: null,
+    submitted_at: null,
+    reviewed_at: '2026-08-02T16:00:00Z',
+  }, 'legacy verification is exposed only as an expired recovery state');
+  assert.throws(() => sanitizeFiscalProfileGet({
+    schema_version: 1,
+    action: 'fiscal_profile_loaded',
+    fiscal_profile: {
+      exists: true,
+      status: 'verified',
+      country_code: 'US',
+      declaration_version: null,
+      submitted_at: null,
+      reviewed_at: '2026-08-02T16:00:00Z',
+    },
+  }), 'verified can never use the legacy null-attestation contract');
+
+  assert.deepEqual(plain(parsePayoutOnboardingInput({
+    currency: 'usd',
+    contactConsent: true,
+  })), { currency: 'USD', contactConsent: true });
+  for (const forbidden of [
+    { currency: 'USD', contactConsent: false },
+    { currency: 'USD', contactConsent: true, provider: 'revolut' },
+    { currency: 'USD', contactConsent: true, executionAdapter: 'revolut_api' },
+    { currency: 'USD', contactConsent: true, iban: 'FR7630006000011234567890189' },
+    { currency: 'USD', contactConsent: true, beneficiaryTokenRef: 'opaque' },
+    { currency: 'USD', contactConsent: true, displayMasked: '**** 1234' },
+  ]) assert.throws(() => parsePayoutOnboardingInput(forbidden));
+
+  const payoutRequest = {
+    schema_version: 1,
+    action: 'payout_onboarding_requested',
+    replayed: false,
+    payout_onboarding: {
+      exists: true,
+      status: 'pending',
+      currency: 'USD',
+      execution_adapter: 'revolut_manual',
+      reconfiguration_required: false,
+      requested_at: '2026-08-02T17:00:00Z',
+      updated_at: '2026-08-02T17:00:00Z',
+      reason_code: null,
+    },
+  };
+  assert.deepEqual(
+    plain(sanitizePayoutOnboardingMutation(payoutRequest)),
+    payoutRequest,
+  );
+  assert.deepEqual(plain(sanitizePayoutOnboardingGet({
+    schema_version: 1,
+    action: 'payout_onboarding_loaded',
+    payout_onboarding: {
+      exists: false,
+      status: 'not_started',
+      currency: null,
+      execution_adapter: 'revolut_manual',
+      reconfiguration_required: false,
+      requested_at: null,
+      updated_at: null,
+      reason_code: null,
+    },
+    allowed_currencies: ['EUR', 'USD'],
+  })).allowed_currencies, ['EUR', 'USD']);
+  assert.equal(plain(sanitizePayoutOnboardingGet({
+    schema_version: 1,
+    action: 'payout_onboarding_loaded',
+    payout_onboarding: {
+      exists: true,
+      status: 'completed',
+      currency: 'USD',
+      execution_adapter: 'revolut_manual',
+      reconfiguration_required: true,
+      requested_at: '2026-08-02T17:00:00Z',
+      updated_at: '2026-08-02T18:00:00Z',
+      reason_code: null,
+    },
+    allowed_currencies: ['USD'],
+  })).payout_onboarding.reconfiguration_required, true);
+  assert.throws(() => sanitizePayoutOnboardingGet({
+    schema_version: 1,
+    action: 'payout_onboarding_loaded',
+    payout_onboarding: {
+      ...payoutRequest.payout_onboarding,
+      reconfiguration_required: true,
+    },
+    allowed_currencies: ['USD'],
+  }), 'only a historically completed request may require reconfiguration');
+  assert.throws(() => sanitizePayoutOnboardingMutation({
+    ...payoutRequest,
+    payout_onboarding: {
+      ...payoutRequest.payout_onboarding,
+      beneficiary_token_ref: 'must-never-leave-private-schema',
+    },
+  }));
+});
+
+test('fiscal upgrade, throttling and manual completion fail closed in SQL', () => {
+  const migration = fiscalPayoutMigration.toLowerCase();
+  const constraintAt = migration.indexOf(
+    'add constraint affiliate_fiscal_profiles_self_attestation',
+  );
+  const legacyRewriteAt = migration.indexOf('with legacy_candidates as materialized');
+  const validationAt = migration.indexOf(
+    'validate constraint affiliate_fiscal_profiles_self_attestation',
+  );
+  assert.ok(
+    constraintAt >= 0 && constraintAt < legacyRewriteAt && legacyRewriteAt < validationAt,
+    'new writes are constrained before legacy rows are rewritten and validated',
+  );
+  const legacyRewrite = migration.slice(legacyRewriteAt, validationAt);
+  assert.match(legacyRewrite, /set\s+status = 'expired'/);
+  assert.match(legacyRewrite, /'missing_self_attestation'/);
+  assert.doesNotMatch(
+    legacyRewrite,
+    /set[\s\S]*declaration_version\s*=|set[\s\S]*self_attested_at\s*=/,
+    'the upgrade must not synthesize consent evidence',
+  );
+
+  const recordStart = migration.indexOf(
+    'affiliate_private.partners_service_fiscal_profile_record(',
+  );
+  const recordEnd = migration.indexOf(
+    'affiliate_private.partners_service_payout_onboarding_get(',
+    recordStart,
+  );
+  const record = migration.slice(recordStart, recordEnd);
+  assert.match(record, /v_status not in \('pending', 'rejected', 'expired'\)/);
+  assert.match(record, /direct service fiscal verification is forbidden/);
+  assert.match(record, /pending fiscal self-attestation is required/);
+  assert.doesNotMatch(record, /insert into affiliate_private\.affiliate_fiscal_profiles/);
+
+  for (const [signature, operation] of [
+    ['partners_service_fiscal_profile_self_attest(', 'fiscal_profile_self_attestation'],
+    ['partners_service_payout_onboarding_request(', 'payout_onboarding'],
+  ]) {
+    const start = migration.indexOf(`affiliate_private.${signature}`);
+    const end = migration.indexOf('\ncreate or replace function', start + 20);
+    const rpc = migration.slice(start, end);
+    const replay = rpc.indexOf('partners_replayed_response');
+    const limiter = rpc.indexOf('partners_enforce_fiscal_onboarding_write_limit');
+    assert.ok(replay >= 0, `${operation} retains terminal-response idempotency`);
+    assert.equal(
+      limiter,
+      -1,
+      `${operation} does not double-charge the separate Edge reservation`,
+    );
+    assert.match(rpc, new RegExp(`'${operation}'`));
+  }
+  const reservation = memberWriteRateMigration.toLowerCase();
+  assert.match(reservation, /affiliate_member_write_reservations/);
+  assert.match(reservation, /interval '30 days'/);
+  assert.match(reservation, /interval '24 hours'/);
+  assert.match(reservation, /v_limit constant integer := 8/);
+  assert.match(reservation, /if found then[\s\S]*'replayed', true/);
+  assert.match(reservation, /errcode = 'p0008'/);
+
+  assert.match(migration, /partners_payout_account_evidence_is_current/);
+  assert.match(migration, /route\.execution_adapter = 'revolut_manual'/);
+  assert.match(migration, /fiscal_profile\.declaration_version =\s*'partners-tax-self-certification-v1'/);
+  assert.doesNotMatch(
+    migration.slice(
+      migration.indexOf('guard_payout_onboarding_request_transition()'),
+      migration.indexOf('create trigger affiliate_payout_onboarding_requests_validate'),
+    ),
+    /old\.status = 'rejected' and new\.status = 'pending'/,
+  );
+  assert.match(
+    migration,
+    /revoke execute on function\s+public\.partners_service_payout_profile_set\(\s*uuid, text, text, text, text, text\s*\)\s+from service_role/,
+  );
 });
 
 test('bootstrap data is copied through a strict schema and enum allowlist', () => {
@@ -547,7 +825,11 @@ test('bootstrap fail-closes inconsistent null and eligibility states', () => {
 });
 
 test('member mutation and dashboard responses are copied through exact schemas', () => {
-  const { sanitizeDashboardData, sanitizeMutationData } = helpers();
+  const {
+    sanitizeActivationReconcile,
+    sanitizeDashboardData,
+    sanitizeMutationData,
+  } = helpers();
   const application = {
     schema_version: 1,
     action: 'application_submitted',
@@ -595,6 +877,46 @@ test('member mutation and dashboard responses are copied through exact schemas',
     const unsafe = structuredClone(rotated);
     unsafe.link.share_url = unsafeUrl;
     assert.throws(() => sanitizeMutationData(unsafe, 'link_rotated'));
+  }
+
+  const activationPending = {
+    schema_version: 1,
+    action: 'activation_reconciled',
+    changed: false,
+    account: {
+      exists: true,
+      status: 'pending_verification',
+      verification_status: 'verified',
+      contract_status: 'accepted',
+      link_status: 'none',
+    },
+    next_action: 'activate_account',
+  };
+  assert.deepEqual(
+    plain(sanitizeActivationReconcile(activationPending)),
+    activationPending,
+  );
+  const activationComplete = structuredClone(activationPending);
+  activationComplete.changed = true;
+  activationComplete.account.status = 'active';
+  activationComplete.next_action = 'share_link';
+  assert.deepEqual(
+    plain(sanitizeActivationReconcile(activationComplete)),
+    activationComplete,
+  );
+  const activationReplay = structuredClone(activationComplete);
+  activationReplay.changed = false;
+  assert.deepEqual(
+    plain(sanitizeActivationReconcile(activationReplay)),
+    activationReplay,
+  );
+  for (const contradictory of [
+    { ...activationPending, changed: true },
+    { ...activationPending, next_action: 'share_link' },
+    { ...activationComplete, next_action: 'activate_account' },
+    { ...activationPending, account_id: '385d8450-1111-4111-8111-111111111111' },
+  ]) {
+    assert.throws(() => sanitizeActivationReconcile(contradictory));
   }
 
   const dashboard = validDashboard('all');
@@ -761,6 +1083,10 @@ test('Edge routes derive identity only from verified JWT and call service-only R
     'partners_service_accept_terms',
     'partners_service_rotate_link',
     'partners_service_dashboard',
+    'partners_service_fiscal_profile_get',
+    'partners_service_fiscal_profile_self_attest',
+    'partners_service_payout_onboarding_get',
+    'partners_service_payout_onboarding_request',
   ]) {
     assert.match(helperSource, new RegExp(`"${rpc}"`), rpc);
   }
@@ -817,11 +1143,14 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
     '/bootstrap',
     '/applications',
     '/activate',
+    '/activation/reconcile',
     '/links',
     '/dashboard',
     '/kyc/sessions',
     '/referral/claim',
     '/payout-profile',
+    '/fiscal-profile',
+    '/payout-onboarding',
   ]) {
     assert.match(helperSource, new RegExp(`route === "${route.replace('/', '\\/')}"`), route);
   }
@@ -832,6 +1161,7 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
   assert.match(edgeSource, /sanitizeBootstrapData\(data, query\)/);
   assert.match(edgeSource, /sanitizeMutationData\(data, "application_submitted"\)/);
   assert.match(edgeSource, /sanitizeMutationData\(data, "terms_accepted"\)/);
+  assert.match(edgeSource, /sanitizeActivationReconcile/);
   assert.match(edgeSource, /sanitizeMutationData\(data, "link_rotated"\)/);
   assert.match(edgeSource, /sanitizeDashboardData\(data, query\)/);
   assert.match(edgeSource, /parseIdempotencyKey/);
@@ -867,6 +1197,7 @@ test('contract clearly separates implemented user, referral and TV boundaries', 
   assert.match(contractSource, /`GET \/bootstrap`/);
   assert.match(contractSource, /`POST \/applications`/);
   assert.match(contractSource, /`POST \/activate`/);
+  assert.match(contractSource, /`POST \/activation\/reconcile`/);
   assert.match(contractSource, /`POST \/links`/);
   assert.match(contractSource, /`GET \/dashboard`/);
   assert.match(contractSource, /business_accounts_not_supported/);

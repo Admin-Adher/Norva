@@ -93,6 +93,18 @@ final class PartnersContract {
         return CLOUD_WATCH_URL + "#" + fragment;
     }
 
+    static String canonicalKycReturnDestination(String value) {
+        URI uri = safeHttpsNorvaUri(value);
+        if (uri == null
+                || value.length() > MAX_SHARE_MESSAGE_CHARS
+                || !"/partners-kyc-return".equals(uri.getRawPath())) {
+            return null;
+        }
+        // Didit may append provider-controlled query values. They are never
+        // copied into WebView history; the Norva callback needs only the path.
+        return NORVA_ORIGIN + "/partners-kyc-return";
+    }
+
     static boolean isTrustedPartnersPage(String value) {
         URI uri = safeHttpsNorvaUri(value);
         if (uri == null) return false;

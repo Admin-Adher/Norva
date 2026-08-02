@@ -2467,6 +2467,12 @@ insert into partners_test_state (state_key, state_value)
 select 'payout_account', account.id::text
 from affiliate_private.affiliate_accounts account
 where account.user_id = '10000000-0000-4000-8000-000000000002';
+insert into partners_test_state (state_key, state_value)
+select
+  'payout_partner_public',
+  affiliate_private.partners_public_account_id(account)
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000002';
 
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
@@ -2522,14 +2528,24 @@ select public.admin_partners_payout_route_set(
   'active',
   'P0 payout pilot exact Revolut manual USD corridor.'
 );
-select public.admin_partners_fiscal_review(
+reset role;
+set local role service_role;
+select public.partners_service_fiscal_profile_self_attest(
+  '10000000-0000-4000-8000-000000000002',
+  'US',
+  'partners-tax-self-certification-v1',
+  true,
+  'affiliate.p0.fiscal.attestation.0001'
+);
+reset role;
+set local role authenticated;
+select public.admin_partners_fiscal_review_by_public_id(
   (
-    select state_value::uuid
+    select state_value
     from partners_test_state
-    where state_key = 'payout_account'
+    where state_key = 'payout_partner_public'
   ),
   'verified',
-  'US',
   'didit',
   encode(extensions.digest('p0-fiscal-profile', 'sha256'), 'hex'),
   'W9',
@@ -2542,7 +2558,7 @@ select
   'revolut_binding_ticket_usd',
   authorized.result ->> 'binding_ticket'
 from (
-  select public.admin_partners_revolut_beneficiary_binding_authorize(
+  select affiliate_private.admin_partners_revolut_beneficiary_binding_authorize(
     (
       select state_value::uuid
       from partners_test_state
@@ -3642,7 +3658,7 @@ select
   'revolut_binding_ticket_eur',
   authorized.result ->> 'binding_ticket'
 from (
-  select public.admin_partners_revolut_beneficiary_binding_authorize(
+  select affiliate_private.admin_partners_revolut_beneficiary_binding_authorize(
     (
       select state_value::uuid
       from partners_test_state

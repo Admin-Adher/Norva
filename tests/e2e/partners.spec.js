@@ -31,16 +31,26 @@ async function mountPartners(page, initialState) {
     window.__partnerState = state;
     window.__partnerCalls = {
       bootstrap: [],
+      activationReconcile: [],
       apply: [],
       acceptTerms: [],
       startKyc: [],
       dashboard: [],
       payoutProfile: [],
+      fiscalProfile: [],
+      submitFiscalProfile: [],
+      payoutOnboarding: [],
+      requestPayoutOnboarding: [],
       rotateLink: [],
       accessRequest: [],
       share: [],
       navigation: [],
     };
+    window.__fiscalState = 'missing';
+    window.__fiscalLegacyUnattested = false;
+    window.__payoutOnboardingState = 'not_started';
+    window.__payoutOnboardingReconfigurationRequired = false;
+    window.__payoutOnboardingReasonCode = null;
 
     const accountFor = (current) => {
       if (['discovery', 'early-access', 'early-requested', 'early-declined']
@@ -205,6 +215,36 @@ async function mountPartners(page, initialState) {
           });
           return bootstrapEnvelope();
         },
+        activation: {
+          async reconcile(input = {}) {
+            const current = window.__partnerState;
+            window.__partnerCalls.activationReconcile.push({
+              hasSignal: Boolean(input.signal),
+              state: current,
+            });
+            const account = accountFor(current);
+            const nextAction = current === 'applied'
+              ? 'accept_terms'
+              : (current === 'pending' ? 'await_verification' : 'start_verification');
+            return {
+              version: '2026-07-29',
+              correlationId: `e2e-activation-reconcile-${current}`,
+              data: {
+                schema_version: 1,
+                action: 'activation_reconciled',
+                changed: false,
+                account: {
+                  exists: true,
+                  status: account.status,
+                  verification_status: account.verification_status,
+                  contract_status: account.contract_status,
+                  link_status: account.link_status,
+                },
+                next_action: nextAction,
+              },
+            };
+          },
+        },
         accessRequest: {
           async get() {
             const status = window.__partnerState === 'early-requested'
@@ -347,6 +387,100 @@ async function mountPartners(page, initialState) {
                 status: 'active',
               }],
               readiness: { ready: false, payouts_live: false, reason: 'payouts_not_live' },
+            },
+          };
+        },
+        async fiscalProfile(input = {}) {
+          window.__partnerCalls.fiscalProfile.push({ hasSignal: Boolean(input.signal) });
+          const exists = window.__fiscalState !== 'missing';
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-fiscal-profile',
+            data: {
+              schema_version: 1,
+              action: 'fiscal_profile_loaded',
+              fiscal_profile: {
+                exists,
+                status: window.__fiscalState,
+                country_code: exists ? 'FR' : null,
+                declaration_version: exists && !window.__fiscalLegacyUnattested
+                  ? 'partners-tax-self-certification-v1' : null,
+                submitted_at: exists && !window.__fiscalLegacyUnattested
+                  ? '2026-08-02T12:00:00Z' : null,
+                reviewed_at: window.__fiscalState === 'verified'
+                  || window.__fiscalLegacyUnattested
+                  ? '2026-08-02T12:30:00Z' : null,
+              },
+            },
+          };
+        },
+        async submitFiscalProfile(input) {
+          window.__partnerCalls.submitFiscalProfile.push({ ...input });
+          window.__fiscalState = 'pending';
+          window.__fiscalLegacyUnattested = false;
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-fiscal-profile-submit',
+            data: {
+              schema_version: 1,
+              action: 'fiscal_profile_submitted',
+              replayed: false,
+              fiscal_profile: {
+                exists: true,
+                status: 'pending',
+                country_code: 'FR',
+                declaration_version: 'partners-tax-self-certification-v1',
+                submitted_at: '2026-08-02T12:00:00Z',
+                reviewed_at: null,
+              },
+            },
+          };
+        },
+        async payoutOnboarding(input = {}) {
+          window.__partnerCalls.payoutOnboarding.push({ hasSignal: Boolean(input.signal) });
+          const exists = window.__payoutOnboardingState !== 'not_started';
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-payout-onboarding',
+            data: {
+              schema_version: 1,
+              action: 'payout_onboarding_loaded',
+              payout_onboarding: {
+                exists,
+                status: window.__payoutOnboardingState,
+                currency: exists ? 'USD' : null,
+                execution_adapter: 'revolut_manual',
+                reconfiguration_required: window.__payoutOnboardingReconfigurationRequired,
+                requested_at: exists ? '2026-08-02T12:35:00Z' : null,
+                updated_at: exists ? '2026-08-02T12:35:00Z' : null,
+                reason_code: window.__payoutOnboardingReasonCode,
+              },
+              allowed_currencies: ['EUR', 'USD'],
+            },
+          };
+        },
+        async requestPayoutOnboarding(input) {
+          window.__partnerCalls.requestPayoutOnboarding.push({ ...input });
+          window.__payoutOnboardingState = 'pending';
+          window.__payoutOnboardingReconfigurationRequired = false;
+          window.__payoutOnboardingReasonCode = null;
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-payout-onboarding-request',
+            data: {
+              schema_version: 1,
+              action: 'payout_onboarding_requested',
+              replayed: false,
+              payout_onboarding: {
+                exists: true,
+                status: 'pending',
+                currency: input.currency,
+                execution_adapter: 'revolut_manual',
+                reconfiguration_required: false,
+                requested_at: '2026-08-02T12:35:00Z',
+                updated_at: '2026-08-02T12:35:00Z',
+                reason_code: null,
+              },
             },
           };
         },
@@ -691,7 +825,7 @@ test('cancelling the platform share sheet is reported without implying success',
   );
 });
 
-test('masked manual payout status is independently retryable in an accessible mobile-safe sheet', async ({
+test('manual payout setup keeps tax and destination steps private, gated and independently retryable', async ({
   page,
 }) => {
   await mountPartners(page, 'active');
@@ -707,9 +841,64 @@ test('masked manual payout status is independently retryable in an accessible mo
   await expect(dialog).toContainText('Revolut ·•• 8421');
   await expect(dialog).toContainText('Manual Revolut destinations are provisioned by Norva Finance');
   await expect(dialog).not.toContainText(/IBAN\s+[A-Z0-9]|beneficiaryTokenRef|ben_tok_/i);
-  await expect(dialog.locator('input, select, textarea')).toHaveCount(0);
   await expect(page.locator('.partners-shell')).toHaveAttribute('inert', '');
   await expect(page.locator('[data-partners-payout-close]').first()).toBeFocused();
+
+  const fiscalStep = dialog.locator('[data-partners-fiscal-step]');
+  await expect(fiscalStep.getByRole('heading', { name: 'Confirm your tax residence' }))
+    .toBeVisible();
+  await expect(fiscalStep).toContainText('France · FR');
+  await expect(fiscalStep.locator('input[type="text"], textarea')).toHaveCount(0);
+  const fiscalSubmit = fiscalStep.getByRole('button', { name: 'Submit self-certification' });
+  await expect(fiscalSubmit).toBeDisabled();
+  await fiscalStep.locator('[data-partners-fiscal-confirm]').check();
+  await expect(fiscalSubmit).toBeEnabled();
+  await fiscalSubmit.click();
+  await expect(fiscalStep).toContainText('Finance review pending');
+  await expect(dialog.locator('[data-partners-onboarding-step]')).toContainText(
+    'Waiting for tax-residence review',
+  );
+  const fiscalCalls = await page.evaluate(() => window.__partnerCalls.submitFiscalProfile);
+  expect(fiscalCalls).toHaveLength(1);
+  expect(fiscalCalls[0]).toMatchObject({
+    countryCode: 'FR',
+    declarationAccepted: true,
+    declarationVersion: 'partners-tax-self-certification-v1',
+  });
+  expect(fiscalCalls[0].idempotencyKey).toMatch(/^norva\.fiscal-profile\./);
+  expect(JSON.stringify(fiscalCalls[0])).not.toMatch(/taxId|document|upload/i);
+
+  // Replacing the submitted form can transiently leave focus on <body>. The
+  // modal-level Escape handler must remain authoritative through that frame.
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(payout).toBeFocused();
+  await page.evaluate(() => { window.__fiscalState = 'verified'; });
+  await payout.click();
+  const reopened = page.getByRole('dialog', { name: 'Payout readiness' });
+  const onboardingStep = reopened.locator('[data-partners-onboarding-step]');
+  await expect(onboardingStep.getByRole('heading', { name: 'Request payout configuration' }))
+    .toBeVisible();
+  await expect(onboardingStep.locator('input[type="text"], textarea')).toHaveCount(0);
+  const onboardingSubmit = onboardingStep.getByRole('button', {
+    name: 'Request secure configuration',
+  });
+  await expect(onboardingSubmit).toBeDisabled();
+  await onboardingStep.locator('[data-partners-onboarding-currency]').selectOption('USD');
+  await onboardingStep.locator('[data-partners-onboarding-consent]').check();
+  await expect(onboardingSubmit).toBeEnabled();
+  await onboardingSubmit.click();
+  await expect(onboardingStep).toContainText('Waiting for Finance review');
+  const onboardingCalls = await page.evaluate(
+    () => window.__partnerCalls.requestPayoutOnboarding,
+  );
+  expect(onboardingCalls).toHaveLength(1);
+  expect(onboardingCalls[0]).toMatchObject({ currency: 'USD', contactConsent: true });
+  expect(onboardingCalls[0].idempotencyKey).toMatch(/^norva\.payout-onboarding\./);
+  expect(JSON.stringify(onboardingCalls[0])).not.toMatch(
+    /iban|bank|beneficiary|execution_adapter|tax/i,
+  );
 
   await page.evaluate(() => {
     window.__partnersPage._payoutTimeoutMs = 20;
@@ -721,16 +910,178 @@ test('masked manual payout status is independently retryable in an accessible mo
       }, { once: true });
     });
   });
-  await dialog.locator('[data-partners-payout-refresh]').click();
-  await expect(dialog.locator('[data-partners-payout-dialog-status]')).toContainText(
+  await reopened.locator('[data-partners-payout-refresh]').click();
+  await expect(reopened.locator('[data-partners-payout-dialog-status]')).toContainText(
     'still unavailable',
   );
-  await expect(dialog).not.toContainText('provider timeout detail');
+  await expect(reopened).not.toContainText('provider timeout detail');
 
-  await page.keyboard.press('Escape');
-  await expect(dialog).toBeHidden();
+  // Android's native Back bridge invokes the overlay close contract directly.
+  const androidBackHandled = await page.evaluate(() => (
+    document.querySelector('[data-partners-payout-overlay]')?.__regionClose?.()
+  ));
+  expect(androidBackHandled).toBe(true);
+  await expect(reopened).toBeHidden();
   await expect(payout).toBeFocused();
   await expect(page.locator('.partners-shell')).not.toHaveAttribute('inert', '');
+});
+
+test('a revoked completed destination exposes a safe reconfiguration path', async ({ page }) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.__fiscalState = 'verified';
+    window.__payoutOnboardingState = 'completed';
+    window.__payoutOnboardingReconfigurationRequired = true;
+  });
+
+  await page.locator('[data-partners-payout-button]').click();
+  const dialog = page.getByRole('dialog', { name: 'Payout readiness' });
+  const step = dialog.locator('[data-partners-onboarding-step]');
+  await expect(step.getByRole('heading', { name: 'Reconfigure your payout destination' }))
+    .toBeVisible();
+  await expect(step).toContainText('Previous destination is no longer active');
+  await expect(step).not.toContainText(/IBAN\s+[A-Z0-9]|beneficiaryTokenRef|ben_tok_/i);
+
+  const submit = step.getByRole('button', { name: 'Request secure reconfiguration' });
+  await expect(submit).toBeDisabled();
+  await step.locator('[data-partners-onboarding-currency]').selectOption('USD');
+  await step.locator('[data-partners-onboarding-consent]').check();
+  await submit.click();
+  await expect(step).toContainText('Waiting for Finance review');
+  const calls = await page.evaluate(() => window.__partnerCalls.requestPayoutOnboarding);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ currency: 'USD', contactConsent: true });
+});
+
+test('a legacy expired fiscal row recovers through explicit self-attestation', async ({ page }) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.__fiscalState = 'expired';
+    window.__fiscalLegacyUnattested = true;
+  });
+
+  await page.locator('[data-partners-payout-button]').click();
+  const dialog = page.getByRole('dialog', { name: 'Payout readiness' });
+  const fiscal = dialog.locator('[data-partners-fiscal-step]');
+  await expect(fiscal.getByRole('heading', { name: 'Renew your tax residence attestation' }))
+    .toBeVisible();
+  await expect(fiscal.locator('input[type="text"], input[type="file"], textarea')).toHaveCount(0);
+  await fiscal.locator('[data-partners-fiscal-confirm]').check();
+  await fiscal.getByRole('button', { name: 'Submit a new attestation' }).click();
+  await expect(fiscal).toContainText('Finance review pending');
+  const state = await page.evaluate(() => ({
+    fiscal: window.__fiscalState,
+    legacy: window.__fiscalLegacyUnattested,
+  }));
+  expect(state).toEqual({ fiscal: 'pending', legacy: false });
+});
+
+test('idempotent mutation replays paint only their authoritative mutation state', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.NorvaCloud.partners.submitFiscalProfile = async (input) => {
+      window.__partnerCalls.submitFiscalProfile.push({ ...input });
+      window.__fiscalState = 'verified';
+      return {
+        version: '2026-07-29',
+        correlationId: 'e2e-fiscal-stale-replay',
+        data: {
+          schema_version: 1,
+          action: 'fiscal_profile_submitted',
+          replayed: true,
+          fiscal_profile: {
+            exists: true,
+            status: 'pending',
+            country_code: 'FR',
+            declaration_version: 'partners-tax-self-certification-v1',
+            submitted_at: '2026-08-02T12:00:00Z',
+            reviewed_at: null,
+          },
+        },
+      };
+    };
+    window.NorvaCloud.partners.requestPayoutOnboarding = async (input) => {
+      window.__partnerCalls.requestPayoutOnboarding.push({ ...input });
+      window.__payoutOnboardingState = 'rejected';
+      window.__payoutOnboardingReasonCode = 'compliance_review';
+      return {
+        version: '2026-07-29',
+        correlationId: 'e2e-payout-stale-replay',
+        data: {
+          schema_version: 1,
+          action: 'payout_onboarding_requested',
+          replayed: true,
+          payout_onboarding: {
+            exists: true,
+            status: 'pending',
+            currency: input.currency,
+            execution_adapter: 'revolut_manual',
+            reconfiguration_required: false,
+            requested_at: '2026-08-02T12:35:00Z',
+            updated_at: '2026-08-02T12:35:00Z',
+            reason_code: null,
+          },
+        },
+      };
+    };
+  });
+
+  await page.locator('[data-partners-payout-button]').click();
+  const dialog = page.getByRole('dialog', { name: 'Payout readiness' });
+  const fiscal = dialog.locator('[data-partners-fiscal-step]');
+  await fiscal.locator('[data-partners-fiscal-confirm]').check();
+  await fiscal.getByRole('button', { name: 'Submit self-certification' }).click();
+  await expect(fiscal).toContainText('Finance review pending');
+  await expect(dialog.locator('[data-partners-payout-dialog-status]')).toContainText(
+    'submission confirmed by Norva',
+  );
+  expect(await page.evaluate(() => window.__partnerCalls.fiscalProfile.length)).toBe(1);
+
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await page.evaluate(() => { window.__fiscalState = 'verified'; });
+  await page.locator('[data-partners-payout-button]').click();
+  const reopened = page.getByRole('dialog', { name: 'Payout readiness' });
+
+  const payout = reopened.locator('[data-partners-onboarding-step]');
+  await payout.locator('[data-partners-onboarding-currency]').selectOption('USD');
+  await payout.locator('[data-partners-onboarding-consent]').check();
+  await payout.getByRole('button', { name: 'Request secure configuration' }).click();
+  await expect(payout.getByRole('heading', { name: 'Configuration request received' })).toBeVisible();
+  await expect(reopened.locator('[data-partners-payout-dialog-status]')).toContainText(
+    'request confirmed by Norva',
+  );
+  const calls = await page.evaluate(() => ({
+    fiscalGets: window.__partnerCalls.fiscalProfile.length,
+    payoutGets: window.__partnerCalls.payoutOnboarding.length,
+  }));
+  expect(calls.fiscalGets).toBe(2);
+  expect(calls.payoutGets).toBe(2);
+});
+
+test('tax self-certification never falls back to the legacy payout-profile country', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.__partnersPage._dashboardPages = [{ account: { country_code: null } }];
+    if (window.__partnersPage.bootstrapEnvelope?.envelope?.data) {
+      window.__partnersPage.bootstrapEnvelope.envelope.data.policy = null;
+    }
+  });
+
+  await page.locator('[data-partners-payout-button]').click();
+  const dialog = page.getByRole('dialog', { name: 'Payout readiness' });
+  await expect(dialog.locator('[data-partners-fiscal-step]')).toContainText(
+    'Account country unavailable',
+  );
+  await expect(dialog.locator('[data-partners-fiscal-form]')).toHaveCount(0);
+  await expect(dialog.locator('[data-partners-fiscal-step]')).not.toContainText(
+    'Country on your Norva account',
+  );
 });
 
 test('dashboard timeout fails closed and exposes a local retry without blocking payout status', async ({

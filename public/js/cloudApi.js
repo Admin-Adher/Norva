@@ -1082,15 +1082,11 @@
         'authentication_required',
         'temporarily_unavailable'
     ]);
-    // Revolut destinations are provisioned by Finance. The generic token
-    // mutation deliberately remains narrower.
+    // Payout destinations are provisioned only by Finance. The member surface
+    // is strictly read-only and never accepts a beneficiary token or mask.
     const PARTNERS_PAYOUT_READ_PROVIDERS = new Set([
         'wise',
         'revolut',
-        'stripe_connect'
-    ]);
-    const PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS = new Set([
-        'wise',
         'stripe_connect'
     ]);
     const PARTNERS_PAYOUT_PROFILE_STATUSES = new Set([
@@ -1104,6 +1100,22 @@
         'verified',
         'rejected',
         'expired'
+    ]);
+    const PARTNERS_FISCAL_DECLARATION_VERSION = 'partners-tax-self-certification-v1';
+    const PARTNERS_PAYOUT_ONBOARDING_STATUSES = new Set([
+        'not_started',
+        'pending',
+        'in_progress',
+        'rejected',
+        'completed'
+    ]);
+    const PARTNERS_PAYOUT_ONBOARDING_REASONS = new Set([
+        'route_unavailable',
+        'beneficiary_setup_required',
+        'identity_mismatch',
+        'unsupported_destination',
+        'compliance_review',
+        'duplicate_request'
     ]);
     const PARTNERS_PAYOUT_READINESS_REASONS = new Set([
         'account_not_active',
@@ -1753,7 +1765,62 @@
         return deepFreeze(cloneJson(payload));
     }
 
-    function validatePartnersPayoutProfileSaved(payload) {
+    function validatePartnersFiscalProfileValue(profile) {
+        if (!hasExactKeys(profile, [
+            'exists',
+            'status',
+            'country_code',
+            'declaration_version',
+            'submitted_at',
+            'reviewed_at'
+        ])
+            || typeof profile.exists !== 'boolean'
+            || !PARTNERS_FISCAL_STATUSES.has(profile.status)
+            || (profile.country_code !== null && !/^[A-Z]{2}$/.test(profile.country_code))
+            || (profile.declaration_version !== null
+                && profile.declaration_version !== PARTNERS_FISCAL_DECLARATION_VERSION)
+            || !isIsoTimestamp(profile.submitted_at, true)
+            || !isIsoTimestamp(profile.reviewed_at, true)) return false;
+        if (!profile.exists) {
+            return profile.status === 'missing'
+                && profile.country_code === null
+                && profile.declaration_version === null
+                && profile.submitted_at === null
+                && profile.reviewed_at === null;
+        }
+        // A pre-self-attestation fiscal row is migrated fail-closed to
+        // `expired`.  Preserve that one recovery shape so the member can read
+        // the state and submit the current declaration instead of getting a
+        // generic contract error.  Pending/verified rows remain strict and no
+        // consent timestamp is synthesized in the browser.
+        if (profile.status === 'expired'
+            && profile.country_code !== null
+            && profile.declaration_version === null
+            && profile.submitted_at === null) return true;
+        return profile.status !== 'missing'
+            && profile.country_code !== null
+            && profile.declaration_version === PARTNERS_FISCAL_DECLARATION_VERSION
+            && profile.submitted_at !== null;
+    }
+
+    function validatePartnersFiscalProfileEnvelope(payload, expectedAction) {
+        const invalid = () => { throw partnersContractError(); };
+        const submitted = expectedAction === 'fiscal_profile_submitted';
+        const expectedKeys = submitted
+            ? ['schema_version', 'action', 'replayed', 'fiscal_profile']
+            : ['schema_version', 'action', 'fiscal_profile'];
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, expectedKeys)
+            || payload.data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || payload.data.action !== expectedAction
+            || (submitted && typeof payload.data.replayed !== 'boolean')
+            || !validatePartnersFiscalProfileValue(payload.data.fiscal_profile)) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersActivationReconcile(payload) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
             || payload.version !== PARTNERS_CONTRACT_VERSION
@@ -1761,14 +1828,87 @@
             || !hasExactKeys(payload.data, [
                 'schema_version',
                 'action',
-                'replayed',
-                'profile'
-            ])
-            || payload.data.schema_version !== PARTNERS_SCHEMA_VERSION
-            || payload.data.action !== 'payout_profile_saved'
-            || typeof payload.data.replayed !== 'boolean'
-            || !validatePartnersPayoutProfileValue(payload.data.profile)
-            || payload.data.profile.status !== 'active') invalid();
+                'changed',
+                'account',
+                'next_action'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || data.action !== 'activation_reconciled'
+            || typeof data.changed !== 'boolean'
+            || !PARTNERS_NEXT_ACTIONS.has(data.next_action)) invalid();
+        const account = validatePartnersActionAccount(data.account);
+        if (data.changed && (
+            account.status !== 'active'
+            || account.verification_status !== 'verified'
+            || account.contract_status !== 'accepted'
+            || data.next_action !== 'share_link'
+        )) invalid();
+        if ((account.status === 'active') !== (data.next_action === 'share_link')) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersPayoutOnboardingValue(onboarding) {
+        if (!hasExactKeys(onboarding, [
+            'exists',
+            'status',
+            'currency',
+            'execution_adapter',
+            'reconfiguration_required',
+            'requested_at',
+            'updated_at',
+            'reason_code'
+        ])
+            || typeof onboarding.exists !== 'boolean'
+            || !PARTNERS_PAYOUT_ONBOARDING_STATUSES.has(onboarding.status)
+            || onboarding.execution_adapter !== 'revolut_manual'
+            || typeof onboarding.reconfiguration_required !== 'boolean'
+            || (onboarding.currency !== null && !/^[A-Z]{3}$/.test(onboarding.currency))
+            || !isIsoTimestamp(onboarding.requested_at, true)
+            || !isIsoTimestamp(onboarding.updated_at, true)
+            || (onboarding.reason_code !== null
+                && !PARTNERS_PAYOUT_ONBOARDING_REASONS.has(onboarding.reason_code))) return false;
+        if (!onboarding.exists) {
+            return onboarding.status === 'not_started'
+                && onboarding.currency === null
+                && onboarding.reconfiguration_required === false
+                && onboarding.requested_at === null
+                && onboarding.updated_at === null
+                && onboarding.reason_code === null;
+        }
+        return onboarding.status !== 'not_started'
+            && onboarding.currency !== null
+            && (!onboarding.reconfiguration_required || onboarding.status === 'completed')
+            && onboarding.requested_at !== null
+            && onboarding.updated_at !== null
+            && ((onboarding.status === 'rejected') === (onboarding.reason_code !== null));
+    }
+
+    function validatePartnersPayoutOnboardingEnvelope(payload, expectedAction) {
+        const invalid = () => { throw partnersContractError(); };
+        const loaded = expectedAction === 'payout_onboarding_loaded';
+        const expectedKeys = loaded
+            ? ['schema_version', 'action', 'payout_onboarding', 'allowed_currencies']
+            : ['schema_version', 'action', 'replayed', 'payout_onboarding'];
+        const data = payload?.data;
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(data, expectedKeys)
+            || data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || data.action !== expectedAction
+            || (!loaded && typeof data.replayed !== 'boolean')
+            || !validatePartnersPayoutOnboardingValue(data.payout_onboarding)) invalid();
+        if (loaded) {
+            if (!Array.isArray(data.allowed_currencies)
+                || data.allowed_currencies.length > 32
+                || data.allowed_currencies.some((currency) => !/^[A-Z]{3}$/.test(currency))
+                || new Set(data.allowed_currencies).size !== data.allowed_currencies.length
+                || data.allowed_currencies.some((currency, index) => (
+                    index > 0
+                    && data.allowed_currencies[index - 1].localeCompare(currency) >= 0
+                ))) invalid();
+        }
         return deepFreeze(cloneJson(payload));
     }
 
@@ -1888,9 +2028,18 @@
         return key;
     }
 
-    async function partnersPost(path, body, idempotencyKey, validator) {
+    async function partnersPost(path, body, idempotencyKey, validator, externalSignal) {
         partnersRequireUserSession();
         const safeIdempotencyKey = partnersIdempotencyKey(idempotencyKey);
+        const controller = new AbortController();
+        let timedOut = false;
+        const abortFromCaller = () => controller.abort();
+        if (externalSignal?.aborted) controller.abort();
+        else externalSignal?.addEventListener?.('abort', abortFromCaller, { once: true });
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, 20000);
         let payload;
         try {
             payload = await requestToBase(
@@ -1900,10 +2049,69 @@
                 body,
                 {
                     skipProfile: true,
+                    signal: controller.signal,
                     headers: { 'Idempotency-Key': safeIdempotencyKey }
                 }
             );
         } catch (error) {
+            if (error?.name === 'AbortError') {
+                if (timedOut) throw partnersClientError('partners_request_timeout');
+                throw error;
+            }
+            throw normalizePartnersRequestError(error);
+        } finally {
+            clearTimeout(timeout);
+            externalSignal?.removeEventListener?.('abort', abortFromCaller);
+        }
+        return validator(payload);
+    }
+
+    async function partnersIntrinsicPost(path, body, validator, externalSignal) {
+        partnersRequireUserSession();
+        const controller = new AbortController();
+        let timedOut = false;
+        const abortFromCaller = () => controller.abort();
+        if (externalSignal?.aborted) controller.abort();
+        else externalSignal?.addEventListener?.('abort', abortFromCaller, { once: true });
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, 20000);
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'POST',
+                path,
+                body,
+                { skipProfile: true, signal: controller.signal }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                if (timedOut) throw partnersClientError('partners_request_timeout');
+                throw error;
+            }
+            throw normalizePartnersRequestError(error);
+        } finally {
+            clearTimeout(timeout);
+            externalSignal?.removeEventListener?.('abort', abortFromCaller);
+        }
+        return validator(payload);
+    }
+
+    async function partnersGet(path, signal, validator) {
+        partnersRequireUserSession();
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                path,
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
             throw normalizePartnersRequestError(error);
         }
         return validator(payload);
@@ -1999,7 +2207,8 @@
     function partnersAccessRequestSubmit({
         countryCode,
         subdivisionCode,
-        idempotencyKey
+        idempotencyKey,
+        signal
     } = {}) {
         const country = String(countryCode || '').trim().toUpperCase();
         const subdivision = String(subdivisionCode || '').trim().toUpperCase();
@@ -2014,14 +2223,15 @@
         return partnersPost('/access-request', {
             countryCode: country,
             ...(subdivision ? { subdivisionCode: subdivision } : {})
-        }, idempotencyKey, (payload) => validatePartnersAccessRequest(payload, { mutation: true }));
+        }, idempotencyKey, (payload) => validatePartnersAccessRequest(payload, { mutation: true }), signal);
     }
 
     async function partnersApply({
         countryCode,
         subdivisionCode,
         accountType = 'individual',
-        idempotencyKey
+        idempotencyKey,
+        signal
     } = {}) {
         const country = String(countryCode || '').trim().toUpperCase();
         const subdivision = String(subdivisionCode || '').trim().toUpperCase();
@@ -2042,10 +2252,10 @@
             accountType: 'individual',
             countryCode: country,
             ...(subdivision ? { subdivisionCode: subdivision } : {})
-        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'application_submitted'));
+        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'application_submitted'), signal);
     }
 
-    function partnersAcceptTerms({ termsVersion, disclosureVersion, idempotencyKey } = {}) {
+    function partnersAcceptTerms({ termsVersion, disclosureVersion, idempotencyKey, signal } = {}) {
         if (!isBoundedString(termsVersion, {
             pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
             max: 64
@@ -2058,15 +2268,25 @@
         return partnersPost('/activate', {
             termsVersion,
             disclosureVersion
-        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'terms_accepted'));
+        }, idempotencyKey, (payload) => validatePartnersAction(payload, 'terms_accepted'), signal);
     }
 
-    function partnersRotateLink({ idempotencyKey } = {}) {
+    function partnersReconcileActivation({ signal } = {}) {
+        return partnersIntrinsicPost(
+            '/activation/reconcile',
+            {},
+            validatePartnersActivationReconcile,
+            signal
+        );
+    }
+
+    function partnersRotateLink({ idempotencyKey, signal } = {}) {
         return partnersPost(
             '/links',
             {},
             idempotencyKey,
-            (payload) => validatePartnersAction(payload, 'link_rotated', { linkRequired: true })
+            (payload) => validatePartnersAction(payload, 'link_rotated', { linkRequired: true }),
+            signal
         );
     }
 
@@ -2074,7 +2294,8 @@
         language = 'en',
         consentVersion,
         capacityConfirmed,
-        idempotencyKey
+        idempotencyKey,
+        signal
     } = {}) {
         const safeLanguage = String(language || '').trim().toLowerCase();
         const safeConsentVersion = String(consentVersion || '').trim();
@@ -2088,7 +2309,7 @@
             consentVersion: safeConsentVersion,
             consentGranted: true,
             capacityConfirmed: true
-        }, idempotencyKey, validatePartnersKycSession);
+        }, idempotencyKey, validatePartnersKycSession, signal);
     }
 
     async function partnersClaimReferral({ signal } = {}) {
@@ -2142,36 +2363,68 @@
         return validatePartnersPayoutProfile(payload);
     }
 
-    function partnersSaveTokenizedPayoutProfile({
-        provider,
-        beneficiaryTokenRef,
-        displayMasked,
-        currency,
-        idempotencyKey
+    function partnersFiscalProfile({ signal } = {}) {
+        return partnersGet(
+            '/fiscal-profile',
+            signal,
+            (payload) => validatePartnersFiscalProfileEnvelope(
+                payload,
+                'fiscal_profile_loaded'
+            )
+        );
+    }
+
+    function partnersSubmitFiscalProfile({
+        countryCode,
+        declarationAccepted,
+        declarationVersion = PARTNERS_FISCAL_DECLARATION_VERSION,
+        idempotencyKey,
+        signal
     } = {}) {
-        const safeProvider = String(provider || '').trim();
-        const safeToken = String(beneficiaryTokenRef || '');
-        const safeMask = String(displayMasked || '');
-        const safeCurrency = String(currency || '').trim().toUpperCase();
-        if (!PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS.has(safeProvider)
-            || safeToken.length < 8
-            || safeToken.length > 255
-            || /[\s\u0000-\u001f\u007f]/u.test(safeToken)
-            || looksLikeRawPayoutIdentifier(safeToken)
-            || safeMask !== safeMask.trim()
-            || safeMask.length < 4
-            || safeMask.length > 64
-            || /[\u0000-\u001f\u007f]/u.test(safeMask)
-            || looksLikeRawPayoutIdentifier(safeMask)
-            || !/^[A-Z]{3}$/.test(safeCurrency)) {
-            throw partnersClientError('partners_payout_profile_invalid');
+        const safeCountry = String(countryCode || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(safeCountry)
+            || declarationAccepted !== true
+            || declarationVersion !== PARTNERS_FISCAL_DECLARATION_VERSION) {
+            throw partnersClientError('partners_fiscal_declaration_invalid');
         }
-        return partnersPost('/payout-profile', {
-            provider: safeProvider,
-            beneficiaryTokenRef: safeToken,
-            displayMasked: safeMask,
-            currency: safeCurrency
-        }, idempotencyKey, validatePartnersPayoutProfileSaved);
+        return partnersPost('/fiscal-profile', {
+            countryCode: safeCountry,
+            declarationAccepted: true,
+            declarationVersion: PARTNERS_FISCAL_DECLARATION_VERSION
+        }, idempotencyKey, (payload) => validatePartnersFiscalProfileEnvelope(
+            payload,
+            'fiscal_profile_submitted'
+        ), signal);
+    }
+
+    function partnersPayoutOnboarding({ signal } = {}) {
+        return partnersGet(
+            '/payout-onboarding',
+            signal,
+            (payload) => validatePartnersPayoutOnboardingEnvelope(
+                payload,
+                'payout_onboarding_loaded'
+            )
+        );
+    }
+
+    function partnersRequestPayoutOnboarding({
+        currency,
+        contactConsent,
+        idempotencyKey,
+        signal
+    } = {}) {
+        const safeCurrency = String(currency || '').trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(safeCurrency) || contactConsent !== true) {
+            throw partnersClientError('partners_payout_onboarding_invalid');
+        }
+        return partnersPost('/payout-onboarding', {
+            currency: safeCurrency,
+            contactConsent: true
+        }, idempotencyKey, (payload) => validatePartnersPayoutOnboardingEnvelope(
+            payload,
+            'payout_onboarding_requested'
+        ), signal);
     }
 
     function partnersDeviceAvailability({ signal } = {}) {
@@ -2209,7 +2462,7 @@
         );
     }
 
-    function partnersConsumeTvRelay({ relayToken, idempotencyKey } = {}) {
+    function partnersConsumeTvRelay({ relayToken, idempotencyKey, signal } = {}) {
         const safeRelayToken = String(relayToken || '');
         if (!PARTNERS_TV_RELAY_TOKEN_PATTERN.test(safeRelayToken)) {
             throw partnersClientError('partners_tv_relay_invalid');
@@ -2218,7 +2471,8 @@
             '/tv-relays/consume',
             { relayToken: safeRelayToken },
             idempotencyKey,
-            validatePartnersTvRelayConsumed
+            validatePartnersTvRelayConsumed,
+            signal
         );
     }
 
@@ -2295,11 +2549,15 @@
             }),
             apply: partnersApply,
             acceptTerms: partnersAcceptTerms,
+            activation: Object.freeze({ reconcile: partnersReconcileActivation }),
             rotateLink: partnersRotateLink,
             startKyc: partnersStartKyc,
             claimReferral: partnersClaimReferral,
             payoutProfile: partnersPayoutProfile,
-            saveTokenizedPayoutProfile: partnersSaveTokenizedPayoutProfile,
+            fiscalProfile: partnersFiscalProfile,
+            submitFiscalProfile: partnersSubmitFiscalProfile,
+            payoutOnboarding: partnersPayoutOnboarding,
+            requestPayoutOnboarding: partnersRequestPayoutOnboarding,
             dashboard: partnersDashboard,
             consumeTvRelay: partnersConsumeTvRelay,
             device: Object.freeze({

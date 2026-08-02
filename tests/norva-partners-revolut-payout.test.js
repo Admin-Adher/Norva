@@ -1097,30 +1097,30 @@ test('statement imports require an AAL2 one-use ticket at the service boundary',
   );
 });
 
-test('client-supplied Revolut beneficiary tokens are rejected by both boundaries', () => {
+test('member payout profile is read-only and beneficiary tokens stay in Finance', () => {
   const edge = read('supabase/functions/_shared/partners-payout.ts');
   const web = read('public/js/cloudApi.js');
+  const member = read('supabase/functions/norva-partners/index.ts');
   const trustedBoundary = read(
     'supabase/functions/norva-partners-revolut-payout/index.ts',
   );
-  const edgeWriteList = edge.slice(
-    edge.indexOf('const CLIENT_SUPPLIED_PROVIDERS'),
-    edge.indexOf('const ACCOUNT_STATUSES'),
-  );
-  const webWriteList = web.slice(
-    web.indexOf('const PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS'),
-    web.indexOf('const PARTNERS_PAYOUT_PROFILE_STATUSES'),
-  );
-  assert.doesNotMatch(edgeWriteList, /"revolut"/);
-  assert.doesNotMatch(webWriteList, /'revolut'/);
+  assert.doesNotMatch(edge, /parsePayoutProfileInput|sanitizePayoutProfileSet/);
+  assert.doesNotMatch(web, /saveTokenizedPayoutProfile|PARTNERS_PAYOUT_TOKEN_WRITE_PROVIDERS/);
+  assert.doesNotMatch(member, /beneficiaryTokenRef|p_beneficiary_token_ref/);
   assert.match(
     trustedBoundary,
     /\/manual\/beneficiaries\/propose/,
   );
   assert.match(
     trustedBoundary,
-    /admin_partners_revolut_beneficiary_binding_authorize/,
+    /admin_partners_revolut_beneficiary_binding_authorize_by_request/,
   );
+  assert.match(trustedBoundary, /p_request_key/);
+  assert.match(trustedBoundary, /proposal\.requestKey/);
+  assert.match(trustedBoundary, /request_key/);
+  assert.doesNotMatch(trustedBoundary, /p_account_id: proposal/);
+  assert.doesNotMatch(trustedBoundary, /p_currency: proposal/);
+  assert.match(trustedBoundary, /attestationPayload.includes\("account_id="\)/);
   assert.match(
     trustedBoundary,
     /signRevolutBeneficiaryFingerprint[\s\S]*partners_service_revolut_beneficiary_binding_propose/,

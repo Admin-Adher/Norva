@@ -2532,7 +2532,7 @@ class App {
                     <img class="account-ic" src="/img/norva-app-icon.png" alt="">
                     <span class="account-row-copy">
                         <span class="account-row-title">Norva Partners</span>
-                        <span class="account-row-hint">Referral programme · access by review</span>
+                        <span class="account-row-hint">Earn with eligible referrals</span>
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="settings">

@@ -21,13 +21,18 @@ export const PARTNERS_RPC = Object.freeze({
   accessRequestSubmit: "partners_service_access_request_submit",
   apply: "partners_service_apply",
   acceptTerms: "partners_service_accept_terms",
+  activationReconcile: "partners_service_activation_reconcile",
   rotateLink: "partners_service_rotate_link",
   dashboard: "partners_service_dashboard",
   kycPrepare: "partners_service_kyc_prepare",
   kycSessionRecord: "partners_service_kyc_session_record",
   referralClaim: "partners_service_referral_claim",
   payoutProfileGet: "partners_service_payout_profile_get",
-  payoutProfileSet: "partners_service_payout_profile_set",
+  fiscalProfileGet: "partners_service_fiscal_profile_get",
+  fiscalProfileSelfAttest: "partners_service_fiscal_profile_self_attest",
+  payoutOnboardingGet: "partners_service_payout_onboarding_get",
+  payoutOnboardingRequest: "partners_service_payout_onboarding_request",
+  memberWriteReserve: "partners_service_member_write_reserve",
   tvRelayConsume: "partners_service_tv_relay_consume",
 });
 
@@ -108,6 +113,17 @@ export type DashboardQuery = {
   historyLimit: number;
   historyCursor: string | null;
   historyStatus: string;
+};
+
+export type FiscalProfileInput = {
+  countryCode: string;
+  declarationAccepted: true;
+  declarationVersion: "partners-tax-self-certification-v1";
+};
+
+export type PayoutOnboardingInput = {
+  currency: string;
+  contactConsent: true;
 };
 
 const VISIBILITY_REASONS = new Set([
@@ -199,6 +215,36 @@ const ACTIVITY_TYPES = new Set([
   "commission_paid",
   "commission_reversed",
 ]);
+const FISCAL_PROFILE_STATUSES = new Set([
+  "missing",
+  "pending",
+  "verified",
+  "rejected",
+  "expired",
+]);
+const PAYOUT_ONBOARDING_STATUSES = new Set([
+  "not_started",
+  "pending",
+  "in_progress",
+  "rejected",
+  "completed",
+]);
+const PAYOUT_ONBOARDING_REASON_CODES = new Set([
+  "route_unavailable",
+  "beneficiary_setup_required",
+  "identity_mismatch",
+  "unsupported_destination",
+  "compliance_review",
+  "duplicate_request",
+]);
+const MEMBER_WRITE_OPERATIONS = new Set([
+  "fiscal_profile_self_attestation",
+  "payout_onboarding",
+]);
+
+export type PartnersMemberWriteOperation =
+  | "fiscal_profile_self_attestation"
+  | "payout_onboarding";
 
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
 const SUBDIVISION_PATTERN = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
@@ -307,11 +353,16 @@ export function allowedMethodsForRoute(
   route: string,
 ): readonly string[] | null {
   if (route === "/bootstrap" || route === "/dashboard") return ["GET"];
-  if (route === "/access-request") return ["GET", "POST"];
-  if (route === "/payout-profile") return ["GET", "PUT"];
+  if (
+    route === "/access-request" ||
+    route === "/fiscal-profile" ||
+    route === "/payout-onboarding"
+  ) return ["GET", "POST"];
+  if (route === "/payout-profile") return ["GET"];
   if (
     route === "/applications" ||
     route === "/activate" ||
+    route === "/activation/reconcile" ||
     route === "/links" ||
     route === "/kyc/sessions" ||
     route === "/referral/claim" ||
@@ -426,6 +477,43 @@ export function parseAccessRequestInput(raw: unknown): AccessRequestInput {
     throw invalidRequest();
   }
   return { countryCode, subdivisionCode };
+}
+
+export function parseFiscalProfileInput(raw: unknown): FiscalProfileInput {
+  const body = boundedRecord(raw, [
+    "countryCode",
+    "declarationAccepted",
+    "declarationVersion",
+  ], []);
+  const countryCode = normalizeRequiredCode(
+    body.countryCode,
+    COUNTRY_PATTERN,
+    2,
+  );
+  if (
+    body.declarationAccepted !== true ||
+    body.declarationVersion !== "partners-tax-self-certification-v1"
+  ) {
+    throw invalidRequest();
+  }
+  return {
+    countryCode,
+    declarationAccepted: true,
+    declarationVersion: "partners-tax-self-certification-v1",
+  };
+}
+
+export function parsePayoutOnboardingInput(
+  raw: unknown,
+): PayoutOnboardingInput {
+  const body = boundedRecord(raw, ["currency", "contactConsent"], []);
+  const currency = normalizeRequiredCode(
+    body.currency,
+    CURRENCY_PATTERN,
+    3,
+  );
+  if (body.contactConsent !== true) throw invalidRequest();
+  return { currency, contactConsent: true };
 }
 
 export function parseAcceptTermsInput(raw: unknown): AcceptTermsInput {
@@ -601,7 +689,9 @@ export function sanitizeBootstrapData(
     const thresholds = program.payout_thresholds as Record<string, number>;
     const settlementCurrencies = policy.payout_currencies as string[];
     if (
-      settlementCurrencies.some((currency) => thresholds[currency] === undefined)
+      settlementCurrencies.some((currency) =>
+        thresholds[currency] === undefined
+      )
     ) {
       throw new BootstrapContractError();
     }
@@ -701,13 +791,11 @@ function sanitizeAccessRequestState(
     exists: true,
     status,
     country_code: patternString(request.country_code, COUNTRY_PATTERN, 2),
-    subdivision_code: request.subdivision_code === null
-      ? null
-      : patternString(
-        request.subdivision_code,
-        SUBDIVISION_PATTERN,
-        12,
-      ),
+    subdivision_code: request.subdivision_code === null ? null : patternString(
+      request.subdivision_code,
+      SUBDIVISION_PATTERN,
+      12,
+    ),
     requested_at: isoTimestamp(request.requested_at, false),
     reviewed_at: reviewedAt,
   };
@@ -738,7 +826,9 @@ function sanitizeAccessProgramPreview(
   };
 }
 
-export function sanitizeAccessRequestData(raw: unknown): Record<string, unknown> {
+export function sanitizeAccessRequestData(
+  raw: unknown,
+): Record<string, unknown> {
   const root = exactRecord(raw, [
     "schema_version",
     "program_preview",
@@ -788,6 +878,361 @@ export function sanitizeAccessRequestMutationData(
     program_preview: sanitizeAccessProgramPreview(root.program_preview),
     request,
     next_action: nextAction,
+  };
+}
+
+function sanitizeFiscalProfileState(raw: unknown): Record<string, unknown> {
+  const profile = exactRecord(raw, [
+    "exists",
+    "status",
+    "country_code",
+    "declaration_version",
+    "submitted_at",
+    "reviewed_at",
+  ]);
+  const exists = strictBoolean(profile.exists);
+  const status = enumString(profile.status, FISCAL_PROFILE_STATUSES);
+  if (!exists) {
+    if (
+      status !== "missing" ||
+      profile.country_code !== null ||
+      profile.declaration_version !== null ||
+      profile.submitted_at !== null ||
+      profile.reviewed_at !== null
+    ) {
+      throw new BootstrapContractError();
+    }
+    return {
+      exists: false,
+      status: "missing",
+      country_code: null,
+      declaration_version: null,
+      submitted_at: null,
+      reviewed_at: null,
+    };
+  }
+  if (status === "missing") throw new BootstrapContractError();
+  const countryCode = contractPatternString(
+    profile.country_code,
+    COUNTRY_PATTERN,
+    2,
+  );
+  // Upgrade recovery is intentionally explicit: a legacy profile whose
+  // consent was never recorded may only surface as expired with no synthetic
+  // declaration/timestamp. POST self-attestation moves it back to pending.
+  if (
+    status === "expired" &&
+    profile.declaration_version === null &&
+    profile.submitted_at === null
+  ) {
+    return {
+      exists: true,
+      status: "expired",
+      country_code: countryCode,
+      declaration_version: null,
+      submitted_at: null,
+      reviewed_at: isoTimestamp(profile.reviewed_at, true),
+    };
+  }
+  const declarationVersion = contractPatternString(
+    profile.declaration_version,
+    VERSION_KEY_PATTERN,
+    64,
+  );
+  const submittedAt = isoTimestamp(profile.submitted_at, false);
+  if (declarationVersion !== "partners-tax-self-certification-v1") {
+    throw new BootstrapContractError();
+  }
+  const reviewedAt = isoTimestamp(profile.reviewed_at, true);
+  if (
+    (status === "pending" && reviewedAt !== null) ||
+    (status !== "pending" && reviewedAt === null)
+  ) throw new BootstrapContractError();
+  return {
+    exists: true,
+    status,
+    country_code: countryCode,
+    declaration_version: declarationVersion,
+    submitted_at: submittedAt,
+    reviewed_at: reviewedAt,
+  };
+}
+
+export function sanitizeFiscalProfileGet(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "fiscal_profile",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "fiscal_profile_loaded"
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "fiscal_profile_loaded",
+    fiscal_profile: sanitizeFiscalProfileState(root.fiscal_profile),
+  };
+}
+
+export function sanitizeFiscalProfileMutation(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "fiscal_profile",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "fiscal_profile_submitted"
+  ) {
+    throw new BootstrapContractError();
+  }
+  const fiscalProfile = sanitizeFiscalProfileState(root.fiscal_profile);
+  if (
+    fiscalProfile.exists !== true ||
+    fiscalProfile.status !== "pending" ||
+    fiscalProfile.declaration_version !==
+      "partners-tax-self-certification-v1" ||
+    fiscalProfile.submitted_at === null ||
+    fiscalProfile.reviewed_at !== null
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "fiscal_profile_submitted",
+    replayed: strictBoolean(root.replayed),
+    fiscal_profile: fiscalProfile,
+  };
+}
+
+export async function partnersMemberWriteRequestHash(
+  operation: PartnersMemberWriteOperation,
+  normalizedFields: readonly string[],
+): Promise<string> {
+  if (
+    !MEMBER_WRITE_OPERATIONS.has(operation) ||
+    normalizedFields.length === 0 ||
+    normalizedFields.length > 8 ||
+    normalizedFields.some((field) => (
+      typeof field !== "string" || field.length === 0 || field.length > 64
+    ))
+  ) {
+    throw new PublicApiError(
+      400,
+      "invalid_request",
+      "The request payload is invalid.",
+    );
+  }
+  const canonical = JSON.stringify([
+    "norva-partners-member-write:v1",
+    operation,
+    ...normalizedFields,
+  ]);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonical),
+  );
+  return Array.from(
+    new Uint8Array(digest),
+    (value) => value.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+export function sanitizeMemberWriteReservation(
+  raw: unknown,
+  expectedOperation: PartnersMemberWriteOperation,
+): Record<string, unknown> {
+  if (!MEMBER_WRITE_OPERATIONS.has(expectedOperation)) {
+    throw new BootstrapContractError();
+  }
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "operation",
+    "replayed",
+    "limit",
+    "used",
+    "remaining",
+    "window_seconds",
+  ]);
+  const limit = integerBetween(root.limit, 8, 8);
+  const used = integerBetween(root.used, 0, limit);
+  const remaining = integerBetween(root.remaining, 0, limit);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "member_write_reserved" ||
+    root.operation !== expectedOperation ||
+    root.window_seconds !== 86_400 ||
+    remaining !== limit - used
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "member_write_reserved",
+    operation: expectedOperation,
+    replayed: strictBoolean(root.replayed),
+    limit,
+    used,
+    remaining,
+    window_seconds: 86_400,
+  };
+}
+
+function sanitizePayoutOnboardingState(
+  raw: unknown,
+): Record<string, unknown> {
+  const request = exactRecord(raw, [
+    "exists",
+    "status",
+    "currency",
+    "execution_adapter",
+    "reconfiguration_required",
+    "requested_at",
+    "updated_at",
+    "reason_code",
+  ]);
+  const exists = strictBoolean(request.exists);
+  const status = enumString(request.status, PAYOUT_ONBOARDING_STATUSES);
+  const reconfigurationRequired = strictBoolean(
+    request.reconfiguration_required,
+  );
+  if (request.execution_adapter !== "revolut_manual") {
+    throw new BootstrapContractError();
+  }
+  if (!exists) {
+    if (
+      status !== "not_started" ||
+      request.currency !== null ||
+      reconfigurationRequired ||
+      request.requested_at !== null ||
+      request.updated_at !== null ||
+      request.reason_code !== null
+    ) {
+      throw new BootstrapContractError();
+    }
+    return {
+      exists: false,
+      status: "not_started",
+      currency: null,
+      execution_adapter: "revolut_manual",
+      reconfiguration_required: false,
+      requested_at: null,
+      updated_at: null,
+      reason_code: null,
+    };
+  }
+  if (status === "not_started") throw new BootstrapContractError();
+  if (reconfigurationRequired && status !== "completed") {
+    throw new BootstrapContractError();
+  }
+  const reasonCode = request.reason_code === null
+    ? null
+    : enumString(request.reason_code, PAYOUT_ONBOARDING_REASON_CODES);
+  if ((status === "rejected") !== (reasonCode !== null)) {
+    throw new BootstrapContractError();
+  }
+  const requestedAt = isoTimestamp(request.requested_at, false);
+  const updatedAt = isoTimestamp(request.updated_at, false);
+  if (requestedAt === null || updatedAt === null) {
+    throw new BootstrapContractError();
+  }
+  if (Date.parse(updatedAt) < Date.parse(requestedAt)) {
+    throw new BootstrapContractError();
+  }
+  return {
+    exists: true,
+    status,
+    currency: contractPatternString(
+      request.currency,
+      CURRENCY_PATTERN,
+      3,
+    ),
+    execution_adapter: "revolut_manual",
+    reconfiguration_required: reconfigurationRequired,
+    requested_at: requestedAt,
+    updated_at: updatedAt,
+    reason_code: reasonCode,
+  };
+}
+
+function sanitizeAllowedCurrencies(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length > 32) {
+    throw new BootstrapContractError();
+  }
+  const currencies = raw.map((currency) =>
+    contractPatternString(currency, CURRENCY_PATTERN, 3)
+  );
+  if (
+    new Set(currencies).size !== currencies.length ||
+    currencies.some((currency, index) => (
+      index > 0 && currencies[index - 1].localeCompare(currency) >= 0
+    ))
+  ) {
+    throw new BootstrapContractError();
+  }
+  return currencies;
+}
+
+export function sanitizePayoutOnboardingGet(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "payout_onboarding",
+    "allowed_currencies",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "payout_onboarding_loaded"
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "payout_onboarding_loaded",
+    payout_onboarding: sanitizePayoutOnboardingState(
+      root.payout_onboarding,
+    ),
+    allowed_currencies: sanitizeAllowedCurrencies(root.allowed_currencies),
+  };
+}
+
+export function sanitizePayoutOnboardingMutation(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "payout_onboarding",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "payout_onboarding_requested"
+  ) {
+    throw new BootstrapContractError();
+  }
+  const payoutOnboarding = sanitizePayoutOnboardingState(
+    root.payout_onboarding,
+  );
+  if (payoutOnboarding.exists !== true) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "payout_onboarding_requested",
+    replayed: strictBoolean(root.replayed),
+    payout_onboarding: payoutOnboarding,
   };
 }
 
@@ -850,6 +1295,53 @@ export function sanitizeMutationData(
   return clean;
 }
 
+export function sanitizeActivationReconcile(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "changed",
+    "account",
+    "next_action",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "activation_reconciled"
+  ) {
+    throw new BootstrapContractError();
+  }
+
+  const changed = strictBoolean(root.changed);
+  const account = sanitizeMemberAccount(root.account, false);
+  const nextAction = enumString(root.next_action, NEXT_ACTIONS);
+  if (
+    changed &&
+    (
+      account.status !== "active" ||
+      account.verification_status !== "verified" ||
+      account.contract_status !== "accepted" ||
+      nextAction !== "share_link"
+    )
+  ) {
+    throw new BootstrapContractError();
+  }
+  if (
+    (account.status === "active" && nextAction !== "share_link") ||
+    (account.status !== "active" && nextAction === "share_link")
+  ) {
+    throw new BootstrapContractError();
+  }
+
+  return {
+    schema_version: 1,
+    action: "activation_reconciled",
+    changed,
+    account,
+    next_action: nextAction,
+  };
+}
+
 export function sanitizeDashboardData(
   raw: unknown,
   query: DashboardQuery,
@@ -904,7 +1396,9 @@ export function sanitizeDashboardData(
   let pendingMinor: number | null = null;
   let availableMinor: number | null = null;
   let paidMinor: number | null = null;
-  if (!Array.isArray(reporting.currencies) || reporting.currencies.length > 32) {
+  if (
+    !Array.isArray(reporting.currencies) || reporting.currencies.length > 32
+  ) {
     throw new BootstrapContractError();
   }
   const currencyBalances = reporting.currencies.map((value) => {
@@ -942,8 +1436,8 @@ export function sanitizeDashboardData(
     };
   });
   if (
-    new Set(currencyBalances.map((balance) => balance.currency)).size
-      !== currencyBalances.length
+    new Set(currencyBalances.map((balance) => balance.currency)).size !==
+      currencyBalances.length
   ) {
     throw new BootstrapContractError();
   }
@@ -966,23 +1460,23 @@ export function sanitizeDashboardData(
       Number.MAX_SAFE_INTEGER,
     );
     if (
-      currencyBalances[0].currency !== currency
-      || currencyBalances[0].pending_minor !== pendingMinor
-      || currencyBalances[0].available_minor !== availableMinor
-      || currencyBalances[0].paid_minor !== paidMinor
+      currencyBalances[0].currency !== currency ||
+      currencyBalances[0].pending_minor !== pendingMinor ||
+      currencyBalances[0].available_minor !== availableMinor ||
+      currencyBalances[0].paid_minor !== paidMinor
     ) {
       throw new BootstrapContractError();
     }
   } else if (
-    reportingAvailable
-    && reportingReason === "multiple_currencies"
+    reportingAvailable &&
+    reportingReason === "multiple_currencies"
   ) {
     if (
-      currencyBalances.length < 2
-      || reporting.currency !== null
-      || reporting.pending_minor !== null
-      || reporting.available_minor !== null
-      || reporting.paid_minor !== null
+      currencyBalances.length < 2 ||
+      reporting.currency !== null ||
+      reporting.pending_minor !== null ||
+      reporting.available_minor !== null ||
+      reporting.paid_minor !== null
     ) {
       throw new BootstrapContractError();
     }

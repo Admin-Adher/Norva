@@ -3,26 +3,9 @@ export type PayoutProvider =
   | "revolut"
   | "stripe_connect";
 
-type ClientSuppliedPayoutProvider = Exclude<
-  PayoutProvider,
-  // Revolut counterparty tokens are provisioned only by Finance.
-  "revolut"
->;
-
-export type PayoutProfileInput = {
-  provider: ClientSuppliedPayoutProvider;
-  beneficiaryTokenRef: string;
-  displayMasked: string;
-  currency: string;
-};
-
 const PROVIDERS = new Set<PayoutProvider>([
   "wise",
   "revolut",
-  "stripe_connect",
-]);
-const CLIENT_SUPPLIED_PROVIDERS = new Set<ClientSuppliedPayoutProvider>([
-  "wise",
   "stripe_connect",
 ]);
 const ACCOUNT_STATUSES = new Set([
@@ -63,42 +46,6 @@ export class PayoutContractError extends Error {
   }
 }
 
-export function parsePayoutProfileInput(raw: unknown): PayoutProfileInput {
-  const body = exactRecord(raw, [
-    "provider",
-    "beneficiaryTokenRef",
-    "displayMasked",
-    "currency",
-  ]);
-  if (
-    typeof body.provider !== "string" ||
-    !CLIENT_SUPPLIED_PROVIDERS.has(
-      body.provider as ClientSuppliedPayoutProvider,
-    ) ||
-    typeof body.beneficiaryTokenRef !== "string" ||
-    body.beneficiaryTokenRef.length < 8 ||
-    body.beneficiaryTokenRef.length > 255 ||
-    /[\s\u0000-\u001f\u007f]/u.test(body.beneficiaryTokenRef) ||
-    looksLikeRawFinancialIdentifier(body.beneficiaryTokenRef) ||
-    typeof body.displayMasked !== "string" ||
-    body.displayMasked !== body.displayMasked.trim() ||
-    body.displayMasked.length < 4 ||
-    body.displayMasked.length > 64 ||
-    /[\u0000-\u001f\u007f]/u.test(body.displayMasked) ||
-    looksLikeRawFinancialIdentifier(body.displayMasked) ||
-    typeof body.currency !== "string" ||
-    !CURRENCY_PATTERN.test(body.currency)
-  ) {
-    throw new PayoutContractError();
-  }
-  return {
-    provider: body.provider as ClientSuppliedPayoutProvider,
-    beneficiaryTokenRef: body.beneficiaryTokenRef,
-    displayMasked: body.displayMasked,
-    currency: body.currency,
-  };
-}
-
 export function sanitizePayoutProfileGet(
   raw: unknown,
 ): Record<string, unknown> {
@@ -119,15 +66,15 @@ export function sanitizePayoutProfileGet(
   }
   const profiles = root.profiles.map(sanitizeProfile);
   if (
-    new Set(profiles.map((item) => item.currency)).size !== profiles.length
-    || ((profile === null) !== (profiles.length === 0))
-    || (
-      profile !== null
-      && !profiles.some((item) =>
-        item.provider === profile.provider
-        && item.display_masked === profile.display_masked
-        && item.currency === profile.currency
-        && item.status === profile.status
+    new Set(profiles.map((item) => item.currency)).size !== profiles.length ||
+    ((profile === null) !== (profiles.length === 0)) ||
+    (
+      profile !== null &&
+      !profiles.some((item) =>
+        item.provider === profile.provider &&
+        item.display_masked === profile.display_masked &&
+        item.currency === profile.currency &&
+        item.status === profile.status
       )
     )
   ) {
@@ -176,32 +123,6 @@ export function sanitizePayoutProfileGet(
     profile,
     profiles,
     readiness,
-  };
-}
-
-export function sanitizePayoutProfileSet(
-  raw: unknown,
-): Record<string, unknown> {
-  const root = exactRecord(raw, [
-    "schema_version",
-    "action",
-    "replayed",
-    "profile",
-  ]);
-  if (
-    root.schema_version !== 1 ||
-    root.action !== "payout_profile_saved" ||
-    typeof root.replayed !== "boolean"
-  ) {
-    throw new PayoutContractError();
-  }
-  const profile = sanitizeProfile(root.profile);
-  if (profile.status !== "active") throw new PayoutContractError();
-  return {
-    schema_version: 1,
-    action: "payout_profile_saved",
-    replayed: root.replayed,
-    profile,
   };
 }
 

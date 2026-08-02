@@ -340,6 +340,75 @@ services:
                 kong.service.request.clear_header("authorization")
               end
 
+  ## Public Didit webhook: route before the generic Functions prefix so Kong
+  ## rejects oversized fixed-length and chunked bodies before edge-runtime.
+  - name: functions-v1-didit-kyc-webhook
+    _comment: 'Didit KYC webhook: hard 2 MiB gateway cap; Edge repeats a streaming byte cap before HMAC verification.'
+    url: http://edge-functions-pool/norva-partners-kyc-webhook
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-didit-kyc-webhook
+        strip_path: true
+        paths:
+          - /functions/v1/norva-partners-kyc-webhook
+    plugins:
+      - name: cors
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 2
+          size_unit: megabytes
+          require_content_length: false
+
+  ## Exact member-write routes must remain before the generic Functions
+  ## prefix. The database enforces 8 distinct keys per authenticated member
+  ## and operation per rolling day; this IP guard only absorbs network bursts
+  ## without making shared mobile/NAT addresses the business authority.
+  - name: functions-v1-partners-fiscal-profile-write
+    _comment: 'Partners fiscal self-attestation POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/fiscal-profile
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-fiscal-profile-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~^/functions/v1/norva-partners/fiscal-profile$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
+  - name: functions-v1-partners-payout-onboarding-write
+    _comment: 'Partners payout onboarding POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/payout-onboarding
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-payout-onboarding-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~^/functions/v1/norva-partners/payout-onboarding$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
   ## Edge Functions routes
   - name: functions-v1
     _comment: 'Edge Functions: /functions/v1/* -> upstream edge-functions-pool (round-robin)'

@@ -18,8 +18,8 @@ import {
   assertDeviceToken,
   loadTvRelayConfig,
   localTvRelayUnavailable,
-  PARTNERS_TV_RELAY_RPC,
   parseTvRelayTokenInput,
+  PARTNERS_TV_RELAY_RPC,
   prepareTvRelay,
   relayTokenHashFromSignedToken,
   sanitizeTvRelayAvailabilityRpc,
@@ -271,8 +271,38 @@ async function readJsonBody(req: Request): Promise<unknown> {
   }
   let text: string;
   try {
-    text = await req.text();
-  } catch {
+    const reader = req.body?.getReader();
+    if (!reader) throw new Error("missing_body");
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      received += value.byteLength;
+      if (received > 4_096) {
+        try {
+          await reader.cancel("payload_too_large");
+        } catch {
+          // Best-effort cancellation only; the public response remains 413.
+        }
+        throw new PublicApiError(
+          413,
+          "payload_too_large",
+          "The request payload is too large.",
+        );
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (error instanceof PublicApiError) throw error;
     throw new PublicApiError(
       400,
       "invalid_request",

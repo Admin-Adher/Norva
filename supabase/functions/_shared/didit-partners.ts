@@ -128,6 +128,58 @@ export class DiditContractError extends Error {
   }
 }
 
+export class DiditPayloadTooLargeError extends Error {
+  constructor() {
+    super("Didit webhook payload exceeds the bounded reader limit");
+    this.name = "DiditPayloadTooLargeError";
+  }
+}
+
+export async function readDiditWebhookBody(
+  request: Request,
+  maxBytes = DIDIT_WEBHOOK_MAX_BYTES,
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new DiditContractError();
+  }
+  if (!request.body) return new Uint8Array();
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await reader.cancel("payload_too_large");
+        } catch {
+          // The size verdict is authoritative even if upstream cancellation
+          // itself races a closed transport.
+        }
+        throw new DiditPayloadTooLargeError();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // A cancelled stream may already have released its lock.
+    }
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export function loadDiditConfig(
   get: (name: string) => string | undefined,
 ): DiditConfig | null {

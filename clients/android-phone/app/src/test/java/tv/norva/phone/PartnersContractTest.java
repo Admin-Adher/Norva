@@ -60,6 +60,20 @@ public final class PartnersContractTest {
     }
 
     @Test
+    public void diditReturnStripsProviderControlledParametersBeforeWebView() {
+        assertEquals(
+                "https://norva.tv/partners-kyc-return",
+                PartnersContract.canonicalKycReturnDestination(
+                        "https://norva.tv/partners-kyc-return?status=approved&verificationSessionId=secret#ignored"));
+        assertNull(PartnersContract.canonicalKycReturnDestination(
+                "https://norva.tv.evil.example/partners-kyc-return?status=approved"));
+        assertNull(PartnersContract.canonicalKycReturnDestination(
+                "http://norva.tv/partners-kyc-return"));
+        assertNull(PartnersContract.canonicalKycReturnDestination(
+                "https://norva.tv/partners-kyc-return/extra"));
+    }
+
+    @Test
     public void partnersPageTrustIsOriginPathAndRouteBound() {
         assertTrue(PartnersContract.isTrustedPartnersPage(
                 "https://norva.tv/app.html?mobile=1#partners"));

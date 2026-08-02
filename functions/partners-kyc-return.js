@@ -1,4 +1,12 @@
-const RETURN_LOCATION = "/app.html?mobile=1#partners";
+const WEB_RETURN_LOCATION = "/app.html#partners";
+const ANDROID_RETURN_LOCATION = "/app.html?mobile=1#partners";
+
+function returnLocation(request) {
+  const userAgent = request.headers.get("User-Agent") || "";
+  return /(?:^|\s)NorvaTV-AndroidPhone\/\d+(?:\.\d+)*(?:\s|$)/.test(userAgent)
+    ? ANDROID_RETURN_LOCATION
+    : WEB_RETURN_LOCATION;
+}
 
 function privateHeaders(extra = {}) {
   return {
@@ -22,6 +30,6 @@ export function onRequest({ request }) {
   // identifier or decision into the application, browser history or referrer.
   return new Response(null, {
     status: 303,
-    headers: privateHeaders({ Location: RETURN_LOCATION }),
+    headers: privateHeaders({ Location: returnLocation(request) }),
   });
 }

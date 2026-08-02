@@ -308,6 +308,72 @@ test('Partners user actions use exact routes, idempotency and validated server-i
   assert.equal(requests[3].options.headers['x-norva-profile-id'], undefined);
 });
 
+test('verified pending accounts reconcile activation without an idempotency header', async () => {
+  const payload = {
+    version: '2026-07-29',
+    correlationId: 'activation-reconcile-contract',
+    data: {
+      schema_version: 1,
+      action: 'activation_reconciled',
+      changed: true,
+      account: {
+        exists: true,
+        status: 'active',
+        verification_status: 'verified',
+        contract_status: 'accepted',
+        link_status: 'active',
+      },
+      next_action: 'share_link',
+    },
+  };
+  const { cloud, requests } = loadCloudApi(payload);
+  const controller = new AbortController();
+  const result = await cloud.partners.activation.reconcile({
+    signal: controller.signal,
+  });
+
+  assert.equal(result.data.action, 'activation_reconciled');
+  assert.equal(result.data.changed, true);
+  assert.equal(result.data.next_action, 'share_link');
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].url,
+    'https://api.norva.tv/functions/v1/norva-partners/activation/reconcile',
+  );
+  assert.equal(requests[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].options.body), {});
+  assert.equal(requests[0].options.signal instanceof AbortSignal, true);
+  assert.equal(requests[0].options.signal.aborted, false);
+  assert.equal(requests[0].options.headers['Idempotency-Key'], undefined);
+  assert.equal(requests[0].options.headers['x-norva-profile-id'], undefined);
+  assert.equal(Object.isFrozen(result.data.account), true);
+});
+
+test('activation reconcile fails closed on contradictory active state', async () => {
+  const payload = {
+    version: '2026-07-29',
+    correlationId: 'activation-reconcile-invalid-contract',
+    data: {
+      schema_version: 1,
+      action: 'activation_reconciled',
+      changed: false,
+      account: {
+        exists: true,
+        status: 'active',
+        verification_status: 'verified',
+        contract_status: 'accepted',
+        link_status: 'active',
+      },
+      next_action: 'accept_terms',
+    },
+  };
+  const { cloud } = loadCloudApi(payload);
+  await assert.rejects(
+    cloud.partners.activation.reconcile(),
+    (error) => error?.code === 'partners_contract_invalid',
+  );
+});
+
 test('Partners KYC starts only from explicit versioned consent and trusts only Didit hosted URLs', async () => {
   const payload = {
     version: '2026-07-29',
@@ -416,7 +482,7 @@ test('Partners consumes referrals only through the same-origin HttpOnly cookie b
   );
 });
 
-test('Partners payout profile stays tokenized, masked and fail-closed', async () => {
+test('Partners payout profile is masked, read-only and fail-closed', async () => {
   const getPayload = {
     version: '2026-07-29',
     correlationId: 'prt_0123456789abcdef01234567',
@@ -449,47 +515,263 @@ test('Partners payout profile stays tokenized, masked and fail-closed', async ()
   assert.equal(profile.data.profile.display_masked, 'Revolut ·•• 8421');
   assert.equal(JSON.stringify(profile).includes('beneficiaryTokenRef'), false);
 
-  const savedPayload = {
+  assert.equal(get.cloud.partners.saveTokenizedPayoutProfile, undefined);
+});
+
+test('Partners tax self-certification and Revolut manual setup expose no financial identifiers', async () => {
+  const responder = (url, options) => {
+    if (url.endsWith('/fiscal-profile') && options.method === 'GET') {
+      return {
+        version: '2026-07-29',
+        correlationId: 'fiscal-loaded-contract',
+        data: {
+          schema_version: 1,
+          action: 'fiscal_profile_loaded',
+          fiscal_profile: {
+            exists: false,
+            status: 'missing',
+            country_code: null,
+            declaration_version: null,
+            submitted_at: null,
+            reviewed_at: null,
+          },
+        },
+      };
+    }
+    if (url.endsWith('/fiscal-profile') && options.method === 'POST') {
+      return {
+        version: '2026-07-29',
+        correlationId: 'fiscal-submitted-contract',
+        data: {
+          schema_version: 1,
+          action: 'fiscal_profile_submitted',
+          replayed: false,
+          fiscal_profile: {
+            exists: true,
+            status: 'pending',
+            country_code: 'FR',
+            declaration_version: 'partners-tax-self-certification-v1',
+            submitted_at: '2026-08-02T12:00:00Z',
+            reviewed_at: null,
+          },
+        },
+      };
+    }
+    if (url.endsWith('/payout-onboarding') && options.method === 'GET') {
+      return {
+        version: '2026-07-29',
+        correlationId: 'payout-onboarding-loaded-contract',
+        data: {
+          schema_version: 1,
+          action: 'payout_onboarding_loaded',
+          payout_onboarding: {
+            exists: false,
+            status: 'not_started',
+            currency: null,
+            execution_adapter: 'revolut_manual',
+            reconfiguration_required: false,
+            requested_at: null,
+            updated_at: null,
+            reason_code: null,
+          },
+          allowed_currencies: ['EUR', 'USD'],
+        },
+      };
+    }
+    if (url.endsWith('/payout-onboarding') && options.method === 'POST') {
+      return {
+        version: '2026-07-29',
+        correlationId: 'payout-onboarding-requested-contract',
+        data: {
+          schema_version: 1,
+          action: 'payout_onboarding_requested',
+          replayed: false,
+          payout_onboarding: {
+            exists: true,
+            status: 'pending',
+            currency: 'USD',
+            execution_adapter: 'revolut_manual',
+            reconfiguration_required: false,
+            requested_at: '2026-08-02T12:05:00Z',
+            updated_at: '2026-08-02T12:05:00Z',
+            reason_code: null,
+          },
+        },
+      };
+    }
+    throw new Error(`unexpected request ${url}`);
+  };
+  const { cloud, requests } = loadCloudApi(responder);
+  const controller = new AbortController();
+  const fiscal = await cloud.partners.fiscalProfile({ signal: controller.signal });
+  const submitted = await cloud.partners.submitFiscalProfile({
+    countryCode: 'fr',
+    declarationAccepted: true,
+    declarationVersion: 'partners-tax-self-certification-v1',
+    idempotencyKey: 'fiscal:0123456789abcdef',
+    taxId: 'must-not-leave-the-client',
+  });
+  const onboarding = await cloud.partners.payoutOnboarding({
+    signal: controller.signal,
+  });
+  const requested = await cloud.partners.requestPayoutOnboarding({
+    currency: 'usd',
+    contactConsent: true,
+    idempotencyKey: 'payout-onboarding:0123456789abcdef',
+    iban: 'must-not-leave-the-client',
+    beneficiaryTokenRef: 'must-not-leave-the-client',
+  });
+
+  assert.equal(fiscal.data.fiscal_profile.status, 'missing');
+  assert.equal(submitted.data.fiscal_profile.status, 'pending');
+  assert.deepEqual(clone(onboarding.data.allowed_currencies), ['EUR', 'USD']);
+  assert.equal(requested.data.payout_onboarding.execution_adapter, 'revolut_manual');
+  assert.equal(requests[0].options.signal, controller.signal);
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    countryCode: 'FR',
+    declarationAccepted: true,
+    declarationVersion: 'partners-tax-self-certification-v1',
+  });
+  assert.deepEqual(JSON.parse(requests[3].options.body), {
+    currency: 'USD',
+    contactConsent: true,
+  });
+  assert.equal(requests[1].options.headers['Idempotency-Key'], 'fiscal:0123456789abcdef');
+  assert.equal(
+    requests[3].options.headers['Idempotency-Key'],
+    'payout-onboarding:0123456789abcdef',
+  );
+  assert.doesNotMatch(
+    requests.map((request) => request.options.body || '').join(''),
+    /iban|taxId|beneficiaryToken|revolut_manual/i,
+  );
+  assert.throws(
+    () => cloud.partners.submitFiscalProfile({
+      countryCode: 'FR',
+      declarationAccepted: false,
+      idempotencyKey: 'fiscal:fedcba9876543210',
+    }),
+    (error) => error?.code === 'partners_fiscal_declaration_invalid',
+  );
+  assert.throws(
+    () => cloud.partners.requestPayoutOnboarding({
+      currency: 'USD',
+      contactConsent: false,
+      idempotencyKey: 'payout-onboarding:fedcba9876543210',
+    }),
+    (error) => error?.code === 'partners_payout_onboarding_invalid',
+  );
+});
+
+test('Partners Web accepts only the fail-closed legacy fiscal recovery shape', async () => {
+  const envelope = {
     version: '2026-07-29',
-    correlationId: 'prt_fedcba9876543210fedcba98',
+    correlationId: 'fiscal-legacy-recovery-contract',
     data: {
       schema_version: 1,
-      action: 'payout_profile_saved',
-      replayed: false,
-      profile: {
-        provider: 'wise',
-        display_masked: 'Wise ·•• 8421',
-        currency: 'EUR',
-        status: 'active',
+      action: 'fiscal_profile_loaded',
+      fiscal_profile: {
+        exists: true,
+        status: 'expired',
+        country_code: 'FR',
+        declaration_version: null,
+        submitted_at: null,
+        reviewed_at: '2026-08-02T12:00:00Z',
       },
     },
   };
-  const saved = loadCloudApi(savedPayload);
-  const result = await saved.cloud.partners.saveTokenizedPayoutProfile({
-    provider: 'wise',
-    beneficiaryTokenRef: 'ben_tok_opaque_0123456789',
-    displayMasked: 'Wise ·•• 8421',
-    currency: 'eur',
-    idempotencyKey: 'payout:0123456789abcdef',
-  });
-  assert.deepEqual(JSON.parse(saved.requests[0].options.body), {
-    provider: 'wise',
-    beneficiaryTokenRef: 'ben_tok_opaque_0123456789',
-    displayMasked: 'Wise ·•• 8421',
-    currency: 'EUR',
-  });
-  assert.equal(JSON.stringify(result).includes('ben_tok_opaque'), false);
-  assert.throws(
-    () => saved.cloud.partners.saveTokenizedPayoutProfile({
-      provider: 'wise',
-      beneficiaryTokenRef: 'FR1420041010050500013M02606',
-      displayMasked: 'FR1420041010050500013M02606',
-      currency: 'EUR',
-      idempotencyKey: 'payout:fedcba9876543210',
-    }),
-    (error) => error?.code === 'partners_payout_profile_invalid',
+  const recovery = loadCloudApi(envelope);
+  const loaded = await recovery.cloud.partners.fiscalProfile();
+  assert.equal(loaded.data.fiscal_profile.status, 'expired');
+  assert.equal(loaded.data.fiscal_profile.declaration_version, null);
+
+  for (const status of ['pending', 'verified', 'rejected']) {
+    const invalid = clone(envelope);
+    invalid.data.fiscal_profile.status = status;
+    const client = loadCloudApi(invalid);
+    await assert.rejects(
+      client.cloud.partners.fiscalProfile(),
+      (error) => error?.code === 'partners_contract_invalid',
+      `${status} must never be accepted without recorded self-attestation`,
+    );
+  }
+});
+
+test('Partners Web exposes reconfiguration only for a historically completed payout request', async () => {
+  const envelope = {
+    version: '2026-07-29',
+    correlationId: 'payout-reconfiguration-contract',
+    data: {
+      schema_version: 1,
+      action: 'payout_onboarding_loaded',
+      payout_onboarding: {
+        exists: true,
+        status: 'completed',
+        currency: 'USD',
+        execution_adapter: 'revolut_manual',
+        reconfiguration_required: true,
+        requested_at: '2026-08-02T12:00:00Z',
+        updated_at: '2026-08-02T13:00:00Z',
+        reason_code: null,
+      },
+      allowed_currencies: ['USD'],
+    },
+  };
+  const client = loadCloudApi(envelope);
+  const loaded = await client.cloud.partners.payoutOnboarding();
+  assert.equal(loaded.data.payout_onboarding.reconfiguration_required, true);
+
+  const invalid = clone(envelope);
+  invalid.data.payout_onboarding.status = 'pending';
+  const failClosed = loadCloudApi(invalid);
+  await assert.rejects(
+    failClosed.cloud.partners.payoutOnboarding(),
+    (error) => error?.code === 'partners_contract_invalid',
+  );
+});
+
+test('Partners rejects unsorted payout currencies and non-whitelisted rejection reasons', async () => {
+  const base = {
+    version: '2026-07-29',
+    correlationId: 'payout-onboarding-order-contract',
+    data: {
+      schema_version: 1,
+      action: 'payout_onboarding_loaded',
+      payout_onboarding: {
+        exists: false,
+        status: 'not_started',
+        currency: null,
+        execution_adapter: 'revolut_manual',
+        reconfiguration_required: false,
+        requested_at: null,
+        updated_at: null,
+        reason_code: null,
+      },
+      allowed_currencies: ['USD', 'EUR'],
+    },
+  };
+  const unsorted = loadCloudApi(base).cloud;
+  await assert.rejects(
+    unsorted.partners.payoutOnboarding(),
+    (error) => error?.code === 'partners_contract_invalid',
   );
 
+  const invalidReason = structuredClone(base);
+  invalidReason.data.allowed_currencies = ['EUR', 'USD'];
+  invalidReason.data.payout_onboarding = {
+    exists: true,
+    status: 'rejected',
+    currency: 'USD',
+    execution_adapter: 'revolut_manual',
+    requested_at: '2026-08-02T12:00:00Z',
+    updated_at: '2026-08-02T12:05:00Z',
+    reason_code: 'arbitrary_internal_reason',
+  };
+  const rejected = loadCloudApi(invalidReason).cloud;
+  await assert.rejects(
+    rejected.partners.payoutOnboarding(),
+    (error) => error?.code === 'partners_contract_invalid',
+  );
 });
 
 test('Partners user actions reject local business flows, weak idempotency and dashboard drift', async () => {
@@ -1168,6 +1450,143 @@ test('pending partner states always expose the authoritative recovery action', (
   assert.doesNotMatch(container.innerHTML, /Secure next step unavailable/);
 });
 
+test('reconcile next_action overrides stale contract state and exposes support safely', () => {
+  const container = {
+    innerHTML: '',
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  };
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: {
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+      querySelector: () => null,
+    },
+    navigator: { language: 'en-US' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  const data = validEnvelope().data;
+  data.visibility = { visible: true, reason: 'existing_account' };
+  data.account = {
+    exists: true,
+    status: 'pending_verification',
+    account_type: 'individual',
+    verification_status: 'verified',
+    contract_status: 'accepted',
+    link_status: 'none',
+  };
+
+  page.renderPending(data, { nextAction: 'accept_terms' });
+  assert.match(container.innerHTML, /Review the current programme terms/);
+  assert.match(container.innerHTML, /data-partners-accept-terms/);
+
+  page.renderPending(data, { nextAction: 'contact_support' });
+  assert.match(container.innerHTML, /Support required/);
+  assert.match(container.innerHTML, /href="\/support\.html\?returnTo=%2Fapp%23partners"/);
+  assert.doesNotMatch(container.innerHTML, /data-partners-refresh-verification/);
+});
+
+test('foreground load reconciles a verified pending account before rendering', async () => {
+  const container = { innerHTML: '', querySelector: () => null };
+  const bootstrap = validEnvelope();
+  bootstrap.data.visibility = { visible: true, reason: 'existing_account' };
+  bootstrap.data.account = {
+    exists: true,
+    status: 'pending_verification',
+    account_type: 'individual',
+    verification_status: 'verified',
+    contract_status: 'accepted',
+    link_status: 'none',
+  };
+  let reconciles = 0;
+  let reconciliation = {
+    changed: true,
+    next_action: 'share_link',
+    account: {
+      exists: true,
+      status: 'active',
+      verification_status: 'verified',
+      contract_status: 'accepted',
+      link_status: 'active',
+    },
+  };
+  const window = {
+    NorvaCloud: {
+      token: 'opaque-session',
+      partners: {
+        bootstrap: async () => bootstrap,
+        activation: {
+          reconcile: async () => {
+            reconciles += 1;
+            return { data: reconciliation };
+          },
+        },
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: {
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+      querySelector: () => null,
+    },
+    navigator: { language: 'en-US', onLine: true },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page.renderLoading = () => {};
+  page.setEntryVisibility = () => true;
+  let rendered = null;
+  page.renderBootstrap = (data, options) => { rendered = { data, options }; };
+
+  await page.show();
+
+  assert.equal(reconciles, 1);
+  assert.equal(rendered.data.account.status, 'active');
+  assert.equal(rendered.data.account.account_type, 'individual');
+  assert.equal(rendered.options.nextAction, 'share_link');
+
+  bootstrap.data.account.verification_status = 'not_started';
+  reconciliation = {
+    changed: false,
+    next_action: 'accept_terms',
+    account: {
+      exists: true,
+      status: 'pending_verification',
+      verification_status: 'not_started',
+      contract_status: 'accepted',
+      link_status: 'none',
+    },
+  };
+  await page.show();
+  assert.equal(reconciles, 2, 'terms drift is reconciled before KYC starts');
+  assert.equal(rendered.options.nextAction, 'accept_terms');
+});
+
+test('unknown-result recovery retries exact mutations and never infers success from GET state', () => {
+  assert.match(pageSource, /const submitAttestation = \(\) =>[\s\S]*idempotencyKey[\s\S]*envelope = await submitAttestation\(\)[\s\S]*envelope = await submitAttestation\(\)/);
+  assert.match(pageSource, /const requestOnboarding = \(\) =>[\s\S]*idempotencyKey[\s\S]*envelope = await requestOnboarding\(\)[\s\S]*envelope = await requestOnboarding\(\)/);
+  assert.doesNotMatch(pageSource, /current\.status !== 'missing'/);
+  assert.doesNotMatch(pageSource, /current\.status !== 'not_started'/);
+});
+
 test('hosted Didit hand-off requires both confirmations and preserves its retry key', async () => {
   const listeners = new Map();
   const makeControl = ({ checked = false, textContent = '' } = {}) => ({
@@ -1660,11 +2079,11 @@ test('Partners is a secondary discoverable route whose operational actions stay 
     'startKyc: partnersStartKyc',
     'claimReferral: partnersClaimReferral',
     'payoutProfile: partnersPayoutProfile',
-    'saveTokenizedPayoutProfile: partnersSaveTokenizedPayoutProfile',
     'dashboard: partnersDashboard',
   ]) {
     assert.match(partnersNamespace, new RegExp(binding.replace(': ', ':\\s*')));
   }
+  assert.doesNotMatch(partnersNamespace, /saveTokenizedPayoutProfile/);
   assert.match(cloudSource, /partners:\s*Object\.freeze\(\{\}\)/);
   assert.doesNotMatch(pageSource, /Math\.random\(\).*referral|referral.*Math\.random\(\)/i);
 });
@@ -1711,6 +2130,21 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
   assert.match(pageSource, /restoreDashboardContext/);
   assert.match(pageSource, /isolateOverlayBackground/);
   assert.match(pageSource, /trapDialogFocus/);
+  assert.match(
+    pageSource,
+    /document\.addEventListener\('keydown', handleDialogKeydown, true\)/,
+    'the payout dialog must retain Escape and Back handling while async rendering detaches focus',
+  );
+  assert.match(
+    pageSource,
+    /document\.removeEventListener\('keydown', handleDialogKeydown, true\)/,
+    'the document-level payout dialog listener must be removed on every close path',
+  );
+  assert.match(
+    pageSource,
+    /!dialog\.contains\(document\.activeElement\)/,
+    'the focus trap must recover if an async rerender temporarily moves focus outside the dialog',
+  );
   assert.match(pageSource, /opener\?\.isConnected/);
   assert.match(pageSource, /history\.back\(\)/);
   assert.match(
