@@ -18244,7 +18244,8 @@ html:not(.tv-mode) .home-state-inline {
   min-width: min(100%, 240px);
 }
 
-.partners-shell .btn:disabled {
+.partners-shell .btn:disabled,
+.partners-shell .btn[aria-disabled="true"] {
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);

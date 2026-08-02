@@ -381,6 +381,10 @@ test('individual application stays gated and reaches the explicit hosted-KYC ste
 });
 
 test('Didit hand-off requires fresh identity and capacity confirmations', async ({ page }) => {
+  const startKycCalls = [];
+  await page.exposeFunction('__captureStartKycCall', (input) => {
+    startKycCalls.push(input);
+  });
   await page.route('https://verify.didit.me/**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -389,6 +393,13 @@ test('Didit hand-off requires fresh identity and capacity confirmations', async 
     });
   });
   await mountPartners(page, 'kyc-ready');
+  await page.evaluate(() => {
+    const startKyc = window.NorvaCloud.partners.startKyc;
+    window.NorvaCloud.partners.startKyc = async (input) => {
+      await window.__captureStartKycCall(input);
+      return startKyc(input);
+    };
+  });
 
   const start = page.locator('[data-partners-start-kyc]');
   await expect(start).toBeDisabled();
@@ -404,15 +415,16 @@ test('Didit hand-off requires fresh identity and capacity confirmations', async 
   await expect(page.getByRole('heading', { name: 'Secure identity verification' }))
     .toBeVisible();
 
-  const calls = await page.evaluate(() => window.__partnerCalls.startKyc);
-  expect(calls).toHaveLength(1);
-  expect(calls[0]).toMatchObject({
+  // The hosted hand-off replaces the Norva document, so capture the RPC input
+  // through a Playwright binding that survives the cross-origin navigation.
+  expect(startKycCalls).toHaveLength(1);
+  expect(startKycCalls[0]).toMatchObject({
     language: 'en',
     consentVersion: 'partners-fr-v1',
     capacityConfirmed: true,
   });
-  expect(calls[0].idempotencyKey).toMatch(/^norva\.kyc-session\./);
-  expect(JSON.stringify(calls[0])).not.toMatch(/document|selfie|userId|user_id/i);
+  expect(startKycCalls[0].idempotencyKey).toMatch(/^norva\.kyc-session\./);
+  expect(JSON.stringify(startKycCalls[0])).not.toMatch(/document|selfie|userId|user_id/i);
 });
 
 test('a partial application failure reloads authoritative state without posting the application twice', async ({

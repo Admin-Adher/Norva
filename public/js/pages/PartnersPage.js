@@ -1526,7 +1526,11 @@ class PartnersPage {
         });
     }
 
-    async loadDashboard(bootstrap, { reset = false, append = false } = {}) {
+    async loadDashboard(bootstrap, {
+        reset = false,
+        append = false,
+        successMessage = 'Partner dashboard updated.'
+    } = {}) {
         if (!this._visible) return;
         if (typeof window.NorvaCloud?.partners?.dashboard !== 'function') {
             this.renderDashboardFailure(bootstrap, { unavailable: true });
@@ -1582,7 +1586,7 @@ class PartnersPage {
             this._dashboardCursor = page.history.next_cursor;
             this.renderDashboardData(bootstrap, combined);
             this.restoreDashboardContext(interactionContext);
-            this.setActionStatus('Partner dashboard updated.');
+            this.setActionStatus(successMessage);
         } catch (error) {
             if (!this._visible || this._dashboardAbort !== controller) return;
             if ((error?.name === 'AbortError' || controller.signal.aborted) && !timedOut) return;
@@ -1806,7 +1810,10 @@ class PartnersPage {
                         });
                         this.clearActionKey('link-rotation');
                         this.setActionStatus('Referral link rotated. Loading the new server-issued link.');
-                        await this.loadDashboard(bootstrap, { reset: true });
+                        await this.loadDashboard(bootstrap, {
+                            reset: true,
+                            successMessage: 'Referral link rotated. The new server-issued link is ready.'
+                        });
                     });
                 });
             }
@@ -1821,7 +1828,10 @@ class PartnersPage {
                         });
                         this.clearActionKey('link-rotation');
                         this.setActionStatus('Referral link created. Loading the server-issued link.');
-                        await this.loadDashboard(bootstrap, { reset: true });
+                        await this.loadDashboard(bootstrap, {
+                            reset: true,
+                            successMessage: 'Referral link created. The server-issued link is ready.'
+                        });
                     }
                 ));
         }
@@ -2172,8 +2182,14 @@ class PartnersPage {
             if (event.target === overlay) close();
         });
         dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        let refreshInFlight = false;
         refreshButton?.addEventListener('click', async () => {
-            refreshButton.disabled = true;
+            if (refreshInFlight) return;
+            refreshInFlight = true;
+            // Keep the active control focusable while the request is pending.
+            // Disabling a focused button moves Chromium focus to <body>, which
+            // breaks Escape/Back handling and keyboard continuity in the sheet.
+            refreshButton.setAttribute('aria-disabled', 'true');
             refreshButton.setAttribute('aria-busy', 'true');
             refreshButton.textContent = 'Refreshing…';
             if (dialogStatus) dialogStatus.textContent = 'Refreshing the authoritative payout profile.';
@@ -2184,7 +2200,8 @@ class PartnersPage {
                 this.openPayoutDialog(refreshed, opener);
                 return;
             }
-            refreshButton.disabled = false;
+            refreshInFlight = false;
+            refreshButton.removeAttribute('aria-disabled');
             refreshButton.removeAttribute('aria-busy');
             refreshButton.textContent = 'Retry secure status';
             if (dialogStatus) {

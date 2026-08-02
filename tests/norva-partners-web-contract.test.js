@@ -1522,7 +1522,7 @@ test('Partners is a secondary, server-gated route with exact user actions and no
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=4"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=5"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -1636,7 +1636,7 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
   );
   assert.match(
     partnersCss,
-    /\.partners-shell \.btn:disabled\s*\{[\s\S]{0,100}color:\s*var\(--color-text-muted\)/,
+    /\.partners-shell \.btn:disabled,\s*\.partners-shell \.btn\[aria-disabled="true"\]\s*\{[\s\S]{0,100}color:\s*var\(--color-text-muted\)/,
   );
   assert.match(
     partnersCss,
@@ -1682,11 +1682,11 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=96/);
+  assert.match(htmlSource, /main\.css\?v=97/);
   assert.match(htmlSource, /cloudApi\.js\?v=55/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=46/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=4/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=5/);
   assert.match(htmlSource, /app\.js\?v=60/);
 });
 
