@@ -45,7 +45,7 @@ const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 const PARTNERS_ENVIRONMENT = revolutEnvironment(REVOLUT_API_BASE);
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 // Each user does 2-3 Revolut round-trips (create + pay [+ refetch]); keep the batch
 // small so a run stays well within the edge wall-clock limit. The cron runs hourly.

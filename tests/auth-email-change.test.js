@@ -104,7 +104,7 @@ test('secure email change uses one strict idempotent batch with complete equival
   assert.equal(request.body.length, 2);
   for (const [index, payload] of request.body.entries()) {
     assert.deepEqual(payload.to, [messages[index].to]);
-    assert.equal(payload.from, 'Norva <noreply@norva.tv>');
+    assert.equal(payload.from, 'Norva <support@norva.tv>');
     assert.equal(payload.reply_to, 'support@norva.tv');
     assert.equal(payload.text, messages[index].text);
     assert.equal(payload.html, messages[index].html);

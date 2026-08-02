@@ -19,7 +19,7 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const DELIVERY_BATCH = 5;
 const DELIVERY_SPACING_MS = 250;

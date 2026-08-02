@@ -26,9 +26,12 @@ No database transaction calls Resend. `pg_net` only wakes the Edge worker.
 - Each immutable `delivery_key` is the Resend `Idempotency-Key`. If Resend accepts
   an email but the SQL acknowledgement is ambiguous, the processing lease is left
   intact and replay resolves to the original provider email.
-- Every email contains HTML and plain text, `Reply-To: support@norva.tv`, and only
+- Every newly enqueued email uses `Norva <support@norva.tv>`, contains HTML and
+  plain text, sets `Reply-To: support@norva.tv`, and carries only
   `category=transactional` plus one stable `flow` tag. Email, user id, ticket or
   free-form content never appear in tags.
+- Rows already present in the immutable outbox keep their frozen sender; the
+  sender migration affects only rows enqueued after it is applied.
 - Recipient and message bodies are erased immediately after Resend acceptance.
   Dead letters retain their frozen payload so operators can safely requeue them;
   all sent/dead-letter rows are pruned after 90 days.

@@ -420,7 +420,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // The 6h per-key cooldown is updated when EITHER channel delivered, so a
   // Resend outage cannot turn Telegram into a 15-minute spam loop (and vice versa).
   const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
-  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
   const recipients = OPS_EMAIL ? [OPS_EMAIL] : [];
 
   let emailed: string[] = [];

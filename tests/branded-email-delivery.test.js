@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260721235400_branded_email_delivery_outbox.sql');
+const senderMigration = read('supabase/migrations/20260803001000_auth_sender_support_address.sql');
 const worker = read('supabase/functions/norva-branded-email-worker/index.ts');
 const docs = read('docs/BRANDED-EMAIL-DELIVERY.md');
 
@@ -62,6 +63,22 @@ test('frozen payload is premium multipart with support reply-to and non-PII tags
   assert.match(html, /public\.norva_html_escape\(p_cta_url\)/);
   assert.match(html, /public\.norva_html_escape\(p_cta_label\)/);
   assert.match(html, /public\.norva_html_escape\(p_footer\)/);
+});
+
+test('latest sender migration preserves the durable routine and uses the canonical support identity', () => {
+  const enqueue = section(
+    senderMigration,
+    'create or replace function public.norva_enqueue_branded_email(',
+    'revoke all on function public.norva_enqueue_branded_email',
+  );
+  assert.match(enqueue, /insert into public\.cloud_branded_email_outbox/);
+  assert.match(enqueue, /'Norva <support@norva\.tv>'/);
+  assert.match(enqueue, /'support@norva\.tv'/);
+  assert.doesNotMatch(enqueue, /noreply@norva\.tv/);
+  assert.match(senderMigration, /Existing outbox rows remain immutable/);
+  assert.match(senderMigration, /revoke all on function public\.norva_enqueue_branded_email/);
+  assert.match(senderMigration, /grant execute on function public\.norva_enqueue_branded_email/);
+  assert.match(docs, /Every newly enqueued email uses `Norva <support@norva\.tv>`/);
 });
 
 test('security events carry explicit flows, stable dedup and warning observability', () => {

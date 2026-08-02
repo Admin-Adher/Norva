@@ -16,6 +16,7 @@ import {
 
 test('team-level webhook requires the Norva sender domain and rejects explicit foreign app tags', () => {
   assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', { app: 'norva' }), true);
+  assert.equal(norvaEventAllowed('Norva <support@norva.tv>', { app: 'norva' }), true);
   assert.equal(norvaEventAllowed('BuildTrack <noreply@buildtrack.test>', { app: 'buildtrack' }), false);
   assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', {}), true);
   assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', { app: 'buildtrack' }), false);
@@ -191,6 +192,41 @@ test('live Resend suppressed payload without tags is admitted only for the Norva
   ]), false);
   assert.equal(norvaEventAllowed([livePayload.data.from], undefined), false);
   assert.equal(norvaEventAllowed(livePayload.data.from, 'malformed-tags'), false);
+});
+
+test('delivery RPC accepts missing app tags without weakening sender or tag validation', () => {
+  const baseSql = read('supabase/migrations/20260721234000_resend_delivery_observability.sql');
+  const migrationSql = read('supabase/migrations/20260803002000_resend_webhook_tagless_events.sql');
+  const functionStart = 'create or replace function public.norva_record_resend_email_event(';
+  const grantEnd = ') to service_role;';
+
+  const rpcDefinition = (sql) => {
+    const start = sql.indexOf(functionStart);
+    const end = sql.indexOf(grantEnd, start);
+    assert.notEqual(start, -1, 'the durable Resend RPC must be replaced');
+    assert.notEqual(end, -1, 'the service-role-only grant must be preserved');
+    return sql.slice(start, end + grantEnd.length).replace(/\r\n/g, '\n');
+  };
+  const admissionBlock = rpcDefinition(migrationSql).slice(
+    rpcDefinition(migrationSql).indexOf('begin'),
+    rpcDefinition(migrationSql).indexOf('  if p_event_type <> all'),
+  );
+
+  assert.match(admissionBlock, /jsonb_typeof\(p_tags\) is distinct from 'object'/);
+  assert.match(admissionBlock, /lower\(coalesce\(p_from_email, ''\)\) !~ '\(\^\|<\)\[\^<>@\[:space:\]\]\+@norva\\\.tv>\?\$'/);
+  assert.match(admissionBlock, /p_tags \? 'app'[\s\S]*coalesce\(p_tags ->> 'app', ''\) <> 'norva'/);
+  assert.match(admissionBlock, /raise exception 'foreign Resend event rejected'/);
+  assert.doesNotMatch(admissionBlock, /coalesce\(p_tags ->> 'app', ''\) <> 'norva'\s+or/);
+
+  const withoutAdmission = (definition) => definition.replace(
+    /begin[\s\S]*?(?=  if p_event_type <> all)/,
+    'begin\n  /* admission contract */\n\n',
+  );
+  assert.equal(
+    withoutAdmission(rpcDefinition(migrationSql)),
+    withoutAdmission(rpcDefinition(baseSql)),
+    'the RPC body and grants must remain unchanged outside admission',
+  );
 });
 
 test('delivery telemetry keeps annual metrics without retaining recipient PII for a year', () => {

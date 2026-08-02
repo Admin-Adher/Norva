@@ -131,6 +131,6 @@ TV, descriptions courte/longue, questionnaire de classification, public cible.
   **active**, catch-all désactivé.
 - **Envoi « en tant que support@norva.tv »** : Gmail *Send mail as* via SMTP Resend
   (`smtp.resend.com:465`, user `resend`, password = clé API Resend). Identifiants **validés** par
-  Gmail. Domaine `norva.tv` vérifié dans Resend (envoi sortant déjà OK, `noreply@norva.tv`).
+  Gmail. Domaine `norva.tv` vérifié dans Resend (envoi sortant déjà OK, `support@norva.tv`).
 - Pages légales à jour avec données KBIS réelles + médiateur **CM2C** (agréé jusqu'en 2029) :
   `privacy.html`, `terms.html`, `mentions-legales.html`. Contact affiché : `support@norva.tv`.

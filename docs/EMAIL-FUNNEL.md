@@ -80,6 +80,10 @@ configuration before it can render:
   `HTTPHookSecrets` separator, until every replica has the new value;
 - `RESEND_API_KEY` is a domain-scoped `sending_access` key available to both
   Edge replicas;
+- `AUTH_EMAIL_FROM` is the canonical verified sender
+  `Norva <support@norva.tv>` in both Edge replicas. The same mailbox is the
+  explicit reply-to, so transactional messages do not present an unreachable
+  `noreply` identity;
 - GoTrue keeps `GOTRUE_HOOK_SEND_EMAIL_ENABLED=true` and never falls back to an
   empty SMTP host.
 
@@ -92,7 +96,7 @@ bash ./scripts/check-auth-email-transport.sh --config-only
 
 Recreate the two Edge replicas one at a time and verify health, then recreate
 Auth. Afterwards, run `bash ./scripts/check-auth-email-transport.sh --runtime`. The
-runtime check verifies secret parity without printing values and sends only an
+runtime check verifies secret and sender parity without printing values and sends only an
 unsigned probe, which the function must reject with HTTP 401. A real supervised
 canary remains required for each release: request a magic link to an internal
 mailbox, confirm an Auth hook invocation, a Resend provider ID, and the signed

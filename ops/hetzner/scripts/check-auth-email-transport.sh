@@ -34,7 +34,7 @@ read_env() {
 
 # Duplicate dotenv keys make first-value/last-value consumers disagree. Reject
 # them before reading anything so Auth and Edge cannot silently diverge.
-for key in RESEND_API_KEY SEND_EMAIL_HOOK_SECRET AUTH_SEND_EMAIL_HOOK_URI SUPABASE_PUBLIC_URL; do
+for key in RESEND_API_KEY SEND_EMAIL_HOOK_SECRET AUTH_SEND_EMAIL_HOOK_URI SUPABASE_PUBLIC_URL AUTH_EMAIL_FROM; do
   count="$(grep -c "^${key}=" "$ENV_FILE" || true)"
   if [[ "$count" != "1" ]]; then
     echo "auth_email_transport=fail reason=duplicate_or_missing_env_key key=$key" >&2
@@ -46,9 +46,14 @@ resend_key="$(read_env RESEND_API_KEY)"
 hook_secret="$(read_env SEND_EMAIL_HOOK_SECRET)"
 hook_uri="$(read_env AUTH_SEND_EMAIL_HOOK_URI)"
 public_url="$(read_env SUPABASE_PUBLIC_URL)"
+auth_email_from="$(read_env AUTH_EMAIL_FROM)"
 
 if [[ ! "$resend_key" =~ ^re_[A-Za-z0-9_-]{20,}$ ]]; then
   echo "auth_email_transport=fail reason=invalid_resend_sending_key" >&2
+  exit 1
+fi
+if [[ "$auth_email_from" != 'Norva <support@norva.tv>' ]]; then
+  echo "auth_email_transport=fail reason=invalid_auth_email_from" >&2
   exit 1
 fi
 if [[ -z "$hook_secret" || "$hook_secret" == \|* || "$hook_secret" == *\| || "$hook_secret" == *"||"* ]]; then
@@ -148,6 +153,10 @@ for container in norva-edge-functions norva-edge-functions-2; do
     echo "auth_email_transport=fail reason=edge_resend_key_drift container=$container" >&2
     exit 1
   fi
+  if [[ "$(container_env "$container" AUTH_EMAIL_FROM)" != "$auth_email_from" ]]; then
+    echo "auth_email_transport=fail reason=edge_auth_email_from_drift container=$container" >&2
+    exit 1
+  fi
 done
 
 # An unsigned probe must reach the exact function and be rejected by its
@@ -188,5 +197,6 @@ fi
 echo "auth_email_transport=runtime_valid"
 echo "auth_hook_enabled=true"
 echo "auth_hook_replica_parity=true"
+echo "auth_sender_replica_parity=true"
 echo "unsigned_probe_rejected=true"
 echo "signed_probe_verified=true"

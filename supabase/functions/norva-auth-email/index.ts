@@ -11,7 +11,7 @@
  *   RESEND_API_KEY          — Resend API key (re_...)
  *   SEND_EMAIL_HOOK_SECRET  — the hook secret Supabase shows when you enable the
  *                             Send Email Hook (looks like: v1,whsec_base64...)
- *   AUTH_EMAIL_FROM         — optional, defaults to "Norva <noreply@norva.tv>"
+ *   AUTH_EMAIL_FROM         — optional, defaults to "Norva <support@norva.tv>"
  * SUPABASE_URL is injected automatically by the platform.
  *
  * Deploy with JWT verification OFF (it's a signed webhook, not a user call):
@@ -20,7 +20,7 @@
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const HOOK_SECRET_RAW = Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "";
-const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
 // Public site base for action links — keeps the email link on norva.tv instead of the

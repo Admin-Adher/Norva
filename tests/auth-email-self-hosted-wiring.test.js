@@ -36,7 +36,7 @@ test('both Edge replicas inherit the same required hook verifier and explicit br
     edge,
     /SEND_EMAIL_HOOK_SECRET: \$\{SEND_EMAIL_HOOK_SECRET:\?SEND_EMAIL_HOOK_SECRET is required for Auth email\}/,
   );
-  assert.match(edge, /AUTH_EMAIL_FROM: \$\{AUTH_EMAIL_FROM:-Norva <noreply@norva\.tv>\}/);
+  assert.match(edge, /AUTH_EMAIL_FROM: \$\{AUTH_EMAIL_FROM:-Norva <support@norva\.tv>\}/);
   assert.match(edge, /AUTH_EMAIL_REPLY_TO: \$\{AUTH_EMAIL_REPLY_TO:-support@norva\.tv\}/);
   assert.match(edge, /PUBLIC_SITE_URL: \$\{SITE_URL:\?SITE_URL is required for Auth email links\}/);
   assert.match(compose, /functions2:[\s\S]*environment: \*functions-env/);
@@ -51,7 +51,7 @@ test('the operator template documents the complete hook pair instead of legacy S
   );
   assert.match(example, /^SEND_EMAIL_HOOK_SECRET=$/m);
   assert.equal((example.match(/^SEND_EMAIL_HOOK_SECRET=/gm) || []).length, 1);
-  assert.match(example, /^AUTH_EMAIL_FROM=Norva <noreply@norva\.tv>$/m);
+  assert.match(example, /^AUTH_EMAIL_FROM=Norva <support@norva\.tv>$/m);
   assert.match(example, /^AUTH_EMAIL_REPLY_TO=support@norva\.tv$/m);
   assert.match(example, /^GOTRUE_MAILER_EXTERNAL_HOSTS=api\.norva\.tv$/m);
   assert.doesNotMatch(example, /^SMTP_(?:HOST|USER|PASS)=/m);
@@ -65,6 +65,19 @@ test('the Edge verifier accepts GoTrue pipe-delimited rotation secrets', () => {
   assert.match(sender, /signatures\.some\(\(sig\) => timingSafeEqual\(sig, expected\)\)/);
 });
 
+test('every AUTH_EMAIL_FROM Edge fallback uses the reachable canonical support identity', () => {
+  for (const relative of [
+    'supabase/functions/norva-auth-email/index.ts',
+    'supabase/functions/norva-admin/index.ts',
+    'supabase/functions/norva-account-delete/index.ts',
+    'supabase/functions/norva-revolut-billing/index.ts',
+  ]) {
+    const sender = read(relative);
+    assert.match(sender, /Deno\.env\.get\("AUTH_EMAIL_FROM"\) \?\? "Norva <support@norva\.tv>"/);
+    assert.doesNotMatch(sender, /Norva <noreply@norva\.tv>/);
+  }
+});
+
 test('the auth-email preflight validates configuration, replica parity and a non-sending signature probe', () => {
   const preflight = read('ops/hetzner/scripts/check-auth-email-transport.sh');
 
@@ -75,6 +88,9 @@ test('the auth-email preflight validates configuration, replica parity and a non
   assert.match(preflight, /IFS='\|' read -r -a hook_secrets/);
   assert.match(preflight, /base64\.b64decode\(payload, validate=True\)/);
   assert.match(preflight, /duplicate_or_missing_env_key/);
+  assert.match(preflight, /auth_email_from.*Norva <support@norva\.tv>/s);
+  assert.match(preflight, /edge_auth_email_from_drift/);
+  assert.match(preflight, /auth_sender_replica_parity=true/);
   assert.match(preflight, /norva-edge-functions-2/);
   assert.match(preflight, /unsigned probe must reach the exact function/i);
   assert.match(preflight, /probe_status" != "401"/);
