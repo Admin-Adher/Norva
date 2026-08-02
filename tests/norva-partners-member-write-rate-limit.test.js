@@ -154,6 +154,11 @@ test('database reservation is service-only, rolling, replay-safe and mapped to 4
 
 test('Kong applies bounded IP burst limits on exact POST routes before the generic Functions route', () => {
   assert.match(
+    kongSource,
+    /^_format_version: '3\.0'/,
+    'Kong 3 declarative format is required for ~/ regex route paths',
+  );
+  assert.match(
     hetznerComposeSource,
     /KONG_PLUGINS:[^\n]*request-size-limiting[^\n]*rate-limiting/,
     'every declarative plugin used by the Partners routes is enabled in Kong',
