@@ -2039,11 +2039,9 @@ begin
       using errcode = 'P0001';
   end if;
   if not (
-    v_request.currency = any (
-      affiliate_private.partners_payout_onboarding_allowed_currencies(
-        v_account
-      )
-    )
+    affiliate_private.partners_payout_onboarding_allowed_currencies(
+      v_account
+    ) @> jsonb_build_array(v_request.currency)
   ) then
     raise exception 'payout onboarding eligibility is no longer valid'
       using errcode = 'P0001';

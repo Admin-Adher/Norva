@@ -572,6 +572,26 @@ test('fiscal upgrade, throttling and manual completion fail closed in SQL', () =
   assert.match(migration, /partners_payout_account_evidence_is_current/);
   assert.match(migration, /route\.execution_adapter = 'revolut_manual'/);
   assert.match(migration, /fiscal_profile\.declaration_version =\s*'partners-tax-self-certification-v1'/);
+  const bindingAuthorizationStart = migration.indexOf(
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize_by_request(',
+  );
+  const bindingAuthorizationEnd = migration.indexOf(
+    '\ncreate or replace function',
+    bindingAuthorizationStart + 20,
+  );
+  const bindingAuthorization = migration.slice(
+    bindingAuthorizationStart,
+    bindingAuthorizationEnd,
+  );
+  assert.match(
+    bindingAuthorization,
+    /partners_payout_onboarding_allowed_currencies\([\s\S]*\)\s*@>\s*jsonb_build_array\(v_request\.currency\)/,
+  );
+  assert.doesNotMatch(
+    bindingAuthorization,
+    /v_request\.currency\s*=\s*any\s*\(\s*affiliate_private\.partners_payout_onboarding_allowed_currencies/,
+    'the JSONB currency allowlist must not be passed to the SQL-array ANY operator',
+  );
   assert.doesNotMatch(
     migration.slice(
       migration.indexOf('guard_payout_onboarding_request_transition()'),

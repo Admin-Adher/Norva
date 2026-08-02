@@ -19,6 +19,7 @@ const fiscalMigrationSource = read(
   'supabase/migrations/20260802190000_partners_fiscal_payout_onboarding.sql',
 );
 const kongSource = read('ops/hetzner/volumes/api/kong.yml');
+const hetznerComposeSource = read('ops/hetzner/docker-compose.supabase.yml');
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -152,6 +153,11 @@ test('database reservation is service-only, rolling, replay-safe and mapped to 4
 });
 
 test('Kong applies bounded IP burst limits on exact POST routes before the generic Functions route', () => {
+  assert.match(
+    hetznerComposeSource,
+    /KONG_PLUGINS:[^\n]*request-size-limiting[^\n]*rate-limiting/,
+    'every declarative plugin used by the Partners routes is enabled in Kong',
+  );
   const genericAt = kongSource.indexOf('\n  - name: functions-v1\n');
   assert.ok(genericAt > 0);
   for (const spec of [
