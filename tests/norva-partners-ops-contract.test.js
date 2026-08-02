@@ -334,6 +334,11 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   );
   assert.match(
     verifier,
+    /v_signature = any \(array\[[\s\S]*public\.admin_partners_revolut_beneficiary_binding_authorize\(uuid,text,text,text,text,integer,text,text\)[\s\S]*retired split\/manual Revolut routine remains callable/,
+    'restore verification must keep the legacy account-UUID beneficiary authorizer closed',
+  );
+  assert.match(
+    verifier,
     /partners_worker_revolut_payout_lease\(text,text,bigint,integer,integer\)/,
   );
   assert.match(verifier, /unexpected private Partners EXECUTE privilege/);

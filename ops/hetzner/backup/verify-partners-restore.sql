@@ -277,6 +277,7 @@ begin
       end if;
     elsif v_signature = any (array[
       'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
+      'public.admin_partners_revolut_beneficiary_binding_authorize(uuid,text,text,text,text,integer,text,text)',
       'public.admin_partners_revolut_manual_batch_payload(text)',
       'public.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
       'public.admin_partners_revolut_statement_ingest(text,date,date,text,jsonb)'
