@@ -6,6 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  norvaEventAdmission,
   norvaEventAllowed,
   normalizedRecipients,
   safeDiagnosticData,
@@ -13,10 +14,11 @@ import {
   verifyWebhookSignature,
 } from '../supabase/functions/_shared/resend-webhook.mjs';
 
-test('team-level webhook accepts only explicitly tagged Norva senders', () => {
+test('team-level webhook requires the Norva sender domain and rejects explicit foreign app tags', () => {
   assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', { app: 'norva' }), true);
   assert.equal(norvaEventAllowed('BuildTrack <noreply@buildtrack.test>', { app: 'buildtrack' }), false);
-  assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', {}), false);
+  assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', {}), true);
+  assert.equal(norvaEventAllowed('Norva <noreply@norva.tv>', { app: 'buildtrack' }), false);
   assert.equal(norvaEventAllowed('Other <noreply@other.test>', { app: 'norva' }), false);
 });
 
@@ -101,6 +103,96 @@ test('delivery migration is idempotent, out-of-order safe and fail-closes market
   assert.match(sql, /interval '400 days'/);
 });
 
+test('official Resend suppressed payload is admitted and admission diagnostics contain no PII', () => {
+  const suppressedData = {
+    email_id: 'email_test',
+    from: 'Norva <noreply@norva.tv>',
+    to: ['private-recipient@example.com'],
+    subject: 'Private subject',
+    tags: { app: 'norva', category: 'transactional_auth', flow: 'magic_link' },
+    suppressed: { type: 'OnAccountSuppressionList', message: 'Private provider message' },
+  };
+
+  assert.deepEqual(norvaEventAdmission(suppressedData.from, suppressedData.tags), {
+    allowed: true,
+    diagnostic: {
+      fromShape: 'string',
+      tagsShape: 'object',
+      tagCount: 3,
+      tagsShapeAllowed: true,
+      appTagPresent: true,
+      hasNorvaAppTag: true,
+      senderDomainAllowed: true,
+    },
+  });
+
+  const untagged = norvaEventAdmission(suppressedData.from, { category: 'transactional_auth' });
+  assert.equal(untagged.allowed, true);
+  assert.deepEqual(untagged.diagnostic, {
+    fromShape: 'string',
+    tagsShape: 'object',
+    tagCount: 1,
+    tagsShapeAllowed: true,
+    appTagPresent: false,
+    hasNorvaAppTag: false,
+    senderDomainAllowed: true,
+  });
+  const rejected = norvaEventAdmission(suppressedData.from, {
+    app: 'buildtrack', category: 'transactional_auth',
+  });
+  assert.equal(rejected.allowed, false);
+  assert.deepEqual(rejected.diagnostic, {
+    fromShape: 'string',
+    tagsShape: 'object',
+    tagCount: 2,
+    tagsShapeAllowed: true,
+    appTagPresent: true,
+    hasNorvaAppTag: false,
+    senderDomainAllowed: true,
+  });
+  assert.doesNotMatch(JSON.stringify([untagged.diagnostic, rejected.diagnostic]), /private-recipient|Private subject|noreply@/);
+});
+
+test('live Resend suppressed payload without tags is admitted only for the Norva sender domain', () => {
+  const livePayload = {
+    type: 'email.suppressed',
+    created_at: '2026-08-02T22:45:36.000Z',
+    data: {
+      email_id: 'email_test',
+      from: 'Norva <noreply@norva.tv>',
+      to: ['private-recipient@example.com'],
+      suppressed: { type: 'OnAccountSuppressionList' },
+    },
+  };
+
+  assert.deepEqual(norvaEventAdmission(livePayload.data.from, livePayload.data.tags), {
+    allowed: true,
+    diagnostic: {
+      fromShape: 'string',
+      tagsShape: 'undefined',
+      tagCount: 0,
+      tagsShapeAllowed: true,
+      appTagPresent: false,
+      hasNorvaAppTag: false,
+      senderDomainAllowed: true,
+    },
+  });
+  assert.equal(norvaEventAllowed('Other <noreply@other.test>', undefined), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, { app: 'buildtrack' }), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, { app: '' }), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, [{ name: 'app', value: 'buildtrack' }]), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, [
+    ...Array.from({ length: 75 }, (_, index) => ({ name: `tag_${index}`, value: 'safe' })),
+    { name: 'app', value: 'buildtrack' },
+  ]), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, [
+    { name: 'app', value: 'norva' },
+    { name: 'app', value: 'buildtrack' },
+  ]), false);
+  assert.equal(norvaEventAllowed([livePayload.data.from], undefined), false);
+  assert.equal(norvaEventAllowed(livePayload.data.from, 'malformed-tags'), false);
+});
+
 test('delivery telemetry keeps annual metrics without retaining recipient PII for a year', () => {
   const sql = read('supabase/migrations/20260722005100_resend_delivery_pii_scrub.sql');
   assert.match(sql, /cloud_email_delivery_events[\s\S]*received_at < now\(\) - interval '90 days'/);
@@ -120,9 +212,14 @@ test('Resend webhook is configured as signed non-JWT endpoint on both Edge runti
   const config = read('supabase/config.toml');
   const compose = read('ops/hetzner/docker-compose.supabase.yml');
   const edge = read('supabase/functions/norva-resend-webhook/index.ts');
+  const shared = read('supabase/functions/_shared/resend-webhook.mjs');
   assert.match(config, /\[functions\.norva-resend-webhook\]\s*verify_jwt = false/);
   assert.match(compose, /RESEND_WEBHOOK_SECRET: \$\{RESEND_WEBHOOK_SECRET:-\}/);
   assert.match(edge, /norva_record_resend_email_event/);
   assert.match(edge, /invalid_signature/);
   assert.match(edge, /payload_too_large/);
+  assert.match(edge, /signed event ignored/);
+  assert.match(edge, /\.\.\.admission\.diagnostic/);
+  assert.match(shared, /hasNorvaAppTag/);
+  assert.match(shared, /senderDomainAllowed/);
 });

@@ -14,7 +14,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   eventTypeAllowed,
-  norvaEventAllowed,
+  norvaEventAdmission,
   normalizedRecipients,
   safeDiagnosticData,
   safeTags,
@@ -79,6 +79,11 @@ async function handle(req: Request): Promise<Response> {
   if (!eventId || !eventType || !eventTypeAllowed(eventType)) {
     // A signed event outside the configured email taxonomy is acknowledged so
     // an accidentally expanded Resend subscription cannot create a retry storm.
+    console.warn("[norva-resend-webhook] signed event ignored", {
+      reason: "unsupported_event",
+      hasEventId: Boolean(eventId),
+      eventType: eventType && /^[a-z0-9._-]{1,100}$/i.test(eventType) ? eventType : null,
+    });
     return json({ received: true, ignored: "unsupported_event" });
   }
   if (!emailId || !Number.isFinite(occurredTimestamp)) {
@@ -86,7 +91,13 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const tags = safeTags(data.tags);
-  if (!norvaEventAllowed(data.from, tags)) {
+  const admission = norvaEventAdmission(data.from, data.tags);
+  if (!admission.allowed) {
+    console.warn("[norva-resend-webhook] signed event ignored", {
+      reason: "foreign_application",
+      eventType,
+      ...admission.diagnostic,
+    });
     return json({ received: true, ignored: "foreign_application" });
   }
 

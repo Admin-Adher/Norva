@@ -103,11 +103,55 @@ export function safeTags(value) {
 }
 
 export function norvaEventAllowed(fromValue, tagsValue) {
+  return norvaEventAdmission(fromValue, tagsValue).allowed;
+}
+
+function valueShape(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function tagField(value, targetName) {
+  if (Array.isArray(value)) {
+    const values = value.flatMap((entry) => {
+      const tag = record(entry);
+      return String(tag.name ?? "").trim() === targetName ? [shortText(tag.value, 200)] : [];
+    });
+    return { present: values.length > 0, values };
+  }
+  const tags = record(value);
+  return Object.prototype.hasOwnProperty.call(tags, targetName)
+    ? { present: true, values: [shortText(tags[targetName], 200)] }
+    : { present: false, values: [] };
+}
+
+export function norvaEventAdmission(fromValue, tagsValue) {
   const from = String(fromValue ?? "").trim().toLowerCase();
   const tags = safeTags(tagsValue);
+  const appTag = tagField(tagsValue, "app");
+  const appTagPresent = appTag.present;
+  const hasNorvaAppTag = appTag.values.length > 0 && appTag.values.every((value) => value === "norva");
+  const tagsShapeAllowed = tagsValue == null || Array.isArray(tagsValue) || typeof tagsValue === "object";
+  const senderDomainAllowed = typeof fromValue === "string" && /(?:^|<)[^<>@\s]+@norva\.tv>?$/.test(from);
   // The webhook is team-wide and the team is shared with another product.
-  // Require both an explicit product tag and Norva's verified sender domain.
-  return tags.app === "norva" && /(?:^|<)[^<>@\s]+@norva\.tv>?$/.test(from);
+  // Resend may omit tags from delivery webhooks even when the Management API
+  // still exposes them.  Keep the verified Norva sender domain mandatory, and
+  // reject any explicit app tag that names another product.
+  return {
+    allowed: tagsShapeAllowed && senderDomainAllowed && (!appTagPresent || hasNorvaAppTag),
+    // These bounded shape/boolean fields are safe to emit to operational logs:
+    // they reveal neither addresses, display names, tag values nor message data.
+    diagnostic: {
+      fromShape: valueShape(fromValue),
+      tagsShape: valueShape(tagsValue),
+      tagCount: Object.keys(tags).length,
+      tagsShapeAllowed,
+      appTagPresent,
+      hasNorvaAppTag,
+      senderDomainAllowed,
+    },
+  };
 }
 
 export function safeDiagnosticData(eventType, dataValue) {
