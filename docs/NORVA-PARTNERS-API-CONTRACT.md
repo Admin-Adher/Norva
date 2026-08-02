@@ -82,13 +82,15 @@ Le preflight accepte seulement :
 - méthode demandée autorisée pour la route (`GET` ou `POST`) ;
 - headers `authorization`, `apikey`, `content-type`, `idempotency-key`,
   `x-client-info` ;
-- route existante parmi `/bootstrap`, `/applications`, `/activate`, `/links`,
-  `/dashboard`, `/kyc/sessions`, `/referral/claim`, `/payout-profile` et
-  `/tv-relays/consume` ;
+- route existante parmi `/bootstrap`, `/access-request`, `/applications`,
+  `/activate`, `/links`, `/dashboard`, `/kyc/sessions`, `/referral/claim`,
+  `/payout-profile` et `/tv-relays/consume` ;
 - origine présente et autorisée.
 
 Les clients Android natifs sans header `Origin` restent autorisés. Dès qu'un
 header `Origin` est présent, il doit appartenir à l'allowlist.
+`Retry-After` et `X-Correlation-Id` sont exposés par CORS afin que le client Web
+puisse respecter le délai serveur sans interpréter le texte d'erreur.
 
 ## 4. Routes implémentées
 
@@ -228,6 +230,181 @@ action reste fermée. Un lien `active` n'est cohérent qu'avec un compte
 `visibility.reason=available` exige enfin `partners_enabled=true`. Toute
 combinaison contraire rend le contrat invalide.
 
+### `GET|POST /access-request`
+
+Cette route porte la demande d'accès au pilote, distincte de l'adhésion
+`POST /applications`. L'entrée de découverte **Norva Partners** est visible à
+tout compte Cloud utilisateur authentifié sur Web et Android mobile, y compris
+à un compte qui possède aussi un rôle Admin. Cette visibilité de navigation ne
+dépend ni de `visibility.visible`, ni de `partners_enabled`, ni des autres
+flags, release gates, policies ou allowlists. L'entrée Admin opérationnelle
+reste une surface séparée. Les identités appareil et les sessions TV ne sont
+pas éligibles à cette route.
+
+`GET /access-request` n'accepte aucun paramètre et retourne exactement :
+
+```json
+{
+  "schema_version": 1,
+  "program_preview": {
+    "commission_rate_bps": 2000,
+    "attribution_window_days": 30,
+    "maturation_days": 45,
+    "payout_thresholds": {
+      "USD": 1000
+    }
+  },
+  "request": {
+    "exists": false,
+    "status": null,
+    "country_code": null,
+    "subdivision_code": null,
+    "requested_at": null,
+    "reviewed_at": null
+  }
+}
+```
+
+Dans les réponses GET et POST, `program_preview` peut être `null` lorsqu'aucune
+version P0 `draft|active` compatible n'existe. Lorsqu'il est présent, il ne
+constitue ni une offre ouverte ni une promesse de disponibilité : ses clés sont
+exactes et ses seuils sont servis par la version de programme autoritative.
+Pour une demande existante, `request.status` appartient à
+`requested|approved|declined`, `country_code` contient deux lettres ISO 3166-1,
+`subdivision_code` est nullable, `requested_at` est renseigné et
+`reviewed_at` reste `null` uniquement pour `requested`.
+
+`GET /access-request` reste lisible quel que soit
+`NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, y compris pendant une pause de la
+collecte. `POST /access-request` exige que cette variable soit explicitement
+égale à `true`, ainsi qu'un e-mail confirmé, une clé `Idempotency-Key` et le
+body exact suivant, limité à 4 Kio. Une variable absente, vide ou différente de
+`true` ferme uniquement le POST avec
+`503 partners_access_requests_disabled` :
+
+```json
+{
+  "countryCode": "FR",
+  "subdivisionCode": "FR-IDF"
+}
+```
+
+`subdivisionCode` peut être omis ou valoir `null`. La réponse `201` contient
+exactement :
+
+```json
+{
+  "schema_version": 1,
+  "action": "access_requested",
+  "replayed": false,
+  "program_preview": {
+    "commission_rate_bps": 2000,
+    "attribution_window_days": 30,
+    "maturation_days": 45,
+    "payout_thresholds": {
+      "USD": 1000
+    }
+  },
+  "request": {
+    "exists": true,
+    "status": "requested",
+    "country_code": "FR",
+    "subdivision_code": "FR-IDF",
+    "requested_at": "2026-08-02T12:00:00Z",
+    "reviewed_at": null
+  },
+  "next_action": "await_review"
+}
+```
+
+`next_action` est déterminé uniquement par l'état persistant :
+`requested → await_review`, `approved → access_approved` et
+`declined → contact_support`. Tant que l'état reste `requested`, une nouvelle
+clé peut corriger la juridiction ; après une décision, l'état est terminal et
+la route ne le réouvre pas. `replayed=true` signifie qu'aucune nouvelle
+mutation persistante n'a été produite, notamment lors du replay exact d'une clé
+ou lorsque l'état demandé était déjà enregistré.
+
+Lorsque `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=true`, cette mutation reste
+disponible même si tous les flags et gates opérationnels du programme sont
+fermés. Le kill switch de collecte est indépendant de `partners_enabled`,
+`partners_invite_only`, Didit, la finance et les release gates. Elle crée ou met
+à jour uniquement
+`affiliate_access_requests`, son enregistrement d'idempotence et son événement
+d'audit sanitisé. Elle ne crée jamais de compte partenaire, candidature
+`/applications`, session KYC/KYB, lien, attribution, fait financier, écriture de
+ledger, profil de versement ou paiement.
+
+Les garde-fous anti-abus s'appliquent sous le verrou transactionnel propre à
+l'utilisateur, après la recherche d'un replay exact :
+
+- même clé et même body : replay immédiat, sans consommer un nouveau quota ;
+- nouvelle clé : délai minimal de 60 secondes depuis la dernière clé
+  `access_request` enregistrée pour cet utilisateur ;
+- au maximum 8 nouvelles clés enregistrées sur toute fenêtre glissante de
+  24 heures par utilisateur, même si le body ou la juridiction changent ;
+- violation du cooldown ou de la limite : `429 rate_limited` avec
+  `Retry-After: 60` ; après huit clés, un retry 60 secondes plus tard peut rester
+  limité jusqu'à la sortie de la fenêtre de 24 heures ;
+- les enregistrements d'idempotence `access_request` âgés de plus de 30 jours
+  sont éligibles à une purge opportuniste bornée à 200 lignes par nouvelle
+  mutation. Cette rétention ne supprime ni la demande, ni son état, ni les
+  événements d'audit.
+
+La file Admin est exposée par
+`admin_partners_access_requests(p_limit,p_offset,p_status,p_search)`. Une
+capacité **Support ou Risk** permet la lecture paginée et sanitisée ; elle
+retourne seulement `request_id`, un `subject_key` opaque, l'e-mail masqué,
+l'état, la juridiction et les horodatages. La décision passe exclusivement par
+`admin_partners_access_request_decide(...)`, exige la capacité **Risk** et une
+session **AAL2**, puis accepte `approve|decline` avec justification auditée.
+`approve` ajoute uniquement l'utilisateur à l'allowlist pilote dans la
+juridiction demandée, avec une expiration optionnelle. Cette décision ne
+modifie aucun flag, gate, programme, policy ou corridor et ne crée aucun compte
+partenaire ; l'adhésion `/applications` reste bloquée tant que ses propres
+préconditions ne sont pas ouvertes.
+
+La lecture Admin retourne exactement l'enveloppe RPC suivante, avec
+`p_status=all|requested|approved|declined`, `p_limit=1..100` et pagination par
+offset :
+
+```json
+{
+  "schema_version": 1,
+  "total": 1,
+  "limit": 50,
+  "offset": 0,
+  "items": [
+    {
+      "request_id": "0f35e8ea-49c2-4e9d-a574-cddf56415b23",
+      "subject_key": "7af64e2196b3",
+      "email_masked": "a***@example.com",
+      "status": "requested",
+      "country_code": "FR",
+      "subdivision_code": "FR-IDF",
+      "requested_at": "2026-08-02T12:00:00Z",
+      "reviewed_at": null
+    }
+  ]
+}
+```
+
+La décision Admin retourne exactement :
+
+```json
+{
+  "schema_version": 1,
+  "action": "access_request_decided",
+  "status": "approved",
+  "changed": true,
+  "allowlist_included": true
+}
+```
+
+Un replay de la même décision retourne `changed=false`. La recherche Admin est
+exécutée côté serveur ; le client ne reçoit toujours qu'un e-mail masqué et un
+sujet opaque.
+
 ### `POST /applications`
 
 Crée ou reprend atomiquement une demande individuelle dans la juridiction
@@ -330,7 +507,9 @@ parcours Partners sur téléphone/Web. L'API appareil séparée
 `POST /relays/status` avec une identité TV de confiance ; elle ne peut ni
 inscrire un partenaire, ni lancer un KYC, ni accéder aux finances.
 
-Les mutations répondent avec l'enveloppe exacte suivante :
+Les mutations d'adhésion `/applications`, `/activate` et `/links` répondent avec
+l'enveloppe exacte suivante ; `/access-request` utilise le contrat distinct
+décrit plus haut :
 
 ```json
 {
@@ -364,11 +543,13 @@ Les mutations répondent avec l'enveloppe exacte suivante :
 | 405 | `method_not_allowed` | méthode incompatible avec la route |
 | 409 | `idempotency_key_reused` | clé rejouée avec une requête différente |
 | 409 | `request_in_progress` | première exécution toujours en cours |
+| 429 | `rate_limited` | cooldown de 60 s ou plafond de 8 nouvelles clés sur 24 h atteint ; `Retry-After: 60` |
 | 413 | `payload_too_large` | body supérieur à 4 Kio |
 | 415 | `invalid_content_type` | mutation sans JSON |
 | 422 | `business_accounts_not_supported` | compte entreprise non disponible |
 | 422 | `partners_action_not_allowed` | transition refusée par l'autorité serveur |
 | 428 | `idempotency_key_required` | mutation sans clé d'idempotence valide |
+| 503 | `partners_access_requests_disabled` | collecte des demandes en pause ; GET reste disponible |
 | 503 | `partners_temporarily_unavailable` | RPC indisponible ou contrat DB invalide |
 
 Codes métier non émis par `/bootstrap` :
@@ -379,6 +560,11 @@ Codes métier non émis par `/bootstrap` :
   facturation/provider, jamais pour le simple passage du quota gratuit 500→501 ;
 - `idempotency_key_reused` : même clé avec une requête différente ;
 - `request_in_progress` : première exécution non terminée.
+- `rate_limited` : nouvelle clé trop proche de la précédente ou neuvième clé
+  sur la fenêtre glissante de 24 heures ; le client lit `Retry-After` ;
+- `partners_access_requests_disabled` : kill switch de collecte fermé ; le
+  client conserve la consultation GET et ne transforme pas cette erreur en
+  indisponibilité générale du programme.
 
 ## 6. Dépendances externes restant fail-closed
 
@@ -387,6 +573,7 @@ seules une activation production :
 
 | Dépendance | État fail-closed |
 |---|---|
+| Collecte pré-pilote | `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` bloque seulement `POST /access-request` avec un 503 sanitisé ; `GET /access-request` et la file Admin restent lisibles |
 | Didit | `/kyc/sessions` renvoie `provider_not_configured` sans workflow, clés et webhook configurés |
 | Referral Web | `/r/{code}` et la consommation refusent de fonctionner sans secrets HMAC/cookie distincts |
 | Relais TV | les créations/consommations restent indisponibles sans secret relais et flag actif |
@@ -411,9 +598,9 @@ preuve d'éligibilité ni un début de KYB.
 
 ## 7. Idempotence
 
-`GET /bootstrap`, `GET /dashboard`, `GET /payout-profile` et
-`GET /availability` ne créent aucun effet et n'utilisent pas de clé
-d'idempotence.
+`GET /bootstrap`, `GET /access-request`, `GET /dashboard`,
+`GET /payout-profile` et `GET /availability` ne créent aucun effet et
+n'utilisent pas de clé d'idempotence.
 
 Toute mutation implémentée ou future exige `Idempotency-Key` :
 
@@ -430,7 +617,27 @@ Toute mutation implémentée ou future exige `Idempotency-Key` :
 La RPC, et pas uniquement le code Edge, doit porter l'atomicité et
 l'idempotence métier.
 
+Pour `POST /access-request`, l'ordre est contractuel : verrou utilisateur,
+replay exact, puis seulement cooldown/quota pour une nouvelle clé. Une même clé
+avec un hash différent reste un `409 idempotency_key_reused` et ne devient pas
+un `429`. Les nouvelles clés réussies ont une fenêtre de rétention de 30 jours
+pour le replay et sont comptées sur une fenêtre glissante de 24 heures ;
+au-delà, leur purge opportuniste bornée ne modifie jamais la machine d'état
+`requested|approved|declined`.
+
 ## 8. Machines d'états P0
+
+### Demande d'accès au pilote
+
+```text
+aucune → requested → approved
+                    └→ declined
+```
+
+`approved` et `declined` sont terminaux. L'approbation est une inclusion dans
+l'allowlist, pas une adhésion, une vérification KYC ni une activation du
+programme. La machine de compte ci-dessous ne commence qu'avec
+`POST /applications`, après satisfaction indépendante de toutes ses portes.
 
 ### Compte et vérification
 
@@ -493,6 +700,10 @@ versement.
 
 `norva-partners` reçoit le JWT utilisateur, appelle uniquement les RPC
 utilisateur/service prévues et peut afficher ses propres états/agrégats.
+La découverte et `GET|POST /access-request` restent accessibles à tout compte
+Cloud utilisateur Web/mobile, Admin inclus, même quand le programme est fermé.
+Cette demande pré-pilote est isolée de l'adhésion, du KYC, des liens et de la
+finance.
 
 ### Referral Web
 

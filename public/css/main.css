@@ -18055,7 +18055,7 @@ html:not(.tv-mode) .home-state-inline {
 }
 
 /* =====================================================
-   Norva Partners — server-gated read-only P0 shell
+   Norva Partners — server-authoritative P0 shell
    ===================================================== */
 #page-partners {
   background: var(--color-bg-primary);
@@ -18287,6 +18287,18 @@ html:not(.tv-mode) .home-state-inline {
 
 .partners-program-card {
   padding: var(--space-xl);
+}
+
+.partners-access-card {
+  min-width: 0;
+}
+
+.partners-access-card .partners-jurisdiction-form {
+  width: 100%;
+}
+
+.partners-access-card .partners-skeleton + .partners-skeleton {
+  margin-top: var(--space-sm);
 }
 
 .partners-program-card h2,

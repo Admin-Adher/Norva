@@ -21,6 +21,7 @@ import {
   corsHeaders,
   isUuid,
   mapDatabaseError,
+  parseAccessRequestInput,
   parseAcceptTermsInput,
   parseAllowedOrigins,
   parseApplicationInput,
@@ -34,6 +35,8 @@ import {
   PublicApiError,
   routeFromPath,
   sanitizeBootstrapData,
+  sanitizeAccessRequestData,
+  sanitizeAccessRequestMutationData,
   sanitizeDashboardData,
   sanitizeMutationData,
 } from "../_shared/partners-api.ts";
@@ -66,6 +69,10 @@ const ALLOWED_ORIGINS = parseAllowedOrigins(
 const DIDIT_CONFIG = loadDiditConfig((name) => Deno.env.get(name));
 const REFERRAL_SECRETS = loadReferralSecrets((name) => Deno.env.get(name));
 const TV_RELAY_CONFIG = loadTvRelayConfig((name) => Deno.env.get(name));
+const ACCESS_REQUESTS_ENABLED =
+  (Deno.env.get("NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED") ?? "false")
+    .trim()
+    .toLowerCase() === "true";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing required Norva Partners server configuration");
@@ -125,6 +132,37 @@ Deno.serve(async (req) => {
         p_subdivision_code: query.subdivisionCode,
       });
       cleanData = sanitizeBootstrapData(data, query);
+    } else if (route === "/access-request" && req.method === "GET") {
+      assertNoQueryParameters(url);
+      const data = await callRpc(PARTNERS_RPC.accessRequestGet, {
+        p_user_id: userId,
+      });
+      cleanData = sanitizeAccessRequestData(data);
+    } else if (route === "/access-request") {
+      assertNoQueryParameters(url);
+      if (!ACCESS_REQUESTS_ENABLED) {
+        throw new PublicApiError(
+          503,
+          "partners_access_requests_disabled",
+          "Norva Partners early-access requests are temporarily closed.",
+        );
+      }
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parseAccessRequestInput(await readJsonBody(req));
+      const data = await callRpc(
+        PARTNERS_RPC.accessRequestSubmit,
+        {
+          p_user_id: userId,
+          p_country_code: input.countryCode,
+          p_subdivision_code: input.subdivisionCode,
+          p_idempotency_key: idempotencyKey,
+        },
+        "mutation",
+      );
+      cleanData = sanitizeAccessRequestMutationData(data);
+      status = 201;
     } else if (route === "/applications") {
       assertNoQueryParameters(url);
       const idempotencyKey = parseIdempotencyKey(
@@ -415,6 +453,8 @@ Deno.serve(async (req) => {
         ? { Allow: `${allowedMethods.join(", ")}, OPTIONS` }
         : problem.code === "request_in_progress"
         ? { "Retry-After": "2" }
+        : problem.code === "rate_limited"
+        ? { "Retry-After": "60" }
         : undefined,
     );
   }

@@ -402,6 +402,9 @@ services:
       # server-side release gate is configured. Keep the two HMAC secrets
       # independent and never expose the cookie secret to Cloudflare Pages.
       NORVA_PARTNERS_ALLOWED_ORIGINS: ${NORVA_PARTNERS_ALLOWED_ORIGINS:-https://norva.tv,https://www.norva.tv}
+      # Independent intake kill switch. This never enables enrollment, KYC,
+      # referral links, ledger writes or payouts.
+      NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED: ${NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED:-false}
       NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS: ${NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS:-}
       NORVA_REFERRAL_EDGE_HMAC_SECRET: ${NORVA_REFERRAL_EDGE_HMAC_SECRET:-}
       NORVA_REFERRAL_COOKIE_SECRET: ${NORVA_REFERRAL_COOKIE_SECRET:-}

@@ -403,32 +403,29 @@ class SettingsPage {
         const deleteRow = document.getElementById('settings-delete-account-row');
         if (deleteRow) deleteRow.style.display = (user.cloud && !user.device) ? '' : 'none';
 
-        // Partners is an inert, feature-gated enhancement. It must never delay
-        // the account tab when the Edge Function is disabled or unreachable.
-        // The row stays hidden until a strict server-authoritative response
-        // explicitly makes it visible.
+        // Discovery is immediate for authenticated Cloud users. The background
+        // probe only warms authoritative eligibility and must never delay or
+        // remove the entry when the programme is closed.
         void this.refreshPartnersEntry().catch(() => {});
         await this.refreshAccessCard();
         await this.refreshSourceHealthCard();
     }
 
     async refreshPartnersEntry() {
-        const row = document.getElementById('settings-partners-row');
-        if (row) {
-            row.hidden = true;
-            row.setAttribute('aria-hidden', 'true');
-        }
+        const partnersPage = this.app?.pages?.partners;
         const user = this.app?.currentUser || {};
-        if (!user.cloud) {
-            this.app?.pages?.partners?.setEntryVisibility?.(false);
+        if (!user.cloud || user.device) {
+            partnersPage?.setEntryVisibility?.(false);
             return false;
         }
+        const visible = partnersPage?.setEntryVisibility?.(false) === true;
         try {
-            return await (this.app?.pages?.partners?.primeVisibility?.() || false);
+            await partnersPage?.primeVisibility?.();
         } catch (_) {
-            this.app?.pages?.partners?.setEntryVisibility?.(false);
-            return false;
+            // Discovery remains available; the page presents a safe retry state
+            // when authoritative programme data cannot be loaded.
         }
+        return visible;
     }
 
     async refreshAccessCard() {

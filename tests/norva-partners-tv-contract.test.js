@@ -237,7 +237,13 @@ test('TV Partners journey is feature-gated, temporary, QR-only and D-pad ready',
   assert.match(pageSource, /renderTvRelayConnected/);
   assert.match(pageSource, /renderTvRelayExpired/);
   assert.doesNotMatch(pageSource, /relay_token[\s\S]{0,120}<code>/);
-  assert.match(settingsSource, /if \(!user\.cloud\)/);
+  assert.match(settingsSource, /if \(!user\.cloud \|\| user\.device\)/);
+  assert.match(pageSource, /return Boolean\(user\.cloud && !user\.device\)/);
+  assert.match(
+    pageSource,
+    /Boolean\(visible\) && this\.canUseTvPartners\(\)/,
+    'Android TV must remain server-gated even though user discovery is immediate',
+  );
   assert.match(appSource, /page\?\.canUsePartners\?\.\(\)/);
   assert.match(cssSource, /html\.tv-mode \.partners-tv-shell button:focus/);
   assert.match(cssSource, /\.partners-tv-shell \.btn\s*\{[\s\S]{0,100}min-height:\s*52px/);

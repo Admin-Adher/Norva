@@ -99,6 +99,8 @@ test('Admin Partners has a whitelisted overview and UUID-bounded detail route', 
 test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.match(source, /_partnersLoadModule\('overview', 'admin_partners_overview'/);
   assert.match(source, /_partnersLoadModule\('accounts', 'admin_partners_accounts'/);
+  assert.match(source, /'admin_partners_access_requests'/);
+  assert.match(source, /admin_partners_access_request_decide/);
   assert.match(source, /this\._rpc\('admin_partners_detail',\s*\{\s*p_account_id:\s*accountId\s*\}\)/);
   assert.match(source, /'monitoring', 'admin_partners_monitoring'/);
   assert.match(source, /revenuecat_transfer:\s*'Transferts RevenueCat'/);
@@ -1591,6 +1593,101 @@ test('Admin Partners uses a semantic desktop table and explicit mobile cards', (
   assert.match(list.innerHTML, /<dl class="partners-account-facts">/);
   assert.doesNotMatch(list.innerHTML, /role="button" tabindex="0"/);
   assert.match(source, /@media\(max-width:700px\)[\s\S]*\.partners-account-cards\{display:grid/);
+});
+
+test('Admin Partners renders a sanitized access-request queue with Risk-only decisions', () => {
+  const list = { innerHTML: '', removeAttribute() {} };
+  const count = { textContent: '' };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-access-requests': list,
+        'partners-access-request-count': count,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const envelope = {
+    schema_version: 1,
+    total: 1,
+    limit: 12,
+    offset: 0,
+    items: [{
+      request_id: '11111111-1111-4111-8111-111111111111',
+      subject_key: '0123456789ab',
+      email_masked: 'ad***@example.com',
+      status: 'requested',
+      country_code: 'FR',
+      subdivision_code: 'FR-IDF',
+      requested_at: '2026-08-02T12:00:00Z',
+      reviewed_at: null,
+    }],
+  };
+
+  page._renderPartnersAccessRequests(envelope);
+  assert.equal(count.textContent, '1 demande');
+  assert.match(list.innerHTML, /Demande 0123456789ab/);
+  assert.match(list.innerHTML, /ad\*\*\*@example\.com/);
+  assert.match(list.innerHTML, /FR · FR-IDF/);
+  assert.doesNotMatch(list.innerHTML, /access-request-approve/);
+
+  page._partnersCapabilities.risk = true;
+  page._renderPartnersAccessRequests(envelope);
+  assert.match(list.innerHTML, /data-partners-action="access-request-approve"/);
+  assert.match(list.innerHTML, /data-partners-action="access-request-decline"/);
+  assert.match(list.innerHTML, /data-partners-access-request-page="prev"/);
+});
+
+test('Admin Partners access decisions require AAL2 Risk and preserve operational gates', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  page._partnersCapabilities.risk = true;
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersPrompt = async () => '';
+  page._partnersJustification = async () => 'Pilot review completed with documented evidence.';
+  let call = null;
+  page._rpc = async (fn, params) => {
+    call = { fn, params };
+    return {
+      schema_version: 1,
+      action: 'access_request_decided',
+      status: 'approved',
+      changed: true,
+      allowlist_included: true,
+    };
+  };
+
+  const result = await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'access-request-approve',
+      partnersRequestId: '11111111-1111-4111-8111-111111111111',
+      partnersRequestKey: '0123456789ab',
+    },
+  });
+
+  assert.equal(result, 'Demande approuvée et invitation pilote enregistrée.');
+  assert.equal(call.fn, 'admin_partners_access_request_decide');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.params)), {
+    p_request_id: '11111111-1111-4111-8111-111111111111',
+    p_decision: 'approve',
+    p_expires_at: null,
+    p_justification: 'Pilot review completed with documented evidence.',
+  });
+  assert.doesNotMatch(JSON.stringify(call.params), /partners_enabled|payouts_live|shadow_mode/);
+
+  page._partnersCapabilities.risk = false;
+  call = null;
+  assert.equal(await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'access-request-approve',
+      partnersRequestId: '11111111-1111-4111-8111-111111111111',
+      partnersRequestKey: '0123456789ab',
+    },
+  }), false);
+  assert.equal(call, null);
 });
 
 test('Admin Partners filters and actions refresh modules without rebuilding the page', () => {

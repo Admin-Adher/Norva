@@ -733,7 +733,7 @@ test('Settings remains responsive when Partners is disabled, rejected or slow', 
   }
 });
 
-test('visibility probing is fail-closed and aborts a slow Edge request', async () => {
+test('Cloud discovery remains visible while a slow eligibility probe aborts safely', async () => {
   const settingsRow = {
     hidden: false,
     attributes: {},
@@ -777,9 +777,97 @@ test('visibility probing is fail-closed and aborts a slow Edge request', async (
     page.primeVisibility(),
     new Promise((resolve) => setTimeout(() => resolve('timed-out'), 100)),
   ]);
-  assert.equal(outcome, false);
-  assert.equal(settingsRow.hidden, true);
-  assert.equal(settingsRow.attributes['aria-hidden'], 'true');
+  assert.equal(outcome, true);
+  assert.equal(settingsRow.hidden, false);
+  assert.equal(settingsRow.attributes['aria-hidden'], 'false');
+});
+
+test('closed programme states expose only reviewed early access and keep operational controls locked', async () => {
+  const container = {
+    innerHTML: '',
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  };
+  let requestStatus = null;
+  const window = {
+    NorvaRegions: {
+      COUNTRIES: [{ code: 'FR', name: 'France', flag: '🇫🇷', kind: 'country' }],
+    },
+    NorvaCloud: {
+      partners: {
+        accessRequest: {
+          async get() {
+            return {
+              data: {
+                schema_version: 1,
+                program_preview: {
+                  commission_rate_bps: 2000,
+                  attribution_window_days: 30,
+                  maturation_days: 45,
+                  payout_thresholds: { USD: 1000 },
+                },
+                request: requestStatus ? {
+                  exists: true,
+                  status: requestStatus,
+                  country_code: 'FR',
+                  subdivision_code: null,
+                  requested_at: '2026-08-01T10:00:00Z',
+                  reviewed_at: requestStatus === 'declined' ? '2026-08-02T10:00:00Z' : null,
+                } : {
+                  exists: false,
+                  status: null,
+                  country_code: null,
+                  subdivision_code: null,
+                  requested_at: null,
+                  reviewed_at: null,
+                },
+              },
+            };
+          },
+          async request() { throw new Error('not called'); },
+        },
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document: {
+      activeElement: null,
+      getElementById: (id) => (id === 'page-partners' ? container : null),
+      querySelector: () => null,
+    },
+    navigator: { language: 'en-US', onLine: true },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  page._visible = true;
+  const data = validEnvelope().data;
+  data.flags.partners_enabled = false;
+  data.visibility = { visible: false, reason: 'disabled' };
+  data.eligibility = { eligible: false, reason: 'disabled' };
+  data.program = null;
+  data.policy = null;
+  data.allowlist = { required: true, included: false };
+
+  await page.loadEarlyAccessRequest(data, 'disabled');
+  assert.match(container.innerHTML, /Earn 20% on eligible referrals/);
+  assert.match(container.innerHTML, /data-partners-access-request-form/);
+  assert.match(container.innerHTML, /Request access/);
+  assert.doesNotMatch(container.innerHTML, /data-partners-(?:join|start-kyc|share|payout-button)/);
+
+  requestStatus = 'declined';
+  await page.loadEarlyAccessRequest(data, 'disabled');
+  assert.match(container.innerHTML, /This early-access request was not approved/);
+  assert.match(container.innerHTML, /support\.html\?returnTo=%2Fapp%23partners/);
+  assert.doesNotMatch(container.innerHTML, /data-partners-access-request-form|Request access again/);
+  assert.doesNotMatch(container.innerHTML, /data-partners-(?:join|start-kyc|share|payout-button)/);
 });
 
 test('foreground loading times out to a sanitized retry state, while navigation abort stays silent', async () => {
@@ -1518,15 +1606,17 @@ test('bootstrap cache is short-lived, jurisdiction-scoped and session-scoped', a
   assert.doesNotMatch(JSON.stringify(page.bootstrapEnvelope), /opaque-user-session/);
 });
 
-test('Partners is a secondary, server-gated route with exact user actions and no local financial authority', () => {
+test('Partners is a secondary discoverable route whose operational actions stay server-gated', () => {
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=5"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=6"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
   assert.match(appSource, /primeVisibility\?\.\(\)\.catch\(\(\) => \{\}\)/);
+  assert.match(pageSource, /canDiscoverUserPartners\(\)/);
+  assert.match(pageSource, /accessRequest/);
   assert.match(appSource, /claimPendingPartnerReferral\(\)/);
   assert.match(appSource, /NorvaCloud\.partners\.claimReferral\(\)/);
   assert.match(settingsSource, /void this\.refreshPartnersEntry\(\)\.catch\(\(\) => \{\}\)/);
@@ -1556,11 +1646,14 @@ test('Partners is a secondary, server-gated route with exact user actions and no
   assert.match(cloudSource, /value\.USD === 1000/);
   assert.match(cloudSource, /data\.policy\.payout_currencies\.some/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.dashboard/);
-  const partnersNamespace = cloudSource.match(
-    /partners:\s*Object\.freeze\(\{([\s\S]{0,1200}?)\}\),/,
-  )?.[1] || '';
+  const partnersNamespaceStart = cloudSource.indexOf('partners: Object.freeze({');
+  const partnersNamespaceEnd = cloudSource.indexOf('\n        profile:', partnersNamespaceStart);
+  assert.ok(partnersNamespaceStart >= 0 && partnersNamespaceEnd > partnersNamespaceStart);
+  const partnersNamespace = cloudSource.slice(partnersNamespaceStart, partnersNamespaceEnd);
   for (const binding of [
     'bootstrap: partnersBootstrap',
+    'get: partnersAccessRequestGet',
+    'request: partnersAccessRequestSubmit',
     'apply: partnersApply',
     'acceptTerms: partnersAcceptTerms',
     'rotateLink: partnersRotateLink',
@@ -1682,12 +1775,12 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=97/);
-  assert.match(htmlSource, /cloudApi\.js\?v=55/);
+  assert.match(htmlSource, /main\.css\?v=98/);
+  assert.match(htmlSource, /cloudApi\.js\?v=56/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
-  assert.match(htmlSource, /Settings\.js\?v=46/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=5/);
-  assert.match(htmlSource, /app\.js\?v=61/);
+  assert.match(htmlSource, /Settings\.js\?v=47/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=6/);
+  assert.match(htmlSource, /app\.js\?v=62/);
 });
 
 test('Didit return identifiers are scrubbed before analytics, referrers or auth redirects', () => {

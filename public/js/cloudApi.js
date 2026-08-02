@@ -1003,6 +1003,11 @@
         'active',
         'revoked'
     ]);
+    const PARTNERS_ACCESS_REQUEST_STATUSES = new Set([
+        'requested',
+        'approved',
+        'declined'
+    ]);
     const PARTNERS_KYC_LEVELS = new Set([
         'identity_age_country',
         'identity_age_country_capacity'
@@ -1063,6 +1068,7 @@
         'rate_limited',
         'idempotency_key_reused',
         'request_in_progress',
+        'partners_access_requests_disabled',
         'partners_temporarily_unavailable'
     ]);
     const PARTNERS_CONSENT_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/;
@@ -1342,6 +1348,80 @@
             || (data.allowlist.required && !data.allowlist.included)
         )) invalid();
 
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersAccessRequestState(value) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(value, [
+            'exists',
+            'status',
+            'country_code',
+            'subdivision_code',
+            'requested_at',
+            'reviewed_at'
+        ]) || typeof value.exists !== 'boolean') invalid();
+        if (!value.exists) {
+            if (value.status !== null
+                || value.country_code !== null
+                || value.subdivision_code !== null
+                || value.requested_at !== null
+                || value.reviewed_at !== null) invalid();
+            return value;
+        }
+        if (!PARTNERS_ACCESS_REQUEST_STATUSES.has(value.status)
+            || !isBoundedString(value.country_code, { pattern: /^[A-Z]{2}$/, max: 2 })
+            || !isBoundedString(value.subdivision_code, {
+                nullable: true,
+                pattern: /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/,
+                max: 12
+            })
+            || !isIsoTimestamp(value.requested_at)
+            || !isIsoTimestamp(value.reviewed_at, true)
+            || (value.status === 'requested' && value.reviewed_at !== null)
+            || (value.status !== 'requested' && value.reviewed_at === null)) invalid();
+        return value;
+    }
+
+    function validatePartnersAccessProgramPreview(value) {
+        const invalid = () => { throw partnersContractError(); };
+        if (value === null) return null;
+        if (!hasExactKeys(value, [
+            'commission_rate_bps',
+            'attribution_window_days',
+            'maturation_days',
+            'payout_thresholds'
+        ])
+            || value.commission_rate_bps !== 2000
+            || value.attribution_window_days !== 30
+            || value.maturation_days !== 45
+            || !validatePayoutThresholds(value.payout_thresholds)) invalid();
+        return value;
+    }
+
+    function validatePartnersAccessRequest(payload, { mutation = false } = {}) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })) invalid();
+        const dataKeys = mutation
+            ? ['schema_version', 'action', 'replayed', 'program_preview', 'request', 'next_action']
+            : ['schema_version', 'program_preview', 'request'];
+        if (!hasExactKeys(payload.data, dataKeys)
+            || payload.data.schema_version !== PARTNERS_SCHEMA_VERSION) invalid();
+        validatePartnersAccessProgramPreview(payload.data.program_preview);
+        const requestState = validatePartnersAccessRequestState(payload.data.request);
+        if (mutation) {
+            const expectedNextAction = requestState.status === 'requested'
+                ? 'await_review'
+                : requestState.status === 'approved'
+                    ? 'access_approved'
+                    : 'contact_support';
+            if (payload.data.action !== 'access_requested'
+                || typeof payload.data.replayed !== 'boolean'
+                || requestState.exists !== true
+                || payload.data.next_action !== expectedNextAction) invalid();
+        }
         return deepFreeze(cloneJson(payload));
     }
 
@@ -1898,6 +1978,45 @@
         });
     }
 
+    async function partnersAccessRequestGet({ signal } = {}) {
+        partnersRequireUserSession();
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                '/access-request',
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validatePartnersAccessRequest(payload);
+    }
+
+    function partnersAccessRequestSubmit({
+        countryCode,
+        subdivisionCode,
+        idempotencyKey
+    } = {}) {
+        const country = String(countryCode || '').trim().toUpperCase();
+        const subdivision = String(subdivisionCode || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(country)
+            || (subdivision && (
+                subdivision.length > 12
+                || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(subdivision)
+                || (subdivision.includes('-') && subdivision.split('-')[0] !== country)
+            ))) {
+            throw partnersClientError('partners_jurisdiction_invalid');
+        }
+        return partnersPost('/access-request', {
+            countryCode: country,
+            ...(subdivision ? { subdivisionCode: subdivision } : {})
+        }, idempotencyKey, (payload) => validatePartnersAccessRequest(payload, { mutation: true }));
+    }
+
     async function partnersApply({
         countryCode,
         subdivisionCode,
@@ -2170,6 +2289,10 @@
         // in the browser.
         partners: Object.freeze({
             bootstrap: partnersBootstrap,
+            accessRequest: Object.freeze({
+                get: partnersAccessRequestGet,
+                request: partnersAccessRequestSubmit
+            }),
             apply: partnersApply,
             acceptTerms: partnersAcceptTerms,
             rotateLink: partnersRotateLink,

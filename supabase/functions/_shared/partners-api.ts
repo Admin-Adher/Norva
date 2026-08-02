@@ -17,6 +17,8 @@ export const PARTNERS_ALLOWED_REQUEST_HEADERS = Object.freeze([
 
 export const PARTNERS_RPC = Object.freeze({
   bootstrap: "partners_service_bootstrap",
+  accessRequestGet: "partners_service_access_request_get",
+  accessRequestSubmit: "partners_service_access_request_submit",
   apply: "partners_service_apply",
   acceptTerms: "partners_service_accept_terms",
   rotateLink: "partners_service_rotate_link",
@@ -51,6 +53,7 @@ export type PublicErrorCode =
   | "idempotency_key_required"
   | "idempotency_key_reused"
   | "request_in_progress"
+  | "partners_access_requests_disabled"
   | "partners_action_not_allowed"
   | "partners_temporarily_unavailable";
 
@@ -87,6 +90,11 @@ export type BootstrapQuery = {
 
 export type ApplicationInput = {
   accountType: "individual";
+  countryCode: string;
+  subdivisionCode: string | null;
+};
+
+export type AccessRequestInput = {
   countryCode: string;
   subdivisionCode: string | null;
 };
@@ -142,6 +150,16 @@ const LINK_STATUSES = new Set([
   "none",
   "active",
   "revoked",
+]);
+const ACCESS_REQUEST_STATUSES = new Set([
+  "requested",
+  "approved",
+  "declined",
+]);
+const ACCESS_REQUEST_NEXT_ACTIONS = new Set([
+  "await_review",
+  "access_approved",
+  "contact_support",
 ]);
 const MUTATION_ACTIONS = new Set([
   "application_submitted",
@@ -289,6 +307,7 @@ export function allowedMethodsForRoute(
   route: string,
 ): readonly string[] | null {
   if (route === "/bootstrap" || route === "/dashboard") return ["GET"];
+  if (route === "/access-request") return ["GET", "POST"];
   if (route === "/payout-profile") return ["GET", "PUT"];
   if (
     route === "/applications" ||
@@ -386,6 +405,27 @@ export function parseApplicationInput(raw: unknown): ApplicationInput {
     countryCode,
     subdivisionCode,
   };
+}
+
+export function parseAccessRequestInput(raw: unknown): AccessRequestInput {
+  const body = boundedRecord(raw, ["countryCode"], ["subdivisionCode"]);
+  const countryCode = normalizeRequiredCode(
+    body.countryCode,
+    COUNTRY_PATTERN,
+    2,
+  );
+  const subdivisionCode = normalizeNullableCode(
+    body.subdivisionCode,
+    SUBDIVISION_PATTERN,
+    12,
+  );
+  if (
+    subdivisionCode?.includes("-") &&
+    subdivisionCode.split("-")[0] !== countryCode
+  ) {
+    throw invalidRequest();
+  }
+  return { countryCode, subdivisionCode };
 }
 
 export function parseAcceptTermsInput(raw: unknown): AcceptTermsInput {
@@ -614,6 +654,140 @@ export function sanitizeBootstrapData(
     policy,
     allowlist: cleanAllowlist,
     account,
+  };
+}
+
+function sanitizeAccessRequestState(
+  raw: unknown,
+): Record<string, unknown> {
+  const request = exactRecord(raw, [
+    "exists",
+    "status",
+    "country_code",
+    "subdivision_code",
+    "requested_at",
+    "reviewed_at",
+  ]);
+  const exists = strictBoolean(request.exists);
+  if (!exists) {
+    if (
+      request.status !== null ||
+      request.country_code !== null ||
+      request.subdivision_code !== null ||
+      request.requested_at !== null ||
+      request.reviewed_at !== null
+    ) {
+      throw new BootstrapContractError();
+    }
+    return {
+      exists: false,
+      status: null,
+      country_code: null,
+      subdivision_code: null,
+      requested_at: null,
+      reviewed_at: null,
+    };
+  }
+
+  const status = enumString(request.status, ACCESS_REQUEST_STATUSES);
+  const reviewedAt = isoTimestamp(request.reviewed_at, true);
+  if (
+    (status === "requested" && reviewedAt !== null) ||
+    (status !== "requested" && reviewedAt === null)
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    exists: true,
+    status,
+    country_code: patternString(request.country_code, COUNTRY_PATTERN, 2),
+    subdivision_code: request.subdivision_code === null
+      ? null
+      : patternString(
+        request.subdivision_code,
+        SUBDIVISION_PATTERN,
+        12,
+      ),
+    requested_at: isoTimestamp(request.requested_at, false),
+    reviewed_at: reviewedAt,
+  };
+}
+
+function sanitizeAccessProgramPreview(
+  raw: unknown,
+): Record<string, unknown> | null {
+  if (raw === null) return null;
+  const preview = exactRecord(raw, [
+    "commission_rate_bps",
+    "attribution_window_days",
+    "maturation_days",
+    "payout_thresholds",
+  ]);
+  if (
+    preview.commission_rate_bps !== 2_000 ||
+    preview.attribution_window_days !== 30 ||
+    preview.maturation_days !== 45
+  ) {
+    throw new BootstrapContractError();
+  }
+  return {
+    commission_rate_bps: 2_000,
+    attribution_window_days: 30,
+    maturation_days: 45,
+    payout_thresholds: sanitizeThresholds(preview.payout_thresholds),
+  };
+}
+
+export function sanitizeAccessRequestData(raw: unknown): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "program_preview",
+    "request",
+  ]);
+  if (root.schema_version !== 1) throw new BootstrapContractError();
+  return {
+    schema_version: 1,
+    program_preview: sanitizeAccessProgramPreview(root.program_preview),
+    request: sanitizeAccessRequestState(root.request),
+  };
+}
+
+export function sanitizeAccessRequestMutationData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "program_preview",
+    "request",
+    "next_action",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "access_requested"
+  ) {
+    throw new BootstrapContractError();
+  }
+  const request = sanitizeAccessRequestState(root.request);
+  if (request.exists !== true) throw new BootstrapContractError();
+  const nextAction = enumString(
+    root.next_action,
+    ACCESS_REQUEST_NEXT_ACTIONS,
+  );
+  const expectedNextAction = request.status === "requested"
+    ? "await_review"
+    : request.status === "approved"
+    ? "access_approved"
+    : "contact_support";
+  if (nextAction !== expectedNextAction) throw new BootstrapContractError();
+  return {
+    schema_version: 1,
+    action: "access_requested",
+    replayed: strictBoolean(root.replayed),
+    program_preview: sanitizeAccessProgramPreview(root.program_preview),
+    request,
+    next_action: nextAction,
   };
 }
 
@@ -923,6 +1097,13 @@ export function mapDatabaseError(
       status: 409,
       code: "request_in_progress",
       message: "This request is already in progress.",
+    };
+  }
+  if (code === "P0008") {
+    return {
+      status: 429,
+      code: "rate_limited",
+      message: "Too many access requests were received. Try again later.",
     };
   }
   if (code === "P0001") {

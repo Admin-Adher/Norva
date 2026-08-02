@@ -27,6 +27,9 @@ class AdminPage {
         this._partnersView = 'overview';
         this._partnersPage = 0;
         this._partnersLimit = 25;
+        this._partnersAccessRequestPage = 0;
+        this._partnersAccessRequestLimit = 12;
+        this._partnersAccessRequestStatus = 'requested';
         this._partnersRoutePage = 0;
         this._partnersRouteLimit = 12;
         this._partnersRouteSearch = '';
@@ -770,6 +773,10 @@ class AdminPage {
 #page-admin .partners-control-item{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:10px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
 #page-admin .partners-control-item > span{min-width:0;color:var(--adm-tx2);font-size:12px;overflow-wrap:anywhere;}
 #page-admin .partners-control-item small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:10px;line-height:1.35;}
+#page-admin .partners-access-request-item{align-items:flex-start;}
+#page-admin .partners-access-request-main{display:flex;flex:0 0 min(240px,32%);flex-wrap:wrap;align-items:center;gap:7px;min-width:0;}
+#page-admin .partners-access-request-main strong{min-width:0;color:var(--adm-tx1);font-size:12px;overflow-wrap:anywhere;}
+#page-admin .partners-access-request-copy{flex:1 1 260px;margin:2px 0;color:var(--adm-tx2);font-size:11px;line-height:1.45;overflow-wrap:anywhere;}
 #page-admin .partners-action-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 #page-admin .partners-action{min-height:44px;padding:9px 12px;border:1px solid rgba(91,124,250,.35);border-radius:9px;background:rgba(91,124,250,.09);color:#c9d3ff;font:inherit;font-size:12px;font-weight:750;cursor:pointer;}
 #page-admin .partners-action:hover{border-color:#7c96ff;background:rgba(91,124,250,.16);}
@@ -870,6 +877,7 @@ class AdminPage {
   #page-admin .partners-route-list{grid-template-columns:1fr;}
   #page-admin .partners-control-head,#page-admin .partners-pane-intro{flex-direction:column;align-items:stretch;}
   #page-admin .partners-control-item{flex-direction:column;align-items:stretch;}
+  #page-admin .partners-access-request-main{flex-basis:auto;}
   #page-admin .partners-ops-row{grid-template-columns:1fr;align-items:start;}
   #page-admin .partners-ops-row strong{text-align:left;}
   #page-admin .partners-risk-actions{justify-content:flex-start;}
@@ -963,6 +971,14 @@ class AdminPage {
                 this._partnersLoadAccounts({ force: true, preserveFocus: partnersPage.dataset.partnersAccountPage });
                 return;
             }
+            const accessRequestPage = e.target.closest('[data-partners-access-request-page]');
+            if (accessRequestPage && !accessRequestPage.disabled) {
+                const direction = accessRequestPage.dataset.partnersAccessRequestPage;
+                this._partnersAccessRequestPage = Math.max(0, this._partnersAccessRequestPage
+                    + (direction === 'next' ? 1 : -1));
+                this._partnersLoadAccessRequests({ force: true, preserveFocus: direction });
+                return;
+            }
             const routesPage = e.target.closest('[data-partners-route-page]');
             if (routesPage && !routesPage.disabled) {
                 this._partnersRoutePage = Math.max(0, this._partnersRoutePage
@@ -1050,6 +1066,13 @@ class AdminPage {
                 this._partnersStatus = e.target.value;
                 this._partnersPage = 0;
                 this._partnersLoadAccounts({ force: true, preserveFocus: 'status' });
+            }
+            if (e.target.id === 'partners-access-request-status') {
+                const allowed = ['requested', 'approved', 'declined', 'all'];
+                this._partnersAccessRequestStatus = allowed.includes(e.target.value)
+                    ? e.target.value : 'requested';
+                this._partnersAccessRequestPage = 0;
+                this._partnersLoadAccessRequests({ force: true, preserveFocus: 'status' });
             }
             if (e.target.id === 'partners-routes-status') {
                 this._partnersRouteStatus = ['all', 'active', 'disabled'].includes(e.target.value)
@@ -4446,6 +4469,24 @@ class AdminPage {
           </section>
 
           <section ${paneAttrs('partners')}>
+            <section class="partners-control-card" aria-labelledby="partners-access-requests-title">
+              <div class="partners-control-head">
+                <div>
+                  <h2 id="partners-access-requests-title">Demandes d’accès</h2>
+                  <p>Demandes de découverte distinctes de l’inscription, du KYC et de l’activation du programme.</p>
+                </div>
+                <span id="partners-access-request-count" class="pill">—</span>
+              </div>
+              <div class="partners-admin-toolbar">
+                <select id="partners-access-request-status" aria-label="Filtrer les demandes d’accès par statut">
+                  ${[['requested', 'À examiner'], ['approved', 'Approuvées'], ['declined', 'Refusées'], ['all', 'Tous les statuts']]
+                    .map(([value, label]) => `<option value="${value}"${this._partnersAccessRequestStatus === value ? ' selected' : ''}>${label}</option>`).join('')}
+                </select>
+              </div>
+              <div id="partners-admin-access-requests" aria-busy="true">
+                <div class="ssub">Chargement des demandes…</div>
+              </div>
+            </section>
             <div class="partners-pane-intro"><div><h2>Partenaires individuels</h2><p>Recherche et état contractuel, sans identifiant sensible visible.</p></div><span id="partners-admin-count" class="pill">—</span></div>
             <div class="partners-admin-toolbar" role="search" aria-label="Rechercher les partenaires">
               <input id="partners-admin-search" type="search" maxlength="64" value="${AdminPage.esc(search)}"
@@ -4803,6 +4844,7 @@ class AdminPage {
 
     _partnersRerenderCapabilityDependentModules() {
         const cached = (key) => this._partnersCache.get(key);
+        if (cached('accessRequests')) this._renderPartnersAccessRequests(cached('accessRequests'));
         if (cached('kyc')) this._renderPartnersKycQuota(cached('kyc'));
         if (cached('risk')) this._renderPartnersRisk(cached('risk'));
         if (cached('configuration')) this._renderPartnersConfiguration(cached('configuration'));
@@ -4838,6 +4880,47 @@ class AdminPage {
         return this._partnersLoadModule('overview', 'admin_partners_overview', {}, (data) => {
             this._renderPartnersAdminSummary(data && typeof data === 'object' ? data : {}, this._partnersCache.get('capabilities'));
         }, { force, targetId: 'partners-admin-summary', title: 'Métriques Partners' });
+    }
+
+    async _partnersLoadAccessRequests({ force = false, preserveFocus = '' } = {}) {
+        const data = await this._partnersLoadModule(
+            'accessRequests',
+            'admin_partners_access_requests',
+            {
+                p_limit: this._partnersAccessRequestLimit,
+                p_offset: this._partnersAccessRequestPage * this._partnersAccessRequestLimit,
+                p_status: this._partnersAccessRequestStatus,
+                p_search: null
+            },
+            (raw) => {
+                if (raw?.schema_version !== 1 || !Array.isArray(raw.items)
+                    || !Number.isSafeInteger(raw.total) || raw.total < 0
+                    || !Number.isSafeInteger(raw.limit) || raw.limit < 1 || raw.limit > 100
+                    || !Number.isSafeInteger(raw.offset) || raw.offset < 0) {
+                    throw new Error('invalid_partners_access_requests_response');
+                }
+                this._renderPartnersAccessRequests(raw);
+            },
+            {
+                force,
+                targetId: 'partners-admin-access-requests',
+                title: 'Demandes d’accès'
+            }
+        );
+        if (preserveFocus && this._route === 'partners' && this._partnersView === 'partners') {
+            setTimeout(() => {
+                let target = preserveFocus === 'status'
+                    ? document.getElementById('partners-access-request-status')
+                    : document.querySelector(`[data-partners-access-request-page="${preserveFocus}"]`);
+                if ((!target || target.disabled) && ['prev', 'next'].includes(preserveFocus)) {
+                    const fallback = preserveFocus === 'next' ? 'prev' : 'next';
+                    target = document.querySelector(`[data-partners-access-request-page="${fallback}"]:not(:disabled)`)
+                        || document.getElementById('partners-access-request-status');
+                }
+                this._partnersFocusElement(target);
+            }, 0);
+        }
+        return data;
     }
 
     async _partnersLoadAccounts({ force = false, preserveFocus = '' } = {}) {
@@ -4885,6 +4968,7 @@ class AdminPage {
         ]);
         if (view === 'partners') return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
+            this._partnersLoadAccessRequests({ force }),
             this._partnersLoadAccounts({ force })
         ]);
         if (view === 'risk') return Promise.allSettled([
@@ -5029,7 +5113,7 @@ class AdminPage {
         if (!descriptor) return false;
         let target = descriptor.id ? document.getElementById(descriptor.id) : null;
         if (!target && descriptor.data && Object.keys(descriptor.data).length) {
-            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-retry],[data-partners-view],[data-partners-account-page],[data-partners-route-page],[data-partners-policy-page],[data-partner-id]'))
+            target = Array.from(document.querySelectorAll('[data-partners-action],[data-partners-retry],[data-partners-view],[data-partners-account-page],[data-partners-access-request-page],[data-partners-route-page],[data-partners-policy-page],[data-partner-id]'))
                 .find((candidate) => Object.entries(descriptor.data).every(([key, value]) => candidate.dataset[key] === value));
         }
         if (this._partnersFocusElement(target)) return true;
@@ -5092,6 +5176,7 @@ class AdminPage {
         const map = {
             overview: () => this._partnersLoadOverview({ force: true }),
             capabilities: () => this._partnersLoadCapabilities({ force: true }),
+            accessRequests: () => this._partnersLoadAccessRequests({ force: true }),
             accounts: () => this._partnersLoadAccounts({ force: true }),
             monitoring: () => load('monitoring', 'admin_partners_monitoring', {}, (d) => this._renderPartnersMonitoring(d), 'partners-admin-monitoring', 'Supervision'),
             analytics: () => load('analytics', 'admin_partners_analytics', { p_days: 30 }, (d) => this._renderPartnersAnalytics(d), 'partners-admin-analytics', 'Performance Partners'),
@@ -7011,6 +7096,107 @@ class AdminPage {
                         : '<div class="admin-err" role="status">Lots manuels indisponibles. <button type="button" class="partners-action" data-partners-retry="manualBatches">Réessayer</button></div>'))}</div>`;
     }
 
+    _renderPartnersAccessRequests(data) {
+        const el = document.getElementById('partners-admin-access-requests');
+        const count = document.getElementById('partners-access-request-count');
+        if (!el) return;
+        const statuses = new Set(['requested', 'approved', 'declined']);
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const cleanRows = data.items.map((row) => {
+            const requestId = String(row?.request_id || '');
+            const subjectKey = String(row?.subject_key || '');
+            const emailMasked = row?.email_masked === null ? null : String(row?.email_masked || '');
+            const status = String(row?.status || '');
+            const country = String(row?.country_code || '');
+            const subdivision = row?.subdivision_code === null ? null : String(row?.subdivision_code || '');
+            const requestedAt = String(row?.requested_at || '');
+            const reviewedAt = row?.reviewed_at === null ? null : String(row?.reviewed_at || '');
+            if (!uuid.test(requestId)
+                || !/^[0-9a-f]{12}$/.test(subjectKey)
+                || !statuses.has(status)
+                || !/^[A-Z]{2}$/.test(country)
+                || (subdivision !== null && (subdivision.length > 12
+                    || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(subdivision)))
+                || !Number.isFinite(Date.parse(requestedAt))
+                || (reviewedAt !== null && !Number.isFinite(Date.parse(reviewedAt)))
+                || (emailMasked !== null && (emailMasked.length < 3 || emailMasked.length > 254))) {
+                return null;
+            }
+            return {
+                requestId,
+                subjectKey,
+                emailMasked,
+                status,
+                country,
+                subdivision,
+                requestedAt,
+                reviewedAt
+            };
+        }).filter(Boolean);
+        if (cleanRows.length !== data.items.length) {
+            throw new Error('invalid_partners_access_request_items');
+        }
+
+        el.removeAttribute('aria-busy');
+        if (count) count.textContent = `${AdminPage.n(data.total)} demande${data.total === 1 ? '' : 's'}`;
+        if (!cleanRows.length) {
+            if (data.total > 0 && this._partnersAccessRequestPage > 0) {
+                this._partnersAccessRequestPage -= 1;
+                void this._partnersLoadAccessRequests({ force: true });
+                return;
+            }
+            el.innerHTML = '<div class="partners-empty-state"><strong>Aucune demande</strong><span>Aucune demande ne correspond à ce filtre.</span></div>';
+            return;
+        }
+
+        const statusLabels = {
+            requested: 'À examiner',
+            approved: 'Approuvée',
+            declined: 'Refusée'
+        };
+        const rows = cleanRows.map((row) => {
+            const jurisdiction = row.subdivision
+                ? `${row.country} · ${row.subdivision}` : row.country;
+            const reviewed = row.reviewedAt
+                ? ` · décision ${AdminPage.timeAgo(row.reviewedAt)}` : '';
+            const actions = row.status === 'requested' && this._partnersCapabilities.risk === true
+                ? `<div class="partners-action-row">
+                    <button type="button" class="partners-action is-success"
+                      data-partners-action="access-request-approve"
+                      data-partners-request-id="${AdminPage.esc(row.requestId)}"
+                      data-partners-request-key="${AdminPage.esc(row.subjectKey)}">Approuver</button>
+                    <button type="button" class="partners-action is-danger"
+                      data-partners-action="access-request-decline"
+                      data-partners-request-id="${AdminPage.esc(row.requestId)}"
+                      data-partners-request-key="${AdminPage.esc(row.subjectKey)}">Refuser</button>
+                  </div>`
+                : '';
+            return `<article class="partners-control-item partners-access-request-item">
+                <div class="partners-access-request-main">
+                  <strong>Demande ${AdminPage.esc(row.subjectKey)}</strong>
+                  <span class="pill">${AdminPage.esc(statusLabels[row.status])}</span>
+                </div>
+                <p class="partners-access-request-copy">${AdminPage.esc(row.emailMasked || 'Email masqué indisponible')} · ${AdminPage.esc(jurisdiction)} · ${AdminPage.esc(AdminPage.timeAgo(row.requestedAt))}${AdminPage.esc(reviewed)}</p>
+                ${actions}
+              </article>`;
+        }).join('');
+        const pageCount = Math.max(1, Math.ceil(data.total / this._partnersAccessRequestLimit));
+        this._partnersAccessRequestPage = Math.min(
+            Math.max(0, this._partnersAccessRequestPage),
+            pageCount - 1
+        );
+        const first = data.total ? this._partnersAccessRequestPage * this._partnersAccessRequestLimit + 1 : 0;
+        const last = Math.min(data.total, first + cleanRows.length - 1);
+        el.innerHTML = `<div class="partners-ops-list">${rows}</div>
+          <nav class="partners-pagination" aria-label="Pagination des demandes d’accès">
+            <span class="partners-pagination-status" role="status" aria-live="polite" aria-atomic="true">${AdminPage.n(first)}–${AdminPage.n(last)} sur ${AdminPage.n(data.total)}</span>
+            <button type="button" class="partners-page-btn" data-partners-access-request-page="prev"
+              aria-label="Page précédente des demandes"${this._partnersAccessRequestPage === 0 ? ' disabled' : ''}>Précédente</button>
+            <button type="button" class="partners-page-btn" data-partners-access-request-page="next"
+              aria-label="Page suivante des demandes"${this._partnersAccessRequestPage >= pageCount - 1 ? ' disabled' : ''}>Suivante</button>
+          </nav>`;
+    }
+
     _renderPartnersAdminAccounts(rows, total) {
         const el = document.getElementById('partners-admin-list');
         const preview = document.getElementById('partners-admin-list-preview');
@@ -7800,6 +7986,57 @@ class AdminPage {
         if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
             'payout-approve', 'fiscal-review'].includes(action)
             && !this._partnersCanUseOperationalAction(action)) return false;
+
+        if (['access-request-approve', 'access-request-decline'].includes(action)) {
+            if (this._partnersCapabilities.risk !== true) return false;
+            const requestId = String(button.dataset.partnersRequestId || '');
+            const requestKey = String(button.dataset.partnersRequestKey || '');
+            if (!uuid.test(requestId) || !/^[0-9a-f]{12}$/.test(requestKey)) return false;
+            const approving = action === 'access-request-approve';
+            const confirmed = await this._confirm(
+                approving
+                    ? `Approuver la demande ${requestKey} et ajouter ce compte à la liste pilote ? L’inscription, le KYC et les paiements resteront verrouillés par leurs propres contrôles.`
+                    : `Refuser la demande ${requestKey} ? Aucun accès ni compte partenaire ne sera créé.`,
+                {
+                    danger: !approving,
+                    okLabel: approving ? 'Approuver la demande' : 'Refuser la demande'
+                }
+            );
+            if (!confirmed) return false;
+            let expiresAt = null;
+            if (approving) {
+                const expiry = await this._partnersPrompt(
+                    'Expiration facultative de l’invitation pilote au format ISO (vide = sans expiration) :',
+                    '',
+                    (value) => value === '' || (Number.isFinite(Date.parse(value)) && Date.parse(value) > Date.now()),
+                    'Expiration invalide ou déjà passée.'
+                );
+                if (expiry === null) return false;
+                expiresAt = expiry ? new Date(expiry).toISOString() : null;
+            }
+            const justification = await this._partnersJustification(
+                `${approving ? 'approbation' : 'refus'} de la demande d’accès ${requestKey}`
+            );
+            if (!justification) return false;
+            const result = await this._rpc('admin_partners_access_request_decide', {
+                p_request_id: requestId,
+                p_decision: approving ? 'approve' : 'decline',
+                p_expires_at: expiresAt,
+                p_justification: justification
+            });
+            if (result?.schema_version !== 1
+                || result?.action !== 'access_request_decided'
+                || result?.status !== (approving ? 'approved' : 'declined')
+                || typeof result?.changed !== 'boolean'
+                || typeof result?.allowlist_included !== 'boolean'
+                || (approving && result.allowlist_included !== true)
+                || (!approving && result.allowlist_included !== false)) {
+                throw new Error('invalid_partners_access_request_decision_response');
+            }
+            return approving
+                ? 'Demande approuvée et invitation pilote enregistrée.'
+                : 'Demande refusée sans créer d’accès partenaire.';
+        }
 
         if (action === 'revolut-binding-propose') {
             if (this._partnersCapabilities.finance !== true) return false;

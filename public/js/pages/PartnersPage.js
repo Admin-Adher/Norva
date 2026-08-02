@@ -20,6 +20,7 @@ class PartnersPage {
         this._showTimeoutMs = 10000;
         this._dashboardTimeoutMs = 10000;
         this._payoutTimeoutMs = 8000;
+        this._accessRequestTimeoutMs = 8000;
         this._bootstrapTtlMs = 30000;
         this._sessionIdentityKey = '';
         this._jurisdiction = { countryCode: '', subdivisionCode: '' };
@@ -39,16 +40,23 @@ class PartnersPage {
         this._tvRelayPollTimer = 0;
         this._tvRelay = null;
         this._tvRelayCreateKey = '';
+        this._accessRequestAbort = null;
+        this._accessRequestToken = 0;
+        this._earlyAccessContext = null;
     }
 
     canUseUserPartners() {
         const user = this.app?.currentUser || {};
         return Boolean(
-            user.cloud
-            && !user.device
+            this.canDiscoverUserPartners()
             && window.NorvaCloud?.partners
             && typeof window.NorvaCloud.partners.bootstrap === 'function'
         );
+    }
+
+    canDiscoverUserPartners() {
+        const user = this.app?.currentUser || {};
+        return Boolean(user.cloud && !user.device);
     }
 
     canUseTvPartners() {
@@ -67,7 +75,10 @@ class PartnersPage {
     }
 
     canUsePartners() {
-        return this.canUseUserPartners() || this.canUseTvPartners();
+        // User discovery remains navigable even if the operational API is
+        // temporarily unavailable; show() then presents the sanitized retry
+        // state. TV still requires the complete relay capability surface.
+        return this.canDiscoverUserPartners() || this.canUseTvPartners();
     }
 
     rememberOpener(opener) {
@@ -82,7 +93,11 @@ class PartnersPage {
     }
 
     setEntryVisibility(visible) {
-        const allowed = Boolean(visible) && this.canUsePartners();
+        // The authenticated Web/mobile discovery entry is always available.
+        // Server visibility continues to gate Android TV relay and every
+        // operational Partners action.
+        const allowed = this.canDiscoverUserPartners()
+            || (Boolean(visible) && this.canUseTvPartners());
         const settingsRow = document.getElementById('settings-partners-row');
         if (settingsRow) {
             settingsRow.hidden = !allowed;
@@ -242,6 +257,10 @@ class PartnersPage {
             this.setEntryVisibility(false);
             return false;
         }
+        // Discovery is immediate for a real Cloud user. Bootstrap only warms
+        // authoritative eligibility; disabled flags or a transient outage must
+        // not make the secondary entry disappear again.
+        this.setEntryVisibility(false);
         this.ensureSessionContext();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), this._visibilityTimeoutMs);
@@ -250,12 +269,11 @@ class PartnersPage {
                 signal: controller.signal,
                 ...this._jurisdiction
             });
-            return this.setEntryVisibility(envelope.data.visibility.visible === true);
+            this.setEntryVisibility(envelope.data.visibility.visible === true);
+            return true;
         } catch (_) {
-            // Fail closed: a missing, invalid or unavailable bootstrap never
-            // reveals a dormant programme entry.
             this.setEntryVisibility(false);
-            return false;
+            return true;
         } finally {
             clearTimeout(timeout);
         }
@@ -270,6 +288,10 @@ class PartnersPage {
         this._closeQrDialog = null;
         this._closePayoutDialog?.({ restoreFocus: false });
         this._closePayoutDialog = null;
+        this._accessRequestAbort?.abort();
+        this._accessRequestAbort = null;
+        this._accessRequestToken += 1;
+        this._earlyAccessContext = null;
         const returnedFromKyc = this.app?.consumePartnersKycReturnNotice?.() === true;
         this.ensureSessionContext();
         const jurisdiction = this.normalizeJurisdiction(
@@ -354,6 +376,10 @@ class PartnersPage {
         this._dashboardAbort = null;
         this._payoutAbort?.abort();
         this._payoutAbort = null;
+        this._accessRequestAbort?.abort();
+        this._accessRequestAbort = null;
+        this._accessRequestToken += 1;
+        this._earlyAccessContext = null;
         this.stopTvRelayPolling();
         this._nativeShareRequests.forEach(({ reject, timer }) => {
             clearTimeout(timer);
@@ -715,13 +741,7 @@ class PartnersPage {
             return;
         }
         if (view === 'invite') {
-            this.renderUnavailable({
-                title: 'Norva Partners is invitation-only',
-                copy: 'The pilot is opening gradually in supported jurisdictions. This account is not currently included.',
-                tone: 'neutral',
-                retry: true,
-                program: data.program
-            });
+            this.openEarlyAccess(data, 'invite');
             return;
         }
         if (view === 'unsupported') {
@@ -734,6 +754,10 @@ class PartnersPage {
                 tone: 'neutral',
                 program: data.program
             });
+            return;
+        }
+        if (!data.account.exists) {
+            this.openEarlyAccess(data, 'disabled');
             return;
         }
         this.renderUnavailable({
@@ -782,6 +806,531 @@ class PartnersPage {
         if (!data.visibility.visible) return 'disabled';
 
         return data.eligibility.eligible ? 'discovery' : 'unsupported';
+    }
+
+    openEarlyAccess(data, reason) {
+        this._earlyAccessContext = { data, reason };
+        this.renderEarlyAccess(data, {
+            reason,
+            phase: 'pending'
+        });
+        void this.loadEarlyAccessRequest(data, reason);
+    }
+
+    async loadEarlyAccessRequest(data, reason, { paintPending = false } = {}) {
+        const api = window.NorvaCloud?.partners?.accessRequest;
+        this._earlyAccessContext = { data, reason, programPreview: null };
+        if (!api || typeof api.get !== 'function' || typeof api.request !== 'function') {
+            this._accessRequestAbort?.abort();
+            this._accessRequestAbort = null;
+            this._accessRequestToken += 1;
+            if (this._visible) {
+                this.renderEarlyAccess(data, { reason, phase: 'disabled' });
+            }
+            return false;
+        }
+        const token = ++this._accessRequestToken;
+        this._accessRequestAbort?.abort();
+        const controller = new AbortController();
+        this._accessRequestAbort = controller;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, this._accessRequestTimeoutMs);
+        if (paintPending) {
+            this.renderEarlyAccess(data, { reason, phase: 'pending' });
+        }
+        try {
+            const envelope = await api.get({ signal: controller.signal });
+            if (!this._visible || token !== this._accessRequestToken) return false;
+            const request = envelope?.data?.request || null;
+            const programPreview = this.normalizeProgramPreview(
+                envelope?.data?.program_preview
+            );
+            if (!this.isAccessRequestRecord(request)) {
+                throw new Error('partners_access_request_contract_invalid');
+            }
+            if (request.exists) {
+                this._jurisdiction = this.normalizeJurisdiction(
+                    request.country_code,
+                    request.subdivision_code
+                );
+            }
+            this.renderEarlyAccess(data, {
+                reason,
+                phase: request.exists ? 'requested' : 'ready',
+                request,
+                programPreview
+            });
+            return true;
+        } catch (error) {
+            if ((error?.name === 'AbortError' && !timedOut) || !this._visible
+                || token !== this._accessRequestToken) return false;
+            const disabled = [
+                'partners_access_request_disabled',
+                'partners_access_requests_disabled'
+            ].includes(error?.code);
+            this.renderEarlyAccess(data, {
+                reason,
+                phase: disabled ? 'disabled' : 'error',
+                message: disabled ? '' : this.partnerErrorMessage(error)
+            });
+            return false;
+        } finally {
+            clearTimeout(timeout);
+            if (token === this._accessRequestToken
+                && this._accessRequestAbort === controller) this._accessRequestAbort = null;
+        }
+    }
+
+    isAccessRequestRecord(request) {
+        if (!request || typeof request !== 'object' || Array.isArray(request)
+            || typeof request.exists !== 'boolean') return false;
+        const nullableCountry = request.country_code == null
+            || /^[A-Z]{2}$/.test(request.country_code);
+        const nullableSubdivision = request.subdivision_code == null
+            || (request.subdivision_code.length <= 12
+                && /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(request.subdivision_code));
+        const nullableDate = (value) => value == null
+            || (typeof value === 'string' && Number.isFinite(Date.parse(value)));
+        if (!nullableCountry || !nullableSubdivision
+            || !nullableDate(request.requested_at)
+            || !nullableDate(request.reviewed_at)) return false;
+        if (!request.exists) {
+            return request.status == null
+                && request.country_code == null
+                && request.subdivision_code == null
+                && request.requested_at == null
+                && request.reviewed_at == null;
+        }
+        return ['requested', 'approved', 'declined'].includes(request.status)
+            && /^[A-Z]{2}$/.test(request.country_code)
+            && typeof request.requested_at === 'string';
+    }
+
+    renderEarlyAccess(data, {
+        reason,
+        phase,
+        request = null,
+        message = '',
+        programPreview = null
+    }) {
+        if (!this.container) return;
+        const previousScrollTop = this.getScrollElement()?.scrollTop || 0;
+        const previousFocus = document.activeElement;
+        const restoreBackFocus = Boolean(previousFocus?.closest?.('[data-partners-back]'));
+        const restoreHeading = previousFocus?.id === 'partners-access-title'
+            ? 'partners-access-title'
+            : (previousFocus?.id === 'partners-title' ? 'partners-title' : '');
+        this._closeCountryPicker?.({ restoreFocus: false });
+        this._closeCountryPicker = null;
+        const preview = this.normalizeProgramPreview(programPreview);
+        this._earlyAccessContext = { data, reason, programPreview: preview };
+        const invitationOnly = reason === 'invite';
+        const title = invitationOnly
+            ? 'Request a place in the Norva Partners pilot.'
+            : (preview
+                ? `Earn ${this.percent(preview.commission_rate_bps)} on eligible referrals.`
+                : 'Be among the first to discover Norva Partners.');
+        const copy = invitationOnly
+            ? 'The supervised pilot is opening gradually. Tell us where you will participate from and Norva will review your request.'
+            : (preview
+                ? `The current server-published preview includes a ${preview.attribution_window_days}-day attribution window and ${preview.maturation_days}-day validation period. Access is still reviewed.`
+                : 'Norva Partners is being opened in controlled stages. You can request early access now without starting KYC or creating a referral link.');
+        const statusLabel = invitationOnly ? 'Invitation-only pilot' : 'Early access';
+        const requestMarkup = this.earlyAccessRequestMarkup(phase, request, message);
+        const pickerMarkup = phase === 'ready' && !request?.exists
+            ? this.earlyAccessCountryPickerMarkup()
+            : '';
+        const liveMessages = {
+            pending: 'Checking your Norva Partners early-access request.',
+            ready: 'Early-access requests are open. Choose your country to continue.',
+            requested: request?.status === 'approved'
+                ? 'Your Norva Partners early-access request is approved.'
+                : (request?.status === 'declined'
+                    ? 'Your early-access request was reviewed and is not open for resubmission.'
+                    : 'Your Norva Partners early-access request is awaiting review.'),
+            success: 'Your Norva Partners early-access request was submitted successfully.',
+            error: 'Norva could not load your early-access request.',
+            disabled: 'Norva Partners early-access requests are temporarily unavailable.'
+        };
+        this.container.innerHTML = `
+            <main class="partners-shell" aria-labelledby="partners-title">
+                ${this.header('Norva Partners')}
+                <section class="partners-discovery-grid partners-early-access-grid">
+                    <div class="partners-discovery-copy">
+                        <span class="partners-eyebrow">Norva Partners · Individuals</span>
+                        <h1 id="partners-title" class="partners-display" tabindex="-1">${this.escape(title)}</h1>
+                        <p class="partners-lead">${this.escape(copy)}</p>
+                        <span class="partners-status-pill partners-status-warning">${this.escape(statusLabel)}</span>
+                        ${this.earlyAccessPreviewMarkup(preview)}
+                        <p class="partners-disclosure">An access request does not create a partner account, start identity verification, generate a referral link or guarantee earnings. Join, KYC, sharing and payouts remain locked until Norva's server policies explicitly authorize them.</p>
+                    </div>
+                    ${requestMarkup}
+                </section>
+                ${this.earlyAccessSteps()}
+                ${this.liveRegion(liveMessages[phase] || liveMessages.ready, phase === 'error' ? 'assertive' : 'polite')}
+            </main>
+            ${pickerMarkup}`;
+        this.bindCommonActions();
+        this.bindEarlyAccessActions();
+        if (this.container.querySelector('[data-partners-access-request-form]')) {
+            this.bindCountryPicker();
+        }
+        requestAnimationFrame(() => {
+            const scroller = this.getScrollElement();
+            if (scroller) scroller.scrollTop = previousScrollTop;
+            const target = phase === 'success'
+                ? this.container?.querySelector('#partners-access-title')
+                : (restoreBackFocus
+                    ? this.container?.querySelector('[data-partners-back]')
+                    : (restoreHeading
+                        ? this.container?.querySelector(`#${restoreHeading}`)
+                        : this.container?.querySelector('#partners-title')));
+            try { target?.focus?.({ preventScroll: true }); } catch (_) { target?.focus?.(); }
+        });
+    }
+
+    earlyAccessSteps() {
+        return `<section class="partners-steps" aria-label="Early-access process">
+            <article><span>1</span><div><strong>Request access</strong><p>Share the country where you would personally participate.</p></div></article>
+            <article><span>2</span><div><strong>Norva reviews</strong><p>The team checks jurisdiction coverage and supervised-pilot capacity.</p></div></article>
+            <article><span>3</span><div><strong>Unlock after release</strong><p>If approved, joining and identity verification appear only after the server opens access.</p></div></article>
+        </section>`;
+    }
+
+    normalizeProgramPreview(preview) {
+        if (preview == null) return null;
+        if (!preview || typeof preview !== 'object' || Array.isArray(preview)
+            || !Number.isSafeInteger(preview.commission_rate_bps)
+            || preview.commission_rate_bps <= 0
+            || preview.commission_rate_bps > 10000
+            || !Number.isSafeInteger(preview.attribution_window_days)
+            || preview.attribution_window_days <= 0
+            || !Number.isSafeInteger(preview.maturation_days)
+            || preview.maturation_days < 0
+            || !preview.payout_thresholds
+            || typeof preview.payout_thresholds !== 'object'
+            || Array.isArray(preview.payout_thresholds)) return null;
+        const thresholds = Object.fromEntries(Object.entries(preview.payout_thresholds)
+            .filter(([currency, amount]) => (
+                /^[A-Z]{3}$/.test(currency)
+                && Number.isSafeInteger(amount)
+                && amount > 0
+            )));
+        return {
+            commission_rate_bps: preview.commission_rate_bps,
+            attribution_window_days: preview.attribution_window_days,
+            maturation_days: preview.maturation_days,
+            payout_thresholds: thresholds
+        };
+    }
+
+    earlyAccessPreviewMarkup(preview) {
+        if (!preview) return '';
+        const threshold = this.referencePayoutThreshold(preview);
+        return `<dl class="partners-program-facts partners-preview-facts" aria-label="Current programme preview">
+            <div><dt>Recurring commission</dt><dd>${this.escape(this.percent(preview.commission_rate_bps))}</dd></div>
+            <div><dt>Attribution window</dt><dd>${preview.attribution_window_days} days</dd></div>
+            <div><dt>Validation period</dt><dd>${preview.maturation_days} days</dd></div>
+            <div><dt>Reference threshold</dt><dd>${this.escape(threshold)}</dd></div>
+        </dl><p class="partners-program-note">Preview only. It does not prove eligibility, approval or future earnings.</p>`;
+    }
+
+    earlyAccessRequestMarkup(phase, request, message) {
+        if (phase === 'pending') {
+            return `<aside class="partners-program-card partners-access-card" aria-busy="true" aria-labelledby="partners-access-title">
+                <span class="partners-eyebrow">Your request</span>
+                <h2 id="partners-access-title">Checking securely</h2>
+                <div class="partners-skeleton" aria-hidden="true"></div>
+                <div class="partners-skeleton" aria-hidden="true"></div>
+                <p>Norva is loading only the current request status for this account.</p>
+            </aside>`;
+        }
+        if (phase === 'disabled') {
+            return `<aside class="partners-program-card partners-access-card" aria-labelledby="partners-access-title">
+                <span class="partners-status-pill">Requests paused</span>
+                <h2 id="partners-access-title" tabindex="-1">Early-access requests are temporarily closed</h2>
+                <p>No application, identity check or partner account has been created. Return here later when the supervised intake reopens.</p>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-secondary" type="button" data-partners-back>Back</button>
+                </div>
+            </aside>`;
+        }
+        if (phase === 'error') {
+            return `<aside class="partners-program-card partners-access-card" aria-labelledby="partners-access-title">
+                <span class="partners-status-pill partners-status-warning">Status unavailable</span>
+                <h2 id="partners-access-title" tabindex="-1">We could not check your request</h2>
+                <p role="alert">${this.escape(message || 'Norva could not load the request securely. No action was taken.')}</p>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-primary" type="button" data-partners-access-retry>Try again</button>
+                    <button class="btn btn-secondary" type="button" data-partners-back>Back</button>
+                </div>
+            </aside>`;
+        }
+        if (request?.exists && ['requested', 'approved'].includes(request.status)) {
+            const approved = request.status === 'approved';
+            const successful = phase === 'success';
+            const heading = approved
+                ? 'Your early access is approved'
+                : (successful ? 'Request sent successfully' : 'Your request is in review');
+            const copy = approved
+                ? 'Norva has approved this request. Operational access will appear here only when the programme and your jurisdiction are opened by the server.'
+                : 'The Norva team will review pilot capacity and jurisdiction coverage. You do not need to submit another request.';
+            const country = this.regionLabel({
+                country_code: request.country_code,
+                subdivision_code: request.subdivision_code
+            }) || request.country_code;
+            return `<aside class="partners-program-card partners-access-card" aria-labelledby="partners-access-title">
+                <span class="partners-status-pill ${approved || successful ? 'partners-status-success' : 'partners-status-warning'}">${approved ? 'Approved' : 'Requested'}</span>
+                <h2 id="partners-access-title" tabindex="-1">${this.escape(heading)}</h2>
+                <p>${this.escape(copy)}</p>
+                <dl class="partners-checklist">
+                    <div><dt>Country</dt><dd>${this.escape(country)}</dd></div>
+                    <div><dt>Status</dt><dd>${approved ? 'Approved · awaiting release' : 'Awaiting review'}</dd></div>
+                    <div><dt>Requested</dt><dd>${this.escape(this.formatDateTime(request.requested_at))}</dd></div>
+                </dl>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-secondary" type="button" data-partners-back>Back</button>
+                </div>
+            </aside>`;
+        }
+        const declined = request?.exists && request.status === 'declined';
+        if (declined) {
+            const country = this.regionLabel({
+                country_code: request.country_code,
+                subdivision_code: request.subdivision_code
+            }) || request.country_code;
+            return `<aside class="partners-program-card partners-access-card" aria-labelledby="partners-access-title">
+                <span class="partners-status-pill">Reviewed</span>
+                <h2 id="partners-access-title" tabindex="-1">This early-access request was not approved</h2>
+                <p>The review is complete and this request cannot be submitted again. No partner account, identity check, referral link or earnings were created.</p>
+                <dl class="partners-checklist">
+                    <div><dt>Country</dt><dd>${this.escape(country)}</dd></div>
+                    <div><dt>Status</dt><dd>Not approved</dd></div>
+                    <div><dt>Reviewed</dt><dd>${this.escape(this.formatDateTime(request.reviewed_at || request.requested_at))}</dd></div>
+                </dl>
+                <div class="partners-actions partners-actions-row">
+                    <a class="btn btn-secondary" href="/support.html?returnTo=%2Fapp%23partners">Contact support</a>
+                    <button class="btn btn-ghost" type="button" data-partners-back>Back</button>
+                </div>
+            </aside>`;
+        }
+        const country = this.escape(this._jurisdiction.countryCode);
+        const subdivision = this.escape(this._jurisdiction.subdivisionCode);
+        const countries = this.availableCountries();
+        const selectedCountry = countries.find((entry) => entry.code === this._jurisdiction.countryCode) || null;
+        const manualCountry = Boolean(this._jurisdiction.countryCode && !selectedCountry);
+        const countryLabel = selectedCountry
+            ? `${selectedCountry.flag || ''} ${selectedCountry.name} · ${selectedCountry.code}`.trim()
+            : 'Choose a country';
+        return `<aside class="partners-program-card partners-access-card" aria-labelledby="partners-access-title">
+            <span class="partners-eyebrow">Request early access</span>
+            <h2 id="partners-access-title">Join the supervised intake</h2>
+            <form class="partners-jurisdiction-form partners-access-form"
+                data-partners-jurisdiction data-partners-access-request-form novalidate>
+                <div class="partners-field">
+                    <span class="partners-field-label" id="partners-country-label">Country</span>
+                    <input id="partners-country-code" name="countryCode" type="hidden"
+                        value="${country}" data-partners-country-code>
+                    <div data-partners-country-standard${manualCountry ? ' hidden' : ''}>
+                        <button class="region-picker-btn source-select partners-country-trigger"
+                            type="button" data-partners-country-open
+                            aria-haspopup="dialog" aria-expanded="false"
+                            aria-controls="partners-country-dialog"
+                            aria-labelledby="partners-country-label partners-country-selection"
+                            aria-describedby="partners-country-hint">
+                            <span id="partners-country-selection" class="region-picker-value"
+                                data-partners-country-value>${this.escape(countryLabel)}</span>
+                            <span class="region-picker-caret" aria-hidden="true">▾</span>
+                        </button>
+                    </div>
+                    <div class="partners-country-manual" data-partners-country-manual${manualCountry ? '' : ' hidden'}>
+                        <input id="partners-country-code-manual" value="${country}"
+                            data-partners-country-manual-input maxlength="2" inputmode="text"
+                            autocapitalize="characters" autocomplete="off" spellcheck="false"
+                            placeholder="US" aria-labelledby="partners-country-label"
+                            aria-describedby="partners-country-hint">
+                        <button class="btn btn-ghost partners-inline-action" type="button"
+                            data-partners-country-list>Choose from country list</button>
+                    </div>
+                    <span id="partners-country-hint">Choose the country where you personally reside and would participate in the programme.</span>
+                </div>
+                <div class="partners-field">
+                    <label for="partners-subdivision-code">State or region code <span>(optional)</span></label>
+                    <input id="partners-subdivision-code" name="subdivisionCode" value="${subdivision}"
+                        maxlength="12" inputmode="text" autocapitalize="characters"
+                        autocomplete="off" spellcheck="false" placeholder="US-CA"
+                        aria-describedby="partners-subdivision-hint">
+                    <span id="partners-subdivision-hint">Use an ISO subdivision code only when your jurisdiction requires it.</span>
+                </div>
+                <div class="partners-form-status" data-partners-jurisdiction-status
+                    data-partners-access-request-status role="status" aria-live="polite"
+                    aria-atomic="true" tabindex="-1"></div>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-primary partners-primary-action" type="submit"
+                        data-partners-access-submit>Request early access</button>
+                    <button class="btn btn-secondary" type="button" data-partners-back>Back</button>
+                </div>
+            </form>
+            <p>Your request records only this account, jurisdiction and review timestamps. It does not start KYC or expose another user's information.</p>
+        </aside>`;
+    }
+
+    earlyAccessCountryPickerMarkup() {
+        const countries = this.availableCountries();
+        return `<div class="partners-country-picker-overlay" data-region-picker
+            data-partners-country-overlay hidden>
+            <section id="partners-country-dialog"
+                class="partners-country-dialog region-picker-pop"
+                data-region-pop role="dialog" aria-modal="true"
+                aria-labelledby="partners-country-picker-title" hidden>
+                <header class="partners-country-dialog-header">
+                    <div>
+                        <span class="partners-eyebrow">Norva Partners</span>
+                        <h2 id="partners-country-picker-title">Choose your country</h2>
+                    </div>
+                    <button class="partners-country-close" type="button"
+                        data-partners-country-close aria-label="Close country selector">×</button>
+                </header>
+                <label class="partners-country-search-label" for="partners-country-search">Search countries</label>
+                <input id="partners-country-search" class="region-picker-search"
+                    data-partners-country-search type="search" role="combobox"
+                    aria-autocomplete="list" aria-controls="partners-country-listbox"
+                    aria-expanded="true" autocomplete="off"
+                    placeholder="Search by country or ISO code">
+                <ul id="partners-country-listbox"
+                    class="region-picker-list partners-country-list"
+                    data-partners-country-listbox role="listbox"
+                    aria-label="Countries">${this.countryOptionMarkup(countries, this._jurisdiction.countryCode)}</ul>
+                <footer class="partners-country-dialog-footer">
+                    <button class="btn btn-secondary partners-country-code-action"
+                        type="button" data-partners-country-manual-open>Country not listed? Enter code</button>
+                </footer>
+            </section>
+        </div>`;
+    }
+
+    bindEarlyAccessActions() {
+        this.container?.querySelector('[data-partners-access-retry]')
+            ?.addEventListener('click', () => {
+                const context = this._earlyAccessContext;
+                if (context) void this.loadEarlyAccessRequest(
+                    context.data,
+                    context.reason,
+                    { paintPending: true }
+                );
+            });
+        const form = this.container?.querySelector('[data-partners-access-request-form]');
+        if (!form) return;
+        const countryInput = form.elements.countryCode;
+        const countryManualInput = form.querySelector('[data-partners-country-manual-input]');
+        const countryManual = form.querySelector('[data-partners-country-manual]');
+        const countryTrigger = form.querySelector('[data-partners-country-open]');
+        const subdivisionInput = form.elements.subdivisionCode;
+        const status = form.querySelector('[data-partners-access-request-status]');
+        const button = form.querySelector('[data-partners-access-submit]');
+        countryManualInput?.addEventListener('input', () => {
+            countryManualInput.value = String(countryManualInput.value || '')
+                .toUpperCase()
+                .replace(/[^A-Z]/g, '')
+                .slice(0, 2);
+            if (countryInput) countryInput.value = countryManualInput.value;
+        });
+        subdivisionInput?.addEventListener('input', () => {
+            subdivisionInput.value = String(subdivisionInput.value || '')
+                .toUpperCase()
+                .replace(/\s+/g, '');
+        });
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const jurisdiction = this.normalizeJurisdiction(
+                countryInput?.value,
+                subdivisionInput?.value
+            );
+            if (!this.jurisdictionIsValid(jurisdiction, { countryRequired: true })) {
+                if (status) {
+                    status.setAttribute('role', 'alert');
+                    status.setAttribute('aria-live', 'assertive');
+                    status.textContent = 'Choose a two-letter country code and, if needed, a matching state or region code.';
+                }
+                const invalidInput = !/^[A-Z]{2}$/.test(jurisdiction.countryCode)
+                    ? (countryManual?.hidden ? countryTrigger : countryManualInput)
+                    : subdivisionInput;
+                invalidInput?.focus();
+                return;
+            }
+            const api = window.NorvaCloud?.partners?.accessRequest;
+            if (!api || typeof api.request !== 'function' || !button) {
+                this.renderEarlyAccess(this._earlyAccessContext.data, {
+                    reason: this._earlyAccessContext.reason,
+                    phase: 'disabled'
+                });
+                return;
+            }
+            const showToken = this._showToken;
+            const previousLabel = button.textContent;
+            this._jurisdiction = jurisdiction;
+            form.setAttribute('aria-busy', 'true');
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = 'Requesting access…';
+            if (status) {
+                status.setAttribute('role', 'status');
+                status.setAttribute('aria-live', 'polite');
+                status.textContent = 'Submitting your early-access request securely.';
+            }
+            try {
+                const envelope = await api.request({
+                    countryCode: jurisdiction.countryCode,
+                    subdivisionCode: jurisdiction.subdivisionCode || undefined,
+                    idempotencyKey: this.actionKey('access-request')
+                });
+                if (!this._visible || showToken !== this._showToken) return;
+                const request = envelope?.data?.request || null;
+                const programPreview = this.normalizeProgramPreview(
+                    envelope?.data?.program_preview
+                ) || this._earlyAccessContext.programPreview;
+                if (envelope?.data?.action !== 'access_requested'
+                    || !this.isAccessRequestRecord(request)) {
+                    throw new Error('partners_access_request_contract_invalid');
+                }
+                this.clearActionKey('access-request');
+                this.renderEarlyAccess(this._earlyAccessContext.data, {
+                    reason: this._earlyAccessContext.reason,
+                    phase: 'success',
+                    request,
+                    programPreview
+                });
+                requestAnimationFrame(() => this.container
+                    ?.querySelector('#partners-access-title')?.focus?.({ preventScroll: true }));
+            } catch (error) {
+                if (!this._visible || showToken !== this._showToken) return;
+                if (['partners_access_request_disabled', 'partners_access_requests_disabled']
+                    .includes(error?.code)) {
+                    this.renderEarlyAccess(this._earlyAccessContext.data, {
+                        reason: this._earlyAccessContext.reason,
+                        phase: 'disabled',
+                        programPreview: this._earlyAccessContext.programPreview
+                    });
+                    return;
+                }
+                if (status) {
+                    status.setAttribute('role', 'alert');
+                    status.setAttribute('aria-live', 'assertive');
+                    status.textContent = this.partnerErrorMessage(error);
+                    status.focus?.({ preventScroll: true });
+                }
+            } finally {
+                if (button.isConnected) {
+                    button.disabled = false;
+                    button.removeAttribute('aria-busy');
+                    button.textContent = previousLabel;
+                    form.removeAttribute('aria-busy');
+                }
+            }
+        });
     }
 
     renderJurisdiction(data) {
@@ -1352,6 +1901,9 @@ class PartnersPage {
             provider_not_configured: 'Identity verification is not configured yet. No account change was made.',
             provider_temporarily_unavailable: 'The identity provider is temporarily unavailable. Retry without creating another account.',
             rate_limited: 'Too many secure attempts were received. Wait a moment before retrying.',
+            partners_access_request_contract_invalid: 'Norva could not verify the request status securely. No action was accepted.',
+            partners_access_request_disabled: 'Early-access requests are temporarily closed. No request was created.',
+            partners_access_requests_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_action_not_allowed: 'This action is not available for the current verified account state.',
             partners_kyc_consent_invalid: 'Review and confirm the current verification statements before continuing.',
             authentication_required: 'Sign in again to continue securely.',

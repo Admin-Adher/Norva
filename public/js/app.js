@@ -2532,7 +2532,7 @@ class App {
                     <img class="account-ic" src="/img/norva-app-icon.png" alt="">
                     <span class="account-row-copy">
                         <span class="account-row-title">Norva Partners</span>
-                        <span class="account-row-hint">Direct referrals · 20% recurring</span>
+                        <span class="account-row-hint">Referral programme · access by review</span>
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="settings">
@@ -2580,11 +2580,10 @@ class App {
             screensRow.style.display = cloudUser ? '' : 'none';
         }
         if (partnersRow) {
-            // The bootstrap is the only authority allowed to reveal this row.
-            // Keep it hidden synchronously, then let PartnersPage expose it only
-            // after a valid `visibility.visible=true` response.
-            partnersRow.hidden = true;
-            partnersRow.setAttribute('aria-hidden', 'true');
+            // Cloud users can always discover Partners or request early access.
+            // Bootstrap remains authoritative for every operational action and
+            // Android TV relay availability.
+            this.pages?.partners?.setEntryVisibility?.(false);
             this.pages?.partners?.primeVisibility?.().catch(() => {});
         }
     }
@@ -3525,7 +3524,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=103';
+                s.src = '/js/pages/AdminPage.js?v=104';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

@@ -340,6 +340,7 @@ jobs:
         run: >-
           supabase test db
           supabase/tests/affiliate_p0.sql
+          supabase/tests/affiliate_access_requests.sql
           supabase/tests/affiliate_dispute_won.sql
           supabase/tests/affiliate_revolut_manual_hybrid.sql
           supabase/tests/revenuecat_transfer.sql

@@ -1,6 +1,6 @@
 # Norva Partners — runbook pilote
 
-**Version :** 30 juillet 2026
+**Version :** 2 août 2026
 **Principe :** tout reste fail-closed tant que KYC, juridiction, finance et
 versement ne sont pas vérifiés séparément.
 
@@ -25,6 +25,45 @@ Pour chaque pays/subdivision, conserver une preuve datée des cinq portes :
 L'activation initiale est limitée à une allowlist nominative de 20 à 50 comptes.
 Le KYB, les sociétés et les versements réels restent fermés.
 
+### Découverte et demandes d'accès avant ouverture
+
+La découverte n'est pas une porte de mise en service. Tout compte Cloud
+utilisateur authentifié voit l'entrée **Norva Partners** sur Web et Android
+mobile, y compris un compte qui possède aussi un rôle Admin. Ne jamais masquer
+cette entrée à cause de `partners_enabled=false`, d'une release gate fermée,
+d'une policy absente, d'une juridiction non ouverte ou d'une allowlist vide.
+L'entrée utilisateur et la surface `Admin > Partners` restent deux contextes
+distincts. TV conserve son relais et ses contrôles appareil séparés.
+
+Le parcours pré-pilote utilise uniquement `GET|POST /access-request` :
+
+- `GET` retourne `request.exists=false` ou l'état
+  `requested|approved|declined`, sans effet de bord ;
+- `POST` exige un compte confirmé, le pays, une subdivision facultative et une
+  clé d'idempotence ; il reste disponible quand tous les flags et gates du
+  programme sont fermés, à condition que son kill switch dédié
+  `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=true` ;
+- seul un enregistrement `affiliate_access_requests`, son état d'idempotence et
+  un événement d'audit sanitisé sont créés ou mis à jour ;
+- aucun compte partenaire, `/applications`, KYC/KYB, lien, attribution, fait
+  financier, ledger, profil de versement ou paiement n'est créé ;
+- une demande `requested` peut mettre à jour sa juridiction avec une nouvelle
+  clé ; `approved` et `declined` sont terminaux côté utilisateur.
+
+La file Admin suit la séparation de responsabilités suivante :
+
+| Action | Autorité minimale | Effet autorisé |
+|---|---|---|
+| Lister, chercher et filtrer les demandes | Support **ou** Risk | lecture paginée de données sanitisées : sujet opaque, e-mail masqué, état, juridiction et horodatages |
+| Approuver ou refuser | Risk **et** session AAL2 | décision auditée avec justification ; expiration future facultative pour une approbation |
+| Approuver | Risk **et** session AAL2 | ajoute seulement l'utilisateur à l'allowlist pilote pour la juridiction demandée |
+
+Après une approbation, vérifier que `partners_enabled`, les release gates, la
+policy, le programme et les corridors n'ont pas changé. L'utilisateur ne peut
+passer à `/applications` que lorsque ces préconditions sont ouvertes
+séparément. Une approbation n'enrôle pas automatiquement et ne démarre jamais
+Didit.
+
 ## 2. Configuration secrète
 
 Configurer dans le gestionnaire de secrets de l'environnement, jamais dans Git :
@@ -43,6 +82,7 @@ DIDIT_FACE_MATCH_NODE_ID
 NORVA_REFERRAL_EDGE_HMAC_SECRET
 NORVA_REFERRAL_COOKIE_SECRET
 NORVA_PARTNERS_ALLOWED_ORIGINS
+NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED # non secret ; false par défaut, ouvre seulement le POST
 NORVA_PARTNERS_TV_RELAY_SECRET
 NORVA_PARTNERS_TV_RELAY_HANDOFF_URL
 NORVA_PARTNERS_TV_RELAY_TTL_SECONDS
@@ -500,17 +540,35 @@ reconstruire la taxe depuis RevenueCat.
 
 1. sauvegarde logique et contrôle de restauration ;
 2. migrations DB et tests pgTAP ;
-3. Edge Functions KYC/referral/worker déployées mais désactivées ;
-4. Web, Android et TV déployés avec états `not_configured` ;
-5. webhook Didit enregistré, secret injecté, événement de test validé ;
-6. une policy de juridiction approuvée et un programme versionné insérés ;
-7. comptes pilotes ajoutés à l'allowlist ;
-8. `partners_enabled=true`, `partners_invite_only=true`,
+3. écrire explicitement `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans
+   l'environnement Hetzner avant de déployer l'Edge ;
+4. déployer/recréer d'abord le service `functions`, attendre sa santé, puis
+   `functions2`, avec `/access-request` et les fonctions KYC/referral/worker
+   toujours désactivées ;
+5. Web, Android et TV déployés avec états `not_configured` ; vérifier que tout
+   compte Cloud Web/mobile, Admin inclus, voit l'entrée utilisateur Partners ;
+6. avec le kill switch à `false`, vérifier que `GET /access-request` retourne
+   toujours l'état existant et que le POST retourne exactement
+   `503 partners_access_requests_disabled`, sans mutation ;
+7. en base jetable puis sur la restauration isolée, valider le replay exact, le
+   cooldown 60 secondes, la neuvième nouvelle clé sur 24 heures, le
+   `429 rate_limited` avec `Retry-After: 60` et la rétention d'idempotence
+   30 jours ;
+8. passer le kill switch à `true`, recréer successivement `functions` puis
+   `functions2` avec contrôle de santé après chacun, puis exécuter un POST
+   contrôlé et son replay exact ;
+9. vérifier la file Admin avec Support|Risk, puis une décision sandbox
+   Risk+AAL2 et confirmer qu'elle ajoute seulement l'allowlist ;
+10. webhook Didit enregistré, secret injecté, événement de test validé ;
+11. une policy de juridiction approuvée et un programme versionné insérés ;
+12. comptes pilotes ajoutés à l'allowlist par décision auditée ou contrôle Admin
+   équivalent ;
+13. `partners_enabled=true`, `partners_invite_only=true`,
    `partners_shadow_mode=true`, `partners_tv_relay_enabled=true`,
    `partners_payouts_live=false`,
    `partners_revolut_api_enabled=false` et kill switch Edge API à `false` ;
-9. calcul shadow comparé au ledger financier pendant au moins un cycle complet ;
-10. deux cycles de versement supervisés avant toute extension.
+14. calcul shadow comparé au ledger financier pendant au moins un cycle complet ;
+15. deux cycles de versement supervisés avant toute extension.
 
 Avant de déclarer `pilot_ready`, archiver également :
 
@@ -585,8 +643,24 @@ jamais inscrire cette cible par migration.
 
 ### Membre Web/Android
 
+- entrée utilisateur Partners visible pour tout compte Cloud authentifié,
+  compte Admin inclus, avec les flags et gates fermés ;
+- `GET /access-request` avec `request.exists=false` : forme exacte, aucun effet
+  de bord ;
+- `POST /access-request` pendant la fermeture du programme, avec son kill switch
+  de collecte à `true` : demande `requested`, `next_action=await_review`, replay
+  idempotent et aucune création de compte/KYC/lien/ledger ;
+- kill switch de collecte à `false` : GET inchangé, POST en
+  `503 partners_access_requests_disabled`, aucune perte d'état ;
+- même clé/body rejoués immédiatement sans quota supplémentaire ; deux nouvelles
+  clés à moins de 60 secondes puis neuf nouvelles clés sur 24 heures produisent
+  `429 rate_limited` et exposent `Retry-After: 60` ;
+- une clé âgée de plus de 30 jours devient purgeable sans supprimer la demande
+  ni son audit ;
+- décision `approved|declined` affichée sans réouverture ni resoumission ;
 - pays absent/inactif : aucune adhésion ;
-- demande individuelle idempotente ;
+- adhésion individuelle `/applications` idempotente et distincte de la demande
+  d'accès ;
 - entreprise : waitlist, aucun KYC/KYB ;
 - session Didit absente de config : message public, aucun changement d'état ;
 - webhook falsifié, expiré ou rejoué : rejet sans mutation ;
@@ -605,6 +679,17 @@ jamais inscrire cette cible par migration.
 - chaque contrôle est atteignable au D-pad ;
 - TV ne crée ni compte partenaire, ni KYC, ni attribution, ni paiement ;
 - la reprise téléphone demande une authentification utilisateur normale.
+
+### Admin Support/Risk
+
+- Support seul peut lister, rechercher et filtrer la file sanitisée, mais ne
+  voit ni UUID utilisateur, ni e-mail complet et ne peut décider ;
+- Risk sans AAL2 ne peut ni approuver ni refuser ;
+- Risk avec AAL2 et justification valide peut décider une seule fois ;
+- une approbation ajoute uniquement l'allowlist pays/subdivision, sans modifier
+  flags, gates, programme, policy, corridor ou statut de compte ;
+- un refus n'ajoute aucune allowlist et oriente l'utilisateur vers le support ;
+- focus, scroll, filtre et page de la file sont conservés après l'action.
 
 ### Finance
 
@@ -695,7 +780,8 @@ scripts sous `ops/backup/` et `ops/hetzner/backup/` portent cette sélection.
 Le drill trimestriel vérifie au minimum :
 
 - présence du schéma, fonctions, contraintes, RLS et privilèges ;
-- nombres de comptes, claims, attributions, faits, écritures, lots et événements ;
+- nombres de demandes d'accès, comptes, claims, attributions, faits, écritures,
+  lots et événements ;
 - append-only et équilibre du ledger ;
 - aucune fonction privée exécutable par `anon` ; pour `authenticated`, seules
   les implémentations Admin explicitement allowlistées, protégées par les
@@ -748,20 +834,61 @@ Ordre de réduction du risque :
 La restauration de base est un dernier recours. Un incident métier normal se
 répare par machines d'états, reprises et contre-écritures.
 
+Fermer `partners_enabled` ou une release gate ne doit pas masquer l'entrée
+utilisateur Partners ni interrompre GET ; tant que le kill switch dédié reste à
+`true`, cela n'interrompt pas non plus POST. Si la collecte des demandes
+elle-même doit être suspendue pour un incident dédié, utiliser uniquement
+`NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, jamais un kill switch financier ou
+KYC.
+
+### Pause et reprise de la collecte des demandes
+
+Pour mettre la collecte en pause sans perdre la visibilité ni l'historique :
+
+1. définir `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans l'environnement
+   Hetzner, sans modifier `partners_enabled` ni les tables ;
+2. recréer `functions`, attendre son état sain et vérifier son endpoint, puis
+   recréer `functions2` et répéter le contrôle afin d'éviter une coupure globale ;
+3. confirmer avec un compte Cloud que `GET /access-request` retourne toujours
+   l'état et que `POST /access-request` répond
+   `503 partners_access_requests_disabled` ;
+4. confirmer que la file Admin Support|Risk et les décisions déjà prises sont
+   lisibles ; ne supprimer ni demande, ni clé d'idempotence récente, ni audit ;
+5. surveiller les corrélations 503/429 séparément des incidents KYC et finance.
+
+Pendant le déploiement roulant, l'ancienne réplique peut encore accepter un
+POST jusqu'à sa recréation. Ne déclarer la pause effective qu'après parité
+`false` et santé vérifiée sur les deux conteneurs Edge.
+
+Pour reprendre :
+
+1. corriger et documenter la cause de la pause, puis valider la migration, la
+   santé DB et les contrats sur une restauration isolée ;
+2. définir `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=true` et recréer de nouveau
+   `functions`, puis `functions2`, avec contrôle de santé entre les deux ;
+3. vérifier d'abord GET, puis effectuer un seul POST contrôlé et son replay avec
+   la même clé ; confirmer que le replay ne consomme pas une nouvelle tentative ;
+4. vérifier la file Admin et les métriques 201/429/503. Ne jamais purger les
+   clés pour contourner le cooldown ou la limite de 8 sur 24 heures.
+
+La reprise n'est effective qu'après parité `true` et santé vérifiée sur les deux
+conteneurs ; des 503 intermittents sont attendus durant la fenêtre roulante et
+ne justifient aucun retry agressif côté client.
+
 ## 10. Matrice de mise en service
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
 | Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer toutes les migrations en attente dans l'ordre |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
-| API membre, referral et TV | livrées | contrats Node, E2E Web/mobile et replay émulateur TV | synchroniser les secrets HMAC et publier les App Links |
+| API membre, demandes d'accès, referral et TV | livrées | entrée visible à tout compte Cloud Web/mobile, Admin inclus ; GET toujours lisible ; POST protégé par `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, cooldown 60 s, 8 nouvelles clés/24 h, rétention d'idempotence 30 j et `429 Retry-After: 60` ; aucun compte/KYC/lien/ledger créé ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer d'abord avec le kill switch de collecte à `false`, valider pause/reprise, puis synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC-only | code livré, inactif sans configuration complète | session sandbox non autoritaire, session live liée au fingerprint/version déployés, conflit environnement/fingerprint mis en quarantaine, décision signée, replay et refus KYB | renseigner API key, workflow/application/node IDs, webhook secret/URL et callback ; archiver trois preuves distinctes sans secrets |
 | Worker commission/J+45/shadow | livré | capture → accrual → J+45/reversal → shadow sans écart ; heartbeats frais | réutiliser le secret cron existant vérifié par `norva_verify_cron_secret`, confirmer son entrée Vault et créer le job `pg_cron` |
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
 | RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; Web reste incomplet sans ventilation fiscale | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé et aucun `tax=0` supposé | activer les événements provider et secrets par environnement ; sélectionner un moteur/contrat fiscal Web avant commission |
 | `DISPUTE_WON` | contre-correction append-only livrée | LOST/WON rejoués, WON avant LOST, reversal/release partiels, restauration exacte et réconciliation propre | activer l'événement Revolut et vérifier la lecture autoritative sur l'environnement disponible |
 | Payout onboarding/dispatch | `revolut_manual` livré pour Basic : lots exacts, référence `NORVA-[A-F0-9]{12}`, acquittement `YES` sans identifiant bancaire saisi, import de relevé sanitisé, incidents append-only, double validation et ledger de règlement ; `revolut_api` livré mais multi-gated | cycle J+45 → lot → export/hash → saisie manuelle → relevé → rapprochement exact, doublon/montant/devise inconnus quarantainés, deux acteurs Finance distincts ; route manuelle active, gate DB API, flag DB API et kill switch Edge à `false`, aucun cron API/provider | configurer uniquement les corridors Revolut manuels, réaliser deux cycles supervisés et conserver les secrets Business API absents tant qu'aucun upgrade n'est décidé |
-| Admin/alertes | surfaces, heartbeats et relais Ops Telegram/e-mail livrés | capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
+| Admin/alertes | surfaces, file de demandes d'accès, heartbeats et relais Ops Telegram/e-mail livrés | Support|Risk lit la file sanitisée ; seule Risk+AAL2 décide ; l'approbation ajoute uniquement l'allowlist ; capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
 | Pilote mondial | gates/policies livrées mais vides/fail-closed ; première preuve technique des pages juridiques archivée le 30 juillet | avant ouverture : artefacts juridiques normalisés, pages HTTP directes, snapshot DB, App Link signé Play, pays approuvés et restore drill ; après ouverture contrôlée : 45 jours observés avant généralisation | configurer juridictions, programme, devises/routes, allowlist et invitations ; laisser invite-only |
 
 Une case « code livré » ne suffit jamais pour lever une gate. L'opérateur doit

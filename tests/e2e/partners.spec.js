@@ -37,12 +37,14 @@ async function mountPartners(page, initialState) {
       dashboard: [],
       payoutProfile: [],
       rotateLink: [],
+      accessRequest: [],
       share: [],
       navigation: [],
     };
 
     const accountFor = (current) => {
-      if (current === 'discovery') {
+      if (['discovery', 'early-access', 'early-requested', 'early-declined']
+        .includes(current)) {
         return {
           exists: false,
           status: null,
@@ -94,24 +96,30 @@ async function mountPartners(page, initialState) {
 
     const bootstrapEnvelope = () => {
       const current = window.__partnerState;
+      const earlyAccess = ['early-access', 'early-requested', 'early-declined']
+        .includes(current);
       return {
         version: '2026-07-29',
         correlationId: `e2e-bootstrap-${current}`,
         data: {
           schema_version: 1,
           flags: {
-            partners_enabled: true,
+            partners_enabled: !earlyAccess,
             partners_invite_only: false,
             partners_shadow_mode: true,
             partners_payouts_live: false,
             partners_tv_relay_enabled: false,
           },
           visibility: {
-            visible: true,
-            reason: current === 'discovery' ? 'available' : 'existing_account',
+            visible: !earlyAccess,
+            reason: earlyAccess
+              ? 'disabled'
+              : (current === 'discovery' ? 'available' : 'existing_account'),
           },
-          eligibility: { eligible: true, reason: 'eligible' },
-          program: {
+          eligibility: earlyAccess
+            ? { eligible: false, reason: 'disabled' }
+            : { eligible: true, reason: 'eligible' },
+          program: earlyAccess ? null : {
             version_key: 'p0-2026-07',
             commission_rate_bps: 2000,
             attribution_window_days: 30,
@@ -120,7 +128,7 @@ async function mountPartners(page, initialState) {
             effective_from: '2026-07-29T00:00:00Z',
             effective_until: null,
           },
-          policy: {
+          policy: earlyAccess ? null : {
             country_code: 'FR',
             subdivision_code: 'FR-IDF',
             individual_available: true,
@@ -131,7 +139,7 @@ async function mountPartners(page, initialState) {
             terms_version: 'partners-fr-v1',
             disclosure_version: 'partners-fr-v1',
           },
-          allowlist: { required: false, included: true },
+          allowlist: { required: earlyAccess, included: !earlyAccess },
           account: accountFor(current),
         },
       };
@@ -196,6 +204,69 @@ async function mountPartners(page, initialState) {
             subdivisionCode: input.subdivisionCode || null,
           });
           return bootstrapEnvelope();
+        },
+        accessRequest: {
+          async get() {
+            const status = window.__partnerState === 'early-requested'
+              ? 'requested'
+              : (window.__partnerState === 'early-declined' ? 'declined' : null);
+            return {
+              version: '2026-07-29',
+              correlationId: 'e2e-access-request-get',
+              data: {
+                schema_version: 1,
+                program_preview: {
+                  commission_rate_bps: 2000,
+                  attribution_window_days: 30,
+                  maturation_days: 45,
+                  payout_thresholds: { USD: 1000 },
+                },
+                request: status ? {
+                  exists: true,
+                  status,
+                  country_code: 'FR',
+                  subdivision_code: 'FR-IDF',
+                  requested_at: '2026-08-01T10:00:00Z',
+                  reviewed_at: status === 'declined' ? '2026-08-02T10:00:00Z' : null,
+                } : {
+                  exists: false,
+                  status: null,
+                  country_code: null,
+                  subdivision_code: null,
+                  requested_at: null,
+                  reviewed_at: null,
+                },
+              },
+            };
+          },
+          async request(input) {
+            window.__partnerCalls.accessRequest.push({ ...input });
+            window.__partnerState = 'early-requested';
+            return {
+              version: '2026-07-29',
+              correlationId: 'e2e-access-request-post',
+              data: {
+                schema_version: 1,
+                action: 'access_requested',
+                replayed: false,
+                program_preview: {
+                  commission_rate_bps: 2000,
+                  attribution_window_days: 30,
+                  maturation_days: 45,
+                  payout_thresholds: { USD: 1000 },
+                },
+                request: {
+                  exists: true,
+                  status: 'requested',
+                  country_code: input.countryCode,
+                  subdivision_code: input.subdivisionCode || null,
+                  requested_at: '2026-08-02T10:00:00Z',
+                  reviewed_at: null,
+                },
+                next_action: 'await_review',
+              },
+            };
+          },
         },
         async apply(input) {
           window.__partnerCalls.apply.push({ ...input });
@@ -318,6 +389,51 @@ async function mountPartners(page, initialState) {
     await window.__partnersPage.show();
   }, initialState);
 }
+
+test('every signed-in Cloud user can discover Partners and request reviewed early access', async ({
+  page,
+}) => {
+  await mountPartners(page, 'early-access');
+
+  await expect(page.locator('#settings-partners-row')).not.toHaveAttribute('hidden', '');
+  await expect(page.locator('#account-sheet [data-act="partners"]')).not.toHaveAttribute('hidden', '');
+  await expect(page.getByRole('heading', {
+    name: 'Earn 20% on eligible referrals.',
+  })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Join the supervised intake' })).toBeVisible();
+  await expect(page.locator('[data-partners-join], [data-partners-start-kyc], [data-partners-share], [data-partners-payout-button]'))
+    .toHaveCount(0);
+
+  await page.locator('[data-partners-country-open]').click();
+  await page.locator('[data-partners-country-manual-open]').click();
+  await page.locator('[data-partners-country-manual-input]').fill('FR');
+  await page.locator('[data-partners-access-submit]').click();
+
+  await expect(page.getByRole('heading', { name: 'Request sent successfully' })).toBeVisible();
+  await expect(page.getByText('Awaiting review')).toBeVisible();
+  await expect(page.locator('[data-partners-access-request-form]')).toHaveCount(0);
+  await expect(page.locator('[data-partners-join], [data-partners-start-kyc], [data-partners-share], [data-partners-payout-button]'))
+    .toHaveCount(0);
+  const calls = await page.evaluate(() => window.__partnerCalls.accessRequest);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ countryCode: 'FR' });
+  expect(calls[0].idempotencyKey).toMatch(/^norva\.access-request\./);
+});
+
+test('a declined early-access request is terminal and offers support without resubmission', async ({
+  page,
+}) => {
+  await mountPartners(page, 'early-declined');
+
+  await expect(page.getByRole('heading', {
+    name: 'This early-access request was not approved',
+  })).toBeVisible();
+  await expect(page.locator('[data-partners-access-request-form]')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Contact support' }))
+    .toHaveAttribute('href', '/support.html?returnTo=%2Fapp%23partners');
+  await expect(page.locator('[data-partners-join], [data-partners-start-kyc], [data-partners-share], [data-partners-payout-button]'))
+    .toHaveCount(0);
+});
 
 test('individual application stays gated and reaches the explicit hosted-KYC step', async ({
   page,
