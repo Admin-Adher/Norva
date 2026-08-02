@@ -580,6 +580,59 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
   );
 });
 
+test('Didit console probe requires a full-body signature and an explicitly non-production envelope', async () => {
+  const {
+    loadDiditConfig,
+    verifyDiditConsoleTestWebhook,
+  } = bundled('supabase/functions/_shared/didit-partners.ts');
+  const config = loadDiditConfig((name) => diditConfig()[name]);
+  const timestamp = 1785661809;
+  const payload = {
+    session_id: sessionId,
+    status: 'Approved',
+    vendor_data: 'test-vendor-data-123',
+    webhook_type: 'status.updated',
+    timestamp,
+    created_at: timestamp,
+    workflow_id: workflowId,
+    metadata: { test_webhook: true },
+    decision: { status: 'Approved' },
+  };
+  async function headersFor(body) {
+    return new Headers({
+      'X-Timestamp': String(timestamp),
+      'X-Didit-Test-Webhook': 'true',
+      'X-Signature-V2': cryptoNode.createHmac('sha256', webhookSecret)
+        .update(diditCanonicalPayload(body))
+        .digest('hex'),
+    });
+  }
+  const raw = Buffer.from(JSON.stringify(payload, null, 2));
+  assert.equal(await verifyDiditConsoleTestWebhook(
+    new Uint8Array(raw),
+    await headersFor(payload),
+    config,
+    timestamp,
+  ), true);
+
+  const productionLike = { ...payload, event_id: eventId };
+  assert.equal(await verifyDiditConsoleTestWebhook(
+    new Uint8Array(Buffer.from(JSON.stringify(productionLike))),
+    await headersFor(productionLike),
+    config,
+    timestamp,
+  ), false, 'any production envelope field must force the normal reducer path');
+
+  const tampered = await headersFor(payload);
+  tampered.set('X-Signature-V2', '0'.repeat(64));
+  await assert.rejects(() => verifyDiditConsoleTestWebhook(
+    new Uint8Array(raw),
+    tampered,
+    config,
+    timestamp,
+  ));
+});
+
 test('Didit webhook rejects foreign envelopes but preserves signed workflow drift for SQL quarantine', async () => {
   const {
     diditConfigFingerprint,
@@ -1018,14 +1071,20 @@ test('Didit Edge and SQL boundaries require immutable environment bindings', () 
   const webhook = read(
     'supabase/functions/norva-partners-kyc-webhook/index.ts',
   );
-  assert.ok(
-    webhook.indexOf('admin.rpc(') < webhook.indexOf('X-Didit-Test-Webhook'),
-    'the unsigned console-test marker may be considered only after the authenticated event reaches SQL',
-  );
   assert.match(
     webhook,
-    /error\.code === "P0006"[\s\S]*X-Didit-Test-Webhook[\s\S]*test_acknowledged/,
-    'only an authenticated unknown synthetic session may be acknowledged as a console test',
+    /X-Didit-Test-Webhook[\s\S]*verifyDiditConsoleTestWebhook/,
+    'the unsigned transport marker delegates to full-body HMAC verification',
+  );
+  assert.match(
+    read('supabase/functions/_shared/didit-partners.ts'),
+    /metadata\?\.test_webhook !== true[\s\S]*productionEnvelopeFields\.some\(\(key\) => Object\.hasOwn\(raw, key\)\)/,
+    'only a signed console marker with an explicitly non-production envelope may bypass SQL',
+  );
+  assert.doesNotMatch(
+    webhook,
+    /error\.code === "P0006"[\s\S]{0,600}X-Didit-Test-Webhook/,
+    'an unsigned header can never convert an unknown production event into success',
   );
   const migration = read(
     'supabase/migrations/20260730100500_partners_didit_environment_binding.sql',

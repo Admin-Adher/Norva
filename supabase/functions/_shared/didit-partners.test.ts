@@ -5,6 +5,7 @@ import {
   sanitizeDiditCreatedSession,
   sanitizeKycWebhookRpc,
   verifyAndNormalizeDiditWebhook,
+  verifyDiditConsoleTestWebhook,
 } from "./didit-partners.ts";
 import { hmacSha256Hex } from "./partners-crypto.ts";
 
@@ -214,6 +215,69 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     rejected = true;
   }
   assert(rejected, "the envelope-only signature must never authorize KYC data");
+});
+
+Deno.test("Didit console probe is accepted only as a fully signed non-production shape", async () => {
+  const now = 1_785_661_809;
+  const payload = {
+    session_id: "99999999-8888-4777-8666-555555555555",
+    status: "Approved",
+    vendor_data: "test-vendor-data-123",
+    webhook_type: "status.updated",
+    timestamp: now,
+    created_at: now,
+    workflow_id: baseConfig.workflowId,
+    metadata: { test_webhook: true },
+    decision: { status: "Approved" },
+  };
+  const raw = new TextEncoder().encode(JSON.stringify(payload, null, 2));
+  const headers = new Headers({
+    "X-Timestamp": String(now),
+    "X-Didit-Test-Webhook": "true",
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(payload)),
+    ),
+  });
+  assert(
+    await verifyDiditConsoleTestWebhook(raw, headers, baseConfig, now),
+    "the current authenticated console payload must be acknowledged",
+  );
+
+  const withProductionEnvelope = {
+    ...payload,
+    event_id: "12345678-1234-4234-8234-123456789abc",
+  };
+  const productionRaw = new TextEncoder().encode(
+    JSON.stringify(withProductionEnvelope),
+  );
+  const productionHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Didit-Test-Webhook": "true",
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(withProductionEnvelope)),
+    ),
+  });
+  assert(
+    !(await verifyDiditConsoleTestWebhook(
+      productionRaw,
+      productionHeaders,
+      baseConfig,
+      now,
+    )),
+    "a production-like event must never bypass normal event validation",
+  );
+
+  const tampered = new Headers(headers);
+  tampered.set("X-Signature-V2", "0".repeat(64));
+  let rejected = false;
+  try {
+    await verifyDiditConsoleTestWebhook(raw, tampered, baseConfig, now);
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "an unsigned or tampered console probe must fail closed");
 });
 
 function sortJson(value: unknown): unknown {

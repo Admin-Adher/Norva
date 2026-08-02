@@ -551,62 +551,12 @@ export async function verifyAndNormalizeDiditWebhook(
   config: DiditConfig,
   nowEpochSeconds = Math.floor(Date.now() / 1_000),
 ): Promise<DiditWebhookResult> {
-  if (
-    rawBody.byteLength < 2 ||
-    rawBody.byteLength > DIDIT_WEBHOOK_MAX_BYTES
-  ) {
-    throw new DiditContractError();
-  }
-  const timestampHeader = headers.get("X-Timestamp");
-  const signatureV2 = headers.get("X-Signature-V2")?.toLowerCase() ?? "";
-  const rawSignature = headers.get("X-Signature")?.toLowerCase() ?? "";
-  if (
-    !timestampHeader ||
-    !/^\d{10}$/.test(timestampHeader) ||
-    (
-      !HEX_SHA256_PATTERN.test(signatureV2) &&
-      !HEX_SHA256_PATTERN.test(rawSignature)
-    )
-  ) {
-    throw new DiditContractError();
-  }
-  const timestamp = Number(timestampHeader);
-  if (
-    !Number.isSafeInteger(timestamp) ||
-    Math.abs(nowEpochSeconds - timestamp) > DIDIT_WEBHOOK_MAX_AGE_SECONDS
-  ) {
-    throw new DiditContractError();
-  }
-
-  let raw: unknown;
-  try {
-    raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawBody));
-  } catch {
-    throw new DiditContractError();
-  }
-  if (!isRecord(raw)) throw new DiditContractError();
-
-  // Prefer Didit's middleware-safe v2 signature over recursively sorted,
-  // compact, Unicode-preserved JSON. Retain the exact raw-body signature as a
-  // fully authenticated fallback. The envelope-only signature variant is
-  // deliberately never accepted because it does not authenticate the KYC
-  // decision.
-  let signatureVerified = false;
-  if (HEX_SHA256_PATTERN.test(signatureV2)) {
-    const expectedV2 = await hmacSha256Hex(
-      config.webhookSecret,
-      JSON.stringify(sortJsonValue(raw)),
-    );
-    signatureVerified = timingSafeEqualText(expectedV2, signatureV2);
-  }
-  if (!signatureVerified && HEX_SHA256_PATTERN.test(rawSignature)) {
-    const expectedRaw = await hmacSha256Hex(
-      config.webhookSecret,
-      rawBody,
-    );
-    signatureVerified = timingSafeEqualText(expectedRaw, rawSignature);
-  }
-  if (!signatureVerified) throw new DiditContractError();
+  const { raw, timestamp } = await authenticateDiditWebhook(
+    rawBody,
+    headers,
+    config,
+    nowEpochSeconds,
+  );
 
   if (
     raw.webhook_type !== "status.updated" ||
@@ -706,6 +656,117 @@ export async function verifyAndNormalizeDiditWebhook(
     faceMatchApproved,
     payloadHash,
   };
+}
+
+/**
+ * Didit's console currently signs its test payload correctly but omits the
+ * production event/application/environment/version envelope. A probe may be
+ * acknowledged only when both the transport header and the signed JSON mark
+ * it as a test, the configured workflow is exact, and every omitted
+ * production-only field is genuinely absent. No decision from this shape is
+ * ever persisted or treated as KYC evidence.
+ */
+export async function verifyDiditConsoleTestWebhook(
+  rawBody: Uint8Array,
+  headers: Headers,
+  config: DiditConfig,
+  nowEpochSeconds = Math.floor(Date.now() / 1_000),
+): Promise<boolean> {
+  const { raw, timestamp } = await authenticateDiditWebhook(
+    rawBody,
+    headers,
+    config,
+    nowEpochSeconds,
+  );
+  const metadata = isRecord(raw.metadata) ? raw.metadata : null;
+  const productionEnvelopeFields = [
+    "event_id",
+    "application_id",
+    "environment",
+    "workflow_version",
+  ];
+  if (
+    headers.get("X-Didit-Test-Webhook") !== "true" ||
+    metadata?.test_webhook !== true ||
+    productionEnvelopeFields.some((key) => Object.hasOwn(raw, key)) ||
+    raw.webhook_type !== "status.updated" ||
+    raw.timestamp !== timestamp ||
+    uuid(raw.workflow_id) !== config.workflowId ||
+    raw.session_kind === "business" ||
+    Object.hasOwn(raw, "business_session_id") ||
+    Object.hasOwn(raw, "vendor_business_id")
+  ) {
+    return false;
+  }
+  uuid(raw.session_id);
+  normalizeDiditStatus(raw.status);
+  epochSeconds(raw.created_at);
+  return true;
+}
+
+async function authenticateDiditWebhook(
+  rawBody: Uint8Array,
+  headers: Headers,
+  config: DiditConfig,
+  nowEpochSeconds: number,
+): Promise<{ raw: Record<string, unknown>; timestamp: number }> {
+  if (
+    rawBody.byteLength < 2 ||
+    rawBody.byteLength > DIDIT_WEBHOOK_MAX_BYTES
+  ) {
+    throw new DiditContractError();
+  }
+  const timestampHeader = headers.get("X-Timestamp");
+  const signatureV2 = headers.get("X-Signature-V2")?.toLowerCase() ?? "";
+  const rawSignature = headers.get("X-Signature")?.toLowerCase() ?? "";
+  if (
+    !timestampHeader ||
+    !/^\d{10}$/.test(timestampHeader) ||
+    (
+      !HEX_SHA256_PATTERN.test(signatureV2) &&
+      !HEX_SHA256_PATTERN.test(rawSignature)
+    )
+  ) {
+    throw new DiditContractError();
+  }
+  const timestamp = Number(timestampHeader);
+  if (
+    !Number.isSafeInteger(timestamp) ||
+    Math.abs(nowEpochSeconds - timestamp) > DIDIT_WEBHOOK_MAX_AGE_SECONDS
+  ) {
+    throw new DiditContractError();
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawBody));
+  } catch {
+    throw new DiditContractError();
+  }
+  if (!isRecord(raw)) throw new DiditContractError();
+
+  // Prefer Didit's middleware-safe v2 signature over recursively sorted,
+  // compact, Unicode-preserved JSON. Retain the exact raw-body signature as a
+  // fully authenticated fallback. The envelope-only signature variant is
+  // deliberately never accepted because it does not authenticate the KYC
+  // decision.
+  let signatureVerified = false;
+  if (HEX_SHA256_PATTERN.test(signatureV2)) {
+    const expectedV2 = await hmacSha256Hex(
+      config.webhookSecret,
+      JSON.stringify(sortJsonValue(raw)),
+    );
+    signatureVerified = timingSafeEqualText(expectedV2, signatureV2);
+  }
+  if (!signatureVerified && HEX_SHA256_PATTERN.test(rawSignature)) {
+    const expectedRaw = await hmacSha256Hex(
+      config.webhookSecret,
+      rawBody,
+    );
+    signatureVerified = timingSafeEqualText(expectedRaw, rawSignature);
+  }
+  if (!signatureVerified) throw new DiditContractError();
+  return { raw, timestamp };
 }
 
 export function normalizeDiditStatus(value: unknown): DiditStatus {

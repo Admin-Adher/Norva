@@ -4,6 +4,7 @@ import {
   DiditContractError,
   loadDiditConfig,
   sanitizeKycWebhookRpc,
+  verifyDiditConsoleTestWebhook,
   verifyAndNormalizeDiditWebhook,
 } from "../_shared/didit-partners.ts";
 
@@ -54,6 +55,21 @@ Deno.serve(async (req) => {
     const rawBody = new Uint8Array(await req.arrayBuffer());
     let event;
     try {
+      if (
+        req.headers.get("X-Didit-Test-Webhook") === "true" &&
+        await verifyDiditConsoleTestWebhook(
+          rawBody,
+          req.headers,
+          DIDIT_CONFIG,
+        )
+      ) {
+        log("info", correlationId, "test_acknowledged");
+        return json(
+          200,
+          { received: true, test: true },
+          correlationId,
+        );
+      }
       event = await verifyAndNormalizeDiditWebhook(
         rawBody,
         req.headers,
@@ -92,18 +108,6 @@ Deno.serve(async (req) => {
         return problem(409, "webhook_conflict", correlationId);
       }
       if (error.code === "P0006") {
-        // The console's test marker is not part of the signed body. It may
-        // therefore convert only an already authenticated, unknown synthetic
-        // session into a successful probe. A known session always reaches the
-        // reducer even if an intermediary adds this unsigned header.
-        if (req.headers.get("X-Didit-Test-Webhook") === "true") {
-          log("info", correlationId, "test_acknowledged");
-          return json(
-            200,
-            { received: true, test: true },
-            correlationId,
-          );
-        }
         log("warn", correlationId, "resource_unknown");
         // Didit retries only unknown/not-found and server failures. A valid,
         // signed event can arrive before the session-record transaction is
