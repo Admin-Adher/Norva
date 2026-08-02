@@ -337,6 +337,37 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     /v_signature = any \(array\[[\s\S]*public\.admin_partners_revolut_beneficiary_binding_authorize\(uuid,text,text,text,text,integer,text,text\)[\s\S]*retired split\/manual Revolut routine remains callable/,
     'restore verification must keep the legacy account-UUID beneficiary authorizer closed',
   );
+  const privateExecuteError = verifier.indexOf(
+    'unexpected private Partners EXECUTE privilege',
+  );
+  const privateExecuteAllowlistStart = verifier.lastIndexOf(
+    'from unnest(array[',
+    privateExecuteError,
+  );
+  const privateExecuteAllowlistEnd = verifier.indexOf(
+    ']) allowed(signature)',
+    privateExecuteAllowlistStart,
+  );
+  const privateExecuteAllowlist = verifier.slice(
+    privateExecuteAllowlistStart,
+    privateExecuteAllowlistEnd,
+  );
+  for (const signature of [
+    'affiliate_private.admin_partners_access_requests(integer,integer,text,text)',
+    'affiliate_private.admin_partners_access_request_decide(uuid,text,timestamp with time zone,text)',
+    'affiliate_private.admin_partners_detail_by_public_id(text)',
+    'affiliate_private.admin_partners_fiscal_profiles(integer,integer,text,text)',
+    'affiliate_private.admin_partners_fiscal_review_by_public_id(text,text,text,text,text,text)',
+    'affiliate_private.admin_partners_payout_onboarding_requests(integer,integer,text,text)',
+    'affiliate_private.admin_partners_payout_onboarding_request_decide(text,text,text,text)',
+    'affiliate_private.admin_partners_payout_onboarding_contact(text,text,uuid)',
+    'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize_by_request(text,text,text,text,integer,text,text)',
+  ]) {
+    assert.ok(
+      privateExecuteAllowlist.includes(`'${signature}'`),
+      `${signature} must remain in the audited authenticated private-RPC allowlist`,
+    );
+  }
   assert.match(
     verifier,
     /partners_worker_revolut_payout_lease\(text,text,bigint,integer,integer\)/,
