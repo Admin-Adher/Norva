@@ -47,8 +47,8 @@ export async function onRequest({ request, env }) {
       body: internal.body,
       redirect: 'error',
     });
-  } catch {
-    return unavailable('30', request, 'upstream-fetch');
+  } catch (error) {
+    return unavailable('30', request, referralFetchProbe(error));
   }
   if (!upstream.ok) {
     try {
@@ -109,4 +109,27 @@ function unavailable(retryAfter = '30', request = null, reason = '') {
     status: 503,
     headers: publicHeaders(extra),
   });
+}
+
+function referralFetchProbe(error) {
+  const name = String(error?.name || 'error').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  const cause = String(error?.cause?.code || error?.code || '').toLowerCase();
+  const detail = `${name}-${cause}-${message}`;
+  const category = [
+    ['certificate', 'tls'],
+    ['tls', 'tls'],
+    ['dns', 'dns'],
+    ['resolve', 'dns'],
+    ['redirect', 'redirect'],
+    ['1042', 'same-zone'],
+    ['same zone', 'same-zone'],
+    ['cannot load', 'cannot-load'],
+    ['network connection lost', 'network-lost'],
+    ['fetch failed', 'fetch-failed'],
+    ['connection refused', 'refused'],
+    ['timed out', 'timeout'],
+    ['timeout', 'timeout'],
+  ].find(([needle]) => detail.includes(needle))?.[1] || name.replace(/[^a-z0-9-]/g, '').slice(0, 20) || 'error';
+  return `upstream-fetch-${category}`;
 }
