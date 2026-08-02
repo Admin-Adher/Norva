@@ -45,7 +45,10 @@ export async function onRequest({ request, env }) {
       method: 'POST',
       headers: internal.headers,
       body: internal.body,
-      redirect: 'error',
+      // Never forward the internal HMAC headers across a redirect. A manual
+      // response also lets the fail-closed path distinguish origin routing
+      // mistakes from transport failures without exposing the Location.
+      redirect: 'manual',
     });
   } catch (error) {
     return unavailable('30', request, referralFetchProbe(error));
