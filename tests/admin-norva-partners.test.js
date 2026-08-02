@@ -37,6 +37,8 @@ function loadAdminPage(documentOverride = null, fetchOverride = null) {
     console: { log() {}, warn() {}, error() {} },
     setTimeout,
     clearTimeout,
+    AbortController: globalThis.AbortController,
+    AbortSignal: globalThis.AbortSignal,
     URL,
     Intl,
     Date,
@@ -44,6 +46,8 @@ function loadAdminPage(documentOverride = null, fetchOverride = null) {
     Set,
     Promise,
     TextEncoder,
+    AbortController,
+    DOMException,
   });
   window.window = window;
   vm.runInContext(source, context, { filename: 'public/js/pages/AdminPage.js' });
@@ -93,24 +97,26 @@ test('Admin Partners has a whitelisted overview and UUID-bounded detail route', 
 });
 
 test('Admin Partners reads only dedicated sanitized RPCs', () => {
-  assert.match(source, /this\._rpc\('admin_partners_overview'\)/);
-  assert.match(source, /this\._rpc\('admin_partners_accounts',\s*\{/);
+  assert.match(source, /_partnersLoadModule\('overview', 'admin_partners_overview'/);
+  assert.match(source, /_partnersLoadModule\('accounts', 'admin_partners_accounts'/);
   assert.match(source, /this\._rpc\('admin_partners_detail',\s*\{\s*p_account_id:\s*accountId\s*\}\)/);
-  assert.match(source, /this\._rpc\('admin_partners_monitoring'\)/);
+  assert.match(source, /'monitoring', 'admin_partners_monitoring'/);
   assert.match(source, /revenuecat_transfer:\s*'Transferts RevenueCat'/);
   assert.match(source, /revenuecat_transfer_dead_letter/);
   assert.match(source, /revenuecat_transfer_partial_aged/);
   assert.match(source, /revenuecat_transfer_quarantined_aged/);
   assert.match(source, /revenuecat_transfer_partner_dead_letter/);
-  assert.match(source, /this\._rpc\('admin_partners_configuration'\)/);
-  assert.match(source, /this\._rpc\('admin_partners_analytics',\s*\{\s*p_days:\s*30\s*\}\)/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_payout_status'\)/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_manual_batches',\s*\{/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_reconciliation_queue',\s*\{/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_reconciliation_incidents',\s*\{/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_return_queue',\s*\{/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_manual_controls_queue',\s*\{/);
-  assert.match(source, /this\._rpc\('admin_partners_revolut_late_completion_queue',\s*\{/);
+  for (const rpc of [
+    'admin_partners_configuration',
+    'admin_partners_analytics',
+    'admin_partners_revolut_payout_status',
+    'admin_partners_revolut_manual_batches',
+    'admin_partners_revolut_reconciliation_queue',
+    'admin_partners_revolut_reconciliation_incidents',
+    'admin_partners_revolut_return_queue',
+    'admin_partners_revolut_manual_controls_queue',
+    'admin_partners_revolut_late_completion_queue',
+  ]) assert.match(source, new RegExp(`['"]${rpc}['"]`));
   assert.match(source, /this\._rpc\('admin_partners_revolut_profile_status',\s*\{/);
   assert.match(source, /norva-partners-revolut-payout\/manual\/beneficiaries\/propose/);
   assert.match(source, /PROPOSE-BENEFICIARY:/);
@@ -179,8 +185,8 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   assert.match(section, /_partnersTypedConfirmation/);
   assert.match(section, /_partnersJustification/);
   assert.match(section, /Action refusée ou indisponible/);
-  assert.match(section, /capabilityEnvelope\?\.can_manage === true/);
-  assert.match(section, /capabilityEnvelope\?\.can_manage_release === true/);
+  assert.match(section, /data\?\.can_manage === true/);
+  assert.match(section, /data\?\.can_manage_release === true/);
   assert.match(section, /this\._partnersCanManageCapabilities !== true/);
   assert.match(section, /this\._partnersCanUseReleaseControl\(kind, key, enabled\)/);
   assert.match(section, /Production en mode manuel/);
@@ -239,8 +245,17 @@ test('Admin Partners renders Revolut Basic manual as production and keeps the AP
     innerHTML: '',
     removeAttribute() {},
   };
+  const routes = {
+    innerHTML: '',
+    removeAttribute() {},
+  };
   const AdminPage = loadAdminPage({
-    getElementById(id) { return id === 'partners-admin-revolut' ? revolut : null; },
+    getElementById(id) {
+      return {
+        'partners-admin-revolut': revolut,
+        'partners-admin-routes': routes,
+      }[id] || null;
+    },
     querySelector() { return null; },
     querySelectorAll() { return []; },
   });
@@ -276,8 +291,10 @@ test('Admin Partners renders Revolut Basic manual as production and keeps the AP
   assert.match(revolut.innerHTML, /Gate adaptateur API non validé/);
   assert.match(revolut.innerHTML, /saisies en attente de relevé/);
   assert.match(revolut.innerHTML, /relevés à valider/);
-  assert.match(revolut.innerHTML, /FR · EUR/);
+  assert.match(routes.innerHTML, /FR · EUR/);
+  assert.match(routes.innerHTML, />1<\/strong><span>corridors configurés/);
   assert.match(revolut.innerHTML, /Aucun virement n’est déclenché automatiquement/);
+  assert.doesNotMatch(source, /data\.routes\.slice\(0,\s*50\)/);
 });
 
 test('Admin partner detail renders only sanitized Revolut profile status', () => {
@@ -1199,7 +1216,7 @@ test('Admin Partners never renders an account UUID as the visible partner refere
     source.indexOf('// ── Page: Norva Partners'),
     source.indexOf('// ── Page: Providers'),
   );
-  assert.match(section, /data-partner-id="\$\{AdminPage\.esc\(id\)\}"/);
+  assert.match(section, /data-partner-id="\$\{AdminPage\.esc\(row\.id\)\}"/);
   assert.match(section, /const ref = String\(row\.partner_key \|\| 'Partenaire'\)/);
   assert.doesNotMatch(section, /\$\{AdminPage\.esc\(row\.account_id\)\}/);
   assert.doesNotMatch(section, /<dd>\$\{AdminPage\.esc\(accountId\)\}/);
@@ -1336,4 +1353,261 @@ test('Admin Partners keeps financial analytics scoped to exact minor units and c
   assert.match(analytics.innerHTML, /987,65 USD/);
   assert.match(analytics.innerHTML, /Traitement des commissions incomplet/);
   assert.doesNotMatch(analytics.innerHTML, /9007199254740992/);
+});
+
+test('Admin Partners exposes five persistent internal views in the required order', () => {
+  const section = source.slice(
+    source.indexOf('// ── Page: Norva Partners'),
+    source.indexOf('// ── Page: Providers'),
+  );
+  const labels = [
+    'Vue d’ensemble',
+    'Partenaires',
+    'Risque/KYC',
+    'Finance/Revolut',
+    'Configuration',
+  ];
+  let cursor = -1;
+  for (const label of labels) {
+    const next = section.indexOf(`'${label}'`);
+    assert.ok(next > cursor, `${label} must keep its requested position`);
+    cursor = next;
+  }
+  assert.match(section, /role="tablist" aria-label="Vues Norva Partners"/);
+  assert.match(section, /role="tabpanel"/);
+  assert.match(source, /\.partners-workspace-nav\{position:sticky/);
+  assert.match(source, /\['ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
+});
+
+test('Admin Partners module coordinator rejects stale responses', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersPageGeneration = 1;
+  const pending = [];
+  const signals = [];
+  page._rpc = (_fn, _params, options = {}) => {
+    signals.push(options.signal);
+    return new Promise((resolve) => pending.push(resolve));
+  };
+  const rendered = [];
+
+  const first = page._partnersLoadModule(
+    'accounts',
+    'admin_partners_accounts',
+    {},
+    (value) => rendered.push(value.version),
+    { force: true, timeoutMs: 500 },
+  );
+  const second = page._partnersLoadModule(
+    'accounts',
+    'admin_partners_accounts',
+    {},
+    (value) => rendered.push(value.version),
+    { force: true, timeoutMs: 500 },
+  );
+  pending[1]({ version: 'new' });
+  await second;
+  pending[0]({ version: 'old' });
+  await first;
+
+  assert.deepEqual(rendered, ['new']);
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[1].aborted, false);
+});
+
+test('Admin Partners module timeout is isolated and exposes a sanitized retry', async () => {
+  const attributes = new Map();
+  const host = {
+    innerHTML: '',
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    removeAttribute(name) { attributes.delete(name); },
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-monitoring' ? host : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersPageGeneration = 1;
+  page._rpc = (_fn, _params, options = {}) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => {
+      const error = new Error('provider payload must never be rendered');
+      error.name = 'AbortError';
+      reject(error);
+    }, { once: true });
+  });
+
+  const result = await page._partnersLoadModule(
+    'monitoring',
+    'admin_partners_monitoring',
+    {},
+    () => assert.fail('a timed-out module must not render data'),
+    {
+      force: true,
+      timeoutMs: 5,
+      targetId: 'partners-admin-monitoring',
+      title: 'Supervision',
+    },
+  );
+
+  assert.equal(result, null);
+  assert.equal(attributes.has('aria-busy'), false);
+  assert.match(host.innerHTML, /Supervision indisponible/);
+  assert.match(host.innerHTML, /data-partners-retry="monitoring"/);
+  assert.doesNotMatch(host.innerHTML, /provider payload/);
+});
+
+test('Admin Partners renders all Revolut corridors with local filtering and pagination', () => {
+  const revolut = { innerHTML: '', removeAttribute() {} };
+  const routes = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-revolut': revolut,
+        'partners-admin-routes': routes,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const configured = Array.from({ length: 66 }, (_, index) => ({
+    country_code: String.fromCharCode(65 + Math.floor(index / 26))
+      + String.fromCharCode(65 + (index % 26)),
+    currency: 'USD',
+    status: index === 65 ? 'active' : 'disabled',
+    execution_adapter: 'revolut_manual',
+    updated_at: '2026-08-01T10:00:00Z',
+  }));
+  page._renderPartnersRevolutStatus({
+    schema_version: 1,
+    provider: 'revolut_business',
+    production_mode: 'revolut_manual',
+    plan: 'basic',
+    api_enabled: false,
+    api_adapter_verified: false,
+    routes: configured,
+    counts: {
+      manual_batches_open: 0,
+      manual_batches_exception: 0,
+      reconciliation_pending: 0,
+      manual_statement_pending: 0,
+      statement_matched_review_pending: 0,
+      api_dead_letter: 0,
+    },
+  });
+
+  assert.match(routes.innerHTML, />66<\/strong><span>corridors configurés/);
+  assert.match(routes.innerHTML, />1<\/strong><span>actifs/);
+  assert.match(routes.innerHTML, />65<\/strong><span>désactivés/);
+  assert.equal((routes.innerHTML.match(/<li class="partners-control-item">/g) || []).length, 12);
+  assert.match(routes.innerHTML, /CN · USD/,
+    'the single active route must be promoted to the first page');
+
+  const seen = new Set();
+  for (let pageIndex = 0; pageIndex < 6; pageIndex += 1) {
+    page._partnersRoutePage = pageIndex;
+    page._renderPartnersRoutes();
+    for (const match of routes.innerHTML.matchAll(/<strong>([A-Z]{2}) · USD<\/strong>/g)) {
+      seen.add(match[1]);
+    }
+  }
+  assert.equal(seen.size, 66);
+  page._partnersRouteStatus = 'active';
+  page._partnersRoutePage = 0;
+  page._renderPartnersRoutes();
+  assert.equal((routes.innerHTML.match(/<li class="partners-control-item">/g) || []).length, 1);
+  assert.doesNotMatch(routes.innerHTML, /Route désactivée/);
+});
+
+test('Admin Partners uses a semantic desktop table and explicit mobile cards', () => {
+  const list = { innerHTML: '', removeAttribute() {} };
+  const preview = { innerHTML: '', removeAttribute() {} };
+  const count = { textContent: '' };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return {
+        'partners-admin-list': list,
+        'partners-admin-list-preview': preview,
+        'partners-admin-count': count,
+      }[id] || null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  new AdminPage({})._renderPartnersAdminAccounts([{
+    account_id: '11111111-1111-4111-8111-111111111111',
+    partner_key: 'partner-01',
+    status: 'active',
+    verification_status: 'verified',
+    contract_status: 'accepted',
+    link_status: 'active',
+    created_at: '2026-08-01T10:00:00Z',
+  }], 1);
+
+  assert.match(list.innerHTML, /<table class="partners-table">/);
+  assert.match(list.innerHTML, /<caption>Comptes partenaires correspondant aux filtres<\/caption>/);
+  assert.match(list.innerHTML, /<th scope="col">Partenaire<\/th>/);
+  assert.match(list.innerHTML, /<button type="button" class="partner-open"/);
+  assert.match(list.innerHTML, /<ul id="partners-account-cards" class="partners-account-cards" role="list">/);
+  assert.match(list.innerHTML, /<dl class="partners-account-facts">/);
+  assert.doesNotMatch(list.innerHTML, /role="button" tabindex="0"/);
+  assert.match(source, /@media\(max-width:700px\)[\s\S]*\.partners-account-cards\{display:grid/);
+});
+
+test('Admin Partners filters and actions refresh modules without rebuilding the page', () => {
+  const section = source.slice(
+    source.indexOf('// ── Page: Norva Partners'),
+    source.indexOf('// ── Page: Providers'),
+  );
+  assert.doesNotMatch(section, /if \(this\._route === 'partners'\) this\._pagePartners\(\)/);
+  assert.match(source, /this\._partnersLoadAccounts\(\{ force: true, preserveFocus: 'search' \}\)/);
+  assert.match(source, /await this\._partnersRefreshVisibleView\(\)/);
+  assert.match(section, /this\._partnersRequests\.get\(key\)\?\.token === token/);
+  assert.match(section, /controller\.abort\?\.\(\)/);
+});
+
+test('Admin Partners starts Finance modules without waiting for capabilities', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const started = [];
+  let releaseCapabilities;
+  page._partnersLoadCapabilities = () => new Promise((resolve) => {
+    releaseCapabilities = resolve;
+  });
+  page._partnersLoadModule = (key) => {
+    started.push(key);
+    return Promise.resolve(key);
+  };
+
+  const loading = page._partnersLoadFinanceView();
+  assert.ok(started.includes('finance'));
+  assert.ok(started.includes('revolut'));
+  assert.ok(started.includes('incidents'));
+  releaseCapabilities();
+  await loading;
+});
+
+test('Admin Partners focus descriptors ignore transient action state', () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const descriptor = page._partnersCaptureFocus({
+    id: '',
+    dataset: {
+      partnersAction: 'capability',
+      partnersCapability: 'finance',
+      partnersEnabled: 'true',
+      partnersBusy: 'true',
+    },
+  });
+
+  assert.equal(JSON.stringify(descriptor), JSON.stringify({
+    id: '',
+    data: {
+      partnersAction: 'capability',
+      partnersCapability: 'finance',
+    },
+  }));
 });
