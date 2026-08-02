@@ -163,12 +163,12 @@ test('Kong applies bounded IP burst limits on exact POST routes before the gener
   for (const spec of [
     {
       name: 'functions-v1-partners-fiscal-profile-write',
-      path: '~^/functions/v1/norva-partners/fiscal-profile$',
+      path: '~/functions/v1/norva-partners/fiscal-profile$',
       upstream: 'http://edge-functions-pool/norva-partners/fiscal-profile',
     },
     {
       name: 'functions-v1-partners-payout-onboarding-write',
-      path: '~^/functions/v1/norva-partners/payout-onboarding$',
+      path: '~/functions/v1/norva-partners/payout-onboarding$',
       upstream: 'http://edge-functions-pool/norva-partners/payout-onboarding',
     },
   ]) {

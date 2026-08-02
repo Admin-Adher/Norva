@@ -374,7 +374,7 @@ services:
         methods:
           - POST
         paths:
-          - '~^/functions/v1/norva-partners/fiscal-profile$'
+          - '~/functions/v1/norva-partners/fiscal-profile$'
     plugins:
       - name: cors
       - name: rate-limiting
@@ -397,7 +397,7 @@ services:
         methods:
           - POST
         paths:
-          - '~^/functions/v1/norva-partners/payout-onboarding$'
+          - '~/functions/v1/norva-partners/payout-onboarding$'
     plugins:
       - name: cors
       - name: rate-limiting
