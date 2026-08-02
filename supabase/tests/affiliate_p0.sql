@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(211);
+select extensions.plan(225);
 
 select extensions.ok(
   exists (
@@ -433,7 +433,7 @@ select extensions.throws_ok(
 );
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
 
 select extensions.is(
   public.admin_partners_capabilities() ->> 'can_manage',
@@ -2247,8 +2247,19 @@ select extensions.is(
   jsonb_array_length(
     public.admin_partners_configuration() -> 'release_flags'
   ),
-  5,
-  'Admin configuration exposes the five managed flags without audit actors'
+  6,
+  'Admin configuration exposes all six managed flags without audit actors'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      public.admin_partners_configuration() -> 'release_flags'
+    ) flag
+    where flag ->> 'key' = 'partners_revolut_api_enabled'
+      and flag ->> 'enabled' = 'false'
+  ),
+  'Admin configuration explicitly exposes the fail-closed Revolut API flag'
 );
 select extensions.ok(
   exists (
@@ -2458,7 +2469,7 @@ from affiliate_private.affiliate_accounts account
 where account.user_id = '10000000-0000-4000-8000-000000000002';
 
 set local request.jwt.claims =
-  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
 set local role authenticated;
 select public.admin_partners_capability_set(
   '10000000-0000-4000-8000-000000000005',
@@ -4660,6 +4671,229 @@ select extensions.is(
   'true',
   'an identical eligibility retry replays after later ledger evolution'
 );
+reset role;
+
+-- P0 operator-read and AAL2 regression matrix.
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+set local role authenticated;
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000003',
+      'risk',
+      true,
+      'AAL1 capability mutation regression probe.'
+    )
+  $$,
+  '42501',
+  'Partners capability mutation requires AAL2',
+  'capability delegation fails closed without an AAL2 session'
+);
+
+reset role;
+insert into affiliate_private.affiliate_admin_capabilities (
+  user_id,
+  capability,
+  enabled,
+  granted_by_pseudonym,
+  justification,
+  updated_at
+)
+values (
+  '10000000-0000-4000-8000-000000000003',
+  'risk',
+  true,
+  repeat('9', 64),
+  'pgTAP risk-only operator read fixture.',
+  now()
+)
+on conflict (user_id, capability) do update
+set
+  enabled = excluded.enabled,
+  granted_by_pseudonym = excluded.granted_by_pseudonym,
+  justification = excluded.justification,
+  updated_at = excluded.updated_at;
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000003","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+
+select extensions.is(
+  public.admin_partners_overview() ->> 'schema_version',
+  '1',
+  'a Risk-only operator can read the shared sanitized overview'
+);
+select extensions.is(
+  public.admin_partners_configuration() ->> 'schema_version',
+  '1',
+  'a Risk-only operator can read shared Partners configuration'
+);
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+
+select extensions.is(
+  public.admin_partners_overview() ->> 'schema_version',
+  '1',
+  'a Finance-only operator can read the shared sanitized overview'
+);
+select extensions.is(
+  public.admin_partners_configuration() ->> 'schema_version',
+  '1',
+  'a Finance-only operator can read shared Partners configuration'
+);
+
+reset role;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_program_create(
+      'p0-aal1-denied',
+      '{"USD":1000}'::jsonb,
+      'partners-terms-p0',
+      'partners-disclosure-p0',
+      now() + interval '10 minutes',
+      'AAL1 program creation regression probe.'
+    )
+  $$,
+  '42501',
+  'Partners program mutation requires AAL2',
+  'programme creation fails closed without an AAL2 session'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_program_activate(
+      'p0-test-v1',
+      'ACTIVATE:p0-test-v1',
+      'AAL1 program activation regression probe.'
+    )
+  $$,
+  '42501',
+  'Partners program mutation requires AAL2',
+  'programme activation fails closed without an AAL2 session'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+select extensions.is(
+  public.admin_partners_program_create(
+    'p0-aal2-wrapper',
+    '{"USD":1000}'::jsonb,
+    'partners-terms-p0',
+    'partners-disclosure-p0',
+    now() + interval '10 minutes',
+    'AAL2 program creation delegation probe.'
+  ) ->> 'action',
+  'program_draft_created',
+  'an AAL2 programme mutation delegates to the versioned implementation'
+);
+
+reset role;
+select extensions.ok(
+  position(
+    'live payout cycle creation requires AAL2' in pg_get_functiondef(
+      'affiliate_private.guard_revolut_live_payout_cycle()'::regprocedure
+    )
+  ) > 0
+  and position(
+    'live payout cycle approval requires AAL2' in pg_get_functiondef(
+      'affiliate_private.guard_revolut_live_payout_cycle()'::regprocedure
+    )
+  ) > 0
+  and exists (
+    select 1
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid =
+        'affiliate_private.affiliate_payout_cycles'::regclass
+      and trigger_row.tgname =
+        'affiliate_payout_cycles_live_promotion_aal2'
+      and not trigger_row.tgisinternal
+  ),
+  'all live create, promote and approve boundaries require AAL2'
+);
+
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000005","role":"authenticated","app_metadata":{"role":"admin"}}';
+set local role authenticated;
+
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_payout_cycle_create(%L,%L,%L,true,%L,%L)',
+    current_date - 140,
+    current_date - 111,
+    'USD',
+    'CREATE:' || (current_date - 140)::text || ':'
+      || (current_date - 111)::text || ':USD:LIVE',
+    'AAL1 live payout creation regression probe.'
+  ),
+  '42501',
+  'live payout cycle creation requires AAL2',
+  'Finance cannot create a live payout cycle in AAL1'
+);
+select extensions.is(
+  public.admin_partners_payout_cycle_create(
+    current_date - 100,
+    current_date - 71,
+    'USD',
+    false,
+    'CREATE:' || (current_date - 100)::text || ':'
+      || (current_date - 71)::text || ':USD:DRY',
+    'AAL1 dry payout cycle regression probe.'
+  ) ->> 'action',
+  'payout_cycle_created',
+  'Finance can still create a dry-run payout cycle in AAL1'
+);
+
+reset role;
+insert into partners_test_state (state_key, state_value)
+select 'payout_aal2_dry_cycle', cycle.cycle_key
+from affiliate_private.affiliate_payout_cycles cycle
+where cycle.period_start = current_date - 100
+  and cycle.period_end = current_date - 71
+  and cycle.currency = 'USD'
+on conflict (state_key) do update
+set state_value = excluded.state_value;
+
+set local role authenticated;
+select extensions.is(
+  public.admin_partners_payout_cycle_approve(
+    (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_aal2_dry_cycle'
+    ),
+    'APPROVE:' || (
+      select state_value
+      from partners_test_state
+      where state_key = 'payout_aal2_dry_cycle'
+    ),
+    'AAL1 dry payout approval regression probe.'
+  ) ->> 'action',
+  'payout_cycle_approved',
+  'Finance can still approve a dry-run payout cycle in AAL1'
+);
+select extensions.throws_ok(
+  format(
+    'select public.admin_partners_payout_cycle_create(%L,%L,%L,true,%L,%L)',
+    current_date - 100,
+    current_date - 71,
+    'USD',
+    'CREATE:' || (current_date - 100)::text || ':'
+      || (current_date - 71)::text || ':USD:LIVE',
+    'AAL1 live promotion regression probe.'
+  ),
+  '42501',
+  'live payout cycle promotion requires AAL2',
+  'Finance cannot promote a dry payout cycle to live in AAL1'
+);
+
 reset role;
 
 select * from extensions.finish();

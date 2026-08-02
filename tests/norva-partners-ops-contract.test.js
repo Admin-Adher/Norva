@@ -312,6 +312,11 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /admin_feature_flags_revolut_api_guard/);
   assert.match(
     verifier,
+    /affiliate_payout_cycles_live_promotion_aal2[\s\S]*affiliate_payout_cycles[\s\S]*guard_partners_payout_live_promotion_aal2/,
+    'restore drill must reject a missing or rewired DRY-to-LIVE AAL2 guard',
+  );
+  assert.match(
+    verifier,
     /affiliate_revolut_payout_executions_reference[\s\S]*affiliate_revolut_statement_rows_reference/,
   );
   assert.match(verifier, /\^NORVA-\[A-F0-9\]\{12\}\$/);

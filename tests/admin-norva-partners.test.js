@@ -1419,6 +1419,37 @@ test('Admin Partners module coordinator rejects stale responses', async () => {
   assert.equal(signals[1].aborted, false);
 });
 
+test('Admin Partners renders capabilities independently when overview is unavailable', async () => {
+  const attributes = new Map([['aria-busy', 'true']]);
+  const readiness = {
+    innerHTML: '<div>Chargement des capacités…</div>',
+    removeAttribute(name) { attributes.delete(name); },
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-readiness' ? readiness : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const envelope = {
+    schema_version: 1,
+    can_manage: false,
+    can_manage_release: false,
+    capabilities: { support: false, risk: false, finance: true },
+  };
+  page._partnersLoadModule = (_key, _fn, _params, render) => {
+    render(envelope);
+    return Promise.resolve(envelope);
+  };
+
+  await page._partnersLoadCapabilities();
+
+  assert.equal(attributes.has('aria-busy'), false);
+  assert.match(readiness.innerHTML, /Finance/);
+  assert.match(readiness.innerHTML, /Capacité serveur disponible/);
+  assert.doesNotMatch(readiness.innerHTML, /Chargement/);
+});
+
 test('Admin Partners module timeout is isolated and exposes a sanitized retry', async () => {
   const attributes = new Map();
   const host = {
@@ -1457,7 +1488,7 @@ test('Admin Partners module timeout is isolated and exposes a sanitized retry', 
 
   assert.equal(result, null);
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(host.innerHTML, /Supervision indisponible/);
+  assert.match(host.innerHTML, /Supervision : indisponible/);
   assert.match(host.innerHTML, /data-partners-retry="monitoring"/);
   assert.doesNotMatch(host.innerHTML, /provider payload/);
 });
@@ -1767,7 +1798,7 @@ test('Admin Partners timeout settles even when the transport ignores AbortSignal
 
   assert.equal(result, null);
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(host.innerHTML, /Supervision indisponible/);
+  assert.match(host.innerHTML, /Supervision : indisponible/);
   assert.doesNotMatch(host.innerHTML, /partners_module_timeout/);
 });
 

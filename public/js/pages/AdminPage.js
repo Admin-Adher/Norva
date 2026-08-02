@@ -4599,7 +4599,7 @@ class AdminPage {
         const target = document.getElementById(targetId);
         if (!target) return;
         target.removeAttribute('aria-busy');
-        target.innerHTML = `<div class="admin-err" role="status"><strong>${AdminPage.esc(title || 'Donnée')} indisponible.</strong>
+        target.innerHTML = `<div class="admin-err" role="status"><strong>${AdminPage.esc(title || 'Donnée')} : indisponible.</strong>
           <span>Aucune valeur n’est supposée et aucune action n’a été exécutée.</span>
           <button type="button" class="partners-action" data-partners-retry="${AdminPage.esc(key)}">Réessayer</button></div>`;
         if (key === 'accounts') {
@@ -4656,9 +4656,14 @@ class AdminPage {
         return this._partnersLoadModule('capabilities', 'admin_partners_capabilities', {}, (data) => {
             this._partnersApplyCapabilities(data);
             const readiness = document.getElementById('partners-admin-readiness');
-            if (readiness && data?.schema_version !== 1) {
+            if (readiness) {
                 readiness.removeAttribute('aria-busy');
-                readiness.innerHTML = this._partnersCapabilityCards({});
+                const valid = data?.schema_version === 1 && data?.capabilities
+                    && typeof data.capabilities === 'object';
+                readiness.innerHTML = this._partnersCapabilityCards(
+                    valid ? data.capabilities : {},
+                    valid && data?.can_manage === true
+                );
             }
         }, { force, targetId: 'partners-admin-readiness', title: 'Capacités Partners' });
     }

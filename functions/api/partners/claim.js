@@ -80,7 +80,9 @@ export async function onRequest({ request, env }) {
         Origin: requestUrl.origin,
       },
       body: JSON.stringify({ claimToken }),
-      redirect: 'error',
+      // Keep the bearer token and opaque claim token on the configured
+      // origin. Redirect responses are handled as non-success below.
+      redirect: 'manual',
     });
   } catch {
     return response(

@@ -36,7 +36,7 @@ export async function onRequest({ request, env }) {
       secret: config.edgeHmacSecret,
     });
   } catch {
-    return unavailable('30', request, 'request-signing');
+    return unavailable('30');
   }
 
   let upstream;
@@ -46,12 +46,11 @@ export async function onRequest({ request, env }) {
       headers: internal.headers,
       body: internal.body,
       // Never forward the internal HMAC headers across a redirect. A manual
-      // response also lets the fail-closed path distinguish origin routing
-      // mistakes from transport failures without exposing the Location.
+      // response keeps every redirect fail-closed at the response boundary.
       redirect: 'manual',
     });
-  } catch (error) {
-    return unavailable('30', request, referralFetchProbe(error));
+  } catch {
+    return unavailable('30');
   }
   if (!upstream.ok) {
     try {
@@ -59,15 +58,11 @@ export async function onRequest({ request, env }) {
     } catch {
       // Public response remains generic.
     }
-    return unavailable(
-      upstream.status === 429 ? '60' : '30',
-      request,
-      `upstream-${upstream.status}`,
-    );
+    return unavailable(upstream.status === 429 ? '60' : '30');
   }
   const contentType = upstream.headers.get('Content-Type') || '';
   if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
-    return unavailable('30', request, 'upstream-content-type');
+    return unavailable('30');
   }
   let result;
   try {
@@ -77,7 +72,7 @@ export async function onRequest({ request, env }) {
     }
     result = sanitizeResolveResponse(JSON.parse(text));
   } catch {
-    return unavailable('30', request, 'upstream-contract');
+    return unavailable('30');
   }
   if (!result.accepted) {
     return redirect(config.redirectUrl, 'unavailable');
@@ -97,42 +92,9 @@ function redirect(base, state, extra = {}) {
   });
 }
 
-function unavailable(retryAfter = '30', request = null, reason = '') {
-  const extra = { 'Retry-After': retryAfter };
-  try {
-    const hostname = new URL(request?.url || '').hostname;
-    if (/^[a-f0-9]{8}\.norva-web\.pages\.dev$/i.test(hostname)
-      && /^[a-z0-9-]{1,32}$/.test(reason)) {
-      extra['X-Norva-Referral-Probe'] = reason;
-    }
-  } catch {
-    // Diagnostics are optional and never change the public failure contract.
-  }
+function unavailable(retryAfter = '30') {
   return new Response('Referral attribution is temporarily unavailable.', {
     status: 503,
-    headers: publicHeaders(extra),
+    headers: publicHeaders({ 'Retry-After': retryAfter }),
   });
-}
-
-function referralFetchProbe(error) {
-  const name = String(error?.name || 'error').toLowerCase();
-  const message = String(error?.message || '').toLowerCase();
-  const cause = String(error?.cause?.code || error?.code || '').toLowerCase();
-  const detail = `${name}-${cause}-${message}`;
-  const category = [
-    ['certificate', 'tls'],
-    ['tls', 'tls'],
-    ['dns', 'dns'],
-    ['resolve', 'dns'],
-    ['redirect', 'redirect'],
-    ['1042', 'same-zone'],
-    ['same zone', 'same-zone'],
-    ['cannot load', 'cannot-load'],
-    ['network connection lost', 'network-lost'],
-    ['fetch failed', 'fetch-failed'],
-    ['connection refused', 'refused'],
-    ['timed out', 'timeout'],
-    ['timeout', 'timeout'],
-  ].find(([needle]) => detail.includes(needle))?.[1] || name.replace(/[^a-z0-9-]/g, '').slice(0, 20) || 'error';
-  return `upstream-fetch-${category}`;
 }

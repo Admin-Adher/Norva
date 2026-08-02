@@ -897,6 +897,7 @@ test('public /r resolver sets the signed cookie server-side and redirects withou
     captured.url,
     'https://project.supabase.co/functions/v1/norva-partners-referral/resolve',
   );
+  assert.equal(captured.options.redirect, 'manual');
   assert.match(captured.options.headers['X-Norva-Signature'], /^[0-9a-f]{64}$/);
   assert.doesNotMatch(captured.options.body, /203\.0\.113\.5|Norva Test/);
 });
@@ -954,6 +955,7 @@ test('same-origin post-auth claim reads HttpOnly cookie in Pages and clears only
     'https://project.supabase.co/functions/v1/norva-partners/referral/claim',
   );
   assert.equal(JSON.parse(captured.options.body).claimToken, token);
+  assert.equal(captured.options.redirect, 'manual');
   assert.match(
     captured.options.headers['Idempotency-Key'],
     /^refclaim:[0-9a-f]{48}$/,

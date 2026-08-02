@@ -792,6 +792,12 @@ begin
           false
         ),
         (
+          'affiliate_payout_cycles_live_promotion_aal2',
+          'affiliate_payout_cycles',
+          'guard_partners_payout_live_promotion_aal2',
+          false
+        ),
+        (
           'affiliate_commission_entries_open_account_guard',
           'affiliate_commission_entries',
           'guard_commission_entry_open_account',
