@@ -469,6 +469,10 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /count\(\*\) filter \(where active\)/);
   assert.match(rehearsal, /cron_counts_unchanged=true/);
   assert.doesNotMatch(rehearsal, /update cron\.job set active/);
+  assert.doesNotMatch(
+    rehearsal,
+    /timeout --signal=TERM --kill-after=30s "\$PSQL_TIMEOUT_SECONDS" \\\n\s+docker exec -i/,
+  );
   assert.equal(
     (rehearsal.match(/docker exec -u postgres "\$DB_CONTAINER"/g) || []).length,
     2,

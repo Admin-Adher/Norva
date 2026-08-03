@@ -535,8 +535,11 @@ PSQL_TIMEOUT_SECONDS="${PARTNERS_REHEARSAL_PSQL_TIMEOUT_SECONDS:-3600}"
 if [[ ! "$PSQL_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{2,5}$ ]]; then
   fail
 fi
+# Every timed psql invocation below reads an already-mounted file with -f.
+# Do not attach Docker stdin (-i): GNU timeout places its child in a separate
+# process group, so an ssh -t run could otherwise suspend docker exec on SIGTTIN.
 if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
-    docker exec -i -u "$PG_UID_GID" "$CONTAINER_NAME" \
+    docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
       psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
         --single-transaction \
         -f "/candidate/$MIGRATION_ONE" \
@@ -599,7 +602,7 @@ proof_line "migration_routine_owner=supabase_admin"
 
 CURRENT_STEP="Partners restore verifier"
 if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
-    docker exec -i -u "$PG_UID_GID" "$CONTAINER_NAME" \
+    docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
       psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
         -f "/candidate/$VERIFIER" \
       > "$RAW_DIR/restore-verifier.log" 2>&1; then
@@ -627,7 +630,7 @@ run_pgtap_file() {
     return 1
   fi
   if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
-      docker exec -i -u "$PG_UID_GID" "$CONTAINER_NAME" \
+      docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
         psql -X -A -t -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
           -f "/candidate/$relative_path" \
         > "$output_path" 2>&1; then
@@ -657,7 +660,7 @@ proof_line "pgtap_transaction_guards=true"
 
 CURRENT_STEP="post-test invariant verification"
 if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
-    docker exec -i -u "$PG_UID_GID" "$CONTAINER_NAME" \
+    docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
       psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
         -f "/candidate/$VERIFIER" \
       > "$RAW_DIR/post-test-verifier.log" 2>&1; then
