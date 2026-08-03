@@ -1487,8 +1487,8 @@ select extensions.ok(
   'a post-expiry approved event is durably ignored as stale and never verifies'
 );
 
--- Preparation is rechecked after the remote Didit call. A live-path change in
--- that network window rejects the service binding and leaves no proof.
+-- Preparation is rechecked after the remote Didit call. A Privacy gate change
+-- in that network window rejects the service binding and leaves no proof.
 do $jwt$
 begin
   perform set_config(
@@ -1541,9 +1541,18 @@ end;
 $claim$;
 reset role;
 
-update public.admin_feature_flags
-set enabled = true
-where key = 'partners_enabled';
+set local role authenticated;
+do $revoke_privacy$
+begin
+  perform public.admin_partners_control(
+    'set_gate',
+    'privacy_approved',
+    false,
+    'Pre-gate Didit pgTAP revokes Privacy approval after provider dispatch.'
+  );
+end;
+$revoke_privacy$;
+reset role;
 set local role service_role;
 select extensions.throws_ok(
   $$
@@ -1563,13 +1572,22 @@ select extensions.throws_ok(
     )
   $$,
   'P0001',
-  'Didit certification requires all live Partners paths disabled',
-  'service binding rechecks flags after the remote provider call'
+  'Privacy approval is required for Didit certification',
+  'service binding rechecks Privacy approval after the remote provider call'
 );
 reset role;
-update public.admin_feature_flags
-set enabled = false
-where key = 'partners_enabled';
+set local role authenticated;
+do $restore_privacy$
+begin
+  perform public.admin_partners_control(
+    'set_gate',
+    'privacy_approved',
+    true,
+    'Pre-gate Didit pgTAP restores Privacy approval after the race check.'
+  );
+end;
+$restore_privacy$;
+reset role;
 
 set local role service_role;
 select extensions.is(
