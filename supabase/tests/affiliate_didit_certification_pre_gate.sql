@@ -738,6 +738,7 @@ set create_claim_response =
     state.response #>> '{certification,key}'
   )
 where state.operator_key = 'risk1';
+reset role;
 select extensions.ok(
   (
     select
@@ -761,12 +762,14 @@ select extensions.ok(
   ),
   'the first create claim persists one non-null dispatch timestamp'
 );
+set local role service_role;
 update didit_certification_state state
 set create_claim_replay_response =
   public.partners_service_kyc_certification_create_claim(
     state.response #>> '{certification,key}'
   )
 where state.operator_key = 'risk1';
+reset role;
 select extensions.ok(
   (
     select
@@ -791,6 +794,7 @@ select extensions.ok(
   ),
   'a replay cannot replace the immutable provider-create dispatch timestamp'
 );
+set local role service_role;
 select extensions.is(
   public.partners_service_kyc_certification_session_record(
     (
