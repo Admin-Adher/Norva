@@ -6,9 +6,10 @@
 > `auth_users=6`. Refaire ce drill (idéalement + le replay WAL de `RESTORE.md §2`) chaque trimestre.
 
 > Deux couches, complémentaires :
-> 1. **Dump logique nightly → R2** (03:40 UTC) : `norva-selfhost-<stamp>.tar.gz`
+> 1. **Dump logique nightly → R2** (03:40 UTC) : `norva-selfhost-<stamp>.tar.gz.age`
 >    (globals + `public` + `affiliate_private` schéma/data + **auth** + storage +
->    crons rejouables + manifest).
+>    crons rejouables + manifest), chiffré avec le destinataire public `age` avant
+>    envoi. La clé privée de restauration reste hors du serveur.
 >    Simple, portable, restauration prouvée (c'est le format du cutover). RPO ≤ 24 h.
 > 2. **PITR** : archivage **WAL** (5 min max, `archive_timeout=300`) syncé sur R2
 >    + **base backup physique hebdo** (dimanche 04:10 UTC). RPO ≈ 5 min,
@@ -26,7 +27,7 @@
 
 ```
 db/                    ← dumps du managé (workflow GitHub, période rollback)
-selfhost/dumps/        ← dumps logiques nightly (rétention 14 j)
+selfhost/dumps/        ← dumps logiques nightly chiffrés .tar.gz.age (rétention 14 j)
 selfhost/base/base-*/  ← base backups hebdo (rétention 8)
 selfhost/wal/          ← segments WAL (rétention 35 j ≥ plus vieux base backup)
 ```
@@ -36,13 +37,15 @@ selfhost/wal/          ← segments WAL (rétention 35 j ≥ plus vieux base bac
 ```bash
 cd ~/norva && git pull origin main && cd ops/hetzner
 
-# 1) rclone
-sudo apt install -y rclone
+# 1) rclone + age
+sudo apt install -y rclone age
 
 # 2) settings + credentials R2 (mêmes clés que les secrets GitHub R2_*)
 sudo cp backup/norva-backup.env.example /etc/norva-backup.env
 sudo chmod 600 /etc/norva-backup.env
-sudo nano /etc/norva-backup.env          # remplir R2_*, vérifier NORVA_OPS_DIR
+sudo nano /etc/norva-backup.env          # remplir R2_*, BACKUP_AGE_RECIPIENT, vérifier NORVA_OPS_DIR
+# Conserver BACKUP_ENCRYPTION_REQUIRED=true en production. Le destinataire
+# age1... est public ; ne jamais copier la clé privée de déchiffrement sur la box.
 
 # 3) dossiers + droits (le postgres du conteneur doit écrire le WAL archive)
 sudo mkdir -p /var/lib/norva/wal-archive /var/lib/norva/backups
@@ -87,6 +90,9 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
   auto-réparé par le retry, données intègres. Pour le supprimer : `rclone` ≥ 1.66
   (`curl https://rclone.org/install.sh | sudo bash`) détecte le provider Cloudflare et n'envoie
   plus ce checksum.
+- Si l'envoi ou sa vérification de taille échoue après création de l'archive, le script
+  conserve le répertoire privé `nightly-work.<stamp>.*` sous `BACKUP_STAGE_DIR` et journalise
+  son chemin. Ne le supprimer qu'après avoir récupéré l'archive ou relancé un envoi vérifié.
 - `wal-sync` **échoue exprès** (unit failed) si >500 segments s'accumulent en local
   → archivage/upload en panne → vérifier réseau/R2 AVANT que `pg_wal` remplisse
   le disque.

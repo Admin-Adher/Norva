@@ -1741,7 +1741,7 @@ test('an active account without a link can create one from the server', async ()
   assert.equal(page._actionKeys.has('link-rotation'), false);
 });
 
-test('legacy copy fallback preserves the complete disclosure payload and focus', async () => {
+test('Clipboard rejection falls back to the complete disclosure payload and restores focus', async () => {
   const payload = [
     'Discover Norva — one media ecosystem across Web, Android and TV.',
     '',
@@ -1774,6 +1774,7 @@ test('legacy copy fallback preserves the complete disclosure payload and focus',
   };
   let appended = null;
   let copied = null;
+  let modernAttempts = 0;
   const document = {
     activeElement: trigger,
     body: { appendChild(node) { appended = node; } },
@@ -1795,7 +1796,15 @@ test('legacy copy fallback preserves the complete disclosure payload and focus',
   const context = vm.createContext({
     window,
     document,
-    navigator: { language: 'en-US' },
+    navigator: {
+      language: 'en-US',
+      clipboard: {
+        async writeText() {
+          modernAttempts += 1;
+          throw new Error('clipboard permission denied');
+        },
+      },
+    },
     AbortController,
     Intl,
     setTimeout,
@@ -1817,6 +1826,111 @@ test('legacy copy fallback preserves the complete disclosure payload and focus',
   assert.equal(fallback.removed, true);
   assert.deepEqual(restoredRanges, [previousRange]);
   assert.equal(focused, 1);
+  assert.equal(modernAttempts, 1);
+});
+
+test('dashboard Copy action uses the canonical disclosure payload, never the bare URL', async () => {
+  const listeners = new Map();
+  const button = {
+    disabled: false,
+    isConnected: true,
+    textContent: 'Copy share text',
+    addEventListener(name, listener) { listeners.set(name, listener); },
+  };
+  const container = {
+    querySelector(selector) {
+      return selector === '[data-partners-copy]' ? button : null;
+    },
+    querySelectorAll: () => [],
+  };
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: { getElementById: (id) => (id === 'page-partners' ? container : null) },
+    navigator: { language: 'en-US', onLine: true },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+  const bootstrap = validEnvelope().data;
+  const dashboard = validDashboardEnvelope().data;
+  let copied = null;
+  let status = null;
+  page.runPartnerAction = async (_button, _label, action) => action();
+  page.copyText = async (value) => { copied = value; };
+  page.setActionStatus = (value) => { status = value; };
+
+  page.bindDashboardActions(bootstrap, dashboard);
+  await listeners.get('click')({ currentTarget: button });
+
+  const content = page.shareContent(dashboard.link.share_url, bootstrap);
+  assert.equal(copied, content.text);
+  assert.notEqual(copied, dashboard.link.share_url);
+  assert.match(copied, /I may receive 20%/);
+  assert.match(copied, /Earnings are not guaranteed/);
+  assert.match(copied, new RegExp(`${'A'.repeat(32)}$`));
+  assert.equal(status, 'Referral message and required disclosure copied.');
+});
+
+test('double clipboard failure returns one stable public error without success', async () => {
+  let removed = false;
+  let focused = 0;
+  const trigger = { focus() { focused += 1; } };
+  const fallback = {
+    value: '',
+    style: {},
+    setAttribute() {},
+    focus() {},
+    select() {},
+    setSelectionRange() {},
+    remove() { removed = true; },
+  };
+  const document = {
+    activeElement: trigger,
+    body: { appendChild() {} },
+    documentElement: {},
+    createElement: () => fallback,
+    getSelection: () => null,
+    execCommand: () => false,
+    getElementById: () => null,
+  };
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document,
+    navigator: {
+      language: 'en-US',
+      onLine: true,
+      clipboard: { async writeText() { throw new Error('clipboard unavailable'); } },
+    },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+
+  await assert.rejects(
+    () => page.copyText('complete disclosure payload'),
+    (error) => error?.code === 'partners_copy_unavailable',
+  );
+
+  assert.equal(removed, true);
+  assert.equal(focused, 1);
+  assert.equal(
+    page.partnerErrorMessage({ code: 'partners_copy_unavailable' }),
+    'Copying is unavailable in this browser. No referral message was copied.',
+  );
 });
 
 test('discovery copy uses the authoritative programme maturation period', () => {

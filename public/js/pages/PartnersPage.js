@@ -1964,6 +1964,7 @@ class PartnersPage {
             partners_payout_onboarding_invalid: 'Choose an available payout currency and confirm secure account contact.',
             partners_payout_currency_unavailable: 'This payout currency is not available for your current account policy.',
             partners_request_timeout: 'Norva did not confirm this secure action in time. Its state is unknown, so retrying will resume the same idempotent request.',
+            partners_copy_unavailable: 'Copying is unavailable in this browser. No referral message was copied.',
             fiscal_profile_required: 'The tax-residence review must be completed before payout setup can begin.',
             authentication_required: 'Sign in again to continue securely.',
             invalid_access_token: 'Your session expired. Sign in again to continue.',
@@ -2293,7 +2294,7 @@ class PartnersPage {
                     <div class="partners-link-control">
                         <input type="text" readonly value="${this.escape(link.share_url)}"
                             aria-label="Your personal Norva referral link" data-partners-link>
-                        <button class="btn btn-secondary" type="button" data-partners-copy>Copy</button>
+                        <button class="btn btn-secondary" type="button" data-partners-copy>Copy share text</button>
                     </div>
                     <div class="partners-link-actions">
                         <button class="btn btn-primary" type="button" data-partners-share>Share link</button>
@@ -2380,8 +2381,8 @@ class PartnersPage {
                     event.currentTarget,
                     'Copying…',
                     async () => {
-                        await this.copyText(link.share_url);
-                        this.setActionStatus('Referral link copied.');
+                        await this.copyText(this.shareContent(link.share_url, bootstrap).text);
+                        this.setActionStatus('Referral message and required disclosure copied.');
                     }
                 ));
             this.container?.querySelector('[data-partners-share]')
@@ -2400,6 +2401,7 @@ class PartnersPage {
             this.container?.querySelector('[data-partners-qr]')
                 ?.addEventListener('click', (event) => this.openQrDialog(
                     link.share_url,
+                    bootstrap,
                     event.currentTarget
                 ));
             const rotate = this.container?.querySelector('[data-partners-rotate]');
@@ -2557,18 +2559,38 @@ class PartnersPage {
         return `Partner link · I may receive ${rate} of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.`;
     }
 
+    shareContent(url, bootstrap) {
+        const message = 'Discover Norva — one media ecosystem across Web, Android and TV.';
+        const disclosure = this.shareDisclosure(bootstrap);
+        return {
+            message,
+            disclosure,
+            text: `${message}\n\n${disclosure}\n${url}`
+        };
+    }
+
     async copyText(value) {
+        const unavailable = () => Object.assign(
+            new Error('partners_copy_unavailable'),
+            { code: 'partners_copy_unavailable' }
+        );
+        if (typeof value !== 'string' || !value) throw unavailable();
+
         if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(value);
-            return;
+            try {
+                await navigator.clipboard.writeText(value);
+                return;
+            } catch (_) {
+                // A Clipboard API can be present while permissions or the
+                // embedding context reject it. Continue with the exact-payload
+                // selection fallback before reporting a failure.
+            }
         }
 
         // The legacy copy fallback must select the exact payload requested by
         // the caller. Reusing the visible referral-link input would silently
         // drop the mandatory disclosure when Share is unavailable.
-        if (typeof value !== 'string' || !document.body || !document.createElement) {
-            throw new Error('partners_copy_unavailable');
-        }
+        if (!document.body || !document.createElement) throw unavailable();
 
         const previouslyFocused = document.activeElement;
         const selection = document.getSelection?.();
@@ -2599,7 +2621,11 @@ class PartnersPage {
             try { fallback.focus({ preventScroll: true }); } catch (_) { fallback.focus(); }
             fallback.select();
             fallback.setSelectionRange?.(0, fallback.value.length);
-            copied = document.execCommand?.('copy') === true;
+            try {
+                copied = document.execCommand?.('copy') === true;
+            } catch (_) {
+                copied = false;
+            }
         } finally {
             fallback.remove();
             if (selection && previousRanges.length) {
@@ -2613,12 +2639,11 @@ class PartnersPage {
             }
         }
 
-        if (!copied) throw new Error('partners_copy_unavailable');
+        if (!copied) throw unavailable();
     }
 
     async shareReferral(url, bootstrap) {
-        const message = 'Discover Norva — one media ecosystem across Web, Android and TV.';
-        const disclosure = this.shareDisclosure(bootstrap);
+        const { message, disclosure, text } = this.shareContent(url, bootstrap);
         const native = window.NorvaShareNative;
         if (native && typeof native.postMessage === 'function') {
             const result = await this.postNativeShare('shareReferral', {
@@ -2642,7 +2667,7 @@ class PartnersPage {
             }
             return 'shared';
         }
-        await this.copyText(`${message}\n\n${disclosure}\n${url}`);
+        await this.copyText(text);
         return 'copied';
     }
 
@@ -3262,15 +3287,17 @@ class PartnersPage {
         });
     }
 
-    openQrDialog(url, opener) {
+    openQrDialog(url, bootstrap, opener) {
         this._closeQrDialog?.({ restoreFocus: false });
+        const disclosure = this.shareDisclosure(bootstrap);
         const overlay = document.createElement('div');
         overlay.className = 'partners-country-picker-overlay partners-qr-overlay';
         overlay.setAttribute('data-region-picker', '');
         overlay.setAttribute('data-partners-qr-overlay', '');
         overlay.innerHTML = `
             <section class="partners-qr-dialog" role="dialog" aria-modal="true"
-                aria-labelledby="partners-qr-title" aria-describedby="partners-qr-copy">
+                aria-labelledby="partners-qr-title"
+                aria-describedby="partners-qr-disclosure partners-qr-copy">
                 <header class="partners-country-dialog-header">
                     <div><span class="partners-eyebrow">Personal referral link</span>
                     <h2 id="partners-qr-title">Scan to open Norva</h2></div>
@@ -3279,6 +3306,9 @@ class PartnersPage {
                 </header>
                 <div class="partners-qr-code" data-partners-qr-code role="img"
                     aria-label="QR code for your personal Norva referral link"></div>
+                <p class="partners-disclosure" id="partners-qr-disclosure"
+                    data-partners-qr-disclosure><strong>Required partner disclosure:</strong>
+                    ${this.escape(disclosure)}</p>
                 <p id="partners-qr-copy">The QR encodes only your active server-issued <strong>norva.tv</strong> referral URL. It contains no balance, e-mail or KYC data.</p>
                 <code>${this.escape(url)}</code>
             </section>`;

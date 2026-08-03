@@ -2189,6 +2189,176 @@ test('Admin Partners paginates jurisdiction configuration without truncating it'
   assert.match(configuration.innerHTML, /25–30 sur 30/);
 });
 
+test('Admin Partners exposes programme activation only after both legal gates', () => {
+  const configuration = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-configuration' ? configuration : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: true, finance: true };
+  const envelope = {
+    schema_version: 1,
+    programs: [{
+      version_key: 'individual-global-v1',
+      status: 'draft',
+      attribution_window_days: 30,
+      maturation_days: 45,
+      terms_version: 'v1',
+      effective_from: '2026-01-01T00:00:00Z',
+    }],
+    policies: [],
+    configuration_counts: {
+      active_country_mappings: 0,
+      active_currencies: 0,
+      active_payout_providers: 0,
+      active_allowlist_entries: 0,
+    },
+    release_flags: [],
+    release_gates: [
+      { key: 'legal_and_tax_approved', satisfied: false },
+      { key: 'privacy_approved', satisfied: false },
+    ],
+  };
+
+  page._renderPartnersConfiguration(envelope);
+  assert.doesNotMatch(configuration.innerHTML, /data-partners-action="program-activate"/);
+  assert.match(configuration.innerHTML, /Activation bloqu/);
+  assert.match(configuration.innerHTML, /validation juridique et fiscale/);
+  assert.match(configuration.innerHTML, /validation de la confidentialit/);
+
+  envelope.release_gates.forEach((gate) => { gate.satisfied = true; });
+  page._renderPartnersConfiguration(envelope);
+  assert.match(configuration.innerHTML, /data-partners-action="program-activate"/);
+  assert.doesNotMatch(configuration.innerHTML, /Activation bloqu/);
+});
+
+test('Admin Partners explains incomplete country opening prerequisites before exposing Open', () => {
+  const configuration = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-configuration' ? configuration : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: true, finance: true };
+  const program = {
+    version_key: 'individual-global-v1',
+    status: 'active',
+    attribution_window_days: 30,
+    maturation_days: 45,
+    terms_version: 'v1',
+    effective_from: '2099-01-01T00:00:00Z',
+  };
+  const policy = {
+    program_version_key: 'individual-global-v1',
+    country_code: 'FR',
+    subdivision_code: null,
+    individual_available: false,
+    minimum_age: 18,
+    payout_currencies: ['USD', 'EUR'],
+    kyc_attempt_policy: { status: 'disabled' },
+  };
+  const envelope = {
+    schema_version: 1,
+    programs: [program],
+    policies: [policy],
+    configuration_counts: {
+      active_country_mappings: 0,
+      active_currencies: 1,
+      active_payout_providers: 0,
+      active_allowlist_entries: 0,
+    },
+    release_flags: [],
+    release_gates: [],
+  };
+
+  page._renderPartnersConfiguration(envelope);
+  assert.doesNotMatch(configuration.innerHTML, /data-partners-action="country-availability"/);
+  assert.match(configuration.innerHTML, /Ouverture bloqu/);
+  assert.match(configuration.innerHTML, /date d’effet du programme atteinte/);
+  assert.match(configuration.innerHTML, /politique KYC active/);
+  assert.match(configuration.innerHTML, /mapping pays actif/);
+  assert.match(configuration.innerHTML, /couverture des devises actives/);
+  assert.match(configuration.innerHTML, /couverture payout active/);
+
+  program.effective_from = '2026-01-01T00:00:00Z';
+  policy.kyc_attempt_policy.status = 'active';
+  envelope.configuration_counts.active_country_mappings = 1;
+  envelope.configuration_counts.active_currencies = 2;
+  envelope.configuration_counts.active_payout_providers = 2;
+  page._renderPartnersConfiguration(envelope);
+  assert.match(configuration.innerHTML, /data-partners-action="country-availability"/);
+  assert.match(configuration.innerHTML, />Ouvrir<\/button>/);
+
+  policy.individual_available = true;
+  envelope.configuration_counts.active_country_mappings = 0;
+  envelope.configuration_counts.active_currencies = 0;
+  envelope.configuration_counts.active_payout_providers = 0;
+  page._renderPartnersConfiguration(envelope);
+  assert.match(configuration.innerHTML, /data-partners-enabled="false">Fermer<\/button>/);
+});
+
+test('Admin Partners country form mirrors subdivision and payout currency database limits', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: true, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  page._partnersConfiguration = {
+    programs: [{ version_key: 'individual-global-v1', status: 'active' }],
+  };
+  const values = [
+    'individual-global-v1',
+    'fr',
+    'fr-idf',
+    '18',
+    ' usd, , eur ',
+    '2099-01-01T00:00:00Z',
+  ];
+  let promptIndex = 0;
+  page._partnersPrompt = async (message, initial, validate) => {
+    const value = values[promptIndex];
+    if (promptIndex === 2) {
+      assert.equal(validate('FR-IDF'), true);
+      assert.equal(validate('US-CA'), false);
+      assert.equal(validate('FR-ABCDEFGHIJ'), false);
+      assert.equal(validate('ABCDEFGHIJKL'), true);
+    }
+    if (promptIndex === 4) {
+      const elevenCurrencies = 'USD,EUR,GBP,CHF,CAD,AUD,NZD,JPY,CNY,INR,BRL';
+      assert.equal(validate(elevenCurrencies), false);
+      assert.equal(validate(elevenCurrencies.split(',').slice(0, 10).join(',')), true);
+      assert.equal(validate('USD,USD'), false);
+    }
+    assert.equal(validate(value), true);
+    promptIndex += 1;
+    return value;
+  };
+  page._partnersJustification = async () => 'Création pilote France contrôlée';
+  let call = null;
+  page._rpc = async (name, args) => { call = { name, args }; return {}; };
+
+  const result = await page._runPartnersAdminAction({
+    dataset: { partnersAction: 'country-create' },
+  });
+
+  assert.match(result, /Juridiction FR/);
+  assert.equal(promptIndex, values.length);
+  assert.deepEqual(JSON.parse(JSON.stringify(call)), {
+    name: 'admin_partners_country_policy_create',
+    args: {
+      p_program_version_key: 'individual-global-v1',
+      p_country_code: 'FR',
+      p_subdivision_code: 'FR-IDF',
+      p_minimum_age: 18,
+      p_payout_currencies: ['USD', 'EUR'],
+      p_effective_from: '2099-01-01T00:00:00.000Z',
+      p_justification: 'Création pilote France contrôlée',
+    },
+  });
+});
+
 test('Admin Partners keeps payout observations independent and retryable', () => {
   const payouts = { innerHTML: '', removeAttribute() {} };
   const AdminPage = loadAdminPage({

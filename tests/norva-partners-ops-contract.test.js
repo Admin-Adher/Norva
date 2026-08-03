@@ -229,6 +229,52 @@ test('every logical application backup includes the private Partners schema and 
   assert.doesNotMatch(nightly, /-Atc \\\\"select/);
 });
 
+test('self-hosted nightly dumps are age-encrypted and verified before plaintext cleanup', () => {
+  const nightly = read('ops/hetzner/backup/backup-nightly.sh');
+  const envExample = read('ops/hetzner/backup/norva-backup.env.example');
+  const restore = read('ops/hetzner/backup/RESTORE.md');
+
+  assert.match(nightly, /BACKUP_ENCRYPTION_REQUIRED="\$\{BACKUP_ENCRYPTION_REQUIRED:-false\}"/);
+  assert.match(nightly, /BACKUP_ENCRYPTION_REQUIRED must be true or false/);
+  assert.match(
+    nightly,
+    /BACKUP_ENCRYPTION_REQUIRED" == "true"[\s\S]*BACKUP_AGE_RECIPIENT is required/,
+  );
+  assert.match(nightly, /command -v age[\s\S]*age is required/);
+  assert.match(
+    nightly,
+    /age --recipient "\$BACKUP_AGE_RECIPIENT" --output "\$\{ARCHIVE\}\.age" "\$ARCHIVE"/,
+  );
+  assert.match(nightly, /REMOTE="r2:[\s\S]*\$\(basename "\$UPLOAD"\)"/);
+  assert.match(nightly, /rclone copyto "\$UPLOAD" "\$REMOTE" --retries 4/);
+  assert.match(nightly, /rclone lsl "\$REMOTE" --retries 4/);
+  assert.match(nightly, /REMOTE_BYTES[\s\S]*LOCAL_BYTES[\s\S]*exit 1/);
+  assert.match(nightly, /UPLOAD_VERIFIED=false[\s\S]*UPLOAD_VERIFIED=true/);
+  assert.match(
+    nightly,
+    /R2 upload was not verified; local backup retained at \$STAGE/,
+  );
+
+  const verified = nightly.indexOf('UPLOAD_VERIFIED=true', nightly.indexOf('rclone copyto'));
+  const plaintextRemoval = nightly.indexOf('rm -f "$ARCHIVE"');
+  const retention = nightly.indexOf('retention: keep');
+  assert.ok(verified > 0, 'the remote object must reach a verified state');
+  assert.ok(
+    plaintextRemoval > verified,
+    'the plaintext archive must remain until the encrypted upload is verified',
+  );
+  assert.ok(retention > verified, 'retention must only run after upload verification');
+
+  assert.match(envExample, /^BACKUP_ENCRYPTION_REQUIRED=true$/m);
+  assert.match(envExample, /^BACKUP_AGE_RECIPIENT=age1CHANGE_ME$/m);
+  assert.match(restore, /BACKUP_AGE_IDENTITY_FILE/);
+  assert.match(
+    restore,
+    /age --decrypt --identity "\$BACKUP_AGE_IDENTITY_FILE"[\s\S]*--output \.\/restore\.tar\.gz/,
+  );
+  assert.match(restore, /sha256sum -c SHA256SUMS/);
+});
+
 test('restore procedures explicitly verify the Partners private schema', () => {
   const migrationRestore = read('ops/hetzner/scripts/02-restore-hetzner.sh');
   const disasterRestore = read('ops/hetzner/backup/RESTORE.md');

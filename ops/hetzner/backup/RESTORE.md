@@ -12,9 +12,21 @@ cutover 2026-07-11, prouvé en prod.
 
 ```bash
 # 0) stack vide : suivre README.md Phase 1 (compose up db → healthy, puis up -d)
-# 1) récupérer le dernier dump
-rclone lsf "r2:$R2_BUCKET/selfhost/dumps/" | sort | tail -1        # → norva-selfhost-<stamp>.tar.gz
-rclone copyto "r2:$R2_BUCKET/selfhost/dumps/<archive>" ./restore.tar.gz
+# 1) récupérer le dernier dump chiffré
+LATEST_DUMP="$(rclone lsf "r2:$R2_BUCKET/selfhost/dumps/" | grep '\.tar\.gz\.age$' | sort | tail -1)"
+test -n "$LATEST_DUMP"
+rclone copyto "r2:$R2_BUCKET/selfhost/dumps/$LATEST_DUMP" ./restore.tar.gz.age
+
+# 2) déchiffrer localement avec l'identité privée conservée hors de la box.
+#    BACKUP_AGE_IDENTITY_FILE désigne un fichier chmod 600 ; ne jamais coller
+#    son contenu dans le terminal, un ticket ou les logs.
+: "${BACKUP_AGE_IDENTITY_FILE:?Set BACKUP_AGE_IDENTITY_FILE to the private age identity file}"
+test -r "$BACKUP_AGE_IDENTITY_FILE"
+age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" \
+  --output ./restore.tar.gz ./restore.tar.gz.age
+chmod 600 ./restore.tar.gz
+
+# 3) extraire puis vérifier les checksums embarqués avant toute écriture DB
 tar -xzf restore.tar.gz && cd norva-selfhost-<stamp>
 sha256sum -c SHA256SUMS
 # Refuser une ancienne archive qui a supprimé les ACL du dump de schéma.
@@ -23,7 +35,7 @@ sha256sum -c SHA256SUMS
 test "$(grep -Ec '^(GRANT|REVOKE) ' 01-schema.sql)" -gt 0
 grep -Eq '^schema_acl_statements=[1-9][0-9]*$' MANIFEST.txt
 
-# 2) recharger, dans l'ordre (en supabase_admin — superuser requis pour
+# 4) recharger, dans l'ordre (en supabase_admin — superuser requis pour
 #    --disable-triggers ; les erreurs "reserved role" des globals sont bénignes)
 dpsql -f - < 00-globals.sql        || true
 dpsql -v ON_ERROR_STOP=0 -f - < 01-schema.sql
@@ -32,7 +44,7 @@ dpsql -v ON_ERROR_STOP=0 -f - < 03-auth-data.sql      # users/identities (confli
 dpsql -v ON_ERROR_STOP=0 -f - < 04-storage-data.sql
 dpsql -c "vacuum analyze;"
 
-# 3) crons (rejouables, URLs déjà self-host). Chaque instruction restaure son
+# 5) crons (rejouables, URLs déjà self-host). Chaque instruction restaure son
 #    état active exact ; le fichier finit aussi par la coupure fail-closed du
 #    rail Revolut Business API dormant :
 dpsql -v ON_ERROR_STOP=1 -f - < ref-cron-jobs.sql
@@ -42,7 +54,7 @@ dpsql -Atc \
   "select count(*) from cron.job where active and jobname='norva-partners-revolut-api';" \
   | grep -qx '0'
 
-# 4) vérifier vs MANIFEST.txt et les invariants Partners
+# 6) vérifier vs MANIFEST.txt et les invariants Partners
 dpsql -Atc "select count(*) from public.cloud_media_items;"
 dpsql -Atc "select count(*) from auth.users;"
 dpsql -Atc "select count(*) from affiliate_private.affiliate_accounts;"
@@ -182,7 +194,7 @@ de production.
 ## Signes que les backups sont sains (à regarder de temps en temps)
 
 ```bash
-rclone lsf "r2:$R2_BUCKET/selfhost/dumps/" | tail -3     # un .tar.gz par nuit
+rclone lsf "r2:$R2_BUCKET/selfhost/dumps/" | tail -3     # un .tar.gz.age par nuit
 rclone lsf "r2:$R2_BUCKET/selfhost/base/" --dirs-only    # un base-*/ par semaine
 rclone lsf "r2:$R2_BUCKET/selfhost/wal/" | wc -l         # croît en continu
 systemctl list-timers 'norva-*'                          # 3 timers armés

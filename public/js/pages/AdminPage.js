@@ -7031,17 +7031,36 @@ class AdminPage {
             return;
         }
         this._partnersConfiguration = data;
+        const gates = Array.isArray(data.release_gates) ? data.release_gates : [];
+        const counts = data.configuration_counts;
+        const gateSatisfied = (key) => gates.some((gate) => (
+            gate?.key === key && gate?.satisfied === true
+        ));
         const programs = data.programs.map((program) => {
             const key = String(program?.version_key || '');
             const isDraft = program?.status === 'draft';
+            const activationMissing = [
+                !gateSatisfied('legal_and_tax_approved')
+                    ? 'validation juridique et fiscale' : '',
+                !gateSatisfied('privacy_approved')
+                    ? 'validation de la confidentialité' : ''
+            ].filter(Boolean);
+            let activationControl = '';
+            if (isDraft && key) {
+                if (activationMissing.length > 0) {
+                    activationControl = `<span class="partners-state is-alert">Activation bloquée · Prérequis manquants : ${AdminPage.esc(activationMissing.join(', '))}</span>`;
+                } else if (this._partnersCanUseConfigurationAction('program-activate')) {
+                    activationControl = `<button type="button" class="partners-action is-success"
+                    data-partners-action="program-activate" data-partners-key="${AdminPage.esc(key)}">Activer</button>`;
+                }
+            }
             return `<div class="partners-control-item">
                 <span>${AdminPage.esc(key || 'Programme')}
                   <small>20 % · attribution ${AdminPage.n(Number(program?.attribution_window_days) || 0)} j · maturation J+${AdminPage.n(Number(program?.maturation_days) || 0)} · ${AdminPage.esc(String(program?.terms_version || 'terms inconnus'))}</small>
                 </span>
                 <div class="partners-risk-actions">
                   <span class="partners-state${program?.status === 'active' ? ' is-on' : ''}">${AdminPage.esc(String(program?.status || 'unknown'))}</span>
-                  ${isDraft && key && this._partnersCanUseConfigurationAction('program-activate') ? `<button type="button" class="partners-action is-success"
-                    data-partners-action="program-activate" data-partners-key="${AdminPage.esc(key)}">Activer</button>` : ''}
+                  ${activationControl}
                 </div>
               </div>`;
         }).join('');
@@ -7055,6 +7074,51 @@ class AdminPage {
             const subdivision = String(policy?.subdivision_code || '');
             const enabled = policy?.individual_available === true;
             const kyc = policy?.kyc_attempt_policy;
+            const program = data.programs.find((candidate) => (
+                String(candidate?.version_key || '') === programKey
+            ));
+            const programEffectiveAt = Date.parse(String(program?.effective_from || ''));
+            const payoutCurrencies = Array.isArray(policy?.payout_currencies)
+                ? policy.payout_currencies.filter((currency) => /^[A-Z]{3}$/.test(String(currency || '')))
+                : [];
+            const activeMappingCount = Number(counts.active_country_mappings);
+            const activeCurrencyCount = Number(counts.active_currencies);
+            const activePayoutCount = Number(counts.active_payout_providers);
+            const openingMissing = [];
+            if (!program || program.status !== 'active') {
+                openingMissing.push('programme actif');
+            } else if (!Number.isFinite(programEffectiveAt)) {
+                openingMissing.push('date d’effet du programme disponible');
+            } else if (programEffectiveAt > Date.now()) {
+                openingMissing.push('date d’effet du programme atteinte');
+            }
+            if (kyc?.status !== 'active') openingMissing.push('politique KYC active');
+            if (!Number.isSafeInteger(activeMappingCount) || activeMappingCount < 1) {
+                openingMissing.push('mapping pays actif');
+            }
+            if (payoutCurrencies.length < 1) {
+                openingMissing.push('devise de versement configurée');
+            } else {
+                if (!Number.isSafeInteger(activeCurrencyCount)
+                    || activeCurrencyCount < payoutCurrencies.length) {
+                    openingMissing.push('couverture des devises actives');
+                }
+                if (!Number.isSafeInteger(activePayoutCount)
+                    || activePayoutCount < payoutCurrencies.length) {
+                    openingMissing.push('couverture payout active');
+                }
+            }
+            let availabilityControl = '';
+            if (!enabled && openingMissing.length > 0) {
+                availabilityControl = `<span class="partners-state is-alert">Ouverture bloquée · Prérequis manquants : ${AdminPage.esc(openingMissing.join(', '))}</span>`;
+            } else if (this._partnersCanUseConfigurationAction('country-availability')) {
+                availabilityControl = `<button type="button" class="partners-action${enabled ? ' is-danger' : ' is-success'}"
+                    data-partners-action="country-availability"
+                    data-partners-program="${AdminPage.esc(programKey)}"
+                    data-partners-country="${AdminPage.esc(country)}"
+                    data-partners-subdivision="${AdminPage.esc(subdivision)}"
+                    data-partners-enabled="${enabled ? 'false' : 'true'}">${enabled ? 'Fermer' : 'Ouvrir'}</button>`;
+            }
             return `<div class="partners-control-item">
                 <span>${AdminPage.esc(country || '—')}${subdivision ? ` · ${AdminPage.esc(subdivision)}` : ''}
                   <small>${AdminPage.esc(programKey)} · majorité ${AdminPage.n(Number(policy?.minimum_age) || 0)} ans · ${AdminPage.esc((Array.isArray(policy?.payout_currencies) ? policy.payout_currencies : []).join(', ') || 'devise non configurée')} · KYC ${AdminPage.esc(String(kyc?.status || 'absent'))}</small>
@@ -7065,17 +7129,11 @@ class AdminPage {
                     data-partners-program="${AdminPage.esc(programKey)}"
                     data-partners-country="${AdminPage.esc(country)}"
                     data-partners-subdivision="${AdminPage.esc(subdivision)}">KYC</button>` : ''}
-                  ${this._partnersCanUseConfigurationAction('country-availability') ? `<button type="button" class="partners-action${enabled ? ' is-danger' : ' is-success'}"
-                    data-partners-action="country-availability"
-                    data-partners-program="${AdminPage.esc(programKey)}"
-                    data-partners-country="${AdminPage.esc(country)}"
-                    data-partners-subdivision="${AdminPage.esc(subdivision)}"
-                    data-partners-enabled="${enabled ? 'false' : 'true'}">${enabled ? 'Fermer' : 'Ouvrir'}</button>` : ''}
+                  ${availabilityControl}
                 </div>
               </div>`;
         }).join('');
         const flags = Array.isArray(data.release_flags) ? data.release_flags : [];
-        const gates = Array.isArray(data.release_gates) ? data.release_gates : [];
         const releaseRows = [
             ...flags.map((flag) => ({
                 action: 'release-flag',
@@ -7114,7 +7172,6 @@ class AdminPage {
             .map(([action, label]) => `<button type="button" class="partners-action"
                 data-partners-action="${action}">${label}</button>`)
             .join('');
-        const counts = data.configuration_counts;
         el.removeAttribute('aria-busy');
         el.innerHTML = `<div class="partners-control-head">
             <div><h2>Programme, juridictions et release</h2><p>Les mutations exigent une justification auditée et les dépendances restent contrôlées côté serveur.</p></div>
@@ -10008,8 +10065,18 @@ class AdminPage {
             const subdivision = await this._partnersPrompt(
                 'Subdivision ISO facultative (laisser vide pour tout le pays) :',
                 '',
-                (value) => value === '' || /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value.toUpperCase()),
-                'Subdivision invalide.'
+                (value) => {
+                    const normalized = value.toUpperCase();
+                    return value === '' || (
+                        normalized.length <= 12
+                        && /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(normalized)
+                        && (
+                            !normalized.includes('-')
+                            || normalized.split('-', 1)[0] === country.toUpperCase()
+                        )
+                    );
+                },
+                'Subdivision invalide : 12 caractères maximum et, avec un tiret, le préfixe doit correspondre au pays.'
             );
             if (subdivision === null) return false;
             const ageRaw = await this._partnersPrompt(
@@ -10024,13 +10091,16 @@ class AdminPage {
                 'USD',
                 (value) => {
                     const values = value.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
-                    return values.length > 0 && values.length <= 32
+                    return values.length > 0 && values.length <= 10
                         && values.every((code) => currencyCode.test(code))
                         && new Set(values).size === values.length;
                 },
-                'Liste de devises invalide.'
+                'Liste de devises invalide : entre 1 et 10 codes ISO 4217 uniques.'
             );
             if (!currenciesRaw) return false;
+            const payoutCurrencies = currenciesRaw.split(',')
+                .map((item) => item.trim().toUpperCase())
+                .filter(Boolean);
             const effective = await this._partnersPrompt(
                 'Date d’effet ISO 8601 :',
                 new Date(Date.now() + 5 * 60 * 1000).toISOString(),
@@ -10045,7 +10115,7 @@ class AdminPage {
                 p_country_code: country.toUpperCase(),
                 p_subdivision_code: subdivision ? subdivision.toUpperCase() : null,
                 p_minimum_age: Number(ageRaw),
-                p_payout_currencies: currenciesRaw.split(',').map((item) => item.trim().toUpperCase()),
+                p_payout_currencies: payoutCurrencies,
                 p_effective_from: new Date(effective).toISOString(),
                 p_justification: justification
             });

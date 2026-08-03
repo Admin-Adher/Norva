@@ -735,11 +735,24 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
   expect(sharedPayload.text).toContain('I may receive 20%');
   expect(sharedPayload.text).toContain('Earnings are not guaranteed');
 
+  const copy = page.locator('[data-partners-copy]');
+  await expect(copy).toHaveText('Copy share text');
+
   const qr = page.locator('[data-partners-qr]');
   await qr.focus();
   await qr.click();
   const dialog = page.getByRole('dialog', { name: 'Scan to open Norva' });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute(
+    'aria-describedby',
+    'partners-qr-disclosure partners-qr-copy',
+  );
+  await expect(page.locator('[data-partners-qr-disclosure]')).toContainText(
+    'I may receive 20%',
+  );
+  await expect(page.locator('[data-partners-qr-disclosure]')).toContainText(
+    'Earnings are not guaranteed',
+  );
   await expect(page.locator('.partners-shell')).toHaveAttribute('inert', '');
   await expect(page.locator('[data-partners-qr-code] svg')).toBeVisible();
   await expect(page.locator('[data-partners-qr-close]')).toBeFocused();
@@ -776,6 +789,40 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
   }
 });
 
+test('Copy share text keeps the disclosure and URL in one canonical payload', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    window.__partnerClipboardCopy = null;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        async writeText(value) { window.__partnerClipboardCopy = value; },
+      },
+    });
+  });
+
+  const copy = page.locator('[data-partners-copy]');
+  await copy.focus();
+  await copy.click();
+
+  const url = `https://norva.tv/r/${'A'.repeat(32)}`;
+  const expected = [
+    'Discover Norva — one media ecosystem across Web, Android and TV.',
+    '',
+    'Partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
+    url,
+  ].join('\n');
+  expect(await page.evaluate(() => window.__partnerClipboardCopy)).toBe(expected);
+  expect(await page.evaluate(() => window.__partnerClipboardCopy)).not.toBe(url);
+  await expect(page.locator('[data-partners-action-status]')).toContainText(
+    'Referral message and required disclosure copied',
+  );
+  await expect(copy).toBeEnabled();
+  await expect(copy).toBeFocused();
+});
+
 test('share fallback copies the complete disclosure through the browser selection path', async ({
   page,
 }) => {
@@ -787,8 +834,16 @@ test('share fallback copies the complete disclosure through the browser selectio
     });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
-      value: undefined,
+      value: {
+        async writeText() {
+          window.__partnerClipboardAttempts += 1;
+          const error = new Error('clipboard permission denied');
+          error.name = 'NotAllowedError';
+          throw error;
+        },
+      },
     });
+    window.__partnerClipboardAttempts = 0;
     window.__partnerFallbackCopy = null;
     document.addEventListener('copy', () => {
       const source = document.activeElement;
@@ -823,7 +878,44 @@ test('share fallback copies the complete disclosure through the browser selectio
     readOnly: true,
     tabIndex: -1,
   });
+  expect(await page.evaluate(() => window.__partnerClipboardAttempts)).toBe(1);
   await expect(page.locator('textarea[aria-hidden="true"]')).toHaveCount(0);
+  await expect(share).toBeFocused();
+});
+
+test('copy failure reports an alert and never implies that sharing succeeded', async ({ page }) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        async writeText() { throw new Error('clipboard unavailable'); },
+      },
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: () => false,
+    });
+  });
+
+  const share = page.locator('[data-partners-share]');
+  await share.focus();
+  await share.click();
+
+  const status = page.locator('[data-partners-action-status]');
+  await expect(status).toHaveAttribute('role', 'alert');
+  await expect(status).toContainText(
+    'Copying is unavailable in this browser. No referral message was copied.',
+  );
+  await expect(status).not.toContainText('required disclosure were copied');
+  await expect(status).not.toContainText('Share sheet opened');
+  await expect(page.locator('textarea[aria-hidden="true"]')).toHaveCount(0);
+  await expect(share).toBeEnabled();
+  await expect(share).not.toHaveAttribute('aria-busy', 'true');
   await expect(share).toBeFocused();
 });
 
