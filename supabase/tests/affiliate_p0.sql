@@ -811,6 +811,11 @@ select extensions.is(
   'a capability manager can grant a capability'
 );
 
+-- Keep affiliate_private inaccessible to authenticated clients. The audit
+-- assertion itself runs as the fixture owner after both mutations have been
+-- exercised through the authenticated public RPC surface above.
+reset role;
+
 select extensions.ok(
   exists (
     select 1
@@ -829,6 +834,7 @@ select extensions.ok(
   'capability grant and revoke mutations append distinct audit events'
 );
 
+set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 
