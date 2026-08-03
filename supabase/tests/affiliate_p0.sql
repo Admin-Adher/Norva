@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(229);
+select extensions.plan(248);
 
 select extensions.ok(
   exists (
@@ -83,6 +83,11 @@ select extensions.ok(
   not has_function_privilege(
     'authenticated',
     'affiliate_private.partners_can_manage_capabilities()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.partners_actor_is_live_admin(text)',
     'EXECUTE'
   ),
   'authenticated clients cannot execute the capability-manager predicate'
@@ -229,7 +234,7 @@ values
     'partners-admin@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin","partners_capability_admin":true,"partners_release_manager":true}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
@@ -268,7 +273,7 @@ values
     'partners-referred@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now() + interval '1 second',
     now() + interval '1 second'
@@ -281,10 +286,52 @@ values
     'partners-unattributed@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
+  );
+
+insert into auth.mfa_factors (
+  id,
+  user_id,
+  friendly_name,
+  factor_type,
+  status,
+  created_at,
+  updated_at,
+  secret
+)
+values
+  (
+    '20000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000001',
+    'Partners test Admin',
+    'totp',
+    'verified',
+    now(),
+    now(),
+    'partners-test-secret-admin'
+  ),
+  (
+    '20000000-0000-4000-8000-000000000004',
+    '10000000-0000-4000-8000-000000000004',
+    'Partners test Finance reviewer',
+    'totp',
+    'verified',
+    now(),
+    now(),
+    'partners-test-secret-reviewer'
+  ),
+  (
+    '20000000-0000-4000-8000-000000000005',
+    '10000000-0000-4000-8000-000000000005',
+    'Partners test Finance approver',
+    'totp',
+    'verified',
+    now(),
+    now(),
+    'partners-test-secret-approver'
   );
 
 insert into affiliate_private.affiliate_program_versions (
@@ -404,6 +451,12 @@ select extensions.is(
   'false',
   'a regular admin has no server-managed Partners release authority'
 );
+select extensions.throws_ok(
+  $$ select public.admin_partners_capability_operators() $$,
+  '42501',
+  'Partners capability manager role is required',
+  'a regular admin cannot enumerate Partners capability operators'
+);
 
 select extensions.throws_ok(
   $$
@@ -464,10 +517,275 @@ select public.admin_partners_capability_set(
   true,
   'P0 database integration finance capability.'
 );
+select public.admin_partners_capability_set(
+  '10000000-0000-4000-8000-000000000004',
+  'support',
+  true,
+  'Prepare a stale capability for the banned-operator fixture.'
+);
+
+reset role;
+update auth.users
+set banned_until = now() + interval '1 day'
+where id = '10000000-0000-4000-8000-000000000001';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
 
 select extensions.is(
-  public.admin_partners_capability_set(
-    '10000000-0000-4000-8000-000000000001',
+  public.admin_partners_capabilities() ->> 'can_manage',
+  'false',
+  'a stale manager JWT loses delegation authority after the actor is banned'
+);
+select extensions.is(
+  public.admin_partners_capabilities() #>> '{capabilities,support}',
+  'false',
+  'a stale Admin JWT loses delegated capabilities after the actor is banned'
+);
+select extensions.throws_ok(
+  $$ select public.admin_partners_capability_operators() $$,
+  '42501',
+  'Partners capability manager role is required',
+  'a banned actor cannot enumerate capability operators with a stale JWT'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000004',
+      'risk',
+      true,
+      'A banned manager must not mutate capabilities.'
+    )
+  $$,
+  '42501',
+  'Partners capability manager role is required',
+  'a banned actor cannot mutate capabilities with a stale JWT'
+);
+
+reset role;
+update auth.users
+set banned_until = null
+where id = '10000000-0000-4000-8000-000000000001';
+update auth.users
+set raw_app_meta_data = raw_app_meta_data - 'partners_capability_admin'
+where id = '10000000-0000-4000-8000-000000000001';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+select extensions.is(
+  public.admin_partners_capabilities() ->> 'can_manage',
+  'false',
+  'a stale JWT loses delegation authority after the live manager flag is removed'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000004',
+      'risk',
+      true,
+      'A revoked manager flag must take effect before JWT expiry.'
+    )
+  $$,
+  '42501',
+  'Partners capability manager role is required',
+  'a removed live manager flag blocks mutation despite a stale privileged JWT'
+);
+
+reset role;
+update auth.users
+set raw_app_meta_data = raw_app_meta_data
+  || '{"partners_capability_admin":true}'::jsonb
+where id = '10000000-0000-4000-8000-000000000001';
+update auth.mfa_factors
+set status = 'unverified'
+where id = '20000000-0000-4000-8000-000000000001';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+select extensions.is(
+  public.admin_partners_capabilities() #>> '{capabilities,finance}',
+  'false',
+  'Finance authority is revoked live when the actor loses verified TOTP'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000004',
+      'risk',
+      true,
+      'An expired AAL2 factor must not authorize a capability mutation.'
+    )
+  $$,
+  '42501',
+  'Partners capability mutation requires AAL2',
+  'a stale AAL2 JWT cannot mutate capabilities after its TOTP factor is removed'
+);
+
+reset role;
+update auth.mfa_factors
+set status = 'verified'
+where id = '20000000-0000-4000-8000-000000000001';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+reset role;
+update auth.users
+set banned_until = now() + interval '1 day'
+where id = '10000000-0000-4000-8000-000000000004';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+select extensions.is(
+  public.admin_partners_capability_operators() ->> 'schema_version',
+  '1',
+  'the capability-manager operator directory is versioned'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'authenticated',
+    'affiliate_private.partners_admin_operator_key(uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'affiliate_private.partners_admin_operator_key(uuid)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)',
+    'EXECUTE'
+  ),
+  'only the guarded authenticated RPC can resolve opaque operator keys'
+);
+select extensions.is(
+  jsonb_array_length(
+    public.admin_partners_capability_operators() -> 'operators'
+  ),
+  3,
+  'the operator directory includes confirmed Admin subjects only'
+);
+select extensions.ok(
+  public.admin_partners_capability_operators()::text not like
+    '%10000000-0000-4000-8000-00000000000%',
+  'the operator directory never serializes an Auth user UUID'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      public.admin_partners_capability_operators() -> 'operators'
+    ) entry
+    where entry ->> 'email' = 'partners-admin@example.invalid'
+      and entry ->> 'operator_key' ~ '^op_[0-9a-f]{64}$'
+      and (entry ->> 'totp_verified')::boolean
+      and (entry -> 'capabilities' ->> 'finance')::boolean
+      and not entry ? 'user_id'
+      and not entry ? 'secret'
+  ),
+  'operator readiness exposes an opaque key and TOTP state without Auth ids or MFA secrets'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from jsonb_array_elements(
+      public.admin_partners_capability_operators() -> 'operators'
+    ) entry
+    where entry ->> 'email' = 'partners-referred@example.invalid'
+      and not (entry ->> 'account_active')::boolean
+      and (entry -> 'capabilities' ->> 'support')::boolean
+  ),
+  'a banned Admin remains visible only so stale capabilities can be revoked'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set_by_operator_key(
+      (
+        select entry ->> 'operator_key'
+        from jsonb_array_elements(
+          public.admin_partners_capability_operators() -> 'operators'
+        ) entry
+        where entry ->> 'email' = 'partners-referred@example.invalid'
+      ),
+      'risk',
+      true,
+      'A banned Admin must not receive another capability.'
+    )
+  $$,
+  '42501',
+  'capability subject must be an active confirmed Admin',
+  'a banned Admin cannot receive a capability'
+);
+select extensions.is(
+  public.admin_partners_capability_set_by_operator_key(
+    (
+      select entry ->> 'operator_key'
+      from jsonb_array_elements(
+        public.admin_partners_capability_operators() -> 'operators'
+      ) entry
+      where entry ->> 'email' = 'partners-referred@example.invalid'
+    ),
+    'support',
+    false,
+    'Remove the stale capability from the banned Admin fixture.'
+  ) ->> 'enabled',
+  'false',
+  'a stale capability can still be revoked from a banned Admin'
+);
+
+reset role;
+update auth.users
+set banned_until = null
+where id = '10000000-0000-4000-8000-000000000004';
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_capability_admin":true}}';
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set_by_operator_key(
+      '10000000-0000-4000-8000-000000000001',
+      'support',
+      true,
+      'Reject an internal Auth UUID at the opaque operator boundary.'
+    )
+  $$,
+  '22023',
+  'invalid capability operator key',
+  'the operator mutation rejects an Auth UUID-shaped key'
+);
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_capability_set(
+      '10000000-0000-4000-8000-000000000002',
+      'finance',
+      true,
+      'A non-Admin member must not become a Finance operator.'
+    )
+  $$,
+  '42501',
+  'capability subject must be an active confirmed Admin',
+  'Finance delegation fails closed for a non-Admin member'
+);
+
+select extensions.is(
+  public.admin_partners_capability_set_by_operator_key(
+    (
+      select entry ->> 'operator_key'
+      from jsonb_array_elements(
+        public.admin_partners_capability_operators() -> 'operators'
+      ) entry
+      where entry ->> 'email' = 'partners-admin@example.invalid'
+    ),
     'risk',
     false,
     'P0 database integration risk capability revocation.'
@@ -477,8 +795,14 @@ select extensions.is(
 );
 
 select extensions.is(
-  public.admin_partners_capability_set(
-    '10000000-0000-4000-8000-000000000001',
+  public.admin_partners_capability_set_by_operator_key(
+    (
+      select entry ->> 'operator_key'
+      from jsonb_array_elements(
+        public.admin_partners_capability_operators() -> 'operators'
+      ) entry
+      where entry ->> 'email' = 'partners-admin@example.invalid'
+    ),
     'risk',
     true,
     'P0 database integration risk capability restoration.'

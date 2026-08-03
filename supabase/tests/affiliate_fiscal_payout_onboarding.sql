@@ -711,7 +711,7 @@ values
     'fiscal-admin@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
@@ -729,6 +729,27 @@ values
     now(),
     now()
   );
+
+insert into auth.mfa_factors (
+  id,
+  user_id,
+  friendly_name,
+  factor_type,
+  status,
+  created_at,
+  updated_at,
+  secret
+)
+values (
+  '23000000-0000-4000-8000-000000000002',
+  '22000000-0000-4000-8000-000000000002',
+  'Partners fiscal Finance actor',
+  'totp',
+  'verified',
+  now(),
+  now(),
+  'partners-fiscal-test-secret'
+);
 
 insert into affiliate_private.affiliate_program_versions (
   version_key,

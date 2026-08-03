@@ -776,6 +776,57 @@ test('active dashboard exposes the real link, disclosure, filters and accessible
   }
 });
 
+test('share fallback copies the complete disclosure through the browser selection path', async ({
+  page,
+}) => {
+  await mountPartners(page, 'active');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    window.__partnerFallbackCopy = null;
+    document.addEventListener('copy', () => {
+      const source = document.activeElement;
+      window.__partnerFallbackCopy = {
+        text: source instanceof HTMLTextAreaElement
+          ? source.value.slice(source.selectionStart, source.selectionEnd)
+          : null,
+        ariaHidden: source?.getAttribute?.('aria-hidden') || null,
+        readOnly: source instanceof HTMLTextAreaElement ? source.readOnly : false,
+        tabIndex: source?.tabIndex ?? null,
+      };
+    }, { capture: true, once: true });
+  });
+
+  const share = page.locator('[data-partners-share]');
+  await share.focus();
+  await share.click();
+
+  const url = `https://norva.tv/r/${'A'.repeat(32)}`;
+  const expected = [
+    'Discover Norva — one media ecosystem across Web, Android and TV.',
+    '',
+    'Partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
+    url,
+  ].join('\n');
+  await expect(page.locator('[data-partners-action-status]')).toContainText(
+    'link and required disclosure were copied',
+  );
+  expect(await page.evaluate(() => window.__partnerFallbackCopy)).toEqual({
+    text: expected,
+    ariaHidden: 'true',
+    readOnly: true,
+    tabIndex: -1,
+  });
+  await expect(page.locator('textarea[aria-hidden="true"]')).toHaveCount(0);
+  await expect(share).toBeFocused();
+});
+
 test('an active account can recover a missing or revoked referral link', async ({ page }) => {
   await mountPartners(page, 'active');
   await page.evaluate(async () => {

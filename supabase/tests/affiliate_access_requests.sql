@@ -2,11 +2,42 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(30);
+select extensions.plan(40);
 
 select extensions.ok(
   to_regclass('affiliate_private.affiliate_access_requests') is not null,
   'the private access request table exists'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from pg_trigger trigger_row
+    join pg_class class_row on class_row.oid = trigger_row.tgrelid
+    join pg_namespace namespace_row on namespace_row.oid = class_row.relnamespace
+    where namespace_row.nspname = 'affiliate_private'
+      and class_row.relname = 'affiliate_access_requests'
+      and trigger_row.tgname = 'partners_access_decision_email_enqueue'
+      and not trigger_row.tgisinternal
+  ),
+  'the final access-decision transition owns one email trigger'
+);
+select extensions.ok(
+  not has_function_privilege(
+    'anon',
+    'affiliate_private.partners_access_decision_email_enqueue()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'affiliate_private.partners_access_decision_email_enqueue()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'affiliate_private.partners_access_decision_email_enqueue()',
+    'EXECUTE'
+  ),
+  'no API role can execute the private notification trigger directly'
 );
 select extensions.ok(
   (
@@ -97,7 +128,7 @@ values
     'access-admin@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
@@ -162,7 +193,7 @@ values
     'access-support@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
@@ -175,11 +206,32 @@ values
     'access-admin-no-capability@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
   );
+
+insert into auth.mfa_factors (
+  id,
+  user_id,
+  friendly_name,
+  factor_type,
+  status,
+  created_at,
+  updated_at,
+  secret
+)
+values (
+  '22000000-0000-4000-8000-000000000001',
+  '21000000-0000-4000-8000-000000000001',
+  'Partners access-request Risk actor',
+  'totp',
+  'verified',
+  now(),
+  now(),
+  'partners-access-request-test-secret'
+);
 
 insert into affiliate_private.affiliate_admin_capabilities (
   user_id,
@@ -433,6 +485,94 @@ select extensions.throws_ok(
   'Risk cannot decide a request from an AAL1 session'
 );
 
+reset role;
+
+select public.norva_enqueue_branded_email(
+  'access-member@example.invalid',
+  'Your Norva Partners access is approved',
+  'Welcome to Norva Partners',
+  'Your early-access request has been approved. Open Norva Partners to review the current programme conditions. Approval does not create a partner account, start identity verification or enable payouts; those steps become available only when your pilot cohort opens.',
+  'Open Norva Partners',
+  'https://norva.tv/app#partners',
+  'Norva never asks you to pay to join Partners. If you did not request access, contact support@norva.tv.',
+  'partners_access_approved',
+  'partners_access_decision:' || (
+    select request_row.id::text
+    from affiliate_private.affiliate_access_requests request_row
+    where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+  ),
+  '21000000-0000-4000-8000-000000000002'
+);
+
+update public.cloud_branded_email_outbox outbox_row
+set next_attempt_at = 'infinity'::timestamptz
+where outbox_row.dedupe_key = 'partners_access_decision:' || (
+  select request_row.id::text
+  from affiliate_private.affiliate_access_requests request_row
+  where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+);
+
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"21000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_access_request_decide(
+      (
+        public.admin_partners_access_requests(
+          1,
+          0,
+          'requested',
+          'access-member@example.invalid'
+        ) #>> '{items,0,request_id}'
+      )::uuid,
+      'approve',
+      now() + interval '7 days',
+      'Reject a deferred transactional outbox collision.'
+    )
+  $$,
+  'P0001',
+  'Partners access decision email mismatch',
+  'a same-identity outbox row that is not worker-claimable aborts approval'
+);
+
+reset role;
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_access_requests request_row
+    where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+      and request_row.status = 'requested'
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_pilot_allowlist allowlist_row
+    where allowlist_row.user_id = '21000000-0000-4000-8000-000000000002'
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_events event_row
+    where event_row.aggregate_type = 'access_request'
+      and event_row.action = 'access_request_decided'
+      and event_row.aggregate_key = (
+        select request_row.id::text
+        from affiliate_private.affiliate_access_requests request_row
+        where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+      )
+  ),
+  'an email envelope conflict rolls back approval, allowlist and decision audit'
+);
+
+delete from public.cloud_branded_email_outbox outbox_row
+where outbox_row.dedupe_key = 'partners_access_decision:' || (
+  select request_row.id::text
+  from affiliate_private.affiliate_access_requests request_row
+  where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+);
+
+set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"21000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 
@@ -470,6 +610,7 @@ select extensions.is(
   'false',
   'repeating the same decision is idempotent'
 );
+
 select extensions.is(
   public.admin_partners_access_request_decide(
     (
@@ -516,6 +657,132 @@ select extensions.ok(
       and event_row.actor_type = 'admin'
   ),
   'Admin decisions append a distinct access-request audit event'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.flow in (
+      'partners_access_approved',
+      'partners_access_declined'
+    )
+  ),
+  2::bigint,
+  'approval and decline each enqueue one transactional email'
+);
+select extensions.is(
+  (
+    select count(*)::bigint
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.dedupe_key = 'partners_access_decision:' || (
+      select request_row.id::text
+      from affiliate_private.affiliate_access_requests request_row
+      where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+    )
+  ),
+  1::bigint,
+  'replaying an approval does not duplicate its email'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.flow = 'partners_access_approved'
+      and outbox_row.user_id = '21000000-0000-4000-8000-000000000002'
+      and outbox_row.recipient_email = 'access-member@example.invalid'
+      and outbox_row.state = 'pending'
+      and outbox_row.request_html like '%https://norva.tv/app#partners%'
+  )
+  and exists (
+    select 1
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.flow = 'partners_access_declined'
+      and outbox_row.user_id = '21000000-0000-4000-8000-000000000003'
+      and outbox_row.recipient_email = 'access-decline@example.invalid'
+      and outbox_row.state = 'pending'
+  ),
+  'decision emails target the current confirmed user and the Partners route'
+);
+select extensions.ok(
+  not exists (
+    select 1
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.flow in (
+      'partners_access_approved',
+      'partners_access_declined'
+    )
+      and (
+        outbox_row.request_html ilike '%supervised Partners access-request fixture%'
+        or outbox_row.request_text ilike '%supervised Partners access-request fixture%'
+      )
+  ),
+  'internal Admin justification is never exposed in user email copy'
+);
+select extensions.ok(
+  not exists (
+    select 1
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.flow in (
+      'partners_access_approved',
+      'partners_access_declined'
+    )
+      and (
+        outbox_row.is_marketing
+        or outbox_row.marker_kind is not null
+        or outbox_row.request_from <> 'Norva <support@norva.tv>'
+        or outbox_row.request_reply_to <> 'support@norva.tv'
+        or concat(
+          outbox_row.request_html,
+          outbox_row.request_text,
+          outbox_row.request_tags::text
+        ) ilike any (array[
+          '%access-admin@example.invalid%',
+          '%21000000-0000-4000-8000-000000000001%',
+          '%supervised Partners access-request fixture%'
+        ])
+      )
+  ),
+  'decision emails remain transactional and contain no Admin identity or rationale'
+);
+
+delete from public.cloud_branded_email_outbox outbox_row
+where outbox_row.dedupe_key = 'partners_access_decision:' || (
+  select request_row.id::text
+  from affiliate_private.affiliate_access_requests request_row
+  where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+);
+
+set local role authenticated;
+set local request.jwt.claims =
+  '{"sub":"21000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
+
+select public.admin_partners_access_request_decide(
+  (
+    public.admin_partners_access_requests(
+      1,
+      0,
+      'approved',
+      'access-member@example.invalid'
+    ) #>> '{items,0,request_id}'
+  )::uuid,
+  'approve',
+  now() + interval '7 days',
+  'Replay after simulated outbox retention without sending again.'
+);
+
+reset role;
+
+select extensions.ok(
+  not exists (
+    select 1
+    from public.cloud_branded_email_outbox outbox_row
+    where outbox_row.dedupe_key = 'partners_access_decision:' || (
+      select request_row.id::text
+      from affiliate_private.affiliate_access_requests request_row
+      where request_row.user_id = '21000000-0000-4000-8000-000000000002'
+    )
+  ),
+  'a replay cannot resend an approval after the outbox retention window'
 );
 select extensions.ok(
   not exists (

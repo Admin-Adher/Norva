@@ -160,7 +160,7 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   assert.match(section, /Non configuré — aucune action live exposée/);
   assert.match(section, /Aucune action n’a été exécutée/);
   for (const rpc of [
-    'admin_partners_capability_set',
+    'admin_partners_capability_set_by_operator_key',
     'admin_partners_control',
     'admin_partners_account_action',
     'admin_partners_job_retry',
@@ -227,11 +227,48 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
     /data-partners-action="capability"/,
     'a regular admin must see capability state without self-service controls',
   );
-  assert.match(
+  assert.doesNotMatch(
     page._partnersCapabilityCards(capabilityState, true),
     /data-partners-action="capability"/,
-    'only a server-designated capability manager receives grant controls',
+    'personal readiness cards never send an Auth user id for self-service mutation',
   );
+  const operatorMarkup = page._partnersCapabilityCards(capabilityState, true, [{
+    operator_key: `op_${'a'.repeat(64)}`,
+    email: 'finance@example.test',
+    is_admin: true,
+    account_active: true,
+    email_confirmed: true,
+    totp_verified: false,
+    capabilities: { support: false, risk: true, finance: false },
+  }]);
+  assert.match(operatorMarkup, /Équipe opératrice et maker-checker/);
+  assert.match(operatorMarkup, new RegExp(`data-partners-operator-key="op_${'a'.repeat(64)}"`));
+  assert.doesNotMatch(operatorMarkup, /11111111-1111-4111-8111-111111111111|data-partners-operator-id/);
+  assert.match(operatorMarkup, /data-partners-operator-email="finance@example\.test"/);
+  assert.match(operatorMarkup, /Retirer Risque/);
+  assert.match(operatorMarkup, /disabled title="Un TOTP vérifié est obligatoire pour Finance\.[\s\S]*Activer Finance/);
+  const validOperator = {
+    operator_key: `op_${'c'.repeat(64)}`,
+    email: 'risk@example.test',
+    is_admin: true,
+    account_active: true,
+    email_confirmed: true,
+    totp_verified: true,
+    capabilities: { support: true, risk: true, finance: false },
+  };
+  assert.equal(page._partnersValidCapabilityOperator(validOperator), true);
+  assert.equal(page._partnersValidCapabilityOperator({
+    ...validOperator,
+    user_id: '11111111-1111-4111-8111-111111111111',
+  }), false, 'an Auth UUID field invalidates the operator envelope');
+  const suspendedMarkup = page._partnersCapabilityCards(capabilityState, true, [{
+    ...validOperator,
+    account_active: false,
+    capabilities: { support: true, risk: false, finance: false },
+  }]);
+  assert.match(suspendedMarkup, /Compte suspendu/);
+  assert.match(suspendedMarkup, /Retirer Support/);
+  assert.match(suspendedMarkup, /disabled title="Le compte est supprimé, suspendu ou banni\.[\s\S]*Activer Finance/);
 
   page._partnersCapabilities = { support: true, risk: false, finance: false };
   page._partnersCanManageRelease = false;
@@ -1432,6 +1469,78 @@ test('Admin Partners module coordinator rejects stale responses', async () => {
   assert.equal(signals[1].aborted, false);
 });
 
+test('Admin Partners capability refresh revokes stale operator responses', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersPageGeneration = 1;
+  page._partnersRerenderCapabilityDependentModules = () => {};
+  const renders = [];
+  page._partnersRenderCapabilitiesArea = (data) => renders.push({
+    canManage: data?.can_manage === true,
+    operators: Array.isArray(page._partnersCapabilityOperators)
+      ? page._partnersCapabilityOperators.map((operator) => operator.email)
+      : page._partnersCapabilityOperators,
+  });
+  const pending = [];
+  page._rpc = (fn, _params, options = {}) => new Promise((resolve, reject) => {
+    pending.push({ fn, resolve, reject, signal: options.signal });
+  });
+  const manager = {
+    schema_version: 1,
+    can_manage: true,
+    can_manage_release: false,
+    capabilities: { support: true, risk: true, finance: false },
+  };
+  const revoked = {
+    schema_version: 1,
+    can_manage: false,
+    can_manage_release: false,
+    capabilities: { support: false, risk: false, finance: false },
+  };
+  const oldOperators = {
+    schema_version: 1,
+    operators: [{
+      operator_key: `op_${'a'.repeat(64)}`,
+      email: 'stale@example.test',
+      is_admin: true,
+      account_active: true,
+      email_confirmed: true,
+      totp_verified: true,
+      capabilities: { support: true, risk: true, finance: true },
+    }],
+    requirements: {
+      confirmed_admin: true,
+      active_admin: true,
+      finance_totp: true,
+      maker_checker_distinct_operators: 2,
+    },
+  };
+
+  const first = page._partnersLoadCapabilities({ force: true });
+  pending[0].resolve(manager);
+  while (pending.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pending[1].fn, 'admin_partners_capability_operators');
+
+  const second = page._partnersLoadCapabilities({ force: true });
+  assert.equal(pending[1].signal.aborted, true);
+  pending[2].resolve(revoked);
+  await second;
+  const renderedAfterRevocation = renders.length;
+
+  // Simulate a transport that ignores AbortSignal and eventually resolves.
+  pending[1].resolve(oldOperators);
+  assert.equal(await first, null);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(renders.length, renderedAfterRevocation);
+  assert.equal(Array.isArray(page._partnersCapabilityOperators), true);
+  assert.equal(page._partnersCapabilityOperators.length, 0);
+  assert.equal(page._partnersCanManageCapabilities, false);
+  assert.equal(renders.at(-1).canManage, false);
+  assert.doesNotMatch(JSON.stringify(renders), /stale@example\.test/);
+});
+
 test('Admin Partners renders capabilities independently when overview is unavailable', async () => {
   const attributes = new Map([['aria-busy', 'true']]);
   const readiness = {
@@ -1677,7 +1786,7 @@ test('Admin Partners access decisions require AAL2 Risk and preserve operational
     },
   });
 
-  assert.equal(result, 'Demande approuvée et invitation pilote enregistrée.');
+  assert.equal(result, 'Demande approuvée, invitation pilote enregistrée et notification transactionnelle mise en file.');
   assert.equal(call.fn, 'admin_partners_access_request_decide');
   assert.deepEqual(JSON.parse(JSON.stringify(call.params)), {
     p_request_id: '11111111-1111-4111-8111-111111111111',
@@ -2290,23 +2399,47 @@ test('Admin Partners preflights AAL2 before a sensitive action and then resumes 
   page._partnersCanManageCapabilities = true;
   page._meId = () => '11111111-1111-4111-8111-111111111111';
   page._partnersEnsureAal2 = async () => { order.push('aal2'); return true; };
+  page._confirm = async () => { order.push('confirm'); return true; };
   page._partnersJustification = async () => { order.push('justification'); return 'Contrôle approuvé'; };
-  page._rpc = async (fn) => { order.push(fn); return {}; };
+  let mutation;
+  page._rpc = async (fn, args) => {
+    order.push(fn);
+    mutation = { fn, args };
+    return {
+      schema_version: 1,
+      action: 'admin_capability_set',
+      capability: 'finance',
+      enabled: true,
+    };
+  };
 
   const result = await page._runPartnersAdminAction({
     dataset: {
       partnersAction: 'capability',
       partnersCapability: 'finance',
       partnersEnabled: 'true',
+      partnersOperatorKey: `op_${'b'.repeat(64)}`,
+      partnersOperatorEmail: 'second.finance@example.test',
     },
   });
 
   assert.deepEqual(order, [
     'aal2',
+    'confirm',
     'justification',
-    'admin_partners_capability_set',
+    'admin_partners_capability_set_by_operator_key',
   ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(mutation)), {
+    fn: 'admin_partners_capability_set_by_operator_key',
+    args: {
+      p_operator_key: `op_${'b'.repeat(64)}`,
+      p_capability: 'finance',
+      p_enabled: true,
+      p_justification: 'Contrôle approuvé',
+    },
+  });
   assert.match(result, /Capacité finance activée/);
+  assert.match(result, /second\.finance@example\.test/);
 });
 
 test('Admin Partners maps MFA failures into distinct sanitized user guidance', () => {

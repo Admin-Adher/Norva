@@ -1741,6 +1741,108 @@ test('an active account without a link can create one from the server', async ()
   assert.equal(page._actionKeys.has('link-rotation'), false);
 });
 
+test('legacy copy fallback preserves the complete disclosure payload and focus', async () => {
+  const payload = [
+    'Discover Norva — one media ecosystem across Web, Android and TV.',
+    '',
+    'Partner link · I may receive 20% of eligible Norva payments excluding tax.',
+    `https://norva.tv/r/${'A'.repeat(32)}`,
+  ].join('\n');
+  const restoredRanges = [];
+  const previousRange = { id: 'existing-selection' };
+  const selection = {
+    rangeCount: 1,
+    getRangeAt: () => ({ cloneRange: () => previousRange }),
+    removeAllRanges() { restoredRanges.length = 0; },
+    addRange(range) { restoredRanges.push(range); },
+  };
+  let focused = 0;
+  const trigger = { focus() { focused += 1; } };
+  const attributes = new Map();
+  const fallback = {
+    value: '',
+    readOnly: false,
+    tabIndex: 0,
+    style: {},
+    removed: false,
+    selection: null,
+    setAttribute(name, value) { attributes.set(name, value); },
+    focus() {},
+    select() { this.selection = [0, this.value.length]; },
+    setSelectionRange(start, end) { this.selection = [start, end]; },
+    remove() { this.removed = true; },
+  };
+  let appended = null;
+  let copied = null;
+  const document = {
+    activeElement: trigger,
+    body: { appendChild(node) { appended = node; } },
+    documentElement: {},
+    createElement(tagName) {
+      assert.equal(tagName, 'textarea');
+      return fallback;
+    },
+    getSelection: () => selection,
+    execCommand(command) {
+      assert.equal(command, 'copy');
+      assert.equal(appended, fallback);
+      copied = fallback.value.slice(...fallback.selection);
+      return true;
+    },
+    getElementById: () => null,
+  };
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document,
+    navigator: { language: 'en-US' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+
+  await page.copyText(payload);
+
+  assert.equal(copied, payload);
+  assert.equal(fallback.value, payload);
+  assert.equal(fallback.readOnly, true);
+  assert.equal(fallback.tabIndex, -1);
+  assert.equal(attributes.get('aria-hidden'), 'true');
+  assert.equal(fallback.removed, true);
+  assert.deepEqual(restoredRanges, [previousRange]);
+  assert.equal(focused, 1);
+});
+
+test('discovery copy uses the authoritative programme maturation period', () => {
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: { getElementById: () => null },
+    navigator: { language: 'en-US' },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, { filename: 'public/js/pages/PartnersPage.js' });
+  const page = new window.PartnersPage({ currentUser: { cloud: true, device: false } });
+
+  const markup = page.steps({ maturation_days: 61 });
+
+  assert.match(markup, /Commission matures after 61 days/);
+  assert.doesNotMatch(markup, /after 45 days/);
+  assert.match(page.steps(null), /server-published validation period/);
+});
+
 test('strict account states resolve to active, pending, attention and terminal views', () => {
   const window = {};
   const context = vm.createContext({

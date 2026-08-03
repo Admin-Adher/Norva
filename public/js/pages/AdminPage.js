@@ -24,6 +24,7 @@ class AdminPage {
         this._partnersCanManageCapabilities = false;
         this._partnersCanManageRelease = false;
         this._partnersCapabilities = { support: false, risk: false, finance: false };
+        this._partnersCapabilityOperators = undefined;
         this._partnersView = 'overview';
         this._partnersPage = 0;
         this._partnersLimit = 25;
@@ -763,6 +764,21 @@ class AdminPage {
 #page-admin .partners-admin-cap span{color:var(--adm-tx3);font-size:12px;line-height:1.5;}
 #page-admin .partners-admin-cap.is-ready{border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.045);}
 #page-admin .partners-admin-cap .partners-action-row{margin-top:12px;}
+#page-admin .partners-operator-manager{grid-column:1/-1;padding:16px;border:1px solid var(--adm-line);border-radius:11px;background:var(--adm-card);}
+#page-admin .partners-operator-manager-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+#page-admin .partners-operator-manager-head h3{margin:0 0 4px;color:var(--adm-tx1);font-size:15px;}
+#page-admin .partners-operator-manager-head p{margin:0;color:var(--adm-tx3);font-size:12px;line-height:1.5;}
+#page-admin .partners-operator-table-wrap{overflow-x:auto;border:1px solid var(--adm-line);border-radius:10px;}
+#page-admin .partners-operator-table{width:100%;border-collapse:collapse;min-width:720px;}
+#page-admin .partners-operator-table th,#page-admin .partners-operator-table td{padding:11px 12px;border-bottom:1px solid var(--adm-line);text-align:left;vertical-align:middle;}
+#page-admin .partners-operator-table tr:last-child td{border-bottom:0;}
+#page-admin .partners-operator-table th{color:var(--adm-tx3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;}
+#page-admin .partners-operator-identity strong{display:block;color:var(--adm-tx1);font-size:13px;}
+#page-admin .partners-operator-status{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;}
+#page-admin .partners-operator-chip{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:rgba(148,163,184,.1);color:var(--adm-tx3);font-size:11px;}
+#page-admin .partners-operator-chip.is-ready{background:rgba(52,211,153,.11);color:var(--adm-green);}
+#page-admin .partners-operator-actions{display:flex;flex-wrap:wrap;gap:6px;}
+#page-admin .partners-operator-actions .partners-action{min-height:44px;}
 #page-admin .partners-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0;}
 #page-admin .partners-ops-card{min-width:0;padding:16px;border:1px solid var(--adm-line);border-radius:11px;background:var(--adm-card);}
 #page-admin .partners-ops-card h2{margin:0 0 5px;font-size:15px;color:var(--adm-tx1);}
@@ -867,6 +883,15 @@ class AdminPage {
   #page-admin .crm-crumb{max-width:56vw;}
   #page-admin .users-controls input{min-width:0;}
   #page-admin .partners-admin-readiness{grid-template-columns:1fr;}
+  #page-admin .partners-operator-manager{padding:13px;}
+  #page-admin .partners-operator-manager-head{display:block;}
+  #page-admin .partners-operator-table-wrap{border:0;overflow:visible;}
+  #page-admin .partners-operator-table{display:block;min-width:0;}
+  #page-admin .partners-operator-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+  #page-admin .partners-operator-table tbody,#page-admin .partners-operator-table tr,#page-admin .partners-operator-table td{display:block;width:100%;}
+  #page-admin .partners-operator-table tr{padding:12px;border:1px solid var(--adm-line);border-radius:10px;margin-top:10px;}
+  #page-admin .partners-operator-table td{padding:8px 0;border:0;}
+  #page-admin .partners-operator-table td::before{content:attr(data-label);display:block;margin-bottom:5px;color:var(--adm-tx3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;}
   #page-admin .partners-workspace-nav{top:69px;}
   #page-admin .partners-detail-grid{grid-template-columns:1fr;}
   #page-admin .partners-ops-grid{grid-template-columns:1fr;}
@@ -4956,6 +4981,7 @@ class AdminPage {
         };
         const overview = this._partnersCache.get('overview');
         if (overview) this._renderPartnersAdminSummary(overview, data);
+        else this._partnersRenderCapabilitiesArea(data);
         this._partnersRerenderCapabilityDependentModules();
     }
 
@@ -4981,20 +5007,67 @@ class AdminPage {
         }
     }
 
-    _partnersLoadCapabilities({ force = false } = {}) {
-        return this._partnersLoadModule('capabilities', 'admin_partners_capabilities', {}, (data) => {
+    async _partnersLoadCapabilities({ force = false } = {}) {
+        if (!(this._partnersRequests instanceof Map)) this._partnersRequests = new Map();
+        if (!(this._partnersCache instanceof Map)) this._partnersCache = new Map();
+        const capabilityEpoch = (Number(this._partnersCapabilitiesEpoch) || 0) + 1;
+        this._partnersCapabilitiesEpoch = capabilityEpoch;
+
+        // Operators are subordinate to the capability envelope. Revoke their
+        // pending response before refreshing authority so a transport that
+        // ignores AbortSignal can never repaint stale controls afterwards.
+        const pendingOperators = this._partnersRequests.get('capabilityOperators');
+        if (typeof pendingOperators?.cancel === 'function') pendingOperators.cancel();
+        else pendingOperators?.controller?.abort?.();
+        this._partnersRequests.delete('capabilityOperators');
+        if (force) {
+            this._partnersCache.delete('capabilityOperators');
+            this._partnersCapabilityOperators = undefined;
+            this._partnersApplyCapabilities(null);
+        }
+
+        const data = await this._partnersLoadModule('capabilities', 'admin_partners_capabilities', {}, (data) => {
+            if (capabilityEpoch !== this._partnersCapabilitiesEpoch) return;
             this._partnersApplyCapabilities(data);
-            const readiness = document.getElementById('partners-admin-readiness');
-            if (readiness) {
-                readiness.removeAttribute('aria-busy');
-                const valid = data?.schema_version === 1 && data?.capabilities
-                    && typeof data.capabilities === 'object';
-                readiness.innerHTML = this._partnersCapabilityCards(
-                    valid ? data.capabilities : {},
-                    valid && data?.can_manage === true
-                );
-            }
         }, { force, targetId: 'partners-admin-readiness', title: 'Capacités Partners' });
+        if (capabilityEpoch !== this._partnersCapabilitiesEpoch) return null;
+        if (data?.schema_version !== 1 || data?.can_manage !== true) {
+            this._partnersCapabilityOperators = [];
+            this._partnersRenderCapabilitiesArea(data);
+            return data;
+        }
+        this._partnersCapabilityOperators = undefined;
+        this._partnersRenderCapabilitiesArea(data);
+        await this._partnersLoadModule(
+            'capabilityOperators',
+            'admin_partners_capability_operators',
+            {},
+            (envelope) => {
+                if (capabilityEpoch !== this._partnersCapabilitiesEpoch
+                    || this._partnersCanManageCapabilities !== true
+                    || this._partnersCache.get('capabilities') !== data) return;
+                if (envelope?.schema_version !== 1 || !Array.isArray(envelope.operators)
+                    || envelope.operators.some((operator) => !this._partnersValidCapabilityOperator(operator))) {
+                    throw new Error('invalid_partners_capability_operators_response');
+                }
+                this._partnersCapabilityOperators = envelope.operators;
+                this._partnersRenderCapabilitiesArea(data);
+            },
+            {
+                force,
+                targetId: '',
+                title: 'Équipe opératrice Partners',
+                onError: () => {
+                    if (capabilityEpoch !== this._partnersCapabilitiesEpoch
+                        || this._partnersCanManageCapabilities !== true
+                        || this._partnersCache.get('capabilities') !== data) return;
+                    this._partnersCapabilityOperators = null;
+                    this._partnersRenderCapabilitiesArea(data);
+                }
+            }
+        );
+        if (capabilityEpoch !== this._partnersCapabilitiesEpoch) return null;
+        return data;
     }
 
     _partnersLoadOverview({ force = false } = {}) {
@@ -5389,6 +5462,7 @@ class AdminPage {
         const map = {
             overview: () => this._partnersLoadOverview({ force: true }),
             capabilities: () => this._partnersLoadCapabilities({ force: true }),
+            capabilityOperators: () => this._partnersLoadCapabilities({ force: true }),
             accessRequests: () => this._partnersLoadAccessRequests({ force: true }),
             accounts: () => this._partnersLoadAccounts({ force: true }),
             monitoring: () => load('monitoring', 'admin_partners_monitoring', {}, (d) => this._renderPartnersMonitoring(d), 'partners-admin-monitoring', 'Supervision'),
@@ -5459,10 +5533,52 @@ class AdminPage {
         const canManage = capabilityEnvelope?.schema_version === 1
             && capabilityEnvelope?.can_manage === true;
         this._partnersCanManageCapabilities = canManage;
-        readiness.innerHTML = this._partnersCapabilityCards(capabilities, canManage);
+        readiness.innerHTML = this._partnersCapabilityCards(
+            capabilities,
+            canManage,
+            this._partnersCapabilityOperators
+        );
     }
 
-    _partnersCapabilityCards(capabilities, canManage = false) {
+    _partnersValidCapabilityOperator(operator) {
+        const operatorKey = /^op_[0-9a-f]{64}$/;
+        return operator && typeof operator === 'object'
+            && JSON.stringify(Object.keys(operator).sort())
+                === JSON.stringify([
+                    'account_active', 'capabilities', 'email', 'email_confirmed', 'is_admin',
+                    'operator_key', 'totp_verified'
+                ])
+            && operatorKey.test(String(operator.operator_key || ''))
+            && typeof operator.email === 'string'
+            && operator.email.length > 0
+            && operator.email.length <= 320
+            && typeof operator.is_admin === 'boolean'
+            && typeof operator.account_active === 'boolean'
+            && typeof operator.email_confirmed === 'boolean'
+            && typeof operator.totp_verified === 'boolean'
+            && operator.capabilities && typeof operator.capabilities === 'object'
+            && JSON.stringify(Object.keys(operator.capabilities).sort())
+                === JSON.stringify(['finance', 'risk', 'support'])
+            && ['support', 'risk', 'finance']
+                .every((key) => typeof operator.capabilities[key] === 'boolean');
+    }
+
+    _partnersRenderCapabilitiesArea(capabilityEnvelope = this._partnersCache.get('capabilities')) {
+        const readiness = document.getElementById('partners-admin-readiness');
+        if (!readiness) return;
+        const valid = capabilityEnvelope?.schema_version === 1
+            && capabilityEnvelope?.capabilities
+            && typeof capabilityEnvelope.capabilities === 'object';
+        if (!valid) return;
+        readiness.removeAttribute('aria-busy');
+        readiness.innerHTML = this._partnersCapabilityCards(
+            capabilityEnvelope.capabilities,
+            capabilityEnvelope.can_manage === true,
+            this._partnersCapabilityOperators
+        );
+    }
+
+    _partnersCapabilityCards(capabilities, canManage = false, operators = undefined) {
         const hasRoleContract = ['support', 'risk', 'finance']
             .some((key) => typeof capabilities?.[key] === 'boolean');
         const rows = hasRoleContract
@@ -5476,27 +5592,80 @@ class AdminPage {
                 ['financial_ledger', 'Ledger de commissions', 'Écritures financières et rapprochement'],
                 ['payout_operations', 'Versements', 'Dry-run, approbation et envoi provider']
             ];
-        return rows.map(([key, label, copy]) => {
+        const personalCards = rows.map(([key, label, copy]) => {
             const value = capabilities?.[key];
             const ready = value === true || value?.ready === true;
             const detail = ready
                 ? (value?.label || 'Capacité serveur disponible')
                 : (value?.label || capabilities?.reason || 'Non configuré — aucune action live exposée');
-            const control = canManage && hasRoleContract && typeof value === 'boolean'
-                ? `<div class="partners-action-row">
-                    <button type="button" class="partners-action${ready ? ' is-danger' : ' is-success'}"
-                      data-partners-action="capability"
-                      data-partners-capability="${AdminPage.esc(key)}"
-                      data-partners-enabled="${ready ? 'false' : 'true'}">
-                      ${ready ? 'Retirer de mon accès' : 'Activer pour mon accès'}
-                    </button>
-                  </div>`
-                : '';
             return `<article class="partners-admin-cap${ready ? ' is-ready' : ''}">
                 <strong>${AdminPage.esc(label)}</strong>
-                <span>${AdminPage.esc(copy)}<br>${AdminPage.esc(detail)}</span>${control}
+                <span>${AdminPage.esc(copy)}<br>${AdminPage.esc(detail)}</span>
             </article>`;
         }).join('');
+        if (!canManage || !hasRoleContract) return personalCards;
+        return `${personalCards}${this._partnersCapabilityOperatorsMarkup(operators)}`;
+    }
+
+    _partnersCapabilityOperatorsMarkup(operators) {
+        let body;
+        if (operators === undefined) {
+            body = '<div class="ssub" role="status">Chargement des opérateurs autorisés…</div>';
+        } else if (operators === null) {
+            body = `<div class="admin-err" role="status">La liste des opérateurs est indisponible.
+                <button type="button" class="partners-action" data-partners-retry="capabilityOperators">Réessayer</button></div>`;
+        } else if (!operators.length) {
+            body = '<div class="admin-err" role="status">Aucun compte Admin confirmé n’est disponible. Créez ou promouvez d’abord un second compte Admin, puis activez son TOTP.</div>';
+        } else {
+            const capabilityLabels = { support: 'Support', risk: 'Risque', finance: 'Finance' };
+            const rows = operators.map((operator) => {
+                const eligible = operator.is_admin
+                    && operator.account_active
+                    && operator.email_confirmed;
+                const status = [
+                    `<span class="partners-operator-chip${operator.is_admin ? ' is-ready' : ''}">${operator.is_admin ? 'Admin' : 'Rôle retiré'}</span>`,
+                    `<span class="partners-operator-chip${operator.account_active ? ' is-ready' : ''}">${operator.account_active ? 'Compte actif' : 'Compte suspendu'}</span>`,
+                    `<span class="partners-operator-chip${operator.email_confirmed ? ' is-ready' : ''}">${operator.email_confirmed ? 'E-mail confirmé' : 'E-mail non confirmé'}</span>`,
+                    `<span class="partners-operator-chip${operator.totp_verified ? ' is-ready' : ''}">${operator.totp_verified ? 'TOTP vérifié' : 'TOTP requis'}</span>`
+                ].join('');
+                const actions = Object.entries(capabilityLabels).map(([key, label]) => {
+                    const enabled = operator.capabilities[key] === true;
+                    const canEnable = eligible && (key !== 'finance' || operator.totp_verified);
+                    const disabled = !enabled && !canEnable;
+                    const reason = !operator.account_active
+                        ? 'Le compte est supprimé, suspendu ou banni.'
+                        : (!eligible
+                            ? 'Le compte doit être Admin et confirmé.'
+                        : (key === 'finance' && !operator.totp_verified
+                            ? 'Un TOTP vérifié est obligatoire pour Finance.'
+                            : ''));
+                    return `<button type="button" class="partners-action${enabled ? ' is-danger' : ' is-success'}"
+                        data-partners-action="capability"
+                        data-partners-capability="${key}"
+                        data-partners-operator-key="${AdminPage.esc(operator.operator_key)}"
+                        data-partners-operator-email="${AdminPage.esc(operator.email)}"
+                        data-partners-enabled="${enabled ? 'false' : 'true'}"
+                        aria-label="${enabled ? 'Retirer' : 'Activer'} la capacité ${label} pour ${AdminPage.esc(operator.email)}"
+                        ${disabled ? `disabled title="${AdminPage.esc(reason)}"` : ''}>
+                        ${enabled ? `Retirer ${label}` : `Activer ${label}`}
+                    </button>`;
+                }).join('');
+                return `<tr>
+                    <td data-label="Opérateur"><div class="partners-operator-identity"><strong>${AdminPage.esc(operator.email)}</strong>
+                        <div class="partners-operator-status">${status}</div></div></td>
+                    <td data-label="Capacités"><div class="partners-operator-actions">${actions}</div></td>
+                </tr>`;
+            }).join('');
+            body = `<div class="partners-operator-table-wrap"><table class="partners-operator-table">
+                <caption class="partners-sr-only">Capacités déléguées aux opérateurs Admin Partners</caption>
+                <thead><tr><th>Opérateur</th><th>Capacités</th></tr></thead><tbody>${rows}</tbody>
+            </table></div>`;
+        }
+        return `<section class="partners-operator-manager" aria-labelledby="partners-operator-manager-title">
+            <div class="partners-operator-manager-head"><div>
+                <h3 id="partners-operator-manager-title">Équipe opératrice et maker-checker</h3>
+                <p>Les capacités ciblent un compte Admin précis. Finance exige un Authenticator vérifié et deux comptes opérateurs distincts avant tout lot réel.</p>
+            </div></div>${body}</section>`;
     }
 
     _partnersOpsUnavailable(id, title) {
@@ -8650,8 +8819,8 @@ class AdminPage {
                 throw new Error('invalid_partners_access_request_decision_response');
             }
             return approving
-                ? 'Demande approuvée et invitation pilote enregistrée.'
-                : 'Demande refusée sans créer d’accès partenaire.';
+                ? 'Demande approuvée, invitation pilote enregistrée et notification transactionnelle mise en file.'
+                : 'Demande refusée sans créer d’accès partenaire ; notification transactionnelle mise en file.';
         }
 
         if (action === 'payout-onboarding-decide') {
@@ -9674,19 +9843,34 @@ class AdminPage {
         if (action === 'capability') {
             if (this._partnersCanManageCapabilities !== true) return false;
             const capability = String(button.dataset.partnersCapability || '');
-            const me = this._meId();
-            if (!uuid.test(me) || !['support', 'risk', 'finance'].includes(capability)) return false;
+            const operatorKey = String(button.dataset.partnersOperatorKey || '');
+            const subjectEmail = String(button.dataset.partnersOperatorEmail || 'votre compte Admin');
+            if (!/^op_[0-9a-f]{64}$/.test(operatorKey)
+                || !['support', 'risk', 'finance'].includes(capability)) return false;
+            if (enabled) {
+                const confirmed = await this._confirm(
+                    `Activer la capacité ${capability} pour ${subjectEmail} ? Cette délégation est auditée et n’accorde jamais le rôle Admin à elle seule.`,
+                    { okLabel: 'Activer la capacité' }
+                );
+                if (!confirmed) return false;
+            }
             const justification = await this._partnersJustification(
-                `${enabled ? 'activation' : 'retrait'} de la capacité ${capability}`
+                `${enabled ? 'activation' : 'retrait'} de la capacité ${capability} pour ${subjectEmail}`
             );
             if (!justification) return false;
-            await this._rpc('admin_partners_capability_set', {
-                p_user_id: me,
+            const result = await this._rpc('admin_partners_capability_set_by_operator_key', {
+                p_operator_key: operatorKey,
                 p_capability: capability,
                 p_enabled: enabled,
                 p_justification: justification
             });
-            return `Capacité ${capability} ${enabled ? 'activée' : 'retirée'} pour votre accès admin.`;
+            if (result?.schema_version !== 1
+                || result?.action !== 'admin_capability_set'
+                || result?.capability !== capability
+                || result?.enabled !== enabled) {
+                throw new Error('invalid_partners_capability_mutation_response');
+            }
+            return `Capacité ${capability} ${enabled ? 'activée' : 'retirée'} pour ${subjectEmail}.`;
         }
 
         if (action === 'release-flag' || action === 'release-gate') {

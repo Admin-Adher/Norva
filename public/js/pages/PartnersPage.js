@@ -1522,7 +1522,7 @@ class PartnersPage {
                         ${this.programWindowNote(program)}
                     </aside>
                 </section>
-                ${this.steps()}
+                ${this.steps(program)}
                 <section class="partners-consent-card" aria-labelledby="partners-readiness-title">
                     <div>
                         <span class="partners-eyebrow">Secure activation</span>
@@ -1915,6 +1915,7 @@ class PartnersPage {
     async runPartnerAction(button, loadingLabel, action) {
         if (!button || button.disabled || typeof action !== 'function') return;
         const previous = button.textContent;
+        const restoreButtonFocus = document.activeElement === button;
         button.disabled = true;
         button.setAttribute('aria-busy', 'true');
         button.textContent = loadingLabel;
@@ -1930,6 +1931,15 @@ class PartnersPage {
                 button.disabled = false;
                 button.removeAttribute('aria-busy');
                 button.textContent = previous;
+                const active = document.activeElement;
+                if (restoreButtonFocus && (
+                    !active
+                    || active === document.body
+                    || active === document.documentElement
+                    || active === button
+                )) {
+                    try { button.focus({ preventScroll: true }); } catch (_) { button.focus?.(); }
+                }
             }
             this.container?.querySelector('.partners-shell')?.removeAttribute('aria-busy');
         }
@@ -2552,11 +2562,58 @@ class PartnersPage {
             await navigator.clipboard.writeText(value);
             return;
         }
-        const input = this.container?.querySelector('[data-partners-link]');
-        if (!input) throw new Error('partners_copy_unavailable');
-        input.focus();
-        input.select();
-        if (!document.execCommand?.('copy')) throw new Error('partners_copy_unavailable');
+
+        // The legacy copy fallback must select the exact payload requested by
+        // the caller. Reusing the visible referral-link input would silently
+        // drop the mandatory disclosure when Share is unavailable.
+        if (typeof value !== 'string' || !document.body || !document.createElement) {
+            throw new Error('partners_copy_unavailable');
+        }
+
+        const previouslyFocused = document.activeElement;
+        const selection = document.getSelection?.();
+        const previousRanges = [];
+        if (selection) {
+            for (let index = 0; index < selection.rangeCount; index += 1) {
+                previousRanges.push(selection.getRangeAt(index).cloneRange());
+            }
+        }
+
+        const fallback = document.createElement('textarea');
+        fallback.value = value;
+        fallback.readOnly = true;
+        fallback.tabIndex = -1;
+        fallback.setAttribute('aria-hidden', 'true');
+        Object.assign(fallback.style, {
+            position: 'fixed',
+            inset: '0 auto auto -9999px',
+            width: '1px',
+            height: '1px',
+            opacity: '0',
+            pointerEvents: 'none'
+        });
+
+        let copied = false;
+        try {
+            document.body.appendChild(fallback);
+            try { fallback.focus({ preventScroll: true }); } catch (_) { fallback.focus(); }
+            fallback.select();
+            fallback.setSelectionRange?.(0, fallback.value.length);
+            copied = document.execCommand?.('copy') === true;
+        } finally {
+            fallback.remove();
+            if (selection && previousRanges.length) {
+                selection.removeAllRanges();
+                previousRanges.forEach((range) => selection.addRange(range));
+            }
+            try {
+                previouslyFocused?.focus?.({ preventScroll: true });
+            } catch (_) {
+                previouslyFocused?.focus?.();
+            }
+        }
+
+        if (!copied) throw new Error('partners_copy_unavailable');
     }
 
     async shareReferral(url, bootstrap) {
@@ -3297,12 +3354,16 @@ class PartnersPage {
             </header>`;
     }
 
-    steps() {
+    steps(program = null) {
+        const maturation = Number.isSafeInteger(program?.maturation_days)
+            && program.maturation_days >= 0
+            ? `${program.maturation_days} days`
+            : 'the server-published validation period';
         return `
             <section class="partners-steps" aria-label="How Norva Partners works">
                 <article><span>1</span><div><h2>Share your personal link</h2><p>A unique opaque link is generated only after server verification.</p></div></article>
                 <article><span>2</span><div><h2>They subscribe to Norva</h2><p>Direct referrals are attributed without revealing their identity to you.</p></div></article>
-                <article><span>3</span><div><h2>You earn on eligible renewals</h2><p>Commission matures after 45 days and follows refunds or chargebacks.</p></div></article>
+                <article><span>3</span><div><h2>You earn on eligible renewals</h2><p>Commission matures after ${this.escape(maturation)} and follows refunds or chargebacks.</p></div></article>
             </section>`;
     }
 

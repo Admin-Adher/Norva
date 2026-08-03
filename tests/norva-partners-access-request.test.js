@@ -15,6 +15,9 @@ const cloudSource = read('public/js/cloudApi.js');
 const migrationSource = read(
   'supabase/migrations/20260802150931_partners_access_requests.sql',
 );
+const decisionEmailMigrationSource = read(
+  'supabase/migrations/20260803084051_partners_access_request_decision_email.sql',
+);
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -283,4 +286,55 @@ test('migration keeps request, enrollment and payment authority separated', () =
   assert.doesNotMatch(submitBody, /admin_feature_flags[\s\S]*(insert|update|delete)/i);
   assert.doesNotMatch(submitBody, /affiliate_release_gates[\s\S]*(insert|update|delete)/i);
   assert.doesNotMatch(submitBody, /affiliate_(commissions|ledger|payout)/i);
+});
+
+test('reviewed access requests enqueue one sanitized transactional email atomically', () => {
+  assert.match(
+    decisionEmailMigrationSource,
+    /create or replace function affiliate_private\.partners_access_decision_email_enqueue/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /after update of status on affiliate_private\.affiliate_access_requests/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /old\.status = 'requested'[\s\S]*new\.status in \('approved', 'declined'\)/,
+  );
+  assert.match(decisionEmailMigrationSource, /public\.norva_enqueue_branded_email\(/);
+  assert.match(
+    decisionEmailMigrationSource,
+    /'partners_access_decision:' \|\| new\.id::text/,
+  );
+  assert.match(decisionEmailMigrationSource, /'partners_access_approved'/);
+  assert.match(decisionEmailMigrationSource, /'partners_access_declined'/);
+  assert.match(decisionEmailMigrationSource, /'https:\/\/norva\.tv\/app#partners'/);
+  assert.match(
+    decisionEmailMigrationSource,
+    /outbox_row\.id = v_notification_id[\s\S]*outbox_row\.user_id = new\.user_id[\s\S]*outbox_row\.flow = v_flow/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /outbox_row\.request_from = 'Norva <support@norva\.tv>'[\s\S]*outbox_row\.request_reply_to = 'support@norva\.tv'/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /outbox_row\.request_html = public\.norva_branded_email_html\([\s\S]*outbox_row\.request_text = public\.norva_branded_email_text\(/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /outbox_row\.request_tags = jsonb_build_array\([\s\S]*outbox_row\.request_headers = '\{\}'::jsonb/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /not outbox_row\.is_marketing[\s\S]*outbox_row\.marker_kind is null[\s\S]*outbox_row\.payload_scrubbed_at is null/,
+  );
+  assert.match(
+    decisionEmailMigrationSource,
+    /outbox_row\.state = 'pending'[\s\S]*outbox_row\.attempt_count = 0[\s\S]*outbox_row\.next_attempt_at <= clock_timestamp\(\)/,
+  );
+  assert.doesNotMatch(
+    decisionEmailMigrationSource,
+    /p_justification|v_justification/,
+  );
 });
