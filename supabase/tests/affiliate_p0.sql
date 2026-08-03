@@ -436,7 +436,22 @@ values (
   'active',
   repeat('a', 64),
   'P0 database integration currency metadata.'
-);
+)
+on conflict (currency_code) do nothing;
+
+do $fixture_usd_currency$
+begin
+  if not exists (
+    select 1
+    from affiliate_private.affiliate_currency_metadata currency
+    where currency.currency_code = 'USD'
+      and currency.exponent = 2
+      and currency.status = 'active'
+  ) then
+    raise exception 'P0 fixture requires active USD exponent 2';
+  end if;
+end;
+$fixture_usd_currency$;
 
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';
@@ -3957,7 +3972,22 @@ values (
   'active',
   repeat('a', 64),
   'P0 payout integration EUR metadata.'
-);
+)
+on conflict (currency_code) do nothing;
+
+do $fixture_eur_currency$
+begin
+  if not exists (
+    select 1
+    from affiliate_private.affiliate_currency_metadata currency
+    where currency.currency_code = 'EUR'
+      and currency.exponent = 2
+      and currency.status = 'active'
+  ) then
+    raise exception 'P0 fixture requires active EUR exponent 2';
+  end if;
+end;
+$fixture_eur_currency$;
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}';
 set local role authenticated;
