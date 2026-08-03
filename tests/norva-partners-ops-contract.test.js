@@ -220,6 +220,12 @@ test('every logical application backup includes the private Partners schema and 
   const nightly = read('ops/hetzner/backup/backup-nightly.sh');
   assert.match(nightly, /AFFILIATE_ACCOUNTS_COUNT="\$\([\s\S]*?to_regclass/);
   assert.match(nightly, /affiliate_accounts=\$AFFILIATE_ACCOUNTS_COUNT/);
+  assert.match(nightly, /schema_acl_statements=\$\(grep -Ec/);
+  assert.match(nightly, /schema dump contains no ACL statements/);
+  assert.doesNotMatch(
+    nightly,
+    /--schema-only --no-owner --no-privileges[\s\S]*?--schema=public/,
+  );
   assert.doesNotMatch(nightly, /-Atc \\\\"select/);
 });
 
@@ -241,7 +247,17 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.doesNotMatch(migrationRestore, /postgresql:\/\/postgres:\$\{POSTGRES_PASSWORD\}/);
   assert.match(disasterRestore, /affiliate_private\.affiliate_accounts/);
   assert.match(disasterRestore, /affiliate_private\.affiliate_events/);
+  assert.match(disasterRestore, /grep -Ec '\^\(GRANT\|REVOKE\) '/);
+  assert.match(disasterRestore, /schema_acl_statements=\[1-9\]/);
   assert.match(disasterRestore, /verify-partners-restore\.sql/);
+  assert.match(
+    verifier,
+    /affiliate_private\.admin_partners_capability_operators\(\)/,
+  );
+  assert.match(
+    verifier,
+    /affiliate_private\.admin_partners_capability_set_by_operator_key\(text,text,boolean,text\)/,
+  );
   assert.match(parity, /affiliate_private\.\$t/);
   assert.match(parity, /partners private tables/);
   assert.match(parity, /p\.proname like '%partners%'/);

@@ -23,8 +23,12 @@ H=127.0.0.1; U=supabase_admin; D=postgres
 
 log "[1/5] logical dumps (globals, public, affiliate_private, auth, storage)"
 pgtool pg_dumpall -h $H -U $U --globals-only --no-role-passwords > "$OUT/00-globals.sql"
-pgtool pg_dump -h $H -U $U -d $D --schema-only --no-owner --no-privileges \
+pgtool pg_dump -h $H -U $U -d $D --schema-only --no-owner \
   --schema=public --schema=affiliate_private > "$OUT/01-schema.sql"
+if ! grep -Eq '^(GRANT|REVOKE) ' "$OUT/01-schema.sql"; then
+  log "ERROR: schema dump contains no ACL statements"
+  exit 1
+fi
 pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
   --schema=public --schema=affiliate_private --disable-triggers > "$OUT/02-data.sql"
 pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
@@ -69,6 +73,7 @@ AFFILIATE_ACCOUNTS_COUNT="$(
   echo "cloud_media_items=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from public.cloud_media_items')"
   echo "auth_users=$(pgtool psql -h $H -U $U -d $D -Atc 'select count(*) from auth.users')"
   echo "affiliate_accounts=$AFFILIATE_ACCOUNTS_COUNT"
+  echo "schema_acl_statements=$(grep -Ec '^(GRANT|REVOKE) ' "$OUT/01-schema.sql")"
 } > "$OUT/MANIFEST.txt"
 ( cd "$OUT" && sha256sum ./* > SHA256SUMS )
 

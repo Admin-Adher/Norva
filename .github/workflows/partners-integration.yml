@@ -343,6 +343,22 @@ jobs:
       - name: Replay every migration from a blank database
         run: supabase db reset --local --no-seed
 
+      - name: Verify restored Partners security invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t db_containers < <(
+            docker ps --format '{{.Names}}' | grep '^supabase_db_'
+          )
+          if [[ "${#db_containers[@]}" -ne 1 ]]; then
+            printf 'Expected one disposable Supabase DB, found %s\n' \
+              "${#db_containers[@]}" >&2
+            exit 1
+          fi
+          docker exec -i "${db_containers[0]}" \
+            psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            < ops/hetzner/backup/verify-partners-restore.sql
+
       - name: Run Partners pgTAP integration tests
         run: >-
           supabase test db

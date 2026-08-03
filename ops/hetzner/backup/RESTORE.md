@@ -17,6 +17,11 @@ rclone lsf "r2:$R2_BUCKET/selfhost/dumps/" | sort | tail -1        # → norva-s
 rclone copyto "r2:$R2_BUCKET/selfhost/dumps/<archive>" ./restore.tar.gz
 tar -xzf restore.tar.gz && cd norva-selfhost-<stamp>
 sha256sum -c SHA256SUMS
+# Refuser une ancienne archive qui a supprimé les ACL du dump de schéma.
+# Utiliser alors le basebackup/PITR de la section 2, jamais une reconstruction
+# manuelle des GRANT Partners.
+test "$(grep -Ec '^(GRANT|REVOKE) ' 01-schema.sql)" -gt 0
+grep -Eq '^schema_acl_statements=[1-9][0-9]*$' MANIFEST.txt
 
 # 2) recharger, dans l'ordre (en supabase_admin — superuser requis pour
 #    --disable-triggers ; les erreurs "reserved role" des globals sont bénignes)
