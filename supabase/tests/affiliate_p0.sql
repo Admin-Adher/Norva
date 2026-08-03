@@ -5096,6 +5096,12 @@ select extensions.throws_ok(
 );
 
 reset role;
+update auth.users
+set
+  raw_app_meta_data = raw_app_meta_data || '{"role":"admin"}'::jsonb,
+  updated_at = now()
+where id = '10000000-0000-4000-8000-000000000003';
+
 insert into affiliate_private.affiliate_admin_capabilities (
   user_id,
   capability,
