@@ -62,8 +62,8 @@ Le professionnel Privacy/DPO produit un artefact distinct couvrant :
 
 1. l'inventaire des données et les finalités ;
 2. les bases légales ;
-3. les sous-traitants et destinataires, notamment Didit, Revolut, Google,
-   RevenueCat, Resend et les canaux de notification réellement utilisés ;
+3. les sous-traitants et destinataires réellement utilisés, notamment Hetzner,
+   Cloudflare, Resend, Didit, Revolut, Google, RevenueCat et Telegram ;
 4. les transferts internationaux et garanties associées ;
 5. les durées de conservation et la suppression ;
 6. l'exercice des droits ;

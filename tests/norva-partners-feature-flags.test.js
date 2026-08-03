@@ -25,6 +25,13 @@ const adminMigration = fs.readFileSync(
   ),
   'utf8',
 ).replace(/\r\n/g, '\n');
+const releaseGateAal2Migration = fs.readFileSync(
+  path.join(
+    migrationDir,
+    '20260803204442_partners_release_gate_aal2.sql',
+  ),
+  'utf8',
+).replace(/\r\n/g, '\n');
 
 function section(source, start, end) {
   const from = source.indexOf(start);
@@ -218,6 +225,34 @@ test('Partners controls use the exact delegated and server release mapping', () 
     'create or replace function affiliate_private.admin_partners_capability_set(',
   );
   assert.match(capabilities, /'can_manage_release'/);
+});
+
+test('every release-gate activation requires AAL2 without changing control ownership', () => {
+  assert.match(
+    releaseGateAal2Migration,
+    /create or replace function\s+affiliate_private\.guard_partners_release_gate_activation_aal2\(\)/i,
+  );
+  assert.match(
+    releaseGateAal2Migration,
+    /old\.satisfied is false[\s\S]*new\.satisfied is true[\s\S]*auth\.uid\(\) is not null/i,
+  );
+  assert.match(
+    releaseGateAal2Migration,
+    /affiliate_private\.partners_require_aal2\(\s*'Partners release gate activation'\s*\)/i,
+  );
+  assert.match(
+    releaseGateAal2Migration,
+    /create trigger affiliate_release_gates_activation_aal2\s+before update of satisfied\s+on affiliate_private\.affiliate_release_gates/i,
+  );
+  assert.match(
+    releaseGateAal2Migration,
+    /revoke all on function\s+affiliate_private\.guard_partners_release_gate_activation_aal2\(\)\s+from public, anon, authenticated, service_role;/i,
+  );
+  assert.doesNotMatch(
+    releaseGateAal2Migration,
+    /partners_require_control_access|admin_feature_flags|partners_(?:enabled|invite_only|shadow_mode|payouts_live)/i,
+    'the additive AAL2 guard must not redefine capabilities or feature flags',
+  );
 });
 
 test('pilot allowlist is independent from admin roles and starts empty', () => {

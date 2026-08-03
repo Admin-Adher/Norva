@@ -180,7 +180,7 @@ son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
 le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
 restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
 isolé, et leurs nombres total et actif sont contrôlés avant et après la
-répétition. Les trois migrations ciblées sont ensuite rejouées dans une
+répétition. Les quatre migrations ciblées sont ensuite rejouées dans une
 transaction unique. Le conteneur et le répertoire temporaire sont toujours
 supprimés par le trap de sortie.
 
@@ -190,9 +190,9 @@ brute, ni mot de passe, ni clé R2. Pour le même SHA candidat, le workflow CI
 exhaustif doit être vert et la preuve physique doit contenir `result=passed`
 ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
 de production.
-La preuve du candidat actuel doit aussi contenir `migrations_applied=3`,
-`migration_markers_before=0|0|0|0`, `migration_markers_after=1|1|1|1`,
-`migration_routines_verified=35` et `migration_relations_verified=3`.
+La preuve du candidat actuel doit aussi contenir `migrations_applied=4`,
+`migration_markers_before=0|0|0|0|0`, `migration_markers_after=1|1|1|1|1`,
+`migration_routines_verified=36` et `migration_relations_verified=3`.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

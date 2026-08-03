@@ -504,6 +504,60 @@ begin
   end if;
 
   if to_regprocedure(
+      'affiliate_private.guard_partners_release_gate_activation_aal2()'
+    ) is null
+  then
+    raise exception
+      'restore omitted the Partners release-gate AAL2 guard';
+  end if;
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.guard_partners_release_gate_activation_aal2()'::regprocedure
+  );
+  if position('old.satisfied is false' in lower(v_definition)) = 0
+    or position('new.satisfied is true' in lower(v_definition)) = 0
+    or position('partners_require_aal2' in lower(v_definition)) = 0
+    or position('auth.uid() is not null' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Partners release-gate guard lost its false-to-true authenticated AAL2 contract';
+  end if;
+  if has_function_privilege(
+      'anon',
+      'affiliate_private.guard_partners_release_gate_activation_aal2()',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'authenticated',
+      'affiliate_private.guard_partners_release_gate_activation_aal2()',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'service_role',
+      'affiliate_private.guard_partners_release_gate_activation_aal2()',
+      'EXECUTE'
+    )
+  then
+    raise exception
+      'restored Partners release-gate AAL2 guard became API-callable';
+  end if;
+  if not exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    where trigger_row.tgrelid =
+        'affiliate_private.affiliate_release_gates'::regclass
+      and trigger_row.tgname = 'affiliate_release_gates_activation_aal2'
+      and trigger_row.tgfoid = to_regprocedure(
+        'affiliate_private.guard_partners_release_gate_activation_aal2()'
+      )
+      and trigger_row.tgenabled = 'O'
+      and trigger_row.tgtype = 19
+      and not trigger_row.tgisinternal
+  ) then
+    raise exception
+      'restore omitted the enabled before-update Partners release-gate AAL2 trigger';
+  end if;
+
+  if to_regprocedure(
       'affiliate_private.partners_didit_certification_key(text,uuid)'
     ) is null
   then

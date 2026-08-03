@@ -3,7 +3,7 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, apply the three pending Partners migrations atomically, then
+# PostgreSQL clone, apply the four pending Partners migrations atomically, then
 # run the restore verifier and the data-compatible Partners restore pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
@@ -81,6 +81,7 @@ fi
 readonly MIGRATION_ONE="supabase/migrations/20260803082211_partners_admin_operator_capabilities.sql"
 readonly MIGRATION_TWO="supabase/migrations/20260803084051_partners_access_request_decision_email.sql"
 readonly MIGRATION_THREE="supabase/migrations/20260803160730_partners_didit_certification_pre_gate.sql"
+readonly MIGRATION_FOUR="supabase/migrations/20260803204442_partners_release_gate_aal2.sql"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -92,6 +93,7 @@ readonly -a CANDIDATE_FILES=(
   "$MIGRATION_ONE"
   "$MIGRATION_TWO"
   "$MIGRATION_THREE"
+  "$MIGRATION_FOUR"
   "$VERIFIER"
   "${RESTORE_PGTAP_FILES[@]}"
 )
@@ -244,6 +246,7 @@ proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | awk '{print $1}')"
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
 proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
+proof_line "migration_four_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FOUR" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
 if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
@@ -544,9 +547,9 @@ fi
 
 CURRENT_STEP="pending migration precondition"
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text;" \
   2> "$RAW_DIR/migration-precondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "0|0|0|0" ]]; then
+if [[ "$MIGRATION_MARKERS" != "0|0|0|0|0" ]]; then
   fail
 fi
 proof_line "migration_markers_before=$MIGRATION_MARKERS"
@@ -566,13 +569,14 @@ if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
         -f "/candidate/$MIGRATION_ONE" \
         -f "/candidate/$MIGRATION_TWO" \
         -f "/candidate/$MIGRATION_THREE" \
+        -f "/candidate/$MIGRATION_FOUR" \
       > "$RAW_DIR/migrations.log" 2>&1; then
   fail
 fi
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text;" \
   2> "$RAW_DIR/migration-postcondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "1|1|1|1" ]]; then
+if [[ "$MIGRATION_MARKERS" != "1|1|1|1|1" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -586,6 +590,7 @@ with expected(signature) as (
     ('affiliate_private.partners_can_manage_capabilities()'),
     ('affiliate_private.partners_is_release_manager()'),
     ('affiliate_private.partners_require_aal2(text)'),
+    ('affiliate_private.guard_partners_release_gate_activation_aal2()'),
     ('affiliate_private.partners_admin_operator_key(uuid)'),
     ('affiliate_private.admin_partners_capability_operators()'),
     ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
@@ -626,7 +631,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "35|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "36|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -650,10 +655,10 @@ SQL
 if [[ "$RELATION_OWNER_CHECK" != "3|0" ]]; then
   fail
 fi
-proof_line "migrations_applied=3"
+proof_line "migrations_applied=4"
 proof_line "migrations_atomic=true"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=35"
+proof_line "migration_routines_verified=36"
 proof_line "migration_relation_owner=supabase_admin"
 proof_line "migration_relations_verified=3"
 

@@ -4904,9 +4904,9 @@ class AdminPage {
             return;
         }
         gate.hidden = false;
-        gate.innerHTML = `<div><strong id="partners-admin-aal2-title">Validation Finance requise</strong>
-          <span>Cette session est connectée, mais les données sensibles restent verrouillées tant que le code à 6 chiffres de votre application Authenticator n’a pas élevé la session à AAL2.</span></div>
-          <span class="partners-sr-only" role="status" aria-live="polite">Validation Authenticator requise pour les données Finance.</span>
+        gate.innerHTML = `<div><strong id="partners-admin-aal2-title">Validation renforcée requise</strong>
+          <span>Cette session est connectée, mais les actions sensibles Partners restent verrouillées tant que le code à 6 chiffres de votre application Authenticator n’a pas élevé la session à AAL2.</span></div>
+          <span class="partners-sr-only" role="status" aria-live="polite">Validation Authenticator requise pour les actions sensibles Partners.</span>
           <button type="button" class="partners-action" data-partners-action="aal2-elevate">Vérifier avec Authenticator</button>`;
     }
 
@@ -4956,7 +4956,7 @@ class AdminPage {
             return true;
         }
         if (status?.nextLevel !== 'aal2' || !Array.isArray(status?.factors) || !status.factors.length) {
-            this._toast('Aucun facteur TOTP vérifié n’est associé à ce compte Admin. Configurez Authenticator avant d’ouvrir Finance.', 'err');
+            this._toast('Aucun facteur TOTP vérifié n’est associé à ce compte Admin. Configurez Authenticator avant d’effectuer une action sensible Partners.', 'err');
             return false;
         }
         const factor = await this._partnersChooseMfaFactor(status.factors);
@@ -4991,7 +4991,7 @@ class AdminPage {
 
     async _partnersElevateAal2() {
         return (await this._partnersEnsureAal2())
-            ? 'Session sécurisée à AAL2. Les données Finance sont maintenant déverrouillées.'
+            ? 'Session sécurisée à AAL2. Les actions sensibles Partners sont maintenant déverrouillées.'
             : false;
     }
 

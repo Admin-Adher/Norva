@@ -583,20 +583,26 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const diditCertificationMigration = rehearsal.indexOf(
     '20260803160730_partners_didit_certification_pre_gate.sql',
   );
+  const releaseGateAal2Migration = rehearsal.indexOf(
+    '20260803204442_partners_release_gate_aal2.sql',
+  );
   assert.ok(
     operatorCapabilitiesMigration < accessDecisionEmailMigration
-      && accessDecisionEmailMigration < diditCertificationMigration,
-    'operator capabilities, decision email and Didit certification must keep their atomic replay order',
+      && accessDecisionEmailMigration < diditCertificationMigration
+      && diditCertificationMigration < releaseGateAal2Migration,
+    'operator capabilities, decision email, Didit certification and release-gate AAL2 must keep their atomic replay order',
   );
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
   assert.match(rehearsal, /migration_three_sha256=/);
+  assert.match(rehearsal, /migration_four_sha256=/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
-  assert.match(rehearsal, /"0\|0\|0\|0"/);
-  assert.match(rehearsal, /"1\|1\|1\|1"/);
-  assert.match(rehearsal, /migrations_applied=3/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "35\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=35/);
+  assert.match(rehearsal, /"0\|0\|0\|0\|0"/);
+  assert.match(rehearsal, /"1\|1\|1\|1\|1"/);
+  assert.match(rehearsal, /migrations_applied=4/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "36\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=36/);
   assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "3\|0"/);
   assert.match(rehearsal, /migration_relations_verified=3/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
@@ -710,6 +716,10 @@ test('Partners legal surfaces disclose KYC minimization and commission reversals
   assert.match(privacy, /<strong>Google Play<\/strong>/);
   assert.match(privacy, /<strong>RevenueCat<\/strong>/);
   assert.match(privacy, /<strong>Revolut<\/strong>/);
+  assert.match(privacy, /<strong>Hetzner<\/strong>/);
+  assert.match(privacy, /<strong>Resend<\/strong>/);
+  assert.match(privacy, /Supabase software[\s\S]*does not host this Norva deployment/i);
+  assert.doesNotMatch(privacy, /Supabase<\/strong>\s*—\s*authentication and cloud database hosting/i);
   assert.doesNotMatch(terms, /ec\.europa\.eu\/consumers\/odr/);
   assert.match(terms, /consumer-redress\.ec\.europa\.eu\/index_en/);
 });

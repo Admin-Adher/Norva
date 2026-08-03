@@ -2,9 +2,9 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(15);
+select extensions.plan(16);
 
--- One immutable catalogue keeps all three pending migrations under the same
+-- One immutable catalogue keeps all four pending migrations under the same
 -- existence, ownership, security, volatility and ACL assertions without
 -- creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
@@ -13,6 +13,7 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_can_manage_capabilities()","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_is_release_manager()","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_require_aal2(text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.guard_partners_release_gate_activation_aal2()","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.partners_admin_operator_key(uuid)","security_definer":false,"volatility":"i","access_role":"owner"},
   {"signature":"affiliate_private.admin_partners_capability_operators()","security_definer":true,"volatility":"s","access_role":"authenticated"},
   {"signature":"affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
@@ -62,8 +63,8 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  35::bigint,
-  'the restored candidate exposes every routine from all three pending migrations'
+  36::bigint,
+  'the restored candidate exposes every routine from all four pending migrations'
 );
 
 select extensions.is(
@@ -85,7 +86,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  35::bigint,
+  36::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -102,7 +103,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 35
+    select count(*) = 36
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -124,7 +125,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 35
+    select count(*) = 36
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -148,7 +149,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 35
+    select count(*) = 36
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -246,7 +247,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 16
+    select count(*) = 17
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
@@ -323,6 +324,30 @@ select extensions.ok(
       and not trigger_row.tgisinternal
   ),
   'the access-decision email trigger is enabled on the restored request table'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    where trigger_row.tgrelid =
+        'affiliate_private.affiliate_release_gates'::regclass
+      and trigger_row.tgname = 'affiliate_release_gates_activation_aal2'
+      and trigger_row.tgfoid = to_regprocedure(
+        'affiliate_private.guard_partners_release_gate_activation_aal2()'
+      )
+      and trigger_row.tgenabled = 'O'
+      and trigger_row.tgtype = 19
+      and trigger_row.tgattr::text = (
+        select attribute_row.attnum::text
+        from pg_catalog.pg_attribute attribute_row
+        where attribute_row.attrelid = trigger_row.tgrelid
+          and attribute_row.attname = 'satisfied'
+          and not attribute_row.attisdropped
+      )
+      and not trigger_row.tgisinternal
+  ),
+  'release-gate activation is guarded by the restored before-update AAL2 trigger'
 );
 
 select extensions.ok(

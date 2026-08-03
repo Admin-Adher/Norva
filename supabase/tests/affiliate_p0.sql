@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(248);
+select extensions.plan(251);
 
 select extensions.ok(
   exists (
@@ -851,7 +851,48 @@ select extensions.ok(
 
 set local role authenticated;
 set local request.jwt.claims =
+  '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1","app_metadata":{"role":"admin","partners_release_manager":true}}';
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_gate',
+      'privacy_approved',
+      true,
+      'P0 AAL1 release gate activation must be rejected.'
+    )
+  $$,
+  '42501',
+  'Partners release gate activation requires AAL2',
+  'AAL1 cannot activate privacy_approved even with Risk authority'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select gate.satisfied::text
+    from affiliate_private.affiliate_release_gates gate
+    where gate.gate_key = 'privacy_approved'
+  ),
+  'false',
+  'rejected AAL1 activation leaves privacy_approved unchanged'
+);
+
+set local role authenticated;
+set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
+
+select extensions.is(
+  public.admin_partners_control(
+    'set_gate',
+    'privacy_approved',
+    true,
+    'P0 AAL2 release gate activation is authorized.'
+  ) ->> 'satisfied',
+  'true',
+  'AAL2 can activate privacy_approved with Risk authority'
+);
 
 do $setup$
 declare

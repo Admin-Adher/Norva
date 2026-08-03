@@ -2495,7 +2495,25 @@ test('Admin Partners identifies only explicit AAL2 authorization failures', () =
   }), false);
 });
 
-test('Admin Partners elevates Finance through the verified TOTP flow without exposing factor ids', async () => {
+test('Admin Partners presents AAL2 as a generic sensitive-action gate', () => {
+  const gate = { hidden: true, innerHTML: '' };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-aal2' ? gate : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersAal2Required = true;
+
+  page._partnersRenderAal2Gate();
+
+  assert.equal(gate.hidden, false);
+  assert.match(gate.innerHTML, /Validation renforcée requise/);
+  assert.match(gate.innerHTML, /actions sensibles Partners/);
+  assert.doesNotMatch(gate.innerHTML, /Validation Finance requise|données Finance/);
+});
+
+test('Admin Partners elevates sensitive actions through verified TOTP without exposing factor ids', async () => {
   const calls = [];
   const authRuntime = {
     NorvaAuth: {
@@ -2525,6 +2543,7 @@ test('Admin Partners elevates Finance through the verified TOTP flow without exp
 
   const result = await page._partnersElevateAal2();
   assert.match(result, /AAL2/);
+  assert.match(result, /actions sensibles Partners/);
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     { code: '012345', factorId: 'private-factor-id' },
   ]);
