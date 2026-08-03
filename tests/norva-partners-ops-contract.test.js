@@ -437,6 +437,100 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /restored Partners ledger contains % unbalanced entries/);
 });
 
+test('physical Partners rehearsal is isolated, atomic and leaves only sanitized proof', () => {
+  const rehearsal = read(
+    'ops/hetzner/backup/rehearse-partners-physical.sh',
+  );
+  const restoreGuide = read('ops/hetzner/backup/RESTORE.md');
+  const workflow = read('.github/workflows/partners-integration.yml');
+
+  assert.match(rehearsal, /if \[\[ "\$\{EUID\}" -ne 0 \]\]/);
+  assert.match(rehearsal, /flock -n 9/);
+  assert.match(rehearsal, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(rehearsal, /GIT=\(git -c "safe\.directory=\$REPO_ROOT" -C "\$REPO_ROOT"\)/);
+  assert.match(rehearsal, /"\$\{GIT\[@\]\}" show "\$TARGET_SHA:\$candidate_file"/);
+  assert.match(
+    rehearsal,
+    /PARTNERS_REHEARSAL_STAGE_DIR:-\$\{BACKUP_STAGE_DIR:-\/var\/lib\/norva\/backups\}/,
+  );
+  assert.match(rehearsal, /docker inspect --format '\{\{\.Image\}\}' "\$DB_CONTAINER"/);
+  assert.match(rehearsal, /docker image inspect --format '\{\{\.Id\}\}' "\$PG_IMAGE"/);
+  assert.match(rehearsal, /"\$LIVE_IMAGE_ID" != "\$PINNED_IMAGE_ID"/);
+
+  assert.match(rehearsal, /--network none/);
+  assert.doesNotMatch(rehearsal, /--network host|--publish|-p 5433/);
+  assert.match(rehearsal, /-c "shared_preload_libraries=\$CLONE_PRELOADS"/);
+  assert.match(rehearsal, /show shared_preload_libraries/);
+  assert.match(rehearsal, /SAW_PG_CRON/);
+  assert.match(rehearsal, /SAW_PG_NET/);
+  assert.match(rehearsal, /cron\.database_name=__norva_rehearsal_disabled__/);
+  assert.match(rehearsal, /update cron\.job set active = false where active/);
+  assert.match(rehearsal, /backend_type ilike '%cron%'/);
+  assert.equal(
+    (rehearsal.match(/docker exec -u postgres "\$DB_CONTAINER"/g) || []).length,
+    2,
+    'only the before/after read-only preload SHOW may execute in the live container',
+  );
+  assert.doesNotMatch(
+    rehearsal,
+    /docker exec -u postgres "\$DB_CONTAINER"[\s\S]{0,180}\b(?:insert|update|delete|alter|drop|truncate)\b/i,
+  );
+  assert.match(rehearsal, /live_health_before=healthy/);
+  assert.match(rehearsal, /live_health_after=healthy/);
+
+  assert.match(rehearsal, /mktemp -d "\$STAGE_ROOT\/\$\{WORKDIR_PREFIX\}XXXXXXXX"/);
+  assert.match(rehearsal, /SAFE_WORKDIR_PREFIX/);
+  assert.match(rehearsal, /docker rm -f "\$CONTAINER_NAME"/);
+  assert.match(rehearsal, /rm -rf -- "\$WORKDIR"/);
+  assert.match(
+    rehearsal,
+    /\^norva-partners-physical-rehearsal-\[0-9a-f\]\{8\}-\[0-9\]\+\$/,
+  );
+
+  assert.match(rehearsal, /--single-transaction/);
+  assert.match(rehearsal, /-U supabase_admin -d postgres/);
+  assert.match(rehearsal, /migration_routine_owner=supabase_admin/);
+  assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
+  assert.ok(
+    rehearsal.indexOf('20260803082211_partners_admin_operator_capabilities.sql')
+      < rehearsal.indexOf('20260803084051_partners_access_request_decision_email.sql'),
+    'operator capabilities must precede decision email in the atomic replay',
+  );
+  assert.match(rehearsal, /verify-partners-restore\.sql/);
+  for (const pgTapFile of [
+    'affiliate_p0.sql',
+    'affiliate_access_requests.sql',
+    'affiliate_dispute_won.sql',
+    'affiliate_fiscal_payout_onboarding.sql',
+    'affiliate_member_write_rate_limits.sql',
+    'affiliate_revolut_manual_hybrid.sql',
+    'revenuecat_transfer.sql',
+  ]) {
+    assert.match(rehearsal, new RegExp(pgTapFile.replace('.', '\\.')));
+  }
+  assert.match(rehearsal, /grep -Eq '\^\(not ok\|Bail out!\)'/);
+  assert.match(rehearsal, /test_transactions_rolled_back=true/);
+
+  assert.match(rehearsal, /umask 077/);
+  assert.match(rehearsal, /chmod 0600 "\$PROOF_LOG"/);
+  assert.match(rehearsal, /sha256sum "\$PROOF_LOG"/);
+  assert.match(rehearsal, /raw_output_retained=false/);
+  assert.doesNotMatch(
+    rehearsal,
+    /set -x|echo "\$POSTGRES_PASSWORD"|-e PGPASSWORD="\$POSTGRES_PASSWORD"/,
+  );
+  assert.match(
+    restoreGuide,
+    /sudo bash ops\/hetzner\/backup\/rehearse-partners-physical\.sh/,
+  );
+  assert.match(restoreGuide, /--network none/);
+  assert.match(restoreGuide, /result=passed/);
+  assert.match(
+    workflow,
+    /bash -n[\s\S]*?backup-nightly\.sh[\s\S]*?rehearse-partners-physical\.sh/,
+  );
+});
+
 test('Partners legal surfaces disclose KYC minimization and commission reversals', () => {
   const privacy = read('public/privacy.html');
   const terms = read('public/terms.html');

@@ -188,11 +188,14 @@ test('genre-items respects explicit Newest/Recently Added ordering instead of po
     'explicit sort selection must be evaluated before falling back to poster_url');
 });
 
-test('self-host deploy restarts every configured edge-runtime replica', () => {
+test('self-host deploy recreates every configured edge-runtime replica', () => {
   const src = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
-  assert.match(src, /docker compose -f "\$COMPOSE" config --services/);
+  assert.match(src, /docker compose --env-file "\$ENV_FILE" -f "\$COMPOSE" config --services/);
   assert.ok(src.includes("grep -E '^functions[0-9]*$'"));
   assert.match(src, /for service in "\$\{function_services\[@\]\}"/);
-  assert.match(src, /restart "\$service"/);
+  assert.match(src, /up -d --no-deps --force-recreate "\$service"/);
+  assert.match(src, /"\$container_id" == "\$previous_container_id"/);
+  assert.match(src, /config --quiet/);
+  assert.doesNotMatch(src, /restart "\$service"/);
   assert.match(src, /did not become healthy within 60 seconds/);
 });

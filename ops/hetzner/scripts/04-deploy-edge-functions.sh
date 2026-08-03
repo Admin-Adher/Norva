@@ -5,11 +5,12 @@
 # In the self-host stack, edge functions are NOT "deployed" to a remote — the
 # `functions` (edge-runtime) container serves them directly from the repo's
 # supabase/functions dir, which the compose mounts read-only. "Deploying" =
-# sync the code + restart the runtime so it re-reads them.
+# sync the code + recreate each runtime so it re-reads both code and env.
 #
 # This script:
 #   1. sanity-checks that every function in supabase/config.toml has a dir,
-#   2. restarts every configured edge-runtime replica to pick up changes.
+#   2. validates the rendered Compose configuration without printing it,
+#   3. recreates every configured edge-runtime replica one at a time.
 #
 # GitHub CI validates the functions but does not deploy them to the Hetzner
 # runtime. Until an explicit SSH deploy workflow exists, production deployment
@@ -24,6 +25,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
+ENV_FILE="$(dirname "$COMPOSE")/.env"
 
 [[ -d "$FUNCS_DIR" ]] || { echo "ERROR: $FUNCS_DIR not found" >&2; exit 1; }
 
@@ -56,26 +58,44 @@ declared=${#configured_functions[@]}
 present=$(find "$FUNCS_DIR" -maxdepth 1 -mindepth 1 -type d -name 'norva-*' | wc -l | tr -d ' ')
 echo ">> config.toml declares $declared functions; $present norva-* dirs present."
 
-echo ">> Restarting edge-runtime replicas to reload functions"
+echo ">> Recreating edge-runtime replicas to reload code and environment"
 if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
+  [[ -f "$ENV_FILE" ]] || {
+    echo "ERROR: $ENV_FILE not found" >&2
+    exit 1
+  }
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --quiet
+
   # Kong round-robins across functions, functions2, ... . Discover the compose
   # services so a deploy cannot leave a stale replica serving old code.
   mapfile -t function_services < <(
-    docker compose -f "$COMPOSE" config --services | grep -E '^functions[0-9]*$'
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --services |
+      grep -E '^functions[0-9]*$'
   )
   if [[ ${#function_services[@]} -eq 0 ]]; then
     echo "ERROR: no edge-runtime service found in $COMPOSE" >&2
     exit 1
   fi
   for service in "${function_services[@]}"; do
-    echo ">> Restarting $service"
-    docker compose -f "$COMPOSE" restart "$service"
+    echo ">> Recreating $service"
+    previous_container_id="$(
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q "$service"
+    )"
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE" \
+      up -d --no-deps --force-recreate "$service"
 
-    container_id=$(docker compose -f "$COMPOSE" ps -q "$service")
+    container_id="$(
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q "$service"
+    )"
     [[ -n "$container_id" ]] || {
-      echo "ERROR: $service has no running container after restart" >&2
+      echo "ERROR: $service has no running container after recreation" >&2
       exit 1
     }
+    if [[ -n "$previous_container_id" \
+        && "$container_id" == "$previous_container_id" ]]; then
+      echo "ERROR: $service was not recreated" >&2
+      exit 1
+    fi
 
     deadline=$((SECONDS + 60))
     while true; do
@@ -91,10 +111,11 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     done
     echo "   $service is $health"
   done
-  echo ">> edge-runtime replicas restarted: ${function_services[*]}."
+  echo ">> edge-runtime replicas recreated: ${function_services[*]}."
 else
   echo "   (docker/compose not found here — run on the box:"
-  echo "    docker compose -f docker-compose.supabase.yml restart functions functions2 )"
+  echo "    docker compose --env-file .env -f docker-compose.supabase.yml up -d --no-deps --force-recreate functions"
+  echo "    then verify health before recreating functions2 )"
 fi
 
 echo ">> Done. Smoke-test e.g.:  curl -i \$FUNCTIONS_BASE_URL/norva-playback  (expect 401 without auth)"

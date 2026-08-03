@@ -175,6 +175,7 @@ jobs:
         run: >-
           bash -n
           ops/hetzner/backup/backup-nightly.sh
+          ops/hetzner/backup/rehearse-partners-physical.sh
           ops/hetzner/scripts/01-dump-prod.sh
           ops/hetzner/scripts/05-verify-parity.sh
           ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh

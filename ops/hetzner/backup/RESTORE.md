@@ -147,6 +147,30 @@ EOF
 > system is ready` ; 935 666 media / 719 944 titles / 7 users (≈ prod à 95 lignes près =
 > snapshot au point du base-backup). **Preuve que les base-backups restaurent sans le WAL archivé.**
 
+### Répétition physique Partners avant migration
+
+Pour valider une release Partners sans modifier le checkout live, sans port
+exposé et sans aucune connexion du clone au réseau, exécuter le script depuis
+un checkout/worktree du candidat avec son SHA complet :
+
+```bash
+sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
+  <sha-git-complet-sur-40-caractères>
+```
+
+Le script lit le dernier base-backup R2, matérialise les migrations, le
+vérificateur et les pgTAP directement depuis l'objet Git demandé, puis restaure
+le tout dans un conteneur unique en `--network none`. `pg_cron` est neutralisé
+dès le démarrage, toutes les tâches du clone sont désactivées avant la première
+migration, et les deux migrations ciblées sont rejouées dans une transaction
+unique. Le conteneur et le répertoire temporaire sont toujours supprimés par le
+trap de sortie.
+
+La seule sortie durable est un `rehearsal-proof.log` privé (mode `0600`) et son
+fichier `.sha256` sous `norva-deploy-backups/`. Ils ne contiennent ni sortie SQL
+brute, ni mot de passe, ni clé R2. Une preuve `result=passed` est nécessaire avant
+toute migration de production.
+
 ## Signes que les backups sont sains (à regarder de temps en temps)
 
 ```bash
