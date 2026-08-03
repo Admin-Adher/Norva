@@ -5,10 +5,12 @@ import {
   DiditPayloadTooLargeError,
   loadDiditConfig,
   readDiditWebhookBody,
+  sanitizeKycCertificationWebhookRpc,
   sanitizeKycWebhookRpc,
   verifyAndNormalizeDiditWebhook,
   verifyDiditConsoleTestWebhook,
 } from "../_shared/didit-partners.ts";
+import { PARTNERS_RPC } from "../_shared/partners-api.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -97,25 +99,37 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    const { data, error } = await admin.rpc(
+    const rpcArgs = {
+      p_provider_event_id: event.providerEventId,
+      p_provider_session_id: event.providerSessionId,
+      p_provider_workflow_id: event.providerWorkflowId,
+      p_provider_workflow_version: event.providerWorkflowVersion,
+      p_provider_status: event.providerStatus,
+      p_event_created_at: event.eventCreatedAt,
+      p_document_age: event.documentAge,
+      p_document_country_iso3: event.documentCountryIso3,
+      p_id_check_approved: event.idCheckApproved,
+      p_liveness_approved: event.livenessApproved,
+      p_face_match_approved: event.faceMatchApproved,
+      p_payload_hash: event.payloadHash,
+      p_provider_environment: event.providerEnvironment,
+      p_provider_config_fingerprint: event.providerConfigFingerprint,
+    };
+    let { data, error } = await admin.rpc(
       "partners_service_kyc_webhook_apply",
-      {
-        p_provider_event_id: event.providerEventId,
-        p_provider_session_id: event.providerSessionId,
-        p_provider_workflow_id: event.providerWorkflowId,
-        p_provider_workflow_version: event.providerWorkflowVersion,
-        p_provider_status: event.providerStatus,
-        p_event_created_at: event.eventCreatedAt,
-        p_document_age: event.documentAge,
-        p_document_country_iso3: event.documentCountryIso3,
-        p_id_check_approved: event.idCheckApproved,
-        p_liveness_approved: event.livenessApproved,
-        p_face_match_approved: event.faceMatchApproved,
-        p_payload_hash: event.payloadHash,
-        p_provider_environment: event.providerEnvironment,
-        p_provider_config_fingerprint: event.providerConfigFingerprint,
-      },
+      rpcArgs,
     );
+    let certification = false;
+    // The member reducer owns the primary namespace. Only its explicit
+    // unknown-resource signal may fall through to the tightly scoped
+    // certification reducer; conflicts and every other error remain terminal.
+    if (error?.code === "P0006") {
+      certification = true;
+      ({ data, error } = await admin.rpc(
+        PARTNERS_RPC.kycCertificationWebhookApply,
+        rpcArgs,
+      ));
+    }
     if (error) {
       if (error.code === "P0003") {
         log("warn", correlationId, "event_conflict");
@@ -130,6 +144,29 @@ Deno.serve(async (req) => {
       }
       log("error", correlationId, "database_unavailable");
       return problem(503, "temporarily_unavailable", correlationId);
+    }
+    if (certification) {
+      let result;
+      try {
+        result = sanitizeKycCertificationWebhookRpc(data);
+      } catch {
+        log("error", correlationId, "database_contract_invalid");
+        return problem(503, "temporarily_unavailable", correlationId);
+      }
+      if (result.action === "kyc_certification_result_quarantined") {
+        log("warn", correlationId, "certification_quarantined");
+        return problem(409, "webhook_quarantined", correlationId);
+      }
+      log(
+        "info",
+        correlationId,
+        result.replayed ? "certification_replayed" : "certification_applied",
+      );
+      return json(
+        200,
+        { received: true, replayed: result.replayed },
+        correlationId,
+      );
     }
     let result;
     try {

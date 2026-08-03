@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION to drop every old cache on activate.
  */
 
-const CACHE_VERSION = 'norva-sw-v6';
+const CACHE_VERSION = 'norva-sw-v10';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const ASSET_CACHE_LIMIT = 220;

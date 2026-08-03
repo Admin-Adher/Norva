@@ -6,6 +6,8 @@ import {
 
 export const DIDIT_CREATE_SESSION_URL =
   "https://verification.didit.me/v3/session/";
+export const DIDIT_LIST_SESSIONS_URL =
+  "https://verification.didit.me/v3/sessions/";
 export const DIDIT_PARTNERS_CALLBACK_URL =
   "https://norva.tv/partners-kyc-return";
 export const DIDIT_WEBHOOK_MAX_AGE_SECONDS = 300;
@@ -19,6 +21,9 @@ const LANGUAGE_PATTERN = /^[a-z]{2}$/;
 const ISO3_PATTERN = /^[A-Z]{3}$/;
 const HEX_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const DIDIT_HOSTED_URL_PATTERN = /^https:\/\/verify\.didit\.me\//;
+const DIDIT_VENDOR_DATA_PATTERN = /^(?:kyr|kcf)_[0-9a-f]{24}$/;
+const DIDIT_CERTIFICATION_CONSENT_VERSION = "partners-didit-certification-v1";
+const DIDIT_CERTIFICATION_CONFIRMATION = "CERTIFIER DIDIT";
 
 export type DiditStatus =
   | "not_started"
@@ -52,6 +57,15 @@ export type KycSessionInput = {
   capacityConfirmed: true;
 };
 
+export type KycCertificationInput = {
+  language: string;
+  consentVersion: typeof DIDIT_CERTIFICATION_CONSENT_VERSION;
+  consentGranted: true;
+  capacityConfirmed: true;
+  confirmation: typeof DIDIT_CERTIFICATION_CONFIRMATION;
+  justification: string;
+};
+
 export type DiditCreatedSession = {
   sessionId: string;
   workflowId: string;
@@ -59,6 +73,26 @@ export type DiditCreatedSession = {
   providerStatus: DiditStatus;
   hostedUrl: string;
 };
+
+export type DiditActiveSession = {
+  sessionId: string;
+  workflowId: string;
+  providerStatus:
+    | "not_started"
+    | "in_progress"
+    | "resubmitted"
+    | "awaiting_user";
+  hostedUrl: string;
+};
+
+export type DiditSessionListInspection =
+  | { kind: "empty" }
+  | { kind: "active"; session: DiditActiveSession };
+
+export type DiditCreateErrorKind =
+  | "credits_unavailable"
+  | "rate_limited"
+  | "other";
 
 export type DiditWebhookResult = {
   providerEventId: string;
@@ -121,10 +155,65 @@ export type KycWebhookRpcResult =
       | "provider_config_mismatch";
   };
 
+export type KycCertificationPrepareResult = {
+  schema_version: 1;
+  action: "kyc_certification_reserved";
+  replayed: boolean;
+  certification: {
+    key: string;
+    status: "reserved" | "pending";
+    expires_at: string;
+  };
+};
+
+export type KycCertificationCreateClaimResult = {
+  schema_version: 1;
+  action: "kyc_certification_create_claimed";
+  claimed: boolean;
+  certification: {
+    status: "reserved";
+    expires_at: string;
+    provider_create_dispatched_at: string;
+  };
+};
+
+export type KycCertificationWebhookRpcResult = {
+  schema_version: 1;
+  action:
+    | "kyc_certification_result_applied"
+    | "kyc_certification_result_quarantined";
+  replayed: boolean;
+  certification: {
+    status:
+      | "pending"
+      | "in_review"
+      | "approved"
+      | "declined"
+      | "expired"
+      | "quarantined"
+      | "revoked";
+    verified: boolean;
+    reason?:
+      | "provider_environment_mismatch"
+      | "provider_config_mismatch"
+      | "provider_workflow_mismatch"
+      | "approved_checks_incomplete"
+      | "stale_event"
+      | "binding_conflict";
+  };
+};
+
 export class DiditContractError extends Error {
   constructor(message = "Invalid Didit contract") {
     super(message);
     this.name = "DiditContractError";
+  }
+}
+
+export class DiditSessionNotResumableError extends DiditContractError {
+  constructor() {
+    super("Didit session is not resumable");
+    this.name = "DiditSessionNotResumableError";
   }
 }
 
@@ -178,6 +267,64 @@ export async function readDiditWebhookBody(
     offset += chunk.byteLength;
   }
   return body;
+}
+
+export async function readBoundedDiditResponseBody(
+  response: Response,
+  maxBytes: number,
+): Promise<string | null> {
+  if (!response.body || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    return null;
+  }
+  const declared = response.headers.get("Content-Length");
+  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    try {
+      await response.body.cancel("provider_response_body_too_large");
+    } catch {
+      // The bounded verdict remains authoritative.
+    }
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await reader.cancel("provider_response_body_too_large");
+        } catch {
+          // The bounded verdict remains authoritative.
+        }
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // An aborted response may already have released its lock.
+    }
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 export function loadDiditConfig(
@@ -317,6 +464,283 @@ export function parseKycSessionInput(
     consentVersion: body.consentVersion,
     consentGranted: true,
     capacityConfirmed: true,
+  };
+}
+
+export function parseKycCertificationInput(
+  raw: unknown,
+): KycCertificationInput {
+  const body = exactRecord(raw, [
+    "language",
+    "consentVersion",
+    "consentGranted",
+    "capacityConfirmed",
+    "confirmation",
+    "justification",
+  ]);
+  const rawJustification = typeof body.justification === "string"
+    ? body.justification
+    : "";
+  const justification = rawJustification.replace(/^ +| +$/g, "");
+  if (
+    typeof body.language !== "string" ||
+    !LANGUAGE_PATTERN.test(body.language) ||
+    body.consentVersion !== DIDIT_CERTIFICATION_CONSENT_VERSION ||
+    body.consentGranted !== true ||
+    body.capacityConfirmed !== true ||
+    body.confirmation !== DIDIT_CERTIFICATION_CONFIRMATION ||
+    justification.length < 12 ||
+    justification.length > 1_000 ||
+    /[\u0000-\u001f\u007f]/.test(rawJustification)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    language: body.language,
+    consentVersion: DIDIT_CERTIFICATION_CONSENT_VERSION,
+    consentGranted: true,
+    capacityConfirmed: true,
+    confirmation: DIDIT_CERTIFICATION_CONFIRMATION,
+    justification,
+  };
+}
+
+export function sanitizeKycCertificationPrepareRpc(
+  raw: unknown,
+): KycCertificationPrepareResult {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "certification",
+  ]);
+  const certification = exactRecord(root.certification, [
+    "key",
+    "status",
+    "expires_at",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "kyc_certification_reserved" ||
+    typeof root.replayed !== "boolean" ||
+    typeof certification.key !== "string" ||
+    !/^kcf_[0-9a-f]{24}$/.test(certification.key) ||
+    (certification.status !== "reserved" &&
+      certification.status !== "pending") ||
+    !isIsoTimestamp(certification.expires_at)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_reserved",
+    replayed: root.replayed,
+    certification: {
+      key: certification.key,
+      status: certification.status,
+      expires_at: certification.expires_at,
+    },
+  };
+}
+
+export function sanitizeKycCertificationCreateClaimRpc(
+  raw: unknown,
+): KycCertificationCreateClaimResult {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "claimed",
+    "certification",
+  ]);
+  const certification = exactRecord(root.certification, [
+    "status",
+    "expires_at",
+    "provider_create_dispatched_at",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "kyc_certification_create_claimed" ||
+    typeof root.claimed !== "boolean" ||
+    certification.status !== "reserved" ||
+    !isIsoTimestamp(certification.expires_at) ||
+    !isIsoTimestamp(certification.provider_create_dispatched_at)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_create_claimed",
+    claimed: root.claimed,
+    certification: {
+      status: "reserved",
+      expires_at: certification.expires_at,
+      provider_create_dispatched_at:
+        certification.provider_create_dispatched_at,
+    },
+  };
+}
+
+export function sanitizeKycCertificationSessionRecordRpc(
+  raw: unknown,
+): {
+  schema_version: 1;
+  action: "kyc_certification_session_recorded";
+  replayed: boolean;
+  certification: {
+    status: "pending" | "in_review";
+    expires_at: string;
+  };
+} {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "certification",
+  ]);
+  const certification = exactRecord(root.certification, [
+    "status",
+    "expires_at",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "kyc_certification_session_recorded" ||
+    typeof root.replayed !== "boolean" ||
+    (certification.status !== "pending" &&
+      certification.status !== "in_review") ||
+    !isIsoTimestamp(certification.expires_at)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_session_recorded",
+    replayed: root.replayed,
+    certification: {
+      status: certification.status,
+      expires_at: certification.expires_at,
+    },
+  };
+}
+
+export function sanitizeKycCertificationBindingMatchRpc(
+  raw: unknown,
+): {
+  schema_version: 1;
+  action: "kyc_certification_binding_matched";
+  matched: true;
+  certification: {
+    status: "pending";
+    expires_at: string;
+  };
+} {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "matched",
+    "certification",
+  ]);
+  const certification = exactRecord(root.certification, [
+    "status",
+    "expires_at",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "kyc_certification_binding_matched" ||
+    root.matched !== true ||
+    certification.status !== "pending" ||
+    !isIsoTimestamp(certification.expires_at)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_binding_matched",
+    matched: true,
+    certification: {
+      status: "pending",
+      expires_at: certification.expires_at,
+    },
+  };
+}
+
+export function sanitizeKycCertificationWebhookRpc(
+  raw: unknown,
+): KycCertificationWebhookRpcResult {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "certification",
+  ]);
+  const quarantined = root.action ===
+    "kyc_certification_result_quarantined";
+  if (
+    root.schema_version !== 1 ||
+    typeof root.replayed !== "boolean" ||
+    (!quarantined && root.action !== "kyc_certification_result_applied")
+  ) {
+    throw new DiditContractError();
+  }
+  const certification = exactRecord(
+    root.certification,
+    quarantined ? ["status", "verified", "reason"] : ["status", "verified"],
+  );
+  const statuses = new Set([
+    "pending",
+    "in_review",
+    "approved",
+    "declined",
+    "expired",
+    "quarantined",
+    "revoked",
+  ]);
+  const reasons = new Set([
+    "provider_environment_mismatch",
+    "provider_config_mismatch",
+    "provider_workflow_mismatch",
+    "approved_checks_incomplete",
+    "stale_event",
+    "binding_conflict",
+  ]);
+  if (
+    typeof certification.status !== "string" ||
+    !statuses.has(certification.status) ||
+    typeof certification.verified !== "boolean" ||
+    (certification.verified && certification.status !== "approved") ||
+    (!quarantined && certification.status === "quarantined") ||
+    (quarantined &&
+      (certification.status !== "quarantined" ||
+        typeof certification.reason !== "string" ||
+        !reasons.has(certification.reason)))
+  ) {
+    throw new DiditContractError();
+  }
+  if (quarantined) {
+    return {
+      schema_version: 1,
+      action: "kyc_certification_result_quarantined",
+      replayed: root.replayed,
+      certification: {
+        status: "quarantined",
+        verified: false,
+        reason: certification
+          .reason as KycCertificationWebhookRpcResult["certification"][
+            "reason"
+          ],
+      },
+    };
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_result_applied",
+    replayed: root.replayed,
+    certification: {
+      status: certification.status as Exclude<
+        KycCertificationWebhookRpcResult["certification"]["status"],
+        "quarantined"
+      >,
+      verified: certification.verified,
+    },
   };
 }
 
@@ -539,7 +963,7 @@ export function diditCreateBody(
   language: string,
 ): Record<string, unknown> {
   if (
-    !/^kyr_[0-9a-f]{24}$/.test(vendorData) ||
+    !DIDIT_VENDOR_DATA_PATTERN.test(vendorData) ||
     !LANGUAGE_PATTERN.test(language)
   ) {
     throw new DiditContractError();
@@ -554,6 +978,148 @@ export function diditCreateBody(
     callback_method: "completer",
     language,
   };
+}
+
+/**
+ * Classifies only the two provider failures that have a stable public meaning.
+ * The caller supplies an already byte-bounded body and must never log or
+ * forward it. Every unrecognised shape deliberately collapses to `other`.
+ */
+export function classifyDiditCreateError(
+  status: number,
+  boundedBody: string | null,
+): DiditCreateErrorKind {
+  if (status === 429) return "rate_limited";
+  if (status === 402) return "credits_unavailable";
+  if (
+    status !== 400 ||
+    typeof boundedBody !== "string" ||
+    boundedBody.length === 0 ||
+    boundedBody.length > 4_096
+  ) {
+    return "other";
+  }
+
+  try {
+    const raw = JSON.parse(boundedBody);
+    if (!isRecord(raw) || typeof raw.detail !== "string") return "other";
+    const detail = raw.detail.trim();
+    if (
+      detail.length === 0 ||
+      detail.length > 512 ||
+      /[\u0000-\u001f\u007f]/.test(detail)
+    ) {
+      return "other";
+    }
+    return /\byou (?:do not|don't) have enough credits\b/i.test(detail)
+      ? "credits_unavailable"
+      : "other";
+  } catch {
+    return "other";
+  }
+}
+
+/**
+ * Reduces Didit's PII-rich list response to the only fields needed to reopen
+ * one already-bound hosted KYC session. The caller must byte-bound the JSON
+ * before parsing it and must never log, persist or forward the raw response.
+ */
+export function inspectDiditSessionList(
+  raw: unknown,
+  config: DiditConfig,
+  expectedVendorData: string,
+): DiditSessionListInspection {
+  if (!DIDIT_VENDOR_DATA_PATTERN.test(expectedVendorData)) {
+    throw new DiditContractError();
+  }
+  const root = record(raw);
+  if (
+    root.count === 0 &&
+    Array.isArray(root.results) &&
+    root.results.length === 0
+  ) {
+    return { kind: "empty" };
+  }
+  if (
+    typeof root.count === "number" &&
+    Number.isSafeInteger(root.count) &&
+    root.count > 1 &&
+    Array.isArray(root.results)
+  ) {
+    throw new DiditSessionNotResumableError();
+  }
+  if (
+    root.count !== 1 ||
+    !Array.isArray(root.results) ||
+    root.results.length !== 1
+  ) {
+    throw new DiditContractError();
+  }
+
+  const candidate = record(root.results[0]);
+  const sessionKind = candidate.session_kind;
+  const workflowType = typeof candidate.workflow_type === "string"
+    ? candidate.workflow_type.trim().toLowerCase()
+    : candidate.workflow_type;
+  const explicitKyb = sessionKind === "business" ||
+    workflowType === "business" || workflowType === "kyb" ||
+    Object.hasOwn(candidate, "business_session_id") ||
+    Object.hasOwn(candidate, "vendor_business_id") ||
+    Object.hasOwn(candidate, "company_name") ||
+    Object.hasOwn(candidate, "registration_number");
+  if (
+    explicitKyb ||
+    (sessionKind !== undefined && sessionKind !== "user") ||
+    (workflowType !== undefined && workflowType !== "user" &&
+      workflowType !== "kyc") ||
+    candidate.vendor_data !== expectedVendorData
+  ) {
+    throw new DiditContractError();
+  }
+
+  const sessionId = uuid(candidate.session_id);
+  // Didit's documented List Sessions row shape may omit workflow_id even
+  // when the request was filtered by that exact value. The URL filter is the
+  // source of truth in that case; if the field is returned, it must still
+  // match exactly so a contradictory provider response fails closed.
+  const workflowId = candidate.workflow_id === undefined
+    ? config.workflowId
+    : uuid(candidate.workflow_id);
+  const hostedUrl = diditHostedUrl(candidate.session_url);
+  if (workflowId !== config.workflowId) throw new DiditContractError();
+
+  const providerStatus = normalizeDiditStatus(candidate.status);
+  if (
+    providerStatus !== "not_started" &&
+    providerStatus !== "in_progress" &&
+    providerStatus !== "resubmitted" &&
+    providerStatus !== "awaiting_user"
+  ) {
+    throw new DiditSessionNotResumableError();
+  }
+  return {
+    kind: "active",
+    session: {
+      sessionId,
+      workflowId,
+      providerStatus,
+      hostedUrl,
+    },
+  };
+}
+
+export function sanitizeDiditActiveSessionList(
+  raw: unknown,
+  config: DiditConfig,
+  expectedVendorData: string,
+): DiditActiveSession {
+  const inspection = inspectDiditSessionList(
+    raw,
+    config,
+    expectedVendorData,
+  );
+  if (inspection.kind !== "active") throw new DiditContractError();
+  return inspection.session;
 }
 
 export function sanitizeDiditCreatedSession(
@@ -966,6 +1532,13 @@ function exactRecord(
 function record(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new DiditContractError();
   return value;
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 40 &&
+    Number.isFinite(Date.parse(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

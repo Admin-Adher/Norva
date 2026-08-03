@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
-const { TextEncoder } = require('node:util');
+const { TextDecoder, TextEncoder } = require('node:util');
 
 const root = path.join(__dirname, '..');
 const source = fs.readFileSync(
@@ -15,7 +15,12 @@ const source = fs.readFileSync(
 );
 
 function loadAdminPage(documentOverride = null, fetchOverride = null, windowOverride = {}) {
-  const window = { crypto: webcrypto, ...windowOverride };
+  const sessionStorage = windowOverride.sessionStorage || {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+  };
+  const window = { crypto: webcrypto, ...windowOverride, sessionStorage };
   const context = vm.createContext({
     window,
     document: documentOverride || {
@@ -27,6 +32,7 @@ function loadAdminPage(documentOverride = null, fetchOverride = null, windowOver
       getItem() { return null; },
       setItem() {},
     },
+    sessionStorage,
     location: { hash: '#admin/partners' },
     history: { state: null, replaceState() {} },
     navigator: {},
@@ -35,17 +41,18 @@ function loadAdminPage(documentOverride = null, fetchOverride = null, windowOver
       json: async () => ({}),
     })),
     console: { log() {}, warn() {}, error() {} },
-    setTimeout,
-    clearTimeout,
+    setTimeout: windowOverride.setTimeout || setTimeout,
+    clearTimeout: windowOverride.clearTimeout || clearTimeout,
     AbortController: globalThis.AbortController,
     AbortSignal: globalThis.AbortSignal,
     URL,
     Intl,
-    Date,
+    Date: windowOverride.Date || Date,
     Map,
     Set,
     Promise,
     TextEncoder,
+    TextDecoder,
     AbortController,
     DOMException,
   });
@@ -3030,4 +3037,690 @@ test('Admin beneficiary proposal is bound to the sanitized payout request key', 
   assert.equal(proposal.request_key, requestKey);
   assert.equal(proposal.beneficiary_payment_method_ref, null);
   assert.doesNotMatch(JSON.stringify(proposal), /account_id|currency/);
+});
+
+test('Admin Partners exposes pre-gate Didit certification only to Risk operators', () => {
+  const kyc = { innerHTML: '', removeAttribute() {} };
+  const certification = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      if (id === 'partners-admin-kyc') return kyc;
+      if (id === 'partners-admin-kyc-certification') return certification;
+      return null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const quota = {
+    schema_version: 1,
+    used: 0,
+    informational_limit: 500,
+    remaining: 500,
+    utilization_percent: 0,
+    blocking: false,
+    window_days: 30,
+  };
+
+  page._partnersCapabilities = { support: false, risk: false, finance: false };
+  page._renderPartnersKycQuota(quota);
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: null,
+  });
+  assert.doesNotMatch(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
+  assert.match(certification.innerHTML, /Lecture seule/);
+  assert.doesNotMatch(kyc.innerHTML, /Certification pré-gate Didit/);
+
+  page._partnersCapabilities.risk = true;
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: null,
+  });
+  assert.match(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
+  assert.match(certification.innerHTML, /séparée des comptes, liens, commissions et paiements/);
+});
+
+test('Admin Partners renders authoritative, sandbox and quarantined Didit proof states', () => {
+  const certification = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-kyc-certification' ? certification : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  const base = {
+    expires_at: '2026-08-03T18:00:00Z',
+    observed_at: '2026-08-03T17:00:00Z',
+    reason: null,
+  };
+
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: {
+      ...base,
+      environment: 'live',
+      status: 'pending',
+      verified: false,
+    },
+  });
+  assert.match(certification.innerHTML, /data-partners-action="kyc-certification-resume"/);
+  assert.match(certification.innerHTML, /Reprendre sur Didit/);
+  assert.doesNotMatch(certification.innerHTML, /kyc-certification-start/);
+
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: {
+      ...base,
+      environment: 'live',
+      status: 'approved',
+      verified: true,
+    },
+  });
+  assert.match(certification.innerHTML, /Preuve live vérifiée/);
+  assert.match(certification.innerHTML, /Environnement live/);
+  assert.doesNotMatch(certification.innerHTML, /kyc-certification-start/);
+
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: {
+      ...base,
+      environment: 'sandbox',
+      status: 'approved',
+      verified: false,
+    },
+  });
+  assert.match(certification.innerHTML, /approuvée non autoritaire/);
+  assert.match(certification.innerHTML, /sandbox · non autoritaire/);
+  assert.match(certification.innerHTML, /kyc-certification-start/);
+
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: {
+      ...base,
+      environment: 'live',
+      status: 'quarantined',
+      verified: false,
+      reason: 'provider_config_mismatch',
+    },
+  });
+  assert.match(certification.innerHTML, /mise en quarantaine/);
+  assert.match(certification.innerHTML, /configuration fournisseur incohérente/);
+});
+
+test('Admin Partners starts Didit certification with AAL2, explicit consent and no provider token exposure', async () => {
+  const stored = new Map();
+  let assigned = '';
+  let observedRequest = null;
+  const sessionStorage = {
+    getItem(key) { return stored.get(key) || null; },
+    setItem(key, value) { stored.set(key, value); },
+    removeItem(key) { stored.delete(key); },
+  };
+  const fetchOverride = async (url, options) => {
+    observedRequest = { url, options };
+    return {
+      ok: true,
+      json: async () => ({
+        version: '2026-07-29',
+        correlationId: 'prt_0123456789abcdef01234567',
+        data: {
+          schema_version: 1,
+          action: 'kyc_certification_session_created',
+          replayed: false,
+          verification: {
+            provider: 'didit',
+            status: 'not_started',
+            url: 'https://verify.didit.me/session/opaque-hosted-link',
+            expires_at: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+          },
+        },
+      }),
+    };
+  };
+  const AdminPage = loadAdminPage(null, fetchOverride, {
+    sessionStorage,
+    location: { assign(value) { assigned = value; } },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersTypedConfirmation = async (expected) => {
+    assert.equal(expected, 'CERTIFIER DIDIT');
+    return expected;
+  };
+  page._partnersJustification = async () => 'Certification live contrôlée du workflow Didit v1.';
+  page._sbUrl = () => 'https://api.norva.tv';
+  page._sbKey = () => 'public-anon-key';
+  page._token = () => 'user-aal2-jwt';
+  page._partnersRandomUuid = () => '11111111-1111-4111-8111-111111111111';
+
+  const result = await page._runPartnersAdminAction({
+    dataset: { partnersAction: 'kyc-certification-start' },
+  });
+  assert.equal(result, false, 'navigation owns completion instead of refreshing Admin');
+  assert.equal(
+    observedRequest.url,
+    'https://api.norva.tv/functions/v1/norva-partners/kyc/certification',
+  );
+  assert.equal(observedRequest.options.headers.Authorization, 'Bearer user-aal2-jwt');
+  assert.equal(
+    observedRequest.options.headers['Idempotency-Key'],
+    'didit-certification:11111111-1111-4111-8111-111111111111',
+  );
+  assert.deepEqual(JSON.parse(observedRequest.options.body), {
+    language: 'fr',
+    consentVersion: 'partners-didit-certification-v1',
+    consentGranted: true,
+    capacityConfirmed: true,
+    confirmation: 'CERTIFIER DIDIT',
+    justification: 'Certification live contrôlée du workflow Didit v1.',
+  });
+  assert.match(stored.get('norva-partners-kyc-certification-v1'), /^\d{13}$/);
+  assert.deepEqual(
+    JSON.parse(stored.get('norva-partners-kyc-certification-context-v1')),
+    {
+      version: 1,
+      view: 'risk',
+      scrollTop: 0,
+      focus: 'kyc_certification_card',
+    },
+  );
+  assert.equal(assigned, 'https://verify.didit.me/session/opaque-hosted-link');
+  assert.doesNotMatch(JSON.stringify(observedRequest), /session_token|provider_session_id/);
+});
+
+test('Admin Partners resumes an unknown Didit result without persisting provider data or repeating consent', async () => {
+  const stored = new Map();
+  let assigned = '';
+  let observedRequest = null;
+  const sessionStorage = {
+    getItem(key) { return stored.get(key) || null; },
+    setItem(key, value) { stored.set(key, value); },
+    removeItem(key) { stored.delete(key); },
+  };
+  const AdminPage = loadAdminPage(null, async (url, options) => {
+    observedRequest = { url, options };
+    return {
+      ok: true,
+      json: async () => ({
+        version: '2026-07-29',
+        correlationId: 'prt_0123456789abcdef01234567',
+        data: {
+          schema_version: 1,
+          action: 'kyc_certification_session_created',
+          replayed: true,
+          verification: {
+            provider: 'didit',
+            status: 'in_progress',
+            url: 'https://verify.didit.me/session/recovered-hosted-link',
+            expires_at: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+          },
+        },
+      }),
+    };
+  }, {
+    sessionStorage,
+    location: { assign(value) { assigned = value; } },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersTypedConfirmation = async () => {
+    throw new Error('resume must not repeat typed consent');
+  };
+  page._partnersJustification = async () => {
+    throw new Error('resume must not persist or repeat free-text justification');
+  };
+  page._partnersRandomUuid = () => {
+    throw new Error('resume must be derived by the server');
+  };
+  page._sbUrl = () => 'https://api.norva.tv';
+  page._sbKey = () => 'public-anon-key';
+  page._token = () => 'user-aal2-jwt';
+
+  const result = await page._runPartnersAdminAction({
+    dataset: { partnersAction: 'kyc-certification-resume' },
+  });
+  assert.equal(result, false);
+  assert.equal(
+    observedRequest.url,
+    'https://api.norva.tv/functions/v1/norva-partners/kyc/certification/resume',
+  );
+  assert.equal(observedRequest.options.headers['Idempotency-Key'], undefined);
+  assert.deepEqual(JSON.parse(observedRequest.options.body), {});
+  assert.match(stored.get('norva-partners-kyc-certification-v1'), /^\d{13}$/);
+  assert.equal(assigned, 'https://verify.didit.me/session/recovered-hosted-link');
+  assert.doesNotMatch(
+    JSON.stringify(observedRequest),
+    /session_token|provider_session_id|workflow_id|justification|confirmation/,
+  );
+});
+
+test('Admin Partners restores only bounded focus and scroll context after Didit', () => {
+  const stored = new Map();
+  const sessionStorage = {
+    getItem(key) { return stored.get(key) || null; },
+    setItem(key, value) { stored.set(key, value); },
+    removeItem(key) { stored.delete(key); },
+  };
+  const documentOverride = {
+    getElementById() { return null; },
+    querySelector(selector) {
+      return selector === '#page-admin .crm-main' ? { scrollTop: 428 } : null;
+    },
+    querySelectorAll() { return []; },
+  };
+  const AdminPage = loadAdminPage(documentOverride, null, { sessionStorage });
+  const page = new AdminPage({});
+
+  page._partnersPersistKycCertificationReturnContext();
+  const persisted = JSON.parse(stored.get(
+    'norva-partners-kyc-certification-context-v1',
+  ));
+  assert.deepEqual(persisted, {
+    version: 1,
+    view: 'risk',
+    scrollTop: 428,
+    focus: 'kyc_certification_card',
+  });
+  assert.doesNotMatch(JSON.stringify(persisted), /email|uuid|provider|session|partner/i);
+
+  const restored = page._partnersConsumeKycCertificationReturnContext();
+  assert.equal(restored.view, 'risk');
+  assert.equal(restored.scrollTop, 428);
+  assert.equal(restored.focus.id, 'partners-admin-kyc-certification');
+  assert.equal(
+    stored.has('norva-partners-kyc-certification-context-v1'),
+    false,
+  );
+
+  stored.set(
+    'norva-partners-kyc-certification-context-v1',
+    JSON.stringify({
+      version: 1,
+      view: 'risk',
+      scrollTop: 428,
+      focus: 'kyc_certification_card',
+      email: 'must-not-be-restored@example.test',
+    }),
+  );
+  assert.equal(page._partnersConsumeKycCertificationReturnContext(), null);
+});
+
+test('Admin Partners polls null certification state through the complete recovery window', async () => {
+  let now = 1_000_000;
+  let nextTimer = 1;
+  const timers = new Map();
+  class FakeDate extends Date {
+    constructor(...args) {
+      super(...(args.length ? args : [now]));
+    }
+    static now() { return now; }
+  }
+  const fakeSetTimeout = (callback, delay = 0) => {
+    const id = nextTimer++;
+    timers.set(id, { at: now + Math.max(0, Number(delay) || 0), callback });
+    return id;
+  };
+  const fakeClearTimeout = (id) => timers.delete(id);
+  const advance = async (milliseconds) => {
+    const target = now + milliseconds;
+    while (true) {
+      const due = Array.from(timers.entries())
+        .filter(([, timer]) => timer.at <= target)
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!due) break;
+      const [id, timer] = due;
+      timers.delete(id);
+      now = timer.at;
+      timer.callback();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    now = target;
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const sessionStorage = {
+    setItem() {},
+    removeItem() {},
+  };
+  const certification = {
+    innerHTML: '',
+    dataset: {},
+    removeAttribute() {},
+    contains() { return false; },
+  };
+  const documentOverride = {
+    getElementById(id) {
+      return id === 'partners-admin-kyc-certification' ? certification : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    activeElement: null,
+  };
+  const AdminPage = loadAdminPage(documentOverride, async () => {
+    throw new Error('network_unknown');
+  }, {
+    sessionStorage,
+    setTimeout: fakeSetTimeout,
+    clearTimeout: fakeClearTimeout,
+    Date: FakeDate,
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersPageGeneration = 1;
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersTypedConfirmation = async () => 'CERTIFIER DIDIT';
+  page._partnersJustification = async () => 'Certification live contrôlée du workflow Didit v1.';
+  page._partnersRandomUuid = () => '11111111-1111-4111-8111-111111111111';
+  page._sbUrl = () => 'https://api.norva.tv';
+  page._sbKey = () => 'public-anon-key';
+  page._token = () => 'user-aal2-jwt';
+  let refreshes = 0;
+  page._partnersLoadKycCertification = async ({ force }) => {
+    assert.equal(force, true);
+    refreshes += 1;
+    page._renderPartnersKycCertification({
+      schema_version: 1,
+      action: 'kyc_certification_status',
+      certification: null,
+    });
+  };
+
+  await assert.rejects(
+    page._runPartnersAdminAction({
+      dataset: { partnersAction: 'kyc-certification-start' },
+    }),
+    /didit_certification_result_uncertain/,
+  );
+  await advance(0);
+  assert.equal(refreshes, 1, 'the uncertain result triggers an immediate read');
+  assert.ok(page._partnersKycCertificationPollTimer !== null);
+  await advance(9_000);
+  assert.equal(refreshes, 4, 'null states keep polling every three seconds');
+  await advance(51_000);
+  assert.equal(
+    refreshes,
+    21,
+    'the 60-second boundary performs one final authoritative read',
+  );
+  assert.equal(page._partnersKycCertificationPollUntil, 0);
+  assert.equal(page._partnersKycCertificationPollTimer, null);
+  assert.equal(timers.size, 0, 'no timer survives the bounded recovery window');
+  assert.match(
+    certification.innerHTML,
+    /data-partners-action="kyc-certification-start"/,
+    'the final read leaves the safe Start action available again',
+  );
+  page.hide();
+});
+
+function validCertificationEnvelope(overrides = {}) {
+  return {
+    version: '2026-07-29',
+    correlationId: 'prt_0123456789abcdef01234567',
+    data: {
+      schema_version: 1,
+      action: 'kyc_certification_session_created',
+      replayed: false,
+      verification: {
+        provider: 'didit',
+        status: 'not_started',
+        url: 'https://verify.didit.me/session/opaque-hosted-link',
+        expires_at: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+      },
+    },
+    ...overrides,
+  };
+}
+
+function configureCertificationActionPage(page) {
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  page._confirm = async () => true;
+  page._partnersTypedConfirmation = async () => 'CERTIFIER DIDIT';
+  page._partnersJustification = async () => (
+    'Certification live contrôlée du workflow Didit v1.'
+  );
+  page._partnersRandomUuid = () => '11111111-1111-4111-8111-111111111111';
+  page._sbUrl = () => 'https://api.norva.tv';
+  page._sbKey = () => 'public-anon-key';
+  page._token = () => 'user-aal2-jwt';
+  page._partnersLoadKycCertification = async () => null;
+}
+
+test('Admin Partners bounds a slow Didit body until AbortSignal settles it', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const controller = new AbortController();
+  let released = false;
+  const response = {
+    headers: { get: () => null },
+    body: {
+      getReader() {
+        return {
+          read() { return new Promise(() => {}); },
+          async cancel() {},
+          releaseLock() { released = true; },
+        };
+      },
+    },
+  };
+  const reading = page._partnersReadBoundedJsonResponse(
+    response,
+    controller.signal,
+  );
+  setImmediate(() => controller.abort());
+  await assert.rejects(reading, (error) => error?.name === 'AbortError');
+  assert.equal(released, true);
+});
+
+test('Admin Partners rejects extra provider fields and enters uncertain recovery', async () => {
+  let assigned = '';
+  const envelope = validCertificationEnvelope();
+  envelope.data.verification.provider_session_id = 'must-never-enter-browser-state';
+  const AdminPage = loadAdminPage(null, async () => ({
+    ok: true,
+    json: async () => envelope,
+  }), {
+    location: { assign(value) { assigned = value; } },
+  });
+  const page = new AdminPage({});
+  configureCertificationActionPage(page);
+  await assert.rejects(
+    page._runPartnersAdminAction({
+      dataset: { partnersAction: 'kyc-certification-start' },
+    }),
+    /didit_certification_result_uncertain/,
+  );
+  assert.equal(assigned, '');
+  page._partnersKycCertificationPollUntil = 0;
+  page.hide();
+});
+
+test('Admin Partners rejects non-canonical or stale Didit hosted sessions', async () => {
+  const cases = [
+    {
+      label: 'custom HTTPS port',
+      url: 'https://verify.didit.me:444/session/not-canonical',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+    },
+    {
+      label: 'expired session',
+      url: 'https://verify.didit.me/session/expired',
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    },
+    {
+      label: 'TTL beyond the local two-hour reservation',
+      url: 'https://verify.didit.me/session/too-long',
+      expiresAt: new Date(Date.now() + (2 * 60 * 60 * 1_000) + 60_000).toISOString(),
+    },
+  ];
+  for (const value of cases) {
+    let assigned = '';
+    const envelope = validCertificationEnvelope();
+    envelope.data.verification.url = value.url;
+    envelope.data.verification.expires_at = value.expiresAt;
+    const AdminPage = loadAdminPage(null, async () => ({
+      ok: true,
+      json: async () => envelope,
+    }), {
+      location: { assign(url) { assigned = url; } },
+    });
+    const page = new AdminPage({});
+    configureCertificationActionPage(page);
+    await assert.rejects(
+      page._runPartnersAdminAction({
+        dataset: { partnersAction: 'kyc-certification-start' },
+      }),
+      /didit_certification_result_uncertain/,
+      value.label,
+    );
+    assert.equal(assigned, '', value.label);
+    page._partnersKycCertificationPollUntil = 0;
+    page.hide();
+  }
+});
+
+test('Admin Partners polling never replaces a busy certification action', () => {
+  let writes = 0;
+  let markup = '<button data-partners-action="kyc-certification-resume">Traitementâ€¦</button>';
+  const certification = {
+    dataset: {},
+    get innerHTML() { return markup; },
+    set innerHTML(value) { writes += 1; markup = value; },
+    removeAttribute() {},
+  };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-kyc-certification' ? certification : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersRequests.set('kycCertificationMutation', {
+    token: 1,
+    controller: { abort() {} },
+  });
+
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: null,
+  });
+  assert.equal(writes, 0);
+  assert.match(markup, /Traitement/);
+  page._partnersRequests.delete('kycCertificationMutation');
+  page.hide();
+});
+
+test('Admin Partners treats final callback-marker failure as an uncertain result', async () => {
+  let writes = 0;
+  let assigned = '';
+  const sessionStorage = {
+    setItem() {
+      writes += 1;
+      if (writes === 2) throw new Error('storage_revoked');
+    },
+    removeItem() {},
+  };
+  const AdminPage = loadAdminPage(null, async () => ({
+    ok: true,
+    json: async () => validCertificationEnvelope(),
+  }), {
+    sessionStorage,
+    location: { assign(value) { assigned = value; } },
+  });
+  const page = new AdminPage({});
+  configureCertificationActionPage(page);
+  await assert.rejects(
+    page._runPartnersAdminAction({
+      dataset: { partnersAction: 'kyc-certification-start' },
+    }),
+    /didit_certification_result_uncertain/,
+  );
+  assert.equal(writes, 2);
+  assert.equal(assigned, '');
+  page._partnersKycCertificationPollUntil = 0;
+  page.hide();
+});
+
+test('Admin Partners never redirects a late Didit response after route change', async () => {
+  let resolveFetch;
+  let assigned = '';
+  const fetchResult = new Promise((resolve) => { resolveFetch = resolve; });
+  const AdminPage = loadAdminPage(null, async () => fetchResult, {
+    location: { assign(value) { assigned = value; } },
+  });
+  const page = new AdminPage({});
+  configureCertificationActionPage(page);
+  const action = page._runPartnersAdminAction({
+    dataset: { partnersAction: 'kyc-certification-start' },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  page._route = 'cockpit';
+  page._partnersAbortAll();
+  resolveFetch({
+    ok: true,
+    json: async () => validCertificationEnvelope(),
+  });
+  await assert.rejects(action, /didit_certification_result_uncertain/);
+  assert.equal(assigned, '');
+  page._partnersKycCertificationPollUntil = 0;
+  page.hide();
+});
+
+test('Admin Partners hides Start while an unknown Didit result is reconciling', () => {
+  const certification = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) {
+      return id === 'partners-admin-kyc-certification' ? certification : null;
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._route = 'partners';
+  page._partnersView = 'risk';
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersKycCertificationPollUntil = Date.now() + 60_000;
+  page._renderPartnersKycCertification({
+    schema_version: 1,
+    action: 'kyc_certification_status',
+    certification: null,
+  });
+  assert.doesNotMatch(
+    certification.innerHTML,
+    /data-partners-action="kyc-certification-start"/,
+  );
+  assert.match(certification.innerHTML, /Norva v&eacute;rifie/);
+  page._partnersKycCertificationPollUntil = 0;
+  page.hide();
 });

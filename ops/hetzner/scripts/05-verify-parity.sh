@@ -24,6 +24,10 @@ if [[ "${NORVA_PARTNERS_REVOLUT_API_ENABLED:-false}" != "false" ]]; then
   echo "Refusing Basic/manual parity: NORVA_PARTNERS_REVOLUT_API_ENABLED must be false." >&2
   exit 1
 fi
+if [[ "${NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:-false}" != "false" ]]; then
+  echo "Refusing resting-state parity: NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED must be false." >&2
+  exit 1
+fi
 
 q() { psql "$1" -At -c "$2" 2>/dev/null; }
 
@@ -31,10 +35,11 @@ hr() { printf '%.0s-' {1..60}; echo; }
 
 FAILURES=0
 
-verify_edge_runtime_revolut_flag() {
+verify_edge_runtime_inert_flags() {
   local runtime=""
   local container=""
   local injected=""
+  local flag=""
   local inspected=0
 
   if command -v docker >/dev/null 2>&1; then
@@ -55,22 +60,25 @@ verify_edge_runtime_revolut_flag() {
       continue
     fi
     inspected=$((inspected + 1))
-    injected="$(
-      "$runtime" inspect \
-        --format '{{range .Config.Env}}{{println .}}{{end}}' \
-        "$container" \
-        | awk -F= \
-          '$1 == "NORVA_PARTNERS_REVOLUT_API_ENABLED" {
-            print substr($0, index($0, "=") + 1)
-          }'
-    )"
-    if [[ "$injected" == "false" ]]; then
-      printf "%-32s %14s\n" "Edge env: $container" "OK"
-    else
-      printf "%-32s %14s\n" "Edge env: $container" "FAIL"
-      echo "  NORVA_PARTNERS_REVOLUT_API_ENABLED is absent or not false." >&2
-      FAILURES=$((FAILURES + 1))
-    fi
+    for flag in \
+      NORVA_PARTNERS_REVOLUT_API_ENABLED \
+      NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED
+    do
+      injected="$(
+        "$runtime" inspect \
+          --format '{{range .Config.Env}}{{println .}}{{end}}' \
+          "$container" \
+          | awk -F= -v wanted="$flag" \
+            '$1 == wanted { print substr($0, index($0, "=") + 1) }'
+      )"
+      if [[ "$injected" == "false" ]]; then
+        printf "%-48s %14s\n" "Edge env: $container $flag" "OK"
+      else
+        printf "%-48s %14s\n" "Edge env: $container $flag" "FAIL"
+        echo "  $flag is absent or not false." >&2
+        FAILURES=$((FAILURES + 1))
+      fi
+    done
   done
 
   if [[ "$inspected" -eq 0 ]]; then
@@ -147,7 +155,7 @@ check_zero() { # label, sql expected to return an invariant-violation count
   printf "%-32s %14s %14s %4s\n" "$label" "${a:-?}" "${b:-?}" "$ok"
 }
 
-verify_edge_runtime_revolut_flag
+verify_edge_runtime_inert_flags
 
 for t in "${TABLES[@]}"; do
   check "rows: $t" "select count(*) from public.$t"

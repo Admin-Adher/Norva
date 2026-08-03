@@ -460,6 +460,10 @@ services:
       DIDIT_ID_VERIFICATION_NODE_ID: ${DIDIT_ID_VERIFICATION_NODE_ID:-}
       DIDIT_LIVENESS_NODE_ID: ${DIDIT_LIVENESS_NODE_ID:-}
       DIDIT_FACE_MATCH_NODE_ID: ${DIDIT_FACE_MATCH_NODE_ID:-}
+      # Exceptional Admin+Risk+AAL2 path used only to certify the live Didit
+      # workflow before the KYC coverage release gate. It cannot create a
+      # partner account or promote a gate and remains closed by default.
+      NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED: ${NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:-false}
       # Shared verbatim with GOTRUE_HOOK_SEND_EMAIL_SECRETS above. Both the
       # signer and verifier are mandatory; there is deliberately no SMTP path.
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:?SEND_EMAIL_HOOK_SECRET is required for Auth email}

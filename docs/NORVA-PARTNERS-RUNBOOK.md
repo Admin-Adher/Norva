@@ -79,6 +79,7 @@ DIDIT_CALLBACK_URL
 DIDIT_ID_VERIFICATION_NODE_ID
 DIDIT_LIVENESS_NODE_ID
 DIDIT_FACE_MATCH_NODE_ID
+NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED # non secret ; false hors fenêtre supervisée
 NORVA_REFERRAL_EDGE_HMAC_SECRET
 NORVA_REFERRAL_COOKIE_SECRET
 NORVA_PARTNERS_ALLOWED_ORIGINS
@@ -565,6 +566,71 @@ preuves de session sandbox, décision live et isolation/quarantaine ne sont pas
 archivées séparément. Ne jamais activer temporairement la production pour
 fabriquer ce snapshot de configuration.
 
+### Certification Didit live avant la gate KYC
+
+La certification pré-gate est un parcours opérateur exceptionnel, isolé des
+comptes Partners. Elle ne crée ni compte, ni lien, ni attribution, ni
+commission, ni paiement et ne modifie aucun flag ou release gate. Le navigateur
+n'envoie aucun UUID utilisateur : la RPC relit exclusivement `auth.uid()` et
+exige simultanément un Admin live, la capacité Risk, un facteur TOTP vérifié,
+un JWT AAL2 émis depuis moins de dix minutes, `privacy_approved=true`,
+`individual_verification_coverage_confirmed=false` et tous les chemins live
+Partners fermés.
+
+Avant une fenêtre supervisée, conserver
+`NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED=false`. Après validation du snapshot
+de configuration live :
+
+1. recréer successivement `functions`, vérifier sa santé, puis `functions2`
+   avec le kill switch à `true` ;
+2. ouvrir Admin Partners > Risque/KYC avec l'opérateur Risk prévu, élever la
+   session à AAL2 et confirmer explicitement l'usage de sa propre identité et
+   biométrie ;
+3. terminer la session hébergée dans les deux heures ; la décision signée du
+   webhook fait seule foi ;
+4. vérifier dans la carte Admin dédiée l'environnement, l'état, l'horodatage et
+   l'éventuelle raison bornée ; le retour poll automatiquement pendant au plus
+   60 secondes et la lecture reste autorisée après fermeture du kill switch ;
+   si le premier POST a un résultat réseau inconnu, utiliser « Reprendre sur
+   Didit » : la reprise serveur AAL2 réutilise la réservation et la même clé
+   opaque sans conserver la justification ni aucun identifiant provider dans
+   le navigateur. Le polling continue même si la première lecture est vide et
+   la création reste indisponible pendant cette réconciliation ;
+5. archiver une preuve sanitisée contenant uniquement hashes, fingerprint,
+   version, environnement, états bornés, booléens et timestamps ; aucun ID
+   Didit, document, date de naissance, nom ou pays détaillé ;
+6. remettre immédiatement le kill switch à `false` et recréer sainement les
+   deux réplicas Edge.
+
+Une réponse sandbox, un workflow/fingerprint/environnement divergent, un replay
+conflictuel, une liaison cross-purpose ou une décision reçue après l'expiration
+locale est non autoritaire et ne peut jamais satisfaire la gate. Même une
+décision live approuvée reste une preuve à corréler : elle ne promeut jamais
+automatiquement `individual_verification_coverage_confirmed`.
+
+Avant toute création ou reprise, l'Edge lit la liste Didit filtrée par
+`vendor_data`, `workflow_id` et `session_kind=user`, avec `limit=2` et un corps
+strictement borné. En `pending`, il ne recrée jamais de session : une RPC
+`service_role` compare l'identifiant de l'unique session KYC active au hash
+privé déjà enregistré avant de rendre l'URL.
+
+En `reserved`, une session active déjà visible est liée directement après le
+claim SQL et ne déclenche aucun `POST`. Si la liste est exactement vide, le
+claim irréversible `provider_create_dispatched_at` est acquis sous verrou de
+ligne ; seul `claimed=true` autorise l'unique `POST`. Un replica perdant sur
+liste vide, plusieurs résultats, un marqueur KYB ou un état terminal impose
+`409 request_in_progress`. Le webhook signé reste la vérité autoritaire et
+met en quarantaine tout mismatch. Ce protocole garantit au plus un débit de
+crédit Didit entre replicas, y compris après un timeout réseau. Ne jamais
+copier, journaliser ou archiver le payload de liste Didit : il est immédiatement
+réduit à l'URL hébergée, l'état public et l'expiration locale.
+
+La liste Didit peut omettre `workflow_id` et `workflow_version`. L'Edge hérite
+uniquement du filtre `workflow_id` exact lorsque le champ est absent, rejette
+toute valeur présente divergente et lie cette certification à la version
+attendue `1`. Confirmer avant la fenêtre que la version publiée est bien `1` ;
+le webhook signé met toute autre version en quarantaine.
+
 Le compte de service Google Play est dédié au backend, limité à la lecture des
 commandes du package Norva et absent de tout client Android/Web. Les deux
 variables Google absentes laissent l'enrichissement inactif et les faits
@@ -992,7 +1058,8 @@ peut contourner une gate DB ou modifier une écriture existante.
 
 Ordre de réduction du risque :
 
-1. `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` ;
+1. `NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED=false` et
+   `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` ;
 2. `partners_revolut_api_enabled=false`, puis
    `partners_payouts_live=false` ;
 3. suspendre le worker et tout paiement manuel du lot concerné sans supprimer

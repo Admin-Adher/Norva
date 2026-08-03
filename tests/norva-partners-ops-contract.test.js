@@ -304,6 +304,17 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     verifier,
     /affiliate_private\.admin_partners_capability_set_by_operator_key\(text,text,boolean,text\)/,
   );
+  assert.match(verifier, /affiliate_didit_session_registry/);
+  assert.match(verifier, /affiliate_didit_certification_sessions/);
+  assert.match(verifier, /affiliate_didit_certification_events/);
+  assert.match(
+    verifier,
+    /partners_assert_didit_certification_pre_gate/,
+  );
+  assert.match(
+    verifier,
+    /partners_require_didit_certification_observer/,
+  );
   assert.match(parity, /affiliate_private\.\$t/);
   assert.match(parity, /partners private tables/);
   assert.match(parity, /p\.proname like '%partners%'/);
@@ -332,6 +343,10 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(
     parity,
     /NORVA_PARTNERS_REVOLUT_API_ENABLED:-false[\s\S]*must be false/,
+  );
+  assert.match(
+    parity,
+    /NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:-false[\s\S]*must be false/,
   );
   assert.match(parity, /Revolut API active routes/);
   assert.match(parity, /execution_adapter='revolut_api'/);
@@ -718,6 +733,14 @@ test('runbook keeps every release gate fail-closed and includes restore and pilo
     'Didit workflow expiry must be exact, fingerprinted and change-controlled',
   );
   assert.match(
+    runbook,
+    /NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED=false/,
+  );
+  assert.match(
+    runbook,
+    /Admin live[\s\S]*capacité Risk[\s\S]*AAL2/i,
+  );
+  assert.match(
     observability + read('docs/NORVA-PARTNERS-RELEASE-EVIDENCE.md'),
     /Un simple code HTTP `200` n'est pas suffisant/,
   );
@@ -912,6 +935,10 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
   );
   assert.match(
     workflow,
+    /supabase\/tests\/affiliate_didit_certification_pre_gate\.sql/,
+  );
+  assert.match(
+    workflow,
     /supabase\/tests\/affiliate_member_write_rate_limits\.sql/,
   );
   assert.match(
@@ -1013,6 +1040,7 @@ test('self-hosted Edge runtimes receive the complete fail-closed Partners config
     'DIDIT_ID_VERIFICATION_NODE_ID',
     'DIDIT_LIVENESS_NODE_ID',
     'DIDIT_FACE_MATCH_NODE_ID',
+    'NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED',
   ];
 
   for (const name of required) {
@@ -1028,6 +1056,14 @@ test('self-hosted Edge runtimes receive the complete fail-closed Partners config
   assert.match(
     example,
     /^DIDIT_SESSION_EXPIRATION_SECONDS=604800$/m,
+  );
+  assert.match(
+    example,
+    /^NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED=false$/m,
+  );
+  assert.match(
+    compose,
+    /NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:\s*\$\{NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:-false\}/,
   );
   assert.doesNotMatch(
     example,

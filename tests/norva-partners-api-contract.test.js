@@ -1093,7 +1093,7 @@ test('database failures map to public codes without parsing SQL messages', () =>
   assert.doesNotMatch(helperSource, /raw\.message|error\.message|details|hint/);
 });
 
-test('Edge routes derive identity only from verified JWT and call service-only RPCs', () => {
+test('Edge routes derive identity only from verified JWT and scope every RPC explicitly', () => {
   assert.match(edgeSource, /verifyUserJwtLocally\(token\)/);
   assert.match(edgeSource, /db\.auth\.getUser\(token\)/);
   assert.match(edgeSource, /local === "fallback"/);
@@ -1110,7 +1110,11 @@ test('Edge routes derive identity only from verified JWT and call service-only R
   ]) {
     assert.match(helperSource, new RegExp(`"${rpc}"`), rpc);
   }
-  assert.match(edgeSource, /admin\.rpc\(rpcName, args\)/);
+  assert.match(
+    edgeSource,
+    /callRpcWithClient\(admin, rpcName, args, requestKind\)/,
+  );
+  assert.match(edgeSource, /const \{ data, error \} = await db\.rpc\(rpcName, args\)/);
   assert.match(edgeSource, /p_user_id: userId/);
   assert.match(edgeSource, /p_country_code: query\.countryCode/);
   assert.match(edgeSource, /p_subdivision_code: query\.subdivisionCode/);

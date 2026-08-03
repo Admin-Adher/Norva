@@ -373,6 +373,7 @@ jobs:
           supabase test db
           supabase/tests/affiliate_p0.sql
           supabase/tests/affiliate_access_requests.sql
+          supabase/tests/affiliate_didit_certification_pre_gate.sql
           supabase/tests/affiliate_dispute_won.sql
           supabase/tests/affiliate_fiscal_payout_onboarding.sql
           supabase/tests/affiliate_member_write_rate_limits.sql

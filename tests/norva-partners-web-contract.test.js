@@ -2419,7 +2419,7 @@ test('Partners route participates in bounded native continuity without storing p
     continuityWrites[0],
     /commission|payout|referral|verification|contract|eligibility|programme/i,
   );
-  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v6'/);
+  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v10'/);
   assert.match(cssSource, /\.main-content\s*\{\s*padding-bottom:\s*var\(--bottom-nav-h\)/);
   assert.match(
     cssSource,
@@ -2430,7 +2430,8 @@ test('Partners route participates in bounded native continuity without storing p
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
   assert.match(htmlSource, /PartnersPage\.js\?v=6/);
-  assert.match(htmlSource, /app\.js\?v=62/);
+  assert.match(htmlSource, /app\.js\?v=67/);
+  assert.match(appSource, /AdminPage\.js\?v=109/);
 });
 
 test('Didit return identifiers are scrubbed before analytics, referrers or auth redirects', () => {
@@ -2448,9 +2449,12 @@ test('Didit return identifiers are scrubbed before analytics, referrers or auth 
   );
   assert.match(
     appSource,
-    /url\.hash = '#partners'[\s\S]{0,220}history\.replaceState/,
+    /sanitizedCertificationReturn[\s\S]{0,900}url\.hash = certificationReturn \? '#admin\/partners' : '#partners'[\s\S]{0,260}history\.replaceState/,
   );
   assert.match(pageSource, /consumePartnersKycReturnNotice/);
+  assert.match(appSource, /NORVA_PARTNERS_KYC_CERTIFICATION_RETURN_TTL_MS/);
+  assert.match(appSource, /url\.hash === '#partners'/);
+  assert.match(appSource, /consumePartnersKycCertificationReturnNotice/);
   assert.doesNotMatch(appSource, /sessionStorage\.[^(]+\([^)]*verificationSessionId/);
   assert.doesNotMatch(appSource, /localStorage\.[^(]+\([^)]*verificationSessionId/);
   assert.match(

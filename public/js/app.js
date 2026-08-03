@@ -30,6 +30,9 @@ const NORVA_NATIVE_CONTINUITY_TTL_MS = 12 * 60 * 60 * 1000;
 const NORVA_PARTNERS_TV_RELAY_SESSION_KEY = 'norva-partners-tv-relay-v1';
 const NORVA_PARTNERS_TV_RELAY_PATTERN = /^v1\.[A-Za-z0-9_-]{43}\.[0-9a-f]{64}$/;
 const NORVA_PARTNERS_TV_RELAY_CLIENT_TTL_MS = 15 * 60 * 1000;
+const NORVA_PARTNERS_KYC_CERTIFICATION_SESSION_KEY =
+    'norva-partners-kyc-certification-v1';
+const NORVA_PARTNERS_KYC_CERTIFICATION_RETURN_TTL_MS = 2 * 60 * 60 * 1000;
 const NORVA_PARTNERS_KYC_SESSION_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NORVA_PARTNERS_KYC_RETURN_STATUSES = new Set([
@@ -103,27 +106,70 @@ class App {
             const url = new URL(window.location.href);
             const sessions = url.searchParams.getAll('verificationSessionId');
             const statuses = url.searchParams.getAll('status');
-            if (sessions.length !== 1
-                || statuses.length !== 1
-                || !NORVA_PARTNERS_KYC_SESSION_PATTERN.test(sessions[0])
-                || !NORVA_PARTNERS_KYC_RETURN_STATUSES.has(statuses[0])) {
-                return null;
-            }
+            const hasSensitiveDiditParams = sessions.length > 0 || statuses.length > 0;
+            const validProviderReturn = sessions.length === 1
+                && statuses.length === 1
+                && NORVA_PARTNERS_KYC_SESSION_PATTERN.test(sessions[0])
+                && NORVA_PARTNERS_KYC_RETURN_STATUSES.has(statuses[0]);
 
             // Didit adds its opaque session id and status to the return URL.
             // They are useful only to confirm that the hosted flow returned;
             // the signed webhook remains authoritative. Remove both values
             // before any referrer, analytics request or authentication return
             // can retain a provider identifier.
+            let certificationReturn = false;
+            let certificationStartedAt = 0;
+            try {
+                const stored = sessionStorage.getItem(
+                    NORVA_PARTNERS_KYC_CERTIFICATION_SESSION_KEY
+                );
+                certificationStartedAt = /^\d{13}$/.test(stored || '')
+                    ? Number(stored)
+                    : 0;
+                certificationReturn = Number.isSafeInteger(certificationStartedAt)
+                    && certificationStartedAt <= Date.now()
+                    && Date.now() - certificationStartedAt
+                        <= NORVA_PARTNERS_KYC_CERTIFICATION_RETURN_TTL_MS;
+                if (stored && !certificationReturn) {
+                    sessionStorage.removeItem(
+                        NORVA_PARTNERS_KYC_CERTIFICATION_SESSION_KEY
+                    );
+                }
+            } catch (_) { /* private mode may deny sessionStorage */ }
+
+            // The public callback deliberately strips every provider query
+            // parameter before redirecting to #partners. The same-tab,
+            // timestamp-only marker is therefore the sole safe way to restore
+            // the Admin context without carrying a provider identifier.
+            const sanitizedCertificationReturn = !hasSensitiveDiditParams
+                && certificationReturn
+                && url.hash === '#partners';
+            if (!hasSensitiveDiditParams && !sanitizedCertificationReturn) {
+                return null;
+            }
+
             url.searchParams.delete('verificationSessionId');
             url.searchParams.delete('status');
-            url.hash = '#partners';
+            if (validProviderReturn || sanitizedCertificationReturn) {
+                url.hash = certificationReturn ? '#admin/partners' : '#partners';
+            }
             window.history.replaceState(
                 window.history.state,
                 '',
                 `${url.pathname}${url.search}${url.hash}`
             );
-            return { capturedAt: Date.now() };
+            if (!validProviderReturn && !sanitizedCertificationReturn) return null;
+            if (certificationReturn) {
+                try {
+                    sessionStorage.removeItem(
+                        NORVA_PARTNERS_KYC_CERTIFICATION_SESSION_KEY
+                    );
+                } catch (_) { /* private mode may deny sessionStorage */ }
+            }
+            return {
+                capturedAt: Date.now(),
+                kind: certificationReturn ? 'certification' : 'member'
+            };
         } catch (_) {
             return null;
         }
@@ -131,10 +177,21 @@ class App {
 
     consumePartnersKycReturnNotice() {
         const returned = this._partnersKycReturn;
+        if (returned?.kind === 'certification') return false;
         this._partnersKycReturn = null;
         return Boolean(
             returned
             && Number.isSafeInteger(returned.capturedAt)
+            && Date.now() - returned.capturedAt < 15 * 60 * 1000
+        );
+    }
+
+    consumePartnersKycCertificationReturnNotice() {
+        const returned = this._partnersKycReturn;
+        if (returned?.kind !== 'certification') return false;
+        this._partnersKycReturn = null;
+        return Boolean(
+            Number.isSafeInteger(returned.capturedAt)
             && Date.now() - returned.capturedAt < 15 * 60 * 1000
         );
     }
@@ -3524,7 +3581,7 @@ class App {
                 // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
                 // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
                 // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=104';
+                s.src = '/js/pages/AdminPage.js?v=109';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

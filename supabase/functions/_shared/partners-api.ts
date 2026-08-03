@@ -26,6 +26,16 @@ export const PARTNERS_RPC = Object.freeze({
   dashboard: "partners_service_dashboard",
   kycPrepare: "partners_service_kyc_prepare",
   kycSessionRecord: "partners_service_kyc_session_record",
+  kycCertificationPrepare: "admin_partners_kyc_certification_prepare",
+  kycCertificationResume: "admin_partners_kyc_certification_resume",
+  kycCertificationCreateClaim:
+    "partners_service_kyc_certification_create_claim",
+  kycCertificationSessionRecord:
+    "partners_service_kyc_certification_session_record",
+  kycCertificationBindingMatch:
+    "partners_service_kyc_certification_binding_match",
+  kycCertificationWebhookApply:
+    "partners_service_kyc_certification_webhook_apply",
   referralClaim: "partners_service_referral_claim",
   payoutProfileGet: "partners_service_payout_profile_get",
   fiscalProfileGet: "partners_service_fiscal_profile_get",
@@ -49,6 +59,7 @@ export type PublicErrorCode =
   | "method_not_allowed"
   | "business_accounts_not_supported"
   | "kyc_billing_unavailable"
+  | "didit_certification_disabled"
   | "provider_not_configured"
   | "provider_temporarily_unavailable"
   | "referral_not_configured"
@@ -365,6 +376,8 @@ export function allowedMethodsForRoute(
     route === "/activation/reconcile" ||
     route === "/links" ||
     route === "/kyc/sessions" ||
+    route === "/kyc/certification" ||
+    route === "/kyc/certification/resume" ||
     route === "/referral/claim" ||
     route === "/tv-relays/consume"
   ) {

@@ -41,6 +41,9 @@ begin
     'affiliate_events',
     'affiliate_kyc_sessions',
     'affiliate_kyc_webhook_events',
+    'affiliate_didit_session_registry',
+    'affiliate_didit_certification_sessions',
+    'affiliate_didit_certification_events',
     'affiliate_link_claims',
     'affiliate_attributions',
     'affiliate_financial_facts',
@@ -110,6 +113,20 @@ begin
   ) then
     raise exception
       'affiliate_private schema became usable by anon';
+  end if;
+  if not pg_catalog.has_schema_privilege(
+      'authenticated',
+      'affiliate_private',
+      'USAGE'
+    )
+    or not pg_catalog.has_schema_privilege(
+      'service_role',
+      'affiliate_private',
+      'USAGE'
+    )
+  then
+    raise exception
+      'affiliate_private schema lost required authenticated or service_role USAGE';
   end if;
 
   select string_agg(
@@ -194,6 +211,13 @@ begin
     'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
     'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'public.partners_service_kyc_binding_recover(integer)',
+    'public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
+    'public.admin_partners_kyc_certification_resume()',
+    'public.admin_partners_kyc_certification_status()',
+    'public.partners_service_kyc_certification_create_claim(text)',
+    'public.partners_service_kyc_certification_binding_match(text,text)',
+    'public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
+    'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'public.partners_worker_shadow_reconcile(text,timestamp with time zone,timestamp with time zone,boolean)',
     'public.admin_partners_payout_route_set(text,text,text,text,text,text)',
     'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
@@ -297,6 +321,7 @@ begin
       end if;
     elsif v_signature like 'public.admin_partners_revolut_%'
       or v_signature like 'public.admin_partners_payout_route_%'
+      or v_signature like 'public.admin_partners_kyc_certification_%'
     then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
          or not has_function_privilege(
@@ -374,6 +399,10 @@ begin
   end loop;
 
   foreach v_signature in array array[
+    'affiliate_private.partners_service_kyc_certification_create_claim(text)',
+    'affiliate_private.partners_service_kyc_certification_binding_match(text,text)',
+    'affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
+    'affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
     'affiliate_private.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
     'affiliate_private.partners_worker_revolut_global_lease_acquire(text,text,integer)',
@@ -389,10 +418,197 @@ begin
       or not has_function_privilege('service_role', v_signature, 'EXECUTE')
     then
       raise exception
-        'invalid private Revolut service routine privileges for %',
+        'invalid private Partners service routine privileges for %',
         v_signature;
     end if;
   end loop;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_certification_create_claim(text)'::regprocedure
+  );
+  if position(
+      'partners_assert_didit_certification_pre_gate' in lower(v_definition)
+    ) = 0
+    or position('for update' in lower(v_definition)) = 0
+    or position('provider_create_dispatched_at' in lower(v_definition)) = 0
+    or position('kyc_certification_create_claimed' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification create claim lost its one-way locked contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_certification_binding_match(text,text)'::regprocedure
+  );
+  if position(
+      'partners_assert_didit_certification_pre_gate' in lower(v_definition)
+    ) = 0
+    or position('provider_session_hash' in lower(v_definition)) = 0
+    or position('v_session.status <> ''pending''' in lower(v_definition)) = 0
+    or position('kyc_certification_binding_matched' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification binding matcher lost its fail-closed hash contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)'::regprocedure
+  );
+  if position(
+      'partners_assert_didit_certification_pre_gate' in lower(v_definition)
+    ) = 0
+    or position(
+      'provider_create_dispatched_at is null' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Didit certification session recorder lost its claim or post-provider pre-gate recheck';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.guard_didit_certification_session_transition()'::regprocedure
+  );
+  if position(
+      'provider dispatch is immutable' in lower(v_definition)
+    ) = 0
+    or position('old.status <> ''reserved''' in lower(v_definition)) = 0
+    or position('new.status <> ''reserved''' in lower(v_definition)) = 0
+    or position('new.provider_session_hash is not null' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification transition guard lost dispatch immutability';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_assert_didit_certification_pre_gate()'::regprocedure
+  );
+  if position('for share' in lower(v_definition)) = 0
+    or position('privacy_approved' in lower(v_definition)) = 0
+    or position('partners_enabled' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification pre-gate assertion lost its atomic row locks';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_require_didit_certification_operator(text)'::regprocedure
+  );
+  if position('partners_require_didit_certification_observer' in lower(v_definition)) = 0
+    or position('partners_require_aal2' in lower(v_definition)) = 0
+    or position('auth.jwt() ->> ''iat''' in lower(v_definition)) = 0
+    or position('10 minutes' in lower(v_definition)) = 0
+    or position('partners_assert_didit_certification_pre_gate' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification operator lost live Admin/Risk, AAL2, fresh-JWT or pre-gate enforcement';
+  end if;
+
+  if to_regprocedure(
+      'affiliate_private.partners_didit_certification_key(text,uuid)'
+    ) is null
+  then
+    raise exception
+      'restore omitted the deterministic Didit certification key helper';
+  end if;
+  if has_function_privilege(
+      'anon',
+      'affiliate_private.partners_didit_certification_key(text,uuid)',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'authenticated',
+      'affiliate_private.partners_didit_certification_key(text,uuid)',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'service_role',
+      'affiliate_private.partners_didit_certification_key(text,uuid)',
+      'EXECUTE'
+    )
+  then
+    raise exception
+      'restored deterministic Didit certification key helper became API-callable';
+  end if;
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_didit_certification_key(text,uuid)'::regprocedure
+  );
+  if position('p_operator_hash' in lower(v_definition)) = 0
+    or position('p_session_id' in lower(v_definition)) = 0
+    or position(
+      'norva:didit:certification-key-material:v2' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored deterministic Didit certification key lost immutable reservation identity';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)'::regprocedure
+  );
+  if position('partners_didit_certification_key' in lower(v_definition)) = 0
+    or position('v_existing.id' in lower(v_definition)) = 0
+    or position(
+      'v_existing.status not in (''reserved'', ''pending'')'
+      in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Didit certification prepare lost deterministic or resumable replay enforcement';
+  end if;
+
+  if to_regprocedure(
+      'affiliate_private.admin_partners_kyc_certification_resume()'
+    ) is null
+  then
+    raise exception
+      'restore omitted the private Didit certification resume routine';
+  end if;
+  if has_function_privilege(
+      'anon',
+      'affiliate_private.admin_partners_kyc_certification_resume()',
+      'EXECUTE'
+    )
+    or not has_function_privilege(
+      'authenticated',
+      'affiliate_private.admin_partners_kyc_certification_resume()',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'service_role',
+      'affiliate_private.admin_partners_kyc_certification_resume()',
+      'EXECUTE'
+    )
+  then
+    raise exception
+      'restored private Didit certification resume has invalid privileges';
+  end if;
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_certification_resume()'::regprocedure
+  );
+  if position(
+      'partners_require_didit_certification_operator' in lower(v_definition)
+    ) = 0
+    or position('partners_didit_certification_key' in lower(v_definition)) = 0
+    or position('''reserved'', ''pending''' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification resume lost its guarded resumable-state contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_certification_status()'::regprocedure
+  );
+  if position(
+      'partners_require_didit_certification_observer' in lower(v_definition)
+    ) = 0
+    or position('provider_environment' in lower(v_definition)) = 0
+    or position(
+      'partners_didit_certification_public_reason' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Didit certification status lost its bounded live-observer contract';
+  end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)'::regprocedure
@@ -565,6 +781,9 @@ begin
             'affiliate_private.admin_partners_program_activate(text,text,text)',
             'affiliate_private.admin_partners_country_policy_create(text,text,text,integer,text[],timestamp with time zone,text)',
             'affiliate_private.admin_partners_kyc_attempt_policy_set(text,text,text,integer,integer,integer,text,text)',
+            'affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
+            'affiliate_private.admin_partners_kyc_certification_resume()',
+            'affiliate_private.admin_partners_kyc_certification_status()',
             'affiliate_private.admin_partners_country_mapping_set(text,text,text,text)',
             'affiliate_private.admin_partners_currency_set(text,integer,text,text)',
             'affiliate_private.admin_partners_payout_provider_set(text,text,text,text,text)',
@@ -641,6 +860,30 @@ begin
     select *
     from (
       values
+        (
+          'affiliate_kyc_sessions_register_didit_purpose',
+          'affiliate_kyc_sessions',
+          'register_member_didit_session',
+          false
+        ),
+        (
+          'affiliate_didit_session_registry_append_only',
+          'affiliate_didit_session_registry',
+          'reject_partners_append_only_mutation',
+          false
+        ),
+        (
+          'affiliate_didit_certification_events_append_only',
+          'affiliate_didit_certification_events',
+          'reject_partners_append_only_mutation',
+          false
+        ),
+        (
+          'affiliate_didit_certification_sessions_validate',
+          'affiliate_didit_certification_sessions',
+          'guard_didit_certification_session_transition',
+          false
+        ),
         (
           'affiliate_kyc_sessions_00_bind_environment',
           'affiliate_kyc_sessions',
@@ -927,6 +1170,118 @@ begin
         v_expected.function_name;
     end if;
   end loop;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    where trigger_row.tgrelid =
+        'affiliate_private.affiliate_kyc_sessions'::regclass
+      and trigger_row.tgname =
+        'affiliate_kyc_sessions_register_didit_purpose'
+      and not trigger_row.tgisinternal
+      -- PostgreSQL tgtype bitmask: ROW (1) + INSERT (4), no BEFORE bit.
+      and trigger_row.tgtype = 5
+  ) then
+    raise exception
+      'member Didit purpose trigger is not exactly AFTER INSERT FOR EACH ROW';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_attribute attribute_info
+    where attribute_info.attrelid =
+        'affiliate_private.affiliate_didit_certification_sessions'::regclass
+      and attribute_info.attname = 'provider_create_dispatched_at'
+      and attribute_info.attnum > 0
+      and not attribute_info.attisdropped
+  ) then
+    raise exception
+      'restored Didit certification sessions lost the provider dispatch claim';
+  end if;
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_info
+    where constraint_info.conrelid =
+        'affiliate_private.affiliate_didit_certification_sessions'::regclass
+      and constraint_info.conname =
+        'affiliate_didit_certification_sessions_provider_binding'
+      and constraint_info.contype = 'c'
+      and constraint_info.convalidated
+      and position(
+        'provider_create_dispatched_at is not null' in lower(
+          pg_catalog.pg_get_constraintdef(constraint_info.oid)
+        )
+      ) > 0
+  ) then
+    raise exception
+      'restored Didit certification binding constraint lost the provider dispatch claim';
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_didit_certification_sessions
+  where provider_session_hash is not null
+    and provider_create_dispatched_at is null;
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored Didit certification bindings contain % unclaimed provider dispatches',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from (
+    select member_session.id
+    from affiliate_private.affiliate_kyc_sessions member_session
+    left join affiliate_private.affiliate_didit_session_registry registry
+      on registry.session_purpose = 'member_kyc'
+      and registry.source_record_id = member_session.id
+      and registry.provider_session_hash =
+        member_session.provider_session_hash
+    where registry.provider_session_hash is null
+
+    union all
+
+    select registry.source_record_id
+    from affiliate_private.affiliate_didit_session_registry registry
+    left join affiliate_private.affiliate_kyc_sessions member_session
+      on member_session.id = registry.source_record_id
+      and member_session.provider_session_hash =
+        registry.provider_session_hash
+    where registry.session_purpose = 'member_kyc'
+      and member_session.id is null
+
+    union all
+
+    select certification_session.id
+    from affiliate_private.affiliate_didit_certification_sessions
+      certification_session
+    left join affiliate_private.affiliate_didit_session_registry registry
+      on registry.session_purpose = 'certification'
+      and registry.source_record_id = certification_session.id
+      and registry.provider_session_hash =
+        certification_session.provider_session_hash
+    where certification_session.provider_session_hash is not null
+      and registry.provider_session_hash is null
+
+    union all
+
+    select registry.source_record_id
+    from affiliate_private.affiliate_didit_session_registry registry
+    left join affiliate_private.affiliate_didit_certification_sessions
+      certification_session
+      on certification_session.id = registry.source_record_id
+      and certification_session.provider_session_hash =
+        registry.provider_session_hash
+    where registry.session_purpose = 'certification'
+      and certification_session.id is null
+  ) didit_registry_inconsistency;
+
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored Didit purpose registry is inconsistent with % source sessions',
+      v_bad_entries;
+  end if;
 
   if not exists (
     select 1

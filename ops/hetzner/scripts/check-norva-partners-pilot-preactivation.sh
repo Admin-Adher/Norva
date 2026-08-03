@@ -289,6 +289,7 @@ validate_edge_container() {
 
   require_exact "$container" NORVA_PARTNERS_ALLOWED_ORIGINS https://norva.tv,https://www.norva.tv "$target_name"
   require_exact "$container" NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED true "$target_name"
+  require_exact "$container" NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED false "$target_name"
   require_secret "$container" NORVA_REFERRAL_EDGE_HMAC_SECRET 32 1024 "$target_name"
   require_secret "$container" NORVA_REFERRAL_COOKIE_SECRET 32 1024 "$target_name"
   require_secret "$container" NORVA_PARTNERS_TV_RELAY_SECRET 32 1024 "$target_name"
@@ -333,6 +334,7 @@ PARITY_KEYS=(
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
   GOOGLE_PLAY_PACKAGE_NAME
   NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED
+  NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED
   NORVA_REFERRAL_EDGE_HMAC_SECRET
   NORVA_REFERRAL_COOKIE_SECRET
   NORVA_PARTNERS_TV_RELAY_SECRET

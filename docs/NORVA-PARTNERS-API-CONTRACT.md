@@ -83,7 +83,8 @@ Le preflight accepte seulement :
 - headers `authorization`, `apikey`, `content-type`, `idempotency-key`,
   `x-client-info` ;
 - route existante parmi `/bootstrap`, `/access-request`, `/applications`,
-  `/activate`, `/activation/reconcile`, `/links`, `/dashboard`, `/kyc/sessions`, `/referral/claim`,
+  `/activate`, `/activation/reconcile`, `/links`, `/dashboard`, `/kyc/sessions`,
+  `/kyc/certification`, `/kyc/certification/resume`, `/referral/claim`,
   `/fiscal-profile`, `/payout-onboarding`, `/payout-profile` et
   `/tv-relays/consume` ;
 - origine présente et autorisée.
@@ -519,6 +520,89 @@ Le webhook `norva-partners-kyc-webhook` vérifie la signature Didit sur le corps
 brut, refuse les événements non autorisés et persiste l'observation exacte. Une
 session inconnue répond `404 webhook_resource_unknown` afin que le provider
 puisse retenter après une éventuelle course entre création et persistance.
+
+### `POST /kyc/certification`
+
+Voie opérateur pré-gate, séparée du parcours membre. Elle est fermée tant que
+`NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED` n'est pas exactement `true` et
+exige un Admin live avec capacité Risk, TOTP vérifié, JWT AAL2 frais, approbation
+Privacy et tous les chemins Partners live désactivés. Le body exact est :
+
+```json
+{
+  "language": "fr",
+  "consentVersion": "partners-didit-certification-v1",
+  "consentGranted": true,
+  "capacityConfirmed": true,
+  "confirmation": "CERTIFIER DIDIT",
+  "justification": "Certification live supervisée du workflow publié."
+}
+```
+
+`Idempotency-Key` est obligatoire. La réponse expose seulement le provider,
+un état public borné, l'URL hébergée HTTPS Didit et l'expiration locale : aucun
+UUID, identifiant de session/workflow, token, document, pays, âge ou résultat
+biométrique. La réservation locale expire au plus tard après deux heures. Après
+l'appel distant, la RPC service revalide Privacy, la gate KYC et les quatre
+chemins live avant de lier la session provider ; une transition concurrente
+laisse donc seulement une réservation locale non liée et expirante.
+
+Un résultat réseau inconnu ne condamne pas l'opérateur à attendre l'expiration.
+Tant que l'état autoritatif est `reserved|pending`, l'Admin expose
+`POST /kyc/certification/resume` avec le body exact `{}`. Cette reprise relit
+le même opérateur côté serveur, réapplique Admin+Risk, TOTP, AAL2, fraîcheur du
+JWT et tous les verrous pré-gate, puis reconstruit la même clé opaque depuis la
+réservation. Elle ne demande pas au navigateur de conserver la justification,
+un identifiant provider ou une URL Didit.
+
+Chaque création ou reprise interroge d'abord la liste Didit avec les filtres
+exacts `vendor_data`, `workflow_id`, `session_kind=user` et `limit=2`, puis
+borne le corps à 32 Kio. En `pending`, l'Edge n'émet jamais de `POST` : il exige
+une unique session KYC active et fait comparer son identifiant brut au hash
+privé déjà lié par une RPC `service_role` sans oracle public.
+
+En `reserved`, une unique session KYC active est liée directement à la
+réservation après acquisition du claim SQL ; elle n'est jamais recréée, même
+si elle devient terminale juste après la lecture. Si la liste est exactement
+vide, le claim durable `provider_create_dispatched_at` passe une seule fois de
+`NULL` à un timestamp sous verrou de ligne : seul le replica ayant obtenu
+`claimed=true` peut émettre l'unique `POST`. Un replica perdant sur liste vide,
+une réponse ambiguë, KYB ou terminale échoue en `409 request_in_progress` et
+attend le webhook signé ou la réconciliation. Le webhook signé reste
+autoritaire et met en quarantaine toute divergence de workflow, version,
+environnement ou fingerprint.
+
+L'API de liste pouvant omettre `workflow_id` et `workflow_version`, le premier
+est hérité du filtre exact de la requête lorsqu'il est absent et toute valeur
+présente divergente est rejetée. La certification pré-gate est épinglée à la
+version attendue `1`; le webhook signé apporte ensuite la version autoritaire
+et met en quarantaine toute divergence.
+
+Cette séquence garantit au plus un débit de crédit Didit même avec plusieurs
+replicas, une réponse réseau inconnue ou une cohérence éventuelle de la liste.
+Le payload de liste, riche en données personnelles, n'est jamais journalisé,
+persisté ni renvoyé ; seule l'URL hébergée validée est rendue au même opérateur.
+`in_review` et les états terminaux ne sont jamais repris.
+
+La session utilise un registre cross-purpose commun : un identifiant provider
+déjà lié au KYC membre est mis en quarantaine. Le webhook essaie d'abord le
+réducteur membre et ne tombe sur le réducteur certification que pour son signal
+explicite `P0006` « session inconnue ». Une décision sandbox, tardive,
+incomplète ou liée à un environnement, workflow, version ou fingerprint
+différent reste non autoritaire. Aucune observation, y compris approuvée, ne
+modifie un compte, un lien, une commission, un paiement, un flag ou une gate.
+
+L'Admin lit ensuite directement la RPC JWT-scoped
+`admin_partners_kyc_certification_status()`. Cette lecture exige toujours
+l'Admin live et la capacité Risk, mais reste disponible après fermeture du kill
+switch ou évolution des gates. Sa réponse fermée est `certification=null`
+ou uniquement : `status`, `verified`, `environment`, `expires_at`,
+`observed_at` et une `reason` nullable choisie dans l'enum public borné. L'Admin
+poll pendant au plus 60 secondes au retour de Didit et n'affiche jamais les
+identifiants provider ni les résultats documentaires détaillés. Après un
+résultat réseau inconnu, ce polling continue pendant toute la fenêtre même si
+la première lecture retourne `certification=null`; le bouton de création reste
+masqué jusqu'à la fin de la réconciliation.
 
 ### `POST /referral/claim`
 

@@ -55,6 +55,8 @@ class AdminPage {
         this._partnersAal2Required = false;
         this._partnersAal2FailedKeys = new Set();
         this._partnersContactKeys = new Map();
+        this._partnersKycCertificationPollTimer = null;
+        this._partnersKycCertificationPollUntil = 0;
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -125,6 +127,8 @@ class AdminPage {
         clearTimeout(this._partnersRoutesDebounce);
         clearTimeout(this._partnersPayoutOnboardingDebounce);
         clearTimeout(this._partnersFiscalDebounce);
+        clearTimeout(this._partnersKycCertificationPollTimer);
+        this._partnersKycCertificationPollTimer = null;
         this._partnersAbortAll?.();
     }
 
@@ -801,6 +805,7 @@ class AdminPage {
 #page-admin .partners-control-head select{min-height:44px;padding:8px 10px;border:1px solid var(--adm-line);border-radius:8px;background:var(--adm-card2);color:var(--adm-tx);font:inherit;}
 #page-admin .partners-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
 #page-admin .partners-control-item{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:10px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
+#page-admin .partners-kyc-certification{margin-top:12px;}
 #page-admin .partners-control-item > span{min-width:0;color:var(--adm-tx2);font-size:12px;overflow-wrap:anywhere;}
 #page-admin .partners-control-item small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:10px;line-height:1.35;}
 #page-admin .partners-access-request-item{align-items:flex-start;}
@@ -4554,9 +4559,18 @@ class AdminPage {
         const status = this._partnersStatus || '';
         const search = this._partnersSearch || '';
         const validViews = ['overview', 'partners', 'risk', 'finance', 'configuration'];
-        const restore = this._partnersRestoreContext;
+        const returnedFromDiditCertification =
+            this.app?.consumePartnersKycCertificationReturnNotice?.() === true;
+        const diditRestore = returnedFromDiditCertification
+            ? this._partnersConsumeKycCertificationReturnContext()
+            : null;
+        const restore = diditRestore || this._partnersRestoreContext;
         this._partnersRestoreContext = null;
         if (restore && validViews.includes(restore.view)) this._partnersView = restore.view;
+        if (returnedFromDiditCertification) this._partnersView = 'risk';
+        if (returnedFromDiditCertification) {
+            this._partnersKycCertificationPollUntil = Date.now() + 60_000;
+        }
         if (!validViews.includes(this._partnersView)) this._partnersView = 'overview';
         const tabs = [
             ['overview', 'Vue d’ensemble'],
@@ -4636,6 +4650,7 @@ class AdminPage {
             <div class="partners-pane-intro"><div><h2>Risque et vérification</h2><p>KYC individuel, files de revue et décisions minimisées.</p></div></div>
             <div class="partners-ops-grid">
               <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true"><h2>KYC individuel</h2><p>Quota informatif et capacité réelle.</p><div class="ssub">Chargement…</div></section>
+              <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Certification pré-gate Didit</h2><p>Preuve opérateur séparée des comptes Partners.</p><div class="ssub">Chargement…</div></section>
               <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true"><h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p><div class="ssub">Chargement…</div></section>
             </div>
             <section id="partners-admin-fiscal-profiles" class="partners-control-card" aria-busy="true">
@@ -4676,6 +4691,13 @@ class AdminPage {
           </section>
         </div>`;
 
+        if (returnedFromDiditCertification) {
+            setTimeout(() => this._toast(
+                'Retour Didit reçu. La décision signée fait foi et peut arriver quelques secondes plus tard.',
+                'ok'
+            ), 0);
+        }
+
         const force = this._partnersForceRefresh === true;
         this._partnersForceRefresh = false;
         const baseLoads = [
@@ -4683,6 +4705,9 @@ class AdminPage {
             this._partnersLoadView(this._partnersView, { force })
         ];
         const completion = Promise.allSettled(baseLoads);
+        if (returnedFromDiditCertification) {
+            this._partnersScheduleKycCertificationPoll(3_000);
+        }
         if (restore) {
             const generation = this._partnersPageGeneration;
             completion.finally(() => setTimeout(() => {
@@ -4989,6 +5014,9 @@ class AdminPage {
         const cached = (key) => this._partnersCache.get(key);
         if (cached('accessRequests')) this._renderPartnersAccessRequests(cached('accessRequests'));
         if (cached('kyc')) this._renderPartnersKycQuota(cached('kyc'));
+        if (cached('kycCertification')) {
+            this._renderPartnersKycCertification(cached('kycCertification'));
+        }
         if (cached('risk')) this._renderPartnersRisk(cached('risk'));
         if (cached('fiscalProfiles')) this._renderPartnersFiscalProfiles(cached('fiscalProfiles'));
         if (cached('configuration')) this._renderPartnersConfiguration(cached('configuration'));
@@ -5168,6 +5196,7 @@ class AdminPage {
         if (view === 'risk') return Promise.allSettled([
             this._partnersLoadCapabilities({ force }),
             load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
+            this._partnersLoadKycCertification({ force }),
             load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
             this._partnersLoadFiscalProfiles({ force })
         ]);
@@ -5185,6 +5214,184 @@ class AdminPage {
             && Number.isSafeInteger(data.total)
             && data.total >= 0
             && Array.isArray(data.items);
+    }
+
+    _partnersLoadKycCertification({ force = false } = {}) {
+        return this._partnersLoadModule(
+            'kycCertification',
+            'admin_partners_kyc_certification_status',
+            {},
+            (data) => this._renderPartnersKycCertification(data),
+            {
+                force,
+                targetId: 'partners-admin-kyc-certification',
+                title: 'Certification pré-gate Didit'
+            }
+        );
+    }
+
+    _partnersPersistKycCertificationReturnContext() {
+        const main = document.querySelector('#page-admin .crm-main');
+        const rawScrollTop = Math.round(Number(main?.scrollTop) || 0);
+        const scrollTop = Math.max(0, Math.min(rawScrollTop, 1_000_000));
+        sessionStorage.setItem(
+            'norva-partners-kyc-certification-context-v1',
+            JSON.stringify({
+                version: 1,
+                view: 'risk',
+                scrollTop,
+                focus: 'kyc_certification_card'
+            })
+        );
+    }
+
+    _partnersConsumeKycCertificationReturnContext() {
+        const key = 'norva-partners-kyc-certification-context-v1';
+        let raw = null;
+        try {
+            raw = sessionStorage.getItem(key);
+            sessionStorage.removeItem(key);
+        } catch (_) {
+            return null;
+        }
+        if (!raw || raw.length > 256) return null;
+        try {
+            const value = JSON.parse(raw);
+            const exactKeys = value && typeof value === 'object'
+                && !Array.isArray(value)
+                && Object.keys(value).sort().join('|')
+                    === ['version', 'view', 'scrollTop', 'focus'].sort().join('|');
+            if (!exactKeys
+                || value.version !== 1
+                || value.view !== 'risk'
+                || value.focus !== 'kyc_certification_card'
+                || !Number.isSafeInteger(value.scrollTop)
+                || value.scrollTop < 0
+                || value.scrollTop > 1_000_000) return null;
+            return {
+                view: 'risk',
+                scrollTop: value.scrollTop,
+                focus: {
+                    id: 'partners-admin-kyc-certification',
+                    data: {}
+                }
+            };
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _partnersClearKycCertificationReturnState() {
+        try {
+            sessionStorage.removeItem('norva-partners-kyc-certification-v1');
+            sessionStorage.removeItem(
+                'norva-partners-kyc-certification-context-v1'
+            );
+        } catch (_) {}
+    }
+
+    _partnersScheduleKycCertificationPoll(delayMs = 3_000) {
+        clearTimeout(this._partnersKycCertificationPollTimer);
+        this._partnersKycCertificationPollTimer = null;
+        if (Date.now() >= this._partnersKycCertificationPollUntil
+            || this._route !== 'partners'
+            || this._partnersView !== 'risk') return;
+        const generation = this._partnersPageGeneration;
+        this._partnersKycCertificationPollTimer = setTimeout(async () => {
+            this._partnersKycCertificationPollTimer = null;
+            if (this._route !== 'partners' || this._partnersView !== 'risk'
+                || generation !== this._partnersPageGeneration) return;
+            const finalRead = Date.now() >= this._partnersKycCertificationPollUntil;
+            await this._partnersLoadKycCertification({ force: true }).catch(() => {});
+            if (finalRead) {
+                this._partnersKycCertificationPollUntil = 0;
+                return;
+            }
+            if (!this._partnersKycCertificationPollTimer) {
+                this._partnersScheduleKycCertificationPoll(3_000);
+            }
+        }, Math.max(0, Math.min(Number(delayMs) || 0, 3_000)));
+    }
+
+    _partnersMarkKycCertificationUncertain() {
+        this._partnersKycCertificationPollUntil = Math.max(
+            this._partnersKycCertificationPollUntil,
+            Date.now() + 60_000
+        );
+        this._partnersCache?.delete?.('kycCertification');
+        this._partnersScheduleKycCertificationPoll(0);
+        const error = new Error('didit_certification_result_uncertain');
+        error.code = 'didit_certification_result_uncertain';
+        return error;
+    }
+
+    async _partnersReadBoundedJsonResponse(response, signal, maxBytes = 16_384) {
+        const abortError = () => {
+            const error = new Error('didit_certification_request_aborted');
+            error.name = 'AbortError';
+            return error;
+        };
+        const awaitWithAbort = async (promise) => {
+            if (signal?.aborted) throw abortError();
+            if (!signal?.addEventListener) return promise;
+            let rejectAbort;
+            const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+            const onAbort = () => rejectAbort(abortError());
+            signal.addEventListener('abort', onAbort, { once: true });
+            try { return await Promise.race([promise, aborted]); }
+            finally { signal.removeEventListener?.('abort', onAbort); }
+        };
+        const contentType = response?.headers?.get?.('Content-Type');
+        if (contentType && !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
+            String(contentType)
+        )) {
+            throw new Error('invalid_didit_certification_content_type');
+        }
+        const declaredLength = response?.headers?.get?.('Content-Length');
+        if (declaredLength !== null && declaredLength !== undefined
+            && (!/^\d{1,8}$/.test(String(declaredLength))
+                || Number(declaredLength) > maxBytes)) {
+            try { await response?.body?.cancel?.(); } catch (_) {}
+            throw new Error('invalid_didit_certification_response_size');
+        }
+        let text = '';
+        const reader = response?.body?.getReader?.();
+        if (reader) {
+            const decoder = new TextDecoder('utf-8', { fatal: true });
+            let total = 0;
+            try {
+                while (true) {
+                    const chunk = await awaitWithAbort(reader.read());
+                    if (chunk.done) break;
+                    total += chunk.value?.byteLength || 0;
+                    if (total > maxBytes) {
+                        await reader.cancel?.().catch?.(() => {});
+                        throw new Error('invalid_didit_certification_response_size');
+                    }
+                    text += decoder.decode(chunk.value, { stream: true });
+                }
+                text += decoder.decode();
+            } finally {
+                reader.releaseLock?.();
+            }
+        } else if (typeof response?.text === 'function') {
+            text = await awaitWithAbort(response.text());
+            if (new TextEncoder().encode(text).byteLength > maxBytes) {
+                throw new Error('invalid_didit_certification_response_size');
+            }
+        } else if (typeof response?.json === 'function') {
+            // Native fetch Responses always expose a byte stream or text().
+            // This branch keeps deterministic unit-test doubles bounded too.
+            const value = await awaitWithAbort(response.json());
+            text = JSON.stringify(value);
+            if (new TextEncoder().encode(text).byteLength > maxBytes) {
+                throw new Error('invalid_didit_certification_response_size');
+            }
+        } else {
+            throw new Error('invalid_didit_certification_response');
+        }
+        try { return JSON.parse(text); }
+        catch (_) { throw new Error('invalid_didit_certification_response'); }
     }
 
     _partnersLoadFinanceView({ force = false } = {}) {
@@ -5468,6 +5675,7 @@ class AdminPage {
             monitoring: () => load('monitoring', 'admin_partners_monitoring', {}, (d) => this._renderPartnersMonitoring(d), 'partners-admin-monitoring', 'Supervision'),
             analytics: () => load('analytics', 'admin_partners_analytics', { p_days: 30 }, (d) => this._renderPartnersAnalytics(d), 'partners-admin-analytics', 'Performance Partners'),
             kyc: () => load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
+            kycCertification: () => this._partnersLoadKycCertification({ force: true }),
             risk: () => load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
             fiscalProfiles: () => this._partnersLoadFiscalProfiles({ force: true }),
             configuration: () => load('configuration', 'admin_partners_configuration', {}, (d) => this._renderPartnersConfiguration(d), 'partners-admin-configuration', 'Configuration Partners'),
@@ -7236,6 +7444,159 @@ class AdminPage {
             </div>`;
     }
 
+    _renderPartnersKycCertification(data) {
+        const el = document.getElementById('partners-admin-kyc-certification');
+        if (!el) return;
+        const mutationActive = this._partnersRequests instanceof Map
+            && this._partnersRequests.has('kycCertificationMutation');
+        if (mutationActive && el.innerHTML) {
+            // The initiating button already carries its busy state. A background
+            // poll must not replace it, steal focus, or expose a second action.
+            el.removeAttribute('aria-busy');
+            this._partnersScheduleKycCertificationPoll(3_000);
+            return;
+        }
+        const certification = data?.certification;
+        const statuses = new Set([
+            'reserved', 'pending', 'in_review', 'approved', 'declined',
+            'expired', 'quarantined'
+        ]);
+        const reasons = new Set([
+            'provider_environment_mismatch', 'provider_config_mismatch',
+            'provider_workflow_mismatch', 'approved_checks_incomplete',
+            'stale_event', 'binding_conflict'
+        ]);
+        const exactKeys = (value, expected) => value && typeof value === 'object'
+            && !Array.isArray(value)
+            && Object.keys(value).sort().join('|') === expected.slice().sort().join('|');
+        const valid = data?.schema_version === 1
+            && data?.action === 'kyc_certification_status'
+            && (certification === null || (
+                exactKeys(certification, [
+                    'environment', 'expires_at', 'observed_at', 'reason',
+                    'status', 'verified'
+                ])
+                && statuses.has(certification.status)
+                && typeof certification.verified === 'boolean'
+                && [null, 'sandbox', 'live'].includes(certification.environment)
+                && Number.isFinite(Date.parse(String(certification.expires_at || '')))
+                && Number.isFinite(Date.parse(String(certification.observed_at || '')))
+                && (certification.reason === null || reasons.has(certification.reason))
+                && (!certification.verified
+                    || (certification.status === 'approved'
+                        && certification.environment === 'live'))
+                && ((certification.status === 'quarantined')
+                    === (certification.reason !== null))
+            ));
+        if (!valid) {
+            clearTimeout(this._partnersKycCertificationPollTimer);
+            this._partnersKycCertificationPollTimer = null;
+            this._partnersOpsUnavailable(
+                'partners-admin-kyc-certification',
+                'Certification pré-gate Didit'
+            );
+            this._partnersScheduleKycCertificationPoll(3_000);
+            return;
+        }
+
+        const active = certification
+            && ['reserved', 'pending', 'in_review'].includes(certification.status);
+        const labels = {
+            reserved: 'Réservation en cours',
+            pending: 'Vérification en cours',
+            in_review: 'Revue Didit en cours',
+            approved: certification?.verified
+                ? 'Preuve live vérifiée'
+                : 'Observation approuvée non autoritaire',
+            declined: 'Vérification refusée',
+            expired: 'Session expirée',
+            quarantined: 'Observation mise en quarantaine'
+        };
+        const reasonLabels = {
+            provider_environment_mismatch: 'environnement fournisseur incohérent',
+            provider_config_mismatch: 'configuration fournisseur incohérente',
+            provider_workflow_mismatch: 'workflow fournisseur incohérent',
+            approved_checks_incomplete: 'contrôles obligatoires incomplets',
+            stale_event: 'événement tardif ou périmé',
+            binding_conflict: 'conflit de liaison ou de rejeu'
+        };
+        const environment = certification?.environment === 'live'
+            ? 'Environnement live'
+            : (certification?.environment === 'sandbox'
+                ? 'Environnement sandbox · non autoritaire'
+                : 'Environnement en attente');
+        const checkingUnknownResult =
+            Date.now() < this._partnersKycCertificationPollUntil;
+        const canStart = this._partnersCapabilities.risk === true
+            && !active
+            && certification?.verified !== true
+            && !checkingUnknownResult
+            && !mutationActive;
+        const canResume = this._partnersCapabilities.risk === true
+            && ['reserved', 'pending'].includes(certification?.status)
+            && !mutationActive;
+        let action = canStart
+            ? '<button type="button" class="partners-action" data-partners-action="kyc-certification-start">Démarrer la certification</button>'
+            : (canResume
+                ? '<button type="button" class="partners-action" data-partners-action="kyc-certification-resume">Reprendre sur Didit</button>'
+                : (active
+                    ? '<span class="partners-state">Décision signée en attente</span>'
+                    : '<span class="partners-state">Lecture seule</span>'));
+        if (checkingUnknownResult && !active) {
+            action = '<span class="partners-state">Norva v&eacute;rifie l&rsquo;&eacute;tat&hellip;</span>';
+        }
+        if (mutationActive) {
+            action = '<span class="partners-state">Traitement s&eacute;curis&eacute; en cours&hellip;</span>';
+        }
+        const status = certification
+            ? `<div class="partners-control-item partners-kyc-certification">
+                <span><strong>${AdminPage.esc(labels[certification.status])}</strong>
+                  <small>${AdminPage.esc(environment)} · observé ${AdminPage.esc(AdminPage.timeAgo(certification.observed_at))}${certification.reason ? ` · ${AdminPage.esc(reasonLabels[certification.reason])}` : ''}</small>
+                </span>${action}
+              </div>`
+            : `<div class="partners-control-item partners-kyc-certification">
+                <span><strong>Aucune certification enregistrée</strong>
+                  <small>Voie ponctuelle séparée des comptes, liens, commissions et paiements Partners.</small>
+                </span>${action}
+              </div>`;
+        const signature = JSON.stringify([
+            certification?.status || null,
+            certification?.verified === true,
+            certification?.environment || null,
+            certification?.reason || null,
+            certification?.expires_at || null,
+            this._partnersCapabilities.risk === true,
+            checkingUnknownResult,
+            mutationActive
+        ]);
+        el.removeAttribute('aria-busy');
+        if (el.dataset?.partnersKycSignature === signature) {
+            this._partnersScheduleKycCertificationPoll(3_000);
+            return;
+        }
+        const focused = document.activeElement;
+        const focusWasInside = el.contains?.(focused) === true;
+        const focusedAction = focusWasInside
+            ? String(focused?.dataset?.partnersAction || '') : '';
+        el.innerHTML = `<h2>Certification pré-gate Didit</h2>
+            <p>La décision signée reste consultable après fermeture du coupe-circuit. Une sandbox ne peut jamais valider la preuve live.</p>
+            <div role="status" aria-live="polite" aria-atomic="true">${status}</div>`;
+        if (el.dataset) el.dataset.partnersKycSignature = signature;
+        if (focusWasInside) {
+            const generation = this._partnersPageGeneration;
+            setTimeout(() => {
+                if (this._route !== 'partners' || this._partnersView !== 'risk'
+                    || generation !== this._partnersPageGeneration) return;
+                const actionTarget = focusedAction
+                    ? el.querySelector?.(`[data-partners-action="${focusedAction}"]`)
+                    : null;
+                this._partnersFocusElement(actionTarget || el);
+            }, 0);
+        }
+
+        this._partnersScheduleKycCertificationPoll(3_000);
+    }
+
     _renderPartnersFinance(data) {
         const el = document.getElementById('partners-admin-finance');
         if (!el) return;
@@ -8802,8 +9163,13 @@ class AdminPage {
                     document.querySelector('#page-admin .crm-back')?.focus?.({ preventScroll: true });
                 }
             }
-        } catch (_) {
-            this._toast('Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.', 'err');
+        } catch (error) {
+            this._toast(
+                error?.code === 'didit_certification_result_uncertain'
+                    ? 'Résultat réseau incertain. Norva vérifie l’état avant toute nouvelle tentative.'
+                    : 'Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.',
+                'err'
+            );
         } finally {
             if (button.isConnected) {
                 delete button.dataset.partnersBusy;
@@ -8828,6 +9194,175 @@ class AdminPage {
         if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
             'payout-approve', 'fiscal-review-public'].includes(action)
             && !this._partnersCanUseOperationalAction(action)) return false;
+
+        if (['kyc-certification-start', 'kyc-certification-resume'].includes(action)) {
+            if (this._partnersCapabilities.risk !== true) return false;
+            const resuming = action === 'kyc-certification-resume';
+            let confirmation = '';
+            let justification = '';
+            if (resuming) {
+                const confirmed = await this._confirm(
+                    'Reprendre la session Didit déjà réservée ? Aucun nouveau compte, crédit parallèle, flag ou paiement ne sera créé.',
+                    { okLabel: 'Reprendre sur Didit' }
+                );
+                if (!confirmed) return false;
+            } else {
+                const consented = await this._confirm(
+                    'Cette certification utilise votre propre pièce d’identité et votre biométrie chez Didit. Elle peut consommer un crédit, ne crée aucun compte partenaire et n’active aucune gate. Continuer ?',
+                    { okLabel: 'Continuer vers Didit' }
+                );
+                if (!consented) return false;
+                confirmation = await this._partnersTypedConfirmation('CERTIFIER DIDIT');
+                if (!confirmation) return false;
+                justification = await this._partnersJustification(
+                    'certification pré-gate du workflow Didit'
+                );
+                if (!justification) return false;
+            }
+
+            // Prove that the same-tab callback marker can be written before
+            // any provider-side effect. If private mode denies sessionStorage,
+            // fail closed instead of creating a session the app cannot safely
+            // classify on return.
+            try {
+                const storageKey = 'norva-partners-kyc-certification-v1';
+                sessionStorage.setItem(storageKey, String(Date.now()));
+                sessionStorage.removeItem(storageKey);
+            } catch (_) {
+                throw new Error('didit_certification_storage_unavailable');
+            }
+
+            if (!(this._partnersRequests instanceof Map)) {
+                this._partnersRequests = new Map();
+            }
+            const requestKey = 'kycCertificationMutation';
+            const previousRequest = this._partnersRequests.get(requestKey);
+            if (typeof previousRequest?.cancel === 'function') previousRequest.cancel();
+            else previousRequest?.controller?.abort?.();
+            const controller = this._partnersCreateController();
+            const token = ++this._partnersRequestSeq;
+            const context = {
+                route: this._route,
+                view: this._partnersView,
+                generation: this._partnersPageGeneration,
+                token
+            };
+            const request = {
+                ...context,
+                controller,
+                cancelled: false,
+                cancel() {
+                    if (this.cancelled) return;
+                    this.cancelled = true;
+                    this.controller?.abort?.();
+                }
+            };
+            this._partnersRequests.set(requestKey, request);
+            const contextIsCurrent = () => (
+                this._partnersRequests.get(requestKey)?.token === context.token
+                && this._route === context.route
+                && this._route === 'partners'
+                && this._partnersView === context.view
+                && context.view === 'risk'
+                && this._partnersPageGeneration === context.generation
+            );
+            const timeout = setTimeout(() => controller.abort?.(), 15_000);
+            try {
+                const response = await fetch(
+                    `${this._sbUrl()}/functions/v1/norva-partners/kyc/certification${resuming ? '/resume' : ''}`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            apikey: this._sbKey(),
+                            Authorization: `Bearer ${this._token()}`,
+                            'Content-Type': 'application/json',
+                            ...(resuming ? {} : {
+                                'Idempotency-Key': `didit-certification:${this._partnersRandomUuid()}`
+                            })
+                        },
+                        body: JSON.stringify(resuming ? {} : {
+                            language: 'fr',
+                            consentVersion: 'partners-didit-certification-v1',
+                            consentGranted: true,
+                            capacityConfirmed: true,
+                            confirmation,
+                            justification
+                        }),
+                        signal: controller.signal
+                    }
+                );
+                const envelope = await this._partnersReadBoundedJsonResponse(
+                    response,
+                    controller.signal
+                );
+                if (!response.ok) throw new Error('didit_certification_failed');
+                const exactKeys = (value, expected) => value
+                    && typeof value === 'object'
+                    && !Array.isArray(value)
+                    && Object.keys(value).sort().join('|')
+                        === expected.slice().sort().join('|');
+                const result = envelope?.data;
+                const verification = result?.verification;
+                let hostedUrl;
+                const expiresAt = Date.parse(String(verification?.expires_at || ''));
+                const now = Date.now();
+                const maxHostedSessionTtlMs = 2 * 60 * 60 * 1_000;
+                try {
+                    hostedUrl = new URL(String(verification?.url || ''));
+                } catch (_) {
+                    throw new Error('invalid_didit_certification_url');
+                }
+                if (!exactKeys(envelope, ['version', 'correlationId', 'data'])
+                    || envelope.version !== '2026-07-29'
+                    || !/^prt_[0-9a-f]{24}$/.test(String(envelope.correlationId || ''))
+                    || !exactKeys(result, [
+                        'schema_version', 'action', 'replayed', 'verification'
+                    ])
+                    || result.schema_version !== 1
+                    || result.action !== 'kyc_certification_session_created'
+                    || typeof result.replayed !== 'boolean'
+                    || !exactKeys(verification, [
+                        'provider', 'status', 'url', 'expires_at'
+                    ])
+                    || verification.provider !== 'didit'
+                    || !['not_started', 'in_progress', 'awaiting_user'].includes(
+                        String(verification.status || '')
+                    )
+                    || hostedUrl.origin !== 'https://verify.didit.me'
+                    || hostedUrl.username || hostedUrl.password
+                    || !Number.isFinite(expiresAt)
+                    || expiresAt <= now
+                    || expiresAt > now + maxHostedSessionTtlMs) {
+                    throw new Error('invalid_didit_certification_response');
+                }
+                if (!contextIsCurrent()) {
+                    throw new Error('didit_certification_context_changed');
+                }
+                try {
+                    this._partnersPersistKycCertificationReturnContext();
+                    sessionStorage.setItem(
+                        'norva-partners-kyc-certification-v1',
+                        String(Date.now())
+                    );
+                } catch (error) {
+                    this._partnersClearKycCertificationReturnState();
+                    throw error;
+                }
+                if (!contextIsCurrent()) {
+                    throw new Error('didit_certification_context_changed');
+                }
+                window.location.assign(hostedUrl.href);
+                return false;
+            } catch (_) {
+                this._partnersClearKycCertificationReturnState();
+                throw this._partnersMarkKycCertificationUncertain();
+            } finally {
+                clearTimeout(timeout);
+                if (this._partnersRequests.get(requestKey)?.token === token) {
+                    this._partnersRequests.delete(requestKey);
+                }
+            }
+        }
 
         if (['access-request-approve', 'access-request-decline'].includes(action)) {
             if (this._partnersCapabilities.risk !== true) return false;

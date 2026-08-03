@@ -1,8 +1,15 @@
 import {
+  classifyDiditCreateError,
   DIDIT_PARTNERS_CALLBACK_URL,
   type DiditConfig,
   diditConfigFingerprint,
+  DiditSessionNotResumableError,
+  inspectDiditSessionList,
+  readBoundedDiditResponseBody,
+  sanitizeDiditActiveSessionList,
   sanitizeDiditCreatedSession,
+  sanitizeKycCertificationBindingMatchRpc,
+  sanitizeKycCertificationCreateClaimRpc,
   sanitizeKycWebhookRpc,
   verifyAndNormalizeDiditWebhook,
   verifyDiditConsoleTestWebhook,
@@ -128,6 +135,225 @@ Deno.test("Didit session response accepts the v3 OpenAPI shape but rejects KYB m
     rejected = true;
   }
   assert(rejected, "an explicit business session must fail closed");
+});
+
+Deno.test("Didit create errors classify only bounded credits and rate limits", () => {
+  assert(
+    classifyDiditCreateError(
+      400,
+      JSON.stringify({
+        detail:
+          "You don't have enough credits to perform this request. Please top up at https://business.didit.me",
+      }),
+    ) === "credits_unavailable",
+    "the documented 400 credit response must be recognized",
+  );
+  assert(
+    classifyDiditCreateError(402, null) === "credits_unavailable",
+    "legacy 402 credit responses remain supported",
+  );
+  assert(
+    classifyDiditCreateError(429, null) === "rate_limited",
+    "429 must remain a public rate limit without inspecting its body",
+  );
+  for (
+    const body of [
+      null,
+      "not-json",
+      JSON.stringify({ detail: "Invalid workflow_id." }),
+      JSON.stringify({ detail: "You don't have enough credits\nsecret" }),
+      JSON.stringify({ detail: "x".repeat(513) }),
+      "x".repeat(4_097),
+    ]
+  ) {
+    assert(
+      classifyDiditCreateError(400, body) === "other",
+      "unknown or oversized provider errors must fail closed",
+    );
+  }
+});
+
+Deno.test("Didit pending recovery accepts one exact active KYC session only", () => {
+  const key = `kcf_${"b".repeat(24)}`;
+  const candidate = {
+    session_id: "99999999-8888-4777-8666-555555555555",
+    session_url: "https://verify.didit.me/session/opaque-token",
+    status: "In Progress",
+    vendor_data: key,
+    workflow_id: baseConfig.workflowId,
+    session_kind: "user",
+    full_name: "PII discarded",
+  };
+  const recovered = sanitizeDiditActiveSessionList(
+    { count: 1, results: [candidate] },
+    baseConfig,
+    key,
+  );
+  assert(
+    recovered.sessionId === candidate.session_id,
+    "the exact candidate id must reach only the private binding verifier",
+  );
+  assert(
+    sanitizeDiditActiveSessionList(
+      {
+        count: 1,
+        results: [{ ...candidate, workflow_id: undefined }],
+      },
+      baseConfig,
+      key,
+    ).workflowId === baseConfig.workflowId,
+    "an omitted list-row workflow_id inherits the exact request filter",
+  );
+  assert(
+    !JSON.stringify(recovered).includes("PII discarded"),
+    "the list sanitizer must discard provider PII",
+  );
+  assert(
+    inspectDiditSessionList(
+      { count: 0, results: [] },
+      baseConfig,
+      key,
+    ).kind === "empty",
+    "an exact empty list must be distinguishable before the dispatch claim",
+  );
+  assert(
+    sanitizeDiditActiveSessionList(
+      { count: 1, results: [{ ...candidate, session_kind: undefined }] },
+      baseConfig,
+      key,
+    ).providerStatus === "in_progress",
+    "a legacy KYC row without a kind is accepted only without KYB markers",
+  );
+
+  for (
+    const invalid of [
+      { count: 2, results: [candidate, candidate] },
+      {
+        count: 1,
+        results: [{ ...candidate, vendor_data: `kcf_${"c".repeat(24)}` }],
+      },
+      {
+        count: 1,
+        results: [{
+          ...candidate,
+          workflow_id: "11111111-2222-4333-8444-666666666666",
+        }],
+      },
+      { count: 1, results: [{ ...candidate, session_kind: "business" }] },
+      {
+        count: 1,
+        results: [{
+          ...candidate,
+          session_kind: undefined,
+          company_name: "KYB",
+        }],
+      },
+      {
+        count: 1,
+        results: [{
+          ...candidate,
+          session_url: "https://attacker.example/session/token",
+        }],
+      },
+    ]
+  ) {
+    let rejected = false;
+    try {
+      sanitizeDiditActiveSessionList(invalid, baseConfig, key);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "ambiguous or mismatched recovery data must fail closed");
+  }
+
+  let terminal = false;
+  try {
+    sanitizeDiditActiveSessionList(
+      { count: 1, results: [{ ...candidate, status: "Approved" }] },
+      baseConfig,
+      key,
+    );
+  } catch (error) {
+    terminal = error instanceof DiditSessionNotResumableError;
+  }
+  assert(terminal, "a terminal session must never be recreated");
+});
+
+Deno.test("Didit list recovery body is byte-bounded and UTF-8 strict", async () => {
+  const exact = JSON.stringify({ count: 0, results: [] });
+  assert(
+    await readBoundedDiditResponseBody(new Response(exact), 32_768) === exact,
+    "a bounded JSON body must remain readable",
+  );
+  assert(
+    await readBoundedDiditResponseBody(
+      new Response("x".repeat(32_769)),
+      32_768,
+    ) === null,
+    "an oversized provider body must fail closed",
+  );
+  assert(
+    await readBoundedDiditResponseBody(
+      new Response(new Uint8Array([0xc3, 0x28])),
+      32_768,
+    ) === null,
+    "invalid UTF-8 must fail closed",
+  );
+});
+
+Deno.test("Didit binding-match RPC sanitizer is exact and identifier-free", () => {
+  const expiresAt = "2026-08-10T12:00:00.000Z";
+  const matched = sanitizeKycCertificationBindingMatchRpc({
+    schema_version: 1,
+    action: "kyc_certification_binding_matched",
+    matched: true,
+    certification: { status: "pending", expires_at: expiresAt },
+  });
+  assert(matched.matched === true, "the private hash match must be explicit");
+  assert(
+    !JSON.stringify(matched).includes("session_id"),
+    "no provider identifier may cross the RPC sanitizer",
+  );
+  let rejected = false;
+  try {
+    sanitizeKycCertificationBindingMatchRpc({
+      ...matched,
+      provider_session_id: "forbidden",
+    });
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "extra provider fields must fail closed");
+});
+
+Deno.test("Didit create-claim RPC sanitizer exposes one immutable timestamp only", () => {
+  const expiresAt = "2026-08-10T12:00:00.000Z";
+  const dispatchedAt = "2026-08-10T10:00:00.000Z";
+  const claimed = sanitizeKycCertificationCreateClaimRpc({
+    schema_version: 1,
+    action: "kyc_certification_create_claimed",
+    claimed: true,
+    certification: {
+      status: "reserved",
+      expires_at: expiresAt,
+      provider_create_dispatched_at: dispatchedAt,
+    },
+  });
+  assert(claimed.claimed, "the first durable dispatch claim must be explicit");
+  assert(
+    claimed.certification.provider_create_dispatched_at === dispatchedAt,
+    "the immutable dispatch timestamp must survive",
+  );
+  let rejected = false;
+  try {
+    sanitizeKycCertificationCreateClaimRpc({
+      ...claimed,
+      provider_session_id: "forbidden",
+    });
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "claim responses cannot expose provider identifiers");
 });
 
 Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects envelope-only signatures", async () => {
