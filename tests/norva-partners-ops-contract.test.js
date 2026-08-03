@@ -280,6 +280,9 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   const disasterRestore = read('ops/hetzner/backup/RESTORE.md');
   const parity = read('ops/hetzner/scripts/05-verify-parity.sh');
   const verifier = read('ops/hetzner/backup/verify-partners-restore.sql');
+  const certificationMigration = read(
+    'supabase/migrations/20260803160730_partners_didit_certification_pre_gate.sql',
+  );
 
   assert.match(migrationRestore, /PARTNERS_VERIFY=.*verify-partners-restore\.sql/);
   assert.match(
@@ -307,6 +310,15 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /affiliate_didit_session_registry/);
   assert.match(verifier, /affiliate_didit_certification_sessions/);
   assert.match(verifier, /affiliate_didit_certification_events/);
+  assert.match(
+    certificationMigration,
+    /constraint affiliate_didit_certification_sessions_binding/,
+  );
+  assert.match(
+    verifier,
+    /constraint_info\.conname =\s*'affiliate_didit_certification_sessions_binding'/,
+    'restore verification must resolve the exact installed binding constraint',
+  );
   assert.match(
     verifier,
     /partners_assert_didit_certification_pre_gate/,

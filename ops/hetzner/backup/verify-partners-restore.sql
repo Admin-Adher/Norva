@@ -1204,7 +1204,7 @@ begin
     where constraint_info.conrelid =
         'affiliate_private.affiliate_didit_certification_sessions'::regclass
       and constraint_info.conname =
-        'affiliate_didit_certification_sessions_provider_binding'
+        'affiliate_didit_certification_sessions_binding'
       and constraint_info.contype = 'c'
       and constraint_info.convalidated
       and position(
