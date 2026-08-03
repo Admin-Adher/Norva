@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "package_key": "partners-france-p0-v1",
+  "repository": "Admin-Adher/Norva",
+  "candidate_commit_sha": null,
+  "target_environment": "sandbox",
+  "deployment_id": null,
+  "contains_personal_data": false,
+  "program": {
+    "version_key": null,
+    "account_type": "individual",
+    "commission_rate_bps": 2000,
+    "attribution_window_days": 30,
+    "maturation_days": 45,
+    "commission_duration": "while_referred_subscription_active",
+    "payout_fee_policy": "platform_absorbed",
+    "threshold_reference_currency": "USD",
+    "threshold_reference_minor": 1000
+  },
+  "jurisdiction": {
+    "country_code": "FR",
+    "subdivision_code": null,
+    "policy_key": null,
+    "minimum_age": 18,
+    "capacity_required": true,
+    "verification_provider": "didit",
+    "verification_level": "identity_age_country_capacity",
+    "payout_currencies": [
+      "EUR"
+    ],
+    "individual_available": false,
+    "effective_from": null
+  },
+  "documents": {
+    "partners_terms_version": null,
+    "partners_terms_sha256": null,
+    "disclosure_version": null,
+    "disclosure_sha256": null,
+    "privacy_version": null,
+    "privacy_sha256": null,
+    "public_surfaces": {
+      "verified_at": null,
+      "hash_basis": "normalized_deployment_artifact",
+      "deployment_evidence": null,
+      "terms_evidence": null,
+      "privacy_evidence": null,
+      "partners_terms_evidence": null
+    }
+  },
+  "dependencies": {
+    "configuration_snapshot_evidence": null,
+    "didit_live_evidence": null,
+    "payout_corridor_evidence": null,
+    "exact_financial_data_evidence": null
+  },
+  "decisions": {
+    "legal_and_tax": {
+      "approved": false,
+      "decided_at": null,
+      "valid_until": null,
+      "reviewer_role": "legal_and_tax_professional",
+      "reviewer_reference_sha256": null,
+      "evidence": null,
+      "checks": {
+        "individual_program_scope_approved": false,
+        "recurring_commission_model_approved": false,
+        "attribution_and_maturation_rules_approved": false,
+        "threshold_and_fee_policy_approved": false,
+        "individual_tax_reporting_approved": false,
+        "sanctions_and_restricted_destinations_reviewed": false,
+        "terms_and_disclosure_approved": false,
+        "kyc_only_without_kyb_scope_approved": false,
+        "refund_chargeback_and_reversal_rules_approved": false
+      }
+    },
+    "privacy": {
+      "approved": false,
+      "decided_at": null,
+      "valid_until": null,
+      "reviewer_role": "privacy_professional",
+      "reviewer_reference_sha256": null,
+      "evidence": null,
+      "checks": {
+        "data_inventory_and_purposes_approved": false,
+        "lawful_bases_approved": false,
+        "subprocessor_disclosures_approved": false,
+        "international_transfers_approved": false,
+        "retention_and_deletion_schedule_approved": false,
+        "data_subject_rights_flow_approved": false,
+        "data_minimization_and_redaction_approved": false,
+        "kyc_and_payout_notices_approved": false,
+        "public_privacy_notice_approved": false,
+        "security_incident_notification_flow_approved": false
+      }
+    },
+    "country_policy": {
+      "approved": false,
+      "decided_at": null,
+      "valid_until": null,
+      "reviewer_role": "risk_officer",
+      "reviewer_reference_sha256": null,
+      "evidence": null,
+      "checks": {
+        "legal_and_tax_dependency_approved": false,
+        "privacy_dependency_approved": false,
+        "minimum_age_and_capacity_rule_approved": false,
+        "didit_live_coverage_approved": false,
+        "payout_corridor_and_currency_approved": false,
+        "exact_financial_data_coverage_approved": false,
+        "sanctions_and_restricted_destinations_reviewed": false,
+        "terms_and_disclosure_versions_match": false,
+        "pilot_allowlist_scope_approved": false,
+        "effective_dates_approved": false
+      }
+    }
+  }
+}

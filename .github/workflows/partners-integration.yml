@@ -39,12 +39,13 @@ on:
       - 'ops/hetzner/scripts/01-dump-prod.sh'
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/capture-norva-partners-*.sh'
       - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh'
       - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/partners/**'
-      - 'scripts/validate-partners-release-evidence.js'
+      - 'scripts/validate-partners-*.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -105,12 +106,13 @@ on:
       - 'ops/hetzner/scripts/01-dump-prod.sh'
       - 'ops/hetzner/scripts/02-restore-hetzner.sh'
       - 'ops/hetzner/scripts/05-verify-parity.sh'
+      - 'ops/hetzner/scripts/capture-norva-partners-*.sh'
       - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh'
       - 'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql'
       - 'ops/hetzner/scripts/register-norva-partners-cron.sql'
       - 'ops/hetzner/scripts/register-norva-revenuecat-transfer-cron.sql'
       - 'ops/partners/**'
-      - 'scripts/validate-partners-release-evidence.js'
+      - 'scripts/validate-partners-*.js'
       - 'supabase/config.toml'
       - 'supabase/functions/_shared/**'
       - 'supabase/functions/norva-admin/**'
@@ -178,12 +180,18 @@ jobs:
           ops/hetzner/backup/rehearse-partners-physical.sh
           ops/hetzner/scripts/01-dump-prod.sh
           ops/hetzner/scripts/05-verify-parity.sh
+          ops/hetzner/scripts/capture-norva-partners-didit-live-config-evidence.sh
           ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh
 
       - name: Validate the fail-closed pilot evidence template
         run: >-
           node scripts/validate-partners-release-evidence.js
           ops/partners/pilot-release.example.json
+
+      - name: Validate the fail-closed approval evidence template
+        run: >-
+          node scripts/validate-partners-approval-evidence.js
+          ops/partners/approval-evidence.example.json
 
       - name: Run financial producer non-regression tests
         run: >-

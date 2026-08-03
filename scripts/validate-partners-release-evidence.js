@@ -1737,6 +1737,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ISO_COUNTRIES,
+  ISO_CURRENCIES,
+  NON_PAYOUT_CURRENCIES,
   evaluateEvidence,
   generalizationReadinessBlockers,
   isEvidenceReference,

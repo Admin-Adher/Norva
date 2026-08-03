@@ -538,6 +538,33 @@ non-autorité d'une décision sandbox puis un mismatch
 environnement/fingerprint et constater sa quarantaine. Le journal de release
 ne doit contenir ni API key, ni secret webhook, ni identifiant de session.
 
+Capturer d'abord le snapshot live de configuration sans ouvrir un flag ou une
+gate. Créer hors Git un dossier `0700`, fournir l'identifiant immuable du
+déploiement et exécuter :
+
+```bash
+PARTNERS_EVIDENCE_OUTPUT_DIR=/home/adrien/norva-release-evidence/partners/<release_key>/didit/live-config \
+PARTNERS_DEPLOYMENT_ID='<deployment-id-immuable>' \
+  bash ops/hetzner/scripts/capture-norva-partners-didit-live-config-evidence.sh
+```
+
+Le script utilise seulement `docker inspect`, `git` en lecture et le `GET`
+Management API du workflow. Il exige deux Edge healthy et identiques, KYC
+publié, KYB/AML désactivés, callback et expiration exacts, puis écrit un JSON
+sanitisé `0600`. Il échoue avant l'écriture au moindre écart et ne journalise
+aucune variable secrète. Après rapatriement dans le coffre local :
+
+```bash
+node scripts/validate-partners-didit-live-config-evidence.js \
+  <artefact-prive.json> \
+  --expected-commit-sha=<sha-git-40-caracteres>
+```
+
+La sortie conserve explicitement `gate_eligible=false` tant que les trois
+preuves de session sandbox, décision live et isolation/quarantaine ne sont pas
+archivées séparément. Ne jamais activer temporairement la production pour
+fabriquer ce snapshot de configuration.
+
 Le compte de service Google Play est dédié au backend, limité à la lecture des
 commandes du package Norva et absent de tout client Android/Web. Les deux
 variables Google absentes laissent l'enrichissement inactif et les faits

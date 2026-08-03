@@ -201,6 +201,63 @@ les artefacts, ne contacte aucun fournisseur, ne lit pas Supabase et ne modifie
 ni Didit ni un rail de versement. Un humain ou une CI de release doit corréler
 chaque URL, `run_id` et SHA-256 avec l'artefact et le snapshot DB réels.
 
+### Snapshot live Didit — configuration uniquement
+
+Le premier artefact Didit est un snapshot sanitisé de la configuration live. Il
+doit être produit hors du dépôt, dans un dossier privé dédié à la release :
+
+```text
+/home/adrien/norva-release-evidence/partners/<release_key>/didit/live-config/
+```
+
+Le dossier porte le mode `0700` et chaque artefact le mode `0600`. Ne jamais
+utiliser `docs/audits/`, `/tmp`, le checkout Git ou un dossier servi par le Web.
+Le snapshot ne contient ni API key, secret webhook, UUID workflow/application,
+identifiant de session, identité, document ou décision KYC. Les identifiants
+provider sont remplacés par des hashes à domaine séparé.
+
+Après rapatriement, le coffre local recommandé pour l'opérateur Windows est :
+
+```text
+C:\Users\AdrienHernandez\.norva-secrets\partners-release-evidence\<release_key>\didit\live-config\
+```
+
+Son ACL reste limitée à l'opérateur et `SYSTEM`. Le fichier ne doit jamais être
+copié dans le workspace, joint à un ticket public ou ajouté à Git.
+
+Depuis Hetzner, avec l'identifiant immuable du déploiement candidat :
+
+```bash
+install -d -m 700 \
+  /home/adrien/norva-release-evidence/partners/<release_key>/didit/live-config
+PARTNERS_EVIDENCE_OUTPUT_DIR=/home/adrien/norva-release-evidence/partners/<release_key>/didit/live-config \
+PARTNERS_DEPLOYMENT_ID='<deployment-id-immuable>' \
+  bash ops/hetzner/scripts/capture-norva-partners-didit-live-config-evidence.sh
+```
+
+Le script inspecte les deux conteneurs Edge en mémoire, exige leur parité, puis
+effectue uniquement un `GET` du workflow via l'API Management Didit. Il écrit
+atomiquement un JSON fermé et affiche son SHA-256, le fingerprint Norva et la
+version du workflow sans afficher les secrets. Rapatrier ensuite l'artefact
+dans le coffre local et valider ses octets exacts :
+
+```bash
+node scripts/validate-partners-didit-live-config-evidence.js \
+  <coffre-prive>/didit-live-config-*.json \
+  --expected-commit-sha=<sha-git-40-caracteres>
+```
+
+Après publication dans le stockage immuable protégé, recalculer le SHA-256 de
+l'objet réellement téléchargé depuis son URL finale. Ce hash, cette URL, le run
+ID et l'heure UTC deviennent une référence structurée du journal privé.
+
+Cet artefact porte obligatoirement `evidence_scope=configuration_only` et
+`gate_eligible=false`. Il ne satisfait jamais
+`individual_verification_coverage_confirmed` à lui seul. Les trois preuves
+indépendantes restent nécessaires : décision sandbox non autoritaire, décision
+live signée liée au même fingerprint/version et conflit environnement ou
+fingerprint effectivement mis en quarantaine.
+
 ## Preuves externes obligatoires
 
 Le dépôt ne peut pas créer ces preuves à la place de l'opérateur :
