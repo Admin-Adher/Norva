@@ -50,10 +50,10 @@ select extensions.is(
     from expected
     join pg_catalog.pg_proc routine
       on routine.oid = to_regprocedure(expected.signature)
-    where pg_catalog.pg_get_userbyid(routine.proowner) = 'supabase_admin'
+    where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
   12::bigint,
-  'every migrated routine retains the controlled supabase_admin owner'
+  'every migrated routine retains the controlled migration executor owner'
 );
 
 select extensions.ok(
