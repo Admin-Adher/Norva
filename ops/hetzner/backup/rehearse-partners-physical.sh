@@ -459,7 +459,7 @@ clone_psql() {
     psql -X -U supabase_admin -d postgres "$@"
 }
 
-CURRENT_STEP="cron neutralization"
+CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
   2> "$RAW_DIR/clone-preloads.log")" || fail
@@ -467,8 +467,8 @@ ACTUAL_CLONE_PRELOADS="${ACTUAL_CLONE_PRELOADS//[[:space:]]/}"
 if [[ "$ACTUAL_CLONE_PRELOADS" != "$CLONE_PRELOADS" ]]; then
   fail
 fi
-if ! clone_psql -v ON_ERROR_STOP=1 > "$RAW_DIR/cron-neutralization.log" 2>&1 <<'SQL'
-begin;
+if ! clone_psql -v ON_ERROR_STOP=1 > "$RAW_DIR/background-neutralization.log" 2>&1 <<'SQL'
+begin read only;
 do $cron_rehearsal_guard$
 begin
   if string_to_array(
@@ -480,30 +480,34 @@ begin
   if exists (
     select 1
     from pg_catalog.pg_stat_activity
-    where backend_type ilike '%cron%'
+    where backend_type ~* '(pg_cron|pg_net|cron scheduler)'
   ) then
-    raise exception 'a cron worker started in the rehearsal clone';
+    raise exception 'a cron or pg_net worker started in the rehearsal clone';
   end if;
   if to_regclass('cron.job') is null then
     raise exception 'restored clone omitted cron.job';
   end if;
 end;
 $cron_rehearsal_guard$;
-update cron.job set active = false where active;
-do $cron_rehearsal_zero$
-begin
-  if exists (select 1 from cron.job where active) then
-    raise exception 'an active cron remained in the rehearsal clone';
-  end if;
-end;
-$cron_rehearsal_zero$;
 commit;
 SQL
 then
   fail
 fi
 proof_line "cron_network_preloads=disabled"
-proof_line "active_crons=0"
+proof_line "cron_network_workers=disabled"
+
+# Do not mutate cron.job in the clone. Its cache-invalidation trigger loads
+# $libdir/pg_cron, which cannot be loaded on demand after pg_cron is deliberately
+# removed from shared_preload_libraries. Without that preload there is no
+# scheduler capable of executing these metadata rows in the no-network clone.
+BASELINE_CRON_COUNTS="$(clone_psql -At -v ON_ERROR_STOP=1 \
+  -c "select count(*)::text || '|' || count(*) filter (where active)::text from cron.job;" \
+  2> "$RAW_DIR/baseline-cron-counts.log")" || fail
+if [[ ! "$BASELINE_CRON_COUNTS" =~ ^[0-9]+\|[0-9]+$ ]]; then
+  fail
+fi
+proof_line "cron_metadata_counts=$BASELINE_CRON_COUNTS"
 
 CURRENT_STEP="baseline aggregate capture"
 BASELINE_COUNTS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
@@ -660,13 +664,14 @@ if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
   fail
 fi
 FINAL_COUNTS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (select count(*) from auth.users)::text || '|' || (select count(*) from affiliate_private.affiliate_accounts)::text || '|' || (select count(*) from affiliate_private.affiliate_events)::text || '|' || (select count(*) from cron.job where active)::text || '|' || (select count(*) from pg_catalog.pg_stat_activity where backend_type ilike '%cron%')::text;" \
+  "select (select count(*) from auth.users)::text || '|' || (select count(*) from affiliate_private.affiliate_accounts)::text || '|' || (select count(*) from affiliate_private.affiliate_events)::text || '|' || (select count(*) from cron.job)::text || '|' || (select count(*) from cron.job where active)::text || '|' || (select count(*) from pg_catalog.pg_stat_activity where backend_type ~* '(pg_cron|pg_net|cron scheduler)')::text;" \
   2> "$RAW_DIR/final-counts.log")" || fail
-if [[ "$FINAL_COUNTS" != "$BASELINE_COUNTS|0|0" ]]; then
+if [[ "$FINAL_COUNTS" != "$BASELINE_COUNTS|$BASELINE_CRON_COUNTS|0" ]]; then
   fail
 fi
 proof_line "post_test_restore_verifier=passed"
 proof_line "test_transactions_rolled_back=true"
+proof_line "cron_counts_unchanged=true"
 
 CURRENT_STEP="live container non-mutation check"
 LIVE_PRELOADS_AFTER="$(docker exec -u postgres "$DB_CONTAINER" \

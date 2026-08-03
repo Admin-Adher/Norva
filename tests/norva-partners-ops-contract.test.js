@@ -464,8 +464,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /SAW_PG_CRON/);
   assert.match(rehearsal, /SAW_PG_NET/);
   assert.match(rehearsal, /cron\.database_name=__norva_rehearsal_disabled__/);
-  assert.match(rehearsal, /update cron\.job set active = false where active/);
-  assert.match(rehearsal, /backend_type ilike '%cron%'/);
+  assert.match(rehearsal, /begin read only/);
+  assert.match(rehearsal, /backend_type ~\* '\(pg_cron\|pg_net\|cron scheduler\)'/);
+  assert.match(rehearsal, /count\(\*\) filter \(where active\)/);
+  assert.match(rehearsal, /cron_counts_unchanged=true/);
+  assert.doesNotMatch(rehearsal, /update cron\.job set active/);
   assert.equal(
     (rehearsal.match(/docker exec -u postgres "\$DB_CONTAINER"/g) || []).length,
     2,

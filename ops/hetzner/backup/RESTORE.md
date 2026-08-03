@@ -160,11 +160,13 @@ sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
 
 Le script lit le dernier base-backup R2, matérialise les migrations, le
 vérificateur et les pgTAP directement depuis l'objet Git demandé, puis restaure
-le tout dans un conteneur unique en `--network none`. `pg_cron` est neutralisé
-dès le démarrage, toutes les tâches du clone sont désactivées avant la première
-migration, et les deux migrations ciblées sont rejouées dans une transaction
-unique. Le conteneur et le répertoire temporaire sont toujours supprimés par le
-trap de sortie.
+le tout dans un conteneur unique en `--network none`. Les workers `pg_cron` et
+`pg_net` sont neutralisés dès le démarrage en les retirant des préloads. Le
+script ne désactive pas les lignes restaurées de `cron.job` : sans scheduler,
+elles restent inertes dans ce clone isolé, et leurs nombres total et actif sont
+contrôlés avant et après la répétition. Les deux migrations ciblées sont ensuite
+rejouées dans une transaction unique. Le conteneur et le répertoire temporaire
+sont toujours supprimés par le trap de sortie.
 
 La seule sortie durable est un `rehearsal-proof.log` privé (mode `0600`) et son
 fichier `.sha256` sous `norva-deploy-backups/`. Ils ne contiennent ni sortie SQL
