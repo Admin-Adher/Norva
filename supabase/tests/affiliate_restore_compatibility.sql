@@ -4,47 +4,80 @@ create extension if not exists pgtap with schema extensions;
 
 select extensions.plan(15);
 
+-- One immutable catalogue keeps all three pending migrations under the same
+-- existence, ownership, security, volatility and ACL assertions without
+-- creating any object in the restored database.
+set local norva.partners_restore_expected_routines = '[
+  {"signature":"affiliate_private.partners_actor_is_live_admin(text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_has_capability(text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_can_manage_capabilities()","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_is_release_manager()","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_require_aal2(text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_admin_operator_key(uuid)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.admin_partners_capability_operators()","security_definer":true,"volatility":"s","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_capability_operators()","security_definer":false,"volatility":"s","access_role":"authenticated"},
+  {"signature":"public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.partners_access_decision_email_enqueue()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.register_member_didit_session()","security_definer":false,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.guard_didit_certification_session_transition()","security_definer":false,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_didit_certification_key_hash(text)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.partners_didit_certification_key(text,uuid)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.partners_didit_certification_public_reason(text)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.partners_didit_certification_operator_hash()","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_require_didit_certification_observer(text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_assert_didit_certification_pre_gate()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_require_didit_certification_operator(text)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_kyc_certification_resume()","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_kyc_certification_status()","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.partners_service_kyc_certification_create_claim(text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_kyc_certification_binding_match(text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_kyc_certification_resume()","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_kyc_certification_status()","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.partners_service_kyc_certification_create_claim(text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_kyc_certification_binding_match(text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"}
+]';
+
 select extensions.is(
   (
-    with expected(signature) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)'),
-        ('affiliate_private.partners_has_capability(text)'),
-        ('affiliate_private.partners_can_manage_capabilities()'),
-        ('affiliate_private.partners_is_release_manager()'),
-        ('affiliate_private.partners_require_aal2(text)'),
-        ('affiliate_private.partners_admin_operator_key(uuid)'),
-        ('affiliate_private.admin_partners_capability_operators()'),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
-        ('public.admin_partners_capability_operators()'),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.partners_access_decision_email_enqueue()')
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
     select count(*)
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  12::bigint,
-  'the restored candidate exposes every routine from both pending migrations'
+  35::bigint,
+  'the restored candidate exposes every routine from all three pending migrations'
 );
 
 select extensions.is(
   (
-    with expected(signature) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)'),
-        ('affiliate_private.partners_has_capability(text)'),
-        ('affiliate_private.partners_can_manage_capabilities()'),
-        ('affiliate_private.partners_is_release_manager()'),
-        ('affiliate_private.partners_require_aal2(text)'),
-        ('affiliate_private.partners_admin_operator_key(uuid)'),
-        ('affiliate_private.admin_partners_capability_operators()'),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
-        ('public.admin_partners_capability_operators()'),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.partners_access_decision_email_enqueue()')
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
     select count(*)
     from expected
@@ -52,28 +85,24 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  12::bigint,
+  35::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
 select extensions.ok(
   (
-    with expected(signature, security_definer) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)', true),
-        ('affiliate_private.partners_has_capability(text)', true),
-        ('affiliate_private.partners_can_manage_capabilities()', true),
-        ('affiliate_private.partners_is_release_manager()', true),
-        ('affiliate_private.partners_require_aal2(text)', true),
-        ('affiliate_private.partners_admin_operator_key(uuid)', false),
-        ('affiliate_private.admin_partners_capability_operators()', true),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)', true),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)', true),
-        ('public.admin_partners_capability_operators()', false),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)', false),
-        ('affiliate_private.partners_access_decision_email_enqueue()', true)
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
-    select count(*) = 12
+    select count(*) = 35
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -84,22 +113,18 @@ select extensions.ok(
 
 select extensions.ok(
   (
-    with expected(signature) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)'),
-        ('affiliate_private.partners_has_capability(text)'),
-        ('affiliate_private.partners_can_manage_capabilities()'),
-        ('affiliate_private.partners_is_release_manager()'),
-        ('affiliate_private.partners_require_aal2(text)'),
-        ('affiliate_private.partners_admin_operator_key(uuid)'),
-        ('affiliate_private.admin_partners_capability_operators()'),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
-        ('public.admin_partners_capability_operators()'),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.partners_access_decision_email_enqueue()')
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
-    select count(*) = 12
+    select count(*) = 35
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -112,23 +137,19 @@ select extensions.ok(
 
 select extensions.ok(
   (
-    with expected(signature, volatility) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)', 's'::"char"),
-        ('affiliate_private.partners_has_capability(text)', 's'::"char"),
-        ('affiliate_private.partners_can_manage_capabilities()', 's'::"char"),
-        ('affiliate_private.partners_is_release_manager()', 's'::"char"),
-        ('affiliate_private.partners_require_aal2(text)', 's'::"char"),
-        ('affiliate_private.partners_admin_operator_key(uuid)', 'i'::"char"),
-        ('affiliate_private.admin_partners_capability_operators()', 's'::"char"),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)', 'v'::"char"),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)', 'v'::"char"),
-        ('public.admin_partners_capability_operators()', 's'::"char"),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)', 'v'::"char"),
-        ('affiliate_private.partners_access_decision_email_enqueue()', 'v'::"char")
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
-    select count(*) = 12
-      and bool_and(routine.provolatile = expected.volatility)
+    select count(*) = 35
+      and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
       on routine.oid = to_regprocedure(expected.signature)
@@ -138,20 +159,16 @@ select extensions.ok(
 
 select extensions.ok(
   not exists (
-    with expected(signature) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)'),
-        ('affiliate_private.partners_has_capability(text)'),
-        ('affiliate_private.partners_can_manage_capabilities()'),
-        ('affiliate_private.partners_is_release_manager()'),
-        ('affiliate_private.partners_require_aal2(text)'),
-        ('affiliate_private.partners_admin_operator_key(uuid)'),
-        ('affiliate_private.admin_partners_capability_operators()'),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
-        ('public.admin_partners_capability_operators()'),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.partners_access_decision_email_enqueue()')
+    with expected as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
     )
     select 1
     from expected
@@ -171,18 +188,22 @@ select extensions.ok(
 
 select extensions.ok(
   (
-    with allowed(signature) as (
-      values
-        ('affiliate_private.admin_partners_capability_operators()'),
-        ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
-        ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
-        ('public.admin_partners_capability_operators()'),
-        ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)')
+    with allowed as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
+      where access_role <> 'owner'
     )
-    select count(*) = 5
+    select count(*) = 19
       and bool_and(
         pg_catalog.has_function_privilege(
-          'authenticated',
+          allowed.access_role,
           to_regprocedure(allowed.signature),
           'EXECUTE'
         )
@@ -191,30 +212,41 @@ select extensions.ok(
           to_regprocedure(allowed.signature),
           'EXECUTE'
         )
-        and not pg_catalog.has_function_privilege(
-          'service_role',
-          to_regprocedure(allowed.signature),
-          'EXECUTE'
+        and (
+          pg_catalog.has_function_privilege(
+            'authenticated',
+            to_regprocedure(allowed.signature),
+            'EXECUTE'
+          ) = (allowed.access_role = 'authenticated')
+        )
+        and (
+          pg_catalog.has_function_privilege(
+            'service_role',
+            to_regprocedure(allowed.signature),
+            'EXECUTE'
+          ) = (allowed.access_role = 'service_role')
         )
       )
     from allowed
   ),
-  'only authenticated Admin calls can enter the audited capability mutations'
+  'authenticated Admin and service-only Didit RPCs retain their exact API roles'
 );
 
 select extensions.ok(
   (
-    with owner_only(signature) as (
-      values
-        ('affiliate_private.partners_actor_is_live_admin(text)'),
-        ('affiliate_private.partners_has_capability(text)'),
-        ('affiliate_private.partners_can_manage_capabilities()'),
-        ('affiliate_private.partners_is_release_manager()'),
-        ('affiliate_private.partners_require_aal2(text)'),
-        ('affiliate_private.partners_admin_operator_key(uuid)'),
-        ('affiliate_private.partners_access_decision_email_enqueue()')
+    with owner_only as (
+      select *
+      from pg_catalog.jsonb_to_recordset(
+        current_setting('norva.partners_restore_expected_routines')::jsonb
+      ) as routine(
+        signature text,
+        security_definer boolean,
+        volatility text,
+        access_role text
+      )
+      where access_role = 'owner'
     )
-    select count(*) = 7
+    select count(*) = 16
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
@@ -234,7 +266,7 @@ select extensions.ok(
       )
     from owner_only
   ),
-  'private predicates, opaque-key helper and email trigger remain owner-only'
+  'private predicates, helpers and trigger functions remain owner-only'
 );
 
 select extensions.ok(

@@ -574,11 +574,31 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /-U supabase_admin -d postgres/);
   assert.match(rehearsal, /migration_routine_owner=supabase_admin/);
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
-  assert.ok(
-    rehearsal.indexOf('20260803082211_partners_admin_operator_capabilities.sql')
-      < rehearsal.indexOf('20260803084051_partners_access_request_decision_email.sql'),
-    'operator capabilities must precede decision email in the atomic replay',
+  const operatorCapabilitiesMigration = rehearsal.indexOf(
+    '20260803082211_partners_admin_operator_capabilities.sql',
   );
+  const accessDecisionEmailMigration = rehearsal.indexOf(
+    '20260803084051_partners_access_request_decision_email.sql',
+  );
+  const diditCertificationMigration = rehearsal.indexOf(
+    '20260803160730_partners_didit_certification_pre_gate.sql',
+  );
+  assert.ok(
+    operatorCapabilitiesMigration < accessDecisionEmailMigration
+      && accessDecisionEmailMigration < diditCertificationMigration,
+    'operator capabilities, decision email and Didit certification must keep their atomic replay order',
+  );
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
+  assert.match(rehearsal, /migration_three_sha256=/);
+  assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
+  assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
+  assert.match(rehearsal, /"0\|0\|0\|0"/);
+  assert.match(rehearsal, /"1\|1\|1\|1"/);
+  assert.match(rehearsal, /migrations_applied=3/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "35\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=35/);
+  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "3\|0"/);
+  assert.match(rehearsal, /migration_relations_verified=3/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
   assert.match(rehearsal, /affiliate_restore_compatibility\.sql/);
   assert.match(workflow, /affiliate_restore_compatibility\.sql/);

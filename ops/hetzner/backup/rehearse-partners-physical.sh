@@ -3,7 +3,7 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, apply the two pending Partners migrations atomically, then
+# PostgreSQL clone, apply the three pending Partners migrations atomically, then
 # run the restore verifier and the data-compatible Partners restore pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
@@ -80,6 +80,7 @@ fi
 
 readonly MIGRATION_ONE="supabase/migrations/20260803082211_partners_admin_operator_capabilities.sql"
 readonly MIGRATION_TWO="supabase/migrations/20260803084051_partners_access_request_decision_email.sql"
+readonly MIGRATION_THREE="supabase/migrations/20260803160730_partners_didit_certification_pre_gate.sql"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -90,6 +91,7 @@ readonly -a RESTORE_PGTAP_FILES=(
 readonly -a CANDIDATE_FILES=(
   "$MIGRATION_ONE"
   "$MIGRATION_TWO"
+  "$MIGRATION_THREE"
   "$VERIFIER"
   "${RESTORE_PGTAP_FILES[@]}"
 )
@@ -241,6 +243,7 @@ done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | awk '{print $1}')"
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
+proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
 if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
@@ -541,11 +544,12 @@ fi
 
 CURRENT_STEP="pending migration precondition"
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text;" \
   2> "$RAW_DIR/migration-precondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "0|0" ]]; then
+if [[ "$MIGRATION_MARKERS" != "0|0|0|0" ]]; then
   fail
 fi
+proof_line "migration_markers_before=$MIGRATION_MARKERS"
 
 CURRENT_STEP="atomic Partners migration application"
 PSQL_TIMEOUT_SECONDS="${PARTNERS_REHEARSAL_PSQL_TIMEOUT_SECONDS:-3600}"
@@ -561,61 +565,97 @@ if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
         --single-transaction \
         -f "/candidate/$MIGRATION_ONE" \
         -f "/candidate/$MIGRATION_TWO" \
+        -f "/candidate/$MIGRATION_THREE" \
       > "$RAW_DIR/migrations.log" 2>&1; then
   fail
 fi
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text;" \
   2> "$RAW_DIR/migration-postcondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "1|1" ]]; then
+if [[ "$MIGRATION_MARKERS" != "1|1|1|1" ]]; then
   fail
 fi
+proof_line "migration_markers_after=$MIGRATION_MARKERS"
+CURRENT_STEP="migration object ownership verification"
 ROUTINE_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
   2> "$RAW_DIR/routine-owner-postcondition.log" <<'SQL'
-with expected(schema_name, routine_name) as (
+with expected(signature) as (
   values
-    ('affiliate_private', 'partners_actor_is_live_admin'),
-    ('affiliate_private', 'partners_has_capability'),
-    ('affiliate_private', 'partners_can_manage_capabilities'),
-    ('affiliate_private', 'partners_is_release_manager'),
-    ('affiliate_private', 'partners_require_aal2'),
-    ('affiliate_private', 'partners_admin_operator_key'),
-    ('affiliate_private', 'admin_partners_capability_operators'),
-    ('affiliate_private', 'admin_partners_capability_set_by_operator_key'),
-    ('affiliate_private', 'admin_partners_capability_set'),
-    ('public', 'admin_partners_capability_operators'),
-    ('public', 'admin_partners_capability_set_by_operator_key'),
-    ('affiliate_private', 'partners_access_decision_email_enqueue')
+    ('affiliate_private.partners_actor_is_live_admin(text)'),
+    ('affiliate_private.partners_has_capability(text)'),
+    ('affiliate_private.partners_can_manage_capabilities()'),
+    ('affiliate_private.partners_is_release_manager()'),
+    ('affiliate_private.partners_require_aal2(text)'),
+    ('affiliate_private.partners_admin_operator_key(uuid)'),
+    ('affiliate_private.admin_partners_capability_operators()'),
+    ('affiliate_private.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
+    ('affiliate_private.admin_partners_capability_set(uuid,text,boolean,text)'),
+    ('public.admin_partners_capability_operators()'),
+    ('public.admin_partners_capability_set_by_operator_key(text,text,boolean,text)'),
+    ('affiliate_private.partners_access_decision_email_enqueue()'),
+    ('affiliate_private.register_member_didit_session()'),
+    ('affiliate_private.guard_didit_certification_session_transition()'),
+    ('affiliate_private.partners_didit_certification_key_hash(text)'),
+    ('affiliate_private.partners_didit_certification_key(text,uuid)'),
+    ('affiliate_private.partners_didit_certification_public_reason(text)'),
+    ('affiliate_private.partners_didit_certification_operator_hash()'),
+    ('affiliate_private.partners_require_didit_certification_observer(text)'),
+    ('affiliate_private.partners_assert_didit_certification_pre_gate()'),
+    ('affiliate_private.partners_require_didit_certification_operator(text)'),
+    ('affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)'),
+    ('affiliate_private.admin_partners_kyc_certification_resume()'),
+    ('affiliate_private.admin_partners_kyc_certification_status()'),
+    ('affiliate_private.partners_service_kyc_certification_create_claim(text)'),
+    ('affiliate_private.partners_service_kyc_certification_binding_match(text,text)'),
+    ('affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)'),
+    ('affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)'),
+    ('public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)'),
+    ('public.admin_partners_kyc_certification_resume()'),
+    ('public.admin_partners_kyc_certification_status()'),
+    ('public.partners_service_kyc_certification_create_claim(text)'),
+    ('public.partners_service_kyc_certification_binding_match(text,text)'),
+    ('public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)'),
+    ('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)')
 )
 select count(*)::text || '|' || count(*) filter (
-  where not exists (
-    select 1
-    from pg_catalog.pg_proc routine
-    join pg_catalog.pg_namespace namespace
-      on namespace.oid = routine.pronamespace
-    where namespace.nspname = expected.schema_name
-      and routine.proname = expected.routine_name
-      and pg_catalog.pg_get_userbyid(routine.proowner) = 'supabase_admin'
-  )
-  or exists (
-    select 1
-    from pg_catalog.pg_proc routine
-    join pg_catalog.pg_namespace namespace
-      on namespace.oid = routine.pronamespace
-    where namespace.nspname = expected.schema_name
-      and routine.proname = expected.routine_name
-      and pg_catalog.pg_get_userbyid(routine.proowner) <> 'supabase_admin'
-  )
+  where routine.oid is null
+    or pg_catalog.pg_get_userbyid(routine.proowner) <> 'supabase_admin'
 )::text
-from expected;
+from expected
+left join pg_catalog.pg_proc routine
+  on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "12|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "35|0" ]]; then
   fail
 fi
-proof_line "migrations_applied=2"
+RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
+  2> "$RAW_DIR/relation-owner-postcondition.log" <<'SQL'
+with expected(relation_name) as (
+  values
+    ('affiliate_private.affiliate_didit_session_registry'),
+    ('affiliate_private.affiliate_didit_certification_sessions'),
+    ('affiliate_private.affiliate_didit_certification_events')
+)
+select count(*)::text || '|' || count(*) filter (
+  where relation.oid is null
+    or relation.relkind not in ('r', 'p')
+    or pg_catalog.pg_get_userbyid(relation.relowner) <> 'supabase_admin'
+)::text
+from expected
+left join pg_catalog.pg_class relation
+  on relation.oid = to_regclass(expected.relation_name);
+SQL
+)" || fail
+if [[ "$RELATION_OWNER_CHECK" != "3|0" ]]; then
+  fail
+fi
+proof_line "migrations_applied=3"
 proof_line "migrations_atomic=true"
 proof_line "migration_routine_owner=supabase_admin"
+proof_line "migration_routines_verified=35"
+proof_line "migration_relation_owner=supabase_admin"
+proof_line "migration_relations_verified=3"
 
 CURRENT_STEP="post-migration sensitive-state verification"
 POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \
