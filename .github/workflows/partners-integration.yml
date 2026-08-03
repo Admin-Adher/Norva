@@ -360,7 +360,7 @@ jobs:
             psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 \
             < ops/hetzner/backup/verify-partners-restore.sql
 
-      - name: Run Partners pgTAP integration tests
+      - name: Run exhaustive Partners pgTAP tests on the fresh database
         run: >-
           supabase test db
           supabase/tests/affiliate_p0.sql
@@ -370,6 +370,12 @@ jobs:
           supabase/tests/affiliate_member_write_rate_limits.sql
           supabase/tests/affiliate_revolut_manual_hybrid.sql
           supabase/tests/revenuecat_transfer.sql
+          --local
+
+      - name: Run the data-compatible physical restore contract
+        run: >-
+          supabase test db
+          supabase/tests/affiliate_restore_compatibility.sql
           --local
 
       - name: Lint public and private Partners routines

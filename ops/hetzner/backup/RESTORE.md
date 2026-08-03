@@ -159,19 +159,25 @@ sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
 ```
 
 Le script lit le dernier base-backup R2, matérialise les migrations, le
-vérificateur et les pgTAP directement depuis l'objet Git demandé, puis restaure
-le tout dans un conteneur unique en `--network none`. Les workers `pg_cron` et
-`pg_net` sont neutralisés dès le démarrage en les retirant des préloads. Le
-script ne désactive pas les lignes restaurées de `cron.job` : sans scheduler,
-elles restent inertes dans ce clone isolé, et leurs nombres total et actif sont
-contrôlés avant et après la répétition. Les deux migrations ciblées sont ensuite
-rejouées dans une transaction unique. Le conteneur et le répertoire temporaire
-sont toujours supprimés par le trap de sortie.
+vérificateur et le pgTAP dédié à la restauration directement depuis l'objet Git
+demandé, puis restaure le tout dans un conteneur unique en `--network none`.
+Ce pgTAP est additif et indépendant du nombre de comptes, demandes et écritures
+déjà présents. Les suites d'intégration exhaustives, qui créent leurs propres
+fixtures et supposent une base vide, restent exécutées séparément par la CI dans
+son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
+le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
+restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
+isolé, et leurs nombres total et actif sont contrôlés avant et après la
+répétition. Les deux migrations ciblées sont ensuite rejouées dans une
+transaction unique. Le conteneur et le répertoire temporaire sont toujours
+supprimés par le trap de sortie.
 
 La seule sortie durable est un `rehearsal-proof.log` privé (mode `0600`) et son
 fichier `.sha256` sous `norva-deploy-backups/`. Ils ne contiennent ni sortie SQL
-brute, ni mot de passe, ni clé R2. Une preuve `result=passed` est nécessaire avant
-toute migration de production.
+brute, ni mot de passe, ni clé R2. Pour le même SHA candidat, le workflow CI
+exhaustif doit être vert et la preuve physique doit contenir `result=passed`
+ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
+de production.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

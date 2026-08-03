@@ -443,6 +443,9 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   const restoreGuide = read('ops/hetzner/backup/RESTORE.md');
   const workflow = read('.github/workflows/partners-integration.yml');
+  const restorePgTap = read(
+    'supabase/tests/affiliate_restore_compatibility.sql',
+  );
 
   assert.match(rehearsal, /if \[\[ "\$\{EUID\}" -ne 0 \]\]/);
   assert.match(rehearsal, /flock -n 9/);
@@ -504,6 +507,8 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     'operator capabilities must precede decision email in the atomic replay',
   );
   assert.match(rehearsal, /verify-partners-restore\.sql/);
+  assert.match(rehearsal, /affiliate_restore_compatibility\.sql/);
+  assert.match(workflow, /affiliate_restore_compatibility\.sql/);
   for (const pgTapFile of [
     'affiliate_p0.sql',
     'affiliate_access_requests.sql',
@@ -513,10 +518,58 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     'affiliate_revolut_manual_hybrid.sql',
     'revenuecat_transfer.sql',
   ]) {
-    assert.match(rehearsal, new RegExp(pgTapFile.replace('.', '\\.')));
+    assert.doesNotMatch(rehearsal, new RegExp(pgTapFile.replace('.', '\\.')));
+    assert.match(workflow, new RegExp(pgTapFile.replace('.', '\\.')));
   }
   assert.match(rehearsal, /grep -Eq '\^\(not ok\|Bail out!\)'/);
   assert.match(rehearsal, /test_transactions_rolled_back=true/);
+  assert.match(
+    rehearsal,
+    /sensitive_partner_state_unchanged_after_migrations=true/,
+  );
+  assert.match(
+    rehearsal,
+    /sensitive_partner_state_unchanged_after_tests=true/,
+  );
+  assert.match(rehearsal, /capture_sensitive_partner_state/);
+  assert.match(rehearsal, /pgtap_profile=physical_restore_compatible_v1/);
+  assert.match(
+    rehearsal,
+    /restore_pgtap_\$\{safe_name\}=passed:\$passed_tests/,
+  );
+  assert.match(rehearsal, /restore_pgtap_files=\$\{#RESTORE_PGTAP_FILES\[@\]\}/);
+  assert.match(rehearsal, /restore_pgtap_transaction_guard=true/);
+  assert.match(
+    workflow,
+    /Run exhaustive Partners pgTAP tests on the fresh database[\s\S]*?revenuecat_transfer\.sql[\s\S]*?Run the data-compatible physical restore contract[\s\S]*?affiliate_restore_compatibility\.sql/,
+  );
+
+  const normalizedRestorePgTap = restorePgTap.trim();
+  assert.match(normalizedRestorePgTap, /^begin;/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(\d+\);/);
+  assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
+  assert.match(normalizedRestorePgTap, /rollback;$/);
+  assert.equal(
+    (restorePgTap.match(
+      /^\s*create extension if not exists pgtap with schema extensions;\s*$/gim,
+    ) || []).length,
+    1,
+    'the rolled-back pgTAP extension is the only allowed restore-test DDL',
+  );
+  const restorePgTapWithoutExtension = restorePgTap.replace(
+    /^\s*create extension if not exists pgtap with schema extensions;\s*$/im,
+    '',
+  );
+  assert.doesNotMatch(
+    restorePgTapWithoutExtension,
+    /^\s*(?:insert|update|delete|merge|copy|truncate|create|alter|drop|commit)\b/im,
+    'the restore contract must not mutate restored business data or schema',
+  );
+  assert.doesNotMatch(
+    restorePgTap,
+    /jsonb_array_length[\s\S]{0,120},\s*3\s*,|example\.invalid|10000000-0000-4000/i,
+    'the restore contract must not rely on blank-database fixture cardinality',
+  );
 
   assert.match(rehearsal, /umask 077/);
   assert.match(rehearsal, /chmod 0600 "\$PROOF_LOG"/);
@@ -532,6 +585,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(restoreGuide, /--network none/);
   assert.match(restoreGuide, /result=passed/);
+  assert.match(restoreGuide, /pgtap_profile=physical_restore_compatible_v1/);
   assert.match(
     workflow,
     /bash -n[\s\S]*?backup-nightly\.sh[\s\S]*?rehearse-partners-physical\.sh/,

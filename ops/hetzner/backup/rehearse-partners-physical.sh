@@ -4,7 +4,7 @@
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
 # PostgreSQL clone, apply the two pending Partners migrations atomically, then
-# run the restore verifier and the complete Partners pgTAP suite.
+# run the restore verifier and the data-compatible Partners restore pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
 # root-owned. The live container is inspected and receives one read-only SHOW
@@ -81,20 +81,17 @@ fi
 readonly MIGRATION_ONE="supabase/migrations/20260803082211_partners_admin_operator_capabilities.sql"
 readonly MIGRATION_TWO="supabase/migrations/20260803084051_partners_access_request_decision_email.sql"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
-readonly -a PGTAP_FILES=(
-  "supabase/tests/affiliate_p0.sql"
-  "supabase/tests/affiliate_access_requests.sql"
-  "supabase/tests/affiliate_dispute_won.sql"
-  "supabase/tests/affiliate_fiscal_payout_onboarding.sql"
-  "supabase/tests/affiliate_member_write_rate_limits.sql"
-  "supabase/tests/affiliate_revolut_manual_hybrid.sql"
-  "supabase/tests/revenuecat_transfer.sql"
+# The exhaustive mutation suites intentionally assume a blank disposable CI
+# database. A physical restore contains real operators, requests and financial
+# history, so it must use cardinality-independent catalogue and data checks.
+readonly -a RESTORE_PGTAP_FILES=(
+  "supabase/tests/affiliate_restore_compatibility.sql"
 )
 readonly -a CANDIDATE_FILES=(
   "$MIGRATION_ONE"
   "$MIGRATION_TWO"
   "$VERIFIER"
-  "${PGTAP_FILES[@]}"
+  "${RESTORE_PGTAP_FILES[@]}"
 )
 
 STAGE_ROOT="${PARTNERS_REHEARSAL_STAGE_DIR:-${BACKUP_STAGE_DIR:-/var/lib/norva/backups}}"
@@ -459,6 +456,19 @@ clone_psql() {
     psql -X -U supabase_admin -d postgres "$@"
 }
 
+capture_sensitive_partner_state() {
+  local state_timeout_seconds="${PARTNERS_REHEARSAL_STATE_TIMEOUT_SECONDS:-600}"
+  if [[ ! "$state_timeout_seconds" =~ ^[1-9][0-9]{1,3}$ ]]; then
+    return 1
+  fi
+  # Hash each row first so future outbox growth cannot materialize every email
+  # payload in one large JSON aggregate. Only the final digest leaves psql.
+  timeout --signal=TERM --kill-after=30s "$state_timeout_seconds" \
+    docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
+      psql -X -A -t -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -c \
+      "select (select count(*) from affiliate_private.affiliate_admin_capabilities)::text || '|' || (select count(*) from affiliate_private.affiliate_access_requests)::text || '|' || (select count(*) from public.cloud_branded_email_outbox where flow in ('partners_access_approved', 'partners_access_declined'))::text || '|' || encode(extensions.digest(coalesce((select string_agg(encode(extensions.digest(to_jsonb(capability_row)::text, 'sha256'), 'hex'), '' order by capability_row.user_id, capability_row.capability) from affiliate_private.affiliate_admin_capabilities capability_row), '') || '|' || coalesce((select string_agg(encode(extensions.digest(to_jsonb(request_row)::text, 'sha256'), 'hex'), '' order by request_row.id) from affiliate_private.affiliate_access_requests request_row), '') || '|' || coalesce((select string_agg(encode(extensions.digest(to_jsonb(outbox_row)::text, 'sha256'), 'hex'), '' order by outbox_row.id) from public.cloud_branded_email_outbox outbox_row where outbox_row.flow in ('partners_access_approved', 'partners_access_declined')), ''), 'sha256'), 'hex');"
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -521,6 +531,13 @@ IFS='|' read -r BASELINE_USERS BASELINE_ACCOUNTS BASELINE_EVENTS \
 proof_line "baseline_auth_users=$BASELINE_USERS"
 proof_line "baseline_partner_accounts=$BASELINE_ACCOUNTS"
 proof_line "baseline_partner_events=$BASELINE_EVENTS"
+
+CURRENT_STEP="sensitive Partners baseline capture"
+BASELINE_SENSITIVE_STATE="$(capture_sensitive_partner_state \
+  2> "$RAW_DIR/baseline-sensitive-state.log")" || fail
+if [[ ! "$BASELINE_SENSITIVE_STATE" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9a-f]{64}$ ]]; then
+  fail
+fi
 
 CURRENT_STEP="pending migration precondition"
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
@@ -600,6 +617,14 @@ proof_line "migrations_applied=2"
 proof_line "migrations_atomic=true"
 proof_line "migration_routine_owner=supabase_admin"
 
+CURRENT_STEP="post-migration sensitive-state verification"
+POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \
+  2> "$RAW_DIR/post-migration-sensitive-state.log")" || fail
+if [[ "$POST_MIGRATION_SENSITIVE_STATE" != "$BASELINE_SENSITIVE_STATE" ]]; then
+  fail
+fi
+proof_line "sensitive_partner_state_unchanged_after_migrations=true"
+
 CURRENT_STEP="Partners restore verifier"
 if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
     docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
@@ -629,6 +654,20 @@ run_pgtap_file() {
   if [[ "$first_statement" != "begin;" || "$last_statement" != "rollback;" ]]; then
     return 1
   fi
+  # pgTAP is deliberately absent from production. Its exact extension command
+  # is allowed inside the rolled-back clone transaction; fixtures and every
+  # other top-level DDL/DML statement are forbidden in this restore profile.
+  if [[ "$(grep -Eic \
+      '^[[:space:]]*create[[:space:]]+' \
+      "$CANDIDATE_DIR/$relative_path" || true)" != "1" ]] \
+    || ! grep -Eiq \
+      '^[[:space:]]*create extension if not exists pgtap with schema extensions;[[:space:]]*$' \
+      "$CANDIDATE_DIR/$relative_path" \
+    || grep -Eiq \
+      '^[[:space:]]*(insert|update|delete|merge|copy|truncate|alter|drop|commit)([[:space:];]|$)' \
+      "$CANDIDATE_DIR/$relative_path"; then
+    return 1
+  fi
   if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
       docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
         psql -X -A -t -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
@@ -648,15 +687,16 @@ run_pgtap_file() {
   if [[ "$passed_tests" != "$expected_tests" ]]; then
     return 1
   fi
-  proof_line "pgtap_${safe_name}=passed:$passed_tests"
+  proof_line "restore_pgtap_${safe_name}=passed:$passed_tests"
 }
 
-for pgtap_file in "${PGTAP_FILES[@]}"; do
-  CURRENT_STEP="pgTAP $(basename "$pgtap_file")"
+proof_line "pgtap_profile=physical_restore_compatible_v1"
+for pgtap_file in "${RESTORE_PGTAP_FILES[@]}"; do
+  CURRENT_STEP="restore-compatible pgTAP $(basename "$pgtap_file")"
   run_pgtap_file "$pgtap_file" || fail
 done
-proof_line "pgtap_files=${#PGTAP_FILES[@]}"
-proof_line "pgtap_transaction_guards=true"
+proof_line "restore_pgtap_files=${#RESTORE_PGTAP_FILES[@]}"
+proof_line "restore_pgtap_transaction_guard=true"
 
 CURRENT_STEP="post-test invariant verification"
 if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
@@ -672,9 +712,15 @@ FINAL_COUNTS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 if [[ "$FINAL_COUNTS" != "$BASELINE_COUNTS|$BASELINE_CRON_COUNTS|0" ]]; then
   fail
 fi
+FINAL_SENSITIVE_STATE="$(capture_sensitive_partner_state \
+  2> "$RAW_DIR/final-sensitive-state.log")" || fail
+if [[ "$FINAL_SENSITIVE_STATE" != "$BASELINE_SENSITIVE_STATE" ]]; then
+  fail
+fi
 proof_line "post_test_restore_verifier=passed"
 proof_line "test_transactions_rolled_back=true"
 proof_line "cron_counts_unchanged=true"
+proof_line "sensitive_partner_state_unchanged_after_tests=true"
 
 CURRENT_STEP="live container non-mutation check"
 LIVE_PRELOADS_AFTER="$(docker exec -u postgres "$DB_CONTAINER" \
