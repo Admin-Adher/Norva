@@ -9,6 +9,10 @@ const migration = fs.readFileSync(path.join(
   root,
   'supabase/migrations/20260722005000_false_permanent_email_suppression_resolution.sql',
 ), 'utf8');
+const providerMigration = fs.readFileSync(path.join(
+  root,
+  'supabase/migrations/20260802235933_provider_suppression_remediation.sql',
+), 'utf8');
 
 test('false permanent-bounce resolution is service-role only and direct writes are closed', () => {
   assert.match(migration, /revoke all on function public\.norva_resolve_false_permanent_email_suppression\([\s\S]*?from public, anon, authenticated/i);
@@ -65,4 +69,102 @@ test('resolution evidence is append-only, address-minimized and fully attributab
   assert.match(migration, /operator_actor text not null/);
   assert.match(migration, /before update or delete on public\.cloud_email_suppression_resolution_audit/);
   assert.match(migration, /raise exception 'email suppression resolution audit is append-only'/);
+});
+
+test('provider remediation is owner-only in a non-exposed schema', () => {
+  assert.match(providerMigration, /create schema if not exists email_private/i);
+  assert.match(
+    providerMigration,
+    /revoke all on schema email_private from public, anon, authenticated, service_role/i,
+  );
+  assert.match(
+    providerMigration,
+    /revoke all on function email_private\.norva_resolve_provider_email_suppression\([\s\S]*?from public, anon, authenticated, service_role/i,
+  );
+  assert.doesNotMatch(
+    providerMigration,
+    /grant execute on function email_private\.norva_resolve_provider_email_suppression/i,
+  );
+  assert.doesNotMatch(providerMigration, /notify pgrst/i);
+});
+
+test('provider remediation requires the current confirmed usable Auth address', () => {
+  assert.match(providerMigration, /v_user\.email <> v_email/);
+  assert.match(providerMigration, /v_user\.email_confirmed_at is null/);
+  assert.match(providerMigration, /v_user\.deleted_at is not null/);
+  assert.match(providerMigration, /v_user\.banned_until[\s\S]*v_now/);
+  assert.match(providerMigration, /from auth\.users u[\s\S]*where u\.id = p_user_id[\s\S]*for share/);
+  assert.match(providerMigration, /where s\.email = v_email[\s\S]*for update/);
+});
+
+test('provider remediation remains fail-closed for complaints and non-provider rows', () => {
+  assert.match(providerMigration, /v_suppression\.complaint_seen_at is not null/);
+  assert.match(providerMigration, /v_suppression\.provider_suppression_seen_at is null/);
+  assert.match(providerMigration, /v_source_event\.event_type <> 'email\.suppressed'/);
+  assert.match(
+    providerMigration,
+    /v_source_event\.occurred_at is distinct from v_suppression\.provider_suppression_seen_at/,
+  );
+});
+
+test('provider remediation consumes one fresh post-suppression delivered message', () => {
+  assert.match(providerMigration, /e\.event_type = 'email\.delivered'/);
+  assert.match(providerMigration, /v_email = any\(e\.to_emails\)/);
+  assert.match(providerMigration, /@norva\\\.tv/);
+  assert.match(providerMigration, /v_delivery_event\.provider_email_id = v_suppression\.source_email_id/);
+  assert.match(
+    providerMigration,
+    /v_delivery_event\.occurred_at <= greatest\([\s\S]*provider_suppression_seen_at[\s\S]*last_seen_at/,
+  );
+  assert.match(providerMigration, /v_delivery_event\.received_at <= greatest\(/);
+  assert.match(providerMigration, /v_now - interval '24 hours'/);
+  assert.match(providerMigration, /v_now \+ interval '5 minutes'/);
+  assert.match(providerMigration, /a newer hard delivery event prevents provider remediation/);
+});
+
+test('provider remediation is audited, single-use and concurrency-safe', () => {
+  assert.match(providerMigration, /provider_post_remediation_delivery/);
+  assert.match(providerMigration, /resend_delivery:/);
+  assert.match(
+    providerMigration,
+    /insert into public\.cloud_email_suppression_resolution_audit[\s\S]*update public\.cloud_email_suppressions/,
+  );
+  assert.match(providerMigration, /get diagnostics v_updated = row_count/);
+  assert.match(providerMigration, /v_updated <> 1/);
+  assert.match(providerMigration, /using errcode = '40001'/);
+  assert.doesNotMatch(providerMigration, /cloud_marketing_email_preferences/);
+  assert.doesNotMatch(providerMigration, /marketing_email_opt_in/);
+});
+
+test('append-only retention is private, age-bounded and keeps public prune semantics', () => {
+  assert.match(
+    providerMigration,
+    /current_setting\('norva\.email_suppression_audit_retention', true\) = 'v1'/,
+  );
+  assert.match(providerMigration, /tg_op = 'DELETE'/);
+  assert.match(providerMigration, /old\.resolved_at < clock_timestamp\(\) - interval '400 days'/);
+  assert.match(
+    providerMigration,
+    /email_private\.norva_prune_email_suppression_resolution_audit\(\)[\s\S]*set_config\('norva\.email_suppression_audit_retention', 'v1', true\)/,
+  );
+  assert.match(
+    providerMigration,
+    /set_config\('norva\.email_suppression_audit_retention', '', true\)/,
+  );
+  assert.match(
+    providerMigration,
+    /revoke all on function email_private\.norva_prune_email_suppression_resolution_audit\(\)[\s\S]*from public, anon, authenticated, service_role/i,
+  );
+  assert.match(
+    providerMigration,
+    /perform email_private\.norva_prune_email_suppression_resolution_audit\(\)/,
+  );
+  assert.match(
+    providerMigration,
+    /grant execute on function public\.norva_prune_resend_delivery_events\(\)[\s\S]*to service_role/i,
+  );
+  assert.match(
+    providerMigration,
+    /revoke insert, update, delete, truncate[\s\S]*cloud_email_suppression_resolution_audit[\s\S]*from service_role/i,
+  );
 });

@@ -168,7 +168,8 @@ API](https://resend.com/docs/api-reference/contacts/update-contact), and
 There is intentionally no generic **Unsuppress** button. A complaint is an
 explicit recipient rejection and remains blocked. A Resend/provider
 `email.suppressed` event also remains blocked until the provider-side cause is
-remediated. Neither can be cleared through the recovery RPC.
+remediated. Neither can be cleared through the false-bounce recovery RPC; the
+separate owner-only provider procedure is documented below.
 
 The only operator-recoverable case is a demonstrably false-positive
 `email.bounced` event whose sanitized diagnostic type is exactly `Permanent`.
@@ -237,3 +238,100 @@ and a newly due contact-projection revision. Do not retry an ambiguous operator
 call: first query the audit by `source_event_id`. If a fresh delivery event
 arrives after resolution, investigate that new event instead of resolving it
 automatically.
+
+## Provider-suppression remediation
+
+This is an exceptional operator procedure, not an **Unsuppress** feature. Use it
+only after the current recipient explicitly requested transactional mail again,
+the provider-side suppression was removed in Resend, and one new message reached
+the `email.delivered` state. A provider `sent` state is not sufficient. Never use
+this procedure to restore marketing consent, and never use it when Norva has
+observed an `email.complained` event for the address.
+
+The procedure is intentionally absent from PostgREST, Edge Functions and Admin.
+`email_private.norva_resolve_provider_email_suppression` has no `USAGE` or
+`EXECUTE` grant for `anon`, `authenticated` or `service_role`; invoke it only as
+the database migration owner (`supabase_admin` in production) through the
+restricted Hetzner shell. Do not add a public wrapper.
+
+Required sequence:
+
+1. Record the recipient's explicit request in the restricted support case and
+   investigate the original suppression. If the recipient did not request the
+   message, stop.
+2. Remove the address from Resend's suppression list.
+3. Trigger exactly one transactional authentication message through the normal
+   Norva flow. Do not send a marketing canary.
+4. Wait for the signed webhook to persist a fresh `email.delivered` event, then
+   cross-check the same Resend email UUID in the Resend dashboard. The event's
+   `occurred_at` and `received_at` must both be after the active suppression and
+   no more than 24 hours old.
+5. Inspect the database before mutating anything:
+
+```sql
+select s.source_event_id, s.source_email_id, s.active,
+       s.complaint_seen_at, s.provider_suppression_seen_at, s.last_seen_at
+from public.cloud_email_suppressions s
+where s.email = lower(btrim('<current-address>'));
+
+select e.event_id, e.provider_email_id, e.event_type,
+       e.occurred_at, e.received_at, e.from_email
+from public.cloud_email_delivery_events e
+where e.provider_email_id = '<fresh-delivered-resend-email-uuid>'
+  and e.event_type = 'email.delivered'
+  and lower(btrim('<current-address>')) = any(e.to_emails);
+```
+
+Expected preflight: one active row; `complaint_seen_at IS NULL`;
+`provider_suppression_seen_at IS NOT NULL`; an exact current
+`email.suppressed` source event; and one fresh delivery from a root `@norva.tv`
+sender to the current confirmed Auth address.
+
+6. From the restricted host, call the private function in a short psql session:
+
+```sql
+select email_private.norva_resolve_provider_email_suppression(
+  '<current-auth-user-uuid>'::uuid,
+  '<current-address>',
+  '<fresh-delivered-resend-email-uuid>',
+  'Recipient explicitly requested transactional mail after provider remediation.',
+  'ops:<operator-name>'
+);
+```
+
+The function locks and revalidates the current suppression, derives the unique
+`resend_delivery:<uuid>` evidence reference, inserts the append-only audit row,
+then resolves the suppression in the same transaction. Address and raw Auth UUID
+are never copied into the audit. A repeated/concurrent call serializes on the
+suppression row and cannot create a second decision. Any later permanent bounce,
+complaint or provider suppression reactivates the block automatically.
+
+Post-checks are the same as for false-bounce recovery above. Additionally verify
+that `verification_method = 'provider_post_remediation_delivery'` and the
+reference matches the cross-checked Resend email UUID. The user's historical
+marketing preference and opt-in ledger must remain byte-for-byte unchanged. If
+the operator call has an ambiguous result, query the audit by the suppression
+source event before any retry. Keep the local suppression active whenever
+provider evidence, chronology, Auth identity or explicit recipient intent is
+uncertain.
+
+## Suppression-audit retention
+
+The resolution ledger remains append-only during its 400-day evidence window.
+Every direct `UPDATE` or `DELETE`, including one executed by an API role or an
+operator, is rejected by the table trigger. `service_role` has `SELECT` only on
+the audit and cannot execute the private retention helper.
+
+The existing service-role-executable
+`public.norva_prune_resend_delivery_events()` is the sole scheduled entrypoint.
+It preserves the established 90/180/400-day delivery scrubs, then calls
+`email_private.norva_prune_email_suppression_resolution_audit()` as its owner.
+That helper sets a transaction-local internal context, deletes only rows whose
+`resolved_at` is strictly older than 400 days, and clears the context before it
+returns or rethrows. The trigger still rejects every `UPDATE`, every younger
+row, and every `DELETE` outside that private call.
+
+After a retention cycle, verify that delivery-event/status PII older than 90
+days was scrubbed, audit rows older than 400 days were removed, newer decisions
+remain, and the prune completed without rollback. Never grant table `DELETE` or
+private-helper `EXECUTE` to `service_role` to bypass this invariant.
