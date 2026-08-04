@@ -519,8 +519,7 @@ begin
     'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)',
     'affiliate_private.admin_partners_revolut_late_completion_review(text,text,text,text)',
     'affiliate_private.admin_partners_revolut_late_completion_decide(text,text,text,text)',
-    'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)',
-    'affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)'
+    'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)'
   ]
   loop
     if position(
@@ -899,12 +898,15 @@ begin
   v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)'::regprocedure
   );
-  if position('partners_require_aal2' in lower(v_definition)) = 0
+  if position(
+      'partners_require_capability(''risk'')' in lower(v_definition)
+    ) = 0
+    or position('partners_require_aal2' in lower(v_definition)) = 0
     or position('p_evidence_sha256' in lower(v_definition)) = 0
     or position('kyc_human_review_resolved' in lower(v_definition)) = 0
   then
     raise exception
-      'restored KYC human-review decision lost AAL2, evidence or audit';
+      'restored KYC human-review decision lost Risk, AAL2, evidence or audit';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
