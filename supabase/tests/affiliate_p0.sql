@@ -1157,6 +1157,12 @@ begin
   );
   perform public.admin_partners_control(
     'set_flag',
+    'partners_earnings_enabled',
+    true,
+    'P0 database integration test commission accrual activation.'
+  );
+  perform public.admin_partners_control(
+    'set_flag',
     'partners_shadow_mode',
     true,
     'P0 database integration shadow worker activation.'
