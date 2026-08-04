@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 8,
   "status": "draft",
   "release_key": "partners-pilot-draft",
   "candidate_commit_sha": null,
@@ -94,6 +94,9 @@
   "feature_flags": {
     "partners_enabled": false,
     "partners_invite_only": false,
+    "partners_cash_pilot_allowlist_only": true,
+    "partners_earnings_enabled": false,
+    "partners_credit_redemptions_enabled": false,
     "partners_shadow_mode": false,
     "partners_payouts_live": false,
     "partners_tv_relay_enabled": false,

@@ -606,7 +606,7 @@ function validateEvidence(evidence, options = {}) {
   assert(evidence && typeof evidence === 'object', 'evidence must be an object');
   assertNoPersonalData(evidence);
   assertExactKeys(evidence, TOP_LEVEL_KEYS, 'evidence');
-  assert(evidence.schema_version === 6, 'schema_version must equal 6');
+  assert(evidence.schema_version === 8, 'schema_version must equal 8');
   assert(
     ['draft', 'pilot_ready', 'generalization_ready'].includes(evidence.status),
     'status must be draft, pilot_ready or generalization_ready',
@@ -959,6 +959,9 @@ function validateEvidence(evidence, options = {}) {
   assertExactKeys(evidence.feature_flags, [
     'partners_enabled',
     'partners_invite_only',
+    'partners_cash_pilot_allowlist_only',
+    'partners_earnings_enabled',
+    'partners_credit_redemptions_enabled',
     'partners_shadow_mode',
     'partners_payouts_live',
     'partners_tv_relay_enabled',
@@ -1412,8 +1415,14 @@ function pilotReadinessBlockers(evidence, options = {}) {
 
   require(evidence.feature_flags.partners_enabled === true,
     'partners_enabled_not_enabled');
-  require(evidence.feature_flags.partners_invite_only === true,
-    'partners_invite_only_not_enabled');
+  require(evidence.feature_flags.partners_invite_only === false,
+    'partners_invite_only_must_remain_false');
+  require(evidence.feature_flags.partners_cash_pilot_allowlist_only === true,
+    'partners_cash_pilot_allowlist_not_enabled');
+  require(evidence.feature_flags.partners_earnings_enabled === true,
+    'partners_earnings_not_enabled');
+  require(evidence.feature_flags.partners_credit_redemptions_enabled === true,
+    'partners_credit_redemptions_not_enabled');
   require(evidence.feature_flags.partners_shadow_mode === true,
     'partners_shadow_mode_not_enabled');
   require(evidence.feature_flags.partners_payouts_live === false,

@@ -59,6 +59,7 @@
 
     <h2>1. Information we collect</h2>
     <table>
+      <tbody>
       <tr><th>Category</th><th>Examples</th><th>Why</th></tr>
       <tr><td>Account</td><td>Email address, display name, password (stored hashed by our auth provider)</td><td>Create and secure your account, sign you in</td></tr>
       <tr><td>Media source settings</td><td>Provider host/username/password (Xtream), playlist (M3U) and TV-guide (EPG) URLs you choose to add</td><td>Connect the Service to the source you are authorized to use</td></tr>
@@ -66,12 +67,13 @@
       <tr><td>Devices &amp; pairing</td><td>Trusted-device records, device tokens, pairing codes</td><td>Let your TV and phone share one account and sync playback</td></tr>
       <tr><td>Sign-up context</td><td>Whether sign-up was completed in a web browser or the Android mobile app, the Norva journey used (account, subscription or TV pairing), sign-in method, and an approximate country/region/city supplied by Cloudflare at the network edge and handed on by the Norva client. This is an indicative analytics signal, not proof of residence. Norva does not retain the raw IP address in this record.</td><td>Understand onboarding, provide support and improve the multi-device experience</td></tr>
       <tr><td>Entitlement / subscription</td><td>Subscription status and the store/provider that granted it (e.g. Google Play, Apple, Stripe)</td><td>Verify Norva access; we do <em>not</em> store card numbers</td></tr>
-      <tr id="partners"><td>Norva Partners</td><td>Partner account status, opaque referral code and claim, pseudonymized attribution, accepted programme terms, and the minimum normalized identity result needed to confirm age, country and legal capacity. Norva does not store identity-document images, biometric captures or the full KYC provider response.</td><td>Operate the individual referral programme, prevent abuse and meet eligibility obligations</td></tr>
-      <tr><td>Partner finance &amp; payout</td><td>Hashed transaction references, exact normalized amount paid, tax, currency/exponent, commission and reversal ledger, payout status, tax profile fields required for the applicable country, and tokenized payout-provider references. The Partners ledger does not retain a raw Google Play purchase token, buyer address, full provider payload, bank credentials or card number.</td><td>Calculate, mature, reconcile and pay valid individual commissions; handle refunds, chargebacks, tax and accounting duties</td></tr>
+      <tr id="partners"><td>Norva Partners membership, referral &amp; access credit</td><td>Partner membership status, accepted programme terms, opaque referral code and claim, pseudonymized attribution, commission and counter-entry ledger, server-issued access-credit quote, redemption and Norva access-grant status. These core records do not require or contain a Didit identity result.</td><td>Join the programme, attribute valid referrals, calculate and mature commissions, prevent abuse and convert available commission into Norva access</td></tr>
+      <tr><td>Optional Partner cash payout</td><td>Only after Norva's server confirms that your account is in the current cash cohort and you choose a cash transfer: your explicit payout country; the minimum normalized Didit identity, age, country and capacity result; hashed transaction references; exact amount paid, tax and currency/exponent; payout status; required tax-profile fields; and tokenized payout-provider references. An account outside that cohort is not asked for payout country, KYC, tax or banking information. Norva does not store identity-document images, biometric captures, a full KYC response, raw Google Play purchase token, buyer address, bank credentials or card number.</td><td>Assess cash-payout readiness, reconcile and pay valid individual commissions, and meet applicable tax, accounting and transfer obligations</td></tr>
       <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
       <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
       <tr><td>Analytics &amp; advertising (web, with consent)</td><td>Cookies and identifiers set by Google Analytics, Google Ads and Meta Pixel when you accept them</td><td>Measure how the Service is used and how our ads perform</td></tr>
       <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
+      </tbody>
     </table>
 
     <h2>2. How we use information</h2>
@@ -80,7 +82,8 @@
       <li>To connect the Service to the compatible source you choose to add.</li>
       <li>To sync playback progress, history and preferences across your devices.</li>
       <li>To verify your Norva access/subscription status.</li>
-      <li>When you choose to join Norva Partners, to verify individual eligibility, attribute valid referrals, calculate and reconcile commissions, prevent fraud and administer payouts.</li>
+      <li>When you choose to join Norva Partners, to create and operate your membership and link, attribute valid referrals, calculate and mature commissions, prevent fraud and let you convert available commission into Norva access.</li>
+      <li>Only after the server confirms cash-pilot eligibility and you choose a cash payout, to collect your explicit payout country, verify the individual payout requirements, collect the applicable tax profile, validate a supported corridor and administer the transfer.</li>
       <li>To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
       <li>To diagnose problems and improve reliability.</li>
       <li>With your consent, to measure audience and the performance of our advertising (web app only).</li>
@@ -93,25 +96,36 @@
       subscription and the optional Partners agreement; compliance with tax, accounting and other
       applicable legal obligations; and our legitimate interests in service security, fraud
       prevention, support and reliability, balanced against your rights. Optional analytics and
-      advertising use consent. For Didit's document, selfie, liveness and face-match verification,
-      Norva requests separate explicit consent before redirecting you to the hosted capture. You may
-      stop before capture or withdraw that consent from the Partners page; Support remains available
-      if the in-app control cannot be used. Withdrawal blocks any new biometric verification and may
-      make the optional Partners programme unavailable, but does not affect your ordinary Norva
-      subscription or the lawfulness of earlier processing. It does not itself erase an already
-      completed verification or records that must be kept for a legal claim, tax, accounting or
-      anti-fraud obligation; those records remain subject to the retention limits in section 5.</p>
+      advertising use consent. Didit's document, selfie, liveness and face-match verification is used
+      only if you choose the optional cash-payout path. Norva requests separate explicit consent before
+      redirecting you to the hosted capture. You may stop before capture or withdraw that consent from
+      the Partners page; Support remains available if the in-app control cannot be used. Withdrawal
+      blocks any new biometric verification and all cash transfers while consent remains withdrawn.
+      It never ends Partners membership, deactivates a referral link,
+      cancels attribution, stops commission accrual or maturation, or prevents conversion of available
+      commission into Norva access. It also does not affect your ordinary Norva subscription or the
+      lawfulness of earlier processing. Withdrawal does not itself erase an already completed
+      verification or records that must be kept for a legal claim, tax, accounting or anti-fraud
+      obligation; those records remain subject to the retention limits in section 5.</p>
     <p>Didit uses automated systems to assess document integrity, liveness, face match and fraud
       signals. Norva then applies the programme's configured age, country, legal-capacity and account
-      rules to the normalized result. An unsuccessful result can prevent activation of the optional
-      Partners account and referral link, but does not affect ordinary access to Norva. From the
-      Partners page you can contest an unsuccessful result and request a human review. A Risk
+      rules to the normalized result. An unsuccessful result can prevent cash-payout readiness and a
+      transfer, but it cannot prevent Partners membership, a referral link, attribution, commission
+      maturation or a Norva access-credit conversion and does not affect ordinary access to Norva.
+      From the Partners page you can contest an unsuccessful payout-verification result and request a human review. A Risk
       operator reviews the relevant result in Didit's secured console through an access that requires
       MFA, authorization and an audited justification; the Norva Admin page does not expose identity
       documents, biometric captures or the raw provider response. The review may uphold the result or
       make a fresh verification available. This description explains the actual workflow and does not
       predetermine whether any particular data-protection-law provision on solely automated decisions
       applies to an individual case.</p>
+    <p>An access-credit redemption records an irreversible conversion of available commission into a
+      Norva-only access entitlement at the server-issued quote. The entitlement cannot be transferred,
+      used to pay another person or redeemed for cash, and Norva does not present it as a bank/payment
+      account or general-purpose payment instrument. This factual description does not predetermine
+      its legal classification under applicable law. The ledger also records any later refund,
+      chargeback, reversal, duplicate correction or recovery due so that Norva does not silently alter
+      the financial history. Access-credit records contain no biometric data or payout destination.</p>
 
     <h2 id="cookies">3. Cookies, analytics &amp; advertising</h2>
     <p>The first-party sign-up context described in section 1 is an operational account record,
@@ -149,7 +163,7 @@
         authentication messages, support communications and Norva Partners access-review
         decisions. Resend receives the destination email address, the minimum message content and
         delivery metadata needed to send and troubleshoot those messages.</li>
-      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification for Norva Partners, only when that programme and provider are enabled for your jurisdiction. Didit acts as Norva's processor for the checks Norva configures and also describes itself as an independent controller for limited security, abuse-prevention, legal-compliance, audit-logging and legal-claims purposes. Before redirecting you, Norva links the <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Verification Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit End User Terms for Identity Verification</a> and requests explicit confirmation for document, selfie, liveness and face-match capture. Verification data may be processed outside the country where the flow starts; where required, Didit states that it uses safeguards such as adequacy decisions, standard contractual clauses or another recognized transfer mechanism. Norva retains only the minimum normalized outcome and provider reference needed for audit and does not copy identity-document images or biometric captures into the Norva database.</li>
+      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification only when a Norva Partner chooses a cash payout and that payout-verification provider is enabled for the jurisdiction. Didit is not used to join, create a referral link, attribute referrals, accrue or mature commission, or convert available commission into Norva access. Didit acts as Norva's processor for the checks Norva configures and also describes itself as an independent controller for limited security, abuse-prevention, legal-compliance, audit-logging and legal-claims purposes. Before redirecting you, Norva links the <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Verification Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit End User Terms for Identity Verification</a> and requests explicit confirmation for document, selfie, liveness and face-match capture. Verification data may be processed outside the country where the flow starts; where required, Didit states that it uses safeguards such as adequacy decisions, standard contractual clauses or another recognized transfer mechanism. Norva retains only the minimum normalized outcome and provider reference needed for payout audit and does not copy identity-document images or biometric captures into the Norva database.</li>
       <li><strong>Telegram</strong> — delivery of operational new-sign-up notifications to a
         restricted administrator chat. These notifications may include a display name, masked email,
         sign-in method, whether sign-up used the web browser or Android mobile app, the Norva journey
@@ -205,10 +219,10 @@
       deletion period and restricted chat membership, but does not claim that a delivered message
       is erased by the account-deletion flow.</p>
     <p>Partners referral claims expire if they are not consumed within the published attribution
-      window. Attribution, commission, reversal and payout records may be retained for the period
+      window. Attribution, commission, access-credit redemption, grant, reversal and payout records may be retained for the period
       required by tax, accounting, anti-fraud and dispute-resolution law even after a Norva account
-      is closed. KYC provider references and normalized outcomes are retained only for as long as
-      necessary for those obligations. Identity-document images and biometric captures are not
+      is closed. For users who choose a cash payout, KYC provider references and normalized outcomes
+      are retained only for as long as necessary for those obligations. Identity-document images and biometric captures are not
       copied into Norva's database. Once Norva has safely committed an accepted terminal Didit
       verification, it stores only the normalized minimum needed for eligibility and audit, then
       requests deletion of the hosted verification session; a deletion failure is retried and blocks
@@ -252,6 +266,9 @@
       <strong>270 rue de Vaugirard, 75015 Paris, France</strong>.<br>
       Email: <a href="mailto:support@norva.tv">support@norva.tv</a><br>
       Full legal notice: <a href="/mentions-legales.html">mentions légales</a>.</p>
+    <p>Norva has not officially designated a Data Protection Officer (DPO). Privacy and data-subject
+      requests may be sent to the contact above; this statement does not limit any right to contact a
+      competent supervisory authority.</p>
     <p>If you are in the EEA/UK, you may lodge a complaint with your local data-protection authority.
       In France this is the <a href="https://www.cnil.fr" target="_blank" rel="noopener">CNIL</a>.</p>
 

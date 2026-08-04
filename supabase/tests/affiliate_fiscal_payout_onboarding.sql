@@ -804,10 +804,40 @@ select
 from affiliate_private.affiliate_program_versions program
 where program.version_key = 'fiscal-payout-pgtap-v1';
 
+insert into affiliate_private.affiliate_kyc_attempt_policies (
+  country_policy_id,
+  max_attempts,
+  window_seconds,
+  cooldown_seconds,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+select
+  policy.id,
+  3,
+  86400,
+  60,
+  'active',
+  repeat('a', 64),
+  'Enable the guarded KYC cash-eligibility pgTAP fixture.'
+from affiliate_private.affiliate_country_policies policy
+join affiliate_private.affiliate_program_versions program
+  on program.id = policy.program_version_id
+where program.version_key = 'fiscal-payout-pgtap-v1'
+  and policy.country_code = 'US';
+
 insert into affiliate_private.affiliate_accounts (
   user_id,
   user_pseudonym,
   account_type,
+  member_status,
+  member_program_version_id,
+  member_terms_version_accepted,
+  member_terms_accepted_at,
+  member_disclosure_version_accepted,
+  member_disclosure_accepted_at,
+  member_joined_at,
   status,
   program_version_id,
   country_policy_id,
@@ -827,6 +857,13 @@ select
   '22000000-0000-4000-8000-000000000001',
   repeat('b', 64),
   'individual',
+  'active',
+  program.id,
+  program.terms_version,
+  now() - interval '2 hours',
+  program.disclosure_version,
+  now() - interval '2 hours',
+  now() - interval '2 hours',
   'pending_verification',
   program.id,
   policy.id,
@@ -899,12 +936,19 @@ insert into affiliate_private.affiliate_pilot_allowlist (
   country_code,
   added_by_pseudonym
 )
-values (
-  '22000000-0000-4000-8000-000000000004',
-  'active',
-  'US',
-  repeat('4', 64)
-);
+values
+  (
+    '22000000-0000-4000-8000-000000000001',
+    'active',
+    'US',
+    repeat('1', 64)
+  ),
+  (
+    '22000000-0000-4000-8000-000000000004',
+    'active',
+    'US',
+    repeat('4', 64)
+  );
 
 -- Activation is intentionally deferred until Didit deletion is proven. These
 -- two already-verified fixture accounts therefore need the same canonical,
@@ -1151,6 +1195,7 @@ begin
   perform set_config('norva.partners_approval_control', 'approve', true);
   foreach v_gate in array array[
     'legal_and_tax_approved',
+    'membership_privacy_approved',
     'privacy_approved',
     'individual_verification_coverage_confirmed',
     'individual_payout_coverage_confirmed',
@@ -1164,6 +1209,11 @@ begin
       when 'legal_and_tax_approved' then jsonb_build_object(
         'legal_tax_review', repeat('3', 64),
         'partners_terms', repeat('4', 64)
+      )
+      when 'membership_privacy_approved' then jsonb_build_object(
+        'gdpr_self_assessment', repeat('6', 64),
+        'privacy_notice', repeat('7', 64),
+        'records_of_processing', repeat('8', 64)
       )
       when 'privacy_approved' then jsonb_build_object(
         'dpia', repeat('5', 64),
@@ -1269,6 +1319,7 @@ begin
     updated_at = now()
   where gate.gate_key = any (array[
     'legal_and_tax_approved',
+    'membership_privacy_approved',
     'privacy_approved',
     'individual_verification_coverage_confirmed',
     'individual_payout_coverage_confirmed',
@@ -1400,6 +1451,13 @@ insert into affiliate_private.affiliate_accounts (
   user_id,
   user_pseudonym,
   account_type,
+  member_status,
+  member_program_version_id,
+  member_terms_version_accepted,
+  member_terms_accepted_at,
+  member_disclosure_version_accepted,
+  member_disclosure_accepted_at,
+  member_joined_at,
   status,
   program_version_id,
   country_policy_id,
@@ -1419,6 +1477,13 @@ select
   '22000000-0000-4000-8000-000000000005',
   repeat('5', 64),
   'individual',
+  'active',
+  program.id,
+  program.terms_version,
+  now() - interval '2 hours',
+  program.disclosure_version,
+  now() - interval '2 hours',
+  now() - interval '2 hours',
   'pending_verification',
   program.id,
   policy.id,
@@ -1748,6 +1813,13 @@ insert into affiliate_private.affiliate_accounts (
   user_id,
   user_pseudonym,
   account_type,
+  member_status,
+  member_program_version_id,
+  member_terms_version_accepted,
+  member_terms_accepted_at,
+  member_disclosure_version_accepted,
+  member_disclosure_accepted_at,
+  member_joined_at,
   status,
   program_version_id,
   country_policy_id,
@@ -1769,6 +1841,13 @@ select
   'individual',
   'active',
   program.id,
+  program.terms_version,
+  now() - interval '2 hours',
+  program.disclosure_version,
+  now() - interval '2 hours',
+  now() - interval '2 hours',
+  'active',
+  program.id,
   policy.id,
   'US',
   'verified',
@@ -1786,6 +1865,19 @@ join affiliate_private.affiliate_country_policies policy
   on policy.program_version_id = program.id
   and policy.country_code = 'US'
 where program.version_key = 'fiscal-payout-pgtap-v1';
+
+insert into affiliate_private.affiliate_pilot_allowlist (
+  user_id,
+  status,
+  country_code,
+  added_by_pseudonym
+)
+values (
+  '22000000-0000-4000-8000-000000000003',
+  'active',
+  'US',
+  repeat('3', 64)
+);
 
 select set_config(
   'test.missing_fiscal_partner_key',

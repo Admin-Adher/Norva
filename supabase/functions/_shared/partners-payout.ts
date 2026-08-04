@@ -29,6 +29,8 @@ const PROFILE_STATUSES = new Set([
   "verification_required",
 ]);
 const READINESS_REASONS = new Set([
+  "cash_pilot_not_allowed",
+  "payout_country_required",
   "account_not_active",
   "kyc_not_verified",
   "fiscal_profile_required",
@@ -87,14 +89,30 @@ export function sanitizePayoutProfileGet(
     (
       readiness.reason !== null ||
       !readiness.payouts_live ||
+      account.country_code === null ||
       account.status !== "active" ||
       fiscal?.status !== "verified" ||
+      fiscal.country_code !== account.country_code ||
       profile?.status !== "active"
     )
   ) {
     throw new PayoutContractError();
   }
   if (!readiness.ready && readiness.reason === null) {
+    throw new PayoutContractError();
+  }
+  if (
+    readiness.reason === "payout_country_required" &&
+    account.country_code !== null
+  ) {
+    throw new PayoutContractError();
+  }
+  if (
+    account.country_code === null &&
+    !["cash_pilot_not_allowed", "payout_country_required"].includes(
+      String(readiness.reason),
+    )
+  ) {
     throw new PayoutContractError();
   }
   if (
@@ -105,7 +123,8 @@ export function sanitizePayoutProfileGet(
   }
   if (
     readiness.reason === "fiscal_profile_required" &&
-    fiscal?.status === "verified"
+    fiscal?.status === "verified" &&
+    fiscal.country_code === account.country_code
   ) {
     throw new PayoutContractError();
   }
@@ -126,17 +145,26 @@ export function sanitizePayoutProfileGet(
   };
 }
 
-function sanitizeAccount(value: unknown): { id: string; status: string } {
-  const account = exactRecord(value, ["id", "status"]);
+function sanitizeAccount(
+  value: unknown,
+): { id: string; status: string; country_code: string | null } {
+  const account = exactRecord(value, ["id", "status", "country_code"]);
   if (
     typeof account.id !== "string" ||
     !PUBLIC_ACCOUNT_PATTERN.test(account.id) ||
     typeof account.status !== "string" ||
-    !ACCOUNT_STATUSES.has(account.status)
+    !ACCOUNT_STATUSES.has(account.status) ||
+    (account.country_code !== null &&
+      (typeof account.country_code !== "string" ||
+        !COUNTRY_PATTERN.test(account.country_code)))
   ) {
     throw new PayoutContractError();
   }
-  return { id: account.id, status: account.status };
+  return {
+    id: account.id,
+    status: account.status,
+    country_code: account.country_code as string | null,
+  };
 }
 
 function sanitizeFiscal(

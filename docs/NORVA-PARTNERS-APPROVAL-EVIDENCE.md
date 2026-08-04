@@ -1,18 +1,29 @@
-# Norva Partners — approbations Legal, Privacy et Country Policy
+# Norva Partners — approbations Legal, Membership Privacy, Cash Privacy et Country Policy
 
 Ce document définit le paquet privé qui doit exister avant de lever les gates
-`legal_and_tax_approved`, `privacy_approved` et `country_policy_approved`.
+`legal_and_tax_approved`, `membership_privacy_approved`, `privacy_approved` et
+`country_policy_approved`.
 Le validateur ne signe rien, ne contacte aucun fournisseur et ne modifie ni
-PostgreSQL, ni les flags, ni les gates. Pour le pilote France sur invitation,
-la décision Privacy repose sur une auto-évaluation RGPD interne documentée et
-visée par le responsable interne désigné dans le dossier privé. Ce rôle
+PostgreSQL, ni les flags, ni les gates. L'adhésion publique possède sa décision
+Privacy propre, bornée aux données de compte, au referral et au ledger. Le
+pilote cash France, limité à une allowlist de 20 à 50 comptes, conserve une
+décision Privacy distincte avec AIPD Didit obligatoire. Les deux décisions
+sont visées par le responsable interne désigné dans le dossier privé. Ce rôle
 opérationnel n'est pas une désignation officielle de DPO.
 
-Le contrat courant est `schema_version=3` et ne peut autoriser que le pilote
-France `invite_only`, limité à 50 participants. Il porte explicitement
-`public_release_eligible=false`. Toute ouverture publique ou tout autre pays
-exige un nouveau contrat, une nouvelle évaluation et les contrôles de
-généralisation décrits dans `NORVA-PARTNERS-RELEASE-EVIDENCE.md`.
+Le paquet distingue deux couches. L'adhésion, le lien, l'attribution,
+l'accumulation et la maturation des commissions, ainsi que leur conversion en
+accès Norva, ne requièrent ni KYC/Didit, ni profil fiscal, ni corridor de
+virement. Les preuves Didit, fiscales et corridor ne conditionnent que la
+capacité optionnelle de demander et recevoir un virement cash. Aucun validateur
+ou gate de payout ne doit être réutilisé pour bloquer la couche sans KYC.
+
+Le contrat courant est `schema_version=4`. Il autorise l'adhésion publique tout
+en maintenant les virements cash France en `allowlist_only`, avec un plafond de
+50 participants et `cash_public_release_eligible=false`. Étendre le cash à un
+autre pays ou au-delà de cette cohorte exige un nouveau contrat, une nouvelle
+évaluation et les contrôles de généralisation décrits dans
+`NORVA-PARTNERS-RELEASE-EVIDENCE.md`.
 
 ## Règle de conservation
 
@@ -35,22 +46,30 @@ qui seraient devinables par force brute.
 
 ## Socle commun à figer
 
-Le paquet lie les trois décisions au même :
+Le paquet lie les quatre décisions au même :
 
 - commit candidat et déploiement cible, identifié sans ambiguïté comme
   `preproduction` ou `production` ; le mode `sandbox` reste réservé aux preuves
   fournisseur et n'est jamais un environnement de déploiement Norva ;
-- périmètre `invite_only`, France uniquement, 50 participants au maximum et
-  inéligibilité explicite à une ouverture publique ;
+- adhésion publique sans KYC et, séparément, virements cash
+  `allowlist_only`, France uniquement, 50 participants au maximum et
+  inéligibilité explicite du cash à une ouverture publique ;
 - programme individuel versionné : 20 %, attribution 30 jours, maturation
   J+45, commission récurrente tant que l'abonnement du filleul reste actif,
   frais absorbés par Norva et seuil de référence `USD=1000` unités mineures ;
-- pays, subdivision éventuelle, âge minimum, capacité, workflow Didit et
-  devises de versement ;
+- catalogue versionné de crédit d'accès : quote autoritatif, conversion
+  irréversible du solde disponible, durée d'accès, pauses provider,
+  remboursements, chargebacks, corrections et contre-écritures ; le crédit est
+  limité contractuellement à un accès Norva, sans transfert, paiement d'un tiers
+  ni remboursement cash ; cette description factuelle ne préjuge pas de sa
+  qualification juridique, qui reste à valider selon le droit applicable ;
+- pour la couche virement uniquement : pays, subdivision éventuelle, âge
+  minimum, capacité, workflow Didit, fiscalité, corridor et devises de versement ;
 - versions et SHA-256 des Partners Terms, de la disclosure et de la Privacy,
   avec quatre preuves distinctes pour le déploiement et les trois surfaces ;
-- snapshot de configuration, preuve Didit live, preuve corridor payout et
-  preuve de données financières exactes.
+- snapshot de configuration et preuve de données financières exactes pour le
+  programme ; preuve Didit live et preuve corridor payout pour autoriser la
+  couche virement seulement.
 
 Un changement de l'un de ces éléments exige un nouveau paquet versionné. Il ne
 faut jamais réinterpréter une ancienne approbation.
@@ -68,16 +87,47 @@ Le professionnel juridique/fiscal produit un artefact distinct couvrant :
 2. le taux récurrent de 20 % et sa durée exacte ;
 3. l'attribution 30 jours, la maturation J+45, les remboursements,
    chargebacks et contre-écritures ;
-4. le seuil mondial de référence, les seuils locaux figés et l'absorption des
+4. la conversion irréversible d'un solde disponible en accès Norva, le quote
+   serveur, l'absence de transfert, de paiement d'un tiers ou de remboursement
+   cash, la qualification juridique applicable sans présumer qu'elle est déjà
+   tranchée et le traitement d'une contre-écriture après conversion ;
+5. le seuil mondial de référence, les seuils locaux figés et l'absorption des
    frais par Norva ;
-5. la qualification et les obligations fiscales du partenaire et de Norva ;
-6. les sanctions, destinations interdites et restrictions pays ;
-7. les versions exactes des Conditions Partners et de la disclosure publique.
+6. la qualification et les obligations fiscales du partenaire et de Norva,
+   applicables à la demande de virement et non à l'adhésion ou au crédit d'accès ;
+7. les sanctions, destinations interdites et restrictions pays ;
+8. les versions exactes des Conditions Partners et de la disclosure publique.
 
 Toutes les cases `decisions.legal_and_tax.checks` doivent être explicitement
 vraies. Une absence ou une réserve non résolue reste `false` et bloque la gate.
 
-## Auto-évaluation Privacy interne du pilote
+## Décision Membership Privacy pour l'adhésion publique
+
+Avant d'ouvrir l'adhésion, le responsable `privacy_accountable_owner` doit
+produire une évaluation documentée sans donnée personnelle et Risk doit
+l'approuver sous session AAL2. Cette décision alimente uniquement la gate
+`membership_privacy_approved`; elle ne vaut ni validation Didit, ni autorisation
+de virement cash. Le paquet exige :
+
+1. une notice Privacy Partners versionnée et son SHA-256 ;
+2. une entrée ROPA versionnée couvrant adhésion, lien, attribution,
+   accumulation, maturation, ledger et conversion en accès Norva ;
+3. une revue de minimisation versionnée démontrant que pays de payout, profil
+   fiscal, destination bancaire, document d'identité et biométrie sont exclus
+   de ce parcours ;
+4. des vues Admin, preuves et journaux sanitisés, sans e-mail, UUID, IBAN,
+   identifiant Didit ou charge utile fournisseur ;
+5. les durées de conservation, droits des personnes, suppression et
+   contre-écritures documentés.
+
+Les trois artefacts `notice`, `ROPA` et `minimisation` ont chacun une version,
+un SHA-256 et une référence immuable distincte. La décision conserve
+`approval_control=risk_aal2` et
+`assessment_method=documented_membership_privacy_assessment`. Elle peut être
+approuvée avant l'AIPD cash, précisément parce qu'elle exclut Didit, la
+biométrie, la fiscalité et le payout.
+
+## Auto-évaluation Cash Privacy interne du pilote
 
 Norva ne désigne pas officiellement de DPO par ce parcours. Le responsable
 interne `privacy_accountable_owner` produit et vise un artefact distinct
@@ -91,13 +141,16 @@ suivant `ops/partners/gdpr-self-assessment.example.md`. Il doit couvrir :
 5. les durées de conservation et la suppression ;
 6. l'exercice des droits ;
 7. la minimisation, les vues Admin sanitisées et les journaux redacted ;
-8. les notices KYC/payout, la Privacy publique et la réponse aux incidents ;
+8. les notices KYC/payout, leur déclenchement uniquement après choix d'un
+   virement, la Privacy publique et la réponse aux incidents ;
 9. l'analyse documentée des critères rendant une désignation de DPO
    obligatoire, sans transformer ce contrôle en désignation ;
-10. une AIPD/DPIA complète et obligatoire du KYC Didit. Le traitement remplit
-    au moins deux critères CNIL : données sensibles/hautement personnelles
-    (biométrie) et exclusion du bénéfice d'un droit ou contrat (éligibilité au
-    programme et aux versements) ;
+10. une AIPD/DPIA complète et obligatoire du KYC Didit avant toute collecte
+    live dans le parcours de virement. Le traitement remplit au moins deux
+    critères CNIL : données sensibles/hautement personnelles (biométrie) et
+    exclusion du bénéfice d'un droit, service ou contrat (le virement cash),
+    sans conditionner l'adhésion, le lien, l'attribution, la maturation ou le
+    crédit d'accès ;
 11. la description systématique du traitement et de ses finalités,
     l'évaluation de sa nécessité et de sa proportionnalité, les risques pour les
     droits et libertés, les garanties, le plan d'action et le risque résiduel ;
@@ -115,14 +168,22 @@ Références CNIL autoritatives :
 - https://www.cnil.fr/fr/securite-analyse-de-risques
 - https://www.cnil.fr/fr/le-delegue-la-protection-des-donnees-dpo/devenir-delegue-la-protection-des-donnees
 
-L'AIPD est obligatoire même si le pilote reste limité à 50 personnes. Cette
+L'AIPD est obligatoire avant d'activer Didit pour un virement même si la
+cohorte cash reste limitée à 50 personnes. Cette
 limite est uniquement pertinente pour l'analyse de la « grande échelle » liée
-à la désignation d'un DPO. Pour ce seul pilote borné et non public, le
+à la désignation d'un DPO. Pour ce seul traitement cash borné et non public, le
 traitement sensible n'est pas à grande échelle et ne déclenche donc pas, à lui
 seul, une désignation obligatoire. Le présent contrat ne conclut pas à une
 exemption générale : il conserve `dpo_designated=false` et exige une
 réévaluation des autres activités de Norva ainsi qu'à chaque changement
 d'échelle ou de finalité.
+
+Le retrait du consentement biométrique bloque une nouvelle vérification Didit
+et tous les virements cash tant qu'il reste retiré. Il ne révoque aucune
+adhésion, aucun lien, aucune attribution ni commission ; il ne stoppe pas la
+maturation et ne bloque pas la conversion du solde disponible en accès Norva.
+Le paquet doit prouver cette séparation dans les notices, les contrôles et les
+tests bout en bout.
 
 Toutes les cases `decisions.privacy.checks` doivent être explicitement vraies.
 La décision conserve exactement :
@@ -141,10 +202,12 @@ La décision conserve exactement :
 Une simple case cochée, un document modifiable ou une décision non reliée au
 commit et aux surfaces juridiques déployées reste bloquant.
 
-## Limite avant ouverture publique
+## Limite avant ouverture publique du cash
 
-L'auto-évaluation interne satisfait uniquement la gate Privacy du pilote
-France sur invitation. Le journal de généralisation exige une preuve distincte
+L'auto-évaluation Cash Privacy satisfait uniquement la gate `privacy_approved`
+du pilote cash France sur allowlist. Elle ne limite pas l'adhésion publique,
+qui dépend de `membership_privacy_approved`. Le journal de généralisation cash
+exige une preuve distincte
 de revue Privacy qualifiée et indépendante, postérieure aux 45 jours
 d'observation et aux deux cycles rapprochés. Cette revue n'implique pas une
 désignation officielle de DPO ; elle empêche qu'une auto-attestation pilote
@@ -152,20 +215,24 @@ soit réutilisée silencieusement pour une ouverture publique.
 
 ## Ce que Risk doit approuver pour le pays
 
-La décision Country Policy vient après les deux décisions précédentes et après
+La décision Country Policy vient après les décisions Legal et Cash Privacy et après
 les quatre preuves techniques du paquet. Risk doit vérifier :
 
 1. la correspondance exacte avec les approbations Legal/Tax et Privacy ;
-2. l'âge minimum, la capacité et la règle KYC individuelle ;
-3. la couverture Didit live du pays ;
-4. le corridor et chaque devise de versement ;
+2. la disponibilité de l'adhésion sans KYC et les restrictions/sanctions qui
+   peuvent réellement imposer une suspension de compte ;
+3. pour le virement seulement, l'âge minimum, la capacité, la règle KYC
+   individuelle et la couverture Didit live du pays ;
+4. pour le virement seulement, le corridor et chaque devise de versement ;
 5. la couverture des données financières exactes ;
 6. les restrictions et sanctions ;
 7. les versions Terms/disclosure, l'allowlist pilote et les dates d'effet.
 
 Le validateur exige que la décision Country Policy soit strictement postérieure
 aux décisions Legal/Privacy et aux preuves Didit, payout, configuration et
-données financières.
+données financières pour autoriser le paquet complet incluant les virements.
+Cette exigence de preuve payout ne doit jamais être interprétée comme une gate
+KYC de l'adhésion ou du crédit d'accès.
 
 ## Validation
 
@@ -174,33 +241,38 @@ bloqueurs :
 
 ```bash
 node scripts/validate-partners-approval-evidence.js \
-  /chemin/prive/partners-france-invite-pilot-v3.json
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json
 ```
 
 Validation ciblée avant chaque gate, avec le SHA exact du commit candidat :
 
 ```bash
 node scripts/validate-partners-approval-evidence.js \
-  /chemin/prive/partners-france-invite-pilot-v3.json \
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json \
   --require-legal \
   --expected-commit-sha=<40-hex-minuscules>
 
 node scripts/validate-partners-approval-evidence.js \
-  /chemin/prive/partners-france-invite-pilot-v3.json \
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json \
+  --require-membership-privacy \
+  --expected-commit-sha=<40-hex-minuscules>
+
+node scripts/validate-partners-approval-evidence.js \
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json \
   --require-privacy \
   --expected-commit-sha=<40-hex-minuscules>
 
 node scripts/validate-partners-approval-evidence.js \
-  /chemin/prive/partners-france-invite-pilot-v3.json \
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json \
   --require-country-policy \
   --expected-commit-sha=<40-hex-minuscules>
 ```
 
-Le paquet complet ne passe qu'avec `status=approved` et les trois décisions :
+Le paquet complet ne passe qu'avec `status=approved` et les quatre décisions :
 
 ```bash
 node scripts/validate-partners-approval-evidence.js \
-  /chemin/prive/partners-france-invite-pilot-v3.json \
+  /chemin/prive/partners-public-membership-france-cash-pilot-v4.json \
   --require-all \
   --expected-commit-sha=<40-hex-minuscules>
 ```

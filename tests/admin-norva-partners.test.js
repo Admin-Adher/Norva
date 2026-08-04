@@ -152,7 +152,8 @@ test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.ok(section.length > 2_000);
   assert.doesNotMatch(section, /provider_reference|kyc_reference|document_number|iban|wallet_address/i);
   assert.doesNotMatch(section, /catch\s*\([^)]*\)\s*\{[\s\S]{0,220}\.message/);
-  assert.match(section, /Aucune référence KYC provider, adresse e-mail ou code public/);
+  assert.match(section, /Aucune référence KYC provider, adresse e-mail, donnée bancaire ou identifiant interne/);
+  assert.match(section, /référence partenaire affichée est publique et pseudonymisée/);
 });
 
 test('Admin Partners exposes capability-gated, audited operational controls', () => {
@@ -281,19 +282,66 @@ test('Admin Partners exposes capability-gated, audited operational controls', ()
   page._partnersCanManageRelease = false;
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_enabled', false), true);
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_enabled', true), false);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_cash_pilot_allowlist_only', true), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_cash_pilot_allowlist_only', false), false);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_earnings_enabled', false), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_earnings_enabled', true), false);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_credit_redemptions_enabled', false), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_credit_redemptions_enabled', true), false);
+  assert.equal(page._partnersCanUseReleaseControl('gate', 'membership_privacy_approved', true), false);
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_payouts_live', false), false);
   assert.equal(page._partnersCanUseConfigurationAction('allowlist'), true);
   assert.equal(page._partnersCanUseConfigurationAction('program-create'), false);
 
   page._partnersCapabilities = { support: true, risk: true, finance: true };
   page._partnersCanManageRelease = true;
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_cash_pilot_allowlist_only', true), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_cash_pilot_allowlist_only', false), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_earnings_enabled', true), true);
+  assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_credit_redemptions_enabled', true), true);
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_payouts_live', true), true);
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_revolut_api_enabled', true), true);
   assert.equal(page._partnersCanUseReleaseControl('flag', 'partners_tv_relay_enabled', true), true);
+  assert.equal(page._partnersCanUseReleaseControl('gate', 'membership_privacy_approved', true), true);
   assert.equal(page._partnersCanUseReleaseControl('gate', 'general_release_approved', true), true);
   assert.equal(page._partnersCanUseReleaseControl('gate', 'manual_payout_workflow_verified', true), true);
   assert.equal(page._partnersCanUseReleaseControl('gate', 'revolut_api_adapter_verified', true), true);
   assert.equal(page._partnersCanUseConfigurationAction('program-create'), true);
+});
+
+test('membership Privacy uses a distinct Risk AAL2 evidence contract', () => {
+  const AdminPage = loadAdminPage({ getElementById() { return null; } });
+  const page = Object.create(AdminPage.prototype);
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersCanManageRelease = false;
+  assert.equal(
+    page._partnersCanUseReleaseControl(
+      'gate',
+      'membership_privacy_approved',
+      true,
+    ),
+    true,
+  );
+  assert.deepEqual(
+    Array.from(page._partnersApprovalRequiredDocuments(
+      'membership_privacy_approved',
+    )),
+    [
+      'approval_record',
+      'deployment_proof',
+      'membership_privacy_notice',
+      'membership_records_of_processing',
+      'membership_minimization_review',
+    ],
+  );
+  const cashPrivacy = Array.from(
+    page._partnersApprovalRequiredDocuments('privacy_approved'),
+  );
+  assert.ok(cashPrivacy.includes('dpia'));
+  assert.ok(cashPrivacy.includes('biometric_consent'));
+  assert.ok(!cashPrivacy.includes('membership_minimization_review'));
+  assert.match(source, /Privacy de l’adhésion publique/);
+  assert.match(source, /AIPD Privacy du virement cash/);
 });
 
 test('Admin Partners renders Revolut Basic manual as production and keeps the API separate', () => {
@@ -2225,7 +2273,7 @@ test('Admin Partners exposes programme activation only after both legal gates', 
     release_flags: [],
     release_gates: [
       { key: 'legal_and_tax_approved', satisfied: false },
-      { key: 'privacy_approved', satisfied: false },
+      { key: 'membership_privacy_approved', satisfied: false },
     ],
   };
 
@@ -2233,7 +2281,7 @@ test('Admin Partners exposes programme activation only after both legal gates', 
   assert.doesNotMatch(configuration.innerHTML, /data-partners-action="program-activate"/);
   assert.match(configuration.innerHTML, /Activation bloqu/);
   assert.match(configuration.innerHTML, /validation juridique et fiscale/);
-  assert.match(configuration.innerHTML, /validation de la confidentialit/);
+  assert.match(configuration.innerHTML, /validation Privacy de l’adhésion/);
 
   envelope.release_gates.forEach((gate) => { gate.satisfied = true; });
   page._renderPartnersConfiguration(envelope);

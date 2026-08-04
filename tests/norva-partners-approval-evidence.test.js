@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
+  MEMBERSHIP_PRIVACY_CHECKS,
   PRIVACY_CHECKS,
   evaluateApprovalPackage,
   validateApprovalPackage,
@@ -80,6 +81,18 @@ function readyPackage() {
     },
   };
   value.dependencies = {
+    membership_privacy_notice_evidence: evidenceRef(
+      'membership-privacy-notice',
+      '2026-08-03T09:05:00Z',
+    ),
+    membership_ropa_evidence: evidenceRef(
+      'membership-ropa',
+      '2026-08-03T09:06:00Z',
+    ),
+    membership_minimization_evidence: evidenceRef(
+      'membership-minimization',
+      '2026-08-03T09:07:00Z',
+    ),
     configuration_snapshot_evidence: evidenceRef(
       'configuration-snapshot',
       '2026-08-03T09:05:00Z',
@@ -103,6 +116,27 @@ function readyPackage() {
   legal.reviewer_reference_sha256 = sha256('legal-reviewer-reference');
   legal.evidence = evidenceRef('legal-decision', '2026-08-03T09:31:00Z');
   Object.keys(legal.checks).forEach((key) => { legal.checks[key] = true; });
+  const membershipPrivacy = value.decisions.membership_privacy;
+  membershipPrivacy.approved = true;
+  membershipPrivacy.decided_at = '2026-08-03T09:25:00Z';
+  membershipPrivacy.notice_version = 'membership-privacy-v1';
+  membershipPrivacy.notice_sha256 = sha256('membership-privacy-v1');
+  membershipPrivacy.ropa_version = 'membership-ropa-v1';
+  membershipPrivacy.ropa_sha256 = sha256('membership-ropa-v1');
+  membershipPrivacy.minimization_review_version = 'membership-minimization-v1';
+  membershipPrivacy.minimization_review_sha256 = sha256(
+    'membership-minimization-v1',
+  );
+  membershipPrivacy.reviewer_reference_sha256 = sha256(
+    'membership-privacy-reviewer-reference',
+  );
+  membershipPrivacy.evidence = evidenceRef(
+    'membership-privacy-decision',
+    '2026-08-03T09:26:00Z',
+  );
+  Object.keys(membershipPrivacy.checks).forEach((key) => {
+    membershipPrivacy.checks[key] = true;
+  });
   const privacy = value.decisions.privacy;
   privacy.approved = true;
   privacy.decided_at = '2026-08-03T09:35:00Z';
@@ -140,6 +174,9 @@ test('approval evidence template is strict, valid and fail-closed', () => {
     nowMs: Date.parse('2026-08-03T10:00:00Z'),
   });
   assert.ok(result.blockers.legal_and_tax.includes('legal_and_tax_not_approved'));
+  assert.ok(result.blockers.membership_privacy.includes(
+    'membership_privacy_not_approved',
+  ));
   assert.ok(result.blockers.privacy.includes('privacy_not_approved'));
   assert.ok(result.blockers.country_policy.includes('country_policy_not_approved'));
   assert.match(workflow, /scripts\/validate-partners-\*\.js/);
@@ -147,14 +184,24 @@ test('approval evidence template is strict, valid and fail-closed', () => {
     workflow,
     /validate-partners-approval-evidence\.js[\s\S]*approval-evidence\.example\.json/,
   );
-  assert.equal(template.schema_version, 3);
+  assert.equal(template.schema_version, 4);
   assert.equal(template.target_environment, 'preproduction');
   assert.deepEqual(template.release_scope, {
-    access_mode: 'invite_only',
-    country_code: 'FR',
-    participant_cap: 50,
-    public_release_eligible: false,
+    membership_access_mode: 'public',
+    membership_public_release_eligible: true,
+    cash_access_mode: 'allowlist_only',
+    cash_country_code: 'FR',
+    cash_participant_cap: 50,
+    cash_public_release_eligible: false,
   });
+  assert.equal(
+    template.decisions.membership_privacy.assessment_method,
+    'documented_membership_privacy_assessment',
+  );
+  assert.equal(
+    template.decisions.membership_privacy.approval_control,
+    'risk_aal2',
+  );
   assert.equal(
     template.decisions.privacy.assessment_method,
     'documented_internal_gdpr_self_assessment_with_mandatory_dpia',
@@ -173,12 +220,13 @@ test('approval evidence template is strict, valid and fail-closed', () => {
   );
 });
 
-test('a complete approval package passes all three decisions', () => {
+test('a complete approval package passes all four decisions', () => {
   const result = evaluateApprovalPackage(readyPackage(), {
     nowMs: Date.parse('2026-08-03T10:00:00Z'),
   });
   assert.deepEqual(result.blockers, {
     legal_and_tax: [],
+    membership_privacy: [],
     privacy: [],
     country_policy: [],
   });
@@ -237,14 +285,21 @@ test('Privacy remains blocked without a completed, controller-validated DPIA', (
   ));
 });
 
-test('the internal assessment is restricted to the France invite-only pilot', () => {
-  const publicScope = readyPackage();
-  publicScope.release_scope.access_mode = 'public';
-  publicScope.release_scope.public_release_eligible = true;
-  publicScope.decisions.privacy.public_release_eligible = true;
+test('membership is public while the France cash pilot remains allowlist-only', () => {
+  const inviteMembership = readyPackage();
+  inviteMembership.release_scope.membership_access_mode = 'invite_only';
   assert.throws(
-    () => validateApprovalPackage(publicScope),
-    /release_scope\.access_mode must remain invite_only/,
+    () => validateApprovalPackage(inviteMembership),
+    /release_scope\.membership_access_mode must remain public/,
+  );
+
+  const publicCash = readyPackage();
+  publicCash.release_scope.cash_access_mode = 'public';
+  publicCash.release_scope.cash_public_release_eligible = true;
+  publicCash.decisions.privacy.public_release_eligible = true;
+  assert.throws(
+    () => validateApprovalPackage(publicCash),
+    /release_scope\.cash_access_mode must remain allowlist_only/,
   );
 
   const designatedDpo = readyPackage();
@@ -259,8 +314,37 @@ test('the internal assessment is restricted to the France invite-only pilot', ()
   wrongCountry.jurisdiction.country_code = 'BE';
   assert.throws(
     () => validateApprovalPackage(wrongCountry),
-    /jurisdiction\.country_code must match release_scope\.country_code/,
+    /jurisdiction\.country_code must match release_scope\.cash_country_code/,
   );
+});
+
+test('membership Privacy can be approved before the cash Didit DPIA', () => {
+  const value = readyPackage();
+  value.decisions.privacy.approved = false;
+  value.decisions.privacy.dpia_outcome = 'pending';
+  value.decisions.privacy.dpia_controller_validated_at = null;
+  value.decisions.privacy.dpia_evidence = null;
+  const result = evaluateApprovalPackage(value, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.deepEqual(result.blockers.membership_privacy, []);
+  assert.ok(result.blockers.privacy.includes('privacy_not_approved'));
+  assert.ok(result.blockers.privacy.includes('privacy_dpia_pending'));
+});
+
+test('membership Privacy requires versioned notice, ROPA and minimization evidence', () => {
+  const value = readyPackage();
+  value.decisions.membership_privacy.notice_version = null;
+  value.dependencies.membership_ropa_evidence = null;
+  const result = evaluateApprovalPackage(value, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.ok(result.blockers.membership_privacy.includes(
+    'membership_privacy_artifacts_not_versioned',
+  ));
+  assert.ok(result.blockers.membership_privacy.includes(
+    'membership_ropa_evidence_missing',
+  ));
 });
 
 test('the GDPR self-assessment template mirrors every privacy control and AAL2', () => {
@@ -275,7 +359,12 @@ test('the GDPR self-assessment template mirrors every privacy control and AAL2',
   assert.match(selfAssessment, /aucune désignation officielle de DPO/i);
   assert.match(selfAssessment, /AIPD\/DPIA obligatoire/i);
   assert.match(selfAssessment, /données sensibles ou hautement personnelles/i);
-  assert.match(selfAssessment, /exclusion du bénéfice d'un droit ou d'un contrat/i);
+  assert.match(selfAssessment, /exclusion du bénéfice d'un droit,[\s\S]*d'un contrat/i);
+  assert.match(selfAssessment, /parcours optionnel de virement/i);
+  assert.match(selfAssessment, /L'adhésion Partners,[\s\S]*ne requièrent ni KYC/i);
+  assert.match(selfAssessment, /conversion irréversible du solde disponible[\s\S]*sans transfert[\s\S]*qualification juridique/i);
+  assert.doesNotMatch(selfAssessment, /(?:n'est|ni) monnaie électronique/i);
+  assert.match(selfAssessment, /retrait bloque uniquement une nouvelle vérification[\s\S]*ne bloque jamais l'adhésion/i);
   assert.match(selfAssessment, /nécessité et proportionnalité/i);
   assert.match(selfAssessment, /risques pour les droits et libertés/i);
   assert.match(selfAssessment, /consultation préalable de la CNIL/i);
@@ -283,6 +372,45 @@ test('the GDPR self-assessment template mirrors every privacy control and AAL2',
   assert.match(selfAssessment, /https:\/\/www\.cnil\.fr\/fr\/ce-quil-faut-savoir/);
   assert.match(selfAssessment, /JWT[\s\S]*AAL2/);
   assert.match(selfAssessment, /stockage privé immuable/);
+});
+
+test('membership Privacy checks exclude Didit and use Risk plus AAL2 approval', () => {
+  const packageDecision = template.decisions.membership_privacy;
+  assert.deepEqual(
+    Object.keys(packageDecision.checks),
+    MEMBERSHIP_PRIVACY_CHECKS,
+  );
+  assert.equal(packageDecision.approval_control, 'risk_aal2');
+  assert.equal(
+    packageDecision.checks.didit_biometric_and_payout_data_excluded,
+    false,
+  );
+  assert.equal(Object.hasOwn(packageDecision, 'dpia_required'), false);
+  assert.equal(Object.hasOwn(packageDecision, 'dpia_evidence'), false);
+});
+
+test('approval guidance keeps payout evidence out of frictionless membership', () => {
+  const guidance = fs.readFileSync(
+    path.join(root, 'docs/NORVA-PARTNERS-APPROVAL-EVIDENCE.md'),
+    'utf8',
+  );
+  assert.match(guidance, /L'adhésion, le lien, l'attribution,[\s\S]*ne requièrent ni KYC\/Didit/i);
+  assert.match(guidance, /preuves Didit, fiscales et corridor[\s\S]*virement cash/i);
+  assert.match(guidance, /conversion irréversible d'un solde disponible en accès Norva/i);
+  assert.match(guidance, /description factuelle ne préjuge pas de sa[\s\S]*qualification juridique/i);
+  assert.doesNotMatch(guidance, /(?:n'est|ni) monnaie électronique/i);
+  assert.match(guidance, /retrait du consentement biométrique[\s\S]*ne bloque\s+pas la conversion/i);
+  assert.match(guidance, /dpo_designated=false/);
+  assert.match(guidance, /AIPD[\s\S]*avant d'activer Didit pour un virement/i);
+  assert.match(
+    guidance,
+    /membership_privacy_approved[\s\S]*notice[\s\S]*ROPA[\s\S]*minimisation/i,
+  );
+  assert.match(
+    guidance,
+    /privacy_approved[\s\S]*pilote cash France sur allowlist/i,
+  );
+  assert.doesNotMatch(guidance, /conditionne l'accès au programme Partners/i);
 });
 
 test('country approval must follow every authoritative dependency', () => {

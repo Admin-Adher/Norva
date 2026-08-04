@@ -274,6 +274,11 @@ as $fixture$
       'legal_tax_review', repeat('3', 64),
       'partners_terms', repeat('4', 64)
     )
+    when 'membership_privacy_approved' then jsonb_build_object(
+      'gdpr_self_assessment', repeat('6', 64),
+      'privacy_notice', repeat('7', 64),
+      'records_of_processing', repeat('8', 64)
+    )
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('5', 64),
       'gdpr_self_assessment', repeat('6', 64),
@@ -298,6 +303,8 @@ immutable
 as $fixture$
   select pg_temp.kyc_reverification_approval_documents(
     'legal_and_tax_approved'
+  ) || pg_temp.kyc_reverification_approval_documents(
+    'membership_privacy_approved'
   ) || pg_temp.kyc_reverification_approval_documents(
     'privacy_approved'
   ) || pg_temp.kyc_reverification_approval_documents(
@@ -437,6 +444,7 @@ begin
   );
   foreach v_gate in array array[
     'legal_and_tax_approved',
+    'membership_privacy_approved',
     'privacy_approved',
     'individual_verification_coverage_confirmed',
     'country_policy_approved'
@@ -486,9 +494,51 @@ select
 from affiliate_private.affiliate_country_policies policy
 where policy.country_code = 'FR';
 
+insert into affiliate_private.affiliate_currency_metadata (
+  currency_code,
+  exponent,
+  status,
+  configured_by_pseudonym,
+  justification
+)
+values (
+  'USD',
+  2,
+  'active',
+  repeat('a', 64),
+  'Enable USD for the re-verification cash-pilot fixture.'
+)
+on conflict (currency_code) do nothing;
+
+insert into affiliate_private.affiliate_payout_provider_configs (
+  provider,
+  country_code,
+  currency,
+  status,
+  execution_adapter,
+  configured_by_pseudonym,
+  justification
+)
+values (
+  'revolut',
+  'FR',
+  'USD',
+  'active',
+  'revolut_manual',
+  repeat('a', 64),
+  'Enable the supervised manual re-verification corridor.'
+);
+
 insert into affiliate_private.affiliate_accounts (
   user_id,
   user_pseudonym,
+  member_status,
+  member_program_version_id,
+  member_terms_version_accepted,
+  member_terms_accepted_at,
+  member_disclosure_version_accepted,
+  member_disclosure_accepted_at,
+  member_joined_at,
   status,
   program_version_id,
   country_policy_id,
@@ -502,6 +552,13 @@ insert into affiliate_private.affiliate_accounts (
 select
   '68000000-0000-4000-8000-000000000001',
   repeat('b', 64),
+  'active',
+  program.id,
+  program.terms_version,
+  now() - interval '2 minutes',
+  program.disclosure_version,
+  now() - interval '2 minutes',
+  now() - interval '2 minutes',
   'pending_verification',
   program.id,
   policy.id,
@@ -516,6 +573,19 @@ join affiliate_private.affiliate_country_policies policy
   on policy.program_version_id = program.id
 where program.version_key = 'p0-reverification-test-v1'
   and policy.country_code = 'FR';
+
+insert into affiliate_private.affiliate_pilot_allowlist (
+  user_id,
+  status,
+  country_code,
+  added_by_pseudonym
+)
+values (
+  '68000000-0000-4000-8000-000000000001',
+  'active',
+  'FR',
+  repeat('b', 64)
+);
 
 -- The member-session binding trigger derives these values from the trusted
 -- Edge runtime GUCs; supplied row values never bypass that boundary.

@@ -30,7 +30,11 @@ export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 # Run a client tool from the pinned supabase/postgres image against the local db.
 # Usage: pgtool pg_dump --schema-only ...   |   pgtool psql -Atc "..."
 pgtool() {
-  docker run --rm -i --network host -e PGPASSWORD="$POSTGRES_PASSWORD" "$PG_IMAGE" \
+  # Pass the value through the parent environment, not Docker's command-line
+  # arguments. `systemctl status` and host process listings must never reveal
+  # the database credential.
+  PGPASSWORD="$POSTGRES_PASSWORD" \
+    docker run --rm -i --network host -e PGPASSWORD "$PG_IMAGE" \
     "$@"
 }
 

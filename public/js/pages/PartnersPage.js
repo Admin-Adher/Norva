@@ -2,8 +2,9 @@
  * Norva Partners — authenticated individual partner journey.
  *
  * Visibility and every displayed policy fact come from the strictly validated
- * norva-partners contracts. KYC, programme eligibility, link activation and all
- * financial reporting remain authoritative on the server.
+ * norva-partners contracts. Membership and sharing stay independent from the
+ * optional cash pilot; KYC and every financial decision remain authoritative
+ * on the server.
  */
 class PartnersPage {
     static BIOMETRIC_CONSENT_VERSION = 'partners-biometric-consent-v1';
@@ -30,14 +31,21 @@ class PartnersPage {
         this._jurisdiction = { countryCode: '', subdivisionCode: '' };
         this._actionKeys = new Map();
         this._dashboardAbort = null;
+        this._dashboardRefreshTimer = 0;
         this._payoutAbort = null;
         this._payoutProfile = null;
         this._payoutLoadState = 'idle';
         this._closeQrDialog = null;
         this._closePayoutDialog = null;
+        this._closeCreditDialog = null;
+        this._closeCashDialog = null;
+        this._creditAbort = null;
+        this._cashCountryAbort = null;
+        this._creditToken = 0;
         this._dashboardFilter = 'all';
         this._dashboardCursor = null;
         this._dashboardPages = [];
+        this._membershipDashboard = null;
         this._nativeShareRequests = new Map();
         this._nativeShareListenerBound = false;
         this._tvRelayAbort = null;
@@ -276,7 +284,9 @@ class PartnersPage {
                 signal: controller.signal,
                 ...this._jurisdiction
             });
-            this.setEntryVisibility(envelope.data.visibility.visible === true);
+            this.setEntryVisibility(envelope.data.schema_version === 2
+                ? envelope.data.eligibility.visible === true
+                : envelope.data.visibility.visible === true);
             return true;
         } catch (_) {
             this.setEntryVisibility(false);
@@ -295,6 +305,17 @@ class PartnersPage {
         this._closeQrDialog = null;
         this._closePayoutDialog?.({ restoreFocus: false });
         this._closePayoutDialog = null;
+        this._closeCreditDialog?.({ restoreFocus: false });
+        this._closeCreditDialog = null;
+        this._closeCashDialog?.({ restoreFocus: false });
+        this._closeCashDialog = null;
+        this._cashCountryAbort?.abort();
+        this._cashCountryAbort = null;
+        this._creditAbort?.abort();
+        this._creditAbort = null;
+        this._creditToken += 1;
+        clearTimeout(this._dashboardRefreshTimer);
+        this._dashboardRefreshTimer = 0;
         this._accessRequestAbort?.abort();
         this._accessRequestAbort = null;
         this._accessRequestToken += 1;
@@ -341,8 +362,8 @@ class PartnersPage {
             if (!this._visible || token !== this._showToken) return;
             let renderData = envelope.data;
             let activationNextAction = null;
-            const account = renderData.account;
-            if (account.exists && account.status === 'pending_verification') {
+            const account = renderData.schema_version === 1 ? renderData.account : null;
+            if (account?.exists && account.status === 'pending_verification') {
                 const reconcile = window.NorvaCloud?.partners?.activation?.reconcile;
                 if (typeof reconcile !== 'function') {
                     throw new Error('partners_activation_reconcile_unavailable');
@@ -362,9 +383,13 @@ class PartnersPage {
                 this.bootstrapEnvelope = null;
             }
             this._jurisdiction = jurisdiction;
-            this.setEntryVisibility(renderData.visibility.visible === true);
+            this.setEntryVisibility(renderData.schema_version === 2
+                ? renderData.eligibility.visible === true
+                : renderData.visibility.visible === true);
             this.renderBootstrap(renderData, { nextAction: activationNextAction });
-            if (renderData.account.exists) this.loadKycRights();
+            if (renderData.schema_version === 1 && renderData.account.exists) {
+                this.loadKycRights();
+            }
             if (returnedFromKyc) {
                 window.NorvaModal?.toast?.(
                     'Identity check submitted. Norva is confirming the signed provider result.',
@@ -402,6 +427,17 @@ class PartnersPage {
         this._closeQrDialog = null;
         this._closePayoutDialog?.({ restoreFocus: false });
         this._closePayoutDialog = null;
+        this._closeCreditDialog?.({ restoreFocus: false });
+        this._closeCreditDialog = null;
+        this._closeCashDialog?.({ restoreFocus: false });
+        this._closeCashDialog = null;
+        this._cashCountryAbort?.abort();
+        this._cashCountryAbort = null;
+        this._creditAbort?.abort();
+        this._creditAbort = null;
+        this._creditToken += 1;
+        clearTimeout(this._dashboardRefreshTimer);
+        this._dashboardRefreshTimer = 0;
         this._dashboardAbort?.abort();
         this._dashboardAbort = null;
         this._payoutAbort?.abort();
@@ -753,6 +789,10 @@ class PartnersPage {
     }
 
     renderBootstrap(data, { nextAction = null } = {}) {
+        if (data.schema_version === 2) {
+            this.renderMembershipBootstrap(data);
+            return;
+        }
         const view = this.resolveView(data);
         if (view === 'discovery') {
             this.renderDiscovery(data);
@@ -840,6 +880,67 @@ class PartnersPage {
         if (!data.visibility.visible) return 'disabled';
 
         return data.eligibility.eligible ? 'discovery' : 'unsupported';
+    }
+
+    renderMembershipBootstrap(data) {
+        const status = data.membership.status;
+        if (status === 'active') {
+            if (!data.program) {
+                this.renderUnavailable({
+                    title: 'Programme rules are temporarily unavailable',
+                    copy: 'Norva cannot safely display sharing or balance actions without the authoritative programme. Your membership and balance are unchanged.',
+                    tone: 'error',
+                    retry: true
+                });
+                return;
+            }
+            this.renderMembershipActive(data);
+            return;
+        }
+        if (['held', 'suspended', 'closed'].includes(status)
+            || data.eligibility.reason === 'account_blocked') {
+            this.renderMembershipAttention(data);
+            return;
+        }
+        if (!data.membership.exists
+            && (data.eligibility.reason === 'pilot_not_allowed'
+                || (data.flags?.partners_invite_only && !data.eligibility.eligible))) {
+            this.renderUnavailable({
+                title: 'Norva Partners is currently invitation-only',
+                copy: 'This account is not in the current pilot cohort. No identity check or payout setup is needed now. Your ordinary Norva access is unchanged, and you can return when the programme opens more broadly.',
+                tone: 'neutral',
+                retry: true
+            });
+            return;
+        }
+        if (!data.membership.exists
+            && data.eligibility.eligible
+            && data.program) {
+            this.renderMembershipDiscovery(data);
+            return;
+        }
+        const state = ({
+            email_unconfirmed: {
+                title: 'Confirm your Norva email to join Partners',
+                copy: 'Open the confirmation message sent by Norva, then return here. Identity verification is not required to join, share or earn.'
+            },
+            disabled: {
+                title: 'Norva Partners is temporarily paused',
+                copy: 'Joining and earning are paused by the authoritative programme switch. No account or referral link was created.'
+            },
+            program_unavailable: {
+                title: 'Programme rules are temporarily unavailable',
+                copy: 'Norva cannot accept terms until the authoritative programme is restored. No local defaults were used.'
+            }
+        })[data.eligibility.reason] || {
+            title: 'Norva Partners is temporarily unavailable',
+            copy: 'Norva could not confirm the authoritative programme state. No account or referral link was created.'
+        };
+        this.renderUnavailable({
+            ...state,
+            tone: data.eligibility.reason === 'email_unconfirmed' ? 'neutral' : 'error',
+            retry: true
+        });
     }
 
     openEarlyAccess(data, reason) {
@@ -1479,6 +1580,172 @@ class PartnersPage {
         this.bindJurisdictionForm();
         this.bindCountryPicker();
         this.focusTitle();
+    }
+
+    renderMembershipDiscovery(data) {
+        const program = data.program;
+        const rate = this.percent(program.commission_rate_bps);
+        this.container.innerHTML = `
+            <main class="partners-shell" aria-labelledby="partners-title">
+                ${this.header('Norva Partners')}
+                <section class="partners-discovery-grid">
+                    <div class="partners-discovery-copy">
+                        <span class="partners-eyebrow">Join now · Verify only for cash</span>
+                        <h1 id="partners-title" class="partners-display" tabindex="-1">Share Norva. Earn ${rate} on eligible renewals.</h1>
+                        <p class="partners-lead">Your confirmed Norva account can join and receive a personal referral link immediately. Identity verification is never required to share, earn or convert an available balance into Norva access.</p>
+                        <span class="partners-status-pill partners-status-success">Ready to join</span>
+                        <form class="partners-join-form" data-partners-membership-form novalidate>
+                            <label class="partners-consent-check">
+                                <input type="checkbox" data-partners-terms-confirm>
+                                <span>I accept the <a href="/partners-terms.html?version=${encodeURIComponent(program.terms_version)}" target="_blank" rel="noopener">Norva Partners terms</a> (${this.escape(program.terms_version)}).</span>
+                            </label>
+                            <label class="partners-consent-check">
+                                <input type="checkbox" data-partners-disclosure-confirm>
+                                <span>I have read the programme disclosure (${this.escape(program.disclosure_version)}), including the ${program.maturation_days}-day validation period and refund reversals.</span>
+                            </label>
+                            <div class="partners-actions">
+                                <button class="btn btn-primary partners-primary-action" type="submit"
+                                    data-partners-membership-join disabled>Join and get my link</button>
+                                <span class="partners-action-note">No KYC, tax profile or payout destination is requested at this step.</span>
+                            </div>
+                            <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
+                        </form>
+                        <p class="partners-disclosure">Earnings are not guaranteed. Commission is ${rate} of eligible payments excluding tax after discounts. Refunds and chargebacks reverse the related commission. Available USD balances can fund Norva access without KYC; cash transfers require identity, fiscal and payout checks.</p>
+                    </div>
+                    <aside class="partners-program-card" aria-labelledby="partners-program-title">
+                        <h2 id="partners-program-title">Clear from day one</h2>
+                        <dl class="partners-program-facts">
+                            <div><dt>Recurring commission</dt><dd>${rate}</dd></div>
+                            <div><dt>Attribution window</dt><dd>${program.attribution_window_days} days</dd></div>
+                            <div><dt>Validation period</dt><dd>${program.maturation_days} days</dd></div>
+                            <div><dt>Join and share</dt><dd>No KYC</dd></div>
+                            <div><dt>Norva access</dt><dd>No KYC</dd></div>
+                            <div><dt>Cash transfer</dt><dd>KYC required</dd></div>
+                        </dl>
+                    </aside>
+                </section>
+                ${this.membershipSteps(program)}
+                ${this.liveRegion('Norva Partners is ready. Accept the current terms and disclosure to join without identity verification.')}
+            </main>`;
+        this.bindCommonActions();
+        this.bindMembershipDiscoveryActions(data);
+        this.focusTitle();
+    }
+
+    bindMembershipDiscoveryActions(data) {
+        const form = this.container?.querySelector('[data-partners-membership-form]');
+        const terms = form?.querySelector('[data-partners-terms-confirm]');
+        const disclosure = form?.querySelector('[data-partners-disclosure-confirm]');
+        const button = form?.querySelector('[data-partners-membership-join]');
+        if (!form || !terms || !disclosure || !button) return;
+        const sync = () => {
+            button.disabled = !(terms.checked && disclosure.checked);
+        };
+        terms.addEventListener('change', sync);
+        disclosure.addEventListener('change', sync);
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!terms.checked || !disclosure.checked) {
+                this.setActionStatus('Accept the current terms and programme disclosure first.', 'error');
+                (!terms.checked ? terms : disclosure).focus();
+                return;
+            }
+            await this.runPartnerAction(button, 'Creating your link…', async () => {
+                const api = window.NorvaCloud?.partners?.join;
+                if (typeof api !== 'function') throw new Error('partners_membership_join_unavailable');
+                const routeToken = this._showToken;
+                await api({
+                    termsAccepted: true,
+                    disclosureAccepted: true,
+                    idempotencyKey: this.actionKey('membership-join')
+                });
+                this.clearActionKey('membership-join');
+                if (!this._visible || routeToken !== this._showToken || !button.isConnected) return;
+                this.setActionStatus('You joined Norva Partners. Loading your personal link.');
+                this.bootstrapEnvelope = null;
+                await this.show();
+            });
+        });
+        sync();
+    }
+
+    renderMembershipAttention(data) {
+        const status = this.statusLabel(data.membership.status, 'Partner membership');
+        const terminal = ['suspended', 'closed'].includes(data.membership.status);
+        this.container.innerHTML = `
+            <main class="partners-shell" aria-labelledby="partners-title">
+                ${this.header('Norva Partners')}
+                <section class="partners-state-card partners-state-wide">
+                    <span class="partners-status-pill partners-status-warning">${terminal ? 'Membership unavailable' : 'Review in progress'}</span>
+                    <h1 id="partners-title" tabindex="-1">${terminal ? 'Your Partners membership is not active.' : 'Your Partners membership is temporarily on hold.'}</h1>
+                    <p>Sharing, earning and balance conversion follow the authoritative membership state. No local action can bypass this protection.</p>
+                    <dl class="partners-checklist">
+                        <div><dt>Membership</dt><dd>${this.escape(status)}</dd></div>
+                        <div><dt>Identity check</dt><dd>${this.escape(this.statusLabel(data.membership.verification_status, 'Not required for membership'))}</dd></div>
+                    </dl>
+                    <div class="partners-actions partners-actions-row">
+                        <a class="btn btn-secondary" href="/support.html?returnTo=%2Fapp%23partners">Contact support</a>
+                        <button class="btn btn-ghost" type="button" data-partners-back>Back</button>
+                    </div>
+                </section>
+                ${this.liveRegion('Your Norva Partners membership needs a secure review.', 'assertive')}
+            </main>`;
+        this.bindCommonActions();
+        this.focusTitle();
+    }
+
+    renderMembershipActive(data) {
+        if (!['all', 'pending', 'available', 'redeemed', 'paid', 'reversed']
+            .includes(this._dashboardFilter)) {
+            this._dashboardFilter = 'all';
+        }
+        this._dashboardAbort?.abort();
+        this._dashboardAbort = null;
+        clearTimeout(this._dashboardRefreshTimer);
+        this._dashboardRefreshTimer = 0;
+        const cashPilotLimited = data.cash_readiness?.reason === 'cash_pilot_not_allowed';
+        const cashActionLabel = cashPilotLimited
+            ? 'Cash transfer pilot'
+            : 'Receive a cash transfer';
+        const availableBalanceNote = cashPilotLimited
+            ? 'Convert to Norva · cash pilot limited'
+            : 'Convert or request cash';
+        this.container.innerHTML = `
+            <main class="partners-shell" aria-labelledby="partners-title">
+                ${this.header('Norva Partners')}
+                <section class="partners-dashboard-heading">
+                    <div>
+                        <span class="partners-status-pill partners-status-success">Ready to share</span>
+                        <h1 id="partners-title" tabindex="-1">Your Partners balance</h1>
+                        <p>Share immediately, follow the ${data.program.maturation_days}-day validation period and choose how to use your available balance.</p>
+                    </div>
+                    <div class="partners-dashboard-actions">
+                        <button class="btn btn-secondary" type="button" data-partners-cash-button>${cashActionLabel}</button>
+                        <button class="btn btn-secondary" type="button" data-partners-dashboard-retry>Refresh</button>
+                    </div>
+                </section>
+                <section class="partners-metrics" aria-label="Partner balance" data-partners-dashboard-metrics aria-busy="true">
+                    ${this.metric('Available to use', 'Loading', availableBalanceNote)}
+                    ${this.metric('In validation', 'Loading', `${data.program.maturation_days}-day validation window`)}
+                    ${this.metric('Converted to Norva', 'Loading', 'Access credits used')}
+                    ${this.metric('Next balance update', 'Loading', 'Authoritative schedule')}
+                </section>
+                <section data-partners-dashboard-content aria-busy="true">
+                    <div class="partners-skeleton partners-skeleton-hero" aria-hidden="true"></div>
+                </section>
+                <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
+                ${this.liveRegion('Norva Partners is active. Loading your personal link and balance.')}
+            </main>`;
+        this.bindCommonActions();
+        this.container.querySelector('[data-partners-dashboard-retry]')
+            ?.addEventListener('click', () => this.loadDashboard(data, { reset: true }));
+        this.container.querySelector('[data-partners-cash-button]')
+            ?.addEventListener('click', (event) => this.openCashJourney({
+                ...data,
+                cash_readiness: this._membershipDashboard?.cash_readiness || data.cash_readiness
+            }, event.currentTarget));
+        this.focusTitle();
+        this.loadDashboard(data, { reset: true });
     }
 
     renderDiscovery(data) {
@@ -2180,8 +2447,23 @@ class PartnersPage {
             partners_access_request_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_access_requests_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_action_not_allowed: 'This action is not available for the current verified account state.',
+            partners_membership_join_unavailable: 'Joining is temporarily unavailable. No membership or link was created.',
+            partners_credit_unavailable: 'Norva access conversion is temporarily unavailable. Your balance is unchanged.',
+            partners_credit_months_invalid: 'Choose a valid Norva access duration.',
+            partners_credit_quote_invalid: 'This conversion quote is no longer valid. Create a new quote.',
+            membership_required: 'Join Norva Partners before converting an available balance.',
+            credits_disabled: 'Norva access conversion is temporarily paused. Your balance is unchanged.',
+            quote_expired: 'This quote expired. Close this review and create a fresh quote.',
+            insufficient_balance: 'Your available balance changed and is now too low. Close this review and refresh your balance.',
+            catalog_unavailable: 'The authoritative Norva access catalogue is temporarily unavailable.',
+            currency_not_supported: 'Norva access conversion currently uses only your available USD balance. Other currencies remain separate and unchanged.',
+            quote_conflict: 'This quote has already been used or replaced. Close this review and refresh your balance.',
             partners_kyc_consent_invalid: 'Review and confirm the current verification statements before continuing.',
             partners_kyc_review_reason_invalid: 'Choose what the human reviewer should check before submitting.',
+            partners_payout_country_invalid: 'Choose a valid payout country before continuing.',
+            payout_country_required: 'Choose your payout country before configuring a cash transfer.',
+            cash_pilot_not_allowed: 'The supervised cash-transfer pilot is not open for this account yet. Membership, sharing, earnings and Norva-access conversion remain available.',
+            payout_country_unavailable: 'Cash transfers are not available for this country yet. Your referral link, balance and Norva-access conversions continue to work.',
             partners_fiscal_declaration_invalid: 'Review and confirm the current tax-residence statement before continuing.',
             partners_fiscal_country_mismatch: 'Your tax-residence country must match the authoritative country on your Norva account.',
             partners_payout_onboarding_invalid: 'Choose an available payout currency and confirm secure account contact.',
@@ -2257,6 +2539,7 @@ class PartnersPage {
         const reasonCopy = {
             account_not_active: 'Partner account activation is required.',
             kyc_not_verified: 'Identity verification is required.',
+            payout_country_required: 'Choose your payout country before cash-transfer setup.',
             fiscal_profile_required: 'A verified individual fiscal profile is required.',
             provider_not_configured: 'No individual payout provider is configured for this policy.',
             payouts_not_live: 'The payout release gate is not live.'
@@ -2367,6 +2650,8 @@ class PartnersPage {
         successMessage = 'Partner dashboard updated.'
     } = {}) {
         if (!this._visible) return;
+        clearTimeout(this._dashboardRefreshTimer);
+        this._dashboardRefreshTimer = 0;
         if (typeof window.NorvaCloud?.partners?.dashboard !== 'function') {
             this.renderDashboardFailure(bootstrap, { unavailable: true });
             this.setActionStatus(
@@ -2442,12 +2727,19 @@ class PartnersPage {
         const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
         const content = this.container?.querySelector('[data-partners-dashboard-content]');
         if (metrics) {
-            metrics.innerHTML = [
-                this.metric('Available payout', 'Unavailable', 'Secure reporting unavailable'),
-                this.metric('In validation', 'Unavailable', 'Secure reporting unavailable'),
-                this.metric('Paid to date', 'Unavailable', 'Secure reporting unavailable'),
-                this.metric('Attributed referrals', 'Unavailable', 'Secure reporting unavailable')
-            ].join('');
+            metrics.innerHTML = (bootstrap.schema_version === 2
+                ? [
+                    this.metric('Available to use', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('In validation', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('Converted to Norva', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('Next balance update', 'Unavailable', 'Secure reporting unavailable')
+                ]
+                : [
+                    this.metric('Available payout', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('In validation', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('Paid to date', 'Unavailable', 'Secure reporting unavailable'),
+                    this.metric('Attributed referrals', 'Unavailable', 'Secure reporting unavailable')
+                ]).join('');
             metrics.removeAttribute?.('aria-busy');
         }
         if (!content) return;
@@ -2470,6 +2762,15 @@ class PartnersPage {
     }
 
     renderDashboardData(bootstrap, dashboard) {
+        if (dashboard.schema_version === 2) {
+            if (!dashboard.program) {
+                this.renderDashboardFailure(bootstrap, { unavailable: true });
+                this.setActionStatus('The authoritative programme rules are unavailable. Your balance was not inferred.', 'error');
+                return;
+            }
+            this.renderMembershipDashboardData(bootstrap, dashboard);
+            return;
+        }
         const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
         const content = this.container?.querySelector('[data-partners-dashboard-content]');
         if (!metrics || !content) return;
@@ -2596,6 +2897,158 @@ class PartnersPage {
         this.bindDashboardActions(bootstrap, dashboard);
     }
 
+    renderMembershipDashboardData(bootstrap, dashboard) {
+        const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
+        const content = this.container?.querySelector('[data-partners-dashboard-content]');
+        if (!metrics || !content) return;
+        this._membershipDashboard = dashboard;
+        const balances = Array.isArray(dashboard.balances) ? dashboard.balances : [];
+        const available = this.formatCurrencyBalances(balances, 'available_minor');
+        const pending = this.formatCurrencyBalances(balances, 'pending_minor');
+        const redeemed = this.formatCurrencyBalances(balances, 'redeemed_minor');
+        const nextMaturation = dashboard.next_maturation_at
+            ? this.formatDateTime(dashboard.next_maturation_at)
+            : 'Nothing scheduled';
+        const cashPilotLimited = dashboard.cash_readiness?.reason === 'cash_pilot_not_allowed';
+        metrics.innerHTML = [
+            this.metric(
+                'Available to use',
+                available,
+                cashPilotLimited
+                    ? 'Convert to Norva · cash pilot limited'
+                    : 'Convert to Norva or request cash'
+            ),
+            this.metric('In validation', pending, `${dashboard.program.maturation_days}-day validation window`),
+            this.metric('Converted to Norva', redeemed, 'Access credits already used'),
+            this.metric('Next balance update', nextMaturation, 'Updates automatically')
+        ].join('');
+
+        const link = dashboard.link;
+        const rate = this.percent(dashboard.program.commission_rate_bps);
+        const linkCard = link
+            ? `<div class="partners-referral-card">
+                <div class="partners-referral-main">
+                    <span class="partners-eyebrow">Your personal referral link</span>
+                    <h2>Share now. Your referrals start here.</h2>
+                    <div class="partners-link-control">
+                        <input type="text" readonly value="${this.escape(link.share_url)}"
+                            aria-label="Your personal Norva referral link" data-partners-link>
+                        <button class="btn btn-secondary" type="button" data-partners-copy>Copy share text</button>
+                    </div>
+                    <div class="partners-link-actions">
+                        <button class="btn btn-primary" type="button" data-partners-share>Share link</button>
+                        <button class="btn btn-secondary" type="button" data-partners-qr>Show QR</button>
+                        <button class="btn btn-ghost" type="button" data-partners-rotate>Rotate link</button>
+                    </div>
+                    <p class="partners-disclosure" data-partners-share-disclosure>${this.escape(this.shareDisclosure(bootstrap))}</p>
+                </div>
+                <div class="partners-rate-badge"><strong>${rate}</strong><span>Recurring</span></div>
+              </div>`
+            : `<div class="partners-referral-card">
+                <div>
+                    <span class="partners-eyebrow">Referral link</span>
+                    <h2>Your link is being prepared.</h2>
+                    <p>Request a fresh opaque link from Norva. No code is generated in this browser.</p>
+                    <button class="btn btn-primary" type="button" data-partners-create-link>Create referral link</button>
+                </div>
+              </div>`;
+
+        const credit = dashboard.credit_readiness;
+        const catalog = credit.catalog;
+        const creditBalance = catalog
+            ? balances.find((entry) => entry.currency === catalog.currency)
+            : balances.find((entry) => entry.currency === 'USD');
+        const planLabel = this.creditPlanLabel(catalog?.plan_code);
+        const canConvert = credit.ready && catalog
+            && creditBalance
+            && creditBalance.available_minor >= catalog.unit_amount_minor;
+        const maximumAffordable = catalog
+            ? Math.min(
+                catalog.maximum_months,
+                Math.floor((creditBalance?.available_minor || 0) / catalog.unit_amount_minor)
+            )
+            : 0;
+        const conversionCopy = credit.ready
+            ? (canConvert
+                ? `Choose 1 to ${maximumAffordable} month${maximumAffordable === 1 ? '' : 's'}. The exact server quote is shown before confirmation.`
+                : `Your available balance needs to reach ${this.formatMinor(catalog.unit_amount_minor, catalog.currency)} for one month.`)
+            : ({
+                credits_disabled: 'Balance conversion is temporarily paused. Your balance remains unchanged.',
+                catalog_unavailable: 'The authoritative Norva access catalogue is temporarily unavailable.',
+                currency_not_supported: 'Conversion to Norva access is available only from your USD balance for now. Other currency balances stay separate and are never shown as zero or converted automatically.',
+                membership_required: 'An active Partners membership is required.'
+            })[credit.reason] || 'Balance conversion is temporarily unavailable.';
+        const monthOptions = catalog && maximumAffordable > 0
+            ? Array.from({ length: maximumAffordable }, (_, index) => index + 1)
+                .map((months) => `<option value="${months}">${months} month${months === 1 ? '' : 's'} · ${this.escape(this.formatMinor(catalog.unit_amount_minor * months, catalog.currency))}</option>`)
+                .join('')
+            : '<option value="1">1 month</option>';
+        const conversionCard = `<aside class="partners-program-card partners-credit-card" aria-labelledby="partners-credit-title">
+            <span class="partners-eyebrow">Use your available balance</span>
+            <h2 id="partners-credit-title" tabindex="-1">Convert to ${this.escape(planLabel)}</h2>
+            <p>${this.escape(conversionCopy)}</p>
+            <form class="partners-credit-form" data-partners-credit-form>
+                <label for="partners-credit-months">Access duration</label>
+                <select id="partners-credit-months" data-partners-credit-months
+                    ${canConvert ? '' : 'disabled'}>${monthOptions}</select>
+                <button class="btn btn-primary partners-primary-action" type="submit"
+                    data-partners-credit-quote ${canConvert ? '' : 'disabled'}>Review conversion</button>
+            </form>
+            <p class="partners-action-note">No KYC is required. ${catalog ? `Each credited ${this.escape(planLabel)} month is ${catalog.unit_duration_days} days. ` : ''}P0 conversion is USD-only with no implicit FX. Other balances remain in their authoritative currency. An active paid subscription stays in control; converted access waits safely and resumes afterward.</p>
+        </aside>`;
+
+        const filters = [
+            ['all', 'All'],
+            ['pending', 'Pending'],
+            ['available', 'Available'],
+            ['redeemed', 'Converted'],
+            ['paid', 'Paid'],
+            ['reversed', 'Reversed']
+        ].map(([value, label]) => `<button class="partners-filter-chip${dashboard.history.status === value ? ' is-active' : ''}"
+            type="button" data-partners-history-filter="${value}"
+            aria-pressed="${dashboard.history.status === value ? 'true' : 'false'}">${label}</button>`).join('');
+        const history = dashboard.history.items.length
+            ? `<ol class="partners-history-list">${dashboard.history.items.map((item) => `
+                <li>
+                    <span class="partners-history-signal" aria-hidden="true"></span>
+                    <div><strong>${this.escape(this.historyLabel(item.type))}</strong>
+                    <span>${this.escape(this.formatMinor(item.amount_minor, item.currency))} · ${this.escape(this.formatDateTime(item.occurred_at))}</span></div>
+                </li>`).join('')}</ol>`
+            : `<div class="partners-empty-state">
+                <strong>No balance events in this view</strong>
+                <span>New eligible payments appear in validation without exposing the referred person.</span>
+              </div>`;
+
+        content.innerHTML = `
+            <section class="partners-dashboard-grid partners-membership-grid">
+                ${linkCard}
+                ${conversionCard}
+            </section>
+            ${balances.some((entry) => entry.recovery_due_minor > 0) ? `<aside class="partners-balance-notice" role="status">
+                <strong>Balance recovery in progress</strong>
+                <span>${this.escape(this.formatCurrencyBalances(
+                    balances.filter((entry) => entry.recovery_due_minor > 0),
+                    'recovery_due_minor'
+                ))} will be offset by future eligible commission after a refund or chargeback.</span>
+            </aside>` : ''}
+            <section class="partners-history-card" aria-labelledby="partners-history-title">
+                <div class="partners-history-heading">
+                    <div><h2 id="partners-history-title" tabindex="-1">Balance history</h2>
+                    <p>Pending, available, converted and paid events are shown without customer identity or payment references.</p></div>
+                    <div class="partners-history-filters" role="group" aria-label="Filter balance history">${filters}</div>
+                </div>
+                ${history}
+                ${dashboard.history.next_cursor
+                    ? '<button class="btn btn-secondary partners-load-more" type="button" data-partners-history-more>Load more</button>'
+                    : ''}
+            </section>`;
+        metrics.removeAttribute('aria-busy');
+        content.removeAttribute('aria-busy');
+        this.bindDashboardActions(bootstrap, dashboard);
+        this.bindCreditActions(bootstrap, dashboard);
+        this.scheduleDashboardRefresh(bootstrap, dashboard);
+    }
+
     bindDashboardActions(bootstrap, dashboard) {
         const link = dashboard.link;
         if (link) {
@@ -2682,6 +3135,548 @@ class PartnersPage {
             ?.addEventListener('click', () => this.loadDashboard(bootstrap, { append: true }));
     }
 
+    bindCreditActions(bootstrap, dashboard) {
+        const form = this.container?.querySelector('[data-partners-credit-form]');
+        const months = form?.querySelector('[data-partners-credit-months]');
+        const button = form?.querySelector('[data-partners-credit-quote]');
+        if (!form || !months || !button || button.disabled) return;
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const selectedMonths = Number(months.value);
+            if (!Number.isSafeInteger(selectedMonths) || selectedMonths < 1 || selectedMonths > 12) {
+                this.setActionStatus('Choose a valid Norva access duration.', 'error');
+                months.focus();
+                return;
+            }
+            const token = ++this._creditToken;
+            await this.runPartnerAction(button, 'Creating secure quote…', async () => {
+                const api = window.NorvaCloud?.partners?.credit?.quote;
+                if (typeof api !== 'function') throw new Error('partners_credit_unavailable');
+                this._creditAbort?.abort();
+                const controller = new AbortController();
+                this._creditAbort = controller;
+                const action = `credit-quote-${selectedMonths}`;
+                try {
+                    const envelope = await api({
+                        months: selectedMonths,
+                        idempotencyKey: this.actionKey(action),
+                        signal: controller.signal
+                    });
+                    this.clearActionKey(action);
+                    if (!this._visible || token !== this._creditToken || !button.isConnected) return;
+                    this.openCreditQuoteDialog(envelope.data.quote, bootstrap, button);
+                } finally {
+                    if (this._creditAbort === controller) this._creditAbort = null;
+                }
+            });
+        });
+    }
+
+    scheduleDashboardRefresh(bootstrap, dashboard) {
+        clearTimeout(this._dashboardRefreshTimer);
+        this._dashboardRefreshTimer = 0;
+        if (!this._visible
+            || bootstrap.schema_version !== 2) return;
+        this._dashboardRefreshTimer = setTimeout(() => {
+            this._dashboardRefreshTimer = 0;
+            if (!this._visible) return;
+            if (document.visibilityState === 'hidden'
+                || this._closeCreditDialog
+                || this._closeCashDialog
+                || this._closePayoutDialog
+                || this._closeQrDialog) {
+                this.scheduleDashboardRefresh(bootstrap, dashboard);
+                return;
+            }
+            this.loadDashboard(bootstrap, {
+                reset: true,
+                successMessage: 'Balance refreshed automatically.'
+            });
+        }, 60000);
+    }
+
+    openCreditQuoteDialog(quote, bootstrap, opener) {
+        this._closeCreditDialog?.({ restoreFocus: false });
+        const overlay = document.createElement('div');
+        overlay.className = 'partners-country-picker-overlay partners-credit-overlay';
+        overlay.setAttribute('data-region-picker', '');
+        overlay.setAttribute('data-partners-credit-overlay', '');
+        const monthsLabel = `${quote.months} month${quote.months === 1 ? '' : 's'}`;
+        const planLabel = this.creditPlanLabel(quote.plan_code);
+        overlay.innerHTML = `
+            <section class="partners-credit-dialog" data-region-pop role="dialog" aria-modal="true"
+                aria-labelledby="partners-credit-confirm-title"
+                aria-describedby="partners-credit-confirm-copy">
+                <header class="partners-country-dialog-header">
+                    <div><span class="partners-eyebrow">Server-confirmed quote</span>
+                    <h2 id="partners-credit-confirm-title">Convert to ${this.escape(monthsLabel)} of ${this.escape(planLabel)}?</h2></div>
+                    <button class="partners-country-close" type="button"
+                        data-partners-credit-close aria-label="Close conversion review">×</button>
+                </header>
+                <dl class="partners-program-facts partners-credit-summary">
+                    <div><dt>Available balance used</dt><dd>${this.escape(this.formatMinor(quote.total_amount_minor, quote.currency))}</dd></div>
+                    <div><dt>Norva access</dt><dd>${this.escape(planLabel)} · ${this.escape(monthsLabel)}</dd></div>
+                    <div><dt>Identity verification</dt><dd>Not required</dd></div>
+                </dl>
+                <p id="partners-credit-confirm-copy">This uses only your available Partners balance. Pending commission is untouched. If paid access is active, this credit waits and resumes automatically afterward.</p>
+                <div class="partners-actions partners-actions-row">
+                    <button class="btn btn-secondary" type="button" data-partners-credit-close>Cancel</button>
+                    <button class="btn btn-primary" type="button" data-partners-credit-confirm>Confirm conversion</button>
+                </div>
+                <div class="partners-form-status" data-partners-credit-status role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>`;
+        this.container.appendChild(overlay);
+        const dialog = overlay.querySelector('[role="dialog"]');
+        const confirm = overlay.querySelector('[data-partners-credit-confirm]');
+        const status = overlay.querySelector('[data-partners-credit-status]');
+        let closed = false;
+        let refreshAfterClose = false;
+        this.container.classList.add('partners-picker-open');
+        try { overlay.querySelector('[data-partners-credit-close]')?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (closed || !overlay.isConnected) return false;
+            if (confirm?.getAttribute('aria-busy') === 'true') {
+                refreshAfterClose = true;
+                this._creditAbort?.abort();
+            }
+            closed = true;
+            restoreBackground();
+            overlay.remove();
+            this.container?.classList.remove('partners-picker-open');
+            if (this._closeCreditDialog === close) this._closeCreditDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            if (refreshAfterClose && restoreFocus && this._visible) {
+                this.loadDashboard(bootstrap, {
+                    reset: true,
+                    successMessage: 'Norva access conversion recorded.'
+                }).then(() => {
+                    const target = this.container?.querySelector('[data-partners-credit-quote]')
+                        || this.container?.querySelector('#partners-credit-title');
+                    try { target?.focus({ preventScroll: true }); } catch (_) { target?.focus?.(); }
+                });
+            }
+            return true;
+        };
+        this._closeCreditDialog = close;
+        overlay.__regionClose = () => close();
+        overlay.querySelectorAll('[data-partners-credit-close]')
+            .forEach((button) => button.addEventListener('click', () => close()));
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        confirm?.addEventListener('click', async () => {
+            if (confirm.disabled || confirm.getAttribute('aria-disabled') === 'true') return;
+            const previous = confirm.textContent;
+            confirm.disabled = true;
+            confirm.setAttribute('aria-busy', 'true');
+            confirm.textContent = 'Converting securely…';
+            if (status) status.textContent = 'Confirming the exact server quote.';
+            const token = ++this._creditToken;
+            try {
+                const api = window.NorvaCloud?.partners?.credit?.redeem;
+                if (typeof api !== 'function') throw new Error('partners_credit_unavailable');
+                this._creditAbort?.abort();
+                const controller = new AbortController();
+                this._creditAbort = controller;
+                const action = `credit-redeem-${quote.key}`;
+                const envelope = await api({
+                    quoteKey: quote.key,
+                    idempotencyKey: this.actionKey(action),
+                    signal: controller.signal
+                });
+                this.clearActionKey(action);
+                if (this._creditAbort === controller) this._creditAbort = null;
+                if (!this._visible || token !== this._creditToken || !overlay.isConnected) return;
+                const redemption = envelope.data.redemption;
+                const grant = envelope.data.grant;
+                dialog.innerHTML = `
+                    <span class="partners-status-pill partners-status-success">Conversion complete</span>
+                    <h2 id="partners-credit-confirm-title" tabindex="-1">${this.escape(redemption.months)} month${redemption.months === 1 ? '' : 's'} of ${this.escape(planLabel)} secured</h2>
+                    <p id="partners-credit-confirm-copy">Your available balance was reduced by ${this.escape(this.formatMinor(redemption.amount_minor, redemption.currency))}. ${this.escape(this.creditGrantCopy(grant.status))}</p>
+                    <button class="btn btn-primary partners-primary-action" type="button" data-partners-credit-close>Done</button>`;
+                dialog.querySelector('[data-partners-credit-close]')
+                    ?.addEventListener('click', () => close());
+                requestAnimationFrame(() => dialog.querySelector('#partners-credit-confirm-title')?.focus?.({ preventScroll: true }));
+                refreshAfterClose = true;
+            } catch (error) {
+                this._creditAbort = null;
+                if (!overlay.isConnected || token !== this._creditToken) return;
+                if (status) {
+                    status.setAttribute('role', 'alert');
+                    status.setAttribute('aria-live', 'assertive');
+                    status.textContent = this.partnerErrorMessage(error);
+                }
+                const terminalQuote = [
+                    'quote_expired',
+                    'quote_conflict',
+                    'insufficient_balance',
+                    'membership_required'
+                ].includes(error?.code);
+                confirm.disabled = terminalQuote;
+                confirm.removeAttribute('aria-busy');
+                confirm.textContent = terminalQuote ? 'Quote cannot be confirmed' : previous;
+            }
+        });
+    }
+
+    creditGrantCopy(status) {
+        return ({
+            active: 'Your Norva access is active now.',
+            queued: 'Your access is queued safely and will activate when it becomes eligible.',
+            paused_provider: 'Your paid subscription remains active first; this credit will resume afterward.'
+        })[status] || 'Your Norva access state is being reconciled securely.';
+    }
+
+    creditPlanLabel(planCode) {
+        return ({
+            plus: 'Norva Plus',
+            family: 'Norva Family'
+        })[planCode] || 'Norva';
+    }
+
+    async openCashJourney(data, opener) {
+        const readiness = data.cash_readiness;
+        if (!readiness) {
+            this.openCashStatusDialog(
+                'Cash-transfer status is unavailable',
+                'Norva could not verify the authoritative cash-transfer state. Your referral link, balance and Norva-access conversions are unchanged.',
+                opener
+            );
+            return;
+        }
+        if (readiness.reason === 'cash_pilot_not_allowed') {
+            this.openCashStatusDialog(
+                'Cash transfers are in a supervised pilot',
+                'This account is not in the current cash-transfer cohort. Your membership, referral link, earnings and Norva-access conversions remain fully available. No payout country, identity check, tax profile or banking detail is requested.',
+                opener
+            );
+            return;
+        }
+        if (readiness.reason === 'payout_country_required') {
+            const profile = await this.loadPayoutProfile();
+            if (!opener?.isConnected) return;
+            if (profile?.account?.country_code) {
+                this.openCashStatusDialog(
+                    'Cash-transfer status needs a refresh',
+                    'Your payout country is already recorded, but the cash-transfer readiness state has not caught up yet. Refresh Partners before continuing.',
+                    opener
+                );
+                return;
+            }
+            if (profile) {
+                this.openCashCountryDialog(data, profile, opener);
+                return;
+            }
+            this.setActionStatus('Cash-transfer country setup is temporarily unavailable. Your balance is unchanged.', 'error');
+            try { opener.focus({ preventScroll: true }); } catch (_) { opener.focus?.(); }
+            return;
+        }
+        if (readiness.reason === 'kyc_required') {
+            this.openCashKycDialog(data, opener);
+            return;
+        }
+        if (readiness.reason === 'account_blocked') {
+            this.openCashStatusDialog(
+                'Cash transfers need a secure review',
+                'Your referral link and balance stay separate from this cash-transfer review. Contact Support without sending identity, banking or tax documents.',
+                opener
+            );
+            return;
+        }
+        if (readiness.reason === 'membership_required') {
+            this.openCashStatusDialog(
+                'Partners membership is required',
+                'Join Norva Partners and obtain your referral link before configuring an optional cash transfer.',
+                opener
+            );
+            return;
+        }
+        const profile = await this.loadPayoutProfile();
+        if (profile && opener?.isConnected) this.openPayoutDialog(profile, opener);
+        else if (opener?.isConnected) {
+            this.setActionStatus('Cash-transfer setup is temporarily unavailable. Your balance is unchanged.', 'error');
+            try { opener.focus({ preventScroll: true }); } catch (_) { opener.focus?.(); }
+        }
+    }
+
+    openCashCountryDialog(data, profile, opener) {
+        this._closeCashDialog?.({ restoreFocus: false });
+        this._cashCountryAbort?.abort();
+        this._cashCountryAbort = null;
+        const countries = this.availableCountries();
+        const countryOptions = countries.map((country) => `
+            <option value="${this.escape(country.code)}">${this.escape(country.name)} · ${this.escape(country.code)}</option>`).join('');
+        const overlay = document.createElement('div');
+        overlay.className = 'partners-country-picker-overlay partners-credit-overlay';
+        overlay.setAttribute('data-region-picker', '');
+        overlay.setAttribute('data-partners-cash-country-overlay', '');
+        overlay.innerHTML = `
+            <section class="partners-credit-dialog" data-region-pop role="dialog" aria-modal="true"
+                aria-labelledby="partners-cash-country-title" aria-describedby="partners-cash-country-copy">
+                <header class="partners-country-dialog-header">
+                    <div><span class="partners-eyebrow">Optional cash transfer</span>
+                    <h2 id="partners-cash-country-title">Choose your payout country</h2></div>
+                    <button class="partners-country-close" type="button"
+                        data-partners-cash-country-close aria-label="Close payout-country setup">×</button>
+                </header>
+                <p id="partners-cash-country-copy">Choose the country where you personally reside for the cash-transfer programme. Norva never infers this from your IP address, device or locale. This does not affect sharing, earnings or conversion to Norva access.</p>
+                <form class="partners-credit-form partners-cash-country-form" data-partners-cash-country-form novalidate>
+                    <label for="partners-cash-country">Country of residence for cash transfers</label>
+                    <select id="partners-cash-country" data-partners-cash-country required>
+                        <option value="">Choose a country</option>
+                        ${countryOptions}
+                    </select>
+                    <p class="partners-action-note">The server will check whether an individual payout route is available. Your country is saved only after you confirm it; no alternative country is guessed or retried.</p>
+                    <button class="btn btn-primary partners-primary-action" type="submit"
+                        data-partners-cash-country-submit disabled>Confirm payout country</button>
+                </form>
+                <div class="partners-form-status" data-partners-cash-country-status role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>`;
+        this.container.appendChild(overlay);
+        const dialog = overlay.querySelector('[role="dialog"]');
+        const form = overlay.querySelector('[data-partners-cash-country-form]');
+        const select = overlay.querySelector('[data-partners-cash-country]');
+        const submit = overlay.querySelector('[data-partners-cash-country-submit]');
+        const status = overlay.querySelector('[data-partners-cash-country-status]');
+        let closed = false;
+        this.container.classList.add('partners-picker-open');
+        try { overlay.querySelector('[data-partners-cash-country-close]')?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (closed || !overlay.isConnected) return false;
+            closed = true;
+            this._cashCountryAbort?.abort();
+            this._cashCountryAbort = null;
+            restoreBackground();
+            overlay.remove();
+            this.container?.classList.remove('partners-picker-open');
+            if (this._closeCashDialog === close) this._closeCashDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            return true;
+        };
+        this._closeCashDialog = close;
+        overlay.__regionClose = () => close();
+        overlay.querySelector('[data-partners-cash-country-close]')
+            ?.addEventListener('click', () => close());
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        const sync = () => {
+            submit.disabled = !/^[A-Z]{2}$/.test(String(select.value || '').trim().toUpperCase());
+        };
+        select.addEventListener('change', sync);
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const countryCode = String(select.value || '').trim().toUpperCase();
+            if (!/^[A-Z]{2}$/.test(countryCode)) {
+                status.setAttribute('role', 'alert');
+                status.textContent = 'Choose your country before continuing.';
+                select.focus();
+                return;
+            }
+            const api = window.NorvaCloud?.partners?.bindPayoutCountry;
+            if (typeof api !== 'function') {
+                status.setAttribute('role', 'alert');
+                status.textContent = 'Secure payout-country setup is unavailable in this app version.';
+                return;
+            }
+            const previous = submit.textContent;
+            submit.disabled = true;
+            select.disabled = true;
+            submit.setAttribute('aria-busy', 'true');
+            submit.textContent = 'Checking securely…';
+            status.setAttribute('role', 'status');
+            status.textContent = 'Checking the authoritative individual payout policy.';
+            const controller = new AbortController();
+            this._cashCountryAbort = controller;
+            const action = `payout-country-${countryCode}`;
+            try {
+                const envelope = await api({
+                    countryCode,
+                    idempotencyKey: this.actionKey(action),
+                    signal: controller.signal
+                });
+                if (this._cashCountryAbort === controller) this._cashCountryAbort = null;
+                if (!overlay.isConnected || closed || controller.signal.aborted) return;
+                this.clearActionKey(action);
+                const nextReadiness = envelope.data.cash_readiness;
+                if (this._membershipDashboard) {
+                    this._membershipDashboard = {
+                        ...this._membershipDashboard,
+                        cash_readiness: nextReadiness
+                    };
+                }
+                close({ restoreFocus: false });
+                this.openCashJourney({
+                    ...data,
+                    cash_readiness: nextReadiness
+                }, opener);
+            } catch (error) {
+                if (this._cashCountryAbort === controller) this._cashCountryAbort = null;
+                if (!overlay.isConnected || closed || error?.name === 'AbortError') return;
+                status.setAttribute('role', 'alert');
+                status.setAttribute('aria-live', 'assertive');
+                status.textContent = this.partnerErrorMessage(error);
+                select.disabled = false;
+                submit.removeAttribute('aria-busy');
+                submit.textContent = previous;
+                sync();
+            }
+        });
+        sync();
+    }
+
+    openCashKycDialog(data, opener) {
+        this._closeCashDialog?.({ restoreFocus: false });
+        const overlay = document.createElement('div');
+        overlay.className = 'partners-country-picker-overlay partners-credit-overlay';
+        overlay.setAttribute('data-region-picker', '');
+        overlay.setAttribute('data-partners-cash-overlay', '');
+        overlay.innerHTML = `
+            <section class="partners-credit-dialog" data-region-pop role="dialog" aria-modal="true"
+                aria-labelledby="partners-cash-title" aria-describedby="partners-cash-copy">
+                <header class="partners-country-dialog-header">
+                    <div><span class="partners-eyebrow">Optional cash transfer</span>
+                    <h2 id="partners-cash-title">Verify only when you want cash</h2></div>
+                    <button class="partners-country-close" type="button"
+                        data-partners-cash-close aria-label="Close cash-transfer setup">×</button>
+                </header>
+                <p id="partners-cash-copy">Your membership, referral link, earnings and Norva-access conversions already work without KYC. A cash transfer requires identity verification, then fiscal and payout-route checks.</p>
+                <aside class="partners-provider-disclosure">
+                    <strong>Secure verification with Didit</strong>
+                    <span>Review the <a href="/privacy.html#partners" target="_blank" rel="noopener">Norva Privacy Notice</a>, <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit Terms</a>.</span>
+                </aside>
+                <form class="partners-join-form" data-partners-cash-kyc-form novalidate>
+                    <label class="partners-consent-check">
+                        <input type="checkbox" data-partners-cash-kyc-consent>
+                        <span>I explicitly consent to document, selfie, liveness and face-match capture in Didit's hosted flow for cash-transfer eligibility.</span>
+                    </label>
+                    <label class="partners-consent-check">
+                        <input type="checkbox" data-partners-cash-capacity>
+                        <span>I confirm that I have legal capacity to request an individual cash transfer.</span>
+                    </label>
+                    <button class="btn btn-primary partners-primary-action" type="submit"
+                        data-partners-cash-kyc-submit disabled>Continue securely to Didit</button>
+                </form>
+                <div class="partners-form-status" data-partners-cash-status role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>`;
+        this.container.appendChild(overlay);
+        const dialog = overlay.querySelector('[role="dialog"]');
+        const form = overlay.querySelector('[data-partners-cash-kyc-form]');
+        const consent = overlay.querySelector('[data-partners-cash-kyc-consent]');
+        const capacity = overlay.querySelector('[data-partners-cash-capacity]');
+        const submit = overlay.querySelector('[data-partners-cash-kyc-submit]');
+        const status = overlay.querySelector('[data-partners-cash-status]');
+        let closed = false;
+        this.container.classList.add('partners-picker-open');
+        try { overlay.querySelector('[data-partners-cash-close]')?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (closed || !overlay.isConnected) return false;
+            closed = true;
+            restoreBackground();
+            overlay.remove();
+            this.container?.classList.remove('partners-picker-open');
+            if (this._closeCashDialog === close) this._closeCashDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            return true;
+        };
+        this._closeCashDialog = close;
+        overlay.__regionClose = () => close();
+        overlay.querySelector('[data-partners-cash-close]')?.addEventListener('click', () => close());
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+        const sync = () => { submit.disabled = !(consent.checked && capacity.checked); };
+        consent.addEventListener('change', sync);
+        capacity.addEventListener('change', sync);
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!consent.checked || !capacity.checked) {
+                status.setAttribute('role', 'alert');
+                status.textContent = 'Confirm both identity-verification statements first.';
+                (!consent.checked ? consent : capacity).focus();
+                return;
+            }
+            const previous = submit.textContent;
+            submit.disabled = true;
+            submit.setAttribute('aria-busy', 'true');
+            submit.textContent = 'Opening Didit securely…';
+            status.textContent = 'Creating a single-use hosted verification session.';
+            try {
+                const envelope = await window.NorvaCloud.partners.startKyc({
+                    language: this.partnerLanguage(),
+                    consentVersion: data.program.disclosure_version,
+                    biometricConsentVersion: PartnersPage.BIOMETRIC_CONSENT_VERSION,
+                    capacityConfirmed: true,
+                    idempotencyKey: this.actionKey('cash-kyc-session')
+                });
+                if (!overlay.isConnected) return;
+                status.textContent = 'Secure verification ready. Opening Didit.';
+                window.location.assign(envelope.data.verification.url);
+            } catch (error) {
+                if (!overlay.isConnected) return;
+                status.setAttribute('role', 'alert');
+                status.setAttribute('aria-live', 'assertive');
+                status.textContent = this.partnerErrorMessage(error);
+                submit.disabled = false;
+                submit.removeAttribute('aria-busy');
+                submit.textContent = previous;
+            }
+        });
+        sync();
+    }
+
+    openCashStatusDialog(title, copy, opener) {
+        this._closeCashDialog?.({ restoreFocus: false });
+        const overlay = document.createElement('div');
+        overlay.className = 'partners-country-picker-overlay partners-credit-overlay';
+        overlay.setAttribute('data-region-picker', '');
+        overlay.innerHTML = `<section class="partners-credit-dialog" data-region-pop role="dialog" aria-modal="true"
+            aria-labelledby="partners-cash-title">
+            <span class="partners-status-pill partners-status-warning">Secure review</span>
+            <h2 id="partners-cash-title">${this.escape(title)}</h2>
+            <p>${this.escape(copy)}</p>
+            <div class="partners-actions partners-actions-row">
+                <a class="btn btn-secondary" href="/support.html?returnTo=%2Fapp%23partners">Contact support</a>
+                <button class="btn btn-primary" type="button" data-partners-cash-close>Close</button>
+            </div>
+        </section>`;
+        this.container.appendChild(overlay);
+        const dialog = overlay.querySelector('[role="dialog"]');
+        this.container.classList.add('partners-picker-open');
+        try { overlay.querySelector('[data-partners-cash-close]')?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        const restoreBackground = this.isolateOverlayBackground(overlay);
+        const close = ({ restoreFocus = true } = {}) => {
+            if (!overlay.isConnected) return false;
+            restoreBackground();
+            overlay.remove();
+            this.container?.classList.remove('partners-picker-open');
+            if (this._closeCashDialog === close) this._closeCashDialog = null;
+            if (restoreFocus) {
+                try { opener?.focus({ preventScroll: true }); } catch (_) { opener?.focus?.(); }
+            }
+            return true;
+        };
+        this._closeCashDialog = close;
+        overlay.__regionClose = () => close();
+        overlay.querySelector('[data-partners-cash-close]')?.addEventListener('click', () => close());
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) close();
+        });
+        dialog?.addEventListener('keydown', (event) => this.trapDialogFocus(dialog, event, close));
+    }
+
     reportingReason(reason) {
         return ({
             available: 'Authoritative commission ledger',
@@ -2762,7 +3757,15 @@ class PartnersPage {
             commission_held: 'Commission held for review',
             commission_paid: 'Commission paid',
             commission_restored: 'Commission restored',
-            commission_reversed: 'Commission reversed'
+            commission_reversed: 'Commission reversed',
+            accrual: 'Commission recorded',
+            release: 'Commission available',
+            access_credit_redemption: 'Converted to Norva access',
+            payout_settlement: 'Cash transfer settled',
+            payout_late_settlement: 'Cash transfer reconciled',
+            reversal: 'Commission reversed',
+            manual_reversal: 'Balance correction',
+            payout_return: 'Cash transfer returned'
         })[type] || 'Partner event';
     }
 
@@ -3617,6 +4620,18 @@ class PartnersPage {
                 <article><span>1</span><div><h2>Share your personal link</h2><p>A unique opaque link is generated only after server verification.</p></div></article>
                 <article><span>2</span><div><h2>They subscribe to Norva</h2><p>Direct referrals are attributed without revealing their identity to you.</p></div></article>
                 <article><span>3</span><div><h2>You earn on eligible renewals</h2><p>Commission matures after ${this.escape(maturation)} and follows refunds or chargebacks.</p></div></article>
+            </section>`;
+    }
+
+    membershipSteps(program) {
+        const maturation = Number.isSafeInteger(program?.maturation_days)
+            ? `${program.maturation_days} days`
+            : 'the published validation period';
+        return `
+            <section class="partners-steps" aria-label="How the flexible Norva Partners balance works">
+                <article><span>1</span><div><h2>Join and share now</h2><p>Your confirmed Norva account gets a personal opaque link without KYC.</p></div></article>
+                <article><span>2</span><div><h2>Watch balance mature</h2><p>Eligible commission stays pending for ${this.escape(maturation)}, then becomes available.</p></div></article>
+                <article><span>3</span><div><h2>Choose access or cash</h2><p>Convert to Norva access without KYC, or verify identity only when requesting cash.</p></div></article>
             </section>`;
     }
 

@@ -39,6 +39,8 @@ import {
   isUuid,
   mapDatabaseError,
   parseAcceptTermsInput,
+  parseAccessCreditQuoteInput,
+  parseAccessCreditRedemptionInput,
   parseAccessRequestInput,
   parseAllowedOrigins,
   parseApplicationInput,
@@ -49,13 +51,19 @@ import {
   parseFiscalProfileInput,
   parseIdempotencyKey,
   parseKycHumanReviewInput,
+  parseJoinInput,
   parsePayoutOnboardingInput,
+  parsePayoutCountryInput,
   PARTNERS_API_VERSION,
   PARTNERS_RPC,
   partnersMemberWriteRequestHash,
+  type PartnersMemberWriteOperation,
   PublicApiError,
   routeFromPath,
   sanitizeAccessRequestData,
+  sanitizeAccessCreditQuoteData,
+  sanitizeAccessCreditRedemptionData,
+  sanitizeAccessCreditStatusData,
   sanitizeAccessRequestMutationData,
   sanitizeActivationReconcile,
   sanitizeBootstrapData,
@@ -64,10 +72,13 @@ import {
   sanitizeFiscalProfileMutation,
   sanitizeKycRightsData,
   sanitizeKycRightsMutationData,
+  sanitizeJoinData,
+  sanitizeLinkMutationData,
   sanitizeMemberWriteReservation,
   sanitizeMutationData,
   sanitizePayoutOnboardingGet,
   sanitizePayoutOnboardingMutation,
+  sanitizePayoutCountryMutationData,
 } from "../_shared/partners-api.ts";
 import { sanitizePayoutProfileGet } from "../_shared/partners-payout.ts";
 import {
@@ -157,12 +168,132 @@ Deno.serve(async (req) => {
 
     if (route === "/bootstrap") {
       const query = parseBootstrapQuery(url);
-      const data = await callRpc(PARTNERS_RPC.bootstrap, {
-        p_user_id: userId,
-        p_country_code: query.countryCode,
-        p_subdivision_code: query.subdivisionCode,
-      });
+      const data = await callVersionedRpc(
+        PARTNERS_RPC.bootstrapV2,
+        { p_user_id: userId },
+        PARTNERS_RPC.bootstrap,
+        {
+          p_user_id: userId,
+          p_country_code: query.countryCode,
+          p_subdivision_code: query.subdivisionCode,
+        },
+        "query",
+        8_000,
+      );
       cleanData = sanitizeBootstrapData(data, query);
+    } else if (route === "/join") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parseJoinInput(await readJsonBody(req));
+      await reserveMemberWrite(
+        userId,
+        "membership_join",
+        idempotencyKey,
+        ["terms-accepted", "disclosure-accepted"],
+      );
+      cleanData = sanitizeJoinData(
+        await callRpc(
+          PARTNERS_RPC.join,
+          {
+            p_user_id: userId,
+            p_terms_accepted: input.termsAccepted,
+            p_disclosure_accepted: input.disclosureAccepted,
+            p_idempotency_key: idempotencyKey,
+          },
+          "guarded_action",
+          8_000,
+        ),
+      );
+      status = 201;
+    } else if (route === "/credit/quotes") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parseAccessCreditQuoteInput(await readJsonBody(req));
+      await reserveMemberWrite(
+        userId,
+        "access_credit_quote",
+        idempotencyKey,
+        [String(input.months)],
+      );
+      cleanData = sanitizeAccessCreditQuoteData(
+        await callRpc(
+          PARTNERS_RPC.accessCreditQuote,
+          {
+            p_user_id: userId,
+            p_months: input.months,
+            p_idempotency_key: idempotencyKey,
+          },
+          "guarded_action",
+          8_000,
+        ),
+      );
+      status = 201;
+    } else if (route === "/credit/redemptions") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parseAccessCreditRedemptionInput(
+        await readJsonBody(req),
+      );
+      await reserveMemberWrite(
+        userId,
+        "access_credit_redeem",
+        idempotencyKey,
+        [input.quoteKey],
+      );
+      cleanData = sanitizeAccessCreditRedemptionData(
+        await callRpc(
+          PARTNERS_RPC.accessCreditRedeem,
+          {
+            p_user_id: userId,
+            p_quote_key: input.quoteKey,
+            p_idempotency_key: idempotencyKey,
+          },
+          "guarded_action",
+          8_000,
+        ),
+      );
+      status = 201;
+    } else if (route === "/credit/status") {
+      assertNoQueryParameters(url);
+      cleanData = sanitizeAccessCreditStatusData(
+        await callRpc(
+          PARTNERS_RPC.accessCreditStatus,
+          { p_user_id: userId },
+          "guarded_action",
+          8_000,
+        ),
+      );
+    } else if (route === "/payout-country") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parsePayoutCountryInput(await readJsonBody(req));
+      await reserveMemberWrite(
+        userId,
+        "payout_country_bind",
+        idempotencyKey,
+        [input.countryCode],
+      );
+      cleanData = sanitizePayoutCountryMutationData(
+        await callRpc(
+          PARTNERS_RPC.payoutCountryBind,
+          {
+            p_user_id: userId,
+            p_country_code: input.countryCode,
+            p_idempotency_key: idempotencyKey,
+          },
+          "guarded_action",
+          8_000,
+        ),
+      );
+      status = 201;
     } else if (route === "/access-request" && req.method === "GET") {
       assertNoQueryParameters(url);
       const data = await callRpc(PARTNERS_RPC.accessRequestGet, {
@@ -246,6 +377,12 @@ Deno.serve(async (req) => {
         req.headers.get("Idempotency-Key"),
       );
       parseEmptyMutationInput(await readJsonBody(req));
+      await reserveMemberWrite(
+        userId,
+        "link_rotation",
+        idempotencyKey,
+        ["rotate"],
+      );
       const data = await callRpc(
         PARTNERS_RPC.rotateLink,
         {
@@ -254,7 +391,7 @@ Deno.serve(async (req) => {
         },
         "mutation",
       );
-      cleanData = sanitizeMutationData(data, "link_rotated");
+      cleanData = sanitizeLinkMutationData(data);
     } else if (route === "/kyc/rights") {
       assertNoQueryParameters(url);
       cleanData = sanitizeKycRightsData(
@@ -670,12 +807,32 @@ Deno.serve(async (req) => {
       );
     } else {
       const query = parseDashboardQuery(url);
-      const data = await callRpc(PARTNERS_RPC.dashboard, {
+      // `held` is retained only for rolling compatibility with the legacy
+      // dashboard. Every current filter prefers the additive v2 contract.
+      const dashboardRpc = query.historyStatus === "held"
+        ? PARTNERS_RPC.dashboard
+        : PARTNERS_RPC.dashboardV2;
+      const dashboardArgs = {
         p_user_id: userId,
         p_history_limit: query.historyLimit,
         p_history_cursor: query.historyCursor,
         p_history_status: query.historyStatus,
-      });
+      };
+      const data = dashboardRpc === PARTNERS_RPC.dashboardV2
+        ? await callVersionedRpc(
+          PARTNERS_RPC.dashboardV2,
+          dashboardArgs,
+          PARTNERS_RPC.dashboard,
+          dashboardArgs,
+          "query",
+          8_000,
+        )
+        : await callRpc(
+          PARTNERS_RPC.dashboard,
+          dashboardArgs,
+          "query",
+          8_000,
+        );
       cleanData = sanitizeDashboardData(data, query);
     }
 
@@ -831,18 +988,95 @@ async function discardDiditResponseBody(response: Response): Promise<void> {
 async function callRpc(
   rpcName: string,
   args: Record<string, unknown>,
-  requestKind: "query" | "mutation" = "query",
+  requestKind: "query" | "mutation" | "guarded_action" = "query",
+  timeoutMs?: number,
 ): Promise<unknown> {
-  return await callRpcWithClient(admin, rpcName, args, requestKind);
+  if (timeoutMs === undefined) {
+    return await callRpcWithClient(admin, rpcName, args, requestKind);
+  }
+  return await callRpcWithClient(
+    admin,
+    rpcName,
+    args,
+    requestKind,
+    timeoutMs,
+  );
+}
+
+async function reserveMemberWrite(
+  userId: string,
+  operation: PartnersMemberWriteOperation,
+  idempotencyKey: string,
+  normalizedFields: readonly string[],
+): Promise<void> {
+  const requestHash = await partnersMemberWriteRequestHash(
+    operation,
+    normalizedFields,
+  );
+  sanitizeMemberWriteReservation(
+    await callRpc(
+      PARTNERS_RPC.memberWriteReserve,
+      {
+        p_user_id: userId,
+        p_operation: operation,
+        p_idempotency_key: idempotencyKey,
+        p_request_hash: requestHash,
+      },
+      "guarded_action",
+      8_000,
+    ),
+    operation,
+  );
+}
+
+async function callVersionedRpc(
+  preferredRpcName: string,
+  preferredArgs: Record<string, unknown>,
+  fallbackRpcName: string,
+  fallbackArgs: Record<string, unknown>,
+  requestKind: "query" | "mutation" | "guarded_action",
+  timeoutMs: number,
+): Promise<unknown> {
+  const preferred = admin.rpc(preferredRpcName, preferredArgs);
+  const { data, error } = await preferred.abortSignal(
+    AbortSignal.timeout(timeoutMs),
+  );
+  if (!error) return data;
+
+  // PGRST202 is the exact PostgREST signal that an additive RPC is absent
+  // from the schema cache during a rolling deployment. No other database
+  // failure is eligible for a legacy fallback.
+  if (error.code !== "PGRST202") {
+    const mapped = mapDatabaseError(error, requestKind);
+    throw new PublicApiError(mapped.status, mapped.code, mapped.message);
+  }
+  return await callRpc(
+    fallbackRpcName,
+    fallbackArgs,
+    requestKind,
+    timeoutMs,
+  );
 }
 
 async function callRpcWithClient(
   db: SupabaseClient,
   rpcName: string,
   args: Record<string, unknown>,
-  requestKind: "query" | "mutation" = "query",
+  requestKind: "query" | "mutation" | "guarded_action" = "query",
+  timeoutMs?: number,
 ): Promise<unknown> {
-  const { data, error } = await db.rpc(rpcName, args);
+  if (timeoutMs === undefined) {
+    const { data, error } = await db.rpc(rpcName, args);
+    if (error) {
+      const mapped = mapDatabaseError(error, requestKind);
+      throw new PublicApiError(mapped.status, mapped.code, mapped.message);
+    }
+    return data;
+  }
+  const rpc = db.rpc(rpcName, args);
+  const { data, error } = await rpc.abortSignal(
+    AbortSignal.timeout(timeoutMs),
+  );
   if (error) {
     const mapped = mapDatabaseError(error, requestKind);
     throw new PublicApiError(mapped.status, mapped.code, mapped.message);
@@ -1246,7 +1480,9 @@ async function requireUserId(
     (
       local === "fallback" ||
       (isUuid(local.id) && local.id === data.user.id)
-    )
+    ) &&
+    typeof data.user.email_confirmed_at === "string" &&
+    data.user.email_confirmed_at.length > 0
   ) {
     return data.user.id;
   }

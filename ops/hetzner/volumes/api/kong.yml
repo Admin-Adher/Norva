@@ -360,9 +360,124 @@ services:
           require_content_length: false
 
   ## Exact member-write routes must remain before the generic Functions
-  ## prefix. The database enforces 8 distinct keys per authenticated member
-  ## and operation per rolling day; this IP guard only absorbs network bursts
-  ## without making shared mobile/NAT addresses the business authority.
+  ## prefix. The database enforces operation-specific rolling daily quotas per
+  ## authenticated member; this IP guard only absorbs network bursts without
+  ## making shared mobile/NAT addresses the business authority.
+  - name: functions-v1-partners-membership-join-write
+    _comment: 'Partners membership join POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/join
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-membership-join-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~/functions/v1/norva-partners/join$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
+  - name: functions-v1-partners-link-rotation-write
+    _comment: 'Partners link rotation POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/links
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-link-rotation-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~/functions/v1/norva-partners/links$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
+  - name: functions-v1-partners-payout-country-write
+    _comment: 'Partners payout country POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/payout-country
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-payout-country-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~/functions/v1/norva-partners/payout-country$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
+  - name: functions-v1-partners-access-credit-quote-write
+    _comment: 'Partners access credit quote POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/credit/quotes
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-access-credit-quote-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~/functions/v1/norva-partners/credit/quotes$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
+  - name: functions-v1-partners-access-credit-redeem-write
+    _comment: 'Partners access credit redemption POST: exact path, 30/min and 240/hour per source IP.'
+    url: http://edge-functions-pool/norva-partners/credit/redemptions
+    read_timeout: 150000
+    routes:
+      - name: functions-v1-partners-access-credit-redeem-write
+        strip_path: true
+        regex_priority: 100
+        methods:
+          - POST
+        paths:
+          - '~/functions/v1/norva-partners/credit/redemptions$'
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 30
+          hour: 240
+          limit_by: ip
+          policy: local
+          fault_tolerant: true
+          hide_client_headers: false
+
   - name: functions-v1-partners-fiscal-profile-write
     _comment: 'Partners fiscal self-attestation POST: exact path, 30/min and 240/hour per source IP.'
     url: http://edge-functions-pool/norva-partners/fiscal-profile

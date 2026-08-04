@@ -10,8 +10,11 @@ begin transaction read only;
 with
 expected_flags(flag_key, expected_enabled) as (
   values
-    ('partners_enabled'::text, false),
-    ('partners_invite_only', true),
+    ('partners_enabled'::text, true),
+    ('partners_invite_only', false),
+    ('partners_cash_pilot_allowlist_only', true),
+    ('partners_earnings_enabled', true),
+    ('partners_credit_redemptions_enabled', true),
     ('partners_shadow_mode', true),
     ('partners_payouts_live', false),
     ('partners_tv_relay_enabled', false),

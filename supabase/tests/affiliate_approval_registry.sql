@@ -220,6 +220,34 @@ select extensions.throws_ok(
   'approval package registration fails closed at AAL1'
 );
 
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_gate',
+      'membership_privacy_approved',
+      true,
+      'AAL1 must not approve the public membership privacy gate.'
+    )
+  $$,
+  '42501',
+  'Risk Partners approval requires AAL2',
+  'membership privacy approval fails closed at AAL1'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_gate',
+      'privacy_approved',
+      true,
+      'AAL1 must not approve the biometric cash privacy gate.'
+    )
+  $$,
+  '42501',
+  'Risk Partners approval requires AAL2',
+  'biometric cash privacy approval fails closed at AAL1'
+);
+
 set local request.jwt.claims =
   '{
     "sub":"60000000-0000-4000-8000-000000000001",
@@ -413,6 +441,33 @@ select extensions.ok(
   'a bound package makes its exact release gate effective'
 );
 
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_release_gates gate
+    where gate.gate_key = 'membership_privacy_approved'
+      and not gate.satisfied
+  )
+  and affiliate_private.partners_approval_required_document_keys(
+    'membership_privacy_approved'
+  ) @> array[
+    'approval_record',
+    'deployment_proof',
+    'gdpr_self_assessment',
+    'privacy_notice',
+    'records_of_processing'
+  ]::text[]
+  and not (
+    affiliate_private.partners_approval_required_document_keys(
+      'membership_privacy_approved'
+    ) && array['dpia', 'biometric_consent']::text[]
+  )
+  and not affiliate_private.release_gates_satisfied(
+    array['membership_privacy_approved']::text[]
+  ),
+  'membership privacy starts false and requires public-membership evidence without Didit artifacts'
+);
+
 select extensions.throws_ok(
   $$
     update affiliate_private.affiliate_approval_packages
@@ -446,6 +501,64 @@ select extensions.is(
   'Finance plus AAL2 can bind legal and tax evidence'
 );
 
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_program_activate(
+      'approval-registry-test-v1',
+      'ACTIVATE:approval-registry-test-v1',
+      'Membership privacy approval is deliberately still absent.'
+    )
+  $$,
+  'P0001',
+  'program legal gates are incomplete',
+  'legal and Didit privacy evidence cannot activate public membership without its own privacy gate'
+);
+
+select extensions.is(
+  public.admin_partners_release_gate_approve(
+    'membership_privacy_approved',
+    'approval-registry-test-v1',
+    '[{"country_code":"FR"}]'::jsonb,
+    jsonb_build_object(
+      'approval_record', repeat('1', 64),
+      'deployment_proof', repeat('b', 64),
+      'gdpr_self_assessment', repeat('4', 64),
+      'privacy_notice', repeat('5', 64),
+      'records_of_processing', repeat('6', 64)
+    ),
+    repeat('a', 40),
+    'production',
+    'approval-registry-test-deployment',
+    repeat('b', 64),
+    now() + interval '30 days',
+    'Documented public membership privacy self-assessment package.'
+  ) ->> 'satisfied',
+  'true',
+  'Risk plus AAL2 binds the independent public-membership privacy package'
+);
+
+select extensions.ok(
+  affiliate_private.release_gates_satisfied(
+    array['membership_privacy_approved']::text[]
+  )
+  and affiliate_private.release_gates_satisfied(
+    array['privacy_approved']::text[]
+  )
+  and lower(pg_get_functiondef(
+    'affiliate_private.guard_partners_program_approved_scope()'::regprocedure
+  )) like '%membership_privacy_approved%'
+  and lower(pg_get_functiondef(
+    'affiliate_private.guard_partners_program_approved_scope()'::regprocedure
+  )) not like '%binding.gate_key = ''privacy_approved''%'
+  and lower(pg_get_functiondef(
+    'affiliate_private.guard_partners_country_policy_approved_scope()'::regprocedure
+  )) like '%privacy_approved%'
+  and lower(pg_get_functiondef(
+    'affiliate_private.guard_partners_country_policy_approved_scope()'::regprocedure
+  )) not like '%membership_privacy_approved%',
+  'programme membership and country-policy Didit privacy scopes remain independent'
+);
+
 select extensions.is(
   public.admin_partners_release_gate_approve(
     'country_policy_approved',
@@ -468,11 +581,17 @@ select extensions.is(
   'Risk plus AAL2 can bind exact country-policy evidence'
 );
 
-reset role;
+select extensions.is(
+  public.admin_partners_program_activate(
+    'approval-registry-test-v1',
+    'ACTIVATE:approval-registry-test-v1',
+    'Activate the programme after legal and membership privacy approval.'
+  ) ->> 'action',
+  'program_activated',
+  'legal plus membership privacy activates the programme without requiring Didit privacy'
+);
 
-update affiliate_private.affiliate_program_versions
-set status = 'active'
-where version_key = 'approval-registry-test-v1';
+reset role;
 
 update affiliate_private.affiliate_country_policies policy
 set individual_available = true
@@ -519,6 +638,63 @@ set local request.jwt.claims =
       "partners_release_manager":true
     }
   }';
+
+select extensions.is(
+  public.admin_partners_control(
+    'set_flag',
+    'partners_enabled',
+    true,
+    'Open public membership only after its legal and privacy packages.'
+  ) ->> 'enabled',
+  'true',
+  'public membership can be enabled after legal plus membership privacy approval'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_control(
+      'set_gate',
+      'membership_privacy_approved',
+      false,
+      'Attempt to revoke membership privacy while membership remains live.'
+    )
+  $$,
+  '55000',
+  'disable dependent Partners flags first',
+  'membership privacy cannot be revoked while public membership is enabled'
+);
+
+select extensions.is(
+  public.admin_partners_control(
+    'set_flag',
+    'partners_enabled',
+    false,
+    'Close public membership before revoking its privacy approval.'
+  ) ->> 'enabled',
+  'false',
+  'the membership kill switch can be closed before privacy revocation'
+);
+
+select extensions.is(
+  public.admin_partners_control(
+    'set_gate',
+    'membership_privacy_approved',
+    false,
+    'Revoke membership privacy after the public membership kill switch.'
+  ) ->> 'satisfied',
+  'false',
+  'membership privacy can be revoked after its dependent feature is closed'
+);
+
+select extensions.ok(
+  affiliate_private.release_gates_satisfied(
+    array['privacy_approved']::text[]
+  )
+  and not affiliate_private.release_gates_satisfied(
+    array['membership_privacy_approved']::text[]
+  ),
+  'revoking membership privacy leaves the biometric Didit privacy gate untouched'
+);
 
 select extensions.ok(
   (

@@ -1044,7 +1044,11 @@ test('payout profile is read-only and never accepts or returns provider tokens',
 
   const readResult = plain(payout.sanitizePayoutProfileGet({
     schema_version: 1,
-    account: { id: 'prt_0123456789abcdef01234567', status: 'active' },
+    account: {
+      id: 'prt_0123456789abcdef01234567',
+      status: 'active',
+      country_code: 'FR',
+    },
     fiscal: { status: 'verified', country_code: 'FR' },
     profile: {
       provider: 'wise',
@@ -1064,6 +1068,31 @@ test('payout profile is read-only and never accepts or returns provider tokens',
     JSON.stringify(readResult),
     /beneficiary|token_ref|iban|account_number|routing/i,
   );
+  const cashPilot = plain(payout.sanitizePayoutProfileGet({
+    schema_version: 1,
+    account: {
+      id: 'prt_0123456789abcdef01234567',
+      status: 'pending_verification',
+      country_code: null,
+    },
+    fiscal: null,
+    profile: null,
+    profiles: [],
+    readiness: {
+      ready: false,
+      payouts_live: false,
+      reason: 'cash_pilot_not_allowed',
+    },
+  }));
+  assert.equal(cashPilot.readiness.reason, 'cash_pilot_not_allowed');
+  assert.throws(() => payout.sanitizePayoutProfileGet({
+    ...cashPilot,
+    readiness: {
+      ready: false,
+      payouts_live: false,
+      reason: 'provider_not_configured',
+    },
+  }), 'a country-less account cannot drift to another payout reason');
 });
 
 test('phase 2 security boundaries are separately configured and never trust simple webhook signatures', () => {

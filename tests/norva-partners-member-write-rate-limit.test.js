@@ -15,6 +15,9 @@ const edgeSource = read('supabase/functions/norva-partners/index.ts');
 const migrationSource = read(
   'supabase/migrations/20260802193000_partners_member_write_rate_limits.sql',
 );
+const frictionlessMigrationSource = read(
+  'supabase/migrations/20260804173000_partners_frictionless_membership_credits.sql',
+);
 const fiscalMigrationSource = read(
   'supabase/migrations/20260802190000_partners_fiscal_payout_onboarding.sql',
 );
@@ -66,6 +69,19 @@ test('member write fingerprints are deterministic, operation-bound and opaque', 
     ),
   );
   assert.equal(fiscal.includes('FR'), false);
+  for (const [operation, fields] of [
+    ['membership_join', ['terms-accepted', 'disclosure-accepted']],
+    ['link_rotation', ['rotate']],
+    ['payout_country_bind', ['FR']],
+    ['access_credit_quote', ['3']],
+    ['access_credit_redeem', ['crq_0123456789abcdef01234567']],
+  ]) {
+    assert.match(
+      await partnersMemberWriteRequestHash(operation, fields),
+      /^[0-9a-f]{64}$/,
+      operation,
+    );
+  }
   await assert.rejects(
     () => partnersMemberWriteRequestHash('unsupported', ['FR']),
     (error) => error?.status === 400 && error?.code === 'invalid_request',
@@ -74,6 +90,32 @@ test('member write fingerprints are deterministic, operation-bound and opaque', 
 
 test('reservation sanitizer accepts only the exact bounded counter contract', () => {
   const { sanitizeMemberWriteReservation } = helpers();
+  const contracts = [
+    ['membership_join', 4],
+    ['link_rotation', 4],
+    ['payout_country_bind', 8],
+    ['access_credit_quote', 24],
+    ['access_credit_redeem', 12],
+    ['fiscal_profile_self_attestation', 8],
+    ['payout_onboarding', 8],
+  ];
+  for (const [operation, limit] of contracts) {
+    const valid = {
+      schema_version: 1,
+      action: 'member_write_reserved',
+      operation,
+      replayed: false,
+      limit,
+      used: Math.min(3, limit),
+      remaining: limit - Math.min(3, limit),
+      window_seconds: 86400,
+    };
+    assert.deepEqual(
+      plain(sanitizeMemberWriteReservation(valid, operation)),
+      valid,
+      operation,
+    );
+  }
   const valid = {
     schema_version: 1,
     action: 'member_write_reserved',
@@ -84,13 +126,6 @@ test('reservation sanitizer accepts only the exact bounded counter contract', ()
     remaining: 5,
     window_seconds: 86400,
   };
-  assert.deepEqual(
-    plain(sanitizeMemberWriteReservation(
-      valid,
-      'fiscal_profile_self_attestation',
-    )),
-    valid,
-  );
   for (const malformed of [
     { ...valid, account_id: 'forbidden' },
     { ...valid, operation: 'payout_onboarding' },
@@ -107,6 +142,36 @@ test('reservation sanitizer accepts only the exact bounded counter contract', ()
 });
 test('Edge reserves a normalized key after JWT verification and before each state mutation', () => {
   const authentication = edgeSource.indexOf('const userId = await requireUserId(token, admin);');
+  const reserveHelperStart = edgeSource.indexOf('async function reserveMemberWrite(');
+  const reserveHelperEnd = edgeSource.indexOf('async function callVersionedRpc(', reserveHelperStart);
+  const reserveHelper = edgeSource.slice(reserveHelperStart, reserveHelperEnd);
+  assert.ok(reserveHelperStart > authentication);
+  assert.match(reserveHelper, /partnersMemberWriteRequestHash\(/);
+  assert.match(reserveHelper, /PARTNERS_RPC\.memberWriteReserve/);
+  assert.match(reserveHelper, /p_user_id: userId/);
+  assert.match(reserveHelper, /p_idempotency_key: idempotencyKey/);
+  assert.match(reserveHelper, /p_request_hash: requestHash/);
+  assert.match(reserveHelper, /sanitizeMemberWriteReservation/);
+
+  const routeCases = [
+    ['/join', '/credit/quotes', 'membership_join', 'PARTNERS_RPC.join'],
+    ['/credit/quotes', '/credit/redemptions', 'access_credit_quote', 'PARTNERS_RPC.accessCreditQuote'],
+    ['/credit/redemptions', '/credit/status', 'access_credit_redeem', 'PARTNERS_RPC.accessCreditRedeem'],
+    ['/payout-country', '/access-request', 'payout_country_bind', 'PARTNERS_RPC.payoutCountryBind'],
+    ['/links', '/kyc/rights', 'link_rotation', 'PARTNERS_RPC.rotateLink'],
+  ];
+  for (const [route, nextRoute, operation, mutationRpc] of routeCases) {
+    const start = edgeSource.indexOf(`} else if (route === "${route}")`);
+    const end = edgeSource.indexOf(`} else if (route === "${nextRoute}"`, start);
+    const block = edgeSource.slice(start, end);
+    const parseAt = block.indexOf('await readJsonBody(req)');
+    const reserveAt = block.indexOf('await reserveMemberWrite(');
+    const operationAt = block.indexOf(`"${operation}"`, reserveAt);
+    const mutateAt = block.indexOf(mutationRpc);
+    assert.ok(parseAt >= 0 && parseAt < reserveAt, operation);
+    assert.ok(reserveAt < operationAt && operationAt < mutateAt, operation);
+  }
+
   const fiscalStart = edgeSource.indexOf('} else if (route === "/fiscal-profile")');
   const payoutStart = edgeSource.indexOf('} else if (route === "/payout-onboarding")');
   const payoutEnd = edgeSource.indexOf('} else if (route === "/tv-relays/consume")');
@@ -150,6 +215,22 @@ test('database reservation is service-only, rolling, replay-safe and mapped to 4
     fiscalMigrationSource,
     /perform affiliate_private\.partners_enforce_fiscal_onboarding_write_limit/,
   );
+  for (const operation of [
+    'membership_join',
+    'link_rotation',
+    'payout_country_bind',
+    'access_credit_quote',
+    'access_credit_redeem',
+  ]) {
+    assert.match(frictionlessMigrationSource, new RegExp(`'${operation}'`));
+  }
+  assert.match(frictionlessMigrationSource, /when 'membership_join' then 4/);
+  assert.match(frictionlessMigrationSource, /when 'link_rotation' then 4/);
+  assert.match(frictionlessMigrationSource, /when 'payout_country_bind' then 8/);
+  assert.match(frictionlessMigrationSource, /when 'access_credit_quote' then 24/);
+  assert.match(frictionlessMigrationSource, /when 'access_credit_redeem' then 12/);
+  assert.match(frictionlessMigrationSource, /reserved_at < now\(\) - interval '30 days'/);
+  assert.match(frictionlessMigrationSource, /if found then[\s\S]*'replayed', true[\s\S]*if v_used >= v_operation_limit then/);
 });
 
 test('Kong applies bounded IP burst limits on exact POST routes before the generic Functions route', () => {
@@ -166,6 +247,31 @@ test('Kong applies bounded IP burst limits on exact POST routes before the gener
   const genericAt = kongSource.indexOf('\n  - name: functions-v1\n');
   assert.ok(genericAt > 0);
   for (const spec of [
+    {
+      name: 'functions-v1-partners-membership-join-write',
+      path: '~/functions/v1/norva-partners/join$',
+      upstream: 'http://edge-functions-pool/norva-partners/join',
+    },
+    {
+      name: 'functions-v1-partners-link-rotation-write',
+      path: '~/functions/v1/norva-partners/links$',
+      upstream: 'http://edge-functions-pool/norva-partners/links',
+    },
+    {
+      name: 'functions-v1-partners-payout-country-write',
+      path: '~/functions/v1/norva-partners/payout-country$',
+      upstream: 'http://edge-functions-pool/norva-partners/payout-country',
+    },
+    {
+      name: 'functions-v1-partners-access-credit-quote-write',
+      path: '~/functions/v1/norva-partners/credit/quotes$',
+      upstream: 'http://edge-functions-pool/norva-partners/credit/quotes',
+    },
+    {
+      name: 'functions-v1-partners-access-credit-redeem-write',
+      path: '~/functions/v1/norva-partners/credit/redemptions$',
+      upstream: 'http://edge-functions-pool/norva-partners/credit/redemptions',
+    },
     {
       name: 'functions-v1-partners-fiscal-profile-write',
       path: '~/functions/v1/norva-partners/fiscal-profile$',

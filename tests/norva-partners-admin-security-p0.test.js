@@ -40,6 +40,15 @@ const adminFoundationMigration = fs.readFileSync(
   ),
   'utf8',
 );
+const frictionlessReleaseMigration = fs.readFileSync(
+  path.join(
+    root,
+    'supabase',
+    'migrations',
+    '20260804174000_partners_frictionless_release_controls.sql',
+  ),
+  'utf8',
+);
 
 function section(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -69,10 +78,27 @@ test('shared Partners reads authorize Support, Risk or Finance operators', () =>
     assert.doesNotMatch(source, /partners_require_capability\('support'\)/);
   }
 
-  assert.match(
-    configuration,
-    /\('partners_revolut_api_enabled'::text, 6\)/,
+  const authoritativeConfiguration = section(
+    frictionlessReleaseMigration,
+    'create or replace function affiliate_private.admin_partners_configuration()',
+    'create or replace function public.admin_partners_configuration()',
   );
+  [
+    ['partners_enabled', 1],
+    ['partners_invite_only', 2],
+    ['partners_cash_pilot_allowlist_only', 3],
+    ['partners_earnings_enabled', 4],
+    ['partners_credit_redemptions_enabled', 5],
+    ['partners_shadow_mode', 6],
+    ['partners_payouts_live', 7],
+    ['partners_tv_relay_enabled', 8],
+    ['partners_revolut_api_enabled', 9],
+  ].forEach(([key, position]) => {
+    assert.match(
+      authoritativeConfiguration,
+      new RegExp(`\\('${key}'::text, ${position}\\)`),
+    );
+  });
 });
 
 test('capability and programme mutations enforce AAL2 at the private boundary', () => {

@@ -18976,6 +18976,7 @@ html:not(.tv-mode) .home-state-inline {
   font-family: 'Outfit', 'Inter', sans-serif;
   font-size: 1.8rem;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .partners-metric > small {
@@ -18988,6 +18989,68 @@ html:not(.tv-mode) .home-state-inline {
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
   gap: var(--space-lg);
   margin-bottom: var(--space-lg);
+}
+
+.partners-membership-grid {
+  align-items: stretch;
+}
+
+.partners-credit-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-md);
+}
+
+.partners-credit-card .partners-eyebrow,
+.partners-credit-card > p {
+  margin: 0;
+}
+
+.partners-credit-form {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.partners-credit-form label {
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.partners-credit-form select {
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  font: inherit;
+}
+
+.partners-credit-form select:focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid var(--color-accent-dim);
+  outline-offset: 2px;
+}
+
+.partners-balance-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.partners-balance-notice strong {
+  color: var(--color-text-primary);
 }
 
 .partners-referral-card {
@@ -19107,6 +19170,9 @@ html:not(.tv-mode) .home-state-inline {
 }
 
 .partners-consent-check a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--color-accent-hover);
   font-weight: 700;
 }
@@ -19244,6 +19310,46 @@ html:not(.tv-mode) .home-state-inline {
 
 .partners-qr-overlay {
   z-index: 10060;
+}
+
+.partners-credit-overlay {
+  z-index: 10070;
+}
+
+.partners-credit-dialog {
+  display: grid;
+  width: min(100%, 620px);
+  max-height: calc(100dvh - var(--safe-area-inset-top) - var(--safe-area-inset-bottom) - 32px);
+  padding: var(--space-xl);
+  gap: var(--space-lg);
+  overflow-y: auto;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.partners-credit-dialog h2 {
+  margin: var(--space-xs) 0 0;
+  color: var(--color-text-primary);
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.partners-credit-dialog > p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+}
+
+.partners-credit-summary {
+  padding: var(--space-md);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .partners-qr-dialog {
@@ -19601,6 +19707,28 @@ html.tv-mode .partners-tv-shell .btn:focus {
       var(--space-md)
       max(var(--space-md), var(--safe-area-inset-right))
       max(var(--space-md), var(--safe-area-inset-bottom))
+      max(var(--space-md), var(--safe-area-inset-left));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .partners-credit-overlay {
+    place-items: end center;
+    padding:
+      max(var(--space-sm), var(--safe-area-inset-top))
+      0
+      0;
+  }
+
+  .partners-credit-dialog {
+    width: 100%;
+    max-height: calc(100dvh - var(--safe-area-inset-top) - var(--space-sm));
+    padding:
+      var(--space-md)
+      max(var(--space-md), var(--safe-area-inset-right))
+      max(var(--space-xl), var(--safe-area-inset-bottom))
       max(var(--space-md), var(--safe-area-inset-left));
     border-right: 0;
     border-bottom: 0;

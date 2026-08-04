@@ -3,8 +3,8 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either apply the seven migrations still pending after the
-# audited AAL2 production baseline atomically
+# PostgreSQL clone, either apply the three frictionless Partners migrations
+# still pending after the audited ab464fe4 production baseline atomically
 # (`predeploy`) or prove that they are already present without replaying them
 # (`postdeploy`), then run the verifier and restore-compatible pgTAP.
 #
@@ -95,17 +95,12 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly MIGRATION_ONE="supabase/migrations/20260803082211_partners_admin_operator_capabilities.sql"
-readonly MIGRATION_TWO="supabase/migrations/20260803084051_partners_access_request_decision_email.sql"
-readonly MIGRATION_THREE="supabase/migrations/20260803160730_partners_didit_certification_pre_gate.sql"
-readonly MIGRATION_FOUR="supabase/migrations/20260803204442_partners_release_gate_aal2.sql"
-readonly MIGRATION_FIVE="supabase/migrations/20260804083541_partners_approval_registry.sql"
-readonly MIGRATION_SIX="supabase/migrations/20260804084500_partners_biometric_consent_contract.sql"
-readonly MIGRATION_SEVEN="supabase/migrations/20260804093000_partners_didit_purge_outbox.sql"
-readonly MIGRATION_EIGHT="supabase/migrations/20260804160000_partners_privacy_rights_human_review.sql"
-readonly MIGRATION_NINE="supabase/migrations/20260804165000_partners_kyc_reverification_override.sql"
-readonly MIGRATION_TEN="supabase/migrations/20260804165500_partners_deployment_manifest_event_contract.sql"
-readonly MIGRATION_ELEVEN="supabase/migrations/20260804170000_partners_biometric_consent_enforcement.sql"
+readonly BASELINE_CONTRACT="ab464fe4"
+readonly MIGRATION_ONE="supabase/migrations/20260804173000_partners_frictionless_membership_credits.sql"
+readonly MIGRATION_TWO="supabase/migrations/20260804173500_partners_payout_country_and_member_link_v2.sql"
+readonly MIGRATION_THREE="supabase/migrations/20260804174000_partners_frictionless_release_controls.sql"
+readonly BASELINE_MARKERS_AB464FE4="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
+readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -117,14 +112,6 @@ readonly -a CANDIDATE_FILES=(
   "$MIGRATION_ONE"
   "$MIGRATION_TWO"
   "$MIGRATION_THREE"
-  "$MIGRATION_FOUR"
-  "$MIGRATION_FIVE"
-  "$MIGRATION_SIX"
-  "$MIGRATION_SEVEN"
-  "$MIGRATION_EIGHT"
-  "$MIGRATION_NINE"
-  "$MIGRATION_TEN"
-  "$MIGRATION_ELEVEN"
   "$VERIFIER"
   "${RESTORE_PGTAP_FILES[@]}"
 )
@@ -275,17 +262,11 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
   chmod 0600 "$destination"
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
+proof_line "baseline_contract=$BASELINE_CONTRACT"
+proof_line "baseline_markers_verified=22"
 proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | awk '{print $1}')"
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
 proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
-proof_line "migration_four_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FOUR" | awk '{print $1}')"
-proof_line "migration_five_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FIVE" | awk '{print $1}')"
-proof_line "migration_six_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_SIX" | awk '{print $1}')"
-proof_line "migration_seven_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_SEVEN" | awk '{print $1}')"
-proof_line "migration_eight_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_EIGHT" | awk '{print $1}')"
-proof_line "migration_nine_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_NINE" | awk '{print $1}')"
-proof_line "migration_ten_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TEN" | awk '{print $1}')"
-proof_line "migration_eleven_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ELEVEN" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
 if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
@@ -591,14 +572,16 @@ MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 DEPLOYMENT_MANIFEST_EVENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select coalesce(bool_or(position('deployment_manifest' in pg_get_constraintdef(constraint_row.oid)) > 0), false)::int::text from pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_events'::regclass and constraint_row.conname = 'affiliate_events_aggregate_type';" \
   2> "$RAW_DIR/deployment-manifest-event-precondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}"
+FRICTIONLESS_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regclass('affiliate_private.affiliate_access_credit_catalog') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_payout_country_bind(uuid,text,text)') is not null)::int::text || '|' || (exists (select 1 from affiliate_private.affiliate_release_gates where gate_key = 'membership_privacy_approved'))::int::text;" \
+  2> "$RAW_DIR/frictionless-migration-precondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # Production already contains migrations one through four. Their five
-  # independent markers (Didit certification contributes two) are the exact
-  # audited f7abea88 baseline; only migrations five through eleven remain.
-  EXPECTED_MARKERS_BEFORE="1|1|1|1|1|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0"
+  # The first 22 independent markers are the exact audited ab464fe4 baseline.
+  # None of the three frictionless migrations may be partially present.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_MARKERS_AB464FE4}|0|0|0"
 else
-  EXPECTED_MARKERS_BEFORE="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_MARKERS_AB464FE4}|${FRICTIONLESS_MARKERS_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -622,17 +605,13 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
       docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
         psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
           --single-transaction \
-          -f "/candidate/$MIGRATION_FIVE" \
-          -f "/candidate/$MIGRATION_SIX" \
-          -f "/candidate/$MIGRATION_SEVEN" \
-          -f "/candidate/$MIGRATION_EIGHT" \
-          -f "/candidate/$MIGRATION_NINE" \
-          -f "/candidate/$MIGRATION_TEN" \
-          -f "/candidate/$MIGRATION_ELEVEN" \
+          -f "/candidate/$MIGRATION_ONE" \
+          -f "/candidate/$MIGRATION_TWO" \
+          -f "/candidate/$MIGRATION_THREE" \
         > "$RAW_DIR/migrations.log" 2>&1; then
     fail
   fi
-  MIGRATIONS_APPLIED=7
+  MIGRATIONS_APPLIED=3
   MIGRATIONS_ATOMIC="true"
   MIGRATION_REPLAY_SKIPPED="false"
 fi
@@ -643,8 +622,11 @@ MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 DEPLOYMENT_MANIFEST_EVENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select coalesce(bool_or(position('deployment_manifest' in pg_get_constraintdef(constraint_row.oid)) > 0), false)::int::text from pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_events'::regclass and constraint_row.conname = 'affiliate_events_aggregate_type';" \
   2> "$RAW_DIR/deployment-manifest-event-postcondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}"
-if [[ "$MIGRATION_MARKERS" != "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
+FRICTIONLESS_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regclass('affiliate_private.affiliate_access_credit_catalog') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_payout_country_bind(uuid,text,text)') is not null)::int::text || '|' || (exists (select 1 from affiliate_private.affiliate_release_gates where gate_key = 'membership_privacy_approved'))::int::text;" \
+  2> "$RAW_DIR/frictionless-migration-postcondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_MARKERS_AB464FE4}|${FRICTIONLESS_MARKERS_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -771,7 +753,45 @@ with expected(signature) as (
     ('public.admin_partners_kyc_human_review_decide(text,text,text,timestamptz,text,text)'),
     ('affiliate_private.guard_kyc_reverification_grant_mutation()'),
     ('affiliate_private.partners_service_kyc_prepare_reverification_once_v2(uuid,text,text,text,boolean,text)'),
-    ('affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamptz,text,text)')
+    ('affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamptz,text,text)'),
+    ('affiliate_private.validate_affiliate_member_transition()'),
+    ('affiliate_private.guard_affiliate_member_active_links()'),
+    ('affiliate_private.guard_affiliate_auth_user_transition()'),
+    ('affiliate_private.validate_affiliate_link_transition()'),
+    ('affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'),
+    ('affiliate_private.partners_account_deletion_ready(uuid)'),
+    ('affiliate_private.partners_access_credit_balances(uuid)'),
+    ('affiliate_private.partners_account_balances(uuid)'),
+    ('affiliate_private.partners_cash_readiness(uuid)'),
+    ('affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)'),
+    ('affiliate_private.partners_service_access_grants_reconcile(uuid)'),
+    ('affiliate_private.reconcile_access_grants_after_projection()'),
+    ('affiliate_private.partners_service_access_credit_status(uuid)'),
+    ('affiliate_private.partners_service_access_credit_quote(uuid,integer,text)'),
+    ('affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'),
+    ('affiliate_private.partners_service_bootstrap_v2(uuid)'),
+    ('affiliate_private.partners_service_dashboard_v2(uuid,integer,text,text)'),
+    ('public.partners_service_bootstrap_v2(uuid)'),
+    ('public.partners_service_dashboard_v2(uuid,integer,text,text)'),
+    ('public.partners_service_join_v2(uuid,boolean,boolean,text)'),
+    ('public.partners_service_access_credit_quote(uuid,integer,text)'),
+    ('public.partners_service_access_credit_redeem(uuid,text,text)'),
+    ('public.partners_service_access_grants_reconcile(uuid)'),
+    ('public.partners_service_access_credit_status(uuid)'),
+    ('affiliate_private.partners_assert_kyc_cash_eligibility(uuid)'),
+    ('affiliate_private.partners_service_payout_country_bind(uuid,text,text)'),
+    ('public.partners_service_payout_country_bind(uuid,text,text)'),
+    ('affiliate_private.partners_service_rotate_link(uuid,text)'),
+    ('public.partners_service_rotate_link(uuid,text)'),
+    ('affiliate_private.partners_service_payout_profile_get(uuid)'),
+    ('public.partners_service_payout_profile_get(uuid)'),
+    ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)'),
+    ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)'),
+    ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)'),
+    ('affiliate_private.is_managed_partners_flag(text)'),
+    ('affiliate_private.partners_require_control_access(text,text,boolean)'),
+    ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)'),
+    ('affiliate_private.admin_partners_program_activate(text,text,text)')
 )
 select count(*)::text || '|' || count(*) filter (
   where routine.oid is null
@@ -782,7 +802,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "119|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "157|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -802,7 +822,11 @@ with expected(relation_name) as (
     ('affiliate_private.affiliate_didit_purge_worker_state'),
     ('affiliate_private.affiliate_biometric_consent_withdrawals'),
     ('affiliate_private.affiliate_kyc_human_review_requests'),
-    ('affiliate_private.affiliate_kyc_reverification_grants')
+    ('affiliate_private.affiliate_kyc_reverification_grants'),
+    ('affiliate_private.affiliate_access_credit_catalog'),
+    ('affiliate_private.affiliate_access_credit_quotes'),
+    ('affiliate_private.affiliate_access_credit_redemptions'),
+    ('public.cloud_access_grants')
 )
 select count(*)::text || '|' || count(*) filter (
   where relation.oid is null
@@ -814,16 +838,16 @@ left join pg_catalog.pg_class relation
   on relation.oid = to_regclass(expected.relation_name);
 SQL
 )" || fail
-if [[ "$RELATION_OWNER_CHECK" != "14|0" ]]; then
+if [[ "$RELATION_OWNER_CHECK" != "18|0" ]]; then
   fail
 fi
 proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=119"
+proof_line "migration_routines_verified=157"
 proof_line "migration_relation_owner=supabase_admin"
-proof_line "migration_relations_verified=14"
+proof_line "migration_relations_verified=18"
 
 CURRENT_STEP="post-migration sensitive-state verification"
 POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \

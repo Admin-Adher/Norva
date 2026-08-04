@@ -109,7 +109,7 @@ docker run -d --name norva-pitr --network host \
 docker logs -f norva-pitr 2>&1 | grep -m1 -E 'consistent recovery state reached|database system is ready'
 
 # 5) vérifier l'état AU point choisi
-docker run --rm --network host -e PGPASSWORD="$PW_PROD_DB" "$PG_IMAGE" \
+PGPASSWORD="$PW_PROD_DB" docker run --rm --network host -e PGPASSWORD "$PG_IMAGE" \
   psql -h 127.0.0.1 -p 5433 -U supabase_admin -d postgres \
   -Atc "select now(), count(*) from public.cloud_media_items;"
 
@@ -149,8 +149,8 @@ docker run -d --name norva-pitr --network host -v /tmp/pitr/data:/var/lib/postgr
   -e POSTGRES_PASSWORD=throwaway "$PG_IMAGE" postgres -p 5433 -c archive_mode=off
 sleep 8; docker logs norva-pitr 2>&1 | tail -20   # attendu: "consistent recovery state reached" + "ready to accept connections"
 Q="select (select count(*) from public.cloud_media_items) media, (select count(*) from public.cloud_titles) titles, (select count(*) from auth.users) users;"
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" norva-pitr psql -h 127.0.0.1 -p 5433 -U supabase_admin -d postgres -c "$Q"
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" norva-db  psql -h 127.0.0.1 -p 5432 -U supabase_admin -d postgres -c "$Q"
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD norva-pitr psql -h 127.0.0.1 -p 5433 -U supabase_admin -d postgres -c "$Q"
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD norva-db  psql -h 127.0.0.1 -p 5432 -U supabase_admin -d postgres -c "$Q"
 docker rm -f norva-pitr; rm -rf /tmp/pitr        # nettoyage
 EOF
 ```
@@ -171,8 +171,18 @@ sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
   <sha-git-complet-sur-40-caractères>
 ```
 
-Après le déploiement biphasé et la création d'un nouveau base-backup R2, le
-contrôle postdéploiement utilise obligatoirement le même SHA et le mode opposé :
+Après le déploiement biphasé, créer obligatoirement un nouveau base-backup R2.
+Le contrôle one-shot ci-dessous préserve tous les anciens objets, même si la
+rétention planifiée est plus courte :
+
+```bash
+sudo env NORVA_SKIP_BASE_RETENTION=true \
+  bash ops/hetzner/backup/basebackup-weekly.sh
+```
+
+Vérifier que le nom `base-YYYYMMDD-HHMMSS` annoncé est postérieur au
+déploiement. Le contrôle postdéploiement utilise ensuite obligatoirement le
+même SHA et le mode opposé :
 
 ```bash
 sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
@@ -190,9 +200,11 @@ son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
 le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
 restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
 isolé, et leurs nombres total et actif sont contrôlés avant et après la
-répétition. En `predeploy`, les 21 marqueurs doivent tous être absents et les
-dix migrations ciblées sont rejouées dans une transaction unique. En
-`postdeploy`, les 21 marqueurs doivent tous être présents : aucune migration
+répétition. Pour cette release, en `predeploy`, les 22 marqueurs du baseline
+audité `ab464fe4` doivent tous être présents et les trois marqueurs
+`173000/173500/174000` doivent être absents. Ces trois migrations seulement sont
+rejouées, dans leur ordre chronologique et dans une transaction unique. En
+`postdeploy`, les 25 marqueurs doivent tous être présents : aucune migration
 n'est rejouée, puis le vérificateur et le pgTAP sont exécutés sur l'état déjà
 migré. Un état partiel est refusé dans les deux modes. Le conteneur et le
 répertoire temporaire sont toujours supprimés par le trap de sortie.
@@ -205,13 +217,15 @@ ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
 de production.
 
 La preuve `predeploy` du candidat actuel doit contenir
-`rehearsal_mode=predeploy`, `migrations_applied=10`,
-`migration_replay_skipped=false`, 21 marqueurs `0` avant puis 21 marqueurs `1`
-après, `migration_routines_verified=119` et
-`migration_relations_verified=14`. La preuve `postdeploy` doit contenir
-`rehearsal_mode=postdeploy`, `migrations_applied=0`,
-`migration_replay_skipped=true`, et 21 marqueurs `1` avant comme après, avec les
-mêmes 119 routines et 14 relations vérifiées.
+`baseline_contract=ab464fe4`, `baseline_markers_verified=22`,
+`rehearsal_mode=predeploy`, `migrations_applied=3`,
+`migrations_atomic=true`, `migration_replay_skipped=false`, 22 marqueurs `1`
+puis trois marqueurs `0` avant, et 25 marqueurs `1` après. Elle doit également
+contenir `migration_routines_verified=157` et
+`migration_relations_verified=18`. La preuve `postdeploy` doit contenir
+`baseline_contract=ab464fe4`, `rehearsal_mode=postdeploy`,
+`migrations_applied=0`, `migration_replay_skipped=true`, et 25 marqueurs `1`
+avant comme après, avec les mêmes 157 routines et 18 relations vérifiées.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

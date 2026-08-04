@@ -1,4 +1,4 @@
-# Norva Partners — auto-évaluation RGPD interne du pilote France
+# Norva Partners — auto-évaluation RGPD du pilote cash Didit France
 
 > Modèle à copier et compléter hors Git. Le document final reste dans le
 > stockage privé immuable des preuves. Il ne doit contenir aucun secret,
@@ -8,18 +8,23 @@
 ## 1. Identité et portée de la décision
 
 - Version de l'évaluation : `<version immuable>`
-- Paquet d'approbation : `partners-france-invite-pilot-v3`
+- Paquet d'approbation : `partners-public-membership-france-cash-pilot-v4`
 - Commit candidat : `<SHA Git 40 caractères>`
 - Déploiement : `<identifiant opaque immuable>`
 - Date UTC de décision : `<YYYY-MM-DDTHH:MM:SSZ>`
 - Dossier pseudonymisé du responsable : `<référence aléatoire privée>`
 - Rôle : `privacy_accountable_owner`
 - Méthode : `documented_internal_gdpr_self_assessment_with_mandatory_dpia`
-- Accès : `invite_only`
-- Pays : `FR`
-- Plafond : `50` participants
-- Ouverture publique autorisée par cette décision : `non`
+- Adhésion Partners : `public`, régie séparément par
+  `membership_privacy_approved`
+- Accès au virement cash : `allowlist_only`
+- Pays du pilote cash : `FR`
+- Plafond cash : `50` participants
+- Ouverture publique du cash autorisée par cette décision : `non`
 - DPO officiellement désigné par cette décision : `non`
+- Portée de la gate Didit : `virement_cash_uniquement`
+- Parcours explicitement hors gate Didit :
+  `adhesion,lien,attribution,accumulation,maturation,credit_acces`
 
 ## 2. Screening de l'obligation de désigner un DPO
 
@@ -35,9 +40,10 @@ viser l'évaluation.
 
 Conclusion motivée : `<à compléter>`
 
-Conclusion de cadrage pour ce seul pilote : Norva n'est pas un organisme
-public et le traitement biométrique du pilote est borné à 50 personnes sur
-invitation ; il n'est donc pas traité « à grande échelle » dans ce périmètre.
+Conclusion de cadrage pour ce seul pilote cash : Norva n'est pas un organisme
+public et le traitement biométrique est borné à 50 personnes sur allowlist ;
+il n'est donc pas traité « à grande échelle » dans ce périmètre. L'adhésion
+publique sans KYC n'entre pas dans ce décompte biométrique.
 Ce pilote ne déclenche pas, à lui seul, une désignation obligatoire de DPO.
 Cette conclusion doit être confirmée par les faits consignés ci-dessus et ne
 préjuge pas des autres activités de Norva. La CNIL rappelle que le DPO devient
@@ -45,20 +51,27 @@ notamment obligatoire lorsque les activités de base conduisent à traiter à
 grande échelle des données sensibles :
 https://www.cnil.fr/fr/le-delegue-la-protection-des-donnees-dpo/devenir-delegue-la-protection-des-donnees
 
-Déclencheurs de réévaluation : ouverture publique, dépassement de 50 pilotes,
+Déclencheurs de réévaluation : ouverture publique du cash, dépassement de 50
+participants Didit/cash,
 nouveau pays, nouveau type de personne, nouveau traitement de données
 sensibles, nouvelle finalité de profilage/surveillance, incident majeur ou
 évolution réglementaire pertinente.
 
-## 3. AIPD/DPIA obligatoire du KYC Didit
+## 3. AIPD/DPIA obligatoire du KYC Didit pour les virements
 
-L'AIPD est obligatoire **avant** toute collecte d'identité en production pour
-ce pilote. Le KYC Didit remplit au moins deux critères CNIL :
+L'AIPD est obligatoire **avant** toute collecte d'identité Didit en production
+dans le parcours optionnel de virement. L'adhésion Partners, la création du
+lien, l'attribution, l'accumulation et la maturation des commissions, ainsi que
+la conversion du solde disponible en accès Norva ne requièrent ni KYC, ni
+profil fiscal, ni corridor de virement et ne doivent jamais être placées derrière
+la gate Didit. Le KYC Didit du parcours de virement remplit au moins deux
+critères CNIL :
 
 1. données sensibles ou hautement personnelles, puisque le parcours traite des
    données biométriques aux fins d'identifier une personne ;
-2. exclusion du bénéfice d'un droit ou d'un contrat, puisque le résultat KYC
-   conditionne l'accès au programme Partners et aux versements.
+2. exclusion du bénéfice d'un droit, d'un service ou d'un contrat, puisque le
+   résultat KYC conditionne le bénéfice du service optionnel de virement cash,
+   jamais l'adhésion Partners ni la conversion en accès Norva.
 
 La CNIL indique qu'une AIPD est requise lorsqu'au moins deux des neuf critères
 sont remplis. Elle doit comprendre une description détaillée du traitement,
@@ -69,16 +82,21 @@ pour les droits et libertés et les mesures prévues pour les traiter. Sources :
 - https://www.cnil.fr/fr/gerer-les-risques
 - https://www.cnil.fr/fr/securite-analyse-de-risques
 
-Le plafond de 50 participants limite l'échelle ; il ne supprime pas l'obligation
-d'AIPD. Une simple « évaluation préliminaire », une case cochée ou une preuve de
-configuration Didit ne remplace pas l'AIPD.
+Le plafond de 50 participants cash limite l'échelle ; il ne supprime pas l'obligation
+d'AIPD du traitement Didit effectivement activé pour un virement. Une simple
+« évaluation préliminaire », une case cochée ou une preuve de configuration
+Didit ne remplace pas l'AIPD. L'AIPD ne constitue pas une autorisation d'étendre
+le KYC au parcours d'adhésion ou de crédit d'accès.
 
 ### 3.1 Description systématique du traitement
 
 - Responsable de traitement et responsable interne de la décision : `<à compléter>`
 - Sous-traitant, workflow et environnement Didit exacts : `<à compléter>`
-- Personnes concernées et plafond effectivement appliqué : `<à compléter>`
-- Finalités précises et usages explicitement exclus : `<à compléter>`
+- Personnes concernées : uniquement les membres qui choisissent un virement
+  cash ; plafond effectivement appliqué : `<à compléter>`
+- Finalité : vérifier les exigences individuelles du virement. Usages
+  explicitement exclus : adhésion, lien, attribution, accumulation/maturation,
+  conversion du solde en accès Norva et accès ordinaire à Norva : `<preuve>`
 - Opérations et flux de bout en bout, y compris capture, transfert, résultat,
   reprise manuelle, suppression et audit : `<à compléter>`
 - Catégories de données, dont données biométriques, document d'identité,
@@ -88,8 +106,8 @@ configuration Didit ne remplace pas l'AIPD.
   données biométriques : `<à faire confirmer ; référence juridique>`
 - Durées de conservation chez Norva et Didit, suppression et preuve de
   paramétrage : `<à compléter>`
-- Décision automatisée ou humaine, effets d'un refus, recours et procédure de
-  reprise manuelle : `<à compléter>`
+- Décision automatisée ou humaine, effets d'un refus limités au virement,
+  recours et procédure de reprise manuelle : `<à compléter>`
 - Interfaces, APIs, webhooks, logs, Admin et sauvegardes concernés : `<à compléter>`
 
 ### 3.2 Nécessité et proportionnalité
@@ -117,7 +135,7 @@ impacts sur les personnes, et non seulement l'impact commercial pour Norva.
 | Scénario de risque | Source/menace | Impact pour la personne | Gravité initiale | Vraisemblance initiale | Mesures existantes/prévues | Gravité résiduelle | Vraisemblance résiduelle | Propriétaire et échéance |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Usurpation ou fuite du document/biométrie | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
-| Faux rejet et exclusion injustifiée | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
+| Faux rejet et exclusion injustifiée du virement | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
 | Faux positif ou contournement | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
 | Accès Admin ou journalisation excessive | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
 | Réutilisation ou conservation excessive | `<à compléter>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` | `<échelle>` | `<échelle>` | `<à compléter>` |
@@ -148,16 +166,18 @@ suffisamment le risque élevé.
 
 | Traitement | Personnes | Données minimales | Finalité | Base légale | Destinataires/sous-traitants | Transfert | Conservation/suppression | Contrôles |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Demande d'accès | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` |
-| KYC Didit | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `Didit` | `<à compléter>` | `<à compléter>` | `<à compléter>` |
-| Attribution/commission | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `Hetzner, Cloudflare, Google, RevenueCat` | `<à compléter>` | `<à compléter>` | `<à compléter>` |
+| Adhésion et lien sans KYC | `<à compléter>` | Statut, acceptations, code opaque | Adhésion et partage | `<à compléter>` | `Hetzner, Cloudflare` | `<à compléter>` | `<à compléter>` | Aucun résultat Didit |
+| Attribution, commission et maturation sans KYC | `<à compléter>` | Claim opaque, attribution pseudonymisée, écritures | Calculer et maturer | `<à compléter>` | `Hetzner, Cloudflare, Google, RevenueCat` | `<à compléter>` | `<à compléter>` | Ledger autoritatif |
+| Conversion en accès Norva sans KYC | `<à compléter>` | Quote, débit irréversible, grant et contre-écritures | Fournir un accès Norva | `<à compléter>` | `Hetzner` | `<à compléter>` | `<à compléter>` | Limité à Norva, non transférable, sans paiement d'un tiers ni remboursement cash ; qualification juridique à confirmer |
+| KYC Didit choisi pour un virement | `<à compléter>` | `<à compléter>` | Vérifier le virement uniquement | `<à compléter>` | `Didit` | `<à compléter>` | `<à compléter>` | Gate séparée du programme et du crédit d'accès |
 | Versement manuel | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `Revolut` | `<à compléter>` | `<à compléter>` | `<à compléter>` |
 | Communications/alertes | `<à compléter>` | `<à compléter>` | `<à compléter>` | `<à compléter>` | `Resend, Telegram` | `<à compléter>` | `<à compléter>` | `<à compléter>` |
 
 ## 5. Transparence et exercice des droits
 
 - Versions et SHA-256 de Privacy, Partners Terms et disclosure : `<références>`
-- Notice KYC avant redirection Didit : `<preuve>`
+- Notice KYC affichée uniquement après le choix d'un virement et avant la
+  redirection Didit : `<preuve>`
 - Notice de confidentialité Didit : `https://didit.me/terms/verification-privacy-notice/`
 - Conditions Didit de vérification : `https://didit.me/terms/identity-verification/`
 - Qualification Didit : sous-traitant pour les contrôles configurés par Norva ; responsable
@@ -169,10 +189,19 @@ suffisamment le risque élevé.
 - Rétention Didit du pilote : `1 mois maximum avant toute collecte live`, complétée par la
   suppression API des sessions terminales après stockage du résultat normalisé minimal ; preuve
   de configuration live et preuve du test de suppression : `<références immuables>`
-- Notice payout et qualification de la localisation réseau : `<preuve>`
+- Notice payout, séparation des gates et qualification de la localisation
+  réseau : `<preuve>`
+- Information crédit d'accès : conversion irréversible du solde disponible en
+  accès Norva, sans transfert, paiement d'un tiers ni remboursement cash ; la
+  description factuelle ne préjuge pas de la qualification juridique, qui doit
+  être confirmée selon le droit applicable ; remboursement, chargeback,
+  correction et recouvrement par contre-écriture explicités : `<preuve>`
 - Canal d'exercice des droits : contrôle authentifié dans la page Partners pour le retrait de tout
   nouveau consentement biométrique et la contestation d'un résultat ; Support comme solution de
-  repli. Preuve de test bout en bout : `<référence immuable>`
+  repli. Le retrait bloque uniquement une nouvelle vérification et tous les
+  virements cash tant qu'il reste retiré ; il ne bloque jamais l'adhésion, le
+  lien, l'attribution, l'accumulation, la maturation ni le crédit d'accès.
+  Preuve de test bout en bout : `<référence immuable>`
 - Recours humain : file Admin sanitisée, capacité Risque, JWT AAL2 frais, confirmation typée,
   justification auditée et preuve locale hachée ; aucun document ni payload provider dans
   l'interface Norva. Preuve de test : `<référence immuable>`
@@ -220,6 +249,11 @@ Chaque ligne doit être vraie dans
 Décision : `<approuvée/refusée>`
 
 Réserves/actions ouvertes : `<aucune ou liste bloquante>`
+
+Ce visa porte sur le traitement Didit et la préparation des virements du
+périmètre décrit. Il ne crée aucune approbation Legal, fiscale, Country Policy
+ou production, et son absence ne doit pas être réinterprétée comme un blocage
+de l'adhésion ou du crédit d'accès sans KYC.
 
 Date de réévaluation maximale : `<YYYY-MM-DDTHH:MM:SSZ ou null motivé>`
 

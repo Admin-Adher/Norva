@@ -2,9 +2,10 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(74);
+select extensions.plan(106);
 
--- One immutable catalogue keeps all ten pending migrations under the same
+-- One immutable catalogue keeps the audited ab464fe4 production baseline and
+-- exactly the three frictionless migrations under the same
 -- existence, ownership, security, volatility and ACL assertions without
 -- creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
@@ -126,7 +127,45 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"public.admin_partners_kyc_human_review_decide(text,text,text,timestamptz,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"affiliate_private.guard_kyc_reverification_grant_mutation()","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.partners_service_kyc_prepare_reverification_once_v2(uuid,text,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"owner"},
-  {"signature":"affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamptz,text,text)","security_definer":true,"volatility":"v","access_role":"owner"}
+  {"signature":"affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamptz,text,text)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.validate_affiliate_member_transition()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.guard_affiliate_member_active_links()","security_definer":false,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.guard_affiliate_auth_user_transition()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.validate_affiliate_link_transition()","security_definer":false,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_account_deletion_ready(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_access_credit_balances(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_account_balances(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_cash_readiness(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_access_grants_reconcile(uuid)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.reconcile_access_grants_after_projection()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_service_access_credit_status(uuid)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_access_credit_quote(uuid,integer,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_access_credit_redeem(uuid,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_bootstrap_v2(uuid)","security_definer":true,"volatility":"s","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_dashboard_v2(uuid,integer,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_bootstrap_v2(uuid)","security_definer":false,"volatility":"s","access_role":"service_role"},
+  {"signature":"public.partners_service_dashboard_v2(uuid,integer,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_join_v2(uuid,boolean,boolean,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_access_credit_quote(uuid,integer,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_access_credit_redeem(uuid,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_access_grants_reconcile(uuid)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_access_credit_status(uuid)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_assert_kyc_cash_eligibility(uuid)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_service_payout_country_bind(uuid,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_payout_country_bind(uuid,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_rotate_link(uuid,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_rotate_link(uuid,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_payout_profile_get(uuid)","security_definer":true,"volatility":"s","access_role":"service_role"},
+  {"signature":"public.partners_service_payout_profile_get(uuid)","security_definer":false,"volatility":"s","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.is_managed_partners_flag(text)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.partners_require_control_access(text,text,boolean)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_program_activate(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"}
 ]';
 
 select extensions.is(
@@ -146,8 +185,8 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  119::bigint,
-  'the restored candidate exposes every routine from all ten pending migrations'
+  157::bigint,
+  'the restored candidate exposes every baseline and frictionless routine'
 );
 
 select extensions.is(
@@ -169,7 +208,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  119::bigint,
+  157::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -186,7 +225,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 119
+    select count(*) = 157
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -208,7 +247,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 119
+    select count(*) = 157
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -232,7 +271,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 119
+    select count(*) = 157
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -326,7 +365,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 64
+    select count(*) = 76
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
@@ -853,6 +892,339 @@ select extensions.ok(
     )))
   ) > 0,
   'restored Didit, purge and Revolut consumers use effective approval evidence'
+);
+
+select extensions.ok(
+  (
+    with expected(schema_name, relation_name, service_select) as (
+      values
+        ('affiliate_private', 'affiliate_access_credit_catalog', false),
+        ('affiliate_private', 'affiliate_access_credit_quotes', false),
+        ('affiliate_private', 'affiliate_access_credit_redemptions', false),
+        ('public', 'cloud_access_grants', true)
+    ), inspected as (
+      select
+        expected.*,
+        relation.oid,
+        relation.relrowsecurity,
+        pg_catalog.pg_get_userbyid(relation.relowner) = current_user
+          as owner_matches
+      from expected
+      left join pg_catalog.pg_namespace namespace
+        on namespace.nspname = expected.schema_name
+      left join pg_catalog.pg_class relation
+        on relation.relnamespace = namespace.oid
+        and relation.relname = expected.relation_name
+        and relation.relkind in ('r', 'p')
+    )
+    select count(*) = 4
+      and bool_and(oid is not null)
+      and bool_and(relrowsecurity)
+      and bool_and(owner_matches)
+      and bool_and(not pg_catalog.has_table_privilege(
+        'anon', oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ))
+      and bool_and(not pg_catalog.has_table_privilege(
+        'authenticated', oid,
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ))
+      and bool_and(
+        pg_catalog.has_table_privilege('service_role', oid, 'SELECT')
+          = service_select
+      )
+      and bool_and(not pg_catalog.has_table_privilege(
+        'service_role', oid,
+        'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ))
+    from inspected
+  ),
+  'frictionless relations retain their owner, RLS and exact API ACLs'
+);
+
+select extensions.ok(
+  (
+    with expected(
+      trigger_name,
+      relation_schema,
+      relation_name,
+      routine_name,
+      trigger_type
+    ) as (
+      values
+        (
+          'affiliate_accounts_member_validate_transition',
+          'affiliate_private',
+          'affiliate_accounts',
+          'validate_affiliate_member_transition',
+          23::smallint
+        ),
+        (
+          'affiliate_accounts_member_active_link_guard',
+          'affiliate_private',
+          'affiliate_accounts',
+          'guard_affiliate_member_active_links',
+          19::smallint
+        ),
+        (
+          'cloud_entitlement_projection_access_grants_insert',
+          'public',
+          'cloud_entitlement_projection',
+          'reconcile_access_grants_after_projection',
+          5::smallint
+        ),
+        (
+          'cloud_entitlement_projection_access_grants_update',
+          'public',
+          'cloud_entitlement_projection',
+          'reconcile_access_grants_after_projection',
+          17::smallint
+        )
+    )
+    select count(*) = 4
+      and bool_and(trigger_row.oid is not null)
+      and bool_and(trigger_row.tgenabled = 'O')
+      and bool_and(not trigger_row.tgisinternal)
+      and bool_and(trigger_row.tgtype = expected.trigger_type)
+      and bool_and(routine_namespace.nspname = 'affiliate_private')
+      and bool_and(routine.proname = expected.routine_name)
+    from expected
+    left join pg_catalog.pg_namespace relation_namespace
+      on relation_namespace.nspname = expected.relation_schema
+    left join pg_catalog.pg_class relation
+      on relation.relnamespace = relation_namespace.oid
+      and relation.relname = expected.relation_name
+    left join pg_catalog.pg_trigger trigger_row
+      on trigger_row.tgrelid = relation.oid
+      and trigger_row.tgname = expected.trigger_name
+    left join pg_catalog.pg_proc routine
+      on routine.oid = trigger_row.tgfoid
+    left join pg_catalog.pg_namespace routine_namespace
+      on routine_namespace.oid = routine.pronamespace
+  ),
+  'membership and entitlement projection triggers are restored exactly'
+);
+
+select extensions.ok(
+  (
+    select count(*) = 9
+      and bool_and(
+        affiliate_private.is_managed_partners_flag(flag.key)
+      )
+    from public.admin_feature_flags flag
+    where flag.key = any(array[
+      'partners_enabled',
+      'partners_invite_only',
+      'partners_cash_pilot_allowlist_only',
+      'partners_earnings_enabled',
+      'partners_credit_redemptions_enabled',
+      'partners_shadow_mode',
+      'partners_payouts_live',
+      'partners_tv_relay_enabled',
+      'partners_revolut_api_enabled'
+    ]::text[])
+  )
+  and not affiliate_private.is_managed_partners_flag(
+    'partners_unreviewed_sentinel'
+  )
+  and exists (
+    select 1
+    from affiliate_private.affiliate_release_gates gate
+    where gate.gate_key = 'membership_privacy_approved'
+  )
+  and affiliate_private.partners_approval_required_document_keys(
+    'membership_privacy_approved'
+  ) = array[
+    'approval_record',
+    'deployment_proof',
+    'gdpr_self_assessment',
+    'privacy_notice',
+    'records_of_processing'
+  ]::text[]
+  and position(
+    'membership_privacy_approved'
+    in pg_catalog.pg_get_constraintdef((
+      select constraint_row.oid
+      from pg_catalog.pg_constraint constraint_row
+      where constraint_row.conrelid =
+        'affiliate_private.affiliate_release_gates'::regclass
+        and constraint_row.conname = 'affiliate_release_gates_key'
+    ))
+  ) > 0,
+  'the nine managed flags and membership privacy gate survive restoration'
+);
+
+select extensions.ok(
+  position(
+    'partners_invite_only'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)'
+    )))
+  ) = 0
+  and position(
+    'member_status'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)'
+    )))
+  ) > 0
+  and position(
+    'partners_assert_kyc_cash_eligibility'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)'
+    )))
+  ) > 0
+  and position(
+    'partners_assert_kyc_cash_eligibility'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)'
+    )))
+  ) > 0
+  and position(
+    'partners_assert_kyc_cash_eligibility'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)'
+    )))
+  ) > 0
+  and position(
+    'partners_cash_pilot_allowlist_only'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)'
+    )))
+  ) > 0
+  and position(
+    'membership_privacy_approved'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.guard_partners_program_approved_scope()'
+    )))
+  ) > 0
+  and position(
+    'membership_privacy_approved'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.admin_partners_program_activate(text,text,text)'
+    )))
+  ) > 0
+  and position(
+    'cash partners prerequisites are incomplete'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)'
+    )))
+  ) > 0,
+  'membership stays frictionless while every cash entry point remains guarded'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_access_credit_catalog catalog
+    where catalog.catalog_key = 'acc_p0_usd_plus_month_v1'
+      and catalog.status = 'active'
+      and catalog.plan_code = 'plus'
+      and catalog.currency = 'USD'
+      and catalog.currency_exponent = 2
+      and catalog.unit_amount_minor = 499
+      and catalog.unit_duration_days = 30
+      and catalog.minimum_months = 1
+      and catalog.maximum_months = 12
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_index index_row
+    where index_row.indexrelid = to_regclass(
+      'affiliate_private.affiliate_access_credit_catalog_one_active_idx'
+    )
+      and index_row.indisunique
+      and index_row.indisvalid
+      and index_row.indisready
+      and pg_catalog.pg_get_expr(
+        index_row.indpred,
+        index_row.indrelid
+      ) like '%status = ''active''%'
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_commission_entries'::regclass
+      and constraint_row.conname = 'affiliate_commission_entries_kind'
+      and constraint_row.convalidated
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+        like '%access_credit_redemption%'
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_commission_postings'::regclass
+      and constraint_row.conname = 'affiliate_commission_postings_account'
+      and constraint_row.convalidated
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+        like '%partner_access_credit_clearing%'
+  ),
+  'the exact P0 USD Plus catalogue and access-credit ledger contract remain'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_accounts account
+    left join auth.users cloud_user on cloud_user.id = account.user_id
+    left join affiliate_private.affiliate_program_versions program
+      on program.id = account.member_program_version_id
+    where account.member_status = 'active'
+      and (
+        cloud_user.id is null
+        or cloud_user.email_confirmed_at is null
+        or program.id is null
+        or program.status <> 'active'
+        or program.account_type <> 'individual'
+        or program.commission_rate_bps <> 2000
+        or program.attribution_window_days <> 30
+        or program.maturation_days <> 45
+        or account.member_terms_version_accepted
+          is distinct from program.terms_version
+        or account.member_disclosure_version_accepted
+          is distinct from program.disclosure_version
+      )
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_links link
+    join affiliate_private.affiliate_accounts account
+      on account.id = link.account_id
+    where link.status = 'active'
+      and account.member_status <> 'active'
+  )
+  and not exists (
+    select 1
+    from affiliate_private.affiliate_access_credit_redemptions redemption
+    join affiliate_private.affiliate_access_credit_quotes quote
+      on quote.id = redemption.quote_id
+    join affiliate_private.affiliate_accounts account
+      on account.id = redemption.account_id
+    join affiliate_private.affiliate_commission_entries entry
+      on entry.id = redemption.ledger_entry_id
+    join public.cloud_access_grants grant_row
+      on grant_row.redemption_id = redemption.id
+    where quote.account_id <> redemption.account_id
+      or quote.status <> 'redeemed'
+      or quote.currency <> redemption.currency
+      or quote.currency_exponent <> redemption.currency_exponent
+      or quote.months <> redemption.months
+      or quote.total_amount_minor <> redemption.amount_minor
+      or quote.duration_days <> redemption.duration_days
+      or entry.account_id <> redemption.account_id
+      or entry.entry_kind <> 'access_credit_redemption'
+      or entry.currency <> redemption.currency
+      or entry.currency_exponent <> redemption.currency_exponent
+      or entry.amount_minor <> redemption.amount_minor
+      or grant_row.plan_code <> redemption.plan_code
+      or grant_row.duration_seconds <> redemption.duration_days::bigint * 86400
+      or grant_row.user_pseudonym <> account.user_pseudonym
+      or (
+        grant_row.user_id is not null
+        and grant_row.user_id is distinct from account.user_id
+      )
+  ),
+  'restored membership, active links and access-credit mappings are coherent at any cardinality'
 );
 
 select * from extensions.finish();

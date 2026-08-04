@@ -14,6 +14,9 @@ const sql = read(
 );
 const runbook = read('docs/NORVA-PARTNERS-RUNBOOK.md');
 const workflow = read('.github/workflows/partners-integration.yml');
+const releaseControls = read(
+  'supabase/migrations/20260804174000_partners_frictionless_release_controls.sql',
+);
 
 test('the pilot database preflight is read-only and models the safe preactivation state', () => {
   assert.match(sql, /begin transaction read only;/i);
@@ -25,8 +28,11 @@ test('the pilot database preflight is read-only and models the safe preactivatio
   assert.doesNotMatch(sql, /cron\.schedule\s*\(/i);
 
   for (const contract of [
-    ["'partners_enabled'::text, false", 'master flag remains closed'],
-    ["'partners_invite_only', true", 'pilot remains invite-only'],
+    ["'partners_enabled'::text, true", 'public membership is already live'],
+    ["'partners_invite_only', false", 'membership remains public'],
+    ["'partners_cash_pilot_allowlist_only', true", 'cash remains allowlisted'],
+    ["'partners_earnings_enabled', true", 'earnings are active in shadow'],
+    ["'partners_credit_redemptions_enabled', true", 'credits are pilot-ready'],
     ["'partners_shadow_mode', true", 'financial processing stays shadowed'],
     ["'partners_payouts_live', false", 'live payouts stay closed'],
     ["'partners_tv_relay_enabled', false", 'TV is promoted only after evidence'],
@@ -37,6 +43,21 @@ test('the pilot database preflight is read-only and models the safe preactivatio
   assert.match(sql, /'general_release_approved', false/);
   assert.match(sql, /'revolut_api_adapter_verified', false/);
   assert.match(sql, /'manual_payout_workflow_verified', true/);
+});
+
+test('the cash preflight state follows the only reachable audited activation order', () => {
+  assert.match(
+    releaseControls,
+    /where flag\.key = 'partners_enabled'[\s\S]*and flag\.enabled[\s\S]*Partners must be enabled before economic features/,
+  );
+  assert.match(
+    releaseControls,
+    /elsif not p_enabled and v_key = 'partners_enabled'[\s\S]*'partners_earnings_enabled'[\s\S]*'partners_credit_redemptions_enabled'[\s\S]*disable dependent Partners flags first/,
+  );
+  assert.match(
+    runbook,
+    /activer d'abord[\s\S]{0,120}`partners_enabled=true`[\s\S]{0,120}`partners_earnings_enabled=true`[\s\S]{0,120}`partners_credit_redemptions_enabled=true`/,
+  );
 });
 
 test('the selected pilot corridor has exact programme, jurisdiction and payout invariants', () => {
@@ -162,13 +183,16 @@ test('the preflight executes the SQL through the local database container and is
 });
 
 test('the runbook separates local preflight from protected external evidence', () => {
-  assert.match(runbook, /Préflight pilote : corridor explicite, sans activation/);
+  assert.match(
+    runbook,
+    /Préflight payout pilote : corridor explicite, sans activation/,
+  );
   assert.match(runbook, /check-norva-partners-pilot-preactivation\.sh/);
   assert.match(runbook, /référence commerciale immuable[\s\S]*`USD=1000`/);
   assert.match(runbook, /aucune conversion USD implicite/);
   assert.match(runbook, /20 à 50 comptes/);
   assert.match(runbook, /App Link signé par Google Play/);
   assert.match(runbook, /ne crée aucune preuve fournisseur/);
-  assert.match(runbook, /partners_enabled=false/);
+  assert.match(runbook, /préflight cash s'exécute après la mise en service/);
   assert.match(runbook, /partners_payouts_live=false/);
 });

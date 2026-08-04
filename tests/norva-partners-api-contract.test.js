@@ -1173,6 +1173,7 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
     '/kyc/sessions',
     '/referral/claim',
     '/payout-profile',
+    '/payout-country',
     '/fiscal-profile',
     '/payout-onboarding',
   ]) {
@@ -1186,7 +1187,8 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
   assert.match(edgeSource, /sanitizeMutationData\(data, "application_submitted"\)/);
   assert.match(edgeSource, /sanitizeMutationData\(data, "terms_accepted"\)/);
   assert.match(edgeSource, /sanitizeActivationReconcile/);
-  assert.match(edgeSource, /sanitizeMutationData\(data, "link_rotated"\)/);
+  assert.match(edgeSource, /sanitizeLinkMutationData/);
+  assert.match(edgeSource, /sanitizePayoutCountryMutationData/);
   assert.match(edgeSource, /sanitizeDashboardData\(data, query\)/);
   assert.match(edgeSource, /parseIdempotencyKey/);
   assert.match(edgeSource, /new TextEncoder\(\)\.encode\(text\)\.byteLength > 4_096/);

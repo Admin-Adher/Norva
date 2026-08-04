@@ -229,6 +229,50 @@ test('every logical application backup includes the private Partners schema and 
   assert.doesNotMatch(nightly, /-Atc \\\\"select/);
 });
 
+test('backup Docker commands never expose the PostgreSQL password in process arguments', () => {
+  const scripts = [
+    { file: 'ops/hetzner/backup/lib.sh', command: 'run' },
+    { file: 'ops/hetzner/backup/basebackup-weekly.sh', command: 'run' },
+    { file: 'ops/hetzner/backup/RESTORE.md', command: 'exec' },
+  ];
+
+  for (const { file, command } of scripts) {
+    const source = read(file);
+    assert.doesNotMatch(
+      source,
+      /(?:docker run|docker exec)[^\r\n]*(?:-e|--env)\s+PGPASSWORD\s*=\s*["']?\$\{?[A-Z_][A-Z0-9_]*\}?/m,
+      `${file} must pass only the PGPASSWORD variable name to Docker, never its value`,
+    );
+    assert.match(
+      source,
+      new RegExp(
+        `PGPASSWORD="\\$POSTGRES_PASSWORD"[\\s\\\\\\r\\n]+docker ${command}[^\\r\\n]*\\s-e PGPASSWORD(?:\\s|$)`,
+      ),
+      `${file} must inject PGPASSWORD through the Docker environment without exposing its value in argv`,
+    );
+  }
+});
+
+test('one-shot physical backups can preserve every prior base without weakening secret precedence', () => {
+  const source = read('ops/hetzner/backup/basebackup-weekly.sh');
+
+  assert.match(
+    source,
+    /KEEP_BASE_COUNT_OVERRIDE="\$\{KEEP_BASE_COUNT-\}"[\s\S]*source "\$HERE\/lib\.sh"[\s\S]*KEEP_BASE_COUNT="\$KEEP_BASE_COUNT_OVERRIDE"/,
+  );
+  assert.match(
+    source,
+    /SKIP_BASE_RETENTION_OVERRIDE="\$\{NORVA_SKIP_BASE_RETENTION-\}"[\s\S]*NORVA_SKIP_BASE_RETENTION="\$SKIP_BASE_RETENTION_OVERRIDE"/,
+  );
+  assert.match(source, /NORVA_SKIP_BASE_RETENTION must be true or false/);
+  assert.match(source, /retention skipped by explicit one-shot operator control/);
+  assert.doesNotMatch(
+    source,
+    /(?:R2_SECRET_ACCESS_KEY|POSTGRES_PASSWORD)_OVERRIDE/,
+    'one-shot overrides must never supersede credential values from the protected environment',
+  );
+});
+
 test('self-hosted nightly dumps are age-encrypted and verified before plaintext cleanup', () => {
   const nightly = read('ops/hetzner/backup/backup-nightly.sh');
   const envExample = read('ops/hetzner/backup/norva-backup.env.example');
@@ -373,6 +417,33 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /to_regnamespace\('affiliate_private'\)/);
   assert.match(verifier, /to_regclass\('affiliate_private\.' \|\| v_name\)/);
   assert.match(verifier, /and not c\.relrowsecurity/);
+  const frictionlessRoutineCatalogStart = verifier.indexOf(
+    'for v_expected in\n    select *\n    from (values',
+  );
+  const frictionlessRoutineCatalogEnd = verifier.indexOf(
+    ') expected(signature, security_definer, volatility, access_role)',
+    frictionlessRoutineCatalogStart,
+  );
+  assert.ok(frictionlessRoutineCatalogStart >= 0 && frictionlessRoutineCatalogEnd > 0);
+  const frictionlessRoutineCatalog = verifier.slice(
+    frictionlessRoutineCatalogStart,
+    frictionlessRoutineCatalogEnd,
+  );
+  assert.equal(
+    (frictionlessRoutineCatalog.match(/^\s*\('/gm) || []).length,
+    38,
+    'the production verifier must cover every routine touched by the three-migration lot',
+  );
+  for (const relation of [
+    'affiliate_private.affiliate_access_credit_catalog',
+    'affiliate_private.affiliate_access_credit_quotes',
+    'affiliate_private.affiliate_access_credit_redemptions',
+    'public.cloud_access_grants',
+  ]) {
+    assert.match(verifier, new RegExp(relation.replaceAll('.', '\\.')));
+  }
+  assert.match(verifier, /membership_privacy_approved/);
+  assert.match(verifier, /partners_cash_pilot_allowlist_only/);
   assert.match(verifier, /has_schema_privilege\(\s*'anon'/);
   assert.match(verifier, /has_table_privilege\(/);
   assert.match(verifier, /has_sequence_privilege\(/);
@@ -586,83 +657,52 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /-U supabase_admin -d postgres/);
   assert.match(rehearsal, /migration_routine_owner=supabase_admin/);
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
-  const operatorCapabilitiesMigration = rehearsal.indexOf(
-    '20260803082211_partners_admin_operator_capabilities.sql',
+  const frictionlessMembershipMigration = rehearsal.indexOf(
+    '20260804173000_partners_frictionless_membership_credits.sql',
   );
-  const accessDecisionEmailMigration = rehearsal.indexOf(
-    '20260803084051_partners_access_request_decision_email.sql',
+  const payoutCountryMigration = rehearsal.indexOf(
+    '20260804173500_partners_payout_country_and_member_link_v2.sql',
   );
-  const diditCertificationMigration = rehearsal.indexOf(
-    '20260803160730_partners_didit_certification_pre_gate.sql',
-  );
-  const releaseGateAal2Migration = rehearsal.indexOf(
-    '20260803204442_partners_release_gate_aal2.sql',
-  );
-  const approvalRegistryMigration = rehearsal.indexOf(
-    '20260804083541_partners_approval_registry.sql',
-  );
-  const biometricConsentMigration = rehearsal.indexOf(
-    '20260804084500_partners_biometric_consent_contract.sql',
-  );
-  const diditPurgeMigration = rehearsal.indexOf(
-    '20260804093000_partners_didit_purge_outbox.sql',
-  );
-  const privacyRightsMigration = rehearsal.indexOf(
-    '20260804160000_partners_privacy_rights_human_review.sql',
-  );
-  const reverificationOverrideMigration = rehearsal.indexOf(
-    '20260804165000_partners_kyc_reverification_override.sql',
-  );
-  const deploymentManifestEventContractMigration = rehearsal.indexOf(
-    '20260804165500_partners_deployment_manifest_event_contract.sql',
-  );
-  const biometricEnforcementMigration = rehearsal.indexOf(
-    '20260804170000_partners_biometric_consent_enforcement.sql',
+  const frictionlessReleaseMigration = rehearsal.indexOf(
+    '20260804174000_partners_frictionless_release_controls.sql',
   );
   assert.ok(
-    operatorCapabilitiesMigration < accessDecisionEmailMigration
-      && accessDecisionEmailMigration < diditCertificationMigration
-      && diditCertificationMigration < releaseGateAal2Migration
-      && releaseGateAal2Migration < approvalRegistryMigration
-      && approvalRegistryMigration < biometricConsentMigration
-      && biometricConsentMigration < diditPurgeMigration
-      && diditPurgeMigration < privacyRightsMigration
-      && privacyRightsMigration < reverificationOverrideMigration
-      && reverificationOverrideMigration < deploymentManifestEventContractMigration
-      && deploymentManifestEventContractMigration < biometricEnforcementMigration,
-    'the eleven-migration Partners lot must keep its final-state chronological order',
+    frictionlessMembershipMigration >= 0
+      && frictionlessMembershipMigration < payoutCountryMigration
+      && payoutCountryMigration < frictionlessReleaseMigration,
+    'the three post-ab464fe4 migrations must keep their chronological order',
   );
-  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_ONE"/);
-  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_TWO"/);
-  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
-  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FIVE"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SIX"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SEVEN"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_EIGHT"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_NINE"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_TEN"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_ELEVEN"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="ab464fe4"/);
+  assert.equal(
+    (rehearsal.match(/readonly MIGRATION_[A-Z]+=/g) || []).length,
+    3,
+    'only the three post-ab464fe4 migrations belong to the candidate lot',
+  );
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_ONE"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_TWO"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
+  assert.equal(
+    (rehearsal.match(/-f "\/candidate\/\$MIGRATION_[A-Z]+"/g) || []).length,
+    3,
+    'predeploy replays exactly the three candidate migrations',
+  );
+  assert.doesNotMatch(rehearsal, /MIGRATION_(?:FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN)/);
+  assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
+  assert.match(rehearsal, /baseline_markers_verified=22/);
+  assert.match(rehearsal, /migration_one_sha256=/);
+  assert.match(rehearsal, /migration_two_sha256=/);
   assert.match(rehearsal, /migration_three_sha256=/);
-  assert.match(rehearsal, /migration_four_sha256=/);
-  assert.match(rehearsal, /migration_five_sha256=/);
-  assert.match(rehearsal, /migration_six_sha256=/);
-  assert.match(rehearsal, /migration_seven_sha256=/);
-  assert.match(rehearsal, /migration_eight_sha256=/);
-  assert.match(rehearsal, /migration_nine_sha256=/);
-  assert.match(rehearsal, /migration_ten_sha256=/);
-  assert.match(rehearsal, /migration_eleven_sha256=/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
-  assert.match(rehearsal, /"1\|1\|1\|1\|1(?:\|0){17}"/);
-  assert.match(rehearsal, /"1(?:\|1){21}"/);
+  assert.match(rehearsal, /BASELINE_MARKERS_AB464FE4="1(?:\|1){21}"/);
+  assert.match(rehearsal, /FRICTIONLESS_MARKERS_COMPLETE="1\|1\|1"/);
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="1\|1\|1\|1\|1(?:\|0){17}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){21}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_MARKERS_AB464FE4\}\|0\|0\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_MARKERS_AB464FE4\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
-    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=7[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
+    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=3[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
   );
   assert.equal(
     (rehearsal.match(/--single-transaction/g) || []).length,
@@ -675,10 +715,10 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
   );
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "119\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=119/);
-  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "14\|0"/);
-  assert.match(rehearsal, /migration_relations_verified=14/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "157\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=157/);
+  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "18\|0"/);
+  assert.match(rehearsal, /migration_relations_verified=18/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
   assert.match(rehearsal, /affiliate_restore_compatibility\.sql/);
   assert.match(workflow, /affiliate_restore_compatibility\.sql/);
@@ -720,9 +760,32 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(\d+\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(106\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
+  const routineCatalogMatch = restorePgTap.match(
+    /set local norva\.partners_restore_expected_routines = '(\[[\s\S]*?\])';/,
+  );
+  assert.ok(routineCatalogMatch, 'the restore pgTAP must expose its exact routine catalogue');
+  const routineCatalog = JSON.parse(routineCatalogMatch[1]);
+  assert.equal(routineCatalog.length, 157);
+  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 157);
+  const routineAccessCounts = routineCatalog.reduce((counts, { access_role: accessRole }) => {
+    counts[accessRole] = (counts[accessRole] || 0) + 1;
+    return counts;
+  }, {});
+  assert.deepEqual(
+    routineAccessCounts,
+    { owner: 76, authenticated: 28, service_role: 53 },
+  );
+  for (const relation of [
+    'affiliate_private.affiliate_access_credit_catalog',
+    'affiliate_private.affiliate_access_credit_quotes',
+    'affiliate_private.affiliate_access_credit_redemptions',
+    'public.cloud_access_grants',
+  ]) {
+    assert.match(restorePgTap, new RegExp(relation.replaceAll('.', '\\.')));
+  }
   assert.equal(
     (restorePgTap.match(
       /^\s*create extension if not exists pgtap with schema extensions;\s*$/gim,
@@ -759,8 +822,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(restoreGuide, /predeploy/);
   assert.match(restoreGuide, /postdeploy/);
-  assert.match(restoreGuide, /migrations_applied=10/);
+  assert.match(restoreGuide, /baseline_contract=ab464fe4/);
+  assert.match(restoreGuide, /migrations_applied=3/);
   assert.match(restoreGuide, /migrations_applied=0/);
+  assert.match(restoreGuide, /NORVA_SKIP_BASE_RETENTION=true/);
+  assert.match(restoreGuide, /base-YYYYMMDD-HHMMSS/);
   assert.match(restoreGuide, /migration_replay_skipped=true/);
   assert.match(restoreGuide, /--network none/);
   assert.match(restoreGuide, /result=passed/);
@@ -771,7 +837,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
 });
 
-test('Partners legal surfaces disclose KYC minimization and commission reversals', () => {
+test('Partners legal surfaces separate access credits from optional cash KYC', () => {
   const privacy = read('public/privacy.html');
   const terms = read('public/terms.html');
   const partnersTerms = read('public/partners-terms.html');
@@ -785,10 +851,31 @@ test('Partners legal surfaces disclose KYC minimization and commission reversals
   assert.match(partnersTerms, /20% of eligible Norva subscription payments/);
   assert.match(partnersTerms, /refunds, chargebacks, reversals/i);
   assert.match(partnersTerms, /not currently a\s+business\/KYB programme/i);
+  assert.match(
+    partnersTerms,
+    /confirmed Norva account may join[\s\S]*Cash transfers are a[\s\S]*separate supervised pilot/i,
+  );
+  assert.match(
+    partnersTerms,
+    /Before this confirmation, Norva does not request your payout[\s\S]*country, identity, tax profile or banking destination/i,
+  );
   assert.match(partnersTerms, /Minimum plain-language disclosure/);
   assert.match(partnersTerms, /separately itemized discount is optional context/i);
+  assert.match(partnersTerms, /Joining Norva Partners,[\s\S]*do <strong>not<\/strong> require identity verification, KYC/i);
+  assert.match(partnersTerms, /irreversibly convert[\s\S]*available balance into[\s\S]*Norva access/i);
+  assert.match(
+    partnersTerms,
+    /contractually limited to a Norva service entitlement[\s\S]*cannot be[\s\S]*sold, transferred, exchanged, used to pay another person or redeemed for cash/i,
+  );
+  assert.match(
+    partnersTerms,
+    /does not predetermine its legal classification under the law that applies/i,
+  );
+  assert.doesNotMatch(partnersTerms, /(?:is|are) not electronic money/i);
+  assert.match(partnersTerms, /refund, chargeback, reversal[\s\S]*ledger counter-entry[\s\S]*recovery-due/i);
   assert.match(partnersTerms, /USD 10\.00 \(1,000 minor units\)/);
   assert.match(partnersTerms, /transfer fees charged to Norva[\s\S]*paid\s+by Norva[\s\S]*not deducted/i);
+  assert.match(partnersTerms, /withdraw consent[\s\S]*blocks all cash transfers while consent[\s\S]*does not end membership/i);
   assert.ok(
     partnersTerms.replace(/\s+/g, ' ').includes(disclosure),
     'repository Partners Terms must carry the exact versioned disclosure before publication',
@@ -796,6 +883,13 @@ test('Partners legal surfaces disclose KYC minimization and commission reversals
   assert.match(privacy, /<strong>Google Play<\/strong>/);
   assert.match(privacy, /<strong>RevenueCat<\/strong>/);
   assert.match(privacy, /<strong>Revolut<\/strong>/);
+  assert.match(privacy, /Didit is not used to join,[\s\S]*convert available commission into Norva access/i);
+  assert.match(
+    privacy,
+    /account outside that cohort is not asked for payout country, KYC, tax or banking information/i,
+  );
+  assert.match(privacy, /Withdrawal[\s\S]*never ends Partners membership[\s\S]*prevents conversion of available[\s\S]*Norva access/i);
+  assert.match(terms, /do not require KYC,[\s\S]*Norva access credit is an irreversible conversion/i);
   assert.match(privacy, /<strong>Hetzner<\/strong>/);
   assert.match(privacy, /<strong>Resend<\/strong>/);
   assert.match(privacy, /Supabase software[\s\S]*does not host this Norva deployment/i);

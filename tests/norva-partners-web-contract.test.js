@@ -492,7 +492,11 @@ test('Partners payout profile is masked, read-only and fail-closed', async () =>
     correlationId: 'prt_0123456789abcdef01234567',
     data: {
       schema_version: 1,
-      account: { id: `prt_${'a'.repeat(24)}`, status: 'active' },
+      account: {
+        id: `prt_${'a'.repeat(24)}`,
+        status: 'active',
+        country_code: 'FR',
+      },
       fiscal: { status: 'verified', country_code: 'FR' },
       profile: {
         provider: 'revolut',
@@ -518,6 +522,29 @@ test('Partners payout profile is masked, read-only and fail-closed', async () =>
   assert.equal(get.requests[0].options.method, 'GET');
   assert.equal(profile.data.profile.display_masked, 'Revolut ·•• 8421');
   assert.equal(JSON.stringify(profile).includes('beneficiaryTokenRef'), false);
+
+  const cashPilotPayload = structuredClone(getPayload);
+  cashPilotPayload.data.account.status = 'pending_verification';
+  cashPilotPayload.data.account.country_code = null;
+  cashPilotPayload.data.fiscal = null;
+  cashPilotPayload.data.profile = null;
+  cashPilotPayload.data.profiles = [];
+  cashPilotPayload.data.readiness = {
+    ready: false,
+    payouts_live: false,
+    reason: 'cash_pilot_not_allowed',
+  };
+  const cashPilot = loadCloudApi(cashPilotPayload);
+  assert.equal(
+    (await cashPilot.cloud.partners.payoutProfile()).data.readiness.reason,
+    'cash_pilot_not_allowed',
+  );
+  const cashPilotDrift = structuredClone(cashPilotPayload);
+  cashPilotDrift.data.readiness.reason = 'provider_not_configured';
+  await assert.rejects(
+    () => loadCloudApi(cashPilotDrift).cloud.partners.payoutProfile(),
+    (error) => error?.code === 'partners_contract_invalid',
+  );
 
   assert.equal(get.cloud.partners.saveTokenizedPayoutProfile, undefined);
 });

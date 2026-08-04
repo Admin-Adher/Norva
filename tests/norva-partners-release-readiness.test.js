@@ -109,7 +109,10 @@ function readyEvidence() {
   evidence.providers.didit.environment_isolation_evidence =
     evidenceRef('didit-environment-isolation');
   evidence.feature_flags.partners_enabled = true;
-  evidence.feature_flags.partners_invite_only = true;
+  evidence.feature_flags.partners_invite_only = false;
+  evidence.feature_flags.partners_cash_pilot_allowlist_only = true;
+  evidence.feature_flags.partners_earnings_enabled = true;
+  evidence.feature_flags.partners_credit_redemptions_enabled = true;
   evidence.feature_flags.partners_shadow_mode = true;
   evidence.feature_flags.partners_tv_relay_enabled = true;
   evidence.payout_reconciliation.statement_status =
@@ -220,11 +223,14 @@ test('the committed release evidence template is valid and fail-closed', () => {
   assert.equal(template.target_environment, 'sandbox');
   assert.equal(template.feature_flags.partners_payouts_live, false);
   assert.equal(template.feature_flags.partners_revolut_api_enabled, false);
+  assert.equal(template.feature_flags.partners_cash_pilot_allowlist_only, true);
+  assert.equal(template.feature_flags.partners_earnings_enabled, false);
+  assert.equal(template.feature_flags.partners_credit_redemptions_enabled, false);
   assert.equal(template.contains_personal_data, false);
   assert.equal(template.providers.didit.config_fingerprint_sha256, null);
   assert.equal(template.providers.didit.workflow_version, null);
   assert.equal(template.providers.didit.environment_isolation_evidence, null);
-  assert.equal(template.schema_version, 6);
+  assert.equal(template.schema_version, 8);
   assert.equal(
     template.legal.privacy_pilot_self_assessment_evidence,
     null,
@@ -240,7 +246,7 @@ test('legacy free-text evidence journals are rejected', () => {
   legacy.schema_version = 1;
   assert.throws(
     () => validateEvidence(legacy),
-    /schema_version must equal 6/,
+    /schema_version must equal 8/,
   );
 });
 
@@ -618,6 +624,24 @@ test('pilot readiness gates Play App Links, DB snapshot, TV, statement and incid
         evidence.database_snapshot.evidence = null;
       },
       'database_configuration_snapshot_not_verified',
+    ],
+    [
+      (evidence) => {
+        evidence.feature_flags.partners_cash_pilot_allowlist_only = false;
+      },
+      'partners_cash_pilot_allowlist_not_enabled',
+    ],
+    [
+      (evidence) => {
+        evidence.feature_flags.partners_earnings_enabled = false;
+      },
+      'partners_earnings_not_enabled',
+    ],
+    [
+      (evidence) => {
+        evidence.feature_flags.partners_credit_redemptions_enabled = false;
+      },
+      'partners_credit_redemptions_not_enabled',
     ],
     [
       (evidence) => {

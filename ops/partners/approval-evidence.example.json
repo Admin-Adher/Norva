@@ -1,17 +1,19 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "status": "draft",
-  "package_key": "partners-france-invite-pilot-v3",
+  "package_key": "partners-public-membership-france-cash-pilot-v4",
   "repository": "Admin-Adher/Norva",
   "candidate_commit_sha": null,
   "target_environment": "preproduction",
   "deployment_id": null,
   "contains_personal_data": false,
   "release_scope": {
-    "access_mode": "invite_only",
-    "country_code": "FR",
-    "participant_cap": 50,
-    "public_release_eligible": false
+    "membership_access_mode": "public",
+    "membership_public_release_eligible": true,
+    "cash_access_mode": "allowlist_only",
+    "cash_country_code": "FR",
+    "cash_participant_cap": 50,
+    "cash_public_release_eligible": false
   },
   "program": {
     "version_key": null,
@@ -55,6 +57,9 @@
     }
   },
   "dependencies": {
+    "membership_privacy_notice_evidence": null,
+    "membership_ropa_evidence": null,
+    "membership_minimization_evidence": null,
     "configuration_snapshot_evidence": null,
     "didit_live_evidence": null,
     "payout_corridor_evidence": null,
@@ -78,6 +83,31 @@
         "terms_and_disclosure_approved": false,
         "kyc_only_without_kyb_scope_approved": false,
         "refund_chargeback_and_reversal_rules_approved": false
+      }
+    },
+    "membership_privacy": {
+      "approved": false,
+      "decided_at": null,
+      "valid_until": null,
+      "reviewer_role": "privacy_accountable_owner",
+      "approval_control": "risk_aal2",
+      "assessment_method": "documented_membership_privacy_assessment",
+      "notice_version": null,
+      "notice_sha256": null,
+      "ropa_version": null,
+      "ropa_sha256": null,
+      "minimization_review_version": null,
+      "minimization_review_sha256": null,
+      "reviewer_reference_sha256": null,
+      "evidence": null,
+      "checks": {
+        "membership_notice_versioned": false,
+        "records_of_processing_documented": false,
+        "data_minimization_reviewed": false,
+        "referral_attribution_and_ledger_scoped": false,
+        "didit_biometric_and_payout_data_excluded": false,
+        "admin_logs_and_evidence_redacted": false,
+        "retention_and_data_subject_rights_documented": false
       }
     },
     "privacy": {

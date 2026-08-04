@@ -17,6 +17,13 @@ export const PARTNERS_ALLOWED_REQUEST_HEADERS = Object.freeze([
 
 export const PARTNERS_RPC = Object.freeze({
   bootstrap: "partners_service_bootstrap",
+  bootstrapV2: "partners_service_bootstrap_v2",
+  join: "partners_service_join_v2",
+  accessCreditQuote: "partners_service_access_credit_quote",
+  accessCreditRedeem: "partners_service_access_credit_redeem",
+  accessGrantsReconcile: "partners_service_access_grants_reconcile",
+  accessCreditStatus: "partners_service_access_credit_status",
+  payoutCountryBind: "partners_service_payout_country_bind",
   accessRequestGet: "partners_service_access_request_get",
   accessRequestSubmit: "partners_service_access_request_submit",
   apply: "partners_service_apply",
@@ -24,6 +31,7 @@ export const PARTNERS_RPC = Object.freeze({
   activationReconcile: "partners_service_activation_reconcile",
   rotateLink: "partners_service_rotate_link",
   dashboard: "partners_service_dashboard",
+  dashboardV2: "partners_service_dashboard_v2",
   kycRightsGet: "partners_service_kyc_rights_get",
   biometricConsentWithdraw: "partners_service_biometric_consent_withdraw",
   kycHumanReviewRequest: "partners_service_kyc_human_review_request",
@@ -74,6 +82,13 @@ export type PublicErrorCode =
   | "idempotency_key_reused"
   | "request_in_progress"
   | "partners_access_requests_disabled"
+  | "membership_required"
+  | "credits_disabled"
+  | "quote_expired"
+  | "insufficient_balance"
+  | "catalog_unavailable"
+  | "quote_conflict"
+  | "payout_country_unavailable"
   | "partners_action_not_allowed"
   | "partners_temporarily_unavailable";
 
@@ -122,6 +137,23 @@ export type AccessRequestInput = {
 export type AcceptTermsInput = {
   termsVersion: string;
   disclosureVersion: string;
+};
+
+export type JoinInput = {
+  termsAccepted: true;
+  disclosureAccepted: true;
+};
+
+export type AccessCreditQuoteInput = {
+  months: number;
+};
+
+export type AccessCreditRedemptionInput = {
+  quoteKey: string;
+};
+
+export type PayoutCountryInput = {
+  countryCode: string;
 };
 
 export type DashboardQuery = {
@@ -220,8 +252,26 @@ const DASHBOARD_HISTORY_STATUSES = new Set([
   "pending",
   "available",
   "held",
+  "redeemed",
   "paid",
   "reversed",
+]);
+const MEMBERSHIP_STATUSES = new Set([
+  "not_joined",
+  "active",
+  "held",
+  "suspended",
+  "closed",
+]);
+const DASHBOARD_V2_HISTORY_TYPES = new Set([
+  "accrual",
+  "release",
+  "access_credit_redemption",
+  "payout_settlement",
+  "payout_late_settlement",
+  "reversal",
+  "manual_reversal",
+  "payout_return",
 ]);
 const REPORTING_REASONS = new Set([
   "available",
@@ -285,14 +335,21 @@ const PAYOUT_ONBOARDING_REASON_CODES = new Set([
   "compliance_review",
   "duplicate_request",
 ]);
-const MEMBER_WRITE_OPERATIONS = new Set([
-  "fiscal_profile_self_attestation",
-  "payout_onboarding",
-]);
+const MEMBER_WRITE_LIMITS = Object.freeze({
+  membership_join: 4,
+  link_rotation: 4,
+  payout_country_bind: 8,
+  access_credit_quote: 24,
+  access_credit_redeem: 12,
+  fiscal_profile_self_attestation: 8,
+  payout_onboarding: 8,
+} as const);
 
-export type PartnersMemberWriteOperation =
-  | "fiscal_profile_self_attestation"
-  | "payout_onboarding";
+export type PartnersMemberWriteOperation = keyof typeof MEMBER_WRITE_LIMITS;
+
+const MEMBER_WRITE_OPERATIONS = new Set<PartnersMemberWriteOperation>(
+  Object.keys(MEMBER_WRITE_LIMITS) as PartnersMemberWriteOperation[],
+);
 
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
 const SUBDIVISION_PATTERN = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
@@ -301,6 +358,9 @@ const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 const DASHBOARD_CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 const PUBLIC_LINK_CODE_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+const ACCESS_CREDIT_QUOTE_KEY_PATTERN = /^crq_[0-9a-f]{24}$/;
+const ACCESS_CREDIT_REDEMPTION_KEY_PATTERN = /^crd_[0-9a-f]{24}$/;
+const ACCESS_GRANT_KEY_PATTERN = /^cag_[0-9a-f]{24}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -403,7 +463,8 @@ export function allowedMethodsForRoute(
   if (
     route === "/bootstrap" ||
     route === "/dashboard" ||
-    route === "/kyc/rights"
+    route === "/kyc/rights" ||
+    route === "/credit/status"
   ) return ["GET"];
   if (
     route === "/access-request" ||
@@ -413,6 +474,10 @@ export function allowedMethodsForRoute(
   if (route === "/payout-profile") return ["GET"];
   if (
     route === "/applications" ||
+    route === "/join" ||
+    route === "/credit/quotes" ||
+    route === "/credit/redemptions" ||
+    route === "/payout-country" ||
     route === "/activate" ||
     route === "/activation/reconcile" ||
     route === "/links" ||
@@ -592,6 +657,53 @@ export function parseAcceptTermsInput(raw: unknown): AcceptTermsInput {
   };
 }
 
+export function parseJoinInput(raw: unknown): JoinInput {
+  const body = boundedRecord(raw, [
+    "termsAccepted",
+    "disclosureAccepted",
+  ], []);
+  if (
+    body.termsAccepted !== true ||
+    body.disclosureAccepted !== true
+  ) throw invalidRequest();
+  return { termsAccepted: true, disclosureAccepted: true };
+}
+
+export function parseAccessCreditQuoteInput(
+  raw: unknown,
+): AccessCreditQuoteInput {
+  const body = boundedRecord(raw, ["months"], []);
+  if (
+    typeof body.months !== "number" ||
+    !Number.isSafeInteger(body.months) ||
+    body.months < 1 ||
+    body.months > 12
+  ) throw invalidRequest();
+  return { months: body.months };
+}
+
+export function parseAccessCreditRedemptionInput(
+  raw: unknown,
+): AccessCreditRedemptionInput {
+  const body = boundedRecord(raw, ["quoteKey"], []);
+  if (
+    typeof body.quoteKey !== "string" ||
+    !ACCESS_CREDIT_QUOTE_KEY_PATTERN.test(body.quoteKey)
+  ) throw invalidRequest();
+  return { quoteKey: body.quoteKey };
+}
+
+export function parsePayoutCountryInput(raw: unknown): PayoutCountryInput {
+  const body = boundedRecord(raw, ["countryCode"], []);
+  return {
+    countryCode: normalizeRequiredCode(
+      body.countryCode,
+      COUNTRY_PATTERN,
+      2,
+    ),
+  };
+}
+
 export function parseEmptyMutationInput(raw: unknown): Record<string, never> {
   if (!isRecord(raw) || Object.keys(raw).length !== 0) throw invalidRequest();
   return {};
@@ -678,6 +790,16 @@ export function isUuid(value: string): boolean {
 }
 
 export function sanitizeBootstrapData(
+  raw: unknown,
+  expected: BootstrapQuery,
+): Record<string, unknown> {
+  if (isRecord(raw) && raw.schema_version === 2) {
+    return sanitizeBootstrapV2Data(raw);
+  }
+  return sanitizeBootstrapV1Data(raw, expected);
+}
+
+function sanitizeBootstrapV1Data(
   raw: unknown,
   expected: BootstrapQuery,
 ): Record<string, unknown> {
@@ -813,6 +935,73 @@ export function sanitizeBootstrapData(
     policy,
     allowlist: cleanAllowlist,
     account,
+  };
+}
+
+function sanitizeBootstrapV2Data(raw: unknown): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "flags",
+    "eligibility",
+    "membership",
+    "program",
+    "link",
+    "credit_readiness",
+    "cash_readiness",
+  ]);
+  if (root.schema_version !== 2) throw new BootstrapContractError();
+  const flags = sanitizePartnersV2Flags(root.flags);
+  const membership = sanitizeV2Membership(root.membership);
+  const eligibility = exactRecord(root.eligibility, [
+    "visible",
+    "eligible",
+    "reason",
+  ]);
+  const visible = strictBoolean(eligibility.visible);
+  const eligible = strictBoolean(eligibility.eligible);
+  const reason = enumString(eligibility.reason, new Set([
+    "email_unconfirmed",
+    "account_blocked",
+    "disabled",
+    "program_unavailable",
+    "available",
+  ]));
+  const program = root.program === null
+    ? null
+    : sanitizeV2Program(root.program);
+  const link = root.link === null
+    ? null
+    : sanitizeMemberLink(root.link, "created_at");
+  const creditReadiness = sanitizeCreditReadiness(
+    root.credit_readiness,
+    null,
+  );
+  const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
+  if (
+    visible !== (flags.partners_enabled || membership.exists) ||
+    eligible !== (reason === "available") ||
+    (eligible && (!visible || !flags.partners_enabled || program === null)) ||
+    (reason === "account_blocked" &&
+      !["held", "suspended", "closed"].includes(String(membership.status))) ||
+    (link !== null && membership.status !== "active") ||
+    (cashReadiness.reason === "cash_pilot_not_allowed" &&
+      (!flags.partners_cash_pilot_allowlist_only ||
+        membership.status !== "active")) ||
+    (creditReadiness.ready !==
+      (membership.status === "active" &&
+        flags.partners_credit_redemptions_enabled)) ||
+    creditReadiness.reason === "catalog_unavailable"
+  ) throw new BootstrapContractError();
+
+  return {
+    schema_version: 2,
+    flags,
+    eligibility: { visible, eligible, reason },
+    membership,
+    program,
+    link,
+    credit_readiness: creditReadiness,
+    cash_readiness: cashReadiness,
   };
 }
 
@@ -1132,7 +1321,8 @@ export function sanitizeMemberWriteReservation(
     "remaining",
     "window_seconds",
   ]);
-  const limit = integerBetween(root.limit, 8, 8);
+  const expectedLimit = MEMBER_WRITE_LIMITS[expectedOperation];
+  const limit = integerBetween(root.limit, expectedLimit, expectedLimit);
   const used = integerBetween(root.used, 0, limit);
   const remaining = integerBetween(root.remaining, 0, limit);
   if (
@@ -1557,7 +1747,417 @@ export function sanitizeActivationReconcile(
   };
 }
 
+export function sanitizeLinkMutationData(
+  raw: unknown,
+): Record<string, unknown> {
+  if (isRecord(raw) && raw.schema_version === 1) {
+    return sanitizeMutationData(raw, "link_rotated");
+  }
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "membership",
+    "link",
+    "next_action",
+  ]);
+  if (
+    root.schema_version !== 2 ||
+    root.action !== "link_rotated" ||
+    root.next_action !== "share_link"
+  ) throw new BootstrapContractError();
+  const membership = exactRecord(root.membership, [
+    "status",
+    "joined_at",
+    "verification_status",
+  ]);
+  if (membership.status !== "active") throw new BootstrapContractError();
+  return {
+    schema_version: 2,
+    action: "link_rotated",
+    replayed: strictBoolean(root.replayed),
+    membership: {
+      status: "active",
+      joined_at: isoTimestamp(membership.joined_at, false),
+      verification_status: enumString(
+        membership.verification_status,
+        VERIFICATION_STATUSES,
+      ),
+    },
+    link: sanitizeMemberLink(root.link, "rotated_at"),
+    next_action: "share_link",
+  };
+}
+
+export function sanitizeJoinData(raw: unknown): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "membership",
+    "program",
+    "link",
+    "cash_readiness",
+    "next_action",
+  ]);
+  if (
+    root.schema_version !== 2 ||
+    root.action !== "membership_joined" ||
+    root.next_action !== "share_link"
+  ) throw new BootstrapContractError();
+
+  const membership = exactRecord(root.membership, [
+    "status",
+    "joined_at",
+    "verification_status",
+  ]);
+  if (membership.status !== "active") throw new BootstrapContractError();
+
+  const program = exactRecord(root.program, [
+    "commission_rate_bps",
+    "attribution_window_days",
+    "maturation_days",
+    "terms_version",
+    "disclosure_version",
+  ]);
+  if (
+    program.commission_rate_bps !== 2_000 ||
+    program.attribution_window_days !== 30 ||
+    program.maturation_days !== 45
+  ) throw new BootstrapContractError();
+
+  const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
+  if (cashReadiness.reason === "membership_required") {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 2,
+    action: "membership_joined",
+    replayed: strictBoolean(root.replayed),
+    membership: {
+      status: "active",
+      joined_at: isoTimestamp(membership.joined_at, false),
+      verification_status: enumString(
+        membership.verification_status,
+        VERIFICATION_STATUSES,
+      ),
+    },
+    program: {
+      commission_rate_bps: 2_000,
+      attribution_window_days: 30,
+      maturation_days: 45,
+      terms_version: contractPatternString(
+        program.terms_version,
+        VERSION_KEY_PATTERN,
+        64,
+      ),
+      disclosure_version: contractPatternString(
+        program.disclosure_version,
+        VERSION_KEY_PATTERN,
+        64,
+      ),
+    },
+    link: sanitizeMemberLink(root.link, "created_at"),
+    cash_readiness: cashReadiness,
+    next_action: "share_link",
+  };
+}
+
+export function sanitizePayoutCountryMutationData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "account",
+    "cash_readiness",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "payout_country_bound"
+  ) throw new BootstrapContractError();
+  const account = exactRecord(root.account, ["id", "status", "country_code"]);
+  const status = enumString(account.status, ACCOUNT_STATUSES);
+  const countryCode = patternString(account.country_code, COUNTRY_PATTERN, 2);
+  const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
+  if (
+    !["pending_verification", "active"].includes(status) ||
+    !new Set([
+      null,
+      "kyc_required",
+      "fiscal_profile_required",
+      "corridor_required",
+    ]).has(cashReadiness.reason as string | null) ||
+    (status === "pending_verification" &&
+      cashReadiness.reason !== "kyc_required") ||
+    (status === "active" && cashReadiness.reason === "kyc_required")
+  ) throw new BootstrapContractError();
+  return {
+    schema_version: 1,
+    action: "payout_country_bound",
+    replayed: strictBoolean(root.replayed),
+    account: {
+      id: contractPatternString(account.id, /^prt_[0-9a-f]{24}$/, 28),
+      status,
+      country_code: countryCode,
+    },
+    cash_readiness: cashReadiness,
+  };
+}
+
+export function sanitizeAccessGrantReconciliationData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "provider",
+    "overlay",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "access_grants_reconciled"
+  ) throw new BootstrapContractError();
+  const provider = sanitizeAccessProvider(root.provider);
+  const overlay = sanitizeAccessGrantOverlay(root.overlay, provider);
+  return {
+    schema_version: 1,
+    action: "access_grants_reconciled",
+    provider,
+    overlay,
+  };
+}
+
+export function sanitizeAccessCreditQuoteData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "quote",
+    "balance",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "access_credit_quoted"
+  ) throw new BootstrapContractError();
+  const quote = exactRecord(root.quote, [
+    "key",
+    "status",
+    "currency",
+    "currency_exponent",
+    "plan_code",
+    "months",
+    "unit_amount_minor",
+    "total_amount_minor",
+    "duration_days",
+    "expires_at",
+  ]);
+  const months = integerBetween(quote.months, 1, 12);
+  const unitAmount = integerBetween(
+    quote.unit_amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const totalAmount = integerBetween(
+    quote.total_amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  if (
+    quote.status !== "open" ||
+    quote.currency !== "USD" ||
+    quote.currency_exponent !== 2 ||
+    quote.plan_code !== "plus" ||
+    unitAmount !== 499 ||
+    totalAmount !== unitAmount * months ||
+    quote.duration_days !== months * 30
+  ) throw new BootstrapContractError();
+  const balance = sanitizeAvailableBalance(root.balance);
+  if (balance.available_minor < totalAmount) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "access_credit_quoted",
+    replayed: strictBoolean(root.replayed),
+    quote: {
+      key: contractPatternString(
+        quote.key,
+        ACCESS_CREDIT_QUOTE_KEY_PATTERN,
+        28,
+      ),
+      status: "open",
+      currency: "USD",
+      currency_exponent: 2,
+      plan_code: "plus",
+      months,
+      unit_amount_minor: unitAmount,
+      total_amount_minor: totalAmount,
+      duration_days: months * 30,
+      expires_at: isoTimestamp(quote.expires_at, false),
+    },
+    balance,
+  };
+}
+
+export function sanitizeAccessCreditRedemptionData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "redemption",
+    "grant",
+    "balance",
+    "overlay",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "access_credit_redeemed"
+  ) throw new BootstrapContractError();
+
+  const redemption = exactRecord(root.redemption, [
+    "key",
+    "status",
+    "currency",
+    "currency_exponent",
+    "amount_minor",
+    "months",
+  ]);
+  const months = integerBetween(redemption.months, 1, 12);
+  const amountMinor = integerBetween(
+    redemption.amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  if (
+    redemption.status !== "granted" ||
+    redemption.currency !== "USD" ||
+    redemption.currency_exponent !== 2 ||
+    amountMinor !== 499 * months
+  ) throw new BootstrapContractError();
+
+  const grant = exactRecord(root.grant, [
+    "key",
+    "status",
+    "plan_code",
+    "duration_days",
+    "remaining_seconds",
+    "active_from",
+    "active_until",
+  ]);
+  const grantStatus = enumString(grant.status, new Set([
+    "queued",
+    "active",
+    "paused_provider",
+  ]));
+  const durationDays = integerBetween(grant.duration_days, 30, 360);
+  const remainingSeconds = integerBetween(
+    grant.remaining_seconds,
+    1,
+    durationDays * 86_400,
+  );
+  const activeFrom = isoTimestamp(grant.active_from, true);
+  const activeUntil = isoTimestamp(grant.active_until, true);
+  if (
+    grant.plan_code !== "plus" ||
+    durationDays !== months * 30 ||
+    (grantStatus === "active"
+      ? activeFrom === null || activeUntil === null ||
+        Date.parse(activeUntil) <= Date.parse(activeFrom)
+      : activeFrom !== null || activeUntil !== null)
+  ) throw new BootstrapContractError();
+
+  return {
+    schema_version: 1,
+    action: "access_credit_redeemed",
+    replayed: strictBoolean(root.replayed),
+    redemption: {
+      key: contractPatternString(
+        redemption.key,
+        ACCESS_CREDIT_REDEMPTION_KEY_PATTERN,
+        28,
+      ),
+      status: "granted",
+      currency: "USD",
+      currency_exponent: 2,
+      amount_minor: amountMinor,
+      months,
+    },
+    grant: {
+      key: contractPatternString(
+        grant.key,
+        ACCESS_GRANT_KEY_PATTERN,
+        28,
+      ),
+      status: grantStatus,
+      plan_code: "plus",
+      duration_days: durationDays,
+      remaining_seconds: remainingSeconds,
+      active_from: activeFrom,
+      active_until: activeUntil,
+    },
+    balance: sanitizeAvailableBalance(root.balance),
+    overlay: sanitizeAccessGrantOverlay(root.overlay),
+  };
+}
+
+export function sanitizeAccessCreditStatusData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "balance",
+    "catalog",
+    "next_maturation_at",
+    "credit_readiness",
+    "cash_readiness",
+    "overlay",
+    "provider",
+  ]);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "access_credit_status"
+  ) throw new BootstrapContractError();
+  const provider = sanitizeAccessProvider(root.provider);
+  const catalog = root.catalog === null
+    ? null
+    : sanitizeAccessCreditCatalog(root.catalog);
+  const creditReadiness = sanitizeCreditReadiness(
+    root.credit_readiness,
+    catalog !== null,
+    true,
+  );
+  const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
+  return {
+    schema_version: 1,
+    action: "access_credit_status",
+    balance: sanitizeAccessCreditBalance(root.balance),
+    catalog,
+    next_maturation_at: isoTimestamp(root.next_maturation_at, true),
+    credit_readiness: creditReadiness,
+    cash_readiness: cashReadiness,
+    overlay: sanitizeAccessGrantOverlay(root.overlay, provider),
+    provider,
+  };
+}
+
 export function sanitizeDashboardData(
+  raw: unknown,
+  query: DashboardQuery,
+): Record<string, unknown> {
+  if (isRecord(raw) && raw.schema_version === 2) {
+    return sanitizeDashboardV2Data(raw, query);
+  }
+  return sanitizeDashboardV1Data(raw, query);
+}
+
+function sanitizeDashboardV1Data(
   raw: unknown,
   query: DashboardQuery,
 ): Record<string, unknown> {
@@ -1773,11 +2373,222 @@ export function sanitizeDashboardData(
   };
 }
 
+function sanitizeDashboardV2Data(
+  raw: unknown,
+  query: DashboardQuery,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "membership",
+    "link",
+    "program",
+    "flags",
+    "balances",
+    "next_maturation_at",
+    "credit_readiness",
+    "cash_readiness",
+    "overlay",
+    "provider",
+    "history",
+  ]);
+  if (root.schema_version !== 2 || query.historyStatus === "held") {
+    throw new BootstrapContractError();
+  }
+  const membership = sanitizeV2Membership(root.membership);
+  const link = root.link === null
+    ? null
+    : sanitizeMemberLink(root.link, "created_at");
+  const program = root.program === null
+    ? null
+    : sanitizeV2Program(root.program);
+  const flags = sanitizePartnersV2Flags(root.flags);
+  if (!Array.isArray(root.balances) || root.balances.length > 32) {
+    throw new BootstrapContractError();
+  }
+  const balances = root.balances.map(sanitizeDashboardBalance);
+  const balanceCurrencies = balances.map((balance) =>
+    String(balance.currency)
+  );
+  if (
+    new Set(balanceCurrencies).size !== balanceCurrencies.length ||
+    balanceCurrencies.some((currency, index) =>
+      index > 0 && balanceCurrencies[index - 1].localeCompare(currency) >= 0
+    )
+  ) throw new BootstrapContractError();
+  const hasUsdBalance = balanceCurrencies.includes("USD");
+  const hasOnlyUnsupportedCurrency = balances.length > 0 && !hasUsdBalance;
+  const provider = sanitizeAccessProvider(root.provider);
+  const overlay = sanitizeAccessGrantOverlay(root.overlay, provider);
+
+  const credit = exactRecord(root.credit_readiness, [
+    "ready",
+    "reason",
+    "catalog",
+  ]);
+  const catalog = credit.catalog === null
+    ? null
+    : sanitizeAccessCreditCatalog(credit.catalog);
+  const creditReadiness = sanitizeCreditReadiness(
+    { ready: credit.ready, reason: credit.reason },
+    catalog !== null,
+    true,
+  );
+  const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
+
+  const history = exactRecord(root.history, [
+    "status",
+    "items",
+    "next_cursor",
+  ]);
+  if (
+    history.status !== query.historyStatus ||
+    !Array.isArray(history.items) ||
+    history.items.length > query.historyLimit
+  ) throw new BootstrapContractError();
+  const historyItems = history.items.map((value) => {
+    const item = exactRecord(value, [
+      "key",
+      "type",
+      "status",
+      "currency",
+      "currency_exponent",
+      "amount_minor",
+      "occurred_at",
+      "matures_at",
+    ]);
+    const type = enumString(item.type, DASHBOARD_V2_HISTORY_TYPES);
+    const status = enumString(item.status, new Set([
+      "pending",
+      "available",
+      "redeemed",
+      "paid",
+      "reversed",
+    ]));
+    const validTypeStatus =
+      (type === "accrual" && ["pending", "available"].includes(status)) ||
+      (type === "release" && status === "available") ||
+      (type === "access_credit_redemption" && status === "redeemed") ||
+      (["payout_settlement", "payout_late_settlement"].includes(type) &&
+        status === "paid") ||
+      (["reversal", "manual_reversal", "payout_return"].includes(type) &&
+        status === "reversed");
+    if (
+      !validTypeStatus ||
+      (query.historyStatus !== "all" && status !== query.historyStatus)
+    ) throw new BootstrapContractError();
+    return {
+      key: contractPatternString(item.key, /^led_[0-9a-f]{24}$/, 28),
+      type,
+      status,
+      currency: contractPatternString(item.currency, CURRENCY_PATTERN, 3),
+      currency_exponent: integerBetween(item.currency_exponent, 0, 6),
+      amount_minor: integerBetween(
+        item.amount_minor,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      occurred_at: isoTimestamp(item.occurred_at, false),
+      matures_at: isoTimestamp(item.matures_at, true),
+    };
+  });
+  const nextCursor = history.next_cursor === null
+    ? null
+    : contractPatternString(
+      history.next_cursor,
+      DASHBOARD_CURSOR_PATTERN,
+      256,
+    );
+  if (nextCursor !== null && nextCursor === query.historyCursor) {
+    throw new BootstrapContractError();
+  }
+  const expectedCreditReason = membership.status !== "active"
+    ? "membership_required"
+    : !flags.partners_credit_redemptions_enabled
+    ? "credits_disabled"
+    : hasOnlyUnsupportedCurrency
+    ? "currency_not_supported"
+    : catalog === null
+    ? "catalog_unavailable"
+    : null;
+  if (
+    (link !== null && membership.status !== "active") ||
+    (cashReadiness.reason === "cash_pilot_not_allowed" &&
+      (!flags.partners_cash_pilot_allowlist_only ||
+        membership.status !== "active")) ||
+    creditReadiness.ready !== (expectedCreditReason === null) ||
+    creditReadiness.reason !== expectedCreditReason ||
+    (expectedCreditReason !== null && catalog !== null) ||
+    (!membership.exists &&
+      (link !== null || historyItems.length !== 0 || nextCursor !== null ||
+        balances.length !== 0))
+  ) throw new BootstrapContractError();
+
+  return {
+    schema_version: 2,
+    membership,
+    link,
+    program,
+    flags,
+    balances,
+    next_maturation_at: isoTimestamp(root.next_maturation_at, true),
+    credit_readiness: { ...creditReadiness, catalog },
+    cash_readiness: cashReadiness,
+    overlay,
+    provider,
+    history: {
+      status: query.historyStatus,
+      items: historyItems,
+      next_cursor: nextCursor,
+    },
+  };
+}
+
 export function mapDatabaseError(
   raw: unknown,
-  requestKind: "query" | "mutation" = "query",
+  requestKind: "query" | "mutation" | "guarded_action" = "query",
 ): Pick<PublicApiError, "status" | "code" | "message"> {
   const code = isRecord(raw) && typeof raw.code === "string" ? raw.code : "";
+  const controlled: Record<
+    string,
+    Pick<PublicApiError, "status" | "code" | "message">
+  > = {
+    P1001: {
+      status: 409,
+      code: "membership_required",
+      message: "Join Norva Partners before using access credits.",
+    },
+    P1002: {
+      status: 409,
+      code: "credits_disabled",
+      message: "Partners access credits are currently unavailable.",
+    },
+    P1003: {
+      status: 409,
+      code: "quote_expired",
+      message: "This access credit quote has expired. Create a new quote.",
+    },
+    P1004: {
+      status: 409,
+      code: "insufficient_balance",
+      message: "Your available Partners balance is too low for this credit.",
+    },
+    P1005: {
+      status: 503,
+      code: "catalog_unavailable",
+      message: "The Norva access credit catalog is temporarily unavailable.",
+    },
+    P1006: {
+      status: 409,
+      code: "quote_conflict",
+      message: "This access credit quote is no longer available.",
+    },
+    P1007: {
+      status: 422,
+      code: "payout_country_unavailable",
+      message: "Cash transfers are not available for this payout country yet.",
+    },
+  };
+  if (Object.hasOwn(controlled, code)) return controlled[code];
   if (code === "22023") {
     return {
       status: 400,
@@ -1788,6 +2599,13 @@ export function mapDatabaseError(
     };
   }
   if (code === "P0002") {
+    if (requestKind === "guarded_action") {
+      return {
+        status: 409,
+        code: "partners_action_not_allowed",
+        message: "This Partners action is not available for the account.",
+      };
+    }
     return {
       status: 401,
       code: "invalid_access_token",
@@ -1802,6 +2620,13 @@ export function mapDatabaseError(
     };
   }
   if (code === "P0004") {
+    if (requestKind === "guarded_action") {
+      return {
+        status: 409,
+        code: "partners_action_not_allowed",
+        message: "This Partners action is not available for the account.",
+      };
+    }
     return {
       status: 409,
       code: "request_in_progress",
@@ -1833,6 +2658,492 @@ export function mapDatabaseError(
     status: 503,
     code: "partners_temporarily_unavailable",
     message: "Norva Partners is temporarily unavailable.",
+  };
+}
+
+function sanitizeCashReadiness(value: unknown): Record<string, unknown> {
+  const readiness = exactRecord(value, ["ready", "reason"]);
+  const ready = strictBoolean(readiness.ready);
+  const reason = readiness.reason === null
+    ? null
+    : enumString(readiness.reason, new Set([
+      "account_blocked",
+      "membership_required",
+      "cash_pilot_not_allowed",
+      "payout_country_required",
+      "kyc_required",
+      "fiscal_profile_required",
+      "corridor_required",
+      "fiscal_or_corridor_required",
+    ]));
+  if ((ready && reason !== null) || (!ready && reason === null)) {
+    throw new BootstrapContractError();
+  }
+  return { ready, reason };
+}
+
+function sanitizePartnersV2Flags(value: unknown): Record<string, boolean> {
+  const flags = exactRecord(value, [
+    "partners_enabled",
+    "partners_invite_only",
+    "partners_cash_pilot_allowlist_only",
+    "partners_earnings_enabled",
+    "partners_credit_redemptions_enabled",
+    "partners_payouts_live",
+  ]);
+  return {
+    partners_enabled: strictBoolean(flags.partners_enabled),
+    partners_invite_only: strictBoolean(flags.partners_invite_only),
+    partners_cash_pilot_allowlist_only: strictBoolean(
+      flags.partners_cash_pilot_allowlist_only,
+    ),
+    partners_earnings_enabled: strictBoolean(
+      flags.partners_earnings_enabled,
+    ),
+    partners_credit_redemptions_enabled: strictBoolean(
+      flags.partners_credit_redemptions_enabled,
+    ),
+    partners_payouts_live: strictBoolean(flags.partners_payouts_live),
+  };
+}
+
+function sanitizeV2Membership(value: unknown): Record<string, unknown> {
+  const membership = exactRecord(value, [
+    "exists",
+    "status",
+    "joined_at",
+    "verification_status",
+  ]);
+  const exists = strictBoolean(membership.exists);
+  const status = enumString(membership.status, MEMBERSHIP_STATUSES);
+  const joinedAt = isoTimestamp(membership.joined_at, true);
+  const verificationStatus = membership.verification_status === null
+    ? null
+    : enumString(membership.verification_status, VERIFICATION_STATUSES);
+  if (
+    (!exists &&
+      (status !== "not_joined" || joinedAt !== null ||
+        verificationStatus !== null)) ||
+    (status === "active" && (!exists || joinedAt === null)) ||
+    (exists && verificationStatus === null)
+  ) throw new BootstrapContractError();
+  return {
+    exists,
+    status,
+    joined_at: joinedAt,
+    verification_status: verificationStatus,
+  };
+}
+
+function sanitizeV2Program(value: unknown): Record<string, unknown> {
+  const program = exactRecord(value, [
+    "commission_rate_bps",
+    "attribution_window_days",
+    "maturation_days",
+    "terms_version",
+    "disclosure_version",
+  ]);
+  if (
+    program.commission_rate_bps !== 2_000 ||
+    program.attribution_window_days !== 30 ||
+    program.maturation_days !== 45
+  ) throw new BootstrapContractError();
+  return {
+    commission_rate_bps: 2_000,
+    attribution_window_days: 30,
+    maturation_days: 45,
+    terms_version: contractPatternString(
+      program.terms_version,
+      VERSION_KEY_PATTERN,
+      64,
+    ),
+    disclosure_version: contractPatternString(
+      program.disclosure_version,
+      VERSION_KEY_PATTERN,
+      64,
+    ),
+  };
+}
+
+function sanitizeAvailableBalance(value: unknown): {
+  currency: "USD";
+  currency_exponent: 2;
+  available_minor: number;
+} {
+  const balance = exactRecord(value, [
+    "currency",
+    "currency_exponent",
+    "available_minor",
+  ]);
+  if (
+    balance.currency !== "USD" ||
+    balance.currency_exponent !== 2
+  ) throw new BootstrapContractError();
+  return {
+    currency: "USD",
+    currency_exponent: 2,
+    available_minor: integerBetween(
+      balance.available_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+function sanitizeAccessCreditBalance(value: unknown): Record<string, unknown> {
+  const balance = exactRecord(value, [
+    "currency",
+    "currency_exponent",
+    "pending_minor",
+    "available_minor",
+    "recovery_due_minor",
+    "redeemed_minor",
+  ]);
+  if (
+    balance.currency !== "USD" ||
+    balance.currency_exponent !== 2
+  ) throw new BootstrapContractError();
+  return {
+    currency: "USD",
+    currency_exponent: 2,
+    pending_minor: integerBetween(
+      balance.pending_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    available_minor: integerBetween(
+      balance.available_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    recovery_due_minor: integerBetween(
+      balance.recovery_due_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    redeemed_minor: integerBetween(
+      balance.redeemed_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+function sanitizeDashboardBalance(value: unknown): Record<string, unknown> {
+  const balance = exactRecord(value, [
+    "currency",
+    "currency_exponent",
+    "pending_minor",
+    "available_minor",
+    "recovery_due_minor",
+    "redeemed_minor",
+  ]);
+  return {
+    currency: contractPatternString(balance.currency, CURRENCY_PATTERN, 3),
+    currency_exponent: integerBetween(balance.currency_exponent, 0, 6),
+    pending_minor: integerBetween(
+      balance.pending_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    available_minor: integerBetween(
+      balance.available_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    recovery_due_minor: integerBetween(
+      balance.recovery_due_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    redeemed_minor: integerBetween(
+      balance.redeemed_minor,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+function sanitizeAccessCreditCatalog(value: unknown): Record<string, unknown> {
+  const catalog = exactRecord(value, [
+    "catalog_key",
+    "plan_code",
+    "currency",
+    "currency_exponent",
+    "unit_amount_minor",
+    "unit_duration_days",
+    "minimum_months",
+    "maximum_months",
+  ]);
+  if (
+    catalog.plan_code !== "plus" ||
+    catalog.currency !== "USD" ||
+    catalog.currency_exponent !== 2 ||
+    catalog.unit_amount_minor !== 499 ||
+    catalog.unit_duration_days !== 30 ||
+    catalog.minimum_months !== 1 ||
+    catalog.maximum_months !== 12
+  ) throw new BootstrapContractError();
+  return {
+    catalog_key: contractPatternString(
+      catalog.catalog_key,
+      /^acc_[a-z0-9][a-z0-9._-]{2,63}$/,
+      68,
+    ),
+    plan_code: "plus",
+    currency: "USD",
+    currency_exponent: 2,
+    unit_amount_minor: 499,
+    unit_duration_days: 30,
+    minimum_months: 1,
+    maximum_months: 12,
+  };
+}
+
+function sanitizeCreditReadiness(
+  value: unknown,
+  hasCatalog: boolean | null,
+  allowCurrencyNotSupported = false,
+): Record<string, unknown> {
+  const readiness = exactRecord(value, ["ready", "reason"]);
+  const ready = strictBoolean(readiness.ready);
+  const reason = readiness.reason === null
+    ? null
+    : enumString(readiness.reason, new Set([
+      "membership_required",
+      "credits_disabled",
+      "catalog_unavailable",
+      ...(allowCurrencyNotSupported ? ["currency_not_supported"] : []),
+    ]));
+  if (
+    (ready && (reason !== null || hasCatalog === false)) ||
+    (!ready && reason === null) ||
+    (reason === "catalog_unavailable" && hasCatalog === true) ||
+    (reason === "currency_not_supported" && hasCatalog !== false)
+  ) throw new BootstrapContractError();
+  return { ready, reason };
+}
+
+function sanitizeAccessProvider(value: unknown): Record<string, unknown> {
+  const provider = exactRecord(value, [
+    "provider",
+    "status",
+    "active",
+    "hard_block",
+    "reason",
+    "fail_open",
+    "current_period_end",
+    "trial_ends_at",
+    "fail_open_until",
+    "last_verified_at",
+  ]);
+  const providerName = provider.provider === null
+    ? null
+    : contractPatternString(
+      provider.provider,
+      /^[a-z][a-z0-9_]{0,63}$/,
+      64,
+    );
+  const status = provider.status === null
+    ? null
+    : enumString(
+      provider.status,
+      new Set([
+        "trialing",
+        "active",
+        "grace",
+        "past_due",
+        "cancelled_at_period_end",
+        "expired",
+        "revoked",
+        "refunded",
+        "fraud",
+        "unknown",
+      ]),
+    );
+  const active = strictBoolean(provider.active);
+  const hardBlock = strictBoolean(provider.hard_block);
+  const reason = enumString(provider.reason, new Set([
+    "trialing",
+    "active",
+    "cancelled_at_period_end",
+    "billing_grace",
+    "billing_recently_verified",
+    "trial_expired",
+    "billing_unverified",
+    "subscription_expired",
+    "subscription_required",
+    "revoked",
+    "refunded",
+    "fraud",
+  ]));
+  const failOpen = strictBoolean(provider.fail_open);
+  const currentPeriodEnd = isoTimestamp(provider.current_period_end, true);
+  const trialEndsAt = isoTimestamp(provider.trial_ends_at, true);
+  const failOpenUntil = isoTimestamp(provider.fail_open_until, true);
+  const lastVerifiedAt = isoTimestamp(provider.last_verified_at, true);
+  const hardStatuses = new Set(["revoked", "refunded", "fraud"]);
+  const failOpenReasons = new Set([
+    "billing_grace",
+    "billing_recently_verified",
+  ]);
+  const allowedActiveReasons: Record<string, Set<string>> = {
+    trialing: new Set(["trialing"]),
+    active: new Set(["active", ...failOpenReasons]),
+    cancelled_at_period_end: new Set(["cancelled_at_period_end"]),
+    grace: failOpenReasons,
+    past_due: failOpenReasons,
+    unknown: failOpenReasons,
+  };
+  const allowedInactiveReasons: Record<string, Set<string>> = {
+    trialing: new Set(["trial_expired", "billing_unverified"]),
+    active: new Set(["subscription_expired", "billing_unverified"]),
+    cancelled_at_period_end: new Set([
+      "subscription_expired",
+      "billing_unverified",
+    ]),
+    grace: new Set(["billing_unverified"]),
+    past_due: new Set(["billing_unverified"]),
+    unknown: new Set(["billing_unverified"]),
+    expired: new Set(["subscription_expired"]),
+  };
+  const providerIsPerpetual = providerName === "system" ||
+    providerName === "manual";
+  const trialOrPeriodEnd = trialEndsAt ?? currentPeriodEnd;
+  if (
+    (status === null &&
+      (providerName !== null || active || hardBlock || failOpen ||
+        reason !== "subscription_required" || currentPeriodEnd !== null ||
+        trialEndsAt !== null || failOpenUntil !== null ||
+        lastVerifiedAt !== null)) ||
+    (status !== null && providerName === null) ||
+    (active && hardBlock) ||
+    (hardBlock && (status === null || !hardStatuses.has(status))) ||
+    (hardBlock && reason !== status) ||
+    (failOpen !== failOpenReasons.has(reason)) ||
+    (active &&
+      (status === null || !allowedActiveReasons[status]?.has(reason))) ||
+    (!active && !hardBlock && status !== null &&
+      !allowedInactiveReasons[status]?.has(reason)) ||
+    (["trialing", "trial_expired"].includes(reason) &&
+      trialOrPeriodEnd === null) ||
+    (reason === "active" && currentPeriodEnd === null &&
+      !providerIsPerpetual) ||
+    (reason === "cancelled_at_period_end" && currentPeriodEnd === null) ||
+    (reason === "billing_grace" &&
+      (status === "active"
+        ? failOpenUntil === null
+        : currentPeriodEnd === null && failOpenUntil === null)) ||
+    (reason === "billing_recently_verified" && lastVerifiedAt === null) ||
+    (reason === "subscription_expired" &&
+      ["active", "cancelled_at_period_end"].includes(String(status)) &&
+      currentPeriodEnd === null)
+  ) throw new BootstrapContractError();
+  return {
+    provider: providerName,
+    status,
+    active,
+    hard_block: hardBlock,
+    reason,
+    fail_open: failOpen,
+    current_period_end: currentPeriodEnd,
+    trial_ends_at: trialEndsAt,
+    fail_open_until: failOpenUntil,
+    last_verified_at: lastVerifiedAt,
+  };
+}
+
+function sanitizeAccessGrantOverlay(
+  value: unknown,
+  provider?: Record<string, unknown>,
+): Record<string, unknown> {
+  const overlay = exactRecord(value, [
+    "status",
+    "active_grant",
+    "queued_grants",
+    "remaining_seconds",
+  ]);
+  const status = enumString(overlay.status, new Set([
+    "blocked_provider",
+    "paused_provider",
+    "active",
+    "queued",
+    "none",
+  ]));
+  const queuedGrants = integerBetween(
+    overlay.queued_grants,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const remainingSeconds = integerBetween(
+    overlay.remaining_seconds,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  let activeGrant: Record<string, unknown> | null = null;
+  if (overlay.active_grant !== null) {
+    const grant = exactRecord(overlay.active_grant, [
+      "key",
+      "status",
+      "plan_code",
+      "remaining_seconds",
+      "active_from",
+      "active_until",
+    ]);
+    const activeFrom = isoTimestamp(grant.active_from, false) as string;
+    const activeUntil = isoTimestamp(grant.active_until, false) as string;
+    const grantRemaining = integerBetween(
+      grant.remaining_seconds,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    );
+    if (
+      grant.status !== "active" ||
+      !new Set(["plus", "family", "premium"]).has(String(grant.plan_code)) ||
+      Date.parse(activeUntil) <= Date.parse(activeFrom)
+    ) throw new BootstrapContractError();
+    activeGrant = {
+      key: contractPatternString(
+        grant.key,
+        ACCESS_GRANT_KEY_PATTERN,
+        28,
+      ),
+      status: "active",
+      plan_code: grant.plan_code,
+      remaining_seconds: grantRemaining,
+      active_from: activeFrom,
+      active_until: activeUntil,
+    };
+  }
+
+  const hasProvider = provider !== undefined;
+  const providerActive = provider?.active === true;
+  const providerHardBlock = provider?.hard_block === true;
+  if (
+    (hasProvider && status === "blocked_provider" && !providerHardBlock) ||
+    (hasProvider && status === "paused_provider" &&
+      (!providerActive || providerHardBlock)) ||
+    (status === "active" &&
+      ((hasProvider && (providerActive || providerHardBlock)) ||
+        activeGrant === null ||
+        remainingSeconds !== activeGrant.remaining_seconds)) ||
+    (status === "queued" &&
+      ((hasProvider && (providerActive || providerHardBlock)) ||
+        activeGrant !== null ||
+        queuedGrants < 1 || remainingSeconds !== 0)) ||
+    (status === "none" &&
+      ((hasProvider && (providerActive || providerHardBlock)) ||
+        activeGrant !== null ||
+        queuedGrants !== 0 || remainingSeconds !== 0)) ||
+    (["blocked_provider", "paused_provider"].includes(status) &&
+      (activeGrant !== null || remainingSeconds !== 0))
+  ) throw new BootstrapContractError();
+
+  return {
+    status,
+    active_grant: activeGrant,
+    queued_grants: queuedGrants,
+    remaining_seconds: remainingSeconds,
   };
 }
 

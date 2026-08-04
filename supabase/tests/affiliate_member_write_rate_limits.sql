@@ -73,7 +73,29 @@ select extensions.ok(
   and lower(pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
   )) like '%errcode = ''p0008''%',
-  'reservation serializes user plus operation and enforces the rolling 8-per-day counter'
+  'reservation serializes user plus operation and enforces a rolling daily counter'
+);
+
+select extensions.ok(
+  lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%when ''membership_join'' then 4%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%when ''link_rotation'' then 4%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%when ''payout_country_bind'' then 8%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%when ''access_credit_quote'' then 24%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%when ''access_credit_redeem'' then 12%'
+  and lower(pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'::regprocedure
+  )) like '%interval ''30 days''%',
+  'frictionless member writes have explicit quotas and bounded local retention'
 );
 
 insert into auth.users (
@@ -199,6 +221,57 @@ select extensions.is(
   ) ->> 'used',
   '1',
   'payout onboarding has an independent per-operation counter'
+);
+
+select extensions.is(
+  public.partners_service_member_write_reserve(
+    '23000000-0000-4000-8000-000000000001',
+    'link_rotation',
+    'link.limit.00000001',
+    repeat('d', 64)
+  ) ->> 'limit',
+  '4',
+  'link rotation publishes its exact four-per-day contract'
+);
+
+select extensions.is(
+  (
+    select count(*)
+    from generate_series(2, 4) series(value)
+    where public.partners_service_member_write_reserve(
+      '23000000-0000-4000-8000-000000000001',
+      'link_rotation',
+      'link.limit.' || lpad(series.value::text, 8, '0'),
+      repeat(substr(md5(series.value::text), 1, 1), 64)
+    ) ->> 'action' = 'member_write_reserved'
+  ),
+  3::bigint,
+  'three further link keys fill the independent daily quota'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.partners_service_member_write_reserve(
+      '23000000-0000-4000-8000-000000000001',
+      'link_rotation',
+      'link.limit.00000005',
+      repeat('e', 64)
+    )
+  $$,
+  'P0008',
+  'Partners member write rate limit exceeded',
+  'the fifth link rotation is rejected for Edge mapping to HTTP 429'
+);
+
+select extensions.is(
+  public.partners_service_member_write_reserve(
+    '23000000-0000-4000-8000-000000000001',
+    'link_rotation',
+    'link.limit.00000001',
+    repeat('d', 64)
+  ) ->> 'replayed',
+  'true',
+  'an exact link replay remains available after the quota is full'
 );
 
 select extensions.throws_ok(

@@ -10,8 +10,27 @@
 # Run by norva-basebackup.timer. Restore: backup/RESTORE.md §2.
 # =============================================================================
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Preserve only these explicit, non-secret one-shot operator overrides. The
+# sourced backup environment remains authoritative for credentials and paths.
+KEEP_BASE_COUNT_OVERRIDE="${KEEP_BASE_COUNT-}"
+SKIP_BASE_RETENTION_OVERRIDE="${NORVA_SKIP_BASE_RETENTION-}"
 # shellcheck disable=SC1091
 source "$HERE/lib.sh"
+
+if [[ -n "$KEEP_BASE_COUNT_OVERRIDE" ]]; then
+  KEEP_BASE_COUNT="$KEEP_BASE_COUNT_OVERRIDE"
+fi
+if [[ -n "$SKIP_BASE_RETENTION_OVERRIDE" ]]; then
+  NORVA_SKIP_BASE_RETENTION="$SKIP_BASE_RETENTION_OVERRIDE"
+fi
+if [[ ! "${KEEP_BASE_COUNT:-8}" =~ ^[1-9][0-9]{0,2}$ ]]; then
+  echo "ERROR: KEEP_BASE_COUNT must be an integer from 1 to 999." >&2
+  exit 1
+fi
+if [[ ! "${NORVA_SKIP_BASE_RETENTION:-false}" =~ ^(true|false)$ ]]; then
+  echo "ERROR: NORVA_SKIP_BASE_RETENTION must be true or false." >&2
+  exit 1
+fi
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 STAGE="${BACKUP_STAGE_DIR:-/var/lib/norva/backups}"
@@ -34,7 +53,8 @@ log "[1/3] pg_basebackup (tar+gzip, WAL fetched → standalone-restorable)"
 # -Ft: tar per tablespace (base.tar.gz [+ pg_wal.tar.gz with -X fetch is folded in])
 # -X fetch: include the WAL needed to make THIS backup consistent on its own;
 #           PITR beyond backup-end uses the R2 WAL archive.
-docker run --rm --network host -e PGPASSWORD="$POSTGRES_PASSWORD" \
+PGPASSWORD="$POSTGRES_PASSWORD" \
+  docker run --rm --network host -e PGPASSWORD \
   -v "$OUTDIR:/out" "$PG_IMAGE" \
   pg_basebackup -h 127.0.0.1 -U supabase_admin -D /out -Ft -z -X fetch \
     --checkpoint=fast --label="norva-weekly-$STAMP"
@@ -45,11 +65,17 @@ for f in "$OUTDIR"/*; do
 done
 log "uploaded base-$STAMP ($(du -sh "$OUTDIR" | cut -f1))"
 
-log "[3/3] retention: keep last ${KEEP_BASE_COUNT:-8} base backups"
-rclone lsf "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/" --dirs-only 2>/dev/null \
-  | sort | head -n -"${KEEP_BASE_COUNT:-8}" | while read -r d; do
-    log "pruning old base backup: $d"
-    rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/${d%/}" --retries 4 || true
-  done
+if [[ "${NORVA_SKIP_BASE_RETENTION:-false}" == "true" ]]; then
+  log "[3/3] retention skipped by explicit one-shot operator control"
+else
+  log "[3/3] retention: keep last ${KEEP_BASE_COUNT:-8} base backups"
+  rclone lsf "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/" --dirs-only 2>/dev/null \
+    | sort | head -n -"${KEEP_BASE_COUNT:-8}" | while read -r d; do
+      log "pruning old base backup: $d"
+      if ! rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_BASE%/}/${d%/}" --retries 4; then
+        log "WARNING: retention could not prune $d; backup creation remains valid"
+      fi
+    done
+fi
 
 log "weekly base backup done."

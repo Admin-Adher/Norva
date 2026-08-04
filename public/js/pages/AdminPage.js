@@ -6255,6 +6255,7 @@ class AdminPage {
                 'revolut_api_adapter_verified'
             ].includes(key)) return this._partnersHasCapabilities('finance');
             if ([
+                'membership_privacy_approved',
                 'privacy_approved',
                 'individual_verification_coverage_confirmed',
                 'country_policy_approved',
@@ -6266,6 +6267,17 @@ class AdminPage {
         if (kind !== 'flag') return false;
         if (key === 'partners_shadow_mode') {
             return this._partnersHasCapabilities('finance');
+        }
+        if ([
+            'partners_earnings_enabled',
+            'partners_credit_redemptions_enabled'
+        ].includes(key)) {
+            return targetEnabled
+                ? this._partnersHasCapabilities('finance')
+                    && this._partnersCanManageRelease === true
+                : this._partnersHasCapabilities('finance')
+                    || this._partnersCanManageRelease === true
+                    || this._partnersHasCapabilities('support');
         }
         if (key === 'partners_payouts_live') {
             return this._partnersHasCapabilities('finance')
@@ -6284,6 +6296,14 @@ class AdminPage {
         }
         if (key === 'partners_invite_only') {
             return this._partnersCanManageRelease === true;
+        }
+        if (key === 'partners_cash_pilot_allowlist_only') {
+            return targetEnabled
+                ? this._partnersCanManageRelease === true
+                    || this._partnersHasCapabilities('risk')
+                    || this._partnersHasCapabilities('support')
+                : this._partnersCanManageRelease === true
+                    && this._partnersHasCapabilities('risk');
         }
         if (key === 'partners_tv_relay_enabled') {
             return targetEnabled
@@ -7266,8 +7286,8 @@ class AdminPage {
             const activationMissing = [
                 !gateSatisfied('legal_and_tax_approved')
                     ? 'validation juridique et fiscale' : '',
-                !gateSatisfied('privacy_approved')
-                    ? 'validation de la confidentialité' : ''
+                !gateSatisfied('membership_privacy_approved')
+                    ? 'validation Privacy de l’adhésion' : ''
             ].filter(Boolean);
             let activationControl = '';
             if (isDraft && key) {
@@ -7358,18 +7378,49 @@ class AdminPage {
               </div>`;
         }).join('');
         const flags = Array.isArray(data.release_flags) ? data.release_flags : [];
+        const releaseFlagLabels = {
+            partners_enabled: 'Adhésion et partage publics',
+            partners_invite_only: 'Adhésion limitée aux invitations',
+            partners_cash_pilot_allowlist_only: 'Virements cash limités à la cohorte pilote',
+            partners_earnings_enabled: 'Attribution et commissions',
+            partners_credit_redemptions_enabled: 'Conversion en accès Norva',
+            partners_shadow_mode: 'Réconciliation shadow',
+            partners_payouts_live: 'Préparation des lots cash live',
+            partners_tv_relay_enabled: 'Relais Partners TV',
+            partners_revolut_api_enabled: 'API Revolut Business'
+        };
+        const releaseGateLabels = {
+            legal_and_tax_approved: 'Validation juridique et fiscale',
+            membership_privacy_approved: 'Privacy de l’adhésion publique',
+            privacy_approved: 'AIPD Privacy du virement cash',
+            country_policy_approved: 'Politique pays du virement cash',
+            individual_verification_coverage_confirmed: 'Couverture KYC individuelle',
+            individual_payout_coverage_confirmed: 'Couverture de versement individuel',
+            financial_data_contract_approved: 'Contrat des données financières',
+            shadow_reconciliation_clean: 'Réconciliation shadow sans écart',
+            backup_restore_verified: 'Sauvegarde et restauration vérifiées',
+            payout_execution_adapter_verified: 'Adaptateur de versement vérifié',
+            manual_payout_workflow_verified: 'Workflow Revolut manuel vérifié',
+            revolut_api_adapter_verified: 'Adaptateur API Revolut vérifié',
+            tv_relay_security_verified: 'Sécurité du relais TV',
+            general_release_approved: 'Release générale approuvée'
+        };
         const releaseRows = [
             ...flags.map((flag) => ({
                 action: 'release-flag',
                 key: flag?.key,
                 enabled: flag?.enabled === true,
-                label: `Flag · ${flag?.key || 'inconnu'}`
+                label: releaseFlagLabels[flag?.key]
+                    ? `Flag · ${releaseFlagLabels[flag.key]}`
+                    : `Flag · ${flag?.key || 'inconnu'}`
             })),
             ...gates.map((gate) => ({
                 action: 'release-gate',
                 key: gate?.key,
                 enabled: gate?.satisfied === true,
-                label: `Gate · ${gate?.key || 'inconnu'}`,
+                label: releaseGateLabels[gate?.key]
+                    ? `Gate · ${releaseGateLabels[gate.key]}`
+                    : `Gate · ${gate?.key || 'inconnu'}`,
                 approvalStatus: String(gate?.approval_status || (
                     gate?.satisfied === true
                         ? 'current'
@@ -8744,7 +8795,7 @@ class AdminPage {
             <div class="fiche-head">
               <div class="fiche-avatar">P</div>
               <div><div class="fiche-title">${AdminPage.esc(account.partner_key || 'Partenaire individuel')}</div>
-              <div class="umeta">Aucune référence KYC provider, adresse e-mail ou code public n’est exposé dans cette vue.</div></div>
+              <div class="umeta">Aucune référence KYC provider, adresse e-mail, donnée bancaire ou identifiant interne n’est exposé dans cette vue. La référence partenaire affichée est publique et pseudonymisée.</div></div>
             </div>
             <div class="partners-detail-grid">
               <section class="section"><div class="sec-head"><h2>Compte et contrat</h2></div>
@@ -8813,6 +8864,11 @@ class AdminPage {
 
     _partnersApprovalRequiredDocuments(gateKey) {
         const specialized = {
+            membership_privacy_approved: [
+                'membership_privacy_notice',
+                'membership_records_of_processing',
+                'membership_minimization_review'
+            ],
             privacy_approved: [
                 'biometric_consent',
                 'dpia',
@@ -12538,6 +12594,9 @@ class AdminPage {
         return [
             'partners_enabled',
             'partners_invite_only',
+            'partners_cash_pilot_allowlist_only',
+            'partners_earnings_enabled',
+            'partners_credit_redemptions_enabled',
             'partners_shadow_mode',
             'partners_payouts_live',
             'partners_revolut_api_enabled',

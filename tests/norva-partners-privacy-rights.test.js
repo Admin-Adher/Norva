@@ -142,4 +142,18 @@ test('Privacy explains mixed Didit roles, transfers, automation and recourse', (
   assert.match(privacy, /Didit uses automated systems/);
   assert.match(privacy, /request a human review/);
   assert.match(privacy, /does not[\s\S]*predetermine whether any particular data-protection-law provision/);
+  assert.match(privacy, /Didit is not used to join,[\s\S]*convert available commission into Norva access/i);
+  assert.match(privacy, /unsuccessful result can prevent cash-payout readiness[\s\S]*cannot prevent Partners membership/i);
+  assert.match(privacy, /Withdrawal[\s\S]*never ends Partners membership[\s\S]*commission into Norva access/i);
+  assert.match(privacy, /not officially designated a Data Protection Officer \(DPO\)/i);
+});
+
+test('public notices describe Norva access credits factually without deciding their legal classification', () => {
+  const partnersTerms = read('public/partners-terms.html');
+  const terms = read('public/terms.html');
+  for (const notice of [privacy, partnersTerms, terms]) {
+    assert.match(notice, /does not predetermine\s+(?:its|their) legal\s+classification/i);
+    assert.match(notice, /cannot be[\s\S]{0,80}transferred[\s\S]{0,120}(?:redeemed|exchanged) for cash/i);
+    assert.doesNotMatch(notice, /It is not (?:an )?electronic(?:-| )money/i);
+  }
 });

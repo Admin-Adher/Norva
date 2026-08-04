@@ -32,6 +32,27 @@ const releaseGateAal2Migration = fs.readFileSync(
   ),
   'utf8',
 ).replace(/\r\n/g, '\n');
+const revolutMigration = fs.readFileSync(
+  path.join(
+    migrationDir,
+    '20260730173351_partners_revolut_manual_hybrid.sql',
+  ),
+  'utf8',
+).replace(/\r\n/g, '\n');
+const frictionlessMembershipMigration = fs.readFileSync(
+  path.join(
+    migrationDir,
+    '20260804173000_partners_frictionless_membership_credits.sql',
+  ),
+  'utf8',
+).replace(/\r\n/g, '\n');
+const frictionlessReleaseMigration = fs.readFileSync(
+  path.join(
+    migrationDir,
+    '20260804174000_partners_frictionless_release_controls.sql',
+  ),
+  'utf8',
+).replace(/\r\n/g, '\n');
 
 function section(source, start, end) {
   const from = source.indexOf(start);
@@ -44,31 +65,35 @@ function section(source, start, end) {
 const managedFlags = [
   'partners_enabled',
   'partners_invite_only',
+  'partners_earnings_enabled',
+  'partners_credit_redemptions_enabled',
   'partners_shadow_mode',
   'partners_payouts_live',
   'partners_tv_relay_enabled',
+  'partners_revolut_api_enabled',
 ];
 
-test('all five managed Partners flags are installed fail-closed', () => {
-  const seed = section(
+test('all eight managed Partners flags are installed fail-closed', () => {
+  const seedSources = [
     migration,
-    'insert into public.admin_feature_flags (',
-    '-- The generic flag CRUD remains available',
-  );
+    revolutMigration,
+    frictionlessMembershipMigration,
+  ];
 
   for (const key of managedFlags) {
-    assert.match(
-      seed,
-      new RegExp(`'${key}'\\s*,\\s*false`, 'i'),
+    assert.ok(
+      seedSources.some((source) => new RegExp(
+        `'${key}'\\s*,\\s*false`,
+        'i',
+      ).test(source)),
       `${key} must start disabled`,
     );
   }
-  assert.match(seed, /on conflict \(key\) do update[\s\S]*enabled = false/i);
 
   const helper = section(
-    migration,
+    frictionlessReleaseMigration,
     'create or replace function affiliate_private.is_managed_partners_flag(',
-    'create or replace function affiliate_private.release_gates_satisfied(',
+    'revoke all on function',
   );
   for (const key of managedFlags) assert.match(helper, new RegExp(`'${key}'`));
 });

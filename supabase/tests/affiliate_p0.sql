@@ -399,6 +399,11 @@ as $fixture$
     'approval_record', repeat('01', 32),
     'deployment_proof', repeat('02', 32)
   ) || case p_gate
+    when 'membership_privacy_approved' then jsonb_build_object(
+      'gdpr_self_assessment', repeat('04', 32),
+      'privacy_notice', repeat('06', 32),
+      'records_of_processing', repeat('07', 32)
+    )
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('03', 32),
       'gdpr_self_assessment', repeat('04', 32),
@@ -445,6 +450,7 @@ immutable
 as $fixture$
   select jsonb_object_agg(document.key, document.value)
   from unnest(array[
+    'membership_privacy_approved',
     'privacy_approved',
     'legal_and_tax_approved',
     'individual_verification_coverage_confirmed',
@@ -1068,6 +1074,7 @@ declare
 begin
   foreach v_gate in array array[
     'legal_and_tax_approved',
+    'membership_privacy_approved',
     'privacy_approved',
     'individual_verification_coverage_confirmed',
     'individual_payout_coverage_confirmed',
@@ -1117,6 +1124,14 @@ begin
     'US',
     null,
     now() + interval '1 day'
+  );
+  perform public.admin_partners_payout_route_set(
+    'revolut',
+    'revolut_manual',
+    'US',
+    'USD',
+    'active',
+    'P0 KYC and payout integration exact Revolut manual USD corridor.'
   );
   perform public.admin_partners_control(
     'set_allowlist',
@@ -1501,6 +1516,12 @@ select extensions.is(
   ) ->> 'action',
   'terms_accepted',
   'the KYC fixture accepts the current terms and disclosure'
+);
+select public.partners_service_join_v2(
+  '10000000-0000-4000-8000-000000000003',
+  true,
+  true,
+  'membership.kyc.integration.0001'
 );
 select extensions.throws_ok(
   $$
@@ -3236,6 +3257,14 @@ select extensions.ok(
   ),
   'unsupported future-provider corridors are not materialized'
 );
+set local role service_role;
+select public.partners_service_join_v2(
+  '10000000-0000-4000-8000-000000000002',
+  true,
+  true,
+  'membership.payout.integration.0001'
+);
+reset role;
 set local role authenticated;
 select public.admin_partners_payout_route_set(
   'revolut',

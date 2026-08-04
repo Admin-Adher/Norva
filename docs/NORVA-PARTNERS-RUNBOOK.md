@@ -1,38 +1,61 @@
 # Norva Partners — runbook pilote
 
-**Version :** 2 août 2026
-**Principe :** tout reste fail-closed tant que KYC, juridiction, finance et
-versement ne sont pas vérifiés séparément.
+**Version :** 4 août 2026
+**Principe :** les couches sont indépendantes et restent fail-closed selon leur
+risque propre. Un compte Norva confirmé peut adhérer, créer son lien, être
+attribué et accumuler/maturer des commissions sans KYC ni pays de virement.
+`partners_earnings_enabled` contrôle le calcul financier et
+`partners_credit_redemptions_enabled` la conversion en accès Norva. Le pays,
+Didit, la fiscalité, le corridor et la fenêtre Finance ne contrôlent que le
+virement cash optionnel.
 
 Ce runbook ne remplace ni une revue juridique/fiscale locale ni les procédures
 d'incident des fournisseurs. Il décrit les contrôles techniques nécessaires
 avant et pendant le pilote individuel Norva Partners.
 
-Pour le pilote France invite-only, Norva ne désigne pas officiellement de DPO.
-La gate `privacy_approved` repose sur l'auto-évaluation RGPD interne documentée
-et immuable décrite dans `NORVA-PARTNERS-APPROVAL-EVIDENCE.md`. Elle est limitée
-à 50 participants et ne vaut jamais autorisation d'ouverture publique. La
-généralisation exige une revue Privacy qualifiée et indépendante distincte,
+Norva ne désigne pas officiellement de DPO par ce pilote. La gate
+`membership_privacy_approved` protège l'adhésion publique avec une évaluation
+documentée excluant Didit et la biométrie. La gate `privacy_approved` protège
+uniquement le parcours cash Didit France ; elle repose sur l'auto-évaluation
+RGPD et l'AIPD immuables décrites dans
+`NORVA-PARTNERS-APPROVAL-EVIDENCE.md`. La cohorte cash est limitée à 50 comptes
+allowlistés et cette décision ne vaut jamais autorisation d'ouverture publique
+du cash. La généralisation du cash exige une revue Privacy distincte,
 sans que cette revue constitue par elle-même une désignation officielle de DPO.
 
 ## 1. Portes de mise en service
 
-Ne jamais ouvrir `partners_enabled` uniquement parce que le code est déployé.
-Pour chaque pays/subdivision, conserver une preuve datée des cinq portes :
+Ne jamais ouvrir un flag uniquement parce que le code est déployé. Distinguer
+les portes du programme sans KYC de celles du virement cash.
 
-1. contrat et disclosure approuvés ;
-2. KYC individuel Didit couvrant identité, âge, pays et capacité ;
-3. traitement fiscal du partenaire individuel défini ;
-4. rail de versement individuel, devise, seuil et retours testés ;
-5. sources financières capables de fournir le montant final réellement payé,
+Pour l'adhésion, le lien, l'attribution, la maturation et le crédit d'accès,
+conserver les preuves datées suivantes :
+
+1. contrat et disclosure approuvés et publiés ;
+2. programme individuel versionné (20 %, attribution 30 jours, maturation
+   J+45) et données financières autoritatives ;
+3. contrôles anti-abus, sauvegarde/restauration et workers validés ;
+4. catalogue d'accès versionné et quote serveur pour lever
+   `partners_credit_redemptions_enabled`.
+
+Ces quatre portes ne demandent ni résultat Didit, ni pays de virement, ni
+profil fiscal, ni corridor. Pour chaque pays/subdivision où un virement cash
+est proposé, conserver en plus une preuve datée des portes payout :
+
+1. KYC individuel Didit couvrant identité, âge, pays et capacité ;
+2. traitement fiscal du partenaire individuel défini ;
+3. rail de versement individuel, devise, seuil et retours testés ;
+4. sources financières capables de fournir le montant final réellement payé,
    la taxe, la devise/exposant, le mouvement parent et l'état de remboursement.
    La remise séparée reste un contexte facultatif et ne doit pas être soustraite
    une seconde fois du montant Google Play déjà remisé.
 
-L'activation initiale est limitée à une allowlist nominative de 20 à 50 comptes.
-Le KYB, les sociétés et les versements réels restent fermés.
+L'activation initiale du virement cash est limitée à une allowlist nominative de
+20 à 50 comptes. L'adhésion, le partage, les commissions et le crédit d'accès
+restent publics et indépendants. Le KYB et les sociétés restent fermés ; les
+versements réels ne s'ouvrent que dans une fenêtre Finance supervisée.
 
-### Découverte et demandes d'accès avant ouverture
+### Découverte publique et demandes d'accès au pilote cash
 
 La découverte n'est pas une porte de mise en service. Tout compte Cloud
 utilisateur authentifié voit l'entrée **Norva Partners** sur Web et Android
@@ -42,7 +65,8 @@ d'une policy absente, d'une juridiction non ouverte ou d'une allowlist vide.
 L'entrée utilisateur et la surface `Admin > Partners` restent deux contextes
 distincts. TV conserve son relais et ses contrôles appareil séparés.
 
-Le parcours pré-pilote utilise uniquement `GET|POST /access-request` :
+`GET|POST /access-request` est un intake facultatif pour la cohorte cash ; il ne
+contrôle jamais l'adhésion Partners :
 
 - `GET` retourne `request.exists=false` ou l'état
   `requested|approved|declined`, sans effet de bord ;
@@ -52,8 +76,8 @@ Le parcours pré-pilote utilise uniquement `GET|POST /access-request` :
   `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=true` ;
 - seul un enregistrement `affiliate_access_requests`, son état d'idempotence et
   un événement d'audit sanitisé sont créés ou mis à jour ;
-- aucun compte partenaire, `/applications`, KYC/KYB, lien, attribution, fait
-  financier, ledger, profil de versement ou paiement n'est créé ;
+- aucun KYC/KYB, pays de payout, profil fiscal, profil de versement ou paiement
+  n'est créé par cette demande ;
 - une demande `requested` peut mettre à jour sa juridiction avec une nouvelle
   clé ; `approved` et `declined` sont terminaux côté utilisateur.
 
@@ -63,13 +87,15 @@ La file Admin suit la séparation de responsabilités suivante :
 |---|---|---|
 | Lister, chercher et filtrer les demandes | Support **ou** Risk | lecture paginée de données sanitisées : sujet opaque, e-mail masqué, état, juridiction et horodatages |
 | Approuver ou refuser | Risk **et** session AAL2 | décision auditée avec justification ; expiration future facultative pour une approbation |
-| Approuver | Risk **et** session AAL2 | ajoute seulement l'utilisateur à l'allowlist pilote pour la juridiction demandée |
+| Approuver | Risk **et** session AAL2 | ajoute seulement l'utilisateur à l'allowlist du pilote cash pour la juridiction demandée |
 
-Après une approbation, vérifier que `partners_enabled`, les release gates, la
-policy, le programme et les corridors n'ont pas changé. L'utilisateur ne peut
-passer à `/applications` que lorsque ces préconditions sont ouvertes
-séparément. Une approbation n'enrôle pas automatiquement et ne démarre jamais
-Didit.
+Un compte confirmé rejoint publiquement par `POST /join`, sans
+`/applications`, pays de virement ni Didit. Une approbation d'accès cash
+n'enrôle pas automatiquement, ne crée pas le lien et ne démarre jamais Didit.
+La policy payout et les corridors sont vérifiés seulement si ce membre
+allowlisté choisit ultérieurement **Recevoir un virement cash**. Pour un compte
+hors cohorte, `cash_readiness.reason=cash_pilot_not_allowed` et aucune donnée de
+payout ne doit être demandée.
 
 ## 2. Configuration secrète
 
@@ -684,7 +710,7 @@ ops/hetzner/scripts/register-norva-partners-didit-purge-cron.sql
 Le job doit être unique, actif et exécuté chaque minute. Le préflight exige
 zéro outbox en `pending|retry|leased`, zéro dead-letter, zéro source terminale
 non supprimée et un heartbeat terminé depuis moins de cinq minutes. En incident,
-fermer la création KYC, conserver `partners_enabled` fail-closed, corriger la
+fermer la création KYC et le cash sans modifier `partners_enabled`, corriger la
 clé ou l'authentification Didit, puis faire traiter la file sous supervision.
 Pour une ligne déjà en dead-letter, ouvrir un incident Privacy/Security et
 établir la suppression chez Didit avant toute action de remédiation en base ;
@@ -699,56 +725,42 @@ reconstruire la taxe depuis RevenueCat.
 
 ## 3. Ordre de déploiement
 
-Le déploiement DB/Edge est obligatoirement biphasé. La répétition physique
-isolée exige un mode explicite : `predeploy` exige les cinq marqueurs du socle
-déjà déployé (`20260803082211` à `20260803204442`) présents et les dix-sept
-marqueurs suivants absents. Il applique les sept migrations encore en attente,
-de `20260804083541` à `20260804170000`, dans leur ordre chronologique pour prouver l'état
-final ; `postdeploy` exige les 22 marqueurs présents, n'applique aucune
-migration et rejoue uniquement le vérificateur et le pgTAP compatible avec une
-restauration. Un état mixte échoue dans les deux modes. Le succès `predeploy`
-ne permet pas d'appliquer les sept migrations restantes d'un seul bloc en production :
+La baseline de production certifiée est le commit `ab464fe4`, postdeploy vert,
+avec toutes les migrations jusqu'à
+`20260804170000_partners_biometric_consent_enforcement.sql`. Ne jamais rejouer
+ce socle. La prochaine répétition physique `predeploy` doit exiger cette
+baseline présente et exactement les trois migrations suivantes absentes :
 
-- **socle déjà déployé** : les quatre premières migrations, de
-  `20260803082211_partners_admin_operator_capabilities.sql` à
-  `20260803204442_partners_release_gate_aal2.sql`, sont la baseline de
-  production auditée ; elles ne sont jamais rejouées ;
-- **phase A — DB compatible avec les deux versions Edge** : appliquer dans
-  l'ordre les six migrations restantes avant enforcement, de
-  `20260804083541_partners_approval_registry.sql` à
-  `20260804165500_partners_deployment_manifest_event_contract.sql`, notamment
-  `20260804083541_partners_approval_registry.sql`,
-  `20260804084500_partners_biometric_consent_contract.sql`,
-  `20260804093000_partners_didit_purge_outbox.sql` et
-  `20260804160000_partners_privacy_rights_human_review.sql`,
-  `20260804165000_partners_kyc_reverification_override.sql` et
-  `20260804165500_partners_deployment_manifest_event_contract.sql` ;
-- **phase Edge v2** : recréer `functions`, vérifier sa santé et un webhook non
-  terminal, puis recréer `functions2` et refaire les mêmes contrôles. Les deux
-  replicas doivent utiliser le contrat biométrique v2, l'enqueue de purge
-  atomique et le même keyring avant de poursuivre ;
-- **phase B — enforcement strict** : appliquer seulement après cette parité
-  `20260804170000_partners_biometric_consent_enforcement.sql`, puis vérifier que
-  tous les anciens RPC sans consentement ont perdu `EXECUTE` pour
-  `service_role` ;
-- **preuve postdéploiement** : restaurer un base-backup R2 capturé après la
-  phase B et exécuter le mode `postdeploy` sur le même SHA candidat. La preuve
-  doit contenir `migrations_applied=0`, `migration_replay_skipped=true`, les
-  22 marqueurs à `1`, le vérificateur et le pgTAP verts ;
-- enregistrer le cron de purge uniquement après un webhook terminal contrôlé,
-  une suppression Didit `204|404`, un heartbeat frais et zéro dead-letter.
+1. `20260804173000_partners_frictionless_membership_credits.sql` ;
+2. `20260804173500_partners_payout_country_and_member_link_v2.sql` ;
+3. `20260804174000_partners_frictionless_release_controls.sql`.
 
-Un outil de migration automatique doit donc être arrêté entre les phases A et
-B ; si cet arrêt sélectif n'est pas démontré sur la restauration isolée, la
-fenêtre de production est annulée.
+Appliquer ces trois migrations, dans cet ordre, dans une seule fenêtre DB
+transactionnelle avec tous les flags inertes. La troisième migration porte la
+séparation des gates et du contrôle de release : ne pas intercaler Edge entre
+`173500` et `174000`. Rejouer ensuite pgTAP, lint/Advisors et les invariants de
+restauration. Puis recréer `functions`, vérifier sa santé et les contrats V2,
+recréer `functions2`, refaire les contrôles, et valider la parité Kong/Edge.
+Seulement après cette parité, approuver `membership_privacy_approved` et lever
+séparément les flags d'adhésion, earnings et crédit. Didit, la fiscalité et le
+cash restent inertes pour tout compte hors cohorte.
+
+La preuve `postdeploy` doit restaurer un base-backup R2 capturé après cette
+fenêtre, constater `migrations_applied=0`, `migration_replay_skipped=true`, les
+marqueurs attendus présents, puis rejouer le vérificateur et les pgTAP sans
+mutation. Enregistrer le cron de purge seulement après un webhook terminal
+contrôlé, une suppression Didit `204|404`, un heartbeat frais et zéro
+dead-letter.
 
 1. sauvegarde logique et contrôle de restauration ;
-2. phase A DB, tests pgTAP et préconditions d'enforcement ;
+2. fenêtre DB transactionnelle `173000 -> 173500 -> 174000`, puis pgTAP,
+   lint/Advisors et postconditions de séparation des gates ;
 3. écrire explicitement `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans
    l'environnement Hetzner avant de déployer l'Edge ;
 4. déployer/recréer d'abord le service `functions`, attendre sa santé, puis
-   `functions2`, avec le même keyring de suppression Didit et les fonctions
-   `/access-request`, KYC/referral/worker encore fermées par leurs gates ;
+   `functions2`, avec le même keyring de suppression Didit et les contrats V2 ;
+   l'adhésion/referral/crédit et le cash restent encore fermés par leurs gates
+   et flags respectifs ;
 5. Web, Android et TV déployés avec états `not_configured` ; vérifier que tout
    compte Cloud Web/mobile, Admin inclus, voit l'entrée utilisateur Partners ;
 6. avec le kill switch à `false`, vérifier que `GET /access-request` retourne
@@ -765,10 +777,16 @@ fenêtre de production est annulée.
    Risk+AAL2 et confirmer qu'elle ajoute seulement l'allowlist ;
 10. webhook Didit enregistré, secrets de signature et de purge injectés,
     événement de test validé, worker de suppression et heartbeat vérifiés ;
-11. une policy de juridiction approuvée et un programme versionné insérés ;
+    cette étape certifie uniquement le futur parcours cash ;
+11. un programme versionné et le catalogue d'accès Norva sont insérés ; une
+    policy de juridiction payout est ajoutée seulement pour les pays cash ;
 12. comptes pilotes ajoutés à l'allowlist par décision auditée ou contrôle Admin
    équivalent ;
-13. `partners_enabled=true`, `partners_invite_only=true`,
+13. après approbation auditée de `membership_privacy_approved`,
+   `partners_enabled=true`, `partners_invite_only=false`,
+   `partners_cash_pilot_allowlist_only=true`,
+   `partners_earnings_enabled=true` après preuve financière,
+   `partners_credit_redemptions_enabled=true` après preuve catalogue,
    `partners_shadow_mode=true`, `partners_tv_relay_enabled=true`,
    `partners_payouts_live=false`,
    `partners_revolut_api_enabled=false` et kill switch Edge API à `false` ;
@@ -846,9 +864,12 @@ jamais inscrire cette cible par migration.
 
 ## 4. Smoke tests
 
-### Préflight pilote : corridor explicite, sans activation
+### Préflight payout pilote : corridor explicite, sans activation
 
-Le préflight ne choisit jamais un pays, une devise, un exposant monétaire, un
+Ce préflight autorise seulement la couche de virement cash ; son échec ne doit
+jamais désactiver une adhésion, un lien, une attribution, une maturation ou un
+crédit d'accès déjà autorisés par leurs propres gates. Il ne choisit jamais un
+pays, une devise, un exposant monétaire, un
 seuil local, un âge minimum, un environnement ou un commit candidat à la place
 de l'opérateur. Ces huit valeurs sont
 obligatoires à chaque exécution :
@@ -871,16 +892,33 @@ contrat impose `PILOT_CURRENCY=USD`, exposant `2` et seuil `1000`. Pour toute
 autre devise de règlement, le seuil local doit être décidé et figé
 explicitement ; aucune conversion USD implicite n'est autorisée.
 
+#### Lot FX ultérieur — hors P0 et sans promesse de disponibilité
+
+Le crédit d'accès P0 consomme uniquement un solde `USD` au quote autoritatif :
+Norva Plus vaut `499` unités mineures et Norva Family `899`. Tout solde dans une
+autre devise reste affiché séparément dans sa devise d'origine, n'est jamais
+présenté comme zéro et ne déclenche ni conversion ni KYC. Un futur lot FX ne
+pourra être cadré qu'avec source de taux autoritative, timestamp, règles
+d'arrondi/exposant, traitement fiscal/comptable, disclosure versionnée,
+contre-écritures et tests de réconciliation. Ce runbook ne promet ni pays, ni
+devise, ni date pour ce lot.
+
 Le script inspecte en mémoire les deux conteneurs Edge sans afficher les
 secrets, puis exécute une transaction PostgreSQL `READ ONLY`. Tout manque
 devient un bloqueur nommé et la commande termine avec un code non nul. Elle ne
 source pas `ops/hetzner/.env`, ne change aucun flag ou gate, n'active aucune
 route et ne planifie aucun cron.
 
-L'état sûr attendu juste avant la promotion finale est :
+Ce préflight cash s'exécute après la mise en service des couches publiques
+d'adhésion, d'attribution et de crédit, et juste avant la promotion finale de
+la couche cash. L'état sûr attendu est :
 
-- `partners_enabled=false`, `partners_tv_relay_enabled=false` ;
-- `partners_invite_only=true`, `partners_shadow_mode=true` ;
+- `partners_enabled=true`, `partners_earnings_enabled=true` et
+  `partners_credit_redemptions_enabled=true`; `partners_tv_relay_enabled=false` ;
+  ces quatre états sont vérifiés et archivés, mais jamais modifiés par ce
+  préflight payout ;
+- `partners_invite_only=false`,
+  `partners_cash_pilot_allowlist_only=true`, `partners_shadow_mode=true` ;
 - `partners_payouts_live=false`, `partners_revolut_api_enabled=false` et
   `NORVA_PARTNERS_REVOLUT_API_ENABLED=false` sur les deux réplicas ;
 - aucune credential Revolut Business API et aucun cron payout/API ;
@@ -911,32 +949,40 @@ Ordre de configuration, exclusivement depuis les RPC/contrôles Admin audités :
    indisponible et sa policy de tentatives Didit ;
 3. enregistrer le commit, l'environnement et les hashes des preuves réellement
    déployées avec `admin_partners_deployment_manifest_register` en AAL2 ;
-4. faire approuver `legal_and_tax_approved`, terminer et archiver
-   l'auto-évaluation RGPD interne du pilote, puis activer `privacy_approved`
-   sous Risk/AAL2, avec l'empreinte distincte du consentement biométrique ;
+4. faire approuver `legal_and_tax_approved`; archiver la notice, le ROPA et la
+   revue de minimisation de l'adhésion, puis activer
+   `membership_privacy_approved` sous Risk/AAL2 ; terminer séparément l'AIPD
+   cash Didit et activer `privacy_approved` sous Risk/AAL2, avec l'empreinte
+   distincte du consentement biométrique ;
 5. activer cette version avec `admin_partners_program_activate` ;
 6. après les tests maker-checker/réconciliation externes, satisfaire
    `manual_payout_workflow_verified` et enregistrer uniquement la route
    `revolut / revolut_manual / <ISO2> / <ISO4217> / active` avec
    `admin_partners_payout_route_set` ;
-7. rendre cette policy disponible avec
-   `admin_partners_country_policy_set_available`, puis traiter 20 à 50 demandes
-   d'accès du même pays par la décision Risk+AAL2. Cette décision est le seul
-   chemin normal d'ajout à l'allowlist ;
-8. lever les autres gates uniquement avec leur preuve, activer
-   `partners_invite_only` puis `partners_shadow_mode`, enregistrer le cron
-   RevenueCat TRANSFER et attendre les cinq heartbeats frais ;
+7. rendre cette policy payout disponible avec
+   `admin_partners_country_policy_set_available`; traiter séparément 20 à 50
+   demandes d'accès cash par la décision Risk+AAL2. L'allowlist contrôle
+   uniquement le cash, jamais l'adhésion, et ne constitue pas un résultat KYC ;
+8. lever les autres gates uniquement avec leur preuve, conserver
+   `partners_invite_only=false` et
+   `partners_cash_pilot_allowlist_only=true`, puis activer d'abord
+   `partners_enabled=true`, ensuite `partners_earnings_enabled=true`, puis
+   `partners_credit_redemptions_enabled=true` et enfin
+   `partners_shadow_mode=true`. Enregistrer le cron RevenueCat TRANSFER et
+   attendre les cinq heartbeats frais ;
 9. exécuter le préflight avec le corridor explicite. Ne promouvoir ni
-   `partners_enabled` ni le relais TV tant qu'une seule ligne reste en `FAIL`.
+   `partners_payouts_live` ni cette route cash tant qu'une seule ligne reste en
+   `FAIL`; un échec payout ne rabaisse pas les flags sans KYC.
 
 Ce contrôle ne crée aucune preuve fournisseur. Avant que le pilote puisse être
 déclaré prêt, l'opérateur doit encore fournir et archiver hors Git :
 
 1. l'approbation juridique et fiscale écrite pour la juridiction sélectionnée,
    les versions et hashes des documents publics ;
-2. l'auto-évaluation RGPD interne visée et immuable, limitée au pilote France
-   invite-only, avec analyse documentée de l'obligation DPO et du besoin d'AIPD,
-   registre des traitements, risques et déclencheurs de réévaluation ;
+2. l'évaluation Membership Privacy visée avec notice, ROPA et minimisation,
+   puis l'auto-évaluation Cash Privacy et l'AIPD immuables limitées au pilote
+   Didit France allowlist-only, avec analyse documentée de l'obligation DPO,
+   risques et déclencheurs de réévaluation ;
 3. les trois preuves Didit distinctes (sandbox non autoritaire, live lié au
    fingerprint/version, conflit mis en quarantaine) ;
 4. un App Link signé par Google Play rejoué depuis l'AAB publié ;
@@ -952,17 +998,20 @@ déclaré prêt, l'opérateur doit encore fournir et archiver hors Git :
    le journal privé `pilot_ready` validé dans l'environnement GitHub protégé
    **Partners Release**.
 
-Après un préflight vert et seulement quand ces preuves sont corrélées,
-promouvoir par l'interface/RPC auditée `partners_enabled=true`, puis
-`partners_tv_relay_enabled=true`, capturer immédiatement le snapshot et lancer
-le workflow protégé. Si sa validation échoue, remettre immédiatement ces deux
-flags à `false`. Pendant tout le pilote, `partners_invite_only=true`, le flag et
-le kill switch Revolut API restent faux. L'état de repos et le snapshot de
-décision conservent `partners_shadow_mode=true` et
-`partners_payouts_live=false`. Une fenêtre de lot manuel supervisée suit le
-cycle dédié du chapitre 8 : elle ne peut changer ces deux flags que le temps
-strictement nécessaire, avec maker-checker et rollback immédiat vers l'état de
-repos. Aucun versement n'est déclenché par ce préflight.
+L'ordre de promotion de l'étape 8 est impératif : le contrôle audité exige
+`partners_enabled=true` avant `partners_earnings_enabled=true` et
+`partners_credit_redemptions_enabled=true`. Le relais TV reste un flag distinct.
+Si une validation de couche échoue, rabaisser
+uniquement son flag et les dépendances aval ; ne jamais utiliser un échec Didit,
+fiscal ou corridor pour fermer l'adhésion ou le crédit d'accès.
+
+Pendant tout le pilote, `partners_invite_only=false` et
+`partners_cash_pilot_allowlist_only=true`; le flag et le kill switch Revolut API
+restent faux. L'état de repos conserve
+`partners_shadow_mode=true` et `partners_payouts_live=false`. Une fenêtre de lot
+manuel supervisée suit le cycle dédié du chapitre 8 : elle ne change
+`partners_payouts_live` que le temps strictement nécessaire, avec maker-checker
+et retour immédiat à `false`. Aucun versement n'est déclenché par le préflight.
 
 ### Membre Web/Android
 
@@ -980,6 +1029,24 @@ repos. Aucun versement n'est déclenché par ce préflight.
   `429 rate_limited` et exposent `Retry-After: 60` ;
 - une clé âgée de plus de 30 jours devient purgeable sans supprimer la demande
   ni son audit ;
+- compte confirmé avec `membership_privacy_approved=true` : `POST /join` accepte les
+  Conditions/disclosure courantes sans pays, KYC, profil fiscal ou corridor ;
+  le replay est exact et une seule adhésion `member_status=active` existe ;
+- après adhésion, créer ou lire un unique lien opaque actif puis vérifier copie,
+  partage natif/fallback et QR avec disclosure indivisible ;
+- une attribution valide et un paiement financier complet créent une écriture
+  pending, qui ne devient disponible qu'à J+45 ; aucun résultat Didit n'est lu ;
+- `POST /credit/quotes` puis `/credit/redemptions` débitent uniquement le solde
+  disponible sous le même verrou que le cash, sans KYC ni seuil de retrait ; le
+  catalogue pilote est Norva Plus à `USD 499` unités mineures (Norva Family
+  reste `USD 899`) et aucune conversion de devise implicite n'est permise ;
+- pour un compte allowlisté cash, le choix **Recevoir un virement cash** demande
+  alors seulement le pays de résidence payout explicite, vérifié par le
+  serveur, puis Didit, fiscalité et corridor dans cet ordre ; aucune donnée IP,
+  locale ou timezone ne choisit le pays à la place du membre ;
+- pour un compte hors cohorte, le serveur retourne
+  `cash_pilot_not_allowed`; l'interface conserve lien, commissions et crédit
+  d'accès, et ne demande ni pays, ni KYC, ni fiscalité, ni donnée bancaire ;
 - fiscalité : aucun `verified` sans déclaration v1 et `self_attested_at` ; les
   anciens états sans consentement deviennent `expired` sans consentement
   synthétique, restent lisibles, puis reviennent à `pending` uniquement après
@@ -1004,10 +1071,13 @@ repos. Aucun versement n'est déclenché par ce préflight.
   ou programme expiré, devise/route désactivée et route `revolut_api` : tous
   doivent échouer avant le contrôle du binding, puis le corridor manuel restauré
   doit encore exiger le profil et le binding maker-checker actifs ;
-- décision `approved|declined` affichée sans réouverture ni resoumission ;
-- pays absent/inactif : aucune adhésion ;
-- adhésion individuelle `/applications` idempotente et distincte de la demande
-  d'accès ;
+- décision d'accès au pilote cash `approved|declined` affichée sans réouverture
+  ni resoumission et sans modifier l'adhésion ;
+- cohorte ou pays payout absent/inactif : adhésion, lien, attribution,
+  maturation et crédit continuent ; seul le virement reste
+  `cash_pilot_not_allowed`, `payout_country_required` ou indisponible ;
+- l'ancien parcours d'adhésion `/applications -> KYC -> activation` n'est plus
+  un chemin membre ; `/join` est l'unique mutation d'adhésion sans KYC ;
 - entreprise : waitlist, aucun KYC/KYB ;
 - session Didit absente de config : message public, aucun changement d'état ;
 - webhook falsifié, expiré ou rejoué : rejet sans mutation ;
@@ -1175,8 +1245,11 @@ Ordre de réduction du risque :
 3. suspendre le worker et tout paiement manuel du lot concerné sans supprimer
    la file ni le lot ;
 4. `partners_shadow_mode=true` ;
-5. désactiver la création de nouvelles sessions KYC ou claims ;
-6. si nécessaire `partners_enabled=false`, sans effacer comptes/ledger ;
+5. désactiver la création de nouvelles sessions KYC ; en cas d'incident
+   financier, rabaisser `partners_earnings_enabled` puis
+   `partners_credit_redemptions_enabled` sans fermer les adhésions existantes ;
+6. utiliser `partners_enabled=false` seulement pour un incident propre à
+   l'adhésion ou au lien, sans effacer comptes/ledger ;
 7. conserver les preuves, correlation IDs et événements sanitisés ;
 8. corriger par contre-écriture ou reprise idempotente, jamais par édition
    manuelle d'un montant canonique.
@@ -1255,17 +1328,17 @@ ne justifient aucun retry agressif côté client.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` du lot final sur restaurations isolées ; la baseline de quatre migrations déjà déployée doit être présente et les sept restantes sont rejouées uniquement sur le clone ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer les six migrations restantes de phase A, déployer les deux Edge v2, puis seulement la migration d'enforcement de phase B `20260804170000` ; ne jamais rejouer les quatre migrations de la baseline ni exécuter les sept restantes d'un bloc en production |
+| Migrations/RPC Partners | livrées | baseline production `ab464fe4` postdeploy certifiée ; `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` sur restaurations isolées | sans rejouer la baseline, appliquer exactement `20260804173000`, `20260804173500`, `20260804174000` dans cet ordre et une seule fenêtre DB transactionnelle avec flags inertes ; déployer ensuite les deux Edge V2, vérifier la parité, puis seulement approuver les gates et activer les flags |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
-| API membre, demandes d'accès, referral et TV | livrées | entrée visible à tout compte Cloud Web/mobile, Admin inclus ; GET toujours lisible ; POST protégé par `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, cooldown 60 s, 8 nouvelles clés/24 h, rétention d'idempotence 30 j et `429 Retry-After: 60` ; aucun compte/KYC/lien/ledger créé ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer d'abord avec le kill switch de collecte à `false`, valider pause/reprise, puis synchroniser les secrets HMAC et publier les App Links |
-| Didit KYC-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; la production refuse de démarrer sans configuration complète | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
+| API membre, demandes d'accès cash, referral, crédit et TV | livrées | entrée visible à tout compte Cloud Web/mobile ; compte confirmé + `membership_privacy_approved` -> `/join` public sans pays/KYC -> lien/partage ; access-request ne sert qu'à la cohorte cash ; attribution et J+45 sous `partners_earnings_enabled` ; quote/redeem Plus `USD 499` sans KYC sous `partners_credit_redemptions_enabled` ; hors cohorte, `cash_pilot_not_allowed` sans collecte payout ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer les flags à `false`, valider chaque couche puis lever `partners_enabled` avec `partners_invite_only=false`; conserver `partners_cash_pilot_allowlist_only=true`; synchroniser les secrets HMAC et publier les App Links |
+| Didit KYC cash-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; aucune session n'est créée avant le choix cash et le pays payout explicite | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter ; un échec n'altère ni membership, lien, maturation ni crédit | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
 | Worker commission/J+45/shadow | livré | capture → accrual → J+45/reversal → shadow sans écart ; heartbeats frais | réutiliser le secret cron existant vérifié par `norva_verify_cron_secret`, confirmer son entrée Vault et créer le job `pg_cron` |
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
 | RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; Web reste incomplet sans ventilation fiscale | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé et aucun `tax=0` supposé | activer les événements provider et secrets par environnement ; sélectionner un moteur/contrat fiscal Web avant commission |
 | `DISPUTE_WON` | contre-correction append-only livrée | LOST/WON rejoués, WON avant LOST, reversal/release partiels, restauration exacte et réconciliation propre | activer l'événement Revolut et vérifier la lecture autoritative sur l'environnement disponible |
 | Payout onboarding/dispatch | `revolut_manual` livré pour Basic : lots exacts, référence `NORVA-[A-F0-9]{12}`, acquittement `YES` sans identifiant bancaire saisi, import de relevé sanitisé, incidents append-only, double validation et ledger de règlement ; `revolut_api` livré mais multi-gated | cycle J+45 → lot → export/hash → saisie manuelle → relevé → rapprochement exact, doublon/montant/devise inconnus quarantainés, deux acteurs Finance distincts ; route manuelle active, gate DB API, flag DB API et kill switch Edge à `false`, aucun cron API/provider | configurer uniquement les corridors Revolut manuels, réaliser deux cycles supervisés et conserver les secrets Business API absents tant qu'aucun upgrade n'est décidé |
-| Admin/alertes | surfaces, file de demandes d'accès, heartbeats et relais Ops Telegram/e-mail livrés | Support|Risk lit la file sanitisée ; seule Risk+AAL2 décide ; l'approbation ajoute uniquement l'allowlist ; capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
-| Pilote mondial | gates/policies livrées mais vides/fail-closed ; première preuve technique des pages juridiques archivée le 30 juillet | avant ouverture : artefacts juridiques normalisés, pages HTTP directes, snapshot DB, App Link signé Play, pays approuvés et restore drill ; après ouverture contrôlée : 45 jours observés avant généralisation | configurer juridictions, programme, devises/routes, allowlist et invitations ; laisser invite-only |
+| Admin/alertes | surfaces, file de demandes d'accès cash, gates Membership/Cash Privacy, heartbeats et relais Ops Telegram/e-mail livrés | Support|Risk lit la file sanitisée ; seule Risk+AAL2 décide ; `membership_privacy_approved` exige notice/ROPA/minimisation, `privacy_approved` exige AIPD/consentement Didit ; une décision d'accès ajoute uniquement l'allowlist cash ; capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |
+| Adhésion publique + pilote cash France | séparation des gates/policies livrée et fail-closed ; première preuve technique des pages juridiques archivée le 30 juillet | avant adhésion : artefacts Membership Privacy normalisés, pages HTTP directes, snapshot DB, App Link signé Play et restore drill ; avant cash : AIPD Didit, policy FR, route manuelle, allowlist 20–50 et maker-checker ; 45 jours observés avant généralisation cash | ouvrir l'adhésion mondiale sans KYC avec `partners_invite_only=false`; configurer seulement la cohorte cash France en allowlist, sans invitation obligatoire pour devenir membre |
 
 Une case « code livré » ne suffit jamais pour lever une gate. L'opérateur doit
 conserver l'attestation structurée du run CI/runtime et de la configuration

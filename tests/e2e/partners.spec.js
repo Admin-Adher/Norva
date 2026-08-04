@@ -28,6 +28,12 @@ async function mountPartners(page, initialState) {
 
   await page.evaluate(async (state) => {
     const shareUrl = `https://norva.tv/r/${'A'.repeat(32)}`;
+    window.NorvaRegions = {
+      COUNTRIES: [
+        { kind: 'country', code: 'FR', name: 'France', flag: '🇫🇷' },
+        { kind: 'country', code: 'US', name: 'United States', flag: '🇺🇸' },
+      ],
+    };
     window.__partnerState = state;
     window.__partnerCalls = {
       bootstrap: [],
@@ -43,6 +49,10 @@ async function mountPartners(page, initialState) {
       requestPayoutOnboarding: [],
       rotateLink: [],
       accessRequest: [],
+      join: [],
+      creditQuote: [],
+      creditRedeem: [],
+      bindPayoutCountry: [],
       share: [],
       navigation: [],
     };
@@ -106,6 +116,58 @@ async function mountPartners(page, initialState) {
 
     const bootstrapEnvelope = () => {
       const current = window.__partnerState;
+      if (['member-discovery', 'member-active', 'member-cash-locked'].includes(current)) {
+        const active = current !== 'member-discovery';
+        const cashPilotAllowed = current !== 'member-cash-locked';
+        return {
+          version: '2026-07-29',
+          correlationId: `e2e-bootstrap-${current}`,
+          data: {
+            schema_version: 2,
+            flags: {
+              partners_enabled: true,
+              partners_invite_only: false,
+              partners_cash_pilot_allowlist_only: true,
+              partners_earnings_enabled: true,
+              partners_credit_redemptions_enabled: true,
+              partners_payouts_live: false,
+            },
+            eligibility: {
+              visible: true,
+              eligible: true,
+              reason: 'available',
+            },
+            membership: {
+              exists: active,
+              status: active ? 'active' : 'not_joined',
+              joined_at: active ? '2026-08-04T12:00:00Z' : null,
+              verification_status: active ? 'not_started' : null,
+            },
+            program: {
+              commission_rate_bps: 2000,
+              attribution_window_days: 30,
+              maturation_days: 45,
+              terms_version: 'partners-global-v1',
+              disclosure_version: 'partners-global-v1',
+            },
+            link: active ? {
+              status: 'active',
+              share_url: shareUrl,
+              created_at: '2026-08-04T12:00:00Z',
+            } : null,
+            credit_readiness: {
+              ready: active,
+              reason: active ? null : 'membership_required',
+            },
+            cash_readiness: {
+              ready: false,
+              reason: active
+                ? (cashPilotAllowed ? 'payout_country_required' : 'cash_pilot_not_allowed')
+                : 'membership_required',
+            },
+          },
+        };
+      }
       const earlyAccess = ['early-access', 'early-requested', 'early-declined']
         .includes(current);
       return {
@@ -205,6 +267,86 @@ async function mountPartners(page, initialState) {
       },
     });
 
+    const membershipDashboardEnvelope = (
+      status = 'all',
+      cashReason = 'payout_country_required',
+    ) => ({
+      version: '2026-07-29',
+      correlationId: `e2e-membership-dashboard-${status}`,
+      data: {
+        schema_version: 2,
+        flags: {
+          partners_enabled: true,
+          partners_invite_only: false,
+          partners_cash_pilot_allowlist_only: true,
+          partners_earnings_enabled: true,
+          partners_credit_redemptions_enabled: true,
+          partners_payouts_live: false,
+        },
+        membership: {
+          exists: true,
+          status: 'active',
+          joined_at: '2026-08-04T12:00:00Z',
+          verification_status: 'not_started',
+        },
+        program: {
+          commission_rate_bps: 2000,
+          attribution_window_days: 30,
+          maturation_days: 45,
+          terms_version: 'partners-global-v1',
+          disclosure_version: 'partners-global-v1',
+        },
+        link: {
+          status: 'active',
+          share_url: shareUrl,
+          created_at: '2026-08-04T12:00:00Z',
+        },
+        balances: [{
+          currency: 'USD',
+          currency_exponent: 2,
+          pending_minor: 1200,
+          available_minor: 1497,
+          recovery_due_minor: 0,
+          redeemed_minor: 0,
+        }],
+        next_maturation_at: '2026-09-18T12:00:00Z',
+        credit_readiness: {
+          ready: true,
+          reason: null,
+          catalog: {
+            catalog_key: 'acc_p0_usd_plus_month_v1',
+            plan_code: 'plus',
+            currency: 'USD',
+            currency_exponent: 2,
+            unit_amount_minor: 499,
+            unit_duration_days: 30,
+            minimum_months: 1,
+            maximum_months: 12,
+          },
+        },
+        cash_readiness: { ready: false, reason: cashReason },
+        provider: {
+          provider: null,
+          status: null,
+          active: false,
+          hard_block: false,
+          reason: 'subscription_required',
+          fail_open: false,
+          current_period_end: null,
+          trial_ends_at: null,
+          fail_open_until: null,
+          last_verified_at: null,
+        },
+        overlay: {
+          status: 'none',
+          active_grant: null,
+          queued_grants: 0,
+          remaining_seconds: 0,
+        },
+        history: { status, items: [], next_cursor: null },
+      },
+    });
+
     window.NorvaCloud = {
       token: 'partners-e2e-user-token',
       partners: {
@@ -214,6 +356,130 @@ async function mountPartners(page, initialState) {
             subdivisionCode: input.subdivisionCode || null,
           });
           return bootstrapEnvelope();
+        },
+        async join(input) {
+          window.__partnerCalls.join.push({ ...input });
+          window.__partnerState = 'member-active';
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-membership-join',
+            data: {
+              schema_version: 2,
+              action: 'membership_joined',
+              replayed: false,
+              membership: {
+                status: 'active',
+                joined_at: '2026-08-04T12:00:00Z',
+                verification_status: 'not_started',
+              },
+              program: {
+                commission_rate_bps: 2000,
+                attribution_window_days: 30,
+                maturation_days: 45,
+                terms_version: 'partners-global-v1',
+                disclosure_version: 'partners-global-v1',
+              },
+              link: {
+                status: 'active',
+                share_url: shareUrl,
+                created_at: '2026-08-04T12:00:00Z',
+              },
+              cash_readiness: {
+                ready: false,
+                reason: 'payout_country_required',
+              },
+              next_action: 'share_link',
+            },
+          };
+        },
+        credit: {
+          async quote(input) {
+            window.__partnerCalls.creditQuote.push({ ...input });
+            return {
+              version: '2026-07-29',
+              correlationId: 'e2e-credit-quote',
+              data: {
+                schema_version: 1,
+                action: 'access_credit_quoted',
+                replayed: false,
+                quote: {
+                  key: `crq_${'a'.repeat(24)}`,
+                  status: 'open',
+                  currency: 'USD',
+                  currency_exponent: 2,
+                  plan_code: 'plus',
+                  months: input.months,
+                  unit_amount_minor: 499,
+                  total_amount_minor: 499 * input.months,
+                  duration_days: 30 * input.months,
+                  expires_at: '2026-08-04T12:10:00Z',
+                },
+                balance: {
+                  currency: 'USD',
+                  currency_exponent: 2,
+                  available_minor: 1497,
+                },
+              },
+            };
+          },
+          async redeem(input) {
+            window.__partnerCalls.creditRedeem.push({ ...input });
+            return {
+              version: '2026-07-29',
+              correlationId: 'e2e-credit-redeem',
+              data: {
+                schema_version: 1,
+                action: 'access_credit_redeemed',
+                replayed: false,
+                redemption: {
+                  key: `crd_${'b'.repeat(24)}`,
+                  status: 'granted',
+                  currency: 'USD',
+                  currency_exponent: 2,
+                  amount_minor: 499,
+                  months: 1,
+                },
+                grant: {
+                  key: `cag_${'c'.repeat(24)}`,
+                  status: 'queued',
+                  plan_code: 'plus',
+                  duration_days: 30,
+                  remaining_seconds: 2592000,
+                  active_from: null,
+                  active_until: null,
+                },
+                balance: {
+                  currency: 'USD',
+                  currency_exponent: 2,
+                  available_minor: 998,
+                },
+                overlay: {
+                  status: 'queued',
+                  active_grant: null,
+                  queued_grants: 1,
+                  remaining_seconds: 0,
+                },
+              },
+            };
+          },
+        },
+        async bindPayoutCountry(input) {
+          window.__partnerCalls.bindPayoutCountry.push({ ...input });
+          return {
+            version: '2026-07-29',
+            correlationId: 'e2e-payout-country',
+            data: {
+              schema_version: 1,
+              action: 'payout_country_bound',
+              replayed: false,
+              account: {
+                id: `prt_${'d'.repeat(24)}`,
+                status: 'pending_verification',
+                country_code: input.countryCode,
+              },
+              cash_readiness: { ready: false, reason: 'kyc_required' },
+            },
+          };
         },
         activation: {
           async reconcile(input = {}) {
@@ -363,7 +629,14 @@ async function mountPartners(page, initialState) {
             status: input.status,
             cursor: input.cursor || null,
           });
-          return dashboardEnvelope(input.status || 'all');
+          return ['member-active', 'member-cash-locked'].includes(window.__partnerState)
+            ? membershipDashboardEnvelope(
+              input.status || 'all',
+              window.__partnerState === 'member-cash-locked'
+                ? 'cash_pilot_not_allowed'
+                : 'payout_country_required',
+            )
+            : dashboardEnvelope(input.status || 'all');
         },
         async payoutProfile(input = {}) {
           window.__partnerCalls.payoutProfile.push({ hasSignal: Boolean(input.signal) });
@@ -372,7 +645,12 @@ async function mountPartners(page, initialState) {
             correlationId: 'e2e-payout-profile',
             data: {
               schema_version: 1,
-              account: { id: `prt_${'a'.repeat(24)}`, status: 'active' },
+              account: {
+                id: `prt_${'a'.repeat(24)}`,
+                status: 'active',
+                country_code: ['member-active', 'member-cash-locked']
+                  .includes(window.__partnerState) ? null : 'FR',
+              },
               fiscal: { status: 'verified', country_code: 'FR' },
               profile: {
                 provider: 'revolut',
@@ -569,7 +847,162 @@ test('a declined early-access request is terminal and offers support without res
     .toHaveCount(0);
 });
 
-test('individual application stays gated and reaches the explicit hosted-KYC step', async ({
+test('public membership stays fully usable when the supervised cash pilot is unavailable', async ({
+  page,
+}) => {
+  await mountPartners(page, 'member-cash-locked');
+
+  await expect(page.getByRole('heading', { name: 'Your Partners balance' }))
+    .toBeVisible();
+  await expect(page.locator('[data-partners-link]')).toHaveValue(
+    `https://norva.tv/r/${'A'.repeat(32)}`,
+  );
+  await expect(page.getByRole('heading', { name: 'Convert to Norva Plus' }))
+    .toBeVisible();
+
+  const cash = page.locator('[data-partners-cash-button]');
+  await expect(cash).toHaveText('Cash transfer pilot');
+  await cash.click();
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Cash transfers are in a supervised pilot',
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(
+    'membership, referral link, earnings and Norva-access conversions remain fully available',
+  );
+  await expect(dialog).toContainText(
+    'No payout country, identity check, tax profile or banking detail is requested.',
+  );
+
+  const calls = await page.evaluate(() => window.__partnerCalls);
+  expect(calls.join).toHaveLength(0);
+  expect(calls.startKyc).toHaveLength(0);
+  expect(calls.bindPayoutCountry).toHaveLength(0);
+  expect(calls.payoutProfile).toHaveLength(0);
+});
+
+test('confirmed user joins and receives a referral link without KYC or country inference', async ({
+  page,
+}) => {
+  await mountPartners(page, 'member-discovery');
+
+  await expect(page.getByRole('heading', {
+    name: /Share Norva\. Earn 20% on eligible renewals/i,
+  })).toBeVisible();
+  await expect(page.getByText('No KYC, tax profile or payout destination is requested at this step.'))
+    .toBeVisible();
+
+  const join = page.locator('[data-partners-membership-join]');
+  await expect(join).toBeDisabled();
+  await page.locator('[data-partners-terms-confirm]').check();
+  await expect(join).toBeDisabled();
+  await page.locator('[data-partners-disclosure-confirm]').check();
+  await expect(join).toBeEnabled();
+  await join.click();
+
+  await expect(page.getByRole('heading', { name: 'Your Partners balance' }))
+    .toBeVisible();
+  await expect(page.locator('[data-partners-link]')).toHaveValue(
+    `https://norva.tv/r/${'A'.repeat(32)}`,
+  );
+  const calls = await page.evaluate(() => window.__partnerCalls);
+  expect(calls.join).toHaveLength(1);
+  expect(calls.join[0]).toMatchObject({
+    termsAccepted: true,
+    disclosureAccepted: true,
+  });
+  expect(calls.join[0].idempotencyKey).toMatch(/^norva\.membership-join\./);
+  expect(Object.keys(calls.join[0]).sort()).toEqual([
+    'disclosureAccepted',
+    'idempotencyKey',
+    'termsAccepted',
+  ]);
+  expect(calls.startKyc).toHaveLength(0);
+  expect(calls.bindPayoutCountry).toHaveLength(0);
+  expect(calls.bootstrap.every((call) => (
+    call.countryCode === null && call.subdivisionCode === null
+  ))).toBe(true);
+});
+
+test('available USD balance converts to Norva Plus without KYC', async ({ page }) => {
+  await mountPartners(page, 'member-active');
+
+  await expect(page.getByRole('heading', { name: 'Convert to Norva Plus' }))
+    .toBeVisible();
+  await expect(page.getByText('P0 conversion is USD-only with no implicit FX.'))
+    .toBeVisible();
+  await page.locator('[data-partners-credit-quote]').click();
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Convert to 1 month of Norva Plus?',
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('$4.99');
+  await expect(dialog).toContainText('Identity verification');
+  await expect(dialog).toContainText('Not required');
+  await expect(page.locator('.partners-shell')).toHaveAttribute('inert', '');
+  await page.locator('[data-partners-credit-confirm]').click();
+
+  await expect(page.getByRole('heading', {
+    name: '1 month of Norva Plus secured',
+  })).toBeVisible();
+  const calls = await page.evaluate(() => window.__partnerCalls);
+  expect(calls.creditQuote).toHaveLength(1);
+  expect(calls.creditQuote[0]).toMatchObject({ months: 1 });
+  expect(calls.creditQuote[0].idempotencyKey).toMatch(/^norva\.credit-quote-1\./);
+  expect(calls.creditRedeem).toHaveLength(1);
+  expect(calls.creditRedeem[0].quoteKey).toMatch(/^crq_/);
+  expect(calls.creditRedeem[0].idempotencyKey).toMatch(/^norva\.credit-redeem-crq_/);
+  expect(calls.startKyc).toHaveLength(0);
+});
+
+test('cash journey asks for an explicit country before offering Didit KYC', async ({ page }) => {
+  await mountPartners(page, 'member-active');
+
+  const cash = page.locator('[data-partners-cash-button]');
+  await expect(cash).toBeVisible();
+  await cash.click();
+
+  const countryDialog = page.getByRole('dialog', { name: 'Choose your payout country' });
+  await expect(countryDialog).toBeVisible();
+  await expect(countryDialog).toContainText(
+    'Norva never infers this from your IP address, device or locale.',
+  );
+  await expect(page.locator('.partners-shell')).toHaveAttribute('inert', '');
+  expect(await page.evaluate(() => window.__partnerCalls.startKyc.length)).toBe(0);
+
+  await page.locator('[data-partners-cash-country]').selectOption('FR');
+  await page.locator('[data-partners-cash-country-submit]').click();
+
+  const kycDialog = page.getByRole('dialog', { name: 'Verify only when you want cash' });
+  await expect(kycDialog).toBeVisible();
+  await expect(kycDialog).toContainText('Secure verification with Didit');
+  await expect(kycDialog).toContainText(
+    'membership, referral link, earnings and Norva-access conversions already work without KYC',
+  );
+  const calls = await page.evaluate(() => window.__partnerCalls);
+  expect(calls.bindPayoutCountry).toHaveLength(1);
+  expect(calls.bindPayoutCountry[0]).toMatchObject({ countryCode: 'FR' });
+  expect(calls.bindPayoutCountry[0].idempotencyKey)
+    .toMatch(/^norva\.payout-country-FR\./);
+  expect(Object.keys(calls.bindPayoutCountry[0]).sort()).toEqual([
+    'countryCode',
+    'idempotencyKey',
+    'signal',
+  ]);
+  expect(calls.startKyc).toHaveLength(0);
+
+  await kycDialog.evaluate((element) => element.dispatchEvent(new KeyboardEvent(
+    'keydown',
+    { key: 'BrowserBack', bubbles: true },
+  )));
+  await expect(kycDialog).toBeHidden();
+  await expect(cash).toBeFocused();
+  await expect(page.locator('.partners-shell')).not.toHaveAttribute('inert', '');
+});
+
+test('legacy v1 individual application stays gated and reaches the explicit hosted-KYC step', async ({
   page,
 }) => {
   await mountPartners(page, 'discovery');
@@ -630,7 +1063,7 @@ test('individual application stays gated and reaches the explicit hosted-KYC ste
   expect(JSON.stringify(calls)).not.toMatch(/userId|user_id|verification_reference/i);
 });
 
-test('Didit hand-off requires fresh identity and capacity confirmations', async ({ page }) => {
+test('legacy v1 Didit hand-off requires fresh identity and capacity confirmations', async ({ page }) => {
   const startKycCalls = [];
   await page.exposeFunction('__captureStartKycCall', (input) => {
     startKycCalls.push(input);
@@ -677,7 +1110,7 @@ test('Didit hand-off requires fresh identity and capacity confirmations', async 
   expect(JSON.stringify(startKycCalls[0])).not.toMatch(/document|selfie|userId|user_id/i);
 });
 
-test('a partial application failure reloads authoritative state without posting the application twice', async ({
+test('legacy v1 partial application failure reloads authoritative state without posting the application twice', async ({
   page,
 }) => {
   await mountPartners(page, 'discovery');

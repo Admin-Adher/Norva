@@ -34,6 +34,32 @@ begin
     raise exception
       'RevenueCat TRANSFER inbox became client-readable';
   end if;
+  if to_regclass('public.cloud_access_grants') is null
+    or not (
+      select relation.relrowsecurity
+      from pg_catalog.pg_class relation
+      where relation.oid = 'public.cloud_access_grants'::regclass
+    )
+    or pg_catalog.pg_get_userbyid((
+      select relation.relowner
+      from pg_catalog.pg_class relation
+      where relation.oid = 'public.cloud_access_grants'::regclass
+    )) <> current_user
+    or has_table_privilege('anon', 'public.cloud_access_grants', 'SELECT')
+    or has_table_privilege(
+      'authenticated', 'public.cloud_access_grants', 'SELECT'
+    )
+    or not has_table_privilege(
+      'service_role', 'public.cloud_access_grants', 'SELECT'
+    )
+    or has_table_privilege(
+      'service_role',
+      'public.cloud_access_grants',
+      'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    )
+  then
+    raise exception 'restored cloud access grants lost owner, RLS or exact ACL';
+  end if;
   if to_regclass(
       'affiliate_private.affiliate_approval_packages'
     ) is null
@@ -143,6 +169,9 @@ begin
     'affiliate_deployment_manifest_bindings',
     'affiliate_approval_packages',
     'affiliate_release_gate_approval_bindings',
+    'affiliate_access_credit_catalog',
+    'affiliate_access_credit_quotes',
+    'affiliate_access_credit_redemptions',
     'affiliate_link_claims',
     'affiliate_attributions',
     'affiliate_financial_facts',
@@ -187,6 +216,32 @@ begin
       raise exception 'restore omitted affiliate_private.%', v_name;
     end if;
   end loop;
+
+  select string_agg(
+    expected.schema_name || '.' || expected.relation_name,
+    ', ' order by expected.schema_name, expected.relation_name
+  )
+  into v_missing
+  from (values
+    ('affiliate_private'::text, 'affiliate_access_credit_catalog'::text),
+    ('affiliate_private', 'affiliate_access_credit_quotes'),
+    ('affiliate_private', 'affiliate_access_credit_redemptions'),
+    ('public', 'cloud_access_grants')
+  ) expected(schema_name, relation_name)
+  left join pg_catalog.pg_namespace namespace
+    on namespace.nspname = expected.schema_name
+  left join pg_catalog.pg_class relation
+    on relation.relnamespace = namespace.oid
+    and relation.relname = expected.relation_name
+    and relation.relkind in ('r', 'p')
+  where relation.oid is null
+    or pg_catalog.pg_get_userbyid(relation.relowner) <> current_user
+    or not relation.relrowsecurity;
+  if v_missing is not null then
+    raise exception
+      'frictionless relations lost controlled owner or RLS: %',
+      v_missing;
+  end if;
 
   select string_agg(c.relname, ', ' order by c.relname)
   into v_missing
@@ -301,6 +356,7 @@ $partners_restore_structure$;
 do $partners_restore_routines$
 declare
   v_signature text;
+  v_expected record;
   v_unexpected text;
   v_definition text;
 begin
@@ -450,6 +506,82 @@ begin
           'invalid Partners Finance admin privileges for %',
           v_signature;
       end if;
+    end if;
+  end loop;
+
+  for v_expected in
+    select *
+    from (values
+      ('affiliate_private.validate_affiliate_member_transition()', true, 'v', 'owner'),
+      ('affiliate_private.guard_affiliate_member_active_links()', false, 'v', 'owner'),
+      ('affiliate_private.guard_affiliate_auth_user_transition()', true, 'v', 'owner'),
+      ('affiliate_private.validate_affiliate_link_transition()', false, 'v', 'owner'),
+      ('affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_account_deletion_ready(uuid)', true, 's', 'owner'),
+      ('affiliate_private.partners_access_credit_balances(uuid)', true, 's', 'owner'),
+      ('affiliate_private.partners_account_balances(uuid)', true, 's', 'owner'),
+      ('affiliate_private.partners_cash_readiness(uuid)', true, 's', 'owner'),
+      ('affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_access_grants_reconcile(uuid)', true, 'v', 'service_role'),
+      ('affiliate_private.reconcile_access_grants_after_projection()', true, 'v', 'owner'),
+      ('affiliate_private.partners_service_access_credit_status(uuid)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_access_credit_quote(uuid,integer,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_access_credit_redeem(uuid,text,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_bootstrap_v2(uuid)', true, 's', 'service_role'),
+      ('affiliate_private.partners_service_dashboard_v2(uuid,integer,text,text)', true, 'v', 'service_role'),
+      ('public.partners_service_bootstrap_v2(uuid)', false, 's', 'service_role'),
+      ('public.partners_service_dashboard_v2(uuid,integer,text,text)', false, 'v', 'service_role'),
+      ('public.partners_service_join_v2(uuid,boolean,boolean,text)', false, 'v', 'service_role'),
+      ('public.partners_service_access_credit_quote(uuid,integer,text)', false, 'v', 'service_role'),
+      ('public.partners_service_access_credit_redeem(uuid,text,text)', false, 'v', 'service_role'),
+      ('public.partners_service_access_grants_reconcile(uuid)', false, 'v', 'service_role'),
+      ('public.partners_service_access_credit_status(uuid)', false, 'v', 'service_role'),
+      ('affiliate_private.partners_assert_kyc_cash_eligibility(uuid)', true, 'v', 'owner'),
+      ('affiliate_private.partners_service_payout_country_bind(uuid,text,text)', true, 'v', 'service_role'),
+      ('public.partners_service_payout_country_bind(uuid,text,text)', false, 'v', 'service_role'),
+      ('affiliate_private.partners_service_rotate_link(uuid,text)', true, 'v', 'service_role'),
+      ('public.partners_service_rotate_link(uuid,text)', false, 'v', 'service_role'),
+      ('affiliate_private.partners_service_payout_profile_get(uuid)', true, 's', 'service_role'),
+      ('public.partners_service_payout_profile_get(uuid)', false, 's', 'service_role'),
+      ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)', true, 'v', 'service_role'),
+      ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)', true, 'v', 'authenticated'),
+      ('affiliate_private.is_managed_partners_flag(text)', false, 'i', 'owner'),
+      ('affiliate_private.partners_require_control_access(text,text,boolean)', true, 's', 'owner'),
+      ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)', true, 'v', 'authenticated'),
+      ('affiliate_private.admin_partners_program_activate(text,text,text)', true, 'v', 'authenticated')
+    ) expected(signature, security_definer, volatility, access_role)
+  loop
+    if to_regprocedure(v_expected.signature) is null then
+      raise exception 'restore omitted frictionless routine %',
+        v_expected.signature;
+    end if;
+    if not exists (
+      select 1
+      from pg_catalog.pg_proc routine
+      where routine.oid = to_regprocedure(v_expected.signature)
+        and pg_catalog.pg_get_userbyid(routine.proowner) = current_user
+        and routine.prosecdef = v_expected.security_definer
+        and routine.provolatile = v_expected.volatility::"char"
+        and 'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
+    ) then
+      raise exception 'frictionless routine metadata drifted: %',
+        v_expected.signature;
+    end if;
+    if has_function_privilege('anon', v_expected.signature, 'EXECUTE')
+      or (
+        has_function_privilege(
+          'authenticated', v_expected.signature, 'EXECUTE'
+        ) <> (v_expected.access_role = 'authenticated')
+      )
+      or (
+        has_function_privilege(
+          'service_role', v_expected.signature, 'EXECUTE'
+        ) <> (v_expected.access_role = 'service_role')
+      )
+    then
+      raise exception 'frictionless routine ACL drifted: %',
+        v_expected.signature;
     end if;
   end loop;
 
@@ -1270,10 +1402,130 @@ begin
       'restored Partners pilot exceeds the 50-member privacy boundary';
   end if;
 
+  if (
+    select count(*)
+    from public.admin_feature_flags flag
+    where flag.key = any(array[
+      'partners_enabled', 'partners_invite_only',
+      'partners_cash_pilot_allowlist_only', 'partners_earnings_enabled',
+      'partners_credit_redemptions_enabled', 'partners_shadow_mode',
+      'partners_payouts_live', 'partners_tv_relay_enabled',
+      'partners_revolut_api_enabled'
+    ]::text[])
+      and affiliate_private.is_managed_partners_flag(flag.key)
+  ) <> 9
+    or affiliate_private.is_managed_partners_flag(
+      'partners_unreviewed_sentinel'
+    )
+  then
+    raise exception 'restore omitted or widened the nine managed Partners flags';
+  end if;
+
+  if not exists (
+      select 1
+      from affiliate_private.affiliate_release_gates gate
+      where gate.gate_key = 'membership_privacy_approved'
+    )
+    or affiliate_private.partners_approval_required_document_keys(
+      'membership_privacy_approved'
+    ) <> array[
+      'approval_record', 'deployment_proof', 'gdpr_self_assessment',
+      'privacy_notice', 'records_of_processing'
+    ]::text[]
+  then
+    raise exception 'restore omitted the membership privacy approval contract';
+  end if;
+
+  if exists (
+      select 1
+      from public.admin_feature_flags flag
+      where flag.key in (
+        'partners_earnings_enabled',
+        'partners_credit_redemptions_enabled'
+      )
+        and flag.enabled
+        and not exists (
+          select 1
+          from public.admin_feature_flags membership_flag
+          where membership_flag.key = 'partners_enabled'
+            and membership_flag.enabled
+        )
+    )
+    or exists (
+      select 1
+      from public.admin_feature_flags flag
+      where flag.key = 'partners_cash_pilot_allowlist_only'
+        and not flag.enabled
+        and not affiliate_private.release_gates_satisfied(
+          array['general_release_approved']::text[]
+        )
+    )
+  then
+    raise exception 'restored Partners feature state bypasses release dependencies';
+  end if;
+
+  if position(
+      'partners_invite_only'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)'
+      )))
+    ) > 0
+    or position(
+      'partners_assert_kyc_cash_eligibility'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)'
+      )))
+    ) = 0
+    or position(
+      'partners_assert_kyc_cash_eligibility'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)'
+      )))
+    ) = 0
+    or position(
+      'partners_assert_kyc_cash_eligibility'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)'
+      )))
+    ) = 0
+    or position(
+      'partners_cash_pilot_allowlist_only'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)'
+      )))
+    ) = 0
+    or position(
+      'membership_privacy_approved'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.guard_partners_program_approved_scope()'
+      )))
+    ) = 0
+    or position(
+      'membership_privacy_approved'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.admin_partners_program_activate(text,text,text)'
+      )))
+    ) = 0
+  then
+    raise exception 'restored frictionless membership or guarded cash contract drifted';
+  end if;
+
   for v_expected in
     select *
     from (
       values
+        (
+          'affiliate_accounts_member_validate_transition',
+          'affiliate_accounts',
+          'validate_affiliate_member_transition',
+          false
+        ),
+        (
+          'affiliate_accounts_member_active_link_guard',
+          'affiliate_accounts',
+          'guard_affiliate_member_active_links',
+          false
+        ),
         (
           'affiliate_kyc_sessions_register_didit_purpose',
           'affiliate_kyc_sessions',
@@ -1644,6 +1896,31 @@ begin
         v_expected.function_name;
     end if;
   end loop;
+
+  if (
+    select count(*)
+    from pg_catalog.pg_trigger trigger_row
+    join pg_catalog.pg_proc routine on routine.oid = trigger_row.tgfoid
+    join pg_catalog.pg_namespace routine_namespace
+      on routine_namespace.oid = routine.pronamespace
+    where trigger_row.tgrelid =
+        'public.cloud_entitlement_projection'::regclass
+      and trigger_row.tgname in (
+        'cloud_entitlement_projection_access_grants_insert',
+        'cloud_entitlement_projection_access_grants_update'
+      )
+      and trigger_row.tgenabled = 'O'
+      and not trigger_row.tgisinternal
+      and routine_namespace.nspname = 'affiliate_private'
+      and routine.proname = 'reconcile_access_grants_after_projection'
+      and trigger_row.tgtype = case trigger_row.tgname
+        when 'cloud_entitlement_projection_access_grants_insert' then 5
+        else 17
+      end
+  ) <> 2 then
+    raise exception
+      'restore omitted or rewired the two access-grant projection triggers';
+  end if;
 
   if not exists (
     select 1
@@ -2497,6 +2774,129 @@ begin
   if v_bad_entries > 0 then
     raise exception
       'restored payout reconciliation contains % invalid settled cycles',
+      v_bad_entries;
+  end if;
+
+  if not exists (
+      select 1
+      from affiliate_private.affiliate_access_credit_catalog catalog
+      where catalog.catalog_key = 'acc_p0_usd_plus_month_v1'
+        and catalog.status = 'active'
+        and catalog.plan_code = 'plus'
+        and catalog.currency = 'USD'
+        and catalog.currency_exponent = 2
+        and catalog.unit_amount_minor = 499
+        and catalog.unit_duration_days = 30
+        and catalog.minimum_months = 1
+        and catalog.maximum_months = 12
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_index index_row
+      where index_row.indexrelid = to_regclass(
+        'affiliate_private.affiliate_access_credit_catalog_one_active_idx'
+      )
+        and index_row.indisunique
+        and index_row.indisvalid
+        and index_row.indisready
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_constraint constraint_row
+      where constraint_row.conrelid =
+        'affiliate_private.affiliate_commission_entries'::regclass
+        and constraint_row.conname = 'affiliate_commission_entries_kind'
+        and constraint_row.convalidated
+        and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+          like '%access_credit_redemption%'
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_constraint constraint_row
+      where constraint_row.conrelid =
+        'affiliate_private.affiliate_commission_postings'::regclass
+        and constraint_row.conname = 'affiliate_commission_postings_account'
+        and constraint_row.convalidated
+        and pg_catalog.pg_get_constraintdef(constraint_row.oid)
+          like '%partner_access_credit_clearing%'
+    )
+  then
+    raise exception 'restore omitted the exact P0 access-credit ledger contract';
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_accounts account
+  left join auth.users cloud_user on cloud_user.id = account.user_id
+  left join affiliate_private.affiliate_program_versions program
+    on program.id = account.member_program_version_id
+  where account.member_status = 'active'
+    and (
+      cloud_user.id is null
+      or cloud_user.email_confirmed_at is null
+      or program.id is null
+      or program.status <> 'active'
+      or program.account_type <> 'individual'
+      or program.commission_rate_bps <> 2000
+      or program.attribution_window_days <> 30
+      or program.maturation_days <> 45
+      or account.member_terms_version_accepted
+        is distinct from program.terms_version
+      or account.member_disclosure_version_accepted
+        is distinct from program.disclosure_version
+    );
+  if v_bad_entries > 0 then
+    raise exception
+      'restored membership contains % invalid active members',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_links link
+  join affiliate_private.affiliate_accounts account
+    on account.id = link.account_id
+  where link.status = 'active'
+    and account.member_status <> 'active';
+  if v_bad_entries > 0 then
+    raise exception
+      'restored membership contains % active links for inactive members',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_access_credit_redemptions redemption
+  join affiliate_private.affiliate_access_credit_quotes quote
+    on quote.id = redemption.quote_id
+  join affiliate_private.affiliate_accounts account
+    on account.id = redemption.account_id
+  join affiliate_private.affiliate_commission_entries entry
+    on entry.id = redemption.ledger_entry_id
+  join public.cloud_access_grants grant_row
+    on grant_row.redemption_id = redemption.id
+  where quote.account_id <> redemption.account_id
+    or quote.status <> 'redeemed'
+    or quote.currency <> redemption.currency
+    or quote.currency_exponent <> redemption.currency_exponent
+    or quote.months <> redemption.months
+    or quote.total_amount_minor <> redemption.amount_minor
+    or quote.duration_days <> redemption.duration_days
+    or entry.account_id <> redemption.account_id
+    or entry.entry_kind <> 'access_credit_redemption'
+    or entry.currency <> redemption.currency
+    or entry.currency_exponent <> redemption.currency_exponent
+    or entry.amount_minor <> redemption.amount_minor
+    or grant_row.plan_code <> redemption.plan_code
+    or grant_row.duration_seconds <> redemption.duration_days::bigint * 86400
+    or grant_row.user_pseudonym <> account.user_pseudonym
+    or (
+      grant_row.user_id is not null
+      and grant_row.user_id is distinct from account.user_id
+    );
+  if v_bad_entries > 0 then
+    raise exception
+      'restored access-credit mapping contains % inconsistent grants',
       v_bad_entries;
   end if;
 

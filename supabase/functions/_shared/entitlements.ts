@@ -17,6 +17,41 @@ export type EntitlementDecision = {
   message: string;
 };
 
+type AccessGrantPlanCode = "plus" | "family" | "premium";
+
+type AccessGrantReconciliation = {
+  provider: {
+    provider: string | null;
+    status: string | null;
+    active: boolean;
+    hard_block: boolean;
+    reason: string;
+    fail_open: boolean;
+    current_period_end: string | null;
+    trial_ends_at: string | null;
+    fail_open_until: string | null;
+    last_verified_at: string | null;
+  };
+  overlay: {
+    status:
+      | "blocked_provider"
+      | "paused_provider"
+      | "active"
+      | "queued"
+      | "none";
+    active_grant: {
+      key: string;
+      status: "active";
+      plan_code: AccessGrantPlanCode;
+      remaining_seconds: number;
+      active_from: string;
+      active_until: string;
+    } | null;
+    queued_grants: number;
+    remaining_seconds: number;
+  };
+};
+
 const DEFAULT_TRIAL_DAYS = boundedEnvInt("NORVA_TRIAL_DAYS", 7, 1, 60);
 const DEFAULT_FAIL_OPEN_HOURS = boundedEnvInt("NORVA_BILLING_FAIL_OPEN_HOURS", 72, 1, 24 * 14);
 const ENTITLEMENTS_MODE = normalizeEntitlementsMode(Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce");
@@ -212,13 +247,282 @@ async function computeDecision(
     billingMode: BILLING_MODE,
     failOpenHours: DEFAULT_FAIL_OPEN_HOURS,
   });
-  if (verdict.kind === "allow") {
-    return applyEntitlementMode(allowedDecision(verdict.reason, projection as JsonRecord, limits, verdict.failOpen));
+  const providerDecision = verdict.kind === "allow"
+    ? applyEntitlementMode(allowedDecision(
+      verdict.reason,
+      projection as JsonRecord,
+      limits,
+      verdict.failOpen,
+    ))
+    : verdict.kind === "soft"
+    ? applyEntitlementMode(freeBrowseDecision(verdict.reason, projection))
+    : applyEntitlementMode(blockedDecision(verdict.reason, projection, limits));
+
+  // Provider-paid access is the hot path. The projection trigger introduced
+  // with access credits pauses their clocks transactionally whenever this same
+  // evaluator would allow the provider, so no overlay RPC is needed here.
+  if (verdict.kind === "allow") return providerDecision;
+
+  // A provider refund, revocation or fraud block is authoritative even if the
+  // grants RPC is unavailable or temporarily inconsistent. Never let a
+  // non-cash Partners credit bypass a provider hard block.
+  if (HARD_BLOCK_STATUSES.has(providerDecision.reason)) {
+    return providerDecision;
   }
-  if (verdict.kind === "soft") {
-    return applyEntitlementMode(freeBrowseDecision(verdict.reason, projection));
+
+  const reconciliation = await reconcileAccessGrantOverlay(db, userId);
+  if (!reconciliation) {
+    // Fail closed for the overlay while preserving the pre-existing billing
+    // behaviour: a missing/malformed grant response cannot create access.
+    return providerDecision;
   }
-  return applyEntitlementMode(blockedDecision(verdict.reason, projection, limits));
+
+  if (reconciliation.provider.hard_block) {
+    return applyEntitlementMode(blockedDecision(
+      reconciliation.provider.status as "revoked" | "refunded" | "fraud",
+      projection,
+      limits,
+    ));
+  }
+  if (reconciliation.provider.active) {
+    // The SQL reconciliation pauses queued/active grants while paid provider
+    // access is authoritative. The provider decision and limits remain the
+    // only source of access on this branch.
+    return providerDecision;
+  }
+
+  const activeGrant = reconciliation.overlay.active_grant;
+  if (
+    reconciliation.overlay.status === "active" &&
+    activeGrant &&
+    activeGrant.remaining_seconds > 0
+  ) {
+    return applyEntitlementMode(accessGrantDecision(
+      activeGrant.plan_code,
+      projection,
+    ));
+  }
+  return providerDecision;
+}
+
+async function reconcileAccessGrantOverlay(
+  db: SupabaseClient,
+  userId: string,
+): Promise<AccessGrantReconciliation | null> {
+  try {
+    const { data, error } = await db.rpc(
+      "partners_service_access_grants_reconcile",
+      { p_user_id: userId },
+    );
+    if (error) return null;
+    return sanitizeAccessGrantReconciliation(data);
+  } catch (_) {
+    return null;
+  }
+}
+
+function sanitizeAccessGrantReconciliation(
+  value: unknown,
+): AccessGrantReconciliation | null {
+  if (!isExactRecord(value, ["schema_version", "action", "provider", "overlay"])) {
+    return null;
+  }
+  if (
+    value.schema_version !== 1 ||
+    value.action !== "access_grants_reconciled" ||
+    !isExactRecord(value.provider, [
+      "provider",
+      "status",
+      "active",
+      "hard_block",
+      "reason",
+      "fail_open",
+      "current_period_end",
+      "trial_ends_at",
+      "fail_open_until",
+      "last_verified_at",
+    ]) ||
+    !isExactRecord(value.overlay, [
+      "status",
+      "active_grant",
+      "queued_grants",
+      "remaining_seconds",
+    ])
+  ) return null;
+
+  const provider = value.provider;
+  const overlay = value.overlay;
+  const providerName = provider.provider;
+  const providerStatus = provider.status;
+  const providerReason = provider.reason;
+  const providerFailOpen = provider.fail_open;
+  const failOpenReasons = new Set([
+    "billing_grace",
+    "billing_recently_verified",
+  ]);
+  const activeReasons: Record<string, Set<string>> = {
+    trialing: new Set(["trialing"]),
+    active: new Set(["active", ...failOpenReasons]),
+    cancelled_at_period_end: new Set(["cancelled_at_period_end"]),
+    grace: failOpenReasons,
+    past_due: failOpenReasons,
+    unknown: failOpenReasons,
+  };
+  const inactiveReasons: Record<string, Set<string>> = {
+    trialing: new Set(["trial_expired", "billing_unverified"]),
+    active: new Set(["subscription_expired", "billing_unverified"]),
+    cancelled_at_period_end: new Set([
+      "subscription_expired",
+      "billing_unverified",
+    ]),
+    grace: new Set(["billing_unverified"]),
+    past_due: new Set(["billing_unverified"]),
+    unknown: new Set(["billing_unverified"]),
+    expired: new Set(["subscription_expired"]),
+  };
+  const providerIsPerpetual = providerName === "system" ||
+    providerName === "manual";
+  const trialOrPeriodEnd = provider.trial_ends_at ??
+    provider.current_period_end;
+  if (
+    (providerName !== null && !boundedState(providerName)) ||
+    (providerStatus !== null && !boundedState(providerStatus)) ||
+    typeof provider.active !== "boolean" ||
+    typeof provider.hard_block !== "boolean" ||
+    typeof providerReason !== "string" ||
+    !boundedState(providerReason) ||
+    typeof providerFailOpen !== "boolean" ||
+    (provider.current_period_end !== null &&
+      !isValidIsoTimestamp(provider.current_period_end)) ||
+    (provider.trial_ends_at !== null &&
+      !isValidIsoTimestamp(provider.trial_ends_at)) ||
+    (provider.fail_open_until !== null &&
+      !isValidIsoTimestamp(provider.fail_open_until)) ||
+    (provider.last_verified_at !== null &&
+      !isValidIsoTimestamp(provider.last_verified_at)) ||
+    (providerStatus === null &&
+      (providerName !== null || provider.active || provider.hard_block ||
+        providerFailOpen || providerReason !== "subscription_required" ||
+        provider.current_period_end !== null || provider.trial_ends_at !== null ||
+        provider.fail_open_until !== null ||
+        provider.last_verified_at !== null)) ||
+    (providerStatus !== null && providerName === null) ||
+    (provider.active && provider.hard_block) ||
+    (provider.hard_block && !HARD_BLOCK_STATUSES.has(String(providerStatus))) ||
+    (provider.hard_block && providerReason !== providerStatus) ||
+    (providerFailOpen !== failOpenReasons.has(providerReason)) ||
+    (provider.active &&
+      !activeReasons[String(providerStatus)]?.has(providerReason)) ||
+    (!provider.active && !provider.hard_block && providerStatus !== null &&
+      !inactiveReasons[String(providerStatus)]?.has(providerReason)) ||
+    (["trialing", "trial_expired"].includes(providerReason) &&
+      trialOrPeriodEnd === null) ||
+    (providerReason === "active" &&
+      provider.current_period_end === null && !providerIsPerpetual) ||
+    (providerReason === "cancelled_at_period_end" &&
+      provider.current_period_end === null) ||
+    (providerReason === "billing_grace" &&
+      (providerStatus === "active"
+        ? provider.fail_open_until === null
+        : provider.current_period_end === null &&
+          provider.fail_open_until === null)) ||
+    (providerReason === "billing_recently_verified" &&
+      provider.last_verified_at === null) ||
+    (providerReason === "subscription_expired" &&
+      ["active", "cancelled_at_period_end"].includes(
+        String(providerStatus),
+      ) && provider.current_period_end === null) ||
+    ![
+      "blocked_provider",
+      "paused_provider",
+      "active",
+      "queued",
+      "none",
+    ].includes(String(overlay.status)) ||
+    !isNonNegativeSafeInteger(overlay.queued_grants) ||
+    !isNonNegativeSafeInteger(overlay.remaining_seconds)
+  ) return null;
+
+  let activeGrant: AccessGrantReconciliation["overlay"]["active_grant"] = null;
+  if (overlay.active_grant !== null) {
+    const grant = overlay.active_grant;
+    if (
+      !isExactRecord(grant, [
+        "key",
+        "status",
+        "plan_code",
+        "remaining_seconds",
+        "active_from",
+        "active_until",
+      ]) ||
+      typeof grant.key !== "string" ||
+      !/^cag_[0-9a-f]{24}$/.test(grant.key) ||
+      grant.status !== "active" ||
+      !["plus", "family", "premium"].includes(String(grant.plan_code)) ||
+      !isNonNegativeSafeInteger(grant.remaining_seconds) ||
+      grant.remaining_seconds <= 0 ||
+      !isValidIsoTimestamp(grant.active_from) ||
+      !isValidIsoTimestamp(grant.active_until) ||
+      Date.parse(grant.active_until as string) <= Date.parse(grant.active_from as string)
+    ) return null;
+    activeGrant = grant as AccessGrantReconciliation["overlay"]["active_grant"];
+  }
+
+  if (
+    (overlay.status === "blocked_provider" &&
+      (!provider.hard_block || activeGrant !== null)) ||
+    (overlay.status === "paused_provider" &&
+      (!provider.active || provider.hard_block || activeGrant !== null)) ||
+    (overlay.status === "active" &&
+      (provider.active || provider.hard_block || activeGrant === null)) ||
+    (overlay.status === "queued" &&
+      (provider.active || provider.hard_block || activeGrant !== null ||
+        overlay.queued_grants < 1)) ||
+    (overlay.status === "none" &&
+      (provider.active || provider.hard_block || activeGrant !== null ||
+        overlay.queued_grants !== 0 || overlay.remaining_seconds !== 0)) ||
+    (activeGrant !== null &&
+      overlay.remaining_seconds < activeGrant.remaining_seconds)
+  ) return null;
+
+  return {
+    provider: {
+      provider: providerName as string | null,
+      status: providerStatus as string | null,
+      active: provider.active as boolean,
+      hard_block: provider.hard_block as boolean,
+      reason: providerReason,
+      fail_open: providerFailOpen,
+      current_period_end: provider.current_period_end as string | null,
+      trial_ends_at: provider.trial_ends_at as string | null,
+      fail_open_until: provider.fail_open_until as string | null,
+      last_verified_at: provider.last_verified_at as string | null,
+    },
+    overlay: {
+      status: overlay.status as AccessGrantReconciliation["overlay"]["status"],
+      active_grant: activeGrant,
+      queued_grants: overlay.queued_grants as number,
+      remaining_seconds: overlay.remaining_seconds as number,
+    },
+  };
+}
+
+function accessGrantDecision(
+  planCode: AccessGrantPlanCode,
+  projection: JsonRecord | null,
+): EntitlementDecision {
+  return {
+    allowed: true,
+    reason: "partners_access_credit",
+    status: "active",
+    planCode,
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
+    failOpen: false,
+    limits: PLAN_LIMITS[planCode],
+    projection: projection ? sanitizeProjection(projection) : null,
+    message: "Norva access is active through a Partners credit.",
+  };
 }
 
 export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
@@ -405,6 +709,36 @@ function billingMessage(reason: string) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isExactRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is JsonRecord {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  return actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index]);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0;
+}
+
+function isValidIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length <= 40 &&
+    Number.isFinite(Date.parse(value));
+}
+
+function boundedState(value: unknown): value is string {
+  return typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 64 &&
+    /^[a-z][a-z0-9_]*$/.test(value);
 }
 
 function normalizeBillingMode(value: string) {

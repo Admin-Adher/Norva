@@ -1050,8 +1050,16 @@
         'pending',
         'available',
         'held',
+        'redeemed',
         'paid',
         'reversed'
+    ]);
+    const PARTNERS_MEMBERSHIP_STATUSES = new Set([
+        'not_joined',
+        'active',
+        'held',
+        'suspended',
+        'closed'
     ]);
     const PARTNERS_HISTORY_TYPES = new Set([
         'commission_pending',
@@ -1067,6 +1075,9 @@
     ]);
     const PARTNERS_SHARE_URL_PATTERN = /^https:\/\/norva\.tv\/r\/[A-Za-z0-9_-]{32}$/;
     const PARTNERS_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
+    const PARTNERS_CREDIT_QUOTE_KEY_PATTERN = /^crq_[0-9a-f]{24}$/;
+    const PARTNERS_CREDIT_REDEMPTION_KEY_PATTERN = /^crd_[0-9a-f]{24}$/;
+    const PARTNERS_ACCESS_GRANT_KEY_PATTERN = /^cag_[0-9a-f]{24}$/;
     const PARTNERS_CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
     const PARTNERS_TV_RELAY_TOKEN_PATTERN = /^v1\.[A-Za-z0-9_-]{43}\.[0-9a-f]{64}$/;
     const PARTNERS_PUBLIC_ERROR_CODES = new Set([
@@ -1093,6 +1104,13 @@
         'idempotency_key_reused',
         'request_in_progress',
         'partners_access_requests_disabled',
+        'membership_required',
+        'credits_disabled',
+        'quote_expired',
+        'insufficient_balance',
+        'catalog_unavailable',
+        'quote_conflict',
+        'payout_country_unavailable',
         'partners_temporarily_unavailable'
     ]);
     const PARTNERS_CONSENT_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/;
@@ -1142,6 +1160,8 @@
         'duplicate_request'
     ]);
     const PARTNERS_PAYOUT_READINESS_REASONS = new Set([
+        'cash_pilot_not_allowed',
+        'payout_country_required',
         'account_not_active',
         'kyc_not_verified',
         'fiscal_profile_required',
@@ -1231,6 +1251,13 @@
     }
 
     function validatePartnersBootstrap(payload, expectedJurisdiction = {}) {
+        if (payload?.data?.schema_version === 2) {
+            return validatePartnersBootstrapV2(payload);
+        }
+        return validatePartnersBootstrapV1(payload, expectedJurisdiction);
+    }
+
+    function validatePartnersBootstrapV1(payload, expectedJurisdiction = {}) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])) invalid();
         if (payload.version !== PARTNERS_CONTRACT_VERSION
@@ -1387,6 +1414,151 @@
         return deepFreeze(cloneJson(payload));
     }
 
+    function validatePartnersV2Flags(flags, invalid) {
+        if (!hasExactKeys(flags, [
+            'partners_enabled',
+            'partners_invite_only',
+            'partners_cash_pilot_allowlist_only',
+            'partners_earnings_enabled',
+            'partners_credit_redemptions_enabled',
+            'partners_payouts_live'
+        ]) || Object.values(flags).some((flag) => typeof flag !== 'boolean')) invalid();
+        return flags;
+    }
+
+    function validatePartnersV2Membership(membership, invalid) {
+        if (!hasExactKeys(membership, [
+            'exists',
+            'status',
+            'joined_at',
+            'verification_status'
+        ])
+            || typeof membership.exists !== 'boolean'
+            || !PARTNERS_MEMBERSHIP_STATUSES.has(membership.status)
+            || !isIsoTimestamp(membership.joined_at, true)
+            || (membership.verification_status !== null
+                && !PARTNERS_VERIFICATION_STATUSES.has(
+                    membership.verification_status
+                ))) invalid();
+        if ((!membership.exists
+                && (membership.status !== 'not_joined'
+                    || membership.joined_at !== null
+                    || membership.verification_status !== null))
+            || (membership.exists && membership.verification_status === null)
+            || (membership.status === 'active'
+                && (!membership.exists || membership.joined_at === null))) invalid();
+        return membership;
+    }
+
+    function validatePartnersV2Program(program, invalid) {
+        if (program === null) return null;
+        if (!hasExactKeys(program, [
+            'commission_rate_bps',
+            'attribution_window_days',
+            'maturation_days',
+            'terms_version',
+            'disclosure_version'
+        ])
+            || program.commission_rate_bps !== 2000
+            || program.attribution_window_days !== 30
+            || program.maturation_days !== 45
+            || !isBoundedString(program.terms_version, {
+                pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+                max: 64
+            })
+            || !isBoundedString(program.disclosure_version, {
+                pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+                max: 64
+            })) invalid();
+        return program;
+    }
+
+    function validatePartnersCashReadiness(readiness, invalid) {
+        if (!hasExactKeys(readiness, ['ready', 'reason'])
+            || typeof readiness.ready !== 'boolean'
+            || (readiness.ready
+                ? readiness.reason !== null
+                : ![
+                    'account_blocked',
+                    'membership_required',
+                    'cash_pilot_not_allowed',
+                    'payout_country_required',
+                    'kyc_required',
+                    'fiscal_profile_required',
+                    'corridor_required',
+                    'fiscal_or_corridor_required'
+                ].includes(readiness.reason))) invalid();
+        return readiness;
+    }
+
+    function validatePartnersBootstrapV2(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'flags',
+                'eligibility',
+                'membership',
+                'program',
+                'link',
+                'credit_readiness',
+                'cash_readiness'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== 2) invalid();
+        validatePartnersV2Flags(data.flags, invalid);
+        validatePartnersV2Membership(data.membership, invalid);
+        validatePartnersV2Program(data.program, invalid);
+        if (!hasExactKeys(data.eligibility, ['visible', 'eligible', 'reason'])
+            || typeof data.eligibility.visible !== 'boolean'
+            || typeof data.eligibility.eligible !== 'boolean'
+            || ![
+                'email_unconfirmed',
+                'account_blocked',
+                'disabled',
+                'program_unavailable',
+                'available'
+            ].includes(data.eligibility.reason)
+            || data.eligibility.visible !== (
+                data.flags.partners_enabled || data.membership.exists
+            )
+            || data.eligibility.eligible !== (
+                data.eligibility.reason === 'available'
+            )
+            || (data.eligibility.eligible
+                && (!data.eligibility.visible
+                    || !data.flags.partners_enabled
+                    || data.program === null))) invalid();
+        if (data.link !== null) {
+            if (!hasExactKeys(data.link, ['status', 'share_url', 'created_at'])
+                || data.link.status !== 'active'
+                || !isBoundedString(data.link.share_url, {
+                    pattern: PARTNERS_SHARE_URL_PATTERN,
+                    max: 128
+                })
+                || !isIsoTimestamp(data.link.created_at)
+                || data.membership.status !== 'active') invalid();
+        }
+        if (!hasExactKeys(data.credit_readiness, ['ready', 'reason'])
+            || typeof data.credit_readiness.ready !== 'boolean'
+            || (data.credit_readiness.ready
+                ? data.credit_readiness.reason !== null
+                : !['membership_required', 'credits_disabled'].includes(
+                    data.credit_readiness.reason
+                ))
+            || data.credit_readiness.ready !== (
+                data.membership.status === 'active'
+                && data.flags.partners_credit_redemptions_enabled
+            )) invalid();
+        validatePartnersCashReadiness(data.cash_readiness, invalid);
+        if (data.cash_readiness.reason === 'cash_pilot_not_allowed'
+            && (!data.flags.partners_cash_pilot_allowlist_only
+                || data.membership.status !== 'active')) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
     function validatePartnersAccessRequestState(value) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(value, [
@@ -1517,7 +1689,500 @@
         return deepFreeze(cloneJson(payload));
     }
 
+    function validatePartnersJoin(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'membership',
+                'program',
+                'link',
+                'cash_readiness',
+                'next_action'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== 2
+            || data.action !== 'membership_joined'
+            || typeof data.replayed !== 'boolean'
+            || data.next_action !== 'share_link'
+            || !hasExactKeys(data.membership, [
+                'status',
+                'joined_at',
+                'verification_status'
+            ])
+            || data.membership.status !== 'active'
+            || !isIsoTimestamp(data.membership.joined_at)
+            || !PARTNERS_VERIFICATION_STATUSES.has(
+                data.membership.verification_status
+            )
+            || !hasExactKeys(data.program, [
+                'commission_rate_bps',
+                'attribution_window_days',
+                'maturation_days',
+                'terms_version',
+                'disclosure_version'
+            ])
+            || data.program.commission_rate_bps !== 2000
+            || data.program.attribution_window_days !== 30
+            || data.program.maturation_days !== 45
+            || !isBoundedString(data.program.terms_version, {
+                pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+                max: 64
+            })
+            || !isBoundedString(data.program.disclosure_version, {
+                pattern: /^[a-z0-9][a-z0-9._-]{2,63}$/,
+                max: 64
+            })
+            || !hasExactKeys(data.link, ['status', 'share_url', 'created_at'])
+            || data.link.status !== 'active'
+            || !isBoundedString(data.link.share_url, {
+                pattern: PARTNERS_SHARE_URL_PATTERN,
+                max: 128
+            })
+            || !isIsoTimestamp(data.link.created_at)) invalid();
+        validatePartnersCashReadiness(data.cash_readiness, invalid);
+        if (data.cash_readiness.reason === 'membership_required') invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersLinkMutation(payload) {
+        if (payload?.data?.schema_version === 1) {
+            return validatePartnersAction(payload, 'link_rotated', { linkRequired: true });
+        }
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'membership',
+                'link',
+                'next_action'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== 2
+            || data.action !== 'link_rotated'
+            || typeof data.replayed !== 'boolean'
+            || data.next_action !== 'share_link'
+            || !hasExactKeys(data.membership, [
+                'status',
+                'joined_at',
+                'verification_status'
+            ])
+            || data.membership.status !== 'active'
+            || !isIsoTimestamp(data.membership.joined_at)
+            || !PARTNERS_VERIFICATION_STATUSES.has(
+                data.membership.verification_status
+            )
+            || !hasExactKeys(data.link, ['status', 'share_url', 'rotated_at'])
+            || data.link.status !== 'active'
+            || !isBoundedString(data.link.share_url, {
+                pattern: PARTNERS_SHARE_URL_PATTERN,
+                max: 128
+            })
+            || !isIsoTimestamp(data.link.rotated_at)) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersAccessProvider(provider, invalid) {
+        const statuses = [
+            'trialing',
+            'active',
+            'grace',
+            'past_due',
+            'cancelled_at_period_end',
+            'expired',
+            'revoked',
+            'refunded',
+            'fraud',
+            'unknown'
+        ];
+        const hardStatuses = ['revoked', 'refunded', 'fraud'];
+        const failOpenReasons = ['billing_grace', 'billing_recently_verified'];
+        const activeReasons = {
+            trialing: ['trialing'],
+            active: ['active', ...failOpenReasons],
+            cancelled_at_period_end: ['cancelled_at_period_end'],
+            grace: failOpenReasons,
+            past_due: failOpenReasons,
+            unknown: failOpenReasons
+        };
+        const inactiveReasons = {
+            trialing: ['trial_expired', 'billing_unverified'],
+            active: ['subscription_expired', 'billing_unverified'],
+            cancelled_at_period_end: ['subscription_expired', 'billing_unverified'],
+            grace: ['billing_unverified'],
+            past_due: ['billing_unverified'],
+            unknown: ['billing_unverified'],
+            expired: ['subscription_expired']
+        };
+        const providerIsPerpetual = ['system', 'manual'].includes(
+            provider.provider
+        );
+        const trialOrPeriodEnd = provider.trial_ends_at
+            || provider.current_period_end;
+        if (!hasExactKeys(provider, [
+            'provider',
+            'status',
+            'active',
+            'hard_block',
+            'reason',
+            'fail_open',
+            'current_period_end',
+            'trial_ends_at',
+            'fail_open_until',
+            'last_verified_at'
+        ])
+            || !isBoundedString(provider.provider, {
+                nullable: true,
+                pattern: /^[a-z][a-z0-9_]{0,63}$/,
+                max: 64
+            })
+            || !isBoundedString(provider.status, {
+                nullable: true,
+                pattern: /^[a-z][a-z0-9_]{0,63}$/,
+                max: 64
+            })
+            || (provider.status !== null && !statuses.includes(provider.status))
+            || !isBoundedString(provider.reason, {
+                pattern: /^[a-z][a-z0-9_]{0,63}$/,
+                max: 64
+            })
+            || typeof provider.active !== 'boolean'
+            || typeof provider.hard_block !== 'boolean'
+            || typeof provider.fail_open !== 'boolean'
+            || !isIsoTimestamp(provider.current_period_end, true)
+            || !isIsoTimestamp(provider.trial_ends_at, true)
+            || !isIsoTimestamp(provider.fail_open_until, true)
+            || !isIsoTimestamp(provider.last_verified_at, true)
+            || (provider.status === null && (
+                provider.provider !== null
+                || provider.active
+                || provider.hard_block
+                || provider.fail_open
+                || provider.reason !== 'subscription_required'
+                || provider.current_period_end !== null
+                || provider.trial_ends_at !== null
+                || provider.fail_open_until !== null
+                || provider.last_verified_at !== null
+            ))
+            || (provider.status !== null && provider.provider === null)
+            || (provider.active && provider.hard_block)
+            || (provider.hard_block
+                && !hardStatuses.includes(provider.status))
+            || (provider.hard_block && provider.reason !== provider.status)
+            || (provider.fail_open !== failOpenReasons.includes(provider.reason))
+            || (provider.active
+                && !activeReasons[provider.status]?.includes(provider.reason))
+            || (!provider.active && !provider.hard_block && provider.status !== null
+                && !inactiveReasons[provider.status]?.includes(provider.reason))
+            || (['trialing', 'trial_expired'].includes(provider.reason)
+                && trialOrPeriodEnd === null)
+            || (provider.reason === 'active'
+                && provider.current_period_end === null
+                && !providerIsPerpetual)
+            || (provider.reason === 'cancelled_at_period_end'
+                && provider.current_period_end === null)
+            || (provider.reason === 'billing_grace'
+                && (provider.status === 'active'
+                    ? provider.fail_open_until === null
+                    : provider.current_period_end === null
+                        && provider.fail_open_until === null))
+            || (provider.reason === 'billing_recently_verified'
+                && provider.last_verified_at === null)
+            || (provider.reason === 'subscription_expired'
+                && ['active', 'cancelled_at_period_end'].includes(provider.status)
+                && provider.current_period_end === null)) invalid();
+        return provider;
+    }
+
+    function validatePartnersAccessOverlay(overlay, invalid, provider = null) {
+        if (!hasExactKeys(overlay, [
+            'status',
+            'active_grant',
+            'queued_grants',
+            'remaining_seconds'
+        ])
+            || ![
+                'blocked_provider',
+                'paused_provider',
+                'active',
+                'queued',
+                'none'
+            ].includes(overlay.status)
+            || !Number.isSafeInteger(overlay.queued_grants)
+            || overlay.queued_grants < 0
+            || !Number.isSafeInteger(overlay.remaining_seconds)
+            || overlay.remaining_seconds < 0) invalid();
+
+        const grant = overlay.active_grant;
+        if (grant !== null) {
+            if (!hasExactKeys(grant, [
+                'key',
+                'status',
+                'plan_code',
+                'remaining_seconds',
+                'active_from',
+                'active_until'
+            ])
+                || !PARTNERS_ACCESS_GRANT_KEY_PATTERN.test(grant.key)
+                || grant.status !== 'active'
+                || !['plus', 'family', 'premium'].includes(grant.plan_code)
+                || !Number.isSafeInteger(grant.remaining_seconds)
+                || grant.remaining_seconds <= 0
+                || !isIsoTimestamp(grant.active_from)
+                || !isIsoTimestamp(grant.active_until)
+                || Date.parse(grant.active_until) <= Date.parse(grant.active_from)) invalid();
+        }
+
+        const providerActive = provider?.active === true;
+        const providerHardBlock = provider?.hard_block === true;
+        if ((provider && overlay.status === 'blocked_provider' && !providerHardBlock)
+            || (provider && overlay.status === 'paused_provider'
+                && (!providerActive || providerHardBlock))
+            || (overlay.status === 'active'
+                && ((provider && (providerActive || providerHardBlock))
+                    || grant === null
+                    || overlay.remaining_seconds !== grant.remaining_seconds))
+            || (overlay.status === 'queued'
+                && ((provider && (providerActive || providerHardBlock))
+                    || grant !== null
+                    || overlay.queued_grants < 1
+                    || overlay.remaining_seconds !== 0))
+            || (overlay.status === 'none'
+                && ((provider && (providerActive || providerHardBlock))
+                    || grant !== null
+                    || overlay.queued_grants !== 0
+                    || overlay.remaining_seconds !== 0))
+            || (['blocked_provider', 'paused_provider'].includes(overlay.status)
+                && (grant !== null || overlay.remaining_seconds !== 0))) invalid();
+        return overlay;
+    }
+
+    function validatePartnersAvailableBalance(balance, invalid) {
+        if (!hasExactKeys(balance, [
+            'currency',
+            'currency_exponent',
+            'available_minor'
+        ])
+            || balance.currency !== 'USD'
+            || balance.currency_exponent !== 2
+            || !Number.isSafeInteger(balance.available_minor)
+            || balance.available_minor < 0) invalid();
+        return balance;
+    }
+
+    function validatePartnersAccessCreditQuote(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'quote',
+                'balance'
+            ])) invalid();
+        const data = payload.data;
+        const quote = data.quote;
+        if (data.schema_version !== 1
+            || data.action !== 'access_credit_quoted'
+            || typeof data.replayed !== 'boolean'
+            || !hasExactKeys(quote, [
+                'key',
+                'status',
+                'currency',
+                'currency_exponent',
+                'plan_code',
+                'months',
+                'unit_amount_minor',
+                'total_amount_minor',
+                'duration_days',
+                'expires_at'
+            ])
+            || !PARTNERS_CREDIT_QUOTE_KEY_PATTERN.test(quote.key)
+            || quote.status !== 'open'
+            || quote.currency !== 'USD'
+            || quote.currency_exponent !== 2
+            || quote.plan_code !== 'plus'
+            || !Number.isSafeInteger(quote.months)
+            || quote.months < 1
+            || quote.months > 12
+            || quote.unit_amount_minor !== 499
+            || quote.total_amount_minor !== quote.months * 499
+            || quote.duration_days !== quote.months * 30
+            || !isIsoTimestamp(quote.expires_at)) invalid();
+        validatePartnersAvailableBalance(data.balance, invalid);
+        if (data.balance.available_minor < quote.total_amount_minor) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersAccessCreditRedemption(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'redemption',
+                'grant',
+                'balance',
+                'overlay'
+            ])) invalid();
+        const data = payload.data;
+        const redemption = data.redemption;
+        const grant = data.grant;
+        if (data.schema_version !== 1
+            || data.action !== 'access_credit_redeemed'
+            || typeof data.replayed !== 'boolean'
+            || !hasExactKeys(redemption, [
+                'key',
+                'status',
+                'currency',
+                'currency_exponent',
+                'amount_minor',
+                'months'
+            ])
+            || !PARTNERS_CREDIT_REDEMPTION_KEY_PATTERN.test(redemption.key)
+            || redemption.status !== 'granted'
+            || redemption.currency !== 'USD'
+            || redemption.currency_exponent !== 2
+            || !Number.isSafeInteger(redemption.months)
+            || redemption.months < 1
+            || redemption.months > 12
+            || redemption.amount_minor !== redemption.months * 499
+            || !hasExactKeys(grant, [
+                'key',
+                'status',
+                'plan_code',
+                'duration_days',
+                'remaining_seconds',
+                'active_from',
+                'active_until'
+            ])
+            || !PARTNERS_ACCESS_GRANT_KEY_PATTERN.test(grant.key)
+            || !['queued', 'active', 'paused_provider'].includes(grant.status)
+            || grant.plan_code !== 'plus'
+            || grant.duration_days !== redemption.months * 30
+            || !Number.isSafeInteger(grant.remaining_seconds)
+            || grant.remaining_seconds < 1
+            || grant.remaining_seconds > grant.duration_days * 86400
+            || (grant.status === 'active'
+                ? !isIsoTimestamp(grant.active_from)
+                    || !isIsoTimestamp(grant.active_until)
+                    || Date.parse(grant.active_until) <= Date.parse(grant.active_from)
+                : grant.active_from !== null || grant.active_until !== null)) invalid();
+        validatePartnersAvailableBalance(data.balance, invalid);
+        validatePartnersAccessOverlay(data.overlay, invalid);
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersAccessCreditStatus(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'balance',
+                'catalog',
+                'next_maturation_at',
+                'credit_readiness',
+                'cash_readiness',
+                'overlay',
+                'provider'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== 1
+            || data.action !== 'access_credit_status'
+            || !hasExactKeys(data.balance, [
+                'currency',
+                'currency_exponent',
+                'pending_minor',
+                'available_minor',
+                'recovery_due_minor',
+                'redeemed_minor'
+            ])
+            || data.balance.currency !== 'USD'
+            || data.balance.currency_exponent !== 2
+            || ['pending_minor', 'available_minor', 'recovery_due_minor', 'redeemed_minor']
+                .some((key) => !Number.isSafeInteger(data.balance[key])
+                    || data.balance[key] < 0)
+            || !isIsoTimestamp(data.next_maturation_at, true)) invalid();
+
+        if (data.catalog !== null) {
+            if (!hasExactKeys(data.catalog, [
+                'catalog_key',
+                'plan_code',
+                'currency',
+                'currency_exponent',
+                'unit_amount_minor',
+                'unit_duration_days',
+                'minimum_months',
+                'maximum_months'
+            ])
+                || !/^acc_[a-z0-9][a-z0-9._-]{2,63}$/.test(
+                    data.catalog.catalog_key
+                )
+                || data.catalog.plan_code !== 'plus'
+                || data.catalog.currency !== 'USD'
+                || data.catalog.currency_exponent !== 2
+                || data.catalog.unit_amount_minor !== 499
+                || data.catalog.unit_duration_days !== 30
+                || data.catalog.minimum_months !== 1
+                || data.catalog.maximum_months !== 12) invalid();
+        }
+        if (!hasExactKeys(data.credit_readiness, ['ready', 'reason'])
+            || typeof data.credit_readiness.ready !== 'boolean'
+            || (data.credit_readiness.ready
+                ? data.credit_readiness.reason !== null || data.catalog === null
+                : ![
+                    'membership_required',
+                    'credits_disabled',
+                    'catalog_unavailable',
+                    'currency_not_supported'
+                ].includes(data.credit_readiness.reason))
+            || (data.credit_readiness.reason === 'catalog_unavailable'
+                && data.catalog !== null)
+            || (data.credit_readiness.reason === 'currency_not_supported'
+                && data.catalog !== null)
+            || !hasExactKeys(data.cash_readiness, ['ready', 'reason'])
+            || typeof data.cash_readiness.ready !== 'boolean'
+            || (data.cash_readiness.ready
+                ? data.cash_readiness.reason !== null
+                : ![
+                    'account_blocked',
+                    'membership_required',
+                    'cash_pilot_not_allowed',
+                    'payout_country_required',
+                    'kyc_required',
+                    'fiscal_profile_required',
+                    'corridor_required',
+                    'fiscal_or_corridor_required'
+                ].includes(data.cash_readiness.reason))) invalid();
+        validatePartnersAccessProvider(data.provider, invalid);
+        validatePartnersAccessOverlay(data.overlay, invalid, data.provider);
+        return deepFreeze(cloneJson(payload));
+    }
+
     function validatePartnersDashboard(payload, expectedStatus) {
+        if (payload?.data?.schema_version === 2) {
+            return validatePartnersDashboardV2(payload, expectedStatus);
+        }
+        return validatePartnersDashboardV1(payload, expectedStatus);
+    }
+
+    function validatePartnersDashboardV1(payload, expectedStatus) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
             || payload.version !== PARTNERS_CONTRACT_VERSION
@@ -1677,6 +2342,177 @@
             && (data.history.items.length !== 0
                 || data.history.next_cursor !== null)) invalid();
 
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersDashboardV2(payload, expectedStatus) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'membership',
+                'link',
+                'program',
+                'flags',
+                'balances',
+                'next_maturation_at',
+                'credit_readiness',
+                'cash_readiness',
+                'overlay',
+                'provider',
+                'history'
+            ])
+            || payload.data.schema_version !== 2
+            || expectedStatus === 'held') invalid();
+        const data = payload.data;
+        validatePartnersV2Membership(data.membership, invalid);
+        validatePartnersV2Program(data.program, invalid);
+        validatePartnersV2Flags(data.flags, invalid);
+        if (data.link !== null) {
+            if (!hasExactKeys(data.link, ['status', 'share_url', 'created_at'])
+                || data.link.status !== 'active'
+                || !isBoundedString(data.link.share_url, {
+                    pattern: PARTNERS_SHARE_URL_PATTERN,
+                    max: 128
+                })
+                || !isIsoTimestamp(data.link.created_at)
+                || data.membership.status !== 'active') invalid();
+        }
+        if (!Array.isArray(data.balances) || data.balances.length > 32) invalid();
+        for (const [index, balance] of data.balances.entries()) {
+            if (!hasExactKeys(balance, [
+                'currency',
+                'currency_exponent',
+                'pending_minor',
+                'available_minor',
+                'recovery_due_minor',
+                'redeemed_minor'
+            ])
+                || !/^[A-Z]{3}$/.test(balance.currency)
+                || !Number.isSafeInteger(balance.currency_exponent)
+                || balance.currency_exponent < 0
+                || balance.currency_exponent > 6
+                || ['pending_minor', 'available_minor', 'recovery_due_minor', 'redeemed_minor']
+                    .some((key) => !Number.isSafeInteger(balance[key])
+                        || balance[key] < 0)
+                || (index > 0
+                    && data.balances[index - 1].currency.localeCompare(
+                        balance.currency
+                    ) >= 0)) invalid();
+        }
+        if (!isIsoTimestamp(data.next_maturation_at, true)) invalid();
+        const hasUsdBalance = data.balances.some((entry) => (
+            entry.currency === 'USD'
+        ));
+        const hasOnlyUnsupportedCurrency = data.balances.length > 0
+            && !hasUsdBalance;
+
+        const credit = data.credit_readiness;
+        if (!hasExactKeys(credit, ['ready', 'reason', 'catalog'])
+            || typeof credit.ready !== 'boolean') invalid();
+        if (credit.catalog !== null) {
+            if (!hasExactKeys(credit.catalog, [
+                'catalog_key',
+                'plan_code',
+                'currency',
+                'currency_exponent',
+                'unit_amount_minor',
+                'unit_duration_days',
+                'minimum_months',
+                'maximum_months'
+            ])
+                || !/^acc_[a-z0-9][a-z0-9._-]{2,63}$/.test(
+                    credit.catalog.catalog_key
+                )
+                || credit.catalog.plan_code !== 'plus'
+                || credit.catalog.currency !== 'USD'
+                || credit.catalog.currency_exponent !== 2
+                || credit.catalog.unit_amount_minor !== 499
+                || credit.catalog.unit_duration_days !== 30
+                || credit.catalog.minimum_months !== 1
+                || credit.catalog.maximum_months !== 12) invalid();
+        }
+        const expectedCreditReason = data.membership.status !== 'active'
+            ? 'membership_required'
+            : !data.flags.partners_credit_redemptions_enabled
+                ? 'credits_disabled'
+                : hasOnlyUnsupportedCurrency
+                    ? 'currency_not_supported'
+                    : credit.catalog === null
+                        ? 'catalog_unavailable'
+                        : null;
+        if (credit.ready !== (expectedCreditReason === null)
+            || credit.reason !== expectedCreditReason
+            || (expectedCreditReason !== null && credit.catalog !== null)) invalid();
+        validatePartnersCashReadiness(data.cash_readiness, invalid);
+        if (data.cash_readiness.reason === 'cash_pilot_not_allowed'
+            && (!data.flags.partners_cash_pilot_allowlist_only
+                || data.membership.status !== 'active')) invalid();
+        validatePartnersAccessProvider(data.provider, invalid);
+        validatePartnersAccessOverlay(data.overlay, invalid, data.provider);
+
+        const history = data.history;
+        if (!hasExactKeys(history, ['status', 'items', 'next_cursor'])
+            || history.status !== expectedStatus
+            || !Array.isArray(history.items)
+            || history.items.length > 50
+            || (history.next_cursor !== null
+                && !isBoundedString(history.next_cursor, {
+                    pattern: PARTNERS_CURSOR_PATTERN,
+                    max: 256
+                }))) invalid();
+        for (const item of history.items) {
+            if (!hasExactKeys(item, [
+                'key',
+                'type',
+                'status',
+                'currency',
+                'currency_exponent',
+                'amount_minor',
+                'occurred_at',
+                'matures_at'
+            ])
+                || !/^led_[0-9a-f]{24}$/.test(item.key)
+                || ![
+                    'accrual',
+                    'release',
+                    'access_credit_redemption',
+                    'payout_settlement',
+                    'payout_late_settlement',
+                    'reversal',
+                    'manual_reversal',
+                    'payout_return'
+                ].includes(item.type)
+                || !['pending', 'available', 'redeemed', 'paid', 'reversed']
+                    .includes(item.status)
+                || !/^[A-Z]{3}$/.test(item.currency)
+                || !Number.isSafeInteger(item.currency_exponent)
+                || item.currency_exponent < 0
+                || item.currency_exponent > 6
+                || !Number.isSafeInteger(item.amount_minor)
+                || item.amount_minor < 1
+                || !isIsoTimestamp(item.occurred_at)
+                || !isIsoTimestamp(item.matures_at, true)
+                || (expectedStatus !== 'all' && item.status !== expectedStatus)) invalid();
+            const typeStatusValid =
+                (item.type === 'accrual'
+                    && ['pending', 'available'].includes(item.status))
+                || (item.type === 'release' && item.status === 'available')
+                || (item.type === 'access_credit_redemption'
+                    && item.status === 'redeemed')
+                || (['payout_settlement', 'payout_late_settlement']
+                    .includes(item.type) && item.status === 'paid')
+                || (['reversal', 'manual_reversal', 'payout_return']
+                    .includes(item.type) && item.status === 'reversed');
+            if (!typeStatusValid) invalid();
+        }
+        if (!data.membership.exists
+            && (data.link !== null
+                || history.items.length !== 0
+                || history.next_cursor !== null
+                || data.balances.length !== 0)) invalid();
         return deepFreeze(cloneJson(payload));
     }
 
@@ -1853,9 +2689,11 @@
             ])) invalid();
         const data = payload.data;
         if (data.schema_version !== PARTNERS_SCHEMA_VERSION
-            || !hasExactKeys(data.account, ['id', 'status'])
+            || !hasExactKeys(data.account, ['id', 'status', 'country_code'])
             || !/^prt_[0-9a-f]{24}$/.test(data.account.id)
             || !PARTNERS_ACCOUNT_STATUSES.has(data.account.status)
+            || (data.account.country_code !== null
+                && !/^[A-Z]{2}$/.test(data.account.country_code))
             || (data.fiscal !== null && (
                 !hasExactKeys(data.fiscal, ['status', 'country_code'])
                 || !PARTNERS_FISCAL_STATUSES.has(data.fiscal.status)
@@ -1881,10 +2719,21 @@
         if (data.readiness.ready !== (
             data.readiness.reason === null
             && data.readiness.payouts_live
+            && data.account.country_code !== null
             && data.account.status === 'active'
             && data.fiscal?.status === 'verified'
+            && data.fiscal.country_code === data.account.country_code
             && data.profile?.status === 'active'
         )) invalid();
+        if (data.readiness.reason === 'payout_country_required'
+            && data.account.country_code !== null) invalid();
+        if (data.account.country_code === null
+            && !['cash_pilot_not_allowed', 'payout_country_required'].includes(
+                data.readiness.reason
+            )) invalid();
+        if (data.readiness.reason === 'fiscal_profile_required'
+            && data.fiscal?.status === 'verified'
+            && data.fiscal.country_code === data.account.country_code) invalid();
         return deepFreeze(cloneJson(payload));
     }
 
@@ -2230,6 +3079,71 @@
         return validator(payload);
     }
 
+    function validatePartnersPayoutCountryMutation(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'account',
+                'cash_readiness'
+            ])) invalid();
+        const data = payload.data;
+        if (data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || data.action !== 'payout_country_bound'
+            || typeof data.replayed !== 'boolean'
+            || !hasExactKeys(data.account, ['id', 'status', 'country_code'])
+            || !/^prt_[0-9a-f]{24}$/.test(data.account.id)
+            || !['pending_verification', 'active'].includes(
+                data.account.status
+            )
+            || !/^[A-Z]{2}$/.test(data.account.country_code)) invalid();
+        validatePartnersCashReadiness(data.cash_readiness, invalid);
+        if (![null, 'kyc_required', 'fiscal_profile_required', 'corridor_required']
+            .includes(data.cash_readiness.reason)
+            || (data.account.status === 'pending_verification'
+                && data.cash_readiness.reason !== 'kyc_required')
+            || (data.account.status === 'active'
+                && data.cash_readiness.reason === 'kyc_required')) invalid();
+        return deepFreeze(cloneJson(payload));
+    }
+
+    async function partnersTimedGet(path, externalSignal, validator) {
+        partnersRequireUserSession();
+        const controller = new AbortController();
+        let timedOut = false;
+        const abortFromCaller = () => controller.abort();
+        if (externalSignal?.aborted) controller.abort();
+        else externalSignal?.addEventListener?.('abort', abortFromCaller, { once: true });
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, 20000);
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                path,
+                null,
+                { signal: controller.signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                if (timedOut) throw partnersClientError('partners_request_timeout');
+                throw error;
+            }
+            throw normalizePartnersRequestError(error);
+        } finally {
+            clearTimeout(timeout);
+            externalSignal?.removeEventListener?.('abort', abortFromCaller);
+        }
+        return validator(payload);
+    }
+
     async function partnersDeviceRequest(method, path, body, {
         idempotencyKey,
         signal,
@@ -2339,6 +3253,59 @@
         }, idempotencyKey, (payload) => validatePartnersAccessRequest(payload, { mutation: true }), signal);
     }
 
+    function partnersJoin({
+        termsAccepted,
+        disclosureAccepted,
+        idempotencyKey,
+        signal
+    } = {}) {
+        if (termsAccepted !== true || disclosureAccepted !== true) {
+            throw partnersClientError('partners_terms_invalid');
+        }
+        return partnersPost('/join', {
+            termsAccepted: true,
+            disclosureAccepted: true
+        }, idempotencyKey, validatePartnersJoin, signal);
+    }
+
+    function partnersQuoteAccessCredit({ months, idempotencyKey, signal } = {}) {
+        const safeMonths = Number(months);
+        if (!Number.isSafeInteger(safeMonths)
+            || safeMonths < 1
+            || safeMonths > 12) {
+            throw partnersClientError('partners_credit_months_invalid');
+        }
+        return partnersPost(
+            '/credit/quotes',
+            { months: safeMonths },
+            idempotencyKey,
+            validatePartnersAccessCreditQuote,
+            signal
+        );
+    }
+
+    function partnersRedeemAccessCredit({ quoteKey, idempotencyKey, signal } = {}) {
+        const safeQuoteKey = String(quoteKey || '').trim().toLowerCase();
+        if (!PARTNERS_CREDIT_QUOTE_KEY_PATTERN.test(safeQuoteKey)) {
+            throw partnersClientError('partners_credit_quote_invalid');
+        }
+        return partnersPost(
+            '/credit/redemptions',
+            { quoteKey: safeQuoteKey },
+            idempotencyKey,
+            validatePartnersAccessCreditRedemption,
+            signal
+        );
+    }
+
+    function partnersAccessCreditStatus({ signal } = {}) {
+        return partnersTimedGet(
+            '/credit/status',
+            signal,
+            validatePartnersAccessCreditStatus
+        );
+    }
+
     async function partnersApply({
         countryCode,
         subdivisionCode,
@@ -2398,7 +3365,7 @@
             '/links',
             {},
             idempotencyKey,
-            (payload) => validatePartnersAction(payload, 'link_rotated', { linkRequired: true }),
+            validatePartnersLinkMutation,
             signal
         );
     }
@@ -2512,6 +3479,24 @@
             throw normalizePartnersRequestError(error);
         }
         return validatePartnersPayoutProfile(payload);
+    }
+
+    function partnersBindPayoutCountry({
+        countryCode,
+        idempotencyKey,
+        signal
+    } = {}) {
+        const safeCountry = String(countryCode || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(safeCountry)) {
+            throw partnersClientError('partners_payout_country_invalid');
+        }
+        return partnersPost(
+            '/payout-country',
+            { countryCode: safeCountry },
+            idempotencyKey,
+            validatePartnersPayoutCountryMutation,
+            signal
+        );
     }
 
     function partnersFiscalProfile({ signal } = {}) {
@@ -2694,6 +3679,12 @@
         // in the browser.
         partners: Object.freeze({
             bootstrap: partnersBootstrap,
+            join: partnersJoin,
+            credit: Object.freeze({
+                quote: partnersQuoteAccessCredit,
+                redeem: partnersRedeemAccessCredit,
+                status: partnersAccessCreditStatus
+            }),
             accessRequest: Object.freeze({
                 get: partnersAccessRequestGet,
                 request: partnersAccessRequestSubmit
@@ -2710,6 +3701,7 @@
             }),
             claimReferral: partnersClaimReferral,
             payoutProfile: partnersPayoutProfile,
+            bindPayoutCountry: partnersBindPayoutCountry,
             fiscalProfile: partnersFiscalProfile,
             submitFiscalProfile: partnersSubmitFiscalProfile,
             payoutOnboarding: partnersPayoutOnboarding,

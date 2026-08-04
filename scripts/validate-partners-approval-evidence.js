@@ -31,6 +31,15 @@ const LEGAL_CHECKS = [
   'kyc_only_without_kyb_scope_approved',
   'refund_chargeback_and_reversal_rules_approved',
 ];
+const MEMBERSHIP_PRIVACY_CHECKS = [
+  'membership_notice_versioned',
+  'records_of_processing_documented',
+  'data_minimization_reviewed',
+  'referral_attribution_and_ledger_scoped',
+  'didit_biometric_and_payout_data_excluded',
+  'admin_logs_and_evidence_redacted',
+  'retention_and_data_subject_rights_documented',
+];
 const PRIVACY_CHECKS = [
   'gdpr_self_assessment_documented',
   'records_of_processing_documented',
@@ -175,7 +184,7 @@ function validateApprovalPackage(value, options = {}) {
     'status',
     'target_environment',
   ], 'approval package');
-  assert(value.schema_version === 3, 'schema_version must be 3');
+  assert(value.schema_version === 4, 'schema_version must be 4');
   assert(['draft', 'approved'].includes(value.status),
     'status must be draft or approved');
   assert(VERSION_KEY.test(value.package_key || ''),
@@ -194,19 +203,25 @@ function validateApprovalPackage(value, options = {}) {
     'contains_personal_data must remain false');
 
   assertExactKeys(value.release_scope, [
-    'access_mode',
-    'country_code',
-    'participant_cap',
-    'public_release_eligible',
+    'cash_access_mode',
+    'cash_country_code',
+    'cash_participant_cap',
+    'cash_public_release_eligible',
+    'membership_access_mode',
+    'membership_public_release_eligible',
   ], 'release_scope');
-  assert(value.release_scope.access_mode === 'invite_only',
-    'release_scope.access_mode must remain invite_only');
-  assert(value.release_scope.country_code === 'FR',
-    'release_scope.country_code must remain FR for this pilot contract');
-  assert(value.release_scope.participant_cap === 50,
-    'release_scope.participant_cap must remain 50');
-  assert(value.release_scope.public_release_eligible === false,
-    'internal self-assessment must never authorize a public release');
+  assert(value.release_scope.membership_access_mode === 'public',
+    'release_scope.membership_access_mode must remain public');
+  assert(value.release_scope.membership_public_release_eligible === true,
+    'membership release must remain explicitly public');
+  assert(value.release_scope.cash_access_mode === 'allowlist_only',
+    'release_scope.cash_access_mode must remain allowlist_only');
+  assert(value.release_scope.cash_country_code === 'FR',
+    'release_scope.cash_country_code must remain FR for this pilot contract');
+  assert(value.release_scope.cash_participant_cap === 50,
+    'release_scope.cash_participant_cap must remain 50');
+  assert(value.release_scope.cash_public_release_eligible === false,
+    'the internal cash assessment must never authorize a public cash release');
 
   assertExactKeys(value.program, [
     'account_type',
@@ -291,8 +306,9 @@ function validateApprovalPackage(value, options = {}) {
     'jurisdiction.individual_available must be boolean');
   assertOptionalTimestamp(value.jurisdiction.effective_from,
     'jurisdiction.effective_from');
-  assert(value.jurisdiction.country_code === value.release_scope.country_code,
-    'jurisdiction.country_code must match release_scope.country_code');
+  assert(value.jurisdiction.country_code
+    === value.release_scope.cash_country_code,
+  'jurisdiction.country_code must match release_scope.cash_country_code');
 
   assertExactKeys(value.documents, [
     'disclosure_sha256',
@@ -345,6 +361,9 @@ function validateApprovalPackage(value, options = {}) {
     'configuration_snapshot_evidence',
     'didit_live_evidence',
     'exact_financial_data_evidence',
+    'membership_minimization_evidence',
+    'membership_privacy_notice_evidence',
+    'membership_ropa_evidence',
     'payout_corridor_evidence',
   ], 'dependencies');
   for (const [key, reference] of Object.entries(value.dependencies)) {
@@ -354,6 +373,7 @@ function validateApprovalPackage(value, options = {}) {
   assertExactKeys(value.decisions, [
     'country_policy',
     'legal_and_tax',
+    'membership_privacy',
     'privacy',
   ], 'decisions');
   validateDecision(
@@ -362,6 +382,42 @@ function validateApprovalPackage(value, options = {}) {
     'legal_and_tax_professional',
     LEGAL_CHECKS,
     nowMs,
+  );
+  validateDecision(
+    value.decisions.membership_privacy,
+    'membership_privacy',
+    'privacy_accountable_owner',
+    MEMBERSHIP_PRIVACY_CHECKS,
+    nowMs,
+    {
+      extraKeys: [
+        'approval_control',
+        'assessment_method',
+        'minimization_review_sha256',
+        'minimization_review_version',
+        'notice_sha256',
+        'notice_version',
+        'ropa_sha256',
+        'ropa_version',
+      ],
+      validateExtra: (decision, trail) => {
+        assert(decision.approval_control === 'risk_aal2',
+          `${trail}.approval_control must be risk_aal2`);
+        assert(decision.assessment_method
+          === 'documented_membership_privacy_assessment',
+        `${trail}.assessment_method is invalid`);
+        for (const field of [
+          'notice_version',
+          'ropa_version',
+          'minimization_review_version',
+        ]) assertOptionalVersion(decision[field], `${trail}.${field}`);
+        for (const field of [
+          'notice_sha256',
+          'ropa_sha256',
+          'minimization_review_sha256',
+        ]) assertOptionalSha(decision[field], `${trail}.${field}`);
+      },
+    },
   );
   validateDecision(
     value.decisions.privacy,
@@ -507,6 +563,11 @@ function decisionBlockers(value, key, nowMs) {
 function approvalBlockers(value, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const legal = decisionBlockers(value, 'legal_and_tax', nowMs);
+  const membershipPrivacy = decisionBlockers(
+    value,
+    'membership_privacy',
+    nowMs,
+  );
   const privacy = decisionBlockers(value, 'privacy', nowMs);
   const country = decisionBlockers(value, 'country_policy', nowMs);
   if (!value.program.version_key) {
@@ -541,12 +602,16 @@ function approvalBlockers(value, options = {}) {
   if (!value.documents.privacy_version
     || !value.documents.privacy_sha256
     || !publicSurfacesReady) {
+    membershipPrivacy.push('membership_privacy_document_not_verified');
     privacy.push('privacy_document_not_verified');
   }
   const legalDecisionAt = parseTimestamp(
     value.decisions.legal_and_tax.decided_at,
   );
   const privacyDecisionAt = parseTimestamp(value.decisions.privacy.decided_at);
+  const membershipPrivacyDecisionAt = parseTimestamp(
+    value.decisions.membership_privacy.decided_at,
+  );
   if (Number.isFinite(publicSurfacesAt)
     && (legalDecisionAt === null || legalDecisionAt <= publicSurfacesAt)) {
     legal.push('legal_and_tax_decision_predates_public_surfaces');
@@ -555,18 +620,70 @@ function approvalBlockers(value, options = {}) {
     && (privacyDecisionAt === null || privacyDecisionAt <= publicSurfacesAt)) {
     privacy.push('privacy_decision_predates_public_surfaces');
   }
+  if (Number.isFinite(publicSurfacesAt)
+    && (membershipPrivacyDecisionAt === null
+      || membershipPrivacyDecisionAt <= publicSurfacesAt)) {
+    membershipPrivacy.push(
+      'membership_privacy_decision_predates_public_surfaces',
+    );
+  }
+  const membershipDecision = value.decisions.membership_privacy;
+  for (const field of [
+    'notice_version',
+    'notice_sha256',
+    'ropa_version',
+    'ropa_sha256',
+    'minimization_review_version',
+    'minimization_review_sha256',
+  ]) {
+    if (!membershipDecision[field]) {
+      membershipPrivacy.push('membership_privacy_artifacts_not_versioned');
+      break;
+    }
+  }
   if (!value.jurisdiction.policy_key
     || !value.jurisdiction.individual_available
     || !value.jurisdiction.effective_from) {
     country.push('country_policy_not_available_or_versioned');
   }
+  const membershipDependencyKeys = [
+    'membership_privacy_notice_evidence',
+    'membership_ropa_evidence',
+    'membership_minimization_evidence',
+  ];
+  const cashDependencyKeys = [
+    'configuration_snapshot_evidence',
+    'didit_live_evidence',
+    'payout_corridor_evidence',
+    'exact_financial_data_evidence',
+  ];
+  const membershipDependencyTimes = [];
+  for (const key of membershipDependencyKeys) {
+    const reference = value.dependencies[key];
+    if (!reference) {
+      membershipPrivacy.push(`${key}_missing`);
+    } else {
+      membershipDependencyTimes.push(parseTimestamp(reference.verified_at));
+    }
+  }
   const dependencyTimes = [];
-  for (const [key, reference] of Object.entries(value.dependencies)) {
+  for (const key of cashDependencyKeys) {
+    const reference = value.dependencies[key];
     if (!reference) {
       country.push(`${key}_missing`);
     } else {
       dependencyTimes.push(parseTimestamp(reference.verified_at));
     }
+  }
+  const membershipCutoff = Math.max(
+    ...membershipDependencyTimes.filter(Number.isFinite),
+  );
+  if (Number.isFinite(membershipCutoff)
+    && (membershipPrivacyDecisionAt === null
+      || membershipPrivacyDecisionAt <= membershipCutoff)) {
+    membershipPrivacy.push(
+      'membership_privacy_decision_predates_dependencies',
+    );
   }
   if (legal.length) country.push('legal_and_tax_dependency_incomplete');
   if (privacy.length) country.push('privacy_dependency_incomplete');
@@ -592,11 +709,13 @@ function approvalBlockers(value, options = {}) {
     country.push('country_policy_decision_predates_dependencies');
   }
   if (value.status === 'approved'
-    && (legal.length || privacy.length || country.length)) {
+    && (legal.length || membershipPrivacy.length
+      || privacy.length || country.length)) {
     country.push('approved_package_has_blockers');
   }
   return {
     legal_and_tax: [...new Set(legal)].sort(),
+    membership_privacy: [...new Set(membershipPrivacy)].sort(),
     privacy: [...new Set(privacy)].sort(),
     country_policy: [...new Set(country)].sort(),
   };
@@ -616,10 +735,14 @@ function parseCliArgs(args) {
   const required = new Set();
   for (const arg of args) {
     if (arg === '--require-legal') required.add('legal_and_tax');
+    else if (arg === '--require-membership-privacy') {
+      required.add('membership_privacy');
+    }
     else if (arg === '--require-privacy') required.add('privacy');
     else if (arg === '--require-country-policy') required.add('country_policy');
     else if (arg === '--require-all') {
       required.add('legal_and_tax');
+      required.add('membership_privacy');
       required.add('privacy');
       required.add('country_policy');
     } else if (arg.startsWith('--expected-commit-sha=')) {
@@ -651,7 +774,7 @@ if (require.main === module) {
     const blocked = cli.required.filter(
       (key) => result.blockers[key].length > 0,
     );
-    if (cli.required.length === 3) {
+    if (cli.required.length === 4) {
       if (value.status !== 'approved') blocked.push('package_status');
     }
     console.log(JSON.stringify({
@@ -664,7 +787,8 @@ if (require.main === module) {
     console.error(
       'Usage: node scripts/validate-partners-approval-evidence.js '
         + '<approval-package.json> '
-        + '[--require-legal] [--require-privacy] '
+        + '[--require-legal] [--require-membership-privacy] '
+        + '[--require-privacy] '
         + '[--require-country-policy|--require-all] '
         + '[--expected-commit-sha=<40-lowercase-hex>]',
     );
@@ -675,6 +799,7 @@ if (require.main === module) {
 module.exports = {
   COUNTRY_CHECKS,
   LEGAL_CHECKS,
+  MEMBERSHIP_PRIVACY_CHECKS,
   PRIVACY_CHECKS,
   approvalBlockers,
   evaluateApprovalPackage,
