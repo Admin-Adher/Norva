@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(76);
+select extensions.plan(77);
 
 select extensions.has_column(
   'affiliate_private',
@@ -109,7 +109,23 @@ select extensions.ok(
     in lower(pg_get_functiondef(
       'affiliate_private.validate_affiliate_link_transition()'::regprocedure
     ))
-  ) = 0,
+  ) = 0
+  and not exists (
+    select 1
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid =
+      'affiliate_private.affiliate_accounts'::regclass
+      and trigger_row.tgname = 'affiliate_accounts_active_link_guard'
+      and not trigger_row.tgisinternal
+  )
+  and exists (
+    select 1
+    from pg_trigger trigger_row
+    where trigger_row.tgrelid =
+      'affiliate_private.affiliate_accounts'::regclass
+      and trigger_row.tgname = 'affiliate_accounts_member_active_link_guard'
+      and not trigger_row.tgisinternal
+  ),
   'an active sharing link depends on membership and never on KYC'
 );
 
@@ -503,18 +519,12 @@ select extensions.ok(
       'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
     ))
   )
-  and position(
-    '''partner_commission_available'', ''debit'''
-    in lower(pg_get_functiondef(
-      'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
-    ))
-  ) > 0
-  and position(
-    '''partner_access_credit_clearing'', ''credit'''
-    in lower(pg_get_functiondef(
-      'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
-    ))
-  ) > 0,
+  and lower(pg_get_functiondef(
+    'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
+  )) ~ '''partner_commission_available''[[:space:]]*,[[:space:]]*''debit'''
+  and lower(pg_get_functiondef(
+    'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
+  )) ~ '''partner_access_credit_clearing''[[:space:]]*,[[:space:]]*''credit''',
   'redemption atomically spends available USD under the canonical balance lock'
 );
 
@@ -2662,9 +2672,53 @@ select extensions.ok(
 
 insert into frictionless_test_state (state_key, json_value)
 values (
-  'deletion_prepared',
+  'deletion_financially_blocked',
   public.partners_service_prepare_account_deletion(
     'f4000000-0000-4000-8000-000000000001'
+  )
+);
+
+select extensions.ok(
+  (
+    select state.json_value ->> 'ready' = 'false'
+      and state.json_value ->> 'state' = 'pending_financial_closure'
+      and state.json_value #>> '{balances,0,currency}' = 'USD'
+      and state.json_value #>> '{balances,0,recovery_due_minor}' = '499'
+    from frictionless_test_state state
+    where state.state_key = 'deletion_financially_blocked'
+  )
+  and exists (
+    select 1
+    from affiliate_private.affiliate_accounts account
+    where account.user_id = 'f4000000-0000-4000-8000-000000000001'
+      and account.status <> 'closed'
+      and account.member_status = 'active'
+  )
+  and exists (
+    select 1
+    from public.cloud_access_grants grant_row
+    where grant_row.user_id = 'f4000000-0000-4000-8000-000000000001'
+      and grant_row.user_pseudonym = encode(
+        extensions.digest(
+          'norva-partners-subject:v1:' ||
+            'f4000000-0000-4000-8000-000000000001',
+          'sha256'
+        ),
+        'hex'
+      )
+      and grant_row.status in ('consumed', 'revoked')
+  )
+  and not affiliate_private.partners_account_deletion_ready(
+    'f4000000-0000-4000-8000-000000000001'
+  ),
+  'unresolved recovery debt keeps account deletion fail-closed without detaching retained state'
+);
+
+insert into frictionless_test_state (state_key, json_value)
+values (
+  'deletion_prepared',
+  public.partners_service_prepare_account_deletion(
+    'f4000000-0000-4000-8000-000000000004'
   )
 );
 
@@ -2681,7 +2735,7 @@ select extensions.ok(
     where account.user_pseudonym = encode(
       extensions.digest(
         'norva-partners-subject:v1:' ||
-          'f4000000-0000-4000-8000-000000000001',
+          'f4000000-0000-4000-8000-000000000004',
         'sha256'
       ),
       'hex'
@@ -2690,24 +2744,25 @@ select extensions.ok(
       and account.status = 'closed'
       and account.member_status = 'closed'
   )
-  and exists (
+  and not exists (
     select 1
-    from public.cloud_access_grants grant_row
-    where grant_row.user_id is null
-      and grant_row.user_pseudonym = encode(
-        extensions.digest(
-          'norva-partners-subject:v1:' ||
-            'f4000000-0000-4000-8000-000000000001',
-          'sha256'
-        ),
-        'hex'
-      )
-      and grant_row.status in ('consumed', 'revoked')
+    from affiliate_private.affiliate_links link
+    join affiliate_private.affiliate_accounts account
+      on account.id = link.account_id
+    where account.user_pseudonym = encode(
+      extensions.digest(
+        'norva-partners-subject:v1:' ||
+          'f4000000-0000-4000-8000-000000000004',
+        'sha256'
+      ),
+      'hex'
+    )
+      and link.status = 'active'
   )
   and affiliate_private.partners_account_deletion_ready(
-    'f4000000-0000-4000-8000-000000000001'
+    'f4000000-0000-4000-8000-000000000004'
   ),
-  'account deletion closes membership and detaches terminal access grants'
+  'financially clear account deletion revokes sharing and closes membership'
 );
 
 select * from extensions.finish();

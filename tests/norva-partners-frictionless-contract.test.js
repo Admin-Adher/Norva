@@ -805,6 +805,13 @@ test('membership is public while the cash pilot remains independently allowliste
   );
 });
 
+test('sharing remains bound to membership while legacy cash status can change independently', () => {
+  assert.match(
+    migrationSource,
+    /create trigger affiliate_accounts_member_active_link_guard[\s\S]*?drop trigger if exists affiliate_accounts_active_link_guard\s+on affiliate_private\.affiliate_accounts/,
+  );
+});
+
 test('frictionless idempotency extends every legacy operation without narrowing it', () => {
   const requiredOperations = [
     'application',

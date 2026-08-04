@@ -275,6 +275,14 @@ on affiliate_private.affiliate_accounts
 for each row execute function
   affiliate_private.guard_affiliate_member_active_links();
 
+-- Sharing now follows the explicit membership lifecycle, not the legacy cash
+-- readiness status. Keeping the historical status trigger would revoke or
+-- block a valid referral link while Didit is still being purged or cash KYC is
+-- held, even though membership remains active. Retain the routine for restore
+-- compatibility, but retire its trigger after the member guard is installed.
+drop trigger if exists affiliate_accounts_active_link_guard
+  on affiliate_private.affiliate_accounts;
+
 -- Email confirmation is a membership invariant. The legacy account status
 -- remains available exclusively to KYC/cash flows.
 create or replace function

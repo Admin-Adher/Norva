@@ -412,13 +412,20 @@ select extensions.ok(
     from public.admin_feature_flags flag
     where flag.key like 'partners_%'
       and flag.enabled
+      and flag.key <> 'partners_cash_pilot_allowlist_only'
+  )
+  and exists (
+    select 1
+    from public.admin_feature_flags flag
+    where flag.key = 'partners_cash_pilot_allowlist_only'
+      and flag.enabled
   )
   and not exists (
     select 1
     from affiliate_private.affiliate_release_gates gate
     where gate.satisfied
   ),
-  'request submission leaves every release flag and gate closed'
+  'request submission leaves every activating flag and gate closed while cash stays restricted'
 );
 
 set local role authenticated;
@@ -790,8 +797,15 @@ select extensions.ok(
     from public.admin_feature_flags flag
     where flag.key like 'partners_%'
       and flag.enabled
+      and flag.key <> 'partners_cash_pilot_allowlist_only'
+  )
+  and exists (
+    select 1
+    from public.admin_feature_flags flag
+    where flag.key = 'partners_cash_pilot_allowlist_only'
+      and flag.enabled
   ),
-  'approval leaves all programme and payout flags disabled'
+  'approval leaves all activating programme and payout flags disabled'
 );
 
 select * from extensions.finish();
