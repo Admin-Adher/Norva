@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(20);
+select extensions.plan(74);
 
 -- One immutable catalogue keeps all ten pending migrations under the same
 -- existence, ownership, security, volatility and ACL assertions without
@@ -270,51 +270,47 @@ select extensions.ok(
   'none of the migrated routines inherits PUBLIC execution'
 );
 
+with allowed as (
+  select *
+  from pg_catalog.jsonb_to_recordset(
+    current_setting('norva.partners_restore_expected_routines')::jsonb
+  ) as routine(
+    signature text,
+    security_definer boolean,
+    volatility text,
+    access_role text
+  )
+  where access_role <> 'owner'
+)
 select extensions.ok(
-  (
-    with allowed as (
-      select *
-      from pg_catalog.jsonb_to_recordset(
-        current_setting('norva.partners_restore_expected_routines')::jsonb
-      ) as routine(
-        signature text,
-        security_definer boolean,
-        volatility text,
-        access_role text
-      )
-      where access_role <> 'owner'
-    )
-    select count(*) = 55
-      and bool_and(
-        pg_catalog.has_function_privilege(
-          allowed.access_role,
-          to_regprocedure(allowed.signature),
-          'EXECUTE'
-        )
-        and not pg_catalog.has_function_privilege(
-          'anon',
-          to_regprocedure(allowed.signature),
-          'EXECUTE'
-        )
-        and (
-          pg_catalog.has_function_privilege(
-            'authenticated',
-            to_regprocedure(allowed.signature),
-            'EXECUTE'
-          ) = (allowed.access_role = 'authenticated')
-        )
-        and (
-          pg_catalog.has_function_privilege(
-            'service_role',
-            to_regprocedure(allowed.signature),
-            'EXECUTE'
-          ) = (allowed.access_role = 'service_role')
-        )
-      )
-    from allowed
+  pg_catalog.has_function_privilege(
+    allowed.access_role,
+    to_regprocedure(allowed.signature),
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    to_regprocedure(allowed.signature),
+    'EXECUTE'
+  )
+  and (
+    pg_catalog.has_function_privilege(
+      'authenticated',
+      to_regprocedure(allowed.signature),
+      'EXECUTE'
+    ) = (allowed.access_role = 'authenticated')
+  )
+  and (
+    pg_catalog.has_function_privilege(
+      'service_role',
+      to_regprocedure(allowed.signature),
+      'EXECUTE'
+    ) = (allowed.access_role = 'service_role')
   ),
-  'authenticated Admin and service-only Didit RPCs retain their exact API roles'
-);
+  'exact Partners API execution role: ' || allowed.signature
+)
+from allowed
+order by allowed.signature;
 
 select extensions.ok(
   (
