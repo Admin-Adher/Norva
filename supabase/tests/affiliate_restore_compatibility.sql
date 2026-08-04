@@ -169,7 +169,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  110::bigint,
+  119::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -186,7 +186,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 110
+    select count(*) = 119
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -208,7 +208,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 110
+    select count(*) = 119
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -232,7 +232,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 110
+    select count(*) = 119
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -853,7 +853,7 @@ select extensions.ok(
   and position(
     'partners_didit_purge_coverage_ready'
     in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
-      'affiliate_private.partners_approval_package_is_current(uuid,text)'
+      'affiliate_private.partners_approval_package_is_current(uuid,text,text)'
     )))
   ) > 0,
   'restored Didit, purge and Revolut consumers use effective approval evidence'
