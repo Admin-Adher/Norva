@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(251);
+select extensions.plan(252);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -1243,12 +1243,16 @@ where user_id = '10000000-0000-4000-8000-000000000002';
 -- The activation reconciler accepts only the canonical live Didit member
 -- session whose provider-side deletion has completed. Mirror that production
 -- proof instead of treating the account columns themselves as KYC evidence.
-select set_config('norva.didit.environment', 'live', true);
-select set_config(
-  'norva.didit.config_fingerprint',
-  repeat('2', 64),
-  true
-);
+do $member_activation_binding$
+begin
+  perform set_config('norva.didit.environment', 'live', true);
+  perform set_config(
+    'norva.didit.config_fingerprint',
+    repeat('2', 64),
+    true
+  );
+end;
+$member_activation_binding$;
 insert into affiliate_private.affiliate_kyc_sessions (
   account_id,
   provider,
@@ -1928,6 +1932,26 @@ select extensions.is(
   'the exact live result is retry-safe and remains verified'
 );
 
+-- A terminal Didit decision deliberately leaves the account pending until the
+-- provider deletion worker records an idempotent 204/404 proof. Complete every
+-- staged member purge through that service boundary; the live session's purge
+-- completion performs the authoritative activation reconcile.
+do $complete_member_purges$
+declare
+  v_claim record;
+begin
+  for v_claim in
+    select * from public.partners_service_didit_purge_claim(25, 300)
+  loop
+    perform public.partners_service_didit_purge_complete(
+      v_claim.outbox_id,
+      v_claim.lease_token,
+      'deleted'
+    );
+  end loop;
+end;
+$complete_member_purges$;
+
 reset role;
 select extensions.is(
   (
@@ -2410,8 +2434,8 @@ select extensions.is(
     where session.status = 'verified'
       and session.verified_at >= now() - interval '30 days'
   ),
-  2::bigint,
-  'the analytics fixture contains one live and one synthetic sandbox verification'
+  3::bigint,
+  'the analytics fixture contains two live and one synthetic sandbox verification'
 );
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","app_metadata":{"role":"admin"}}';

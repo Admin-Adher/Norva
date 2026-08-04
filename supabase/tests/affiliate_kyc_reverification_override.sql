@@ -519,12 +519,16 @@ where program.version_key = 'p0-reverification-test-v1'
 
 -- The member-session binding trigger derives these values from the trusted
 -- Edge runtime GUCs; supplied row values never bypass that boundary.
-select set_config('norva.didit.environment', 'sandbox', true);
-select set_config(
-  'norva.didit.config_fingerprint',
-  repeat('e', 64),
-  true
-);
+do $didit_binding_config$
+begin
+  perform set_config('norva.didit.environment', 'sandbox', true);
+  perform set_config(
+    'norva.didit.config_fingerprint',
+    repeat('e', 64),
+    true
+  );
+end;
+$didit_binding_config$;
 insert into affiliate_private.affiliate_kyc_sessions (
   account_id,
   provider,
@@ -561,11 +565,15 @@ update affiliate_private.affiliate_kyc_sessions
 set status = 'failed', updated_at = now()
 where provider_session_hash = repeat('c', 64);
 
-select set_config(
-  'norva.partners_control',
-  'admin_partners_control',
-  true
-);
+do $partners_control_config$
+begin
+  perform set_config(
+    'norva.partners_control',
+    'admin_partners_control',
+    true
+  );
+end;
+$partners_control_config$;
 update public.admin_feature_flags
 set enabled = true, updated_at = now(), updated_by = 'pgtap'
 where key = 'partners_enabled';
@@ -622,11 +630,15 @@ where country_policy_id = (
   where account.user_id = '68000000-0000-4000-8000-000000000001'
 );
 
-select set_config(
-  'norva.partners_kyc_review_control',
-  'request',
-  true
-);
+do $review_request_config$
+begin
+  perform set_config(
+    'norva.partners_kyc_review_control',
+    'request',
+    true
+  );
+end;
+$review_request_config$;
 insert into affiliate_private.affiliate_kyc_human_review_requests (
   review_key,
   account_id,
@@ -647,11 +659,15 @@ where account.user_id = '68000000-0000-4000-8000-000000000001'
   and session.provider_session_hash = repeat('c', 64);
 
 set local role authenticated;
-select set_config(
-  'request.jwt.claims',
-  '{"sub":"68000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal1","app_metadata":{"role":"admin"}}',
-  true
-);
+do $aal1_claims$
+begin
+  perform set_config(
+    'request.jwt.claims',
+    '{"sub":"68000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal1","app_metadata":{"role":"admin"}}',
+    true
+  );
+end;
+$aal1_claims$;
 select extensions.throws_ok(
   $$
     select public.admin_partners_kyc_human_review_decide(
@@ -664,14 +680,18 @@ select extensions.throws_ok(
     )
   $$,
   '42501',
-  'Partners KYC human-review decision requires an AAL2 session',
+  'Partners KYC human-review decision requires AAL2',
   'Risk capability alone cannot issue a re-verification right at AAL1'
 );
-select set_config(
-  'request.jwt.claims',
-  '{"sub":"68000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}',
-  true
-);
+do $aal2_claims$
+begin
+  perform set_config(
+    'request.jwt.claims',
+    '{"sub":"68000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin"}}',
+    true
+  );
+end;
+$aal2_claims$;
 select extensions.is(
   public.admin_partners_kyc_human_review_decide(
     'khr_' || repeat('1', 24),
@@ -697,7 +717,11 @@ select extensions.is(
   'Risk+AAL2 resolution atomically issues one private re-verification right'
 );
 reset role;
-select set_config('request.jwt.claims', '{}', true);
+do $clear_claims$
+begin
+  perform set_config('request.jwt.claims', '{}', true);
+end;
+$clear_claims$;
 
 select extensions.throws_ok(
   $$
@@ -793,11 +817,15 @@ select extensions.throws_ok(
 );
 reset role;
 
-select set_config(
-  'norva.partners_kyc_review_control',
-  'request',
-  true
-);
+do $withdrawal_review_request_config$
+begin
+  perform set_config(
+    'norva.partners_kyc_review_control',
+    'request',
+    true
+  );
+end;
+$withdrawal_review_request_config$;
 insert into affiliate_private.affiliate_kyc_human_review_requests (
   review_key,
   account_id,
@@ -816,11 +844,15 @@ join affiliate_private.affiliate_kyc_sessions session
   on session.account_id = account.id
 where account.user_id = '68000000-0000-4000-8000-000000000001'
   and session.provider_session_hash = repeat('c', 64);
-select set_config(
-  'norva.partners_kyc_review_control',
-  'admin',
-  true
-);
+do $withdrawal_review_admin_config$
+begin
+  perform set_config(
+    'norva.partners_kyc_review_control',
+    'admin',
+    true
+  );
+end;
+$withdrawal_review_admin_config$;
 update affiliate_private.affiliate_kyc_human_review_requests
 set
   status = 'in_review',
@@ -872,6 +904,33 @@ join affiliate_private.affiliate_accounts account
   on account.id = reservation.account_id
 where account.user_id = '68000000-0000-4000-8000-000000000001'
   and reservation.status = 'reserved';
+
+-- Resolve the two private sources while the fixture owner is active. Service
+-- role exercises only the public RPC below and receives no direct grant on
+-- either private relation.
+create temporary table kyc_reverification_record_state (
+  reservation_key text not null,
+  consent_reservation_key text not null,
+  constraint kyc_reverification_record_state_same_key
+    check (reservation_key = consent_reservation_key)
+) on commit drop;
+grant select on table kyc_reverification_record_state to service_role;
+insert into kyc_reverification_record_state (
+  reservation_key,
+  consent_reservation_key
+)
+select
+  reservation.reservation_key,
+  consent.reservation_key
+from affiliate_private.affiliate_kyc_session_reservations reservation
+join affiliate_private.affiliate_accounts account
+  on account.id = reservation.account_id
+join affiliate_private.affiliate_biometric_consent_attestations consent
+  on consent.account_id = reservation.account_id
+  and consent.reservation_key = reservation.reservation_key
+where account.user_id = '68000000-0000-4000-8000-000000000001'
+  and reservation.status = 'reserved'
+  and consent.idempotency_key = 'kyc.record.withdrawn.0001';
 insert into affiliate_private.affiliate_biometric_consent_withdrawals (
   account_id,
   idempotency_key,
@@ -902,13 +961,8 @@ select extensions.is(
         'not_started',
         null,
         (
-          select reservation.reservation_key
-          from affiliate_private.affiliate_kyc_session_reservations reservation
-          join affiliate_private.affiliate_accounts account
-            on account.id = reservation.account_id
-          where account.user_id =
-            '68000000-0000-4000-8000-000000000001'
-            and reservation.status = 'reserved'
+          select state.reservation_key
+          from kyc_reverification_record_state state
         ),
         'sandbox',
         repeat('7', 64),
@@ -937,13 +991,8 @@ select extensions.is(
       'not_started',
       null,
       (
-        select consent.reservation_key
-        from affiliate_private.affiliate_biometric_consent_attestations consent
-        join affiliate_private.affiliate_accounts account
-          on account.id = consent.account_id
-        where account.user_id =
-          '68000000-0000-4000-8000-000000000001'
-          and consent.idempotency_key = 'kyc.record.withdrawn.0001'
+        select state.consent_reservation_key
+        from kyc_reverification_record_state state
       ),
       'sandbox',
       repeat('7', 64),
