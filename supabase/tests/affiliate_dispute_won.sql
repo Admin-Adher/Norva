@@ -184,7 +184,7 @@ begin
 
   v_manifest_hash :=
     affiliate_private.partners_deployment_manifest_sha256(
-      'preproduction',
+      'production',
       1,
       repeat('b', 40),
       'dispute-won-pgtap-deployment',
@@ -208,7 +208,7 @@ begin
     registered_at,
     justification
   ) values (
-    'preproduction',
+    'production',
     1,
     repeat('b', 40),
     'dispute-won-pgtap-deployment',
@@ -226,7 +226,7 @@ begin
     bound_by_pseudonym,
     bound_at
   ) values (
-    'preproduction',
+    'production',
     v_manifest_id,
     repeat('c', 64),
     v_approved_at
@@ -275,7 +275,7 @@ begin
       v_scope,
       v_documents,
       repeat('b', 40),
-      'preproduction',
+      'production',
       'dispute-won-pgtap-deployment',
       repeat('2', 64),
       v_manifest_hash,
@@ -314,7 +314,7 @@ begin
       v_scope,
       v_documents,
       repeat('b', 40),
-      'preproduction',
+      'production',
       'dispute-won-pgtap-deployment',
       repeat('2', 64),
       v_manifest_hash,

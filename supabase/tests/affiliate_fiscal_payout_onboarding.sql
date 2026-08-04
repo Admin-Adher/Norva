@@ -953,11 +953,11 @@ begin
   select coalesce(max(manifest.manifest_version), 0) + 1
   into v_manifest_version
   from affiliate_private.affiliate_deployment_manifests manifest
-  where manifest.deployment_environment = 'preproduction';
+  where manifest.deployment_environment = 'production';
 
   v_manifest_hash :=
     affiliate_private.partners_deployment_manifest_sha256(
-      'preproduction',
+      'production',
       v_manifest_version,
       repeat('d', 40),
       'fiscal-payout-pgtap-deployment',
@@ -981,7 +981,7 @@ begin
     registered_at,
     justification
   ) values (
-    'preproduction',
+    'production',
     v_manifest_version,
     repeat('d', 40),
     'fiscal-payout-pgtap-deployment',
@@ -999,7 +999,7 @@ begin
     bound_by_pseudonym,
     bound_at
   ) values (
-    'preproduction',
+    'production',
     v_manifest_id,
     repeat('4', 64),
     v_approved_at
@@ -1061,7 +1061,7 @@ begin
       v_scope,
       v_documents,
       repeat('d', 40),
-      'preproduction',
+      'production',
       'fiscal-payout-pgtap-deployment',
       repeat('e', 64),
       v_manifest_hash,
@@ -1102,7 +1102,7 @@ begin
       v_scope,
       v_documents,
       repeat('d', 40),
-      'preproduction',
+      'production',
       'fiscal-payout-pgtap-deployment',
       repeat('e', 64),
       v_manifest_hash,

@@ -423,8 +423,17 @@ do $remaining_approvals$
 declare
   v_gate text;
 begin
+  perform public.admin_partners_deployment_manifest_register(
+    'production',
+    repeat('e', 40),
+    'kyc-reverification-production-deployment',
+    repeat('2', 64),
+    pg_temp.kyc_reverification_deployment_documents(),
+    'KYC re-verification pgTAP production deployment manifest.'
+  );
   foreach v_gate in array array[
     'legal_and_tax_approved',
+    'privacy_approved',
     'individual_verification_coverage_confirmed',
     'country_policy_approved'
   ]::text[]
@@ -434,9 +443,9 @@ begin
       'p0-reverification-test-v1',
       '[{"country_code":"FR"}]'::jsonb,
       pg_temp.kyc_reverification_approval_documents(v_gate),
-      repeat('c', 40),
-      'preproduction',
-      'kyc-reverification-test-deployment',
+      repeat('e', 40),
+      'production',
+      'kyc-reverification-production-deployment',
       repeat('2', 64),
       now() + interval '30 days',
       'KYC re-verification pgTAP immutable release approval.'

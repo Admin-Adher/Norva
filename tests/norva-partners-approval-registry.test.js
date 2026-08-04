@@ -13,6 +13,9 @@ const read = (file) => fs
 const migration = read(
   'supabase/migrations/20260804083541_partners_approval_registry.sql',
 );
+const deploymentManifestEventContract = read(
+  'supabase/migrations/20260804171000_partners_deployment_manifest_event_contract.sql',
+);
 const preactivation = read(
   'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql',
 );
@@ -58,6 +61,14 @@ test('approval evidence is private, RLS protected and append-only', () => {
 });
 
 test('deployment authority is versioned, current and callable only by AAL2 release managers', () => {
+  assert.match(
+    deploymentManifestEventContract,
+    /add constraint affiliate_events_aggregate_type_v3[\s\S]*'deployment_manifest'[\s\S]*not valid/i,
+  );
+  assert.match(
+    deploymentManifestEventContract,
+    /validate constraint affiliate_events_aggregate_type_v3[\s\S]*drop constraint affiliate_events_aggregate_type[\s\S]*rename constraint affiliate_events_aggregate_type_v3[\s\S]*to affiliate_events_aggregate_type/i,
+  );
   assert.match(
     migration,
     /partners_require_aal2\(\s*'Partners deployment manifest registration'/i,
