@@ -1234,11 +1234,73 @@ update affiliate_private.affiliate_accounts
 set
   verification_status = 'verified',
   verification_provider = 'didit',
-  verification_reference = 'test-verification-reference',
+  verification_reference = repeat('1', 64),
   age_verified = true,
   capacity_verified = true,
   updated_at = now()
 where user_id = '10000000-0000-4000-8000-000000000002';
+
+-- The activation reconciler accepts only the canonical live Didit member
+-- session whose provider-side deletion has completed. Mirror that production
+-- proof instead of treating the account columns themselves as KYC evidence.
+select set_config('norva.didit.environment', 'live', true);
+select set_config(
+  'norva.didit.config_fingerprint',
+  repeat('2', 64),
+  true
+);
+insert into affiliate_private.affiliate_kyc_sessions (
+  account_id,
+  provider,
+  provider_session_hash,
+  provider_workflow_hash,
+  provider_workflow_version,
+  provider_status,
+  status,
+  consent_version,
+  age_over_minimum,
+  country_policy_match,
+  identity_checks_approved,
+  capacity_attested,
+  last_event_created_at,
+  verified_at,
+  expires_at,
+  created_at,
+  updated_at,
+  provider_purge_status,
+  provider_purge_requested_at,
+  provider_purged_at
+)
+select
+  account.id,
+  'didit',
+  account.verification_reference,
+  repeat('3', 64),
+  1,
+  'approved',
+  'pending',
+  'partners-biometric-consent-v1',
+  true,
+  true,
+  true,
+  true,
+  statement_timestamp() - interval '40 seconds',
+  statement_timestamp() - interval '30 seconds',
+  statement_timestamp() + interval '59 minutes',
+  statement_timestamp() - interval '1 minute',
+  statement_timestamp() - interval '10 seconds',
+  'purged',
+  statement_timestamp() - interval '20 seconds',
+  statement_timestamp() - interval '10 seconds'
+from affiliate_private.affiliate_accounts account
+where account.user_id = '10000000-0000-4000-8000-000000000002';
+update affiliate_private.affiliate_kyc_sessions session
+set status = 'verified'
+where session.account_id = (
+  select account.id
+  from affiliate_private.affiliate_accounts account
+  where account.user_id = '10000000-0000-4000-8000-000000000002'
+);
 
 set local role service_role;
 

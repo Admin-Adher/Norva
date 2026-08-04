@@ -517,6 +517,14 @@ join affiliate_private.affiliate_country_policies policy
 where program.version_key = 'p0-reverification-test-v1'
   and policy.country_code = 'FR';
 
+-- The member-session binding trigger derives these values from the trusted
+-- Edge runtime GUCs; supplied row values never bypass that boundary.
+select set_config('norva.didit.environment', 'sandbox', true);
+select set_config(
+  'norva.didit.config_fingerprint',
+  repeat('e', 64),
+  true
+);
 insert into affiliate_private.affiliate_kyc_sessions (
   account_id,
   provider,
