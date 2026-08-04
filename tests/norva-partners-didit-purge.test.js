@@ -32,6 +32,11 @@ test('terminal Didit results enqueue encrypted deletion atomically', () => {
   );
   assert.match(migration, /provider_purge_status = 'purge_pending'/);
   assert.match(migration, /provider_session_envelope = null/);
+  assert.match(
+    migration,
+    /\[A-Za-z0-9_-\]\{22\}\[A-Za-z0-9_-\]\*\$/,
+  );
+  assert.doesNotMatch(migration, /\{22,384\}/);
   assert.match(migration, /provider_purged_at/);
   assert.match(migration, /status = 'waiting_terminal'/);
   assert.match(

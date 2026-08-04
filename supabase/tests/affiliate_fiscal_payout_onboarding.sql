@@ -906,6 +906,72 @@ values (
   repeat('4', 64)
 );
 
+-- The coverage gate used by this fiscal fixture must be backed by a completed
+-- live Didit certification and its canonical provider-deletion proof.
+insert into affiliate_private.affiliate_didit_certification_sessions (
+  certification_key_hash,
+  operator_hash,
+  idempotency_key_hash,
+  request_hash,
+  confirmation_hash,
+  justification_hash,
+  consent_version,
+  capacity_attested,
+  provider_session_hash,
+  provider_workflow_hash,
+  provider_workflow_version,
+  provider_environment,
+  provider_config_fingerprint,
+  provider_status,
+  provider_create_dispatched_at,
+  status,
+  id_check_approved,
+  liveness_approved,
+  face_match_approved,
+  age_over_minimum,
+  jurisdiction_result_present,
+  verified,
+  last_event_created_at,
+  verified_at,
+  expires_at,
+  created_at,
+  updated_at,
+  provider_purge_status,
+  provider_purge_requested_at,
+  provider_purged_at
+) values (
+  encode(extensions.digest('fiscal:certification:key', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:operator', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:idempotency', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:request', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:confirmation', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:justification', 'sha256'), 'hex'),
+  'partners-didit-certification-v1',
+  true,
+  encode(extensions.digest('fiscal:certification:session', 'sha256'), 'hex'),
+  encode(extensions.digest('fiscal:certification:workflow', 'sha256'), 'hex'),
+  1,
+  'live',
+  encode(extensions.digest('fiscal:certification:config', 'sha256'), 'hex'),
+  'approved',
+  statement_timestamp() - interval '50 seconds',
+  'approved',
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  statement_timestamp() - interval '40 seconds',
+  statement_timestamp() - interval '30 seconds',
+  statement_timestamp() + interval '59 minutes',
+  statement_timestamp() - interval '1 minute',
+  statement_timestamp() - interval '10 seconds',
+  'purged',
+  statement_timestamp() - interval '20 seconds',
+  statement_timestamp() - interval '10 seconds'
+);
+
 do $approval_fixture$
 declare
   v_gate text;

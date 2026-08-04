@@ -127,7 +127,7 @@ create table affiliate_private.affiliate_didit_purge_outbox (
       or (
         length(provider_session_envelope) between 64 and 512
         and provider_session_envelope ~
-          '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,384}$'
+          '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}[A-Za-z0-9_-]*$'
       )
     ),
   constraint affiliate_didit_purge_outbox_status
@@ -618,7 +618,7 @@ begin
     or p_provider_session_envelope is null
     or length(p_provider_session_envelope) not between 64 and 512
     or p_provider_session_envelope !~
-      '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,384}$'
+      '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}[A-Za-z0-9_-]*$'
     or p_provider_environment not in ('sandbox', 'live')
   then
     raise exception 'invalid Didit purge envelope'
@@ -885,7 +885,7 @@ begin
     or p_provider_session_envelope is null
     or length(p_provider_session_envelope) not between 64 and 512
     or p_provider_session_envelope !~
-      '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,384}$'
+      '^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}[A-Za-z0-9_-]*$'
     or p_provider_environment not in ('sandbox', 'live')
   then
     raise exception 'invalid Didit purge envelope'
