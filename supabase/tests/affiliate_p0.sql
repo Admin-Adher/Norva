@@ -1090,13 +1090,23 @@ begin
       'P0 database integration test approval.'
     );
   end loop;
+end;
+$setup$;
 
-  update affiliate_private.affiliate_country_policies policy
-  set individual_available = true
-  from affiliate_private.affiliate_program_versions program
-  where program.id = policy.program_version_id
-    and program.version_key = 'p0-test-v1'
-    and policy.country_code = 'US';
+-- Opening a private jurisdiction is fixture setup, not a client capability.
+-- Drop the authenticated role before writing the private policy, after the
+-- immutable approval packages required by the availability guard exist.
+reset role;
+update affiliate_private.affiliate_country_policies policy
+set individual_available = true
+from affiliate_private.affiliate_program_versions program
+where program.id = policy.program_version_id
+  and program.version_key = 'p0-test-v1'
+  and policy.country_code = 'US';
+
+set local role authenticated;
+do $setup_controls$
+begin
 
   perform public.admin_partners_control(
     'set_allowlist',
@@ -1137,7 +1147,7 @@ begin
     'P0 database integration shadow worker activation.'
   );
 end;
-$setup$;
+$setup_controls$;
 
 set local role service_role;
 

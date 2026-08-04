@@ -1247,7 +1247,12 @@ select extensions.is(
 );
 reset role;
 update didit_certification_state
-set event_created_at = clock_timestamp()
+-- pgTAP executes the complete certification and provider purge in one
+-- transaction.  The purge worker records its canonical deletion timestamp
+-- with transaction_timestamp(); keep the authoritative approval event on the
+-- same database clock so provider_purged_at >= verified_at remains a genuinely
+-- current coverage proof inside this transactional fixture.
+set event_created_at = transaction_timestamp()
 where operator_key = 'risk2';
 
 set local role service_role;

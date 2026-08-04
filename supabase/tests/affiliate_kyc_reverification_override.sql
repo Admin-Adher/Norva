@@ -394,7 +394,11 @@ begin
     'didit-workflow-certification',
     1,
     'approved',
-    clock_timestamp(),
+    -- This pgTAP fixture applies the signed decision and completes the purge
+    -- in one transaction.  The purge completion RPC uses the transaction
+    -- timestamp, so the approval event must use the same canonical clock for
+    -- provider_purged_at >= verified_at to be a current immutable proof.
+    transaction_timestamp(),
     30,
     'FRA',
     true,
