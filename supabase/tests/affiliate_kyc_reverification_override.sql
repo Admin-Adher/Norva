@@ -967,7 +967,7 @@ select extensions.is(
         'sandbox',
         repeat('7', 64),
         3600,
-        'v1.k1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB'
+        'v1.k1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
       ) as response
     ) recorded
   ),
@@ -997,7 +997,7 @@ select extensions.is(
       'sandbox',
       repeat('7', 64),
       3600,
-      'v1.k1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB'
+      'v1.k1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
       ) as response
     ) recorded
   ),
