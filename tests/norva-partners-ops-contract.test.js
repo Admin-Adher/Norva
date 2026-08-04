@@ -613,6 +613,9 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const reverificationOverrideMigration = rehearsal.indexOf(
     '20260804165000_partners_kyc_reverification_override.sql',
   );
+  const deploymentManifestEventContractMigration = rehearsal.indexOf(
+    '20260804165500_partners_deployment_manifest_event_contract.sql',
+  );
   const biometricEnforcementMigration = rehearsal.indexOf(
     '20260804170000_partners_biometric_consent_enforcement.sql',
   );
@@ -625,8 +628,9 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
       && biometricConsentMigration < diditPurgeMigration
       && diditPurgeMigration < privacyRightsMigration
       && privacyRightsMigration < reverificationOverrideMigration
-      && reverificationOverrideMigration < biometricEnforcementMigration,
-    'the ten pending Partners migrations must keep their atomic final-state replay order',
+      && reverificationOverrideMigration < deploymentManifestEventContractMigration
+      && deploymentManifestEventContractMigration < biometricEnforcementMigration,
+    'the eleven pending Partners migrations must keep their atomic final-state replay order',
   );
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
@@ -636,6 +640,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_EIGHT"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_NINE"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_TEN"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_ELEVEN"/);
   assert.match(rehearsal, /migration_three_sha256=/);
   assert.match(rehearsal, /migration_four_sha256=/);
   assert.match(rehearsal, /migration_five_sha256=/);
@@ -644,17 +649,18 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_eight_sha256=/);
   assert.match(rehearsal, /migration_nine_sha256=/);
   assert.match(rehearsal, /migration_ten_sha256=/);
+  assert.match(rehearsal, /migration_eleven_sha256=/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
-  assert.match(rehearsal, /"0(?:\|0){20}"/);
-  assert.match(rehearsal, /"1(?:\|1){20}"/);
+  assert.match(rehearsal, /"0(?:\|0){21}"/);
+  assert.match(rehearsal, /"1(?:\|1){21}"/);
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="0(?:\|0){20}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){20}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="0(?:\|0){21}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){21}"/,
   );
   assert.match(
     rehearsal,
-    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=10[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
+    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=11[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
   );
   assert.equal(
     (rehearsal.match(/--single-transaction/g) || []).length,

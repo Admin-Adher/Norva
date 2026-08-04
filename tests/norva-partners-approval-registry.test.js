@@ -14,7 +14,7 @@ const migration = read(
   'supabase/migrations/20260804083541_partners_approval_registry.sql',
 );
 const deploymentManifestEventContract = read(
-  'supabase/migrations/20260804171000_partners_deployment_manifest_event_contract.sql',
+  'supabase/migrations/20260804165500_partners_deployment_manifest_event_contract.sql',
 );
 const preactivation = read(
   'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql',

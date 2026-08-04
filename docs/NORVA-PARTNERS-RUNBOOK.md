@@ -700,21 +700,23 @@ reconstruire la taxe depuis RevenueCat.
 ## 3. Ordre de déploiement
 
 Le déploiement DB/Edge est obligatoirement biphasé. La répétition physique
-isolée exige un mode explicite : `predeploy` exige les 21 marqueurs absents et
-applique les dix migrations dans leur ordre chronologique pour prouver l'état
-final ; `postdeploy` exige les 21 marqueurs présents, n'applique aucune
+isolée exige un mode explicite : `predeploy` exige les 22 marqueurs absents et
+applique les onze migrations dans leur ordre chronologique pour prouver l'état
+final ; `postdeploy` exige les 22 marqueurs présents, n'applique aucune
 migration et rejoue uniquement le vérificateur et le pgTAP compatible avec une
 restauration. Un état mixte échoue dans les deux modes. Le succès `predeploy`
-ne permet pas d'appliquer les dix migrations d'un seul bloc en production :
+ne permet pas d'appliquer les onze migrations d'un seul bloc en production :
 
 - **phase A — DB compatible avec les deux versions Edge** : appliquer dans
-  l'ordre les neuf premières migrations du lot, de
+  l'ordre les dix premières migrations du lot, de
   `20260803082211_partners_admin_operator_capabilities.sql` à
-  `20260804165000_partners_kyc_reverification_override.sql`, notamment
+  `20260804165500_partners_deployment_manifest_event_contract.sql`, notamment
   `20260804083541_partners_approval_registry.sql`,
   `20260804084500_partners_biometric_consent_contract.sql`,
   `20260804093000_partners_didit_purge_outbox.sql` et
-  `20260804160000_partners_privacy_rights_human_review.sql` ;
+  `20260804160000_partners_privacy_rights_human_review.sql`,
+  `20260804165000_partners_kyc_reverification_override.sql` et
+  `20260804165500_partners_deployment_manifest_event_contract.sql` ;
 - **phase Edge v2** : recréer `functions`, vérifier sa santé et un webhook non
   terminal, puis recréer `functions2` et refaire les mêmes contrôles. Les deux
   replicas doivent utiliser le contrat biométrique v2, l'enqueue de purge
@@ -726,7 +728,7 @@ ne permet pas d'appliquer les dix migrations d'un seul bloc en production :
 - **preuve postdéploiement** : restaurer un base-backup R2 capturé après la
   phase B et exécuter le mode `postdeploy` sur le même SHA candidat. La preuve
   doit contenir `migrations_applied=0`, `migration_replay_skipped=true`, les
-  21 marqueurs à `1`, le vérificateur et le pgTAP verts ;
+  22 marqueurs à `1`, le vérificateur et le pgTAP verts ;
 - enregistrer le cron de purge uniquement après un webhook terminal contrôlé,
   une suppression Didit `204|404`, un heartbeat frais et zéro dead-letter.
 
@@ -1247,7 +1249,7 @@ ne justifient aucun retry agressif côté client.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` des dix migrations sur restaurations isolées ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer les neuf migrations de phase A, déployer les deux Edge v2, puis seulement la dixième migration de phase B `20260804170000` ; ne jamais exécuter les dix migrations d'un bloc en production |
+| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` des onze migrations sur restaurations isolées ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer les dix migrations de phase A, déployer les deux Edge v2, puis seulement la onzième migration de phase B `20260804170000` ; ne jamais exécuter les onze migrations d'un bloc en production |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
 | API membre, demandes d'accès, referral et TV | livrées | entrée visible à tout compte Cloud Web/mobile, Admin inclus ; GET toujours lisible ; POST protégé par `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, cooldown 60 s, 8 nouvelles clés/24 h, rétention d'idempotence 30 j et `429 Retry-After: 60` ; aucun compte/KYC/lien/ledger créé ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer d'abord avec le kill switch de collecte à `false`, valider pause/reprise, puis synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; la production refuse de démarrer sans configuration complète | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
