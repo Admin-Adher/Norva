@@ -4,6 +4,9 @@ create extension if not exists pgtap with schema extensions;
 
 select extensions.plan(72);
 
+set local norva.partners_test_purge_envelope =
+  'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
 select extensions.ok(
   (
     select bool_and(class_row.relrowsecurity)
@@ -191,17 +194,22 @@ select extensions.ok(
   'only service_role can bind a provider certification session'
 );
 select extensions.ok(
-  has_function_privilege(
+  not has_function_privilege(
     'service_role',
     'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)',
     'EXECUTE'
   )
+  and has_function_privilege(
+    'service_role',
+    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'EXECUTE'
+  )
   and not has_function_privilege(
     'authenticated',
-    'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'EXECUTE'
   ),
-  'only service_role can apply a certification webhook'
+  'only service_role can apply an atomic certification webhook with purge'
 );
 select extensions.ok(
   (
@@ -690,7 +698,7 @@ reset role;
 set local role service_role;
 select extensions.throws_ok(
   $$
-    select public.partners_service_kyc_certification_webhook_apply(
+    select public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
       'cross-purpose-event-0001',
       'cross-purpose-session-0001',
       'didit-workflow-certification',
@@ -704,7 +712,8 @@ select extensions.throws_ok(
       true,
       repeat('1', 64),
       'live',
-      repeat('a', 64)
+      repeat('a', 64),
+      current_setting('norva.partners_test_purge_envelope')
     )
   $$,
   'P0006',
@@ -977,7 +986,7 @@ set event_created_at = clock_timestamp()
 where operator_key = 'risk1';
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply(
+  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
     'didit-certification-event-risk1',
     'didit-certification-session-risk1',
     'didit-workflow-certification',
@@ -995,13 +1004,14 @@ select extensions.is(
     true,
     repeat('2', 64),
     'live',
-    repeat('b', 64)
+    repeat('b', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_certification_result_quarantined',
   'a config-fingerprint mismatch is quarantined instead of promoted'
 );
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply(
+  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
     'didit-certification-event-risk1',
     'didit-certification-session-risk1',
     'didit-workflow-certification',
@@ -1019,7 +1029,8 @@ select extensions.is(
     true,
     repeat('2', 64),
     'live',
-    repeat('b', 64)
+    repeat('b', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) #>> '{certification,reason}',
   'provider_config_mismatch',
   'the quarantined response exposes only the bounded public reason enum'
@@ -1115,7 +1126,7 @@ where operator_key = 'risk2';
 
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply(
+  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
     'didit-certification-event-risk2',
     'didit-certification-session-risk2',
     'didit-workflow-certification',
@@ -1133,13 +1144,14 @@ select extensions.is(
     true,
     repeat('3', 64),
     'live',
-    repeat('c', 64)
+    repeat('c', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_certification_result_applied',
   'an exact live approved decision is applied to certification only'
 );
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply(
+  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
     'didit-certification-event-risk2',
     'didit-certification-session-risk2',
     'didit-workflow-certification',
@@ -1157,7 +1169,8 @@ select extensions.is(
     true,
     repeat('3', 64),
     'live',
-    repeat('c', 64)
+    repeat('c', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'replayed',
   'true',
   'the exact signed decision replays idempotently'
@@ -1294,7 +1307,7 @@ set event_created_at = clock_timestamp()
 where operator_key = 'risk2-sandbox';
 set local role service_role;
 update didit_certification_state state
-set response = public.partners_service_kyc_certification_webhook_apply(
+set response = public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
   'didit-certification-event-risk2-sandbox',
   'didit-certification-session-risk2-sandbox',
   'didit-workflow-certification',
@@ -1308,7 +1321,8 @@ set response = public.partners_service_kyc_certification_webhook_apply(
   true,
   repeat('4', 64),
   'sandbox',
-  repeat('d', 64)
+  repeat('d', 64),
+  current_setting('norva.partners_test_purge_envelope')
 )
 where state.operator_key = 'risk2-sandbox';
 select extensions.ok(
@@ -1434,7 +1448,7 @@ select extensions.ok(
 
 set local role service_role;
 update didit_certification_state state
-set response = public.partners_service_kyc_certification_webhook_apply(
+set response = public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
   'didit-certification-event-risk2-late',
   'didit-certification-session-risk2-late',
   'didit-workflow-certification',
@@ -1448,7 +1462,8 @@ set response = public.partners_service_kyc_certification_webhook_apply(
   true,
   repeat('5', 64),
   'live',
-  repeat('e', 64)
+  repeat('e', 64),
+  current_setting('norva.partners_test_purge_envelope')
 )
 where state.operator_key = 'risk2-late';
 select extensions.ok(

@@ -307,8 +307,6 @@ begin
   foreach v_signature in array array[
     'public.partners_service_dashboard(uuid,integer,text,text)',
     'public.partners_service_referral_claim(uuid,text,text)',
-    'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
-    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'public.partners_service_kyc_binding_recover(integer)',
     'public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
     'public.admin_partners_kyc_certification_resume()',
@@ -318,9 +316,8 @@ begin
     'public.partners_service_kyc_certification_create_claim(text)',
     'public.partners_service_kyc_certification_binding_match(text,text)',
     'public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
-    'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)',
-    'public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'public.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)',
     'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'public.partners_service_didit_purge_claim(integer,integer)',
@@ -477,7 +474,13 @@ begin
     'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text)',
     'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
     'affiliate_private.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text)',
-    'affiliate_private.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)'
+    'affiliate_private.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'affiliate_private.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)'
   ]
   loop
     if has_function_privilege('service_role', v_signature, 'EXECUTE') then
@@ -538,9 +541,8 @@ begin
     'affiliate_private.partners_service_kyc_certification_create_claim(text)',
     'affiliate_private.partners_service_kyc_certification_binding_match(text,text)',
     'affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
-    'affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)',
-    'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'affiliate_private.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)',
     'affiliate_private.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'affiliate_private.partners_service_didit_purge_claim(integer,integer)',
@@ -891,6 +893,33 @@ begin
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)'::regprocedure
+  );
+  if position(
+      'partners_service_kyc_session_record_v3_pre_withdrawal_20260804'
+      in lower(v_definition)
+    ) = 0
+    or position('pg_advisory_xact_lock' in lower(v_definition)) = 0
+    or position('p_provider_session_envelope' in lower(v_definition)) = 0
+    or position('partners_didit_purge_activate_staged' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored active KYC session recorder lost withdrawal serialization or purge activation';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_session_record_v3_pre_withdrawal_20260804(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)'::regprocedure
+  );
+  if position('partners_service_kyc_session_record_v2' in lower(v_definition)) = 0
+    or position('partners_didit_purge_stage_member' in lower(v_definition)) = 0
+    or position('p_provider_session_envelope' in lower(v_definition)) = 0
+    or position('p_provider_environment' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored active KYC session recorder lost consent-bound purge staging';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)'::regprocedure
   );
   if position(
@@ -901,7 +930,7 @@ begin
     or position('p_provider_session_ttl_seconds' in lower(v_definition)) = 0
   then
     raise exception
-      'restored KYC session recorder v2 lost consent or exact provider binding';
+      'restored inner KYC consent recorder lost consent or exact provider binding';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(

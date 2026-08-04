@@ -4,6 +4,9 @@ create extension if not exists pgtap with schema extensions;
 
 select extensions.plan(251);
 
+set local norva.partners_test_purge_envelope =
+  'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
 select extensions.ok(
   exists (
     select 1
@@ -1353,10 +1356,11 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$
-    select public.partners_service_kyc_prepare(
+    select public.partners_service_kyc_prepare_v2(
       '10000000-0000-4000-8000-000000000003',
       'kyc.prepare.integration.bad1',
       'partners-disclosure-old',
+      'partners-biometric-consent-v1',
       true,
       'en'
     )
@@ -1366,10 +1370,11 @@ select extensions.throws_ok(
   'KYC preparation rejects a stale disclosure'
 );
 select extensions.is(
-  public.partners_service_kyc_prepare(
+  public.partners_service_kyc_prepare_v2(
     '10000000-0000-4000-8000-000000000003',
     'kyc.prepare.integration.0001',
     'partners-disclosure-v1',
+    'partners-biometric-consent-v1',
     true,
     'en'
   ) ->> 'action',
@@ -1377,10 +1382,11 @@ select extensions.is(
   'KYC preparation reserves exactly one hosted session slot'
 );
 select extensions.is(
-  public.partners_service_kyc_prepare(
+  public.partners_service_kyc_prepare_v2(
     '10000000-0000-4000-8000-000000000003',
     'kyc.prepare.integration.0001',
     'partners-disclosure-v1',
+    'partners-biometric-consent-v1',
     true,
     'en'
   ) ->> 'replayed',
@@ -1389,10 +1395,11 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$
-    select public.partners_service_kyc_prepare(
+    select public.partners_service_kyc_prepare_v2(
       '10000000-0000-4000-8000-000000000003',
       'kyc.prepare.integration.0002',
       'partners-disclosure-v1',
+      'partners-biometric-consent-v1',
       true,
       'en'
     )
@@ -1420,7 +1427,7 @@ grant select, insert on partners_test_state to authenticated;
 set local role service_role;
 
 select extensions.is(
-  public.partners_service_kyc_session_record(
+  public.partners_service_kyc_session_record_v3(
     '10000000-0000-4000-8000-000000000003',
     'kyc.session.integration.0001',
     'didit-session-integration-0001',
@@ -1435,13 +1442,14 @@ select extensions.is(
     ),
     'sandbox',
     repeat('1', 64),
-    604800
+    604800,
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_session_recorded',
   'a Didit session binds to its database reservation'
 );
 select extensions.is(
-  public.partners_service_kyc_session_record(
+  public.partners_service_kyc_session_record_v3(
     '10000000-0000-4000-8000-000000000003',
     'kyc.session.integration.0001',
     'didit-session-integration-0001',
@@ -1456,14 +1464,15 @@ select extensions.is(
     ),
     'sandbox',
     repeat('1', 64),
-    604800
+    604800,
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'replayed',
   'true',
   'provider session recording is retry-safe after a network timeout'
 );
 select extensions.throws_ok(
   $$
-    select public.partners_service_kyc_session_record(
+    select public.partners_service_kyc_session_record_v3(
       '10000000-0000-4000-8000-000000000003',
       'kyc.session.integration.0002',
       'didit-session-integration-0001',
@@ -1478,7 +1487,8 @@ select extensions.throws_ok(
       ),
       'sandbox',
       repeat('1', 64),
-      604800
+      604800,
+      current_setting('norva.partners_test_purge_envelope')
     )
   $$,
   'P0003',
@@ -1526,7 +1536,7 @@ select extensions.throws_ok(
 
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-sandbox-integration-0001',
     'didit-session-integration-0001',
     'didit-workflow-integration',
@@ -1540,13 +1550,14 @@ select extensions.is(
     true,
     repeat('a', 64),
     'sandbox',
-    repeat('1', 64)
+    repeat('1', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_observed',
   'an approved sandbox decision is observation-only'
 );
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-sandbox-integration-0001',
     'didit-session-integration-0001',
     'didit-workflow-integration',
@@ -1560,7 +1571,8 @@ select extensions.is(
     true,
     repeat('a', 64),
     'sandbox',
-    repeat('1', 64)
+    repeat('1', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'replayed',
   'true',
   'the exact sandbox observation replays without another decision'
@@ -1630,9 +1642,27 @@ join affiliate_private.affiliate_accounts account
 where account.user_id = '10000000-0000-4000-8000-000000000003'
   and reservation.status = 'reserved';
 
+insert into affiliate_private.affiliate_biometric_consent_attestations (
+  account_id,
+  idempotency_key,
+  reservation_key,
+  disclosure_version,
+  biometric_consent_version
+)
+select
+  account.id,
+  'kyc.prepare.live.integration.0001',
+  state.state_value,
+  'partners-disclosure-v1',
+  'partners-biometric-consent-v1'
+from affiliate_private.affiliate_accounts account
+join partners_test_state state
+  on state.state_key = 'kyc_live_reservation'
+where account.user_id = '10000000-0000-4000-8000-000000000003';
+
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_session_record(
+  public.partners_service_kyc_session_record_v3(
     '10000000-0000-4000-8000-000000000003',
     'kyc.session.live.integration.0001',
     'didit-session-live-integration-0001',
@@ -1647,7 +1677,8 @@ select extensions.is(
     ),
     'live',
     repeat('2', 64),
-    604800
+    604800,
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_session_recorded',
   'a fresh production session receives a distinct live binding'
@@ -1655,7 +1686,7 @@ select extensions.is(
 select extensions.is(
   concat_ws(
     ':',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-pending-config-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1669,9 +1700,10 @@ select extensions.is(
       false,
       repeat('9', 64),
       'live',
-      repeat('6', 64)
+      repeat('6', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'action',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-pending-config-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1685,7 +1717,8 @@ select extensions.is(
       false,
       repeat('9', 64),
       'live',
-      repeat('6', 64)
+      repeat('6', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'reason'
   ),
   'kyc_result_quarantined:provider_config_mismatch',
@@ -1709,7 +1742,7 @@ select extensions.is(
 );
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-live-integration-0001',
     'didit-session-live-integration-0001',
     'didit-workflow-integration',
@@ -1723,13 +1756,14 @@ select extensions.is(
     true,
     repeat('b', 64),
     'live',
-    repeat('2', 64)
+    repeat('2', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_applied',
   'an exact live binding reaches the authoritative KYC reducer'
 );
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-live-integration-0001',
     'didit-session-live-integration-0001',
     'didit-workflow-integration',
@@ -1743,7 +1777,8 @@ select extensions.is(
     true,
     repeat('b', 64),
     'live',
-    repeat('2', 64)
+    repeat('2', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) #>> '{kyc,status}',
   'verified',
   'the exact live result is retry-safe and remains verified'
@@ -1763,7 +1798,7 @@ select extensions.is(
 
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-binding-conflict-0001',
     'didit-session-live-integration-0001',
     'didit-workflow-integration',
@@ -1777,7 +1812,8 @@ select extensions.is(
     true,
     repeat('c', 64),
     'sandbox',
-    repeat('1', 64)
+    repeat('1', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_quarantined',
   'an environment conflict is rejected into a visible quarantine'
@@ -1785,7 +1821,7 @@ select extensions.is(
 select extensions.is(
   concat_ws(
     ':',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-workflow-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-replaced',
@@ -1799,9 +1835,10 @@ select extensions.is(
       false,
       repeat('d', 64),
       'live',
-      repeat('3', 64)
+      repeat('3', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'action',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-workflow-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-replaced',
@@ -1815,7 +1852,8 @@ select extensions.is(
       false,
       repeat('d', 64),
       'live',
-      repeat('3', 64)
+      repeat('3', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'reason'
   ),
   'kyc_result_quarantined:provider_config_mismatch',
@@ -1824,7 +1862,7 @@ select extensions.is(
 select extensions.is(
   concat_ws(
     ':',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-version-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1838,9 +1876,10 @@ select extensions.is(
       false,
       repeat('e', 64),
       'live',
-      repeat('4', 64)
+      repeat('4', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'action',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-version-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1854,7 +1893,8 @@ select extensions.is(
       false,
       repeat('e', 64),
       'live',
-      repeat('4', 64)
+      repeat('4', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'reason'
   ),
   'kyc_result_quarantined:provider_config_mismatch',
@@ -1863,7 +1903,7 @@ select extensions.is(
 select extensions.is(
   concat_ws(
     ':',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-node-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1877,9 +1917,10 @@ select extensions.is(
       false,
       repeat('f', 64),
       'live',
-      repeat('5', 64)
+      repeat('5', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'action',
-    public.partners_service_kyc_webhook_apply(
+    public.partners_service_kyc_webhook_apply_and_enqueue_purge(
       'didit-event-node-drift-0001',
       'didit-session-live-integration-0001',
       'didit-workflow-integration',
@@ -1893,14 +1934,15 @@ select extensions.is(
       false,
       repeat('f', 64),
       'live',
-      repeat('5', 64)
+      repeat('5', 64),
+      current_setting('norva.partners_test_purge_envelope')
     ) ->> 'reason'
   ),
   'kyc_result_quarantined:provider_config_mismatch',
   'a signed known-session node/config drift reaches visible quarantine'
 );
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-live-integration-0001',
     'didit-session-live-integration-0001',
     'didit-workflow-integration',
@@ -1914,13 +1956,14 @@ select extensions.is(
     true,
     repeat('b', 64),
     'sandbox',
-    repeat('1', 64)
+    repeat('1', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_quarantined',
   'a replay of a live event through another provider binding is quarantined'
 );
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-live-integration-0001',
     'didit-session-live-integration-0001',
     'didit-workflow-integration',
@@ -1934,7 +1977,8 @@ select extensions.is(
     true,
     repeat('b', 64),
     'sandbox',
-    repeat('1', 64)
+    repeat('1', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_quarantined',
   'a retry of the same binding-conflict replay remains idempotent'
@@ -2018,7 +2062,7 @@ from affiliate_private.affiliate_accounts account
 where account.user_id = '10000000-0000-4000-8000-000000000003';
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-recovery-drift-0001',
     'didit-recovery-session-old-0001',
     'didit-workflow-recovery',
@@ -2032,7 +2076,8 @@ select extensions.is(
     false,
     repeat('6', 64),
     'live',
-    repeat('7', 64)
+    repeat('7', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) ->> 'action',
   'kyc_result_quarantined',
   'a known pending session enters bounded recovery after config drift'
@@ -2073,7 +2118,7 @@ select extensions.is(
   'the bounded worker recovery expires the elapsed drifted session'
 );
 select extensions.is(
-  public.partners_service_kyc_webhook_apply(
+  public.partners_service_kyc_webhook_apply_and_enqueue_purge(
     'didit-event-recovery-late-exact-0001',
     'didit-recovery-session-old-0001',
     'didit-workflow-recovery',
@@ -2087,7 +2132,8 @@ select extensions.is(
     true,
     repeat('a', 64),
     'live',
-    repeat('6', 64)
+    repeat('6', 64),
+    current_setting('norva.partners_test_purge_envelope')
   ) #>> '{kyc,status}',
   'expired',
   'an exact live decision arriving after recovery cannot activate an expired session'
@@ -2296,20 +2342,25 @@ select extensions.ok(
   'the pre-binding webhook service signature is no longer callable'
 );
 select extensions.ok(
-  has_function_privilege(
+  not has_function_privilege(
     'service_role',
     'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
     'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'EXECUTE'
   ),
-  'service_role can call only the environment-bound webhook signature'
+  'service_role can call only the environment-bound atomic purge signature'
 );
 select extensions.ok(
   not has_function_privilege(
     'authenticated',
-    'public.partners_service_kyc_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'EXECUTE'
   ),
-  'authenticated clients cannot forge an environment-bound KYC result'
+  'authenticated clients cannot forge an atomic environment-bound KYC result'
 );
 
 select extensions.ok(

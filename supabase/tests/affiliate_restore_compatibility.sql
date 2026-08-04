@@ -36,14 +36,14 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_kyc_certification_create_claim(text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_kyc_certification_binding_match(text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
-  {"signature":"affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"public.admin_partners_kyc_certification_resume()","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"public.admin_partners_kyc_certification_status()","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"public.partners_service_kyc_certification_create_claim(text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_kyc_certification_binding_match(text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
-  {"signature":"public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.valid_partners_approval_document_hashes(jsonb)","security_definer":false,"volatility":"i","access_role":"owner"},
   {"signature":"affiliate_private.valid_partners_approval_jurisdiction_scope(jsonb)","security_definer":false,"volatility":"i","access_role":"owner"},
   {"signature":"affiliate_private.partners_approval_required_document_keys(text)","security_definer":false,"volatility":"i","access_role":"owner"},
@@ -79,8 +79,8 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"public.admin_partners_revolut_payout_status()","security_definer":false,"volatility":"s","access_role":"authenticated"},
   {"signature":"affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
-  {"signature":"affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
-  {"signature":"public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)","security_definer":false,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.guard_didit_purge_managed_mutation()","security_definer":false,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.mark_member_didit_purge_pending()","security_definer":false,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.mark_certification_didit_purge_pending()","security_definer":false,"volatility":"v","access_role":"owner"},
@@ -284,7 +284,7 @@ select extensions.ok(
       )
       where access_role <> 'owner'
     )
-    select count(*) = 57
+    select count(*) = 55
       and bool_and(
         pg_catalog.has_function_privilege(
           allowed.access_role,
@@ -330,7 +330,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 53
+    select count(*) = 64
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',

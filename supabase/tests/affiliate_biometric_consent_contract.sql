@@ -84,7 +84,17 @@ select extensions.ok(
   )
   and has_function_privilege(
     'service_role',
+    'public.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
     'public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)',
     'EXECUTE'
   )
   and not has_function_privilege(
@@ -97,7 +107,7 @@ select extensions.ok(
     'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)',
     'EXECUTE'
   ),
-  'only the Edge service role can prepare v2 consent and cannot bypass through v1'
+  'only the Edge service role can prepare consent and record through atomic v3'
 );
 
 select extensions.throws_ok(
