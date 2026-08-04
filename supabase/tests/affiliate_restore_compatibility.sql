@@ -226,7 +226,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 157
+    select count(*) = 158
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -248,7 +248,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 157
+    select count(*) = 158
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -272,7 +272,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 157
+    select count(*) = 158
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -366,7 +366,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 76
+    select count(*) = 77
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
