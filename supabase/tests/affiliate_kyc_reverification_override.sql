@@ -277,7 +277,7 @@ as $fixture$
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('5', 64),
       'gdpr_self_assessment', repeat('6', 64),
-      'biometric_consent', repeat('0', 64),
+      'biometric_consent', repeat('f', 64),
       'privacy_notice', repeat('7', 64),
       'records_of_processing', repeat('8', 64)
     )

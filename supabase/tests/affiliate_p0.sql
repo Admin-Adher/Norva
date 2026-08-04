@@ -396,44 +396,44 @@ language sql
 immutable
 as $fixture$
   select jsonb_build_object(
-    'approval_record', repeat('1', 64),
-    'deployment_proof', repeat('b', 64)
+    'approval_record', repeat('01', 32),
+    'deployment_proof', repeat('02', 32)
   ) || case p_gate
     when 'privacy_approved' then jsonb_build_object(
-      'dpia', repeat('3', 64),
-      'gdpr_self_assessment', repeat('4', 64),
-      'biometric_consent', repeat('0', 64),
-      'privacy_notice', repeat('5', 64),
-      'records_of_processing', repeat('6', 64)
+      'dpia', repeat('03', 32),
+      'gdpr_self_assessment', repeat('04', 32),
+      'biometric_consent', repeat('05', 32),
+      'privacy_notice', repeat('06', 32),
+      'records_of_processing', repeat('07', 32)
     )
     when 'legal_and_tax_approved' then jsonb_build_object(
-      'legal_tax_review', repeat('7', 64),
-      'partners_terms', repeat('8', 64)
+      'legal_tax_review', repeat('08', 32),
+      'partners_terms', repeat('09', 32)
     )
     when 'individual_verification_coverage_confirmed' then
-      jsonb_build_object('kyc_certification', repeat('9', 64))
+      jsonb_build_object('kyc_certification', repeat('0a', 32))
     when 'individual_payout_coverage_confirmed' then
-      jsonb_build_object('payout_coverage_review', repeat('a', 64))
+      jsonb_build_object('payout_coverage_review', repeat('0b', 32))
     when 'country_policy_approved' then jsonb_build_object(
-      'country_policy_review', repeat('b', 64),
-      'payout_corridor_review', repeat('c', 64)
+      'country_policy_review', repeat('0c', 32),
+      'payout_corridor_review', repeat('0d', 32)
     )
     when 'financial_data_contract_approved' then
-      jsonb_build_object('financial_contract_test', repeat('d', 64))
+      jsonb_build_object('financial_contract_test', repeat('0e', 32))
     when 'shadow_reconciliation_clean' then
-      jsonb_build_object('shadow_reconciliation_report', repeat('e', 64))
+      jsonb_build_object('shadow_reconciliation_report', repeat('0f', 32))
     when 'backup_restore_verified' then
-      jsonb_build_object('restore_rehearsal_proof', repeat('f', 64))
+      jsonb_build_object('restore_rehearsal_proof', repeat('10', 32))
     when 'payout_execution_adapter_verified' then
-      jsonb_build_object('payout_execution_test', repeat('0', 64))
+      jsonb_build_object('payout_execution_test', repeat('11', 32))
     when 'manual_payout_workflow_verified' then
-      jsonb_build_object('manual_payout_runbook_test', repeat('1', 64))
+      jsonb_build_object('manual_payout_runbook_test', repeat('12', 32))
     when 'revolut_api_adapter_verified' then
-      jsonb_build_object('revolut_api_certification', repeat('2', 64))
+      jsonb_build_object('revolut_api_certification', repeat('13', 32))
     when 'tv_relay_security_verified' then
-      jsonb_build_object('tv_relay_security_review', repeat('3', 64))
+      jsonb_build_object('tv_relay_security_review', repeat('14', 32))
     when 'general_release_approved' then
-      jsonb_build_object('release_readiness_report', repeat('4', 64))
+      jsonb_build_object('release_readiness_report', repeat('15', 32))
     else '{}'::jsonb
   end;
 $fixture$;
@@ -965,7 +965,7 @@ select extensions.is(
     'preproduction',
     repeat('a', 40),
     'p0-test-deployment',
-    repeat('b', 64),
+    repeat('02', 32),
     pg_temp.partners_deployment_documents(),
     'P0 exact deployment manifest registration fixture.'
   ) ->> 'action',
@@ -982,7 +982,7 @@ select extensions.is(
     repeat('a', 40),
     'preproduction',
     'p0-test-deployment',
-    repeat('b', 64),
+    repeat('02', 32),
     now() + interval '30 days',
     'P0 AAL2 release gate activation is authorized.'
   ) ->> 'satisfied',
@@ -1013,7 +1013,7 @@ begin
       repeat('a', 40),
       'preproduction',
       'p0-test-deployment',
-      repeat('b', 64),
+      repeat('02', 32),
       now() + interval '30 days',
       'P0 database integration test approval.'
     );
@@ -2832,7 +2832,7 @@ select public.admin_partners_release_gate_approve(
   repeat('a', 40),
   'preproduction',
   'p0-test-deployment',
-  repeat('b', 64),
+  repeat('02', 32),
   now() + interval '30 days',
   'P0 database integration clean shadow result.'
 );
@@ -3426,7 +3426,7 @@ select public.admin_partners_release_gate_approve(
   repeat('a', 40),
   'preproduction',
   'p0-test-deployment',
-  repeat('b', 64),
+  repeat('02', 32),
   now() + interval '30 days',
   'P0 payout integration verified test adapter.'
 );
