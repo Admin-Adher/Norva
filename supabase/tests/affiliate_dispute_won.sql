@@ -139,6 +139,218 @@ values (
   now() - interval '1 day'
 );
 
+-- Build the same immutable release provenance required in production before
+-- opening this financial-worker fixture's jurisdiction. The dispute tests are
+-- not allowed to bypass the country-policy guard merely because they run as
+-- the database owner.
+do $approval_fixture$
+declare
+  v_gate text;
+  v_program affiliate_private.affiliate_program_versions%rowtype;
+  v_policy affiliate_private.affiliate_country_policies%rowtype;
+  v_package_id uuid;
+  v_package_hash text;
+  v_manifest_id uuid;
+  v_manifest_hash text;
+  v_manifest_documents jsonb;
+  v_documents jsonb;
+  v_scope jsonb;
+  v_approved_at timestamptz := statement_timestamp();
+  v_expires_at timestamptz := statement_timestamp() + interval '30 days';
+begin
+  select program.*
+  into strict v_program
+  from affiliate_private.affiliate_program_versions program
+  where program.id = '21000000-0000-4000-8000-000000000001';
+
+  select policy.*
+  into strict v_policy
+  from affiliate_private.affiliate_country_policies policy
+  where policy.id = '22000000-0000-4000-8000-000000000001';
+
+  v_manifest_documents := jsonb_build_object(
+    'approval_record', repeat('1', 64),
+    'deployment_proof', repeat('2', 64),
+    'legal_tax_review', repeat('3', 64),
+    'partners_terms', repeat('4', 64),
+    'dpia', repeat('5', 64),
+    'gdpr_self_assessment', repeat('6', 64),
+    'biometric_consent', repeat('0', 64),
+    'privacy_notice', repeat('7', 64),
+    'records_of_processing', repeat('8', 64),
+    'country_policy_review', repeat('9', 64),
+    'payout_corridor_review', repeat('a', 64)
+  );
+
+  v_manifest_hash :=
+    affiliate_private.partners_deployment_manifest_sha256(
+      'preproduction',
+      1,
+      repeat('b', 40),
+      'dispute-won-pgtap-deployment',
+      repeat('2', 64),
+      v_manifest_documents,
+      repeat('c', 64),
+      v_approved_at,
+      'DISPUTE_WON pgTAP deployment manifest fixture.'
+    );
+
+  perform set_config('norva.partners_approval_control', 'deployment', true);
+  insert into affiliate_private.affiliate_deployment_manifests (
+    deployment_environment,
+    manifest_version,
+    source_commit_sha,
+    deployment_key,
+    deployment_evidence_sha256,
+    document_hashes,
+    manifest_sha256,
+    registered_by_pseudonym,
+    registered_at,
+    justification
+  ) values (
+    'preproduction',
+    1,
+    repeat('b', 40),
+    'dispute-won-pgtap-deployment',
+    repeat('2', 64),
+    v_manifest_documents,
+    v_manifest_hash,
+    repeat('c', 64),
+    v_approved_at,
+    'DISPUTE_WON pgTAP deployment manifest fixture.'
+  ) returning id into v_manifest_id;
+
+  insert into affiliate_private.affiliate_deployment_manifest_bindings (
+    deployment_environment,
+    deployment_manifest_id,
+    bound_by_pseudonym,
+    bound_at
+  ) values (
+    'preproduction',
+    v_manifest_id,
+    repeat('c', 64),
+    v_approved_at
+  );
+
+  perform set_config('norva.partners_approval_control', 'approve', true);
+  foreach v_gate in array array[
+    'legal_and_tax_approved',
+    'privacy_approved',
+    'country_policy_approved'
+  ]::text[]
+  loop
+    v_documents := jsonb_build_object(
+      'approval_record', repeat('1', 64),
+      'deployment_proof', repeat('2', 64)
+    ) || case v_gate
+      when 'legal_and_tax_approved' then jsonb_build_object(
+        'legal_tax_review', repeat('3', 64),
+        'partners_terms', repeat('4', 64)
+      )
+      when 'privacy_approved' then jsonb_build_object(
+        'dpia', repeat('5', 64),
+        'gdpr_self_assessment', repeat('6', 64),
+        'biometric_consent', repeat('0', 64),
+        'privacy_notice', repeat('7', 64),
+        'records_of_processing', repeat('8', 64)
+      )
+      when 'country_policy_approved' then jsonb_build_object(
+        'country_policy_review', repeat('9', 64),
+        'payout_corridor_review', repeat('a', 64)
+      )
+    end;
+    v_scope := jsonb_build_array(jsonb_build_object(
+      'country_code', v_policy.country_code,
+      'subdivision_code', v_policy.subdivision_code,
+      'policy_snapshot_sha256',
+        affiliate_private.partners_country_policy_approval_snapshot_sha256(
+          v_policy.id
+        )
+    ));
+    v_package_hash := affiliate_private.partners_approval_package_sha256(
+      v_gate,
+      1,
+      v_program.version_key,
+      affiliate_private.partners_program_approval_snapshot_sha256(v_program.id),
+      v_scope,
+      v_documents,
+      repeat('b', 40),
+      'preproduction',
+      'dispute-won-pgtap-deployment',
+      repeat('2', 64),
+      v_manifest_hash,
+      repeat('c', 64),
+      v_approved_at,
+      v_expires_at,
+      'DISPUTE_WON pgTAP immutable approval fixture.'
+    );
+
+    insert into affiliate_private.affiliate_approval_packages (
+      gate_key,
+      package_version,
+      program_version_id,
+      deployment_manifest_id,
+      program_version_key,
+      program_snapshot_sha256,
+      jurisdiction_scope,
+      document_hashes,
+      source_commit_sha,
+      deployment_environment,
+      deployment_key,
+      deployment_evidence_sha256,
+      deployment_manifest_sha256,
+      package_sha256,
+      approved_by_pseudonym,
+      approved_at,
+      expires_at,
+      justification
+    ) values (
+      v_gate,
+      1,
+      v_program.id,
+      v_manifest_id,
+      v_program.version_key,
+      affiliate_private.partners_program_approval_snapshot_sha256(v_program.id),
+      v_scope,
+      v_documents,
+      repeat('b', 40),
+      'preproduction',
+      'dispute-won-pgtap-deployment',
+      repeat('2', 64),
+      v_manifest_hash,
+      v_package_hash,
+      repeat('c', 64),
+      v_approved_at,
+      v_expires_at,
+      'DISPUTE_WON pgTAP immutable approval fixture.'
+    ) returning id into v_package_id;
+
+    insert into affiliate_private.affiliate_release_gate_approval_bindings (
+      gate_key,
+      approval_package_id,
+      bound_by_pseudonym,
+      bound_at
+    ) values (v_gate, v_package_id, repeat('c', 64), v_approved_at);
+  end loop;
+
+  update affiliate_private.affiliate_release_gates gate
+  set
+    satisfied = true,
+    satisfied_at = v_approved_at,
+    updated_by_pseudonym = repeat('c', 64),
+    updated_at = v_approved_at
+  where gate.gate_key = any (array[
+    'legal_and_tax_approved',
+    'privacy_approved',
+    'country_policy_approved'
+  ]::text[]);
+
+  update affiliate_private.affiliate_country_policies policy
+  set individual_available = true
+  where policy.id = v_policy.id;
+end;
+$approval_fixture$;
+
 insert into affiliate_private.affiliate_accounts (
   id,
   user_id,

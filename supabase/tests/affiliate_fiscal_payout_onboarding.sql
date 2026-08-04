@@ -827,7 +827,7 @@ select
   '22000000-0000-4000-8000-000000000001',
   repeat('b', 64),
   'individual',
-  'active',
+  'pending_verification',
   program.id,
   policy.id,
   'US',
@@ -1140,6 +1140,10 @@ begin
   update affiliate_private.affiliate_country_policies policy
   set individual_available = true
   where policy.id = v_policy.id;
+
+  update affiliate_private.affiliate_accounts account
+  set status = 'active', updated_at = now()
+  where account.user_id = '22000000-0000-4000-8000-000000000001';
 end;
 $approval_fixture$;
 

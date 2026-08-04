@@ -159,7 +159,7 @@ insert into auth.users (
   'kyc-risk-admin-fixture@example.invalid',
   '',
   now(),
-  '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
+  '{"provider":"email","providers":["email"],"role":"admin","partners_release_manager":true}'::jsonb,
   '{}'::jsonb,
   now(),
   now()
@@ -171,13 +171,21 @@ insert into affiliate_private.affiliate_admin_capabilities (
   enabled,
   granted_by_pseudonym,
   justification
-) values (
-  '68000000-0000-4000-8000-000000000002',
-  'risk',
-  true,
-  repeat('f', 64),
-  'pgTAP Risk reviewer fixture capability.'
-);
+) values
+  (
+    '68000000-0000-4000-8000-000000000002',
+    'risk',
+    true,
+    repeat('f', 64),
+    'pgTAP Risk reviewer fixture capability.'
+  ),
+  (
+    '68000000-0000-4000-8000-000000000002',
+    'finance',
+    true,
+    repeat('f', 64),
+    'pgTAP immutable Legal approval fixture capability.'
+  );
 
 insert into auth.mfa_factors (
   id,
@@ -239,7 +247,7 @@ insert into affiliate_private.affiliate_country_policies (
 select
   program.id,
   'FR',
-  true,
+  false,
   18,
   true,
   'identity_age_country_capacity',
@@ -250,6 +258,200 @@ select
   now() - interval '1 minute'
 from affiliate_private.affiliate_program_versions program
 where program.version_key = 'p0-reverification-test-v1';
+
+create or replace function pg_temp.kyc_reverification_approval_documents(
+  p_gate text
+)
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select jsonb_build_object(
+    'approval_record', repeat('1', 64),
+    'deployment_proof', repeat('2', 64)
+  ) || case p_gate
+    when 'legal_and_tax_approved' then jsonb_build_object(
+      'legal_tax_review', repeat('3', 64),
+      'partners_terms', repeat('4', 64)
+    )
+    when 'privacy_approved' then jsonb_build_object(
+      'dpia', repeat('5', 64),
+      'gdpr_self_assessment', repeat('6', 64),
+      'biometric_consent', repeat('0', 64),
+      'privacy_notice', repeat('7', 64),
+      'records_of_processing', repeat('8', 64)
+    )
+    when 'individual_verification_coverage_confirmed' then
+      jsonb_build_object('kyc_certification', repeat('9', 64))
+    when 'country_policy_approved' then jsonb_build_object(
+      'country_policy_review', repeat('a', 64),
+      'payout_corridor_review', repeat('b', 64)
+    )
+    else '{}'::jsonb
+  end;
+$fixture$;
+
+create or replace function pg_temp.kyc_reverification_deployment_documents()
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select pg_temp.kyc_reverification_approval_documents(
+    'legal_and_tax_approved'
+  ) || pg_temp.kyc_reverification_approval_documents(
+    'privacy_approved'
+  ) || pg_temp.kyc_reverification_approval_documents(
+    'individual_verification_coverage_confirmed'
+  ) || pg_temp.kyc_reverification_approval_documents(
+    'country_policy_approved'
+  );
+$fixture$;
+
+set local role authenticated;
+do $approval_jwt$
+begin
+  perform set_config(
+    'request.jwt.claims',
+    jsonb_build_object(
+      'sub', '68000000-0000-4000-8000-000000000002',
+      'role', 'authenticated',
+      'aal', 'aal2',
+      'iat', floor(extract(epoch from clock_timestamp()))::bigint,
+      'app_metadata', jsonb_build_object(
+        'role', 'admin',
+        'partners_release_manager', true
+      )
+    )::text,
+    true
+  );
+end;
+$approval_jwt$;
+do $privacy_approval$
+begin
+  perform public.admin_partners_deployment_manifest_register(
+    'preproduction',
+    repeat('c', 40),
+    'kyc-reverification-test-deployment',
+    repeat('2', 64),
+    pg_temp.kyc_reverification_deployment_documents(),
+    'KYC re-verification pgTAP immutable deployment manifest.'
+  );
+  perform public.admin_partners_release_gate_approve(
+    'privacy_approved',
+    'p0-reverification-test-v1',
+    '[{"country_code":"FR"}]'::jsonb,
+    pg_temp.kyc_reverification_approval_documents('privacy_approved'),
+    repeat('c', 40),
+    'preproduction',
+    'kyc-reverification-test-deployment',
+    repeat('2', 64),
+    now() + interval '30 days',
+    'KYC re-verification pgTAP immutable Privacy approval.'
+  );
+end;
+$privacy_approval$;
+
+create temporary table kyc_reverification_certification_state (
+  certification_key text not null
+) on commit drop;
+grant select, insert on kyc_reverification_certification_state
+  to authenticated, service_role;
+insert into kyc_reverification_certification_state (certification_key)
+select response #>> '{certification,key}'
+from (
+  select public.admin_partners_kyc_certification_prepare(
+    'certification.kyc-reverification.0001',
+    'partners-didit-certification-v1',
+    true,
+    'fr',
+    'CERTIFIER DIDIT',
+    'Certify the KYC re-verification immutable approval fixture.'
+  ) as response
+) prepared;
+reset role;
+
+set local role service_role;
+do $certification_proof$
+declare
+  v_claim record;
+begin
+  perform public.partners_service_kyc_certification_create_claim(
+    (select certification_key from kyc_reverification_certification_state)
+  );
+  perform public.partners_service_kyc_certification_session_record(
+    (select certification_key from kyc_reverification_certification_state),
+    'didit-certification-session-kyc-reverification',
+    'didit-workflow-certification',
+    1,
+    'not_started',
+    'live',
+    repeat('d', 64),
+    604800
+  );
+  perform public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+    'didit-certification-event-kyc-reverification',
+    'didit-certification-session-kyc-reverification',
+    'didit-workflow-certification',
+    1,
+    'approved',
+    clock_timestamp(),
+    30,
+    'FRA',
+    true,
+    true,
+    true,
+    repeat('e', 64),
+    'live',
+    repeat('d', 64),
+    'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  );
+  for v_claim in
+    select * from public.partners_service_didit_purge_claim(25, 300)
+  loop
+    perform public.partners_service_didit_purge_complete(
+      v_claim.outbox_id,
+      v_claim.lease_token,
+      'deleted'
+    );
+  end loop;
+end;
+$certification_proof$;
+reset role;
+
+set local role authenticated;
+do $remaining_approvals$
+declare
+  v_gate text;
+begin
+  foreach v_gate in array array[
+    'legal_and_tax_approved',
+    'individual_verification_coverage_confirmed',
+    'country_policy_approved'
+  ]::text[]
+  loop
+    perform public.admin_partners_release_gate_approve(
+      v_gate,
+      'p0-reverification-test-v1',
+      '[{"country_code":"FR"}]'::jsonb,
+      pg_temp.kyc_reverification_approval_documents(v_gate),
+      repeat('c', 40),
+      'preproduction',
+      'kyc-reverification-test-deployment',
+      repeat('2', 64),
+      now() + interval '30 days',
+      'KYC re-verification pgTAP immutable release approval.'
+    );
+  end loop;
+end;
+$remaining_approvals$;
+reset role;
+
+update affiliate_private.affiliate_country_policies policy
+set individual_available = true
+from affiliate_private.affiliate_program_versions program
+where program.id = policy.program_version_id
+  and program.version_key = 'p0-reverification-test-v1'
+  and policy.country_code = 'FR';
 
 insert into affiliate_private.affiliate_kyc_attempt_policies (
   country_policy_id,
@@ -346,18 +548,6 @@ select set_config(
 update public.admin_feature_flags
 set enabled = true, updated_at = now(), updated_by = 'pgtap'
 where key = 'partners_enabled';
-
--- This fixture isolates the attempt-policy behavior. Immutable release-package
--- validity is covered by its dedicated approval-registry suite.
-create or replace function affiliate_private.release_gates_satisfied(
-  p_gate_keys text[]
-)
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$ select true $$;
 
 set local role service_role;
 select extensions.throws_ok(

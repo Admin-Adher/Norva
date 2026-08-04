@@ -397,7 +397,7 @@ immutable
 as $fixture$
   select jsonb_build_object(
     'approval_record', repeat('1', 64),
-    'deployment_proof', repeat('2', 64)
+    'deployment_proof', repeat('b', 64)
   ) || case p_gate
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('3', 64),

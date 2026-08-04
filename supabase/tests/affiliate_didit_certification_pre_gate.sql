@@ -278,7 +278,7 @@ values
     'didit-risk-one@example.invalid',
     '',
     now(),
-    '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
+    '{"provider":"email","providers":["email"],"role":"admin","partners_release_manager":true}'::jsonb,
     '{}'::jsonb,
     now(),
     now()
@@ -365,13 +365,139 @@ values
     'Pre-gate Didit certification pgTAP Risk fixture two.'
   );
 
-update affiliate_private.affiliate_release_gates
-set
-  satisfied = true,
-  satisfied_at = now(),
-  updated_by_pseudonym = repeat('c', 64),
-  updated_at = now()
-where gate_key = 'privacy_approved';
+insert into affiliate_private.affiliate_program_versions (
+  version_key,
+  account_type,
+  status,
+  commission_rate_bps,
+  attribution_window_days,
+  maturation_days,
+  payout_thresholds,
+  terms_version,
+  disclosure_version,
+  effective_from
+)
+values (
+  'p0-didit-certification-test-v1',
+  'individual',
+  'draft',
+  2000,
+  30,
+  45,
+  '{"USD":1000}'::jsonb,
+  'partners-terms-v1',
+  'partners-disclosure-v1',
+  now() - interval '1 minute'
+);
+
+insert into affiliate_private.affiliate_country_policies (
+  program_version_id,
+  country_code,
+  individual_available,
+  minimum_age,
+  capacity_required,
+  verification_level,
+  verification_provider,
+  payout_currencies,
+  terms_version,
+  disclosure_version,
+  effective_from
+)
+select
+  program.id,
+  'FR',
+  false,
+  18,
+  true,
+  'identity_age_country_capacity',
+  'didit',
+  array['USD']::text[],
+  'partners-terms-v1',
+  'partners-disclosure-v1',
+  now() - interval '1 minute'
+from affiliate_private.affiliate_program_versions program
+where program.version_key = 'p0-didit-certification-test-v1';
+
+create or replace function pg_temp.didit_certification_approval_documents(
+  p_gate text
+)
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select jsonb_build_object(
+    'approval_record', repeat('1', 64),
+    'deployment_proof', repeat('2', 64)
+  ) || case p_gate
+    when 'privacy_approved' then jsonb_build_object(
+      'dpia', repeat('3', 64),
+      'gdpr_self_assessment', repeat('4', 64),
+      'biometric_consent', repeat('0', 64),
+      'privacy_notice', repeat('5', 64),
+      'records_of_processing', repeat('6', 64)
+    )
+    when 'individual_verification_coverage_confirmed' then
+      jsonb_build_object('kyc_certification', repeat('9', 64))
+    else '{}'::jsonb
+  end;
+$fixture$;
+
+create or replace function pg_temp.didit_certification_deployment_documents()
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select pg_temp.didit_certification_approval_documents(
+    'privacy_approved'
+  ) || pg_temp.didit_certification_approval_documents(
+    'individual_verification_coverage_confirmed'
+  );
+$fixture$;
+
+do $approval_jwt$
+begin
+  perform set_config(
+    'request.jwt.claims',
+    jsonb_build_object(
+      'sub', '31000000-0000-4000-8000-000000000001',
+      'role', 'authenticated',
+      'aal', 'aal2',
+      'iat', floor(extract(epoch from clock_timestamp()))::bigint,
+      'app_metadata', jsonb_build_object(
+        'role', 'admin',
+        'partners_release_manager', true
+      )
+    )::text,
+    true
+  );
+end;
+$approval_jwt$;
+set local role authenticated;
+do $privacy_approval$
+begin
+  perform public.admin_partners_deployment_manifest_register(
+    'preproduction',
+    repeat('a', 40),
+    'didit-certification-test-deployment',
+    repeat('2', 64),
+    pg_temp.didit_certification_deployment_documents(),
+    'Didit certification pgTAP immutable deployment manifest.'
+  );
+  perform public.admin_partners_release_gate_approve(
+    'privacy_approved',
+    'p0-didit-certification-test-v1',
+    '[{"country_code":"FR"}]'::jsonb,
+    pg_temp.didit_certification_approval_documents('privacy_approved'),
+    repeat('a', 40),
+    'preproduction',
+    'didit-certification-test-deployment',
+    repeat('2', 64),
+    now() + interval '30 days',
+    'Didit certification pgTAP immutable Privacy approval.'
+  );
+end;
+$privacy_approval$;
+reset role;
 
 create temporary table didit_certification_state (
   operator_key text primary key,
@@ -1594,11 +1720,17 @@ reset role;
 set local role authenticated;
 do $restore_privacy$
 begin
-  perform public.admin_partners_control(
-    'set_gate',
+  perform public.admin_partners_release_gate_approve(
     'privacy_approved',
-    true,
-    'Pre-gate Didit pgTAP restores Privacy approval after the race check.'
+    'p0-didit-certification-test-v1',
+    '[{"country_code":"FR"}]'::jsonb,
+    pg_temp.didit_certification_approval_documents('privacy_approved'),
+    repeat('a', 40),
+    'preproduction',
+    'didit-certification-test-deployment',
+    repeat('2', 64),
+    now() + interval '30 days',
+    'Pre-gate Didit pgTAP restores immutable Privacy approval after the race.'
   );
 end;
 $restore_privacy$;
@@ -1655,27 +1787,58 @@ select extensions.ok(
 );
 
 -- Read-only observation remains available after the pre-gate phase closes.
-update affiliate_private.affiliate_release_gates
-set
-  satisfied = true,
-  satisfied_at = now(),
-  updated_by_pseudonym = repeat('e', 64),
-  updated_at = now()
-where gate_key = 'individual_verification_coverage_confirmed';
+set local role service_role;
+do $complete_certification_purge$
+declare
+  v_claim record;
+begin
+  for v_claim in
+    select * from public.partners_service_didit_purge_claim(25, 300)
+  loop
+    perform public.partners_service_didit_purge_complete(
+      v_claim.outbox_id,
+      v_claim.lease_token,
+      'deleted'
+    );
+  end loop;
+end;
+$complete_certification_purge$;
+reset role;
 set local role authenticated;
+do $close_pre_gate$
+begin
+  perform public.admin_partners_release_gate_approve(
+    'individual_verification_coverage_confirmed',
+    'p0-didit-certification-test-v1',
+    '[{"country_code":"FR"}]'::jsonb,
+    pg_temp.didit_certification_approval_documents(
+      'individual_verification_coverage_confirmed'
+    ),
+    repeat('a', 40),
+    'preproduction',
+    'didit-certification-test-deployment',
+    repeat('2', 64),
+    now() + interval '30 days',
+    'Didit certification pgTAP closes the pre-gate with immutable evidence.'
+  );
+end;
+$close_pre_gate$;
 select extensions.is(
   public.admin_partners_kyc_certification_status() ->> 'action',
   'kyc_certification_status',
   'Risk can still observe its bounded proof after the coverage gate closes'
 );
+do $reopen_pre_gate$
+begin
+  perform public.admin_partners_control(
+    'set_gate',
+    'individual_verification_coverage_confirmed',
+    false,
+    'Didit certification pgTAP restores the initial pre-gate state.'
+  );
+end;
+$reopen_pre_gate$;
 reset role;
-update affiliate_private.affiliate_release_gates
-set
-  satisfied = false,
-  satisfied_at = null,
-  updated_by_pseudonym = null,
-  updated_at = now()
-where gate_key = 'individual_verification_coverage_confirmed';
 
 select extensions.is(
   (
