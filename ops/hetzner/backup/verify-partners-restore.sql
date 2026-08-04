@@ -520,7 +520,6 @@ begin
     'affiliate_private.admin_partners_revolut_late_completion_review(text,text,text,text)',
     'affiliate_private.admin_partners_revolut_late_completion_decide(text,text,text,text)',
     'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)',
-    'affiliate_private.admin_partners_kyc_human_review_locator(text,text,text)',
     'affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)'
   ]
   loop
@@ -869,6 +868,22 @@ begin
   then
     raise exception
       'restored biometric-consent withdrawal lost its pending-session stop or audit';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_human_review_locator(text,text,text)'::regprocedure
+  );
+  if position(
+      'partners_require_capability(''risk'')' in lower(v_definition)
+    ) = 0
+    or position('partners_require_aal2' in lower(v_definition)) = 0
+    or position('lookup:' in lower(v_definition)) = 0
+    or position(
+      'kyc_human_review_locator_accessed' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored KYC human-review locator lost Risk, AAL2, confirmation or audit';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
