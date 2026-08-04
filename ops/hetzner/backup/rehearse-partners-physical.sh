@@ -791,6 +791,7 @@ with expected(signature) as (
     ('affiliate_private.is_managed_partners_flag(text)'),
     ('affiliate_private.partners_require_control_access(text,text,boolean)'),
     ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)'),
+    ('affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)'),
     ('affiliate_private.admin_partners_program_activate(text,text,text)')
 )
 select count(*)::text || '|' || count(*) filter (
@@ -802,7 +803,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "157|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "158|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -845,7 +846,7 @@ proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=157"
+proof_line "migration_routines_verified=158"
 proof_line "migration_relation_owner=supabase_admin"
 proof_line "migration_relations_verified=18"
 

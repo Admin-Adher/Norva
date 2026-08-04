@@ -424,7 +424,7 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   const frictionlessRoutineCatalog = frictionlessRoutineCatalogMatch[1];
   assert.equal(
     (frictionlessRoutineCatalog.match(/^\s*\('/gm) || []).length,
-    38,
+    39,
     'the production verifier must cover every routine touched by the three-migration lot',
   );
   for (const relation of [
@@ -708,8 +708,8 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
   );
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "157\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=157/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "158\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=158/);
   assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "18\|0"/);
   assert.match(rehearsal, /migration_relations_verified=18/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
@@ -761,15 +761,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.ok(routineCatalogMatch, 'the restore pgTAP must expose its exact routine catalogue');
   const routineCatalog = JSON.parse(routineCatalogMatch[1]);
-  assert.equal(routineCatalog.length, 157);
-  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 157);
+  assert.equal(routineCatalog.length, 158);
+  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 158);
   const routineAccessCounts = routineCatalog.reduce((counts, { access_role: accessRole }) => {
     counts[accessRole] = (counts[accessRole] || 0) + 1;
     return counts;
   }, {});
   assert.deepEqual(
     routineAccessCounts,
-    { owner: 76, authenticated: 28, service_role: 53 },
+    { owner: 77, authenticated: 28, service_role: 53 },
   );
   for (const relation of [
     'affiliate_private.affiliate_access_credit_catalog',

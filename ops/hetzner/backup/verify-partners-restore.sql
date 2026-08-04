@@ -549,6 +549,7 @@ begin
       ('affiliate_private.is_managed_partners_flag(text)', false, 'i', 'owner'),
       ('affiliate_private.partners_require_control_access(text,text,boolean)', true, 's', 'owner'),
       ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)', true, 'v', 'authenticated'),
+      ('affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)', true, 'v', 'owner'),
       ('affiliate_private.admin_partners_program_activate(text,text,text)', true, 'v', 'authenticated')
     ) expected(signature, security_definer, volatility, access_role)
   loop
@@ -1502,6 +1503,18 @@ begin
     ) = 0
     or position(
       'membership_privacy_approved'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)'
+      )))
+    ) = 0
+    or position(
+      'partners_require_aal2'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.admin_partners_program_activate(text,text,text)'
+      )))
+    ) = 0
+    or position(
+      'admin_partners_program_activate_pre_aal2_20260802'
       in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
         'affiliate_private.admin_partners_program_activate(text,text,text)'
       )))

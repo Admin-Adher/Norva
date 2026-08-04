@@ -221,11 +221,11 @@ La preuve `predeploy` du candidat actuel doit contenir
 `rehearsal_mode=predeploy`, `migrations_applied=3`,
 `migrations_atomic=true`, `migration_replay_skipped=false`, 22 marqueurs `1`
 puis trois marqueurs `0` avant, et 25 marqueurs `1` après. Elle doit également
-contenir `migration_routines_verified=157` et
+contenir `migration_routines_verified=158` et
 `migration_relations_verified=18`. La preuve `postdeploy` doit contenir
 `baseline_contract=ab464fe4`, `rehearsal_mode=postdeploy`,
 `migrations_applied=0`, `migration_replay_skipped=true`, et 25 marqueurs `1`
-avant comme après, avec les mêmes 157 routines et 18 relations vérifiées.
+avant comme après, avec les mêmes 158 routines et 18 relations vérifiées.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

@@ -165,6 +165,7 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.is_managed_partners_flag(text)","security_definer":false,"volatility":"i","access_role":"owner"},
   {"signature":"affiliate_private.partners_require_control_access(text,text,boolean)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.admin_partners_program_activate(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"}
 ]';
 
@@ -185,7 +186,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  157::bigint,
+  158::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -208,7 +209,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  157::bigint,
+  158::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -1098,6 +1099,18 @@ select extensions.ok(
   ) > 0
   and position(
     'membership_privacy_approved'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)'
+    )))
+  ) > 0
+  and position(
+    'partners_require_aal2'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.admin_partners_program_activate(text,text,text)'
+    )))
+  ) > 0
+  and position(
+    'admin_partners_program_activate_pre_aal2_20260802'
     in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
       'affiliate_private.admin_partners_program_activate(text,text,text)'
     )))
