@@ -983,7 +983,7 @@ begin
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
-    'affiliate_private.partners_approval_package_is_current(uuid,text)'::regprocedure
+    'affiliate_private.partners_approval_package_is_current(uuid,text,text)'::regprocedure
   );
   if position('partners_didit_purge_coverage_ready' in lower(v_definition)) = 0
     or position(
@@ -992,6 +992,18 @@ begin
   then
     raise exception
       'restored verification coverage approval ignores provider deletion proof';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_approval_package_is_current(uuid,text)'::regprocedure
+  );
+  if position(
+      'partners_approval_package_is_current(' in lower(v_definition)
+    ) = 0
+    or position('''production''' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored approval compatibility wrapper lost production-scoped delegation';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
