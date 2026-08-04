@@ -2989,8 +2989,8 @@ select extensions.is(
   jsonb_array_length(
     public.admin_partners_configuration() -> 'release_flags'
   ),
-  6,
-  'Admin configuration exposes all six managed flags without audit actors'
+  9,
+  'Admin configuration exposes all nine managed flags without audit actors'
 );
 select extensions.ok(
   exists (
@@ -3045,8 +3045,8 @@ select extensions.throws_ok(
     )
   $$,
   '55000',
-  'payout prerequisites are incomplete',
-  'live payouts cannot be enabled before the adapter is verified'
+  'cash Partners prerequisites are incomplete',
+  'live payouts cannot be enabled before every cash control is verified'
 );
 select public.admin_partners_control(
   'set_flag',
