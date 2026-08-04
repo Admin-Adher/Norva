@@ -903,10 +903,30 @@ begin
     ) = 0
     or position('partners_require_aal2' in lower(v_definition)) = 0
     or position('p_evidence_sha256' in lower(v_definition)) = 0
+    or position(
+      'admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804'
+      in lower(v_definition)
+    ) = 0
+    or position(
+      'kyc_human_review_reverification_granted' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored KYC human-review decision lost Risk, AAL2, evidence or atomic grant audit';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamp with time zone,text,text)'::regprocedure
+  );
+  if position(
+      'partners_require_capability(''risk'')' in lower(v_definition)
+    ) = 0
+    or position('partners_require_aal2' in lower(v_definition)) = 0
+    or position('p_evidence_sha256' in lower(v_definition)) = 0
     or position('kyc_human_review_resolved' in lower(v_definition)) = 0
   then
     raise exception
-      'restored KYC human-review decision lost Risk, AAL2, evidence or audit';
+      'restored inner KYC human-review decision lost Risk, AAL2, evidence or resolution audit';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
