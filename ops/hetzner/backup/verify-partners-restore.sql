@@ -1790,7 +1790,7 @@ begin
       outbox.status = 'succeeded'
       and (
         outbox.provider_session_envelope is not null
-        or outbox.completed_at is null
+        or outbox.purged_at is null
       )
     );
   if v_bad_entries <> 0 then

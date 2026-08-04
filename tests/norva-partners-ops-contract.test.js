@@ -311,6 +311,12 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /affiliate_didit_certification_sessions/);
   assert.match(verifier, /affiliate_didit_certification_events/);
   assert.match(
+    verifier,
+    /outbox\.status = 'succeeded'[\s\S]*outbox\.provider_session_envelope is not null[\s\S]*outbox\.purged_at is null/,
+    'successful Didit purge rows must be checked against the canonical purged_at timestamp',
+  );
+  assert.doesNotMatch(verifier, /outbox\.completed_at/);
+  assert.match(
     certificationMigration,
     /constraint affiliate_didit_certification_sessions_binding/,
   );
