@@ -89,5 +89,26 @@ revoke execute on function
     text, text, integer
   ) from service_role;
 
+-- The approval-registry migration was already present on the production
+-- baseline.  Its two public Admin shims were created while the self-hosted
+-- database still had a service-role default EXECUTE grant.  CREATE OR REPLACE
+-- preserves that ACL, so normalize it explicitly before the release gates can
+-- be used.  These shims are interactive Admin/AAL2 operations only.
+revoke all on function public.admin_partners_deployment_manifest_register(
+  text, text, text, text, jsonb, text
+) from public, anon, authenticated, service_role;
+grant execute on function public.admin_partners_deployment_manifest_register(
+  text, text, text, text, jsonb, text
+) to authenticated;
+
+revoke all on function public.admin_partners_release_gate_approve(
+  text, text, jsonb, jsonb, text, text, text, text,
+  timestamptz, text
+) from public, anon, authenticated, service_role;
+grant execute on function public.admin_partners_release_gate_approve(
+  text, text, jsonb, jsonb, text, text, text, text,
+  timestamptz, text
+) to authenticated;
+
 reset lock_timeout;
 reset statement_timeout;
