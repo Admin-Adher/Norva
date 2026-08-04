@@ -850,10 +850,14 @@ run_pgtap_file() {
   local plan_line=""
   local expected_tests=""
   local passed_tests=""
+  local failed_test_numbers=""
   local first_statement=""
   local last_statement=""
 
   safe_name="$(basename "$relative_path" .sql)"
+  if [[ ! "$safe_name" =~ ^[a-z0-9_]+$ ]]; then
+    return 1
+  fi
   output_path="$RAW_DIR/pgtap-$safe_name.log"
   first_statement="$(awk 'NF { print tolower($0); exit }' \
     "$CANDIDATE_DIR/$relative_path")"
@@ -881,18 +885,35 @@ run_pgtap_file() {
         psql -X -A -t -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
           -f "/candidate/$relative_path" \
         > "$output_path" 2>&1; then
+    proof_line "restore_pgtap_${safe_name}_execution=failed"
     return 1
   fi
   if grep -Eq '^(not ok|Bail out!)' "$output_path"; then
+    failed_test_numbers="$(awk \
+      '/^not ok [0-9]+( |$)/ {
+        if (seen++) printf ","
+        printf "%s", $3
+      }
+      END { if (seen) print "" }' "$output_path")"
+    if [[ -n "$failed_test_numbers" \
+        && "$failed_test_numbers" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+      # Only controlled TAP ordinal numbers are retained. Assertion text and
+      # diagnostics remain in the private temporary directory and are deleted.
+      proof_line "restore_pgtap_${safe_name}_not_ok=$failed_test_numbers"
+    else
+      proof_line "restore_pgtap_${safe_name}_tap=failed"
+    fi
     return 1
   fi
   plan_line="$(grep -E '^1\.\.[0-9]+$' "$output_path" | tail -n 1)"
   if [[ ! "$plan_line" =~ ^1\.\.[0-9]+$ ]]; then
+    proof_line "restore_pgtap_${safe_name}_plan=missing"
     return 1
   fi
   expected_tests="${plan_line#1..}"
   passed_tests="$(grep -Ec '^ok( |$)' "$output_path" || true)"
   if [[ "$passed_tests" != "$expected_tests" ]]; then
+    proof_line "restore_pgtap_${safe_name}_counts=${passed_tests}:${expected_tests}"
     return 1
   fi
   proof_line "restore_pgtap_${safe_name}=passed:$passed_tests"
