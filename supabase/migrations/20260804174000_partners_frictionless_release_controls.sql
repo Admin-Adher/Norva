@@ -126,16 +126,30 @@ $partners_program_membership_privacy_gate$;
 do $partners_program_activation_membership_privacy_gate$
 declare
   v_oid regprocedure := to_regprocedure(
+    'affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)'
+  );
+  v_wrapper_oid regprocedure := to_regprocedure(
     'affiliate_private.admin_partners_program_activate(text,text,text)'
   );
   v_definition text;
+  v_wrapper_definition text;
   v_expected constant text :=
     'array[''legal_and_tax_approved'', ''privacy_approved'']::text[]';
   v_replacement constant text :=
     'array[''legal_and_tax_approved'', ''membership_privacy_approved'']::text[]';
 begin
-  if v_oid is null then
+  if v_oid is null or v_wrapper_oid is null then
     raise exception 'required programme activation routine is unavailable'
+      using errcode = '55000';
+  end if;
+  select pg_get_functiondef(v_wrapper_oid::oid) into v_wrapper_definition;
+  if position(
+    'admin_partners_program_activate_pre_aal2_20260802' in
+    v_wrapper_definition
+  ) = 0
+    or position('partners_require_aal2' in v_wrapper_definition) = 0
+  then
+    raise exception 'programme activation AAL2 wrapper contract drifted'
       using errcode = '55000';
   end if;
   select pg_get_functiondef(v_oid::oid) into v_definition;

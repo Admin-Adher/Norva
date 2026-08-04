@@ -417,18 +417,11 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   assert.match(verifier, /to_regnamespace\('affiliate_private'\)/);
   assert.match(verifier, /to_regclass\('affiliate_private\.' \|\| v_name\)/);
   assert.match(verifier, /and not c\.relrowsecurity/);
-  const frictionlessRoutineCatalogStart = verifier.indexOf(
-    'for v_expected in\n    select *\n    from (values',
+  const frictionlessRoutineCatalogMatch = verifier.match(
+    /for v_expected in\r?\n\s+select \*\r?\n\s+from \(values([\s\S]*?)\) expected\(signature, security_definer, volatility, access_role\)/,
   );
-  const frictionlessRoutineCatalogEnd = verifier.indexOf(
-    ') expected(signature, security_definer, volatility, access_role)',
-    frictionlessRoutineCatalogStart,
-  );
-  assert.ok(frictionlessRoutineCatalogStart >= 0 && frictionlessRoutineCatalogEnd > 0);
-  const frictionlessRoutineCatalog = verifier.slice(
-    frictionlessRoutineCatalogStart,
-    frictionlessRoutineCatalogEnd,
-  );
+  assert.ok(frictionlessRoutineCatalogMatch);
+  const frictionlessRoutineCatalog = frictionlessRoutineCatalogMatch[1];
   assert.equal(
     (frictionlessRoutineCatalog.match(/^\s*\('/gm) || []).length,
     38,

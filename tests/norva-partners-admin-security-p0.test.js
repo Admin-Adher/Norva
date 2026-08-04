@@ -142,6 +142,36 @@ test('capability and programme mutations enforce AAL2 at the private boundary', 
   );
 });
 
+test('membership privacy activation patches the version-pinned implementation behind AAL2', () => {
+  const activationPatch = section(
+    frictionlessReleaseMigration,
+    'do $partners_program_activation_membership_privacy_gate$',
+    '$partners_program_activation_membership_privacy_gate$;',
+  );
+  const activationWrapper = section(
+    sensitiveMutationMigration,
+    'create or replace function affiliate_private.admin_partners_program_activate(',
+    '-- ---------------------------------------------------------------------------\n-- Version-pin the existing payout implementations',
+  );
+
+  assert.match(
+    activationPatch,
+    /admin_partners_program_activate_pre_aal2_20260802\(text,text,text\)/,
+  );
+  assert.match(
+    activationPatch,
+    /programme activation AAL2 wrapper contract drifted/,
+  );
+  assert.match(
+    activationPatch,
+    /membership_privacy_approved/,
+  );
+  assert.match(
+    activationWrapper,
+    /partners_require_aal2\([\s\S]*admin_partners_program_activate_pre_aal2_20260802\(/,
+  );
+});
+
 test('payout cycle RPCs require AAL2 before both dry and live execution', () => {
   const createWrapper = section(
     sensitiveMutationMigration,
