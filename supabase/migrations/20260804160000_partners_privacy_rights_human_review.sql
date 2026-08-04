@@ -1154,6 +1154,7 @@ declare
     affiliate_private.affiliate_kyc_human_review_requests%rowtype;
   v_actor text;
   v_resolution text;
+  v_expected_confirmation text;
   v_now timestamptz := clock_timestamp();
 begin
   perform affiliate_private.partners_require_capability('risk');
@@ -1208,11 +1209,12 @@ begin
       when 'resolve_upheld' then 'original_decision_upheld'
       else 'reverification_available'
     end;
+    v_expected_confirmation := case v_action
+      when 'resolve_upheld' then 'RESOLVE-UPHOLD:' || v_key
+      else 'RESOLVE-REVERIFY:' || v_key
+    end;
     if v_review.status <> 'in_review'
-      or v_confirmation <> case v_action
-        when 'resolve_upheld' then 'RESOLVE-UPHOLD:' || v_key
-        else 'RESOLVE-REVERIFY:' || v_key
-      end
+      or v_confirmation <> v_expected_confirmation
       or v_evidence !~ '^[0-9a-f]{64}$'
       or v_evidence = repeat('0', 64)
       or p_evidence_observed_at is null
