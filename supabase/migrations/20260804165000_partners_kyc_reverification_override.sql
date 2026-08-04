@@ -226,8 +226,8 @@ begin
       using errcode = 'P0001';
   end if;
 
-  select grant_row, review.review_key
-  into v_grant, v_review_key
+  select grant_row.*
+  into v_grant
   from affiliate_private.affiliate_kyc_reverification_grants grant_row
   join affiliate_private.affiliate_kyc_human_review_requests review
     on review.id = grant_row.review_id
@@ -242,6 +242,10 @@ begin
     raise exception 'one-time KYC re-verification is unavailable'
       using errcode = 'P0001';
   end if;
+  select review.review_key
+  into strict v_review_key
+  from affiliate_private.affiliate_kyc_human_review_requests review
+  where review.id = v_grant.review_id;
 
   select program.*
   into v_program
