@@ -630,10 +630,12 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
       && privacyRightsMigration < reverificationOverrideMigration
       && reverificationOverrideMigration < deploymentManifestEventContractMigration
       && deploymentManifestEventContractMigration < biometricEnforcementMigration,
-    'the eleven pending Partners migrations must keep their atomic final-state replay order',
+    'the eleven-migration Partners lot must keep its final-state chronological order',
   );
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
-  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
+  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_ONE"/);
+  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_TWO"/);
+  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
+  assert.doesNotMatch(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FIVE"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SIX"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SEVEN"/);
@@ -652,15 +654,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_eleven_sha256=/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
-  assert.match(rehearsal, /"0(?:\|0){21}"/);
+  assert.match(rehearsal, /"1\|1\|1\|1\|1(?:\|0){17}"/);
   assert.match(rehearsal, /"1(?:\|1){21}"/);
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="0(?:\|0){21}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){21}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="1\|1\|1\|1\|1(?:\|0){17}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){21}"/,
   );
   assert.match(
     rehearsal,
-    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=11[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
+    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=7[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
   );
   assert.equal(
     (rehearsal.match(/--single-transaction/g) || []).length,

@@ -3,7 +3,8 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either apply the ten pending Partners migrations atomically
+# PostgreSQL clone, either apply the seven migrations still pending after the
+# audited AAL2 production baseline atomically
 # (`predeploy`) or prove that they are already present without replaying them
 # (`postdeploy`), then run the verifier and restore-compatible pgTAP.
 #
@@ -592,7 +593,10 @@ DEPLOYMENT_MANIFEST_EVENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   2> "$RAW_DIR/deployment-manifest-event-precondition.log")" || fail
 MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  EXPECTED_MARKERS_BEFORE="0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0"
+  # Production already contains migrations one through four. Their five
+  # independent markers (Didit certification contributes two) are the exact
+  # audited f7abea88 baseline; only migrations five through eleven remain.
+  EXPECTED_MARKERS_BEFORE="1|1|1|1|1|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0"
 else
   EXPECTED_MARKERS_BEFORE="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 fi
@@ -618,10 +622,6 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
       docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
         psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
           --single-transaction \
-          -f "/candidate/$MIGRATION_ONE" \
-          -f "/candidate/$MIGRATION_TWO" \
-          -f "/candidate/$MIGRATION_THREE" \
-          -f "/candidate/$MIGRATION_FOUR" \
           -f "/candidate/$MIGRATION_FIVE" \
           -f "/candidate/$MIGRATION_SIX" \
           -f "/candidate/$MIGRATION_SEVEN" \
@@ -632,7 +632,7 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
         > "$RAW_DIR/migrations.log" 2>&1; then
     fail
   fi
-  MIGRATIONS_APPLIED=11
+  MIGRATIONS_APPLIED=7
   MIGRATIONS_ATOMIC="true"
   MIGRATION_REPLAY_SKIPPED="false"
 fi
