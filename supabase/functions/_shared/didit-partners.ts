@@ -8,8 +8,11 @@ export const DIDIT_CREATE_SESSION_URL =
   "https://verification.didit.me/v3/session/";
 export const DIDIT_LIST_SESSIONS_URL =
   "https://verification.didit.me/v3/sessions/";
+export const DIDIT_SESSION_DELETE_URL_PREFIX =
+  "https://verification.didit.me/v3/session/";
 export const DIDIT_PARTNERS_CALLBACK_URL =
   "https://norva.tv/partners-kyc-return";
+export const DIDIT_PARTNERS_WORKFLOW_VERSION = 1;
 export const DIDIT_WEBHOOK_MAX_AGE_SECONDS = 300;
 export const DIDIT_WEBHOOK_MAX_BYTES = 2 * 1_024 * 1_024;
 
@@ -23,6 +26,8 @@ const HEX_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const DIDIT_HOSTED_URL_PATTERN = /^https:\/\/verify\.didit\.me\//;
 const DIDIT_VENDOR_DATA_PATTERN = /^(?:kyr|kcf)_[0-9a-f]{24}$/;
 const DIDIT_CERTIFICATION_CONSENT_VERSION = "partners-didit-certification-v1";
+export const DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION =
+  "partners-biometric-consent-v1";
 const DIDIT_CERTIFICATION_CONFIRMATION = "CERTIFIER DIDIT";
 
 export type DiditStatus =
@@ -53,6 +58,7 @@ export type DiditConfig = {
 export type KycSessionInput = {
   language: string;
   consentVersion: string;
+  biometricConsentVersion: typeof DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION;
   consentGranted: true;
   capacityConfirmed: true;
 };
@@ -111,6 +117,8 @@ export type DiditWebhookResult = {
   payloadHash: string;
 };
 
+export type DiditSessionPurgeResult = "deleted" | "already_deleted";
+
 export type KycPrepareResult = {
   schema_version: 1;
   action: "kyc_ready";
@@ -126,14 +134,22 @@ export type KycPrepareResult = {
     country_code: string;
     capacity_required: boolean;
     reservation_key: string;
+    biometric_consent_version: typeof DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION;
   };
 };
+
+export type DiditPurgePublicStatus =
+  | "not_required"
+  | "purge_pending"
+  | "purged"
+  | "purge_dead_letter";
 
 export type KycWebhookRpcResult =
   | {
     schema_version: 1;
     action: "kyc_result_applied";
     replayed: boolean;
+    purge_status: DiditPurgePublicStatus;
     account: { id: string; status: string };
     kyc: { status: string; verified_at: string | null };
   }
@@ -141,6 +157,7 @@ export type KycWebhookRpcResult =
     schema_version: 1;
     action: "kyc_result_observed";
     replayed: boolean;
+    purge_status: DiditPurgePublicStatus;
     environment: "sandbox";
     reason: "sandbox_non_authoritative";
   }
@@ -148,6 +165,7 @@ export type KycWebhookRpcResult =
     schema_version: 1;
     action: "kyc_result_quarantined";
     replayed: boolean;
+    purge_status: DiditPurgePublicStatus;
     environment: "live" | "sandbox";
     reason:
       | "legacy_provider_binding"
@@ -183,6 +201,7 @@ export type KycCertificationWebhookRpcResult = {
     | "kyc_certification_result_applied"
     | "kyc_certification_result_quarantined";
   replayed: boolean;
+  purge_status: DiditPurgePublicStatus;
   certification: {
     status:
       | "pending"
@@ -221,6 +240,32 @@ export class DiditPayloadTooLargeError extends Error {
   constructor() {
     super("Didit webhook payload exceeds the bounded reader limit");
     this.name = "DiditPayloadTooLargeError";
+  }
+}
+
+export class DiditPurgeRequestError extends Error {
+  readonly code:
+    | "provider_timeout"
+    | "provider_network"
+    | "provider_rate_limited"
+    | "provider_server_error"
+    | "provider_rejected";
+  readonly status: number | null;
+  readonly retryable: boolean;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(
+    code: DiditPurgeRequestError["code"],
+    status: number | null,
+    retryable: boolean,
+    retryAfterSeconds: number | null = null,
+  ) {
+    super("Didit purge request failed");
+    this.name = "DiditPurgeRequestError";
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -446,6 +491,7 @@ export function parseKycSessionInput(
   const body = exactRecord(raw, [
     "language",
     "consentVersion",
+    "biometricConsentVersion",
     "consentGranted",
     "capacityConfirmed",
   ]);
@@ -454,6 +500,8 @@ export function parseKycSessionInput(
     !LANGUAGE_PATTERN.test(body.language) ||
     typeof body.consentVersion !== "string" ||
     !VERSION_PATTERN.test(body.consentVersion) ||
+    body.biometricConsentVersion !==
+      DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION ||
     body.consentGranted !== true ||
     body.capacityConfirmed !== true
   ) {
@@ -462,6 +510,7 @@ export function parseKycSessionInput(
   return {
     language: body.language,
     consentVersion: body.consentVersion,
+    biometricConsentVersion: DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION,
     consentGranted: true,
     capacityConfirmed: true,
   };
@@ -670,6 +719,7 @@ export function sanitizeKycCertificationWebhookRpc(
     "schema_version",
     "action",
     "replayed",
+    "purge_status",
     "certification",
   ]);
   const quarantined = root.action ===
@@ -677,6 +727,7 @@ export function sanitizeKycCertificationWebhookRpc(
   if (
     root.schema_version !== 1 ||
     typeof root.replayed !== "boolean" ||
+    !isDiditPurgePublicStatus(root.purge_status) ||
     (!quarantined && root.action !== "kyc_certification_result_applied")
   ) {
     throw new DiditContractError();
@@ -720,6 +771,7 @@ export function sanitizeKycCertificationWebhookRpc(
       schema_version: 1,
       action: "kyc_certification_result_quarantined",
       replayed: root.replayed,
+      purge_status: root.purge_status,
       certification: {
         status: "quarantined",
         verified: false,
@@ -734,6 +786,7 @@ export function sanitizeKycCertificationWebhookRpc(
     schema_version: 1,
     action: "kyc_certification_result_applied",
     replayed: root.replayed,
+    purge_status: root.purge_status,
     certification: {
       status: certification.status as Exclude<
         KycCertificationWebhookRpcResult["certification"]["status"],
@@ -760,6 +813,7 @@ export function sanitizeKycPrepareRpc(raw: unknown): KycPrepareResult {
     "country_code",
     "capacity_required",
     "reservation_key",
+    "biometric_consent_version",
   ]);
   if (
     root.schema_version !== 1 ||
@@ -778,7 +832,9 @@ export function sanitizeKycPrepareRpc(raw: unknown): KycPrepareResult {
     !/^[A-Z]{2}$/.test(kyc.country_code) ||
     typeof kyc.capacity_required !== "boolean" ||
     typeof kyc.reservation_key !== "string" ||
-    !/^kyr_[0-9a-f]{24}$/.test(kyc.reservation_key)
+    !/^kyr_[0-9a-f]{24}$/.test(kyc.reservation_key) ||
+    kyc.biometric_consent_version !==
+      DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION
   ) {
     throw new DiditContractError();
   }
@@ -797,6 +853,7 @@ export function sanitizeKycPrepareRpc(raw: unknown): KycPrepareResult {
       country_code: kyc.country_code,
       capacity_required: kyc.capacity_required,
       reservation_key: kyc.reservation_key,
+      biometric_consent_version: DIDIT_PARTNERS_BIOMETRIC_CONSENT_VERSION,
     },
   };
 }
@@ -807,12 +864,16 @@ export function sanitizeKycSessionRecordRpc(
   schema_version: 1;
   action: "kyc_session_recorded";
   replayed: boolean;
-  kyc: { status: "pending"; expires_at: string | null };
+  session_disposition: "active" | "withdrawn" | "terminal";
+  purge_status: DiditPurgePublicStatus;
+  kyc: { status: "pending" | "superseded"; expires_at: string | null };
 } {
   const root = exactRecord(raw, [
     "schema_version",
     "action",
     "replayed",
+    "session_disposition",
+    "purge_status",
     "kyc",
   ]);
   const kyc = exactRecord(root.kyc, ["status", "expires_at"]);
@@ -820,7 +881,22 @@ export function sanitizeKycSessionRecordRpc(
     root.schema_version !== 1 ||
     root.action !== "kyc_session_recorded" ||
     typeof root.replayed !== "boolean" ||
-    kyc.status !== "pending" ||
+    (
+      root.session_disposition !== "active" &&
+      root.session_disposition !== "withdrawn" &&
+      root.session_disposition !== "terminal"
+    ) ||
+    !isDiditPurgePublicStatus(root.purge_status) ||
+    (kyc.status !== "pending" && kyc.status !== "superseded") ||
+    (
+      root.session_disposition === "active" &&
+      (root.purge_status !== "not_required" || kyc.status !== "pending")
+    ) ||
+    (
+      root.session_disposition !== "active" &&
+      root.purge_status === "not_required"
+    ) ||
+    (root.session_disposition === "withdrawn" && kyc.status !== "superseded") ||
     (
       kyc.expires_at !== null &&
       (
@@ -836,8 +912,10 @@ export function sanitizeKycSessionRecordRpc(
     schema_version: 1,
     action: "kyc_session_recorded",
     replayed: root.replayed,
+    session_disposition: root.session_disposition,
+    purge_status: root.purge_status,
     kyc: {
-      status: "pending",
+      status: kyc.status,
       expires_at: kyc.expires_at as string | null,
     },
   };
@@ -852,12 +930,14 @@ export function sanitizeKycWebhookRpc(
       "schema_version",
       "action",
       "replayed",
+      "purge_status",
       "environment",
       "reason",
     ]);
     if (
       root.schema_version !== 1 ||
       typeof root.replayed !== "boolean" ||
+      !isDiditPurgePublicStatus(root.purge_status) ||
       root.environment !== "sandbox" ||
       root.reason !== "sandbox_non_authoritative"
     ) {
@@ -867,6 +947,7 @@ export function sanitizeKycWebhookRpc(
       schema_version: 1,
       action: "kyc_result_observed",
       replayed: root.replayed,
+      purge_status: root.purge_status,
       environment: "sandbox",
       reason: "sandbox_non_authoritative",
     };
@@ -876,6 +957,7 @@ export function sanitizeKycWebhookRpc(
       "schema_version",
       "action",
       "replayed",
+      "purge_status",
       "environment",
       "reason",
     ]);
@@ -887,6 +969,7 @@ export function sanitizeKycWebhookRpc(
     if (
       root.schema_version !== 1 ||
       typeof root.replayed !== "boolean" ||
+      !isDiditPurgePublicStatus(root.purge_status) ||
       (root.environment !== "live" && root.environment !== "sandbox") ||
       typeof root.reason !== "string" ||
       !reasons.has(root.reason)
@@ -897,6 +980,7 @@ export function sanitizeKycWebhookRpc(
       schema_version: 1,
       action: "kyc_result_quarantined",
       replayed: root.replayed,
+      purge_status: root.purge_status,
       environment: root.environment,
       reason: root.reason as
         | "legacy_provider_binding"
@@ -908,6 +992,7 @@ export function sanitizeKycWebhookRpc(
     "schema_version",
     "action",
     "replayed",
+    "purge_status",
     "account",
     "kyc",
   ]);
@@ -930,6 +1015,7 @@ export function sanitizeKycWebhookRpc(
     root.schema_version !== 1 ||
     root.action !== "kyc_result_applied" ||
     typeof root.replayed !== "boolean" ||
+    !isDiditPurgePublicStatus(root.purge_status) ||
     typeof account.id !== "string" ||
     !/^prt_[0-9a-f]{24}$/.test(account.id) ||
     typeof account.status !== "string" ||
@@ -952,6 +1038,7 @@ export function sanitizeKycWebhookRpc(
     schema_version: 1,
     action: "kyc_result_applied",
     replayed: root.replayed,
+    purge_status: root.purge_status,
     account: { id: account.id, status: account.status },
     kyc: { status: kyc.status, verified_at: kyc.verified_at as string | null },
   };
@@ -1063,13 +1150,12 @@ export function inspectDiditSessionList(
     : candidate.workflow_type;
   const explicitKyb = sessionKind === "business" ||
     workflowType === "business" || workflowType === "kyb" ||
-    Object.hasOwn(candidate, "business_session_id") ||
-    Object.hasOwn(candidate, "vendor_business_id") ||
-    Object.hasOwn(candidate, "company_name") ||
+    hasDiditBusinessMarker(candidate) ||
     Object.hasOwn(candidate, "registration_number");
   if (
     explicitKyb ||
-    (sessionKind !== undefined && sessionKind !== "user") ||
+    (sessionKind !== undefined && sessionKind !== null &&
+      sessionKind !== "user") ||
     (workflowType !== undefined && workflowType !== "user" &&
       workflowType !== "kyc") ||
     candidate.vendor_data !== expectedVendorData
@@ -1139,9 +1225,9 @@ export function sanitizeDiditCreatedSession(
     // Didit's v3 OpenAPI response schema does not currently declare
     // session_kind, although newer KYC responses can include "user". Accept
     // that documented omission, but fail closed on every explicit KYB marker.
-    (sessionKind !== undefined && sessionKind !== "user") ||
-    Object.hasOwn(raw, "business_session_id") ||
-    Object.hasOwn(raw, "vendor_business_id") ||
+    (sessionKind !== undefined && sessionKind !== null &&
+      sessionKind !== "user") ||
+    hasDiditBusinessMarker(raw) ||
     workflowId !== config.workflowId ||
     raw.vendor_data !== expectedVendorData ||
     raw.callback !== config.callbackUrl ||
@@ -1180,9 +1266,15 @@ export async function verifyAndNormalizeDiditWebhook(
     raw.webhook_type !== "status.updated" ||
     raw.timestamp !== timestamp ||
     uuid(raw.application_id) !== config.applicationId ||
-    (raw.environment !== "live" && raw.environment !== "sandbox") ||
-    raw.session_kind === "business" ||
-    Object.hasOwn(raw, "business_session_id")
+    raw.environment !== config.environment ||
+    (raw.session_kind !== undefined && raw.session_kind !== null &&
+      raw.session_kind !== "user") ||
+    hasDiditBusinessMarker(raw) ||
+    (config.environment === "live" && raw.sandbox_scenario !== null) ||
+    (config.environment === "sandbox" &&
+      raw.sandbox_scenario !== undefined &&
+      raw.sandbox_scenario !== null &&
+      typeof raw.sandbox_scenario !== "string")
   ) {
     throw new DiditContractError();
   }
@@ -1192,7 +1284,16 @@ export async function verifyAndNormalizeDiditWebhook(
   const providerSessionId = uuid(raw.session_id);
   const providerWorkflowId = uuid(raw.workflow_id);
   const providerWorkflowVersion = positiveInteger(raw.workflow_version);
-  const providerEnvironment = raw.environment;
+  // Use the validated, strongly typed configuration value. The equality guard
+  // above proves the signed payload is bound to this exact environment, while
+  // `raw.environment` remains `unknown` to TypeScript.
+  const providerEnvironment = config.environment;
+  if (
+    providerWorkflowId !== config.workflowId ||
+    providerWorkflowVersion !== DIDIT_PARTNERS_WORKFLOW_VERSION
+  ) {
+    throw new DiditContractError();
+  }
   const createdAt = epochSeconds(raw.created_at);
   // Didit keeps event_id and the underlying event stable across delivery
   // retries, but refreshes the top-level dispatch timestamp and its signature.
@@ -1277,12 +1378,12 @@ export async function verifyAndNormalizeDiditWebhook(
 }
 
 /**
- * Didit's console currently signs its test payload correctly but omits the
- * production event/application/environment/version envelope. A probe may be
- * acknowledged only when both the transport header and the signed JSON mark
- * it as a test, the configured workflow is exact, and every omitted
- * production-only field is genuinely absent. No decision from this shape is
- * ever persisted or treated as KYC evidence.
+ * Didit's Console "Try Webhook" now sends the same complete v3 envelope as a
+ * live delivery and marks the transport with X-Didit-Test-Webhook: true. The
+ * body is still authenticated with the destination secret before this helper
+ * validates the exact Norva application, environment and workflow binding.
+ * A successful probe is acknowledged without persisting its synthetic
+ * session or decision as KYC evidence.
  */
 export async function verifyDiditConsoleTestWebhook(
   rawBody: Uint8Array,
@@ -1296,29 +1397,37 @@ export async function verifyDiditConsoleTestWebhook(
     config,
     nowEpochSeconds,
   );
-  const metadata = isRecord(raw.metadata) ? raw.metadata : null;
-  const productionEnvelopeFields = [
-    "event_id",
-    "application_id",
-    "environment",
-    "workflow_version",
-  ];
   if (
     headers.get("X-Didit-Test-Webhook") !== "true" ||
-    metadata?.test_webhook !== true ||
-    productionEnvelopeFields.some((key) => Object.hasOwn(raw, key)) ||
     raw.webhook_type !== "status.updated" ||
     raw.timestamp !== timestamp ||
+    uuid(raw.event_id) === "" ||
+    uuid(raw.application_id) !== config.applicationId ||
+    raw.environment !== config.environment ||
     uuid(raw.workflow_id) !== config.workflowId ||
-    raw.session_kind === "business" ||
-    Object.hasOwn(raw, "business_session_id") ||
-    Object.hasOwn(raw, "vendor_business_id")
+    positiveInteger(raw.workflow_version) !== DIDIT_PARTNERS_WORKFLOW_VERSION ||
+    (raw.session_kind !== undefined && raw.session_kind !== null &&
+      raw.session_kind !== "user") ||
+    hasDiditBusinessMarker(raw)
   ) {
     return false;
   }
   uuid(raw.session_id);
   normalizeDiditStatus(raw.status);
   epochSeconds(raw.created_at);
+  if (
+    config.environment === "live" &&
+    raw.sandbox_scenario !== null
+  ) {
+    return false;
+  }
+  if (
+    config.environment === "sandbox" &&
+    raw.sandbox_scenario !== null &&
+    typeof raw.sandbox_scenario !== "string"
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -1405,6 +1514,94 @@ export function normalizeDiditStatus(value: unknown): DiditStatus {
     default:
       throw new DiditContractError();
   }
+}
+
+/**
+ * Requests provider-side deletion after Norva has committed the minimum
+ * normalized outcome. Didit's DELETE is intentionally non-idempotent:
+ * 204 is the first deletion and 404 is the safe replay after it disappeared.
+ * No response body, session id or API key is ever surfaced by this helper.
+ */
+export async function purgeDiditSession(
+  config: DiditConfig,
+  sessionId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DiditSessionPurgeResult> {
+  const canonicalSessionId = uuid(sessionId);
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${DIDIT_SESSION_DELETE_URL_PREFIX}${canonicalSessionId}/delete/`,
+      {
+        method: "DELETE",
+        headers: { "x-api-key": config.apiKey },
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+  } catch (error) {
+    const timedOut = error instanceof DOMException &&
+      error.name === "TimeoutError";
+    throw new DiditPurgeRequestError(
+      timedOut ? "provider_timeout" : "provider_network",
+      null,
+      true,
+    );
+  }
+  if (response.status === 204) return "deleted";
+  if (response.status === 404) return "already_deleted";
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Body cancellation is best-effort; failure stays intentionally opaque.
+  }
+  const retryAfterSeconds = parseRetryAfterSeconds(
+    response.headers.get("Retry-After"),
+  );
+  if (response.status === 429) {
+    throw new DiditPurgeRequestError(
+      "provider_rate_limited",
+      response.status,
+      true,
+      retryAfterSeconds,
+    );
+  }
+  if (
+    response.status === 408 ||
+    response.status === 425 ||
+    response.status >= 500
+  ) {
+    throw new DiditPurgeRequestError(
+      "provider_server_error",
+      response.status,
+      true,
+      retryAfterSeconds,
+    );
+  }
+  throw new DiditPurgeRequestError(
+    "provider_rejected",
+    response.status,
+    false,
+  );
+}
+
+function isDiditPurgePublicStatus(
+  value: unknown,
+): value is DiditPurgePublicStatus {
+  return value === "not_required" || value === "purge_pending" ||
+    value === "purged" || value === "purge_dead_letter";
+}
+
+function parseRetryAfterSeconds(value: string | null): number | null {
+  if (!value) return null;
+  if (/^\d{1,4}$/.test(value)) {
+    const seconds = Number(value);
+    return seconds >= 1 && seconds <= 3_600 ? seconds : null;
+  }
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  const seconds = Math.ceil((at - Date.now()) / 1_000);
+  return seconds >= 1 && seconds <= 3_600 ? seconds : null;
 }
 
 function observedNodeResult(
@@ -1543,6 +1740,27 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasDiditBusinessMarker(value: Record<string, unknown>): boolean {
+  const explicitType = [
+    value.workflow_type,
+    value.session_type,
+    value.verification_type,
+  ].some((candidate) =>
+    typeof candidate === "string" &&
+    ["business", "kyb"].includes(candidate.trim().toLowerCase())
+  );
+  if (explicitType) return true;
+
+  return Object.keys(value).some((key) => {
+    const normalized = key.trim().toLowerCase();
+    return normalized === "registration_number" ||
+      normalized.includes("kyb") ||
+      normalized.startsWith("business_") ||
+      normalized.startsWith("vendor_business_") ||
+      normalized.startsWith("company_");
+  });
 }
 
 function uuid(value: unknown): string {

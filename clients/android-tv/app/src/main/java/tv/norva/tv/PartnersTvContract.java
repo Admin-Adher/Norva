@@ -48,12 +48,7 @@ final class PartnersTvContract {
                 || handoffUrl.length() > 512) {
             return false;
         }
-        URI uri = safeUri(handoffUrl);
-        return uri != null
-                && isTrustedNorvaCloudUrl(handoffUrl)
-                && "/app.html".equals(uri.getRawPath())
-                && uri.getRawQuery() == null
-                && ("relay=" + relayToken).equals(uri.getRawFragment());
+        return ("https://norva.tv/app.html#relay=" + relayToken).equals(handoffUrl);
     }
 
     static boolean isValidPendingRelay(

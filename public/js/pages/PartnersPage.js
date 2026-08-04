@@ -6,6 +6,8 @@
  * financial reporting remain authoritative on the server.
  */
 class PartnersPage {
+    static BIOMETRIC_CONSENT_VERSION = 'partners-biometric-consent-v1';
+
     constructor(app) {
         this.app = app;
         this.container = document.getElementById('page-partners');
@@ -22,6 +24,7 @@ class PartnersPage {
         this._payoutTimeoutMs = 8000;
         this._payoutSetupTimeoutMs = 8000;
         this._accessRequestTimeoutMs = 8000;
+        this._kycRightsTimeoutMs = 8000;
         this._bootstrapTtlMs = 30000;
         this._sessionIdentityKey = '';
         this._jurisdiction = { countryCode: '', subdivisionCode: '' };
@@ -44,6 +47,9 @@ class PartnersPage {
         this._accessRequestAbort = null;
         this._accessRequestToken = 0;
         this._earlyAccessContext = null;
+        this._kycRightsAbort = null;
+        this._kycRightsToken = 0;
+        this._kycRightsData = null;
     }
 
     canUseUserPartners() {
@@ -358,6 +364,7 @@ class PartnersPage {
             this._jurisdiction = jurisdiction;
             this.setEntryVisibility(renderData.visibility.visible === true);
             this.renderBootstrap(renderData, { nextAction: activationNextAction });
+            if (renderData.account.exists) this.loadKycRights();
             if (returnedFromKyc) {
                 window.NorvaModal?.toast?.(
                     'Identity check submitted. Norva is confirming the signed provider result.',
@@ -402,6 +409,10 @@ class PartnersPage {
         this._accessRequestAbort?.abort();
         this._accessRequestAbort = null;
         this._accessRequestToken += 1;
+        this._kycRightsAbort?.abort();
+        this._kycRightsAbort = null;
+        this._kycRightsToken += 1;
+        this._kycRightsData = null;
         this._earlyAccessContext = null;
         this.stopTvRelayPolling();
         this._nativeShareRequests.forEach(({ reject, timer }) => {
@@ -1618,9 +1629,13 @@ class PartnersPage {
                     data-partners-accept-terms>Accept current programme terms</button>`
             : (canStartKyc
                 ? `<form class="partners-join-form partners-kyc-form" data-partners-kyc-form novalidate>
+                    <aside class="partners-provider-disclosure" aria-labelledby="partners-didit-disclosure-title">
+                        <strong id="partners-didit-disclosure-title">Before you verify with Didit</strong>
+                        <span>Norva requests this eligibility check and Didit provides the secure hosted identity-verification flow. Review the <a href="/privacy.html#partners" target="_blank" rel="noopener">Norva Privacy Notice</a>, <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Verification Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit End User Terms</a> before continuing.</span>
+                    </aside>
                     <label class="partners-consent-check">
                         <input type="checkbox" data-partners-kyc-consent>
-                        <span>I consent to the hosted identity, liveness and face-match checks described in the <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Notice</a>. Identity documents are handled by Didit, not uploaded to this page.</span>
+                        <span>I have read these notices and explicitly consent to document, selfie, liveness and face-match capture in Didit's hosted flow for this individual Partners eligibility check. Identity documents are handled by Didit, not uploaded to this page.</span>
                     </label>
                     <label class="partners-consent-check">
                         <input type="checkbox" data-partners-capacity-confirm>
@@ -1657,7 +1672,7 @@ class PartnersPage {
                             : (needsTerms
                                 ? 'The authoritative programme policy is unavailable. Terms cannot be accepted until the server restores it.'
                                 : (canStartKyc
-                                    ? `You will continue on Didit's secure hosted verification. Norva records consent version ${this.escape(data.policy.disclosure_version)} and receives only the verification result needed for programme eligibility.`
+                                    ? `You will continue on Didit's secure hosted verification. Norva records the dedicated biometric consent ${this.escape(PartnersPage.BIOMETRIC_CONSENT_VERSION)} separately from programme disclosure ${this.escape(data.policy.disclosure_version)}, and receives only the verification result needed for programme eligibility.`
                                     : (supportRequired
                                         ? 'Support will review the authoritative account state. Do not send identity documents, bank details or tax identifiers in a support message.'
                                         : (verificationPending
@@ -1861,6 +1876,7 @@ class PartnersPage {
                     const envelope = await window.NorvaCloud.partners.startKyc({
                         language: this.partnerLanguage(),
                         consentVersion: data.policy.disclosure_version,
+                        biometricConsentVersion: PartnersPage.BIOMETRIC_CONSENT_VERSION,
                         capacityConfirmed: true,
                         idempotencyKey: this.actionKey('kyc-session')
                     });
@@ -1883,6 +1899,211 @@ class PartnersPage {
                     await this.show();
                 }
             ));
+    }
+
+    ensureKycRightsTarget() {
+        const main = this.container?.querySelector('.partners-shell');
+        if (!main) return null;
+        let target = main.querySelector('[data-partners-kyc-rights]');
+        if (target) return target;
+        target = document.createElement('section');
+        target.className = 'partners-state-card partners-state-wide partners-kyc-rights';
+        target.setAttribute('data-partners-kyc-rights', '');
+        target.setAttribute('aria-labelledby', 'partners-kyc-rights-title');
+        main.append(target);
+        return target;
+    }
+
+    async loadKycRights({ focus = '' } = {}) {
+        const api = window.NorvaCloud?.partners?.kycRights;
+        const target = this.ensureKycRightsTarget();
+        if (!target || typeof api?.get !== 'function') {
+            this.renderKycRights(null, { state: 'unavailable' });
+            return null;
+        }
+        this._kycRightsAbort?.abort();
+        const controller = new AbortController();
+        const token = ++this._kycRightsToken;
+        this._kycRightsAbort = controller;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, this._kycRightsTimeoutMs);
+        this.renderKycRights(this._kycRightsData, { state: 'loading' });
+        try {
+            const envelope = await api.get({ signal: controller.signal });
+            if (!this._visible || controller.signal.aborted || token !== this._kycRightsToken) return null;
+            this._kycRightsData = envelope.data;
+            this.renderKycRights(envelope.data, { state: 'ready', focus });
+            return envelope.data;
+        } catch (error) {
+            if (!this._visible || token !== this._kycRightsToken) return null;
+            if ((error?.name === 'AbortError' || controller.signal.aborted) && !timedOut) return null;
+            this._kycRightsData = null;
+            this.renderKycRights(null, { state: 'error', timedOut });
+            return null;
+        } finally {
+            clearTimeout(timeout);
+            if (this._kycRightsAbort === controller) this._kycRightsAbort = null;
+        }
+    }
+
+    renderKycRights(data, { state = 'ready', timedOut = false, focus = '' } = {}) {
+        const target = this.ensureKycRightsTarget();
+        if (!target) return;
+        if (state === 'loading') {
+            target.setAttribute('aria-busy', 'true');
+            target.innerHTML = `<span class="partners-eyebrow">Privacy and verification</span>
+                <h2 id="partners-kyc-rights-title">Checking your verification rights...</h2>
+                <p>No identity document or provider payload is loaded on this page.</p>`;
+            return;
+        }
+        target.removeAttribute('aria-busy');
+        if (!data) {
+            target.innerHTML = `<span class="partners-eyebrow">Privacy and verification</span>
+                <h2 id="partners-kyc-rights-title">Verification controls unavailable</h2>
+                <p role="${state === 'error' ? 'alert' : 'status'}">${this.escape(timedOut
+                    ? 'The secure rights check took too long. No privacy action was inferred or submitted.'
+                    : 'Norva could not load the authoritative privacy controls. No action was taken.')}</p>
+                <button class="btn btn-secondary" type="button" data-partners-kyc-rights-retry>Retry securely</button>`;
+            target.querySelector('[data-partners-kyc-rights-retry]')
+                ?.addEventListener('click', () => this.loadKycRights({ focus: '#partners-kyc-rights-title' }));
+            return;
+        }
+
+        const consentLabels = {
+            not_available: 'Not available',
+            not_granted: 'Not granted',
+            granted: 'Granted for the recorded check',
+            withdrawn: 'Withdrawn for any new check'
+        };
+        const reviewLabels = {
+            requested: 'Review requested',
+            in_review: 'Human review in progress',
+            resolved: 'Human review completed'
+        };
+        const resolutionLabels = {
+            original_decision_upheld: 'The original decision was upheld',
+            reverification_available: 'A fresh verification is available'
+        };
+        const reasonOptions = [
+            ['identity_result_contested', 'My identity result is incorrect'],
+            ['age_result_contested', 'My age result is incorrect'],
+            ['country_result_contested', 'My country result is incorrect'],
+            ['verification_unavailable', 'I could not complete verification'],
+            ['other_result_contested', 'Another verification result is incorrect']
+        ];
+        const review = data.review;
+        const reviewSummary = review.exists
+            ? `<div class="partners-setup-value">
+                <span>${this.escape(reviewLabels[review.status] || 'Human review')}</span>
+                <strong>${this.escape(resolutionLabels[review.resolution] || this.formatDateTime(review.requested_at))}</strong>
+               </div>`
+            : '<p>No human-review request is currently open.</p>';
+        const reviewForm = data.actions.can_request_human_review
+            ? `<form class="partners-join-form" data-partners-kyc-review-form novalidate>
+                <label for="partners-kyc-review-reason">What should a person review?</label>
+                <select id="partners-kyc-review-reason" data-partners-kyc-review-reason>
+                    ${reasonOptions.map(([value, label]) => `<option value="${this.escape(value)}">${this.escape(label)}</option>`).join('')}
+                </select>
+                <button class="btn btn-secondary" type="submit" data-partners-kyc-review-submit>Request human review</button>
+               </form>`
+            : '';
+        const withdrawAction = data.actions.can_withdraw
+            ? `<button class="btn btn-secondary" type="button" data-partners-kyc-withdraw>Withdraw consent for any new biometric check</button>`
+            : '';
+        target.innerHTML = `<span class="partners-eyebrow">Privacy and verification</span>
+            <h2 id="partners-kyc-rights-title" tabindex="-1">Your identity-verification controls</h2>
+            <div class="partners-setup-value">
+                <span>Biometric consent</span>
+                <strong>${this.escape(consentLabels[data.consent.status] || data.consent.status)}</strong>
+            </div>
+            ${reviewSummary}
+            <p>Norva uses Didit's hosted check and receives the result needed to apply the programme rules. You can contest an unsuccessful result and request a person to review it. Do not send identity documents through Support.</p>
+            ${reviewForm}
+            ${withdrawAction}
+            <p class="partners-action-note">Withdrawal prevents a new biometric check. It does not erase an already completed verification or override legal retention duties. See the <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Notice</a>.</p>
+            <div class="partners-form-status" data-partners-kyc-rights-status role="status" aria-live="polite" aria-atomic="true"></div>`;
+
+        target.querySelector('[data-partners-kyc-withdraw]')
+            ?.addEventListener('click', async (event) => {
+                const confirmed = typeof window.NorvaModal?.confirm === 'function'
+                    ? await window.NorvaModal.confirm(
+                        'This blocks every new biometric verification. Existing verification records remain subject to the Privacy Notice and applicable retention duties.',
+                        {
+                            title: 'Withdraw biometric consent?',
+                            confirmLabel: 'Withdraw consent',
+                            cancelLabel: 'Keep consent',
+                            danger: true
+                        }
+                    )
+                    : false;
+                if (!confirmed) return;
+                await this.runKycRightsAction(
+                    event.currentTarget,
+                    'Withdrawing securely...',
+                    async () => window.NorvaCloud.partners.kycRights.withdrawConsent({
+                        idempotencyKey: this.actionKey('kyc-consent-withdraw')
+                    }),
+                    'kyc-consent-withdraw'
+                );
+            });
+        target.querySelector('[data-partners-kyc-review-form]')
+            ?.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const button = event.currentTarget.querySelector('[data-partners-kyc-review-submit]');
+                const reason = event.currentTarget.querySelector('[data-partners-kyc-review-reason]')?.value;
+                await this.runKycRightsAction(
+                    button,
+                    'Submitting securely...',
+                    async () => window.NorvaCloud.partners.kycRights.requestHumanReview({
+                        reason,
+                        idempotencyKey: this.actionKey('kyc-human-review')
+                    }),
+                    'kyc-human-review'
+                );
+            });
+        if (data.consent.status === 'withdrawn') {
+            const form = this.container?.querySelector('[data-partners-kyc-form]');
+            form?.querySelectorAll('input, button').forEach((control) => { control.disabled = true; });
+            const note = this.container?.querySelector('#partners-verification-note');
+            if (note) note.textContent = 'Biometric consent was withdrawn. A new hosted verification cannot be started.';
+        }
+        if (focus) {
+            const focusTarget = target.querySelector(focus);
+            try { focusTarget?.focus({ preventScroll: true }); } catch (_) { focusTarget?.focus?.(); }
+        }
+    }
+
+    async runKycRightsAction(button, loadingLabel, action, actionKey) {
+        if (!button || button.disabled || typeof action !== 'function') return;
+        const previous = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = loadingLabel;
+        const status = this.container?.querySelector('[data-partners-kyc-rights-status]');
+        if (status) status.textContent = loadingLabel;
+        try {
+            const envelope = await action();
+            this.clearActionKey(actionKey);
+            this._kycRightsData = envelope.data.rights;
+            this.renderKycRights(envelope.data.rights, {
+                state: 'ready',
+                focus: '#partners-kyc-rights-title'
+            });
+            window.NorvaModal?.toast?.('Your verification controls were updated.', 'success');
+        } catch (error) {
+            if (status?.isConnected) {
+                status.setAttribute('role', 'alert');
+                status.textContent = this.partnerErrorMessage(error);
+            }
+            if (button.isConnected) {
+                button.disabled = false;
+                button.removeAttribute('aria-busy');
+                button.textContent = previous;
+            }
+        }
     }
 
     partnerLanguage() {
@@ -1953,12 +2174,14 @@ class PartnersPage {
             kyc_billing_unavailable: 'Identity verification is temporarily unavailable. No charge or account change was made.',
             provider_not_configured: 'Identity verification is not configured yet. No account change was made.',
             provider_temporarily_unavailable: 'The identity provider is temporarily unavailable. Retry without creating another account.',
+            biometric_consent_withdrawn: 'Verification was cancelled because biometric consent was withdrawn. No Didit link was opened.',
             rate_limited: 'Too many secure attempts were received. Wait a moment before retrying.',
             partners_access_request_contract_invalid: 'Norva could not verify the request status securely. No action was accepted.',
             partners_access_request_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_access_requests_disabled: 'Early-access requests are temporarily closed. No request was created.',
             partners_action_not_allowed: 'This action is not available for the current verified account state.',
             partners_kyc_consent_invalid: 'Review and confirm the current verification statements before continuing.',
+            partners_kyc_review_reason_invalid: 'Choose what the human reviewer should check before submitting.',
             partners_fiscal_declaration_invalid: 'Review and confirm the current tax-residence statement before continuing.',
             partners_fiscal_country_mismatch: 'Your tax-residence country must match the authoritative country on your Norva account.',
             partners_payout_onboarding_invalid: 'Choose an available payout currency and confirm secure account contact.',

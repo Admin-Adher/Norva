@@ -24,6 +24,12 @@ public final class PartnersTvContractTest {
         assertFalse(PartnersTvContract.isValidHandoffUrl(
                 "https://evil.example/app.html#relay=" + TOKEN, TOKEN));
         assertFalse(PartnersTvContract.isValidHandoffUrl(
+                "https://norva.tv/app#relay=" + TOKEN, TOKEN));
+        assertFalse(PartnersTvContract.isValidHandoffUrl(
+                "https://norva.tv:443/app.html#relay=" + TOKEN, TOKEN));
+        assertFalse(PartnersTvContract.isValidHandoffUrl(
+                "https://NORVA.TV/app.html#relay=" + TOKEN, TOKEN));
+        assertFalse(PartnersTvContract.isValidHandoffUrl(
                 "https://attacker@norva.tv/app.html#relay=" + TOKEN, TOKEN));
         assertFalse(PartnersTvContract.isValidHandoffUrl(
                 "https://norva.tv/app.html?token=1#relay=" + TOKEN, TOKEN));

@@ -24,8 +24,11 @@ export const PARTNERS_RPC = Object.freeze({
   activationReconcile: "partners_service_activation_reconcile",
   rotateLink: "partners_service_rotate_link",
   dashboard: "partners_service_dashboard",
-  kycPrepare: "partners_service_kyc_prepare",
-  kycSessionRecord: "partners_service_kyc_session_record",
+  kycRightsGet: "partners_service_kyc_rights_get",
+  biometricConsentWithdraw: "partners_service_biometric_consent_withdraw",
+  kycHumanReviewRequest: "partners_service_kyc_human_review_request",
+  kycPrepare: "partners_service_kyc_prepare_v2",
+  kycSessionRecord: "partners_service_kyc_session_record_v3",
   kycCertificationPrepare: "admin_partners_kyc_certification_prepare",
   kycCertificationResume: "admin_partners_kyc_certification_resume",
   kycCertificationCreateClaim:
@@ -62,6 +65,7 @@ export type PublicErrorCode =
   | "didit_certification_disabled"
   | "provider_not_configured"
   | "provider_temporarily_unavailable"
+  | "biometric_consent_withdrawn"
   | "referral_not_configured"
   | "tv_relay_not_configured"
   | "tv_relay_not_found"
@@ -124,6 +128,15 @@ export type DashboardQuery = {
   historyLimit: number;
   historyCursor: string | null;
   historyStatus: string;
+};
+
+export type KycHumanReviewInput = {
+  reason:
+    | "identity_result_contested"
+    | "age_result_contested"
+    | "country_result_contested"
+    | "verification_unavailable"
+    | "other_result_contested";
 };
 
 export type FiscalProfileInput = {
@@ -219,6 +232,30 @@ const KYC_LEVELS = new Set([
   "identity_age_country",
   "identity_age_country_capacity",
 ]);
+const KYC_CONSENT_STATUSES = new Set([
+  "not_available",
+  "not_granted",
+  "granted",
+  "withdrawn",
+]);
+const KYC_HUMAN_REVIEW_REASONS = new Set([
+  "identity_result_contested",
+  "age_result_contested",
+  "country_result_contested",
+  "verification_unavailable",
+  "other_result_contested",
+]);
+const KYC_HUMAN_REVIEW_STATUSES = new Set([
+  "none",
+  "requested",
+  "in_review",
+  "resolved",
+]);
+const KYC_HUMAN_REVIEW_RESOLUTIONS = new Set([
+  "original_decision_upheld",
+  "reverification_available",
+]);
+const KYC_HUMAN_REVIEW_KEY_PATTERN = /^khr_[0-9a-f]{24}$/;
 const ACTIVITY_TYPES = new Set([
   "commission_pending",
   "commission_available",
@@ -363,7 +400,11 @@ export function assertValidPreflight(
 export function allowedMethodsForRoute(
   route: string,
 ): readonly string[] | null {
-  if (route === "/bootstrap" || route === "/dashboard") return ["GET"];
+  if (
+    route === "/bootstrap" ||
+    route === "/dashboard" ||
+    route === "/kyc/rights"
+  ) return ["GET"];
   if (
     route === "/access-request" ||
     route === "/fiscal-profile" ||
@@ -375,6 +416,8 @@ export function allowedMethodsForRoute(
     route === "/activate" ||
     route === "/activation/reconcile" ||
     route === "/links" ||
+    route === "/kyc/consent/withdraw" ||
+    route === "/kyc/reviews" ||
     route === "/kyc/sessions" ||
     route === "/kyc/certification" ||
     route === "/kyc/certification/resume" ||
@@ -552,6 +595,19 @@ export function parseAcceptTermsInput(raw: unknown): AcceptTermsInput {
 export function parseEmptyMutationInput(raw: unknown): Record<string, never> {
   if (!isRecord(raw) || Object.keys(raw).length !== 0) throw invalidRequest();
   return {};
+}
+
+export function parseKycHumanReviewInput(
+  raw: unknown,
+): KycHumanReviewInput {
+  const body = boundedRecord(raw, ["reason"], []);
+  if (
+    typeof body.reason !== "string" ||
+    !KYC_HUMAN_REVIEW_REASONS.has(body.reason)
+  ) {
+    throw invalidRequest();
+  }
+  return { reason: body.reason as KycHumanReviewInput["reason"] };
 }
 
 export function parseIdempotencyKey(value: string | null): string {
@@ -1246,6 +1302,152 @@ export function sanitizePayoutOnboardingMutation(
     action: "payout_onboarding_requested",
     replayed: strictBoolean(root.replayed),
     payout_onboarding: payoutOnboarding,
+  };
+}
+
+export function sanitizeKycRightsData(
+  raw: unknown,
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "consent",
+    "review",
+    "actions",
+  ]);
+  if (root.schema_version !== 1) throw new BootstrapContractError();
+
+  const consent = exactRecord(root.consent, [
+    "status",
+    "version",
+    "granted_at",
+    "withdrawn_at",
+  ]);
+  const consentStatus = enumString(
+    consent.status,
+    KYC_CONSENT_STATUSES,
+  );
+  if (consent.version !== "partners-biometric-consent-v1") {
+    throw new BootstrapContractError();
+  }
+  const grantedAt = isoTimestamp(consent.granted_at, true);
+  const withdrawnAt = isoTimestamp(consent.withdrawn_at, true);
+  if (
+    ((consentStatus === "not_available" || consentStatus === "not_granted") &&
+      (grantedAt !== null || withdrawnAt !== null)) ||
+    (consentStatus === "granted" &&
+      (grantedAt === null || withdrawnAt !== null)) ||
+    (consentStatus === "withdrawn" &&
+      (grantedAt === null || withdrawnAt === null))
+  ) {
+    throw new BootstrapContractError();
+  }
+
+  const review = exactRecord(root.review, [
+    "exists",
+    "key",
+    "status",
+    "reason",
+    "resolution",
+    "requested_at",
+    "updated_at",
+    "resolved_at",
+  ]);
+  const reviewExists = strictBoolean(review.exists);
+  const reviewStatus = enumString(review.status, KYC_HUMAN_REVIEW_STATUSES);
+  const requestedAt = isoTimestamp(review.requested_at, true);
+  const updatedAt = isoTimestamp(review.updated_at, true);
+  const resolvedAt = isoTimestamp(review.resolved_at, true);
+  if (!reviewExists) {
+    if (
+      review.key !== null ||
+      reviewStatus !== "none" ||
+      review.reason !== null ||
+      review.resolution !== null ||
+      requestedAt !== null ||
+      updatedAt !== null ||
+      resolvedAt !== null
+    ) {
+      throw new BootstrapContractError();
+    }
+  } else {
+    patternString(review.key, KYC_HUMAN_REVIEW_KEY_PATTERN, 28);
+    enumString(review.reason, KYC_HUMAN_REVIEW_REASONS);
+    if (
+      reviewStatus === "none" ||
+      requestedAt === null ||
+      updatedAt === null ||
+      (reviewStatus === "resolved"
+        ? (resolvedAt === null ||
+          typeof review.resolution !== "string" ||
+          !KYC_HUMAN_REVIEW_RESOLUTIONS.has(review.resolution))
+        : (resolvedAt !== null || review.resolution !== null))
+    ) {
+      throw new BootstrapContractError();
+    }
+  }
+
+  const actions = exactRecord(root.actions, [
+    "can_withdraw",
+    "can_request_human_review",
+  ]);
+  const canWithdraw = strictBoolean(actions.can_withdraw);
+  const canRequestHumanReview = strictBoolean(
+    actions.can_request_human_review,
+  );
+  if (
+    canWithdraw !== (consentStatus === "granted") ||
+    (canRequestHumanReview &&
+      reviewExists &&
+      (reviewStatus === "requested" || reviewStatus === "in_review"))
+  ) {
+    throw new BootstrapContractError();
+  }
+
+  return {
+    schema_version: 1,
+    consent: {
+      status: consentStatus,
+      version: "partners-biometric-consent-v1",
+      granted_at: grantedAt,
+      withdrawn_at: withdrawnAt,
+    },
+    review: {
+      exists: reviewExists,
+      key: reviewExists ? review.key : null,
+      status: reviewStatus,
+      reason: reviewExists ? review.reason : null,
+      resolution: reviewExists ? review.resolution : null,
+      requested_at: requestedAt,
+      updated_at: updatedAt,
+      resolved_at: resolvedAt,
+    },
+    actions: {
+      can_withdraw: canWithdraw,
+      can_request_human_review: canRequestHumanReview,
+    },
+  };
+}
+
+export function sanitizeKycRightsMutationData(
+  raw: unknown,
+  expectedAction:
+    | "biometric_consent_withdrawn"
+    | "kyc_human_review_requested",
+): Record<string, unknown> {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "replayed",
+    "rights",
+  ]);
+  if (root.schema_version !== 1 || root.action !== expectedAction) {
+    throw new BootstrapContractError();
+  }
+  return {
+    schema_version: 1,
+    action: expectedAction,
+    replayed: strictBoolean(root.replayed),
+    rights: sanitizeKycRightsData(root.rights),
   };
 }
 

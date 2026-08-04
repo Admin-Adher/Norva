@@ -10,13 +10,18 @@ import {
   verifyAndNormalizeDiditWebhook,
   verifyDiditConsoleTestWebhook,
 } from "../_shared/didit-partners.ts";
-import { PARTNERS_RPC } from "../_shared/partners-api.ts";
+import {
+  diditProviderSessionHash,
+  encryptDiditPurgeEnvelope,
+  loadDiditPurgeKeyring,
+} from "../_shared/didit-purge-envelope.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const DIDIT_CONFIG = loadDiditConfig((name) => Deno.env.get(name));
+const DIDIT_PURGE_KEYRING = loadDiditPurgeKeyring((name) => Deno.env.get(name));
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing required Norva Partners webhook configuration");
@@ -38,7 +43,7 @@ Deno.serve(async (req) => {
     if (url.search || url.hash) {
       return problem(400, "invalid_request", correlationId);
     }
-    if (!DIDIT_CONFIG) {
+    if (!DIDIT_CONFIG || !DIDIT_PURGE_KEYRING) {
       return problem(503, "provider_not_configured", correlationId);
     }
     const contentType = req.headers.get("Content-Type") ?? "";
@@ -99,6 +104,14 @@ Deno.serve(async (req) => {
       throw error;
     }
 
+    const providerSessionHash = await diditProviderSessionHash(
+      event.providerSessionId,
+    );
+    const providerSessionEnvelope = await encryptDiditPurgeEnvelope(
+      event.providerSessionId,
+      providerSessionHash,
+      DIDIT_PURGE_KEYRING,
+    );
     const rpcArgs = {
       p_provider_event_id: event.providerEventId,
       p_provider_session_id: event.providerSessionId,
@@ -114,9 +127,10 @@ Deno.serve(async (req) => {
       p_payload_hash: event.payloadHash,
       p_provider_environment: event.providerEnvironment,
       p_provider_config_fingerprint: event.providerConfigFingerprint,
+      p_provider_session_envelope: providerSessionEnvelope,
     };
     let { data, error } = await admin.rpc(
-      "partners_service_kyc_webhook_apply",
+      "partners_service_kyc_webhook_apply_and_enqueue_purge",
       rpcArgs,
     );
     let certification = false;
@@ -126,7 +140,7 @@ Deno.serve(async (req) => {
     if (error?.code === "P0006") {
       certification = true;
       ({ data, error } = await admin.rpc(
-        PARTNERS_RPC.kycCertificationWebhookApply,
+        "partners_service_kyc_certification_webhook_apply_and_enqueue_purge",
         rpcArgs,
       ));
     }

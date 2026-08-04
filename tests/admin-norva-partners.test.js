@@ -3100,6 +3100,8 @@ test('Admin Partners exposes pre-gate Didit certification only to Risk operators
   });
   assert.match(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
   assert.match(certification.innerHTML, /séparée des comptes, liens, commissions et paiements/);
+  assert.match(certification.innerHTML, /verification-privacy-notice/);
+  assert.match(certification.innerHTML, /identity-verification/);
 });
 
 test('Admin Partners renders authoritative, sandbox and quarantined Didit proof states', () => {
@@ -3742,4 +3744,139 @@ test('Admin Partners hides Start while an unknown Didit result is reconciling', 
   assert.match(certification.innerHTML, /Norva v&eacute;rifie/);
   page._partnersKycCertificationPollUntil = 0;
   page.hide();
+});
+
+test('Admin Partners renders approval registry schema v2 and immutable provenance', () => {
+  const configuration = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-configuration' ? configuration : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersCanManageRelease = true;
+  page._renderPartnersConfiguration({
+    schema_version: 2,
+    programs: [{
+      version_key: 'individual-global-p0-v2',
+      status: 'active',
+      attribution_window_days: 30,
+      maturation_days: 45,
+      terms_version: 'partners-terms-v1',
+    }],
+    policies: [],
+    configuration_counts: {
+      active_country_mappings: 0,
+      active_currencies: 0,
+      active_payout_providers: 0,
+      active_allowlist_entries: 0,
+    },
+    release_flags: [],
+    release_gates: [{
+      key: 'privacy_approved',
+      satisfied: false,
+      preproduction_satisfied: true,
+      recorded_satisfied: true,
+      approval_status: 'current_preproduction',
+      approval_provenance: {
+        package_version: 3,
+        deployment_environment: 'preproduction',
+        source_commit_sha: 'a'.repeat(40),
+        expires_at: '2099-01-01T00:00:00.000Z',
+      },
+    }],
+    deployment_manifests: [{
+      deployment_environment: 'preproduction',
+      manifest_version: 2,
+      manifest_sha256: 'b'.repeat(64),
+      source_commit_sha: 'a'.repeat(40),
+      deployment_key: 'hetzner-preproduction-a',
+      deployment_evidence_sha256: 'c'.repeat(64),
+      document_keys: ['deployment_proof', 'privacy_notice'],
+      registered_at: '2026-08-04T00:00:00.000Z',
+    }],
+  });
+  assert.match(configuration.innerHTML, /manifeste #2/);
+  assert.match(configuration.innerHTML, /préproduction uniquement/);
+  assert.match(configuration.innerHTML, /aucune autorité live/);
+  assert.match(configuration.innerHTML, /package #3/);
+  assert.match(configuration.innerHTML, /Approuver avec preuves/);
+  assert.match(configuration.innerHTML, /data-partners-action="release-manifest"/);
+});
+
+test('Admin Partners approves a gate through the immutable package RPC', async () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersEnsureAal2 = async () => true;
+  const commit = 'a'.repeat(40);
+  const deploymentHash = 'b'.repeat(64);
+  const evidence = {
+    approval_record: '1'.repeat(64),
+    deployment_proof: deploymentHash,
+    biometric_consent: '3'.repeat(64),
+    dpia: '4'.repeat(64),
+    gdpr_self_assessment: '5'.repeat(64),
+    privacy_notice: '6'.repeat(64),
+    records_of_processing: '7'.repeat(64),
+  };
+  page._partnersConfiguration = {
+    schema_version: 2,
+    programs: [{ version_key: 'individual-global-p0-v2', status: 'active' }],
+    policies: [{
+      program_version_key: 'individual-global-p0-v2',
+      country_code: 'FR',
+      subdivision_code: null,
+    }],
+    deployment_manifests: [{
+      deployment_environment: 'preproduction',
+      source_commit_sha: commit,
+      deployment_key: 'hetzner-preproduction-a',
+      deployment_evidence_sha256: deploymentHash,
+    }],
+  };
+  const prompts = [
+    'preproduction',
+    'individual-global-p0-v2',
+    '2099-01-01T00:00:00.000Z',
+  ];
+  page._partnersPrompt = async () => prompts.shift();
+  const jsonPrompts = [[{ country_code: 'FR', subdivision_code: null }], evidence];
+  page._partnersPromptJson = async () => jsonPrompts.shift();
+  page._partnersJustification = async () => 'Approbation Privacy documentée pour le pilote France.';
+  page._partnersTypedConfirmation = async () => 'confirmed';
+  const calls = [];
+  page._rpc = async (name, args) => {
+    calls.push({ name, args });
+    return {
+      schema_version: 1,
+      action: 'release_gate_approved',
+      gate_key: 'privacy_approved',
+      satisfied: true,
+      effective: true,
+      recorded_satisfied: true,
+      approval: {
+        package_sha256: 'f'.repeat(64),
+        source_commit_sha: commit,
+        deployment_environment: 'preproduction',
+      },
+    };
+  };
+  const result = await page._runPartnersAdminAction({
+    dataset: {
+      partnersAction: 'release-gate',
+      partnersKey: 'privacy_approved',
+      partnersEnabled: 'true',
+    },
+  });
+  assert.match(result, /préproduction/);
+  assert.match(result, /autorité live reste fermée/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'admin_partners_release_gate_approve');
+  assert.equal(calls[0].args.p_source_commit_sha, commit);
+  assert.deepEqual(calls[0].args.p_jurisdictions, [
+    { country_code: 'FR', subdivision_code: null },
+  ]);
+  assert.equal(calls.some((call) => call.name === 'admin_partners_control'), false);
 });

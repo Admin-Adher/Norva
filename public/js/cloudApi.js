@@ -1012,6 +1012,30 @@
         'identity_age_country',
         'identity_age_country_capacity'
     ]);
+    const PARTNERS_KYC_CONSENT_STATUSES = new Set([
+        'not_available',
+        'not_granted',
+        'granted',
+        'withdrawn'
+    ]);
+    const PARTNERS_KYC_REVIEW_REASONS = new Set([
+        'identity_result_contested',
+        'age_result_contested',
+        'country_result_contested',
+        'verification_unavailable',
+        'other_result_contested'
+    ]);
+    const PARTNERS_KYC_REVIEW_STATUSES = new Set([
+        'none',
+        'requested',
+        'in_review',
+        'resolved'
+    ]);
+    const PARTNERS_KYC_REVIEW_RESOLUTIONS = new Set([
+        'original_decision_upheld',
+        'reverification_available'
+    ]);
+    const PARTNERS_KYC_REVIEW_KEY_PATTERN = /^khr_[0-9a-f]{24}$/;
     const PARTNERS_NEXT_ACTIONS = new Set([
         'start_verification',
         'await_verification',
@@ -1684,6 +1708,105 @@
         return deepFreeze(cloneJson(payload));
     }
 
+    function validatePartnersKycRightsValue(data) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(data, ['schema_version', 'consent', 'review', 'actions'])
+            || data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || !hasExactKeys(data.consent, [
+                'status',
+                'version',
+                'granted_at',
+                'withdrawn_at'
+            ])
+            || !PARTNERS_KYC_CONSENT_STATUSES.has(data.consent.status)
+            || data.consent.version !== 'partners-biometric-consent-v1'
+            || !isIsoTimestamp(data.consent.granted_at, true)
+            || !isIsoTimestamp(data.consent.withdrawn_at, true)) invalid();
+        const consent = data.consent;
+        if ((['not_available', 'not_granted'].includes(consent.status)
+                && (consent.granted_at !== null || consent.withdrawn_at !== null))
+            || (consent.status === 'granted'
+                && (consent.granted_at === null || consent.withdrawn_at !== null))
+            || (consent.status === 'withdrawn'
+                && (consent.granted_at === null || consent.withdrawn_at === null))) invalid();
+
+        if (!hasExactKeys(data.review, [
+            'exists',
+            'key',
+            'status',
+            'reason',
+            'resolution',
+            'requested_at',
+            'updated_at',
+            'resolved_at'
+        ])
+            || typeof data.review.exists !== 'boolean'
+            || !PARTNERS_KYC_REVIEW_STATUSES.has(data.review.status)
+            || !isIsoTimestamp(data.review.requested_at, true)
+            || !isIsoTimestamp(data.review.updated_at, true)
+            || !isIsoTimestamp(data.review.resolved_at, true)) invalid();
+        const review = data.review;
+        if (!review.exists) {
+            if (review.key !== null
+                || review.status !== 'none'
+                || review.reason !== null
+                || review.resolution !== null
+                || review.requested_at !== null
+                || review.updated_at !== null
+                || review.resolved_at !== null) invalid();
+        } else if (!isBoundedString(review.key, {
+            pattern: PARTNERS_KYC_REVIEW_KEY_PATTERN,
+            max: 28
+        })
+            || review.status === 'none'
+            || !PARTNERS_KYC_REVIEW_REASONS.has(review.reason)
+            || review.requested_at === null
+            || review.updated_at === null
+            || (review.status === 'resolved'
+                ? (review.resolved_at === null
+                    || !PARTNERS_KYC_REVIEW_RESOLUTIONS.has(review.resolution))
+                : (review.resolved_at !== null || review.resolution !== null))) invalid();
+
+        if (!hasExactKeys(data.actions, [
+            'can_withdraw',
+            'can_request_human_review'
+        ])
+            || typeof data.actions.can_withdraw !== 'boolean'
+            || typeof data.actions.can_request_human_review !== 'boolean'
+            || data.actions.can_withdraw !== (consent.status === 'granted')
+            || (data.actions.can_request_human_review
+                && review.exists
+                && ['requested', 'in_review'].includes(review.status))) invalid();
+        return data;
+    }
+
+    function validatePartnersKycRights(payload) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })) invalid();
+        validatePartnersKycRightsValue(payload.data);
+        return deepFreeze(cloneJson(payload));
+    }
+
+    function validatePartnersKycRightsMutation(payload, expectedAction) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })
+            || !hasExactKeys(payload.data, [
+                'schema_version',
+                'action',
+                'replayed',
+                'rights'
+            ])
+            || payload.data.schema_version !== PARTNERS_SCHEMA_VERSION
+            || payload.data.action !== expectedAction
+            || typeof payload.data.replayed !== 'boolean') invalid();
+        validatePartnersKycRightsValue(payload.data.rights);
+        return deepFreeze(cloneJson(payload));
+    }
+
     function validatePartnersReferralClaim(payload) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(payload, ['version', 'claimed', 'state'])
@@ -1993,19 +2116,9 @@
     }
 
     function isTrustedPartnersTvHandoff(value, relayToken) {
-        if (typeof value !== 'string' || value.length > 2048) return false;
-        try {
-            const url = new URL(value);
-            return url.protocol === 'https:'
-                && /^(?:[a-z0-9-]+\.)*norva\.tv$/.test(url.hostname)
-                && !url.username
-                && !url.password
-                && !url.search
-                && url.pathname !== '/'
-                && url.hash === `#relay=${encodeURIComponent(relayToken)}`;
-        } catch (_) {
-            return false;
-        }
+        return typeof value === 'string'
+            && value.length <= 2048
+            && value === `https://norva.tv/app.html#relay=${encodeURIComponent(relayToken)}`;
     }
 
     function partnersRequireUserSession() {
@@ -2293,23 +2406,61 @@
     function partnersStartKyc({
         language = 'en',
         consentVersion,
+        biometricConsentVersion,
         capacityConfirmed,
         idempotencyKey,
         signal
     } = {}) {
         const safeLanguage = String(language || '').trim().toLowerCase();
         const safeConsentVersion = String(consentVersion || '').trim();
+        const safeBiometricConsentVersion = String(biometricConsentVersion || '').trim();
         if (!/^[a-z]{2}$/.test(safeLanguage)
             || !PARTNERS_CONSENT_VERSION_PATTERN.test(safeConsentVersion)
+            || safeBiometricConsentVersion !== 'partners-biometric-consent-v1'
             || capacityConfirmed !== true) {
             throw partnersClientError('partners_kyc_consent_invalid');
         }
         return partnersPost('/kyc/sessions', {
             language: safeLanguage,
             consentVersion: safeConsentVersion,
+            biometricConsentVersion: safeBiometricConsentVersion,
             consentGranted: true,
             capacityConfirmed: true
         }, idempotencyKey, validatePartnersKycSession, signal);
+    }
+
+    function partnersKycRights({ signal } = {}) {
+        return partnersGet('/kyc/rights', signal, validatePartnersKycRights);
+    }
+
+    function partnersWithdrawBiometricConsent({ idempotencyKey, signal } = {}) {
+        return partnersPost(
+            '/kyc/consent/withdraw',
+            {},
+            idempotencyKey,
+            (payload) => validatePartnersKycRightsMutation(
+                payload,
+                'biometric_consent_withdrawn'
+            ),
+            signal
+        );
+    }
+
+    function partnersRequestKycHumanReview({ reason, idempotencyKey, signal } = {}) {
+        const safeReason = String(reason || '').trim();
+        if (!PARTNERS_KYC_REVIEW_REASONS.has(safeReason)) {
+            throw partnersClientError('partners_kyc_review_reason_invalid');
+        }
+        return partnersPost(
+            '/kyc/reviews',
+            { reason: safeReason },
+            idempotencyKey,
+            (payload) => validatePartnersKycRightsMutation(
+                payload,
+                'kyc_human_review_requested'
+            ),
+            signal
+        );
     }
 
     async function partnersClaimReferral({ signal } = {}) {
@@ -2552,6 +2703,11 @@
             activation: Object.freeze({ reconcile: partnersReconcileActivation }),
             rotateLink: partnersRotateLink,
             startKyc: partnersStartKyc,
+            kycRights: Object.freeze({
+                get: partnersKycRights,
+                withdrawConsent: partnersWithdrawBiometricConsent,
+                requestHumanReview: partnersRequestKycHumanReview
+            }),
             claimReferral: partnersClaimReferral,
             payoutProfile: partnersPayoutProfile,
             fiscalProfile: partnersFiscalProfile,

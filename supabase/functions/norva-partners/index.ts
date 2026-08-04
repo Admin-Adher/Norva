@@ -5,6 +5,7 @@ import {
   classifyDiditCreateError,
   DIDIT_CREATE_SESSION_URL,
   DIDIT_LIST_SESSIONS_URL,
+  DIDIT_PARTNERS_WORKFLOW_VERSION,
   type DiditActiveSession,
   diditConfigFingerprint,
   DiditContractError,
@@ -24,6 +25,11 @@ import {
   sanitizeKycSessionRecordRpc,
 } from "../_shared/didit-partners.ts";
 import {
+  diditProviderSessionHash,
+  encryptDiditPurgeEnvelope,
+  loadDiditPurgeKeyring,
+} from "../_shared/didit-purge-envelope.ts";
+import {
   allowedMethodsForRoute,
   assertAllowedOrigin,
   assertNoQueryParameters,
@@ -42,6 +48,7 @@ import {
   parseEmptyMutationInput,
   parseFiscalProfileInput,
   parseIdempotencyKey,
+  parseKycHumanReviewInput,
   parsePayoutOnboardingInput,
   PARTNERS_API_VERSION,
   PARTNERS_RPC,
@@ -55,6 +62,8 @@ import {
   sanitizeDashboardData,
   sanitizeFiscalProfileGet,
   sanitizeFiscalProfileMutation,
+  sanitizeKycRightsData,
+  sanitizeKycRightsMutationData,
   sanitizeMemberWriteReservation,
   sanitizeMutationData,
   sanitizePayoutOnboardingGet,
@@ -83,6 +92,7 @@ const ALLOWED_ORIGINS = parseAllowedOrigins(
   Deno.env.get("NORVA_PARTNERS_ALLOWED_ORIGINS"),
 );
 const DIDIT_CONFIG = loadDiditConfig((name) => Deno.env.get(name));
+const DIDIT_PURGE_KEYRING = loadDiditPurgeKeyring((name) => Deno.env.get(name));
 const REFERRAL_SECRETS = loadReferralSecrets((name) => Deno.env.get(name));
 const TV_RELAY_CONFIG = loadTvRelayConfig((name) => Deno.env.get(name));
 const ACCESS_REQUESTS_ENABLED =
@@ -94,7 +104,6 @@ const DIDIT_CERTIFICATION_ENABLED =
 // List Sessions does not expose workflow_version. The exceptional pre-gate
 // certification is deliberately pinned to the workflow version being
 // certified; a later signed webhook with any other version is quarantined.
-const DIDIT_CERTIFICATION_EXPECTED_WORKFLOW_VERSION = 1;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing required Norva Partners server configuration");
@@ -246,12 +255,55 @@ Deno.serve(async (req) => {
         "mutation",
       );
       cleanData = sanitizeMutationData(data, "link_rotated");
+    } else if (route === "/kyc/rights") {
+      assertNoQueryParameters(url);
+      cleanData = sanitizeKycRightsData(
+        await callRpc(PARTNERS_RPC.kycRightsGet, {
+          p_user_id: userId,
+        }),
+      );
+    } else if (route === "/kyc/consent/withdraw") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      parseEmptyMutationInput(await readJsonBody(req));
+      cleanData = sanitizeKycRightsMutationData(
+        await callRpc(
+          PARTNERS_RPC.biometricConsentWithdraw,
+          {
+            p_user_id: userId,
+            p_idempotency_key: idempotencyKey,
+          },
+          "mutation",
+        ),
+        "biometric_consent_withdrawn",
+      );
+    } else if (route === "/kyc/reviews") {
+      assertNoQueryParameters(url);
+      const idempotencyKey = parseIdempotencyKey(
+        req.headers.get("Idempotency-Key"),
+      );
+      const input = parseKycHumanReviewInput(await readJsonBody(req));
+      cleanData = sanitizeKycRightsMutationData(
+        await callRpc(
+          PARTNERS_RPC.kycHumanReviewRequest,
+          {
+            p_user_id: userId,
+            p_reason: input.reason,
+            p_idempotency_key: idempotencyKey,
+          },
+          "mutation",
+        ),
+        "kyc_human_review_requested",
+      );
+      status = 201;
     } else if (route === "/kyc/sessions") {
       assertNoQueryParameters(url);
       const idempotencyKey = parseIdempotencyKey(
         req.headers.get("Idempotency-Key"),
       );
-      if (!DIDIT_CONFIG) {
+      if (!DIDIT_CONFIG || !DIDIT_PURGE_KEYRING) {
         throw new PublicApiError(
           503,
           "provider_not_configured",
@@ -277,7 +329,8 @@ Deno.serve(async (req) => {
           {
             p_user_id: userId,
             p_idempotency_key: idempotencyKey,
-            p_consent_version: input.consentVersion,
+            p_disclosure_version: input.consentVersion,
+            p_biometric_consent_version: input.biometricConsentVersion,
             p_capacity_attested: input.capacityConfirmed,
             p_language: input.language,
           },
@@ -299,6 +352,14 @@ Deno.serve(async (req) => {
         DIDIT_CONFIG,
         providerSession.workflowVersion,
       );
+      const providerSessionHash = await diditProviderSessionHash(
+        providerSession.sessionId,
+      );
+      const providerSessionEnvelope = await encryptDiditPurgeEnvelope(
+        providerSession.sessionId,
+        providerSessionHash,
+        DIDIT_PURGE_KEYRING,
+      );
       const recorded = sanitizeKycSessionRecordRpc(
         await callRpc(
           PARTNERS_RPC.kycSessionRecord,
@@ -315,10 +376,25 @@ Deno.serve(async (req) => {
             p_provider_config_fingerprint: providerConfigFingerprint,
             p_provider_session_ttl_seconds:
               DIDIT_CONFIG.sessionExpirationSeconds,
+            p_provider_session_envelope: providerSessionEnvelope,
           },
           "mutation",
         ),
       );
+      if (recorded.session_disposition === "withdrawn") {
+        throw new PublicApiError(
+          409,
+          "biometric_consent_withdrawn",
+          "Identity verification was cancelled because biometric consent was withdrawn.",
+        );
+      }
+      if (recorded.session_disposition === "terminal") {
+        throw new PublicApiError(
+          409,
+          "request_in_progress",
+          "Identity verification is being finalized.",
+        );
+      }
       cleanData = {
         schema_version: 1,
         action: "kyc_session_created",
@@ -977,7 +1053,7 @@ async function createCertificationHostedSession(
   if (inspection.kind === "active") {
     const providerConfigFingerprint = await diditConfigFingerprint(
       config,
-      DIDIT_CERTIFICATION_EXPECTED_WORKFLOW_VERSION,
+      DIDIT_PARTNERS_WORKFLOW_VERSION,
     );
     const recorded = sanitizeKycCertificationSessionRecordRpc(
       await callRpc(
@@ -986,8 +1062,7 @@ async function createCertificationHostedSession(
           p_certification_key: prepared.certification.key,
           p_provider_session_id: inspection.session.sessionId,
           p_provider_workflow_id: inspection.session.workflowId,
-          p_provider_workflow_version:
-            DIDIT_CERTIFICATION_EXPECTED_WORKFLOW_VERSION,
+          p_provider_workflow_version: DIDIT_PARTNERS_WORKFLOW_VERSION,
           p_provider_status: inspection.session.providerStatus,
           p_provider_environment: config.environment,
           p_provider_config_fingerprint: providerConfigFingerprint,

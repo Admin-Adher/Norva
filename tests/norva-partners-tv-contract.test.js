@@ -170,6 +170,10 @@ test('relay handoff and destination are exact; drift fails closed', async () => 
   const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
   for (const mutate of [
     (payload) => { payload.data.relay.handoff_url = `https://evil.example/#relay=${relayToken}`; },
+    (payload) => { payload.data.relay.handoff_url = `https://norva.tv/app#relay=${relayToken}`; },
+    (payload) => { payload.data.relay.handoff_url = `https://www.norva.tv/app.html#relay=${relayToken}`; },
+    (payload) => { payload.data.relay.handoff_url = `https://norva.tv:443/app.html#relay=${relayToken}`; },
+    (payload) => { payload.data.relay.handoff_url = `https://NORVA.TV/app.html#relay=${relayToken}`; },
     (payload) => { payload.data.relay.handoff_url = 'https://norva.tv/app.html'; },
     (payload) => { payload.data.relay.relay_token = `v1.${'B'.repeat(43)}.${'b'.repeat(64)}`; },
     (payload) => { payload.data.relay.poll_after_seconds = 30; },
@@ -198,6 +202,14 @@ test('relay handoff and destination are exact; drift fails closed', async () => 
       (error) => error?.code === 'partners_contract_invalid',
     );
   }
+});
+
+test('cloud TV client enforces the canonical relay landing', () => {
+  assert.match(
+    cloudSource,
+    /value === `https:\/\/norva\.tv\/app\.html#relay=\$\{encodeURIComponent\(relayToken\)\}`/,
+  );
+  assert.doesNotMatch(cloudSource, /NORVA_HANDOFF_HOST_PATTERN|\*\.norva\.tv/);
 });
 
 test('authenticated phone consumes one relay through the user boundary', async () => {

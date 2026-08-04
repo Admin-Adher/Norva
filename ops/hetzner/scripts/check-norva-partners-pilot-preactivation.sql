@@ -167,17 +167,85 @@ checks(check_name, passed, detail) as (
   select
     'gate.' || expected.gate_key,
     count(gate.gate_key) = 1
-      and bool_and(gate.satisfied = expected.expected_satisfied),
+      and bool_and(gate.satisfied = expected.expected_satisfied)
+      and bool_and(
+        case
+          when expected.expected_satisfied then
+            affiliate_private.partners_release_gate_approval_is_current(
+              expected.gate_key,
+              :'deployment_environment'
+            )
+          else not gate.satisfied
+        end
+      ),
     format(
-      'expected=%s;actual=%s;rows=%s',
+      'expected=%s;recorded=%s;approval_current=%s;rows=%s',
       expected.expected_satisfied,
       coalesce(bool_or(gate.satisfied)::text, 'missing'),
+      coalesce(
+        bool_or(
+          affiliate_private.partners_release_gate_approval_is_current(
+            expected.gate_key,
+            :'deployment_environment'
+          )
+        )::text,
+        'false'
+      ),
       count(gate.gate_key)
     )
   from required_gates expected
   left join affiliate_private.affiliate_release_gates gate
     on gate.gate_key = expected.gate_key
   group by expected.gate_key, expected.expected_satisfied
+
+  union all
+
+  select
+    'gate.approval_registry_exact_pilot_scope',
+    count(*) = (
+      select count(*)
+      from required_gates expected
+      where expected.expected_satisfied
+      )
+      and bool_and(
+        package.program_version_id in (select id from matching_programs)
+        and package.deployment_environment = :'deployment_environment'
+        and package.source_commit_sha = lower(:'candidate_commit_sha')
+        and package.deployment_evidence_sha256 ~ '^[0-9a-f]{64}$'
+        and package.document_hashes ? 'approval_record'
+        and package.document_hashes ? 'deployment_proof'
+        and jsonb_array_length(package.jurisdiction_scope) = 1
+        and exists (
+          select 1
+          from jsonb_array_elements(package.jurisdiction_scope) scope(item)
+          where scope.item ->> 'country_code' = :'pilot_country'
+            and nullif(scope.item ->> 'subdivision_code', '') is null
+        )
+        and affiliate_private.partners_approval_package_is_current(
+          package.id,
+          gate.gate_key,
+          :'deployment_environment'
+        )
+      ),
+    format(
+      'current_exact_packages=%s;required=%s;environment=%s;country=%s',
+      count(*),
+      (
+        select count(*)
+        from required_gates expected
+        where expected.expected_satisfied
+      ),
+      :'deployment_environment',
+      :'pilot_country'
+    )
+  from required_gates expected
+  join affiliate_private.affiliate_release_gates gate
+    on gate.gate_key = expected.gate_key
+  join affiliate_private.affiliate_release_gate_approval_bindings binding
+    on binding.gate_key = gate.gate_key
+  join affiliate_private.affiliate_approval_packages package
+    on package.id = binding.approval_package_id
+  where expected.expected_satisfied
 
   union all
 
@@ -310,6 +378,106 @@ checks(check_name, passed, detail) as (
     stats.release_manager_totp_count >= 1,
     format('ready_operators=%s;required=1', stats.release_manager_totp_count)
   from operator_stats stats
+
+  union all
+
+  select
+    'didit.pending_member_purge_coverage',
+    count(*) = 0,
+    format('pending_without_outbox=%s', count(*))
+  from affiliate_private.affiliate_kyc_sessions session
+  where session.status = 'pending'
+    and session.provider_session_hash is not null
+    and not exists (
+      select 1
+      from affiliate_private.affiliate_didit_purge_outbox outbox
+      where outbox.provider_session_hash = session.provider_session_hash
+        and outbox.session_purpose = 'member_kyc'
+        and outbox.source_record_id = session.id
+        and outbox.provider_environment = session.provider_environment
+    )
+
+  union all
+
+  select
+    'didit.purge_coverage_ready',
+    affiliate_private.partners_didit_purge_coverage_ready(),
+    format(
+      'coverage_ready=%s',
+      affiliate_private.partners_didit_purge_coverage_ready()
+    )
+
+  union all
+
+  select
+    'didit.purge_outbox_clear',
+    count(*) = 0,
+    format('unresolved=%s', count(*))
+  from affiliate_private.affiliate_didit_purge_outbox outbox
+  where outbox.status in ('pending', 'leased', 'retry', 'dead_letter')
+
+  union all
+
+  select
+    'didit.purge_sources_clear',
+    count(*) = 0,
+    format('unresolved_terminal_sources=%s', count(*))
+  from (
+    select session.id
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.status <> 'pending'
+      and session.provider_purge_status <> 'purged'
+    union all
+    select session.id
+    from affiliate_private.affiliate_didit_certification_sessions session
+    where session.provider_session_hash is not null
+      and session.status in ('approved', 'declined', 'expired', 'quarantined')
+      and session.provider_purge_status <> 'purged'
+  ) unresolved
+
+  union all
+
+  select
+    'didit.orphaned_source_dead_letter',
+    coalesce(
+      (status.snapshot ->> 'orphaned_source_dead_letter')::bigint,
+      -1
+    ) = 0,
+    format(
+      'orphaned_source_dead_letter=%s',
+      coalesce(
+        status.snapshot ->> 'orphaned_source_dead_letter',
+        'missing'
+      )
+    )
+  from (
+    select affiliate_private.partners_service_didit_purge_status() snapshot
+  ) status
+
+  union all
+
+  select
+    'didit.purge_worker_heartbeat',
+    state.last_outcome in ('ok', 'partial')
+      and state.last_completed_at >= clock_timestamp() - interval '5 minutes',
+    format(
+      'outcome=%s;last_completed_at=%s',
+      coalesce(state.last_outcome, 'missing'),
+      coalesce(state.last_completed_at::text, 'missing')
+    )
+  from affiliate_private.affiliate_didit_purge_worker_state state
+  where state.worker_name = 'didit_purge'
+
+  union all
+
+  select
+    'cron.partners_didit_purge_worker',
+    count(*) = 1
+      and bool_and(job.schedule = '* * * * *')
+      and bool_and(job.active),
+    format('matching=%s', count(*))
+  from cron.job job
+  where job.jobname = 'norva-partners-didit-purge-worker'
 
   union all
 

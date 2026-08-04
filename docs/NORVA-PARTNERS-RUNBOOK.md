@@ -8,6 +8,13 @@ Ce runbook ne remplace ni une revue juridique/fiscale locale ni les procédures
 d'incident des fournisseurs. Il décrit les contrôles techniques nécessaires
 avant et pendant le pilote individuel Norva Partners.
 
+Pour le pilote France invite-only, Norva ne désigne pas officiellement de DPO.
+La gate `privacy_approved` repose sur l'auto-évaluation RGPD interne documentée
+et immuable décrite dans `NORVA-PARTNERS-APPROVAL-EVIDENCE.md`. Elle est limitée
+à 50 participants et ne vaut jamais autorisation d'ouverture publique. La
+généralisation exige une revue Privacy qualifiée et indépendante distincte,
+sans que cette revue constitue par elle-même une désignation officielle de DPO.
+
 ## 1. Portes de mise en service
 
 Ne jamais ouvrir `partners_enabled` uniquement parce que le code est déployé.
@@ -79,13 +86,18 @@ DIDIT_CALLBACK_URL
 DIDIT_ID_VERIFICATION_NODE_ID
 DIDIT_LIVENESS_NODE_ID
 DIDIT_FACE_MATCH_NODE_ID
+NORVA_PARTNERS_DIDIT_PURGE_KEYS_JSON # objet version -> clé AES-256 base64url
+NORVA_PARTNERS_DIDIT_PURGE_ACTIVE_KEY_VERSION
+NORVA_PARTNERS_DIDIT_PURGE_BATCH      # 1..20, défaut 10
+NORVA_PARTNERS_DIDIT_PURGE_MAX_BATCHES # 1..4, défaut 2
+NORVA_PARTNERS_DIDIT_PURGE_LEASE_SECONDS # 60..300, défaut 120
 NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED # non secret ; false hors fenêtre supervisée
 NORVA_REFERRAL_EDGE_HMAC_SECRET
 NORVA_REFERRAL_COOKIE_SECRET
 NORVA_PARTNERS_ALLOWED_ORIGINS
 NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED # non secret ; false par défaut, ouvre seulement le POST
 NORVA_PARTNERS_TV_RELAY_SECRET
-NORVA_PARTNERS_TV_RELAY_HANDOFF_URL
+NORVA_PARTNERS_TV_RELAY_HANDOFF_URL=https://norva.tv/app.html
 NORVA_PARTNERS_TV_RELAY_TTL_SECONDS
 NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS  # optionnel ; sinon allowlist Partners
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON      # JSON sur une ligne, secret Edge
@@ -180,8 +192,10 @@ un lease minimal de 120 secondes. Sur `429`/`503`, il respecte `Retry-After`,
 diffère le reliquat et interrompt le batch.
 
 `NORVA_PARTNERS_TV_RELAY_SECRET` contient 32 à 512 caractères. L'URL de handoff
-est HTTPS, sous `*.norva.tv`, sans query ni fragment ; son TTL est compris entre
-120 et 600 secondes. Didit reçoit directement la `kyc.reservation_key` opaque
+doit être exactement `https://norva.tv/app.html` : `/app`, un sous-domaine, un
+port explicite, une query ou un fragment rendent le relais `not_configured`.
+Le fragment signé est ajouté uniquement à l'exécution et le TTL est compris
+entre 120 et 600 secondes. Didit reçoit directement la `kyc.reservation_key` opaque
 émise par la DB comme `vendor_data` : aucun second secret vendor n'est requis.
 
 ### Revolut Business Basic : production manuelle
@@ -631,6 +645,51 @@ toute valeur présente divergente et lie cette certification à la version
 attendue `1`. Confirmer avant la fenêtre que la version publiée est bien `1` ;
 le webhook signé met toute autre version en quarantaine.
 
+### Suppression durable des sessions Didit
+
+Tout résultat terminal KYC (`approved`, `declined`, `expired` ou mis en
+quarantaine) crée dans la même transaction une demande de suppression privée.
+L'identifiant Didit brut n'est jamais écrit en clair : l'Edge l'enveloppe en
+AES-256-GCM avec une clé versionnée, liée par AAD à son hash SHA-256. La réponse
+publique expose uniquement `purge_pending`, `purged` ou
+`purge_dead_letter`; elle ne contient ni identifiant provider, ni enveloppe, ni
+erreur brute. Un compte individuel ne devient jamais `active` tant que la
+session exacte vérifiée n'est pas `purged` avec `provider_purged_at`.
+
+Avant le premier webhook terminal, les deux replicas Edge doivent contenir le
+même keyring `NORVA_PARTNERS_DIDIT_PURGE_KEYS_JSON` et la même version active.
+Pour une rotation, ajouter d'abord la nouvelle version aux deux replicas,
+basculer ensuite la version active, puis conserver toutes les anciennes clés
+tant qu'une ligne `pending|retry|leased|dead_letter` porte leur enveloppe. Une
+clé ne peut être retirée qu'après une preuve SQL de zéro enveloppe concernée et
+une sauvegarde restaurable ; ne jamais imprimer le keyring ou une enveloppe.
+
+Le worker `norva-partners-didit-purge-worker` réclame des lots bornés avec un
+lease SQL. `DELETE` Didit `204` signifie supprimé et `404` signifie déjà absent :
+les deux sont des succès idempotents, effacent immédiatement l'enveloppe et
+horodatent `purged_at`. Les timeouts, erreurs réseau, `408`, `425`, `429` et
+`5xx` sont rejoués avec backoff exponentiel borné et `Retry-After`; une erreur
+d'authentification/configuration ou douze échecs passent en dead-letter. Une
+dead-letter bloque la certification et l'activation : elle n'est jamais
+transformée en succès par un opérateur.
+
+Après déploiement sain des deux replicas et vérification du keyring, exécuter
+une fois `/norva-partners-didit-purge-worker/cron/run`, contrôler un heartbeat
+frais, puis enregistrer uniquement :
+
+```text
+ops/hetzner/scripts/register-norva-partners-didit-purge-cron.sql
+```
+
+Le job doit être unique, actif et exécuté chaque minute. Le préflight exige
+zéro outbox en `pending|retry|leased`, zéro dead-letter, zéro source terminale
+non supprimée et un heartbeat terminé depuis moins de cinq minutes. En incident,
+fermer la création KYC, conserver `partners_enabled` fail-closed, corriger la
+clé ou l'authentification Didit, puis faire traiter la file sous supervision.
+Pour une ligne déjà en dead-letter, ouvrir un incident Privacy/Security et
+établir la suppression chez Didit avant toute action de remédiation en base ;
+ne jamais modifier directement les tables privées ni fabriquer `purged_at`.
+
 Le compte de service Google Play est dédié au backend, limité à la lecture des
 commandes du package Norva et absent de tout client Android/Web. Les deux
 variables Google absentes laissent l'enrichissement inactif et les faits
@@ -640,13 +699,48 @@ reconstruire la taxe depuis RevenueCat.
 
 ## 3. Ordre de déploiement
 
+Le déploiement DB/Edge est obligatoirement biphasé. La répétition physique
+isolée exige un mode explicite : `predeploy` exige les 21 marqueurs absents et
+applique les dix migrations dans leur ordre chronologique pour prouver l'état
+final ; `postdeploy` exige les 21 marqueurs présents, n'applique aucune
+migration et rejoue uniquement le vérificateur et le pgTAP compatible avec une
+restauration. Un état mixte échoue dans les deux modes. Le succès `predeploy`
+ne permet pas d'appliquer les dix migrations d'un seul bloc en production :
+
+- **phase A — DB compatible avec les deux versions Edge** : appliquer dans
+  l'ordre les neuf premières migrations du lot, de
+  `20260803082211_partners_admin_operator_capabilities.sql` à
+  `20260804165000_partners_kyc_reverification_override.sql`, notamment
+  `20260804083541_partners_approval_registry.sql`,
+  `20260804084500_partners_biometric_consent_contract.sql`,
+  `20260804093000_partners_didit_purge_outbox.sql` et
+  `20260804160000_partners_privacy_rights_human_review.sql` ;
+- **phase Edge v2** : recréer `functions`, vérifier sa santé et un webhook non
+  terminal, puis recréer `functions2` et refaire les mêmes contrôles. Les deux
+  replicas doivent utiliser le contrat biométrique v2, l'enqueue de purge
+  atomique et le même keyring avant de poursuivre ;
+- **phase B — enforcement strict** : appliquer seulement après cette parité
+  `20260804170000_partners_biometric_consent_enforcement.sql`, puis vérifier que
+  tous les anciens RPC sans consentement ont perdu `EXECUTE` pour
+  `service_role` ;
+- **preuve postdéploiement** : restaurer un base-backup R2 capturé après la
+  phase B et exécuter le mode `postdeploy` sur le même SHA candidat. La preuve
+  doit contenir `migrations_applied=0`, `migration_replay_skipped=true`, les
+  21 marqueurs à `1`, le vérificateur et le pgTAP verts ;
+- enregistrer le cron de purge uniquement après un webhook terminal contrôlé,
+  une suppression Didit `204|404`, un heartbeat frais et zéro dead-letter.
+
+Un outil de migration automatique doit donc être arrêté entre les phases A et
+B ; si cet arrêt sélectif n'est pas démontré sur la restauration isolée, la
+fenêtre de production est annulée.
+
 1. sauvegarde logique et contrôle de restauration ;
-2. migrations DB et tests pgTAP ;
+2. phase A DB, tests pgTAP et préconditions d'enforcement ;
 3. écrire explicitement `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans
    l'environnement Hetzner avant de déployer l'Edge ;
 4. déployer/recréer d'abord le service `functions`, attendre sa santé, puis
-   `functions2`, avec `/access-request` et les fonctions KYC/referral/worker
-   toujours désactivées ;
+   `functions2`, avec le même keyring de suppression Didit et les fonctions
+   `/access-request`, KYC/referral/worker encore fermées par leurs gates ;
 5. Web, Android et TV déployés avec états `not_configured` ; vérifier que tout
    compte Cloud Web/mobile, Admin inclus, voit l'entrée utilisateur Partners ;
 6. avec le kill switch à `false`, vérifier que `GET /access-request` retourne
@@ -661,7 +755,8 @@ reconstruire la taxe depuis RevenueCat.
    contrôlé et son replay exact ;
 9. vérifier la file Admin avec Support|Risk, puis une décision sandbox
    Risk+AAL2 et confirmer qu'elle ajoute seulement l'allowlist ;
-10. webhook Didit enregistré, secret injecté, événement de test validé ;
+10. webhook Didit enregistré, secrets de signature et de purge injectés,
+    événement de test validé, worker de suppression et heartbeat vérifiés ;
 11. une policy de juridiction approuvée et un programme versionné insérés ;
 12. comptes pilotes ajoutés à l'allowlist par décision auditée ou contrôle Admin
    équivalent ;
@@ -746,7 +841,8 @@ jamais inscrire cette cible par migration.
 ### Préflight pilote : corridor explicite, sans activation
 
 Le préflight ne choisit jamais un pays, une devise, un exposant monétaire, un
-seuil local ou un âge minimum à la place de l'opérateur. Ces six valeurs sont
+seuil local, un âge minimum, un environnement ou un commit candidat à la place
+de l'opérateur. Ces huit valeurs sont
 obligatoires à chaque exécution :
 
 ```bash
@@ -757,6 +853,8 @@ export NORVA_PARTNERS_PILOT_CURRENCY='<ISO4217>'
 export NORVA_PARTNERS_PILOT_CURRENCY_EXPONENT='<0-6>'
 export NORVA_PARTNERS_PILOT_THRESHOLD_MINOR='<minor-units>'
 export NORVA_PARTNERS_PILOT_MINIMUM_AGE='<18-99>'
+export NORVA_PARTNERS_DEPLOYMENT_ENVIRONMENT='preproduction'
+export NORVA_PARTNERS_CANDIDATE_COMMIT_SHA='<40-or-64-char-lowercase-sha>'
 bash ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh
 ```
 
@@ -800,26 +898,27 @@ Ordre de configuration, exclusivement depuis les RPC/contrôles Admin audités :
 1. provisionner un release manager côté serveur et deux opérateurs Finance
    Admin distincts ; chacun enrôle puis vérifie son TOTP, sans partager de
    session ;
-2. faire approuver `legal_and_tax_approved` et `privacy_approved`, puis créer
-   et activer la nouvelle version avec `admin_partners_program_create` et
-   `admin_partners_program_activate` ;
-3. enregistrer USD et la devise pilote avec `admin_partners_currency_set`, puis
-   le mapping ISO3 vers ISO2 avec `admin_partners_country_mapping_set` ;
-4. créer la policy nationale encore indisponible via
-   `admin_partners_country_policy_create`, puis sa policy de tentatives Didit
-   via `admin_partners_kyc_attempt_policy_set` ;
-5. après les tests maker-checker/réconciliation externes, satisfaire
+2. créer la nouvelle version en `draft` avec `admin_partners_program_create`,
+   enregistrer devises et mapping pays, puis créer la policy nationale encore
+   indisponible et sa policy de tentatives Didit ;
+3. enregistrer le commit, l'environnement et les hashes des preuves réellement
+   déployées avec `admin_partners_deployment_manifest_register` en AAL2 ;
+4. faire approuver `legal_and_tax_approved`, terminer et archiver
+   l'auto-évaluation RGPD interne du pilote, puis activer `privacy_approved`
+   sous Risk/AAL2, avec l'empreinte distincte du consentement biométrique ;
+5. activer cette version avec `admin_partners_program_activate` ;
+6. après les tests maker-checker/réconciliation externes, satisfaire
    `manual_payout_workflow_verified` et enregistrer uniquement la route
    `revolut / revolut_manual / <ISO2> / <ISO4217> / active` avec
    `admin_partners_payout_route_set` ;
-6. rendre cette policy disponible avec
+7. rendre cette policy disponible avec
    `admin_partners_country_policy_set_available`, puis traiter 20 à 50 demandes
    d'accès du même pays par la décision Risk+AAL2. Cette décision est le seul
    chemin normal d'ajout à l'allowlist ;
-7. lever les autres gates uniquement avec leur preuve, activer
+8. lever les autres gates uniquement avec leur preuve, activer
    `partners_invite_only` puis `partners_shadow_mode`, enregistrer le cron
    RevenueCat TRANSFER et attendre les cinq heartbeats frais ;
-8. exécuter le préflight avec le corridor explicite. Ne promouvoir ni
+9. exécuter le préflight avec le corridor explicite. Ne promouvoir ni
    `partners_enabled` ni le relais TV tant qu'une seule ligne reste en `FAIL`.
 
 Ce contrôle ne crée aucune preuve fournisseur. Avant que le pilote puisse être
@@ -827,18 +926,21 @@ déclaré prêt, l'opérateur doit encore fournir et archiver hors Git :
 
 1. l'approbation juridique et fiscale écrite pour la juridiction sélectionnée,
    les versions et hashes des documents publics ;
-2. les trois preuves Didit distinctes (sandbox non autoritaire, live lié au
+2. l'auto-évaluation RGPD interne visée et immuable, limitée au pilote France
+   invite-only, avec analyse documentée de l'obligation DPO et du besoin d'AIPD,
+   registre des traitements, risques et déclencheurs de réévaluation ;
+3. les trois preuves Didit distinctes (sandbox non autoritaire, live lié au
    fingerprint/version, conflit mis en quarantaine) ;
-3. un App Link signé par Google Play rejoué depuis l'AAB publié ;
-4. l'identifiant exact de chaque application RevenueCat autorisée, une clé API
+4. un App Link signé par Google Play rejoué depuis l'AAB publié ;
+5. l'identifiant exact de chaque application RevenueCat autorisée, une clé API
    secrète serveur permettant le re-fetch TRANSFER et la preuve du webhook
    HMAC ;
-5. un compte de service Google Play dédié, autorisé côté Play Console pour la
+6. un compte de service Google Play dédié, autorisé côté Play Console pour la
    lecture autoritative des commandes du seul package `tv.norva.phone` ;
-6. la preuve maker-checker du registre bénéficiaire, de la révocation, du lot
+7. la preuve maker-checker du registre bénéficiaire, de la révocation, du lot
    manuel Revolut, du relevé et du rapprochement sans secret ni identité
    bancaire dans le journal ;
-7. le restore drill, les Advisors, le snapshot DB sanitisé, le run CI vert et
+8. le restore drill, les Advisors, le snapshot DB sanitisé, le run CI vert et
    le journal privé `pilot_ready` validé dans l'environnement GitHub protégé
    **Partners Release**.
 
@@ -1145,10 +1247,10 @@ ne justifient aucun retry agressif côté client.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer toutes les migrations en attente dans l'ordre |
+| Migrations/RPC Partners | livrées | `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` des dix migrations sur restaurations isolées ; la migration versionnée des extensions précède tout usage de `pg_cron`/`pg_net` | appliquer les neuf migrations de phase A, déployer les deux Edge v2, puis seulement la dixième migration de phase B `20260804170000` ; ne jamais exécuter les dix migrations d'un bloc en production |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
 | API membre, demandes d'accès, referral et TV | livrées | entrée visible à tout compte Cloud Web/mobile, Admin inclus ; GET toujours lisible ; POST protégé par `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED`, cooldown 60 s, 8 nouvelles clés/24 h, rétention d'idempotence 30 j et `429 Retry-After: 60` ; aucun compte/KYC/lien/ledger créé ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer d'abord avec le kill switch de collecte à `false`, valider pause/reprise, puis synchroniser les secrets HMAC et publier les App Links |
-| Didit KYC-only | code livré, inactif sans configuration complète | session sandbox non autoritaire, session live liée au fingerprint/version déployés, conflit environnement/fingerprint mis en quarantaine, décision signée, replay et refus KYB | renseigner API key, workflow/application/node IDs, webhook secret/URL et callback ; archiver trois preuves distinctes sans secrets |
+| Didit KYC-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; la production refuse de démarrer sans configuration complète | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
 | Worker commission/J+45/shadow | livré | capture → accrual → J+45/reversal → shadow sans écart ; heartbeats frais | réutiliser le secret cron existant vérifié par `norva_verify_cron_secret`, confirmer son entrée Vault et créer le job `pg_cron` |
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
 | RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; Web reste incomplet sans ventilation fiscale | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé et aucun `tax=0` supposé | activer les événements provider et secrets par environnement ; sélectionner un moteur/contrat fiscal Web avant commission |

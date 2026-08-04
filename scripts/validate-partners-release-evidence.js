@@ -480,7 +480,7 @@ function pilotAuthorityCutoff(evidence) {
       provider.environment_isolation_evidence,
     ]);
   return maxTimestamp([
-    evidence.legal.privacy_review_evidence,
+    evidence.legal.privacy_pilot_self_assessment_evidence,
     publicSurfaces.verified_at,
     publicSurfaces.deployment_evidence,
     publicSurfaces.terms_evidence,
@@ -509,6 +509,7 @@ function pilotAuthorityCutoff(evidence) {
 
 function generalReleaseCutoff(evidence) {
   return maxTimestamp([
+    evidence.legal.privacy_public_release_review_evidence,
     evidence.runtime.pilot_observation.completed_at,
     evidence.runtime.pilot_observation.evidence,
     ...evidence.payout_cycles.flatMap((cycle) => [
@@ -605,7 +606,7 @@ function validateEvidence(evidence, options = {}) {
   assert(evidence && typeof evidence === 'object', 'evidence must be an object');
   assertNoPersonalData(evidence);
   assertExactKeys(evidence, TOP_LEVEL_KEYS, 'evidence');
-  assert(evidence.schema_version === 5, 'schema_version must equal 5');
+  assert(evidence.schema_version === 6, 'schema_version must equal 6');
   assert(
     ['draft', 'pilot_ready', 'generalization_ready'].includes(evidence.status),
     'status must be draft, pilot_ready or generalization_ready',
@@ -667,7 +668,8 @@ function validateEvidence(evidence, options = {}) {
     'terms_sha256',
     'disclosure_version',
     'disclosure_sha256',
-    'privacy_review_evidence',
+    'privacy_pilot_self_assessment_evidence',
+    'privacy_public_release_review_evidence',
     'public_surfaces',
   ], 'legal');
   for (const key of ['terms_sha256', 'disclosure_sha256']) {
@@ -677,8 +679,13 @@ function validateEvidence(evidence, options = {}) {
     );
   }
   assertOptionalEvidenceReference(
-    evidence.legal.privacy_review_evidence,
-    'legal.privacy_review_evidence',
+    evidence.legal.privacy_pilot_self_assessment_evidence,
+    'legal.privacy_pilot_self_assessment_evidence',
+    nowMs,
+  );
+  assertOptionalEvidenceReference(
+    evidence.legal.privacy_public_release_review_evidence,
+    'legal.privacy_public_release_review_evidence',
     nowMs,
   );
   const publicSurfaces = evidence.legal.public_surfaces;
@@ -1318,8 +1325,13 @@ function pilotReadinessBlockers(evidence, options = {}) {
       && isStrongSha256(evidence.legal.disclosure_sha256),
     'partner_disclosure_not_versioned_or_hashed',
   );
-  require(isEvidenceReference(evidence.legal.privacy_review_evidence, nowMs),
-    'privacy_review_evidence_missing');
+  require(
+    isEvidenceReference(
+      evidence.legal.privacy_pilot_self_assessment_evidence,
+      nowMs,
+    ),
+    'privacy_pilot_self_assessment_evidence_missing',
+  );
   const publicSurfaces = evidence.legal.public_surfaces;
   require(
     isIsoTimestamp(publicSurfaces.verified_at)
@@ -1523,6 +1535,27 @@ function pilotReadinessBlockers(evidence, options = {}) {
 function generalizationReadinessBlockers(evidence, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const blockers = pilotReadinessBlockers(evidence, { nowMs });
+  const publicPrivacyReview =
+    evidence.legal.privacy_public_release_review_evidence;
+  if (!isEvidenceReference(publicPrivacyReview, nowMs)) {
+    blockers.push('privacy_public_release_review_missing');
+  } else {
+    const publicPrivacyCutoff = maxTimestamp([
+      evidence.runtime.pilot_observation.completed_at,
+      evidence.runtime.pilot_observation.evidence,
+      ...evidence.payout_cycles.flatMap((cycle) => [
+        cycle.period_completed_at,
+        cycle.reconciliation_evidence,
+      ]),
+    ]);
+    if (
+      publicPrivacyCutoff === null
+      || parseIsoTimestamp(publicPrivacyReview.verified_at)
+        <= publicPrivacyCutoff
+    ) {
+      blockers.push('privacy_public_release_review_predates_pilot_evidence');
+    }
+  }
   if (
     evidence.release_gates.general_release_approved !== true
     || !isEvidenceReference(

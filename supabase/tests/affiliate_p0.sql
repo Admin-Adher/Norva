@@ -375,7 +375,7 @@ insert into affiliate_private.affiliate_country_policies (
 select
   p.id,
   'US',
-  true,
+  false,
   18,
   false,
   'identity_age_country',
@@ -386,6 +386,80 @@ select
   now() - interval '1 minute'
 from affiliate_private.affiliate_program_versions p
 where p.version_key = 'p0-test-v1';
+
+create or replace function pg_temp.partners_approval_documents(p_gate text)
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select jsonb_build_object(
+    'approval_record', repeat('1', 64),
+    'deployment_proof', repeat('2', 64)
+  ) || case p_gate
+    when 'privacy_approved' then jsonb_build_object(
+      'dpia', repeat('3', 64),
+      'gdpr_self_assessment', repeat('4', 64),
+      'biometric_consent', repeat('0', 64),
+      'privacy_notice', repeat('5', 64),
+      'records_of_processing', repeat('6', 64)
+    )
+    when 'legal_and_tax_approved' then jsonb_build_object(
+      'legal_tax_review', repeat('7', 64),
+      'partners_terms', repeat('8', 64)
+    )
+    when 'individual_verification_coverage_confirmed' then
+      jsonb_build_object('kyc_certification', repeat('9', 64))
+    when 'individual_payout_coverage_confirmed' then
+      jsonb_build_object('payout_coverage_review', repeat('a', 64))
+    when 'country_policy_approved' then jsonb_build_object(
+      'country_policy_review', repeat('b', 64),
+      'payout_corridor_review', repeat('c', 64)
+    )
+    when 'financial_data_contract_approved' then
+      jsonb_build_object('financial_contract_test', repeat('d', 64))
+    when 'shadow_reconciliation_clean' then
+      jsonb_build_object('shadow_reconciliation_report', repeat('e', 64))
+    when 'backup_restore_verified' then
+      jsonb_build_object('restore_rehearsal_proof', repeat('f', 64))
+    when 'payout_execution_adapter_verified' then
+      jsonb_build_object('payout_execution_test', repeat('0', 64))
+    when 'manual_payout_workflow_verified' then
+      jsonb_build_object('manual_payout_runbook_test', repeat('1', 64))
+    when 'revolut_api_adapter_verified' then
+      jsonb_build_object('revolut_api_certification', repeat('2', 64))
+    when 'tv_relay_security_verified' then
+      jsonb_build_object('tv_relay_security_review', repeat('3', 64))
+    when 'general_release_approved' then
+      jsonb_build_object('release_readiness_report', repeat('4', 64))
+    else '{}'::jsonb
+  end;
+$fixture$;
+
+create or replace function pg_temp.partners_deployment_documents()
+returns jsonb
+language sql
+immutable
+as $fixture$
+  select jsonb_object_agg(document.key, document.value)
+  from unnest(array[
+    'privacy_approved',
+    'legal_and_tax_approved',
+    'individual_verification_coverage_confirmed',
+    'individual_payout_coverage_confirmed',
+    'country_policy_approved',
+    'financial_data_contract_approved',
+    'shadow_reconciliation_clean',
+    'backup_restore_verified',
+    'payout_execution_adapter_verified',
+    'manual_payout_workflow_verified',
+    'revolut_api_adapter_verified',
+    'tv_relay_security_verified',
+    'general_release_approved'
+  ]::text[]) gate(gate_key)
+  cross join lateral jsonb_each(
+    pg_temp.partners_approval_documents(gate.gate_key)
+  ) document(key, value);
+$fixture$;
 
 insert into affiliate_private.affiliate_country_code_mappings (
   iso3,
@@ -884,10 +958,29 @@ set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 
 select extensions.is(
-  public.admin_partners_control(
-    'set_gate',
+  public.admin_partners_deployment_manifest_register(
+    'preproduction',
+    repeat('a', 40),
+    'p0-test-deployment',
+    repeat('b', 64),
+    pg_temp.partners_deployment_documents(),
+    'P0 exact deployment manifest registration fixture.'
+  ) ->> 'action',
+  'deployment_manifest_registered',
+  'the P0 approval fixture binds to an authoritative deployment manifest'
+);
+
+select extensions.is(
+  public.admin_partners_release_gate_approve(
     'privacy_approved',
-    true,
+    'p0-test-v1',
+    '[{"country_code":"US"}]'::jsonb,
+    pg_temp.partners_approval_documents('privacy_approved'),
+    repeat('a', 40),
+    'preproduction',
+    'p0-test-deployment',
+    repeat('b', 64),
+    now() + interval '30 days',
     'P0 AAL2 release gate activation is authorized.'
   ) ->> 'satisfied',
   'true',
@@ -909,13 +1002,26 @@ begin
     'manual_payout_workflow_verified'
   ]::text[]
   loop
-    perform public.admin_partners_control(
-      'set_gate',
+    perform public.admin_partners_release_gate_approve(
       v_gate,
-      true,
+      'p0-test-v1',
+      '[{"country_code":"US"}]'::jsonb,
+      pg_temp.partners_approval_documents(v_gate),
+      repeat('a', 40),
+      'preproduction',
+      'p0-test-deployment',
+      repeat('b', 64),
+      now() + interval '30 days',
       'P0 database integration test approval.'
     );
   end loop;
+
+  update affiliate_private.affiliate_country_policies policy
+  set individual_available = true
+  from affiliate_private.affiliate_program_versions program
+  where program.id = policy.program_version_id
+    and program.version_key = 'p0-test-v1'
+    and policy.country_code = 'US';
 
   perform public.admin_partners_control(
     'set_allowlist',
@@ -2667,10 +2773,16 @@ select public.admin_partners_control(
   false,
   'P0 database integration payout gate test.'
 );
-select public.admin_partners_control(
-  'set_gate',
+select public.admin_partners_release_gate_approve(
   'shadow_reconciliation_clean',
-  true,
+  'p0-test-v1',
+  '[{"country_code":"US"}]'::jsonb,
+  pg_temp.partners_approval_documents('shadow_reconciliation_clean'),
+  repeat('a', 40),
+  'preproduction',
+  'p0-test-deployment',
+  repeat('b', 64),
+  now() + interval '30 days',
   'P0 database integration clean shadow result.'
 );
 select extensions.throws_ok(
@@ -3255,10 +3367,16 @@ values (
 set local request.jwt.claims =
   '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2","app_metadata":{"role":"admin","partners_release_manager":true}}';
 set local role authenticated;
-select public.admin_partners_control(
-  'set_gate',
+select public.admin_partners_release_gate_approve(
   'payout_execution_adapter_verified',
-  true,
+  'p0-test-v1',
+  '[{"country_code":"US"}]'::jsonb,
+  pg_temp.partners_approval_documents('payout_execution_adapter_verified'),
+  repeat('a', 40),
+  'preproduction',
+  'p0-test-deployment',
+  repeat('b', 64),
+  now() + interval '30 days',
   'P0 payout integration verified test adapter.'
 );
 select public.admin_partners_control(
@@ -5207,7 +5325,7 @@ select extensions.is(
 );
 select extensions.is(
   public.admin_partners_configuration() ->> 'schema_version',
-  '1',
+  '2',
   'a Risk-only operator can read shared Partners configuration'
 );
 
@@ -5223,7 +5341,7 @@ select extensions.is(
 );
 select extensions.is(
   public.admin_partners_configuration() ->> 'schema_version',
-  '1',
+  '2',
   'a Finance-only operator can read shared Partners configuration'
 );
 

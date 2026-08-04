@@ -34,6 +34,95 @@ begin
     raise exception
       'RevenueCat TRANSFER inbox became client-readable';
   end if;
+  if to_regclass(
+      'affiliate_private.affiliate_approval_packages'
+    ) is null
+    or to_regclass(
+      'affiliate_private.affiliate_release_gate_approval_bindings'
+    ) is null
+    or to_regclass(
+      'affiliate_private.affiliate_deployment_manifests'
+    ) is null
+    or to_regclass(
+      'affiliate_private.affiliate_deployment_manifest_bindings'
+    ) is null
+  then
+    raise exception 'restore omitted the Partners approval registry';
+  end if;
+  if not (
+      select relation.relrowsecurity
+      from pg_catalog.pg_class relation
+      where relation.oid =
+        'affiliate_private.affiliate_approval_packages'::regclass
+    )
+    or not (
+      select relation.relrowsecurity
+      from pg_catalog.pg_class relation
+      where relation.oid =
+        'affiliate_private.affiliate_release_gate_approval_bindings'::regclass
+    )
+    or not (
+      select relation.relrowsecurity
+      from pg_catalog.pg_class relation
+      where relation.oid =
+        'affiliate_private.affiliate_deployment_manifests'::regclass
+    )
+  then
+    raise exception 'restored Partners approval registry without RLS';
+  end if;
+  if not exists (
+      select 1
+      from pg_catalog.pg_trigger trigger_row
+      where trigger_row.tgrelid =
+          'affiliate_private.affiliate_approval_packages'::regclass
+        and trigger_row.tgname = 'affiliate_approval_packages_append_only'
+        and trigger_row.tgfoid = to_regprocedure(
+          'affiliate_private.reject_partners_approval_package_mutation()'
+        )
+        and trigger_row.tgenabled = 'O'
+        and not trigger_row.tgisinternal
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_trigger trigger_row
+      where trigger_row.tgrelid =
+          'affiliate_private.affiliate_release_gate_approval_bindings'::regclass
+        and trigger_row.tgname =
+          'affiliate_release_gate_approval_bindings_guard'
+        and trigger_row.tgfoid = to_regprocedure(
+          'affiliate_private.guard_partners_approval_binding_mutation()'
+        )
+        and trigger_row.tgenabled = 'O'
+        and not trigger_row.tgisinternal
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_trigger trigger_row
+      where trigger_row.tgrelid =
+          'affiliate_private.affiliate_deployment_manifests'::regclass
+        and trigger_row.tgname =
+          'affiliate_deployment_manifests_append_only'
+        and trigger_row.tgfoid = to_regprocedure(
+          'affiliate_private.reject_partners_deployment_manifest_mutation()'
+        )
+        and trigger_row.tgenabled = 'O'
+        and not trigger_row.tgisinternal
+    )
+    or not exists (
+      select 1
+      from pg_catalog.pg_trigger trigger_row
+      where trigger_row.tgrelid =
+          'affiliate_private.affiliate_pilot_allowlist'::regclass
+        and trigger_row.tgname = 'affiliate_pilot_allowlist_limit'
+        and trigger_row.tgfoid = to_regprocedure(
+          'affiliate_private.guard_partners_pilot_allowlist_limit()'
+        )
+        and trigger_row.tgenabled = 'O'
+        and not trigger_row.tgisinternal
+    )
+  then
+    raise exception 'restored Partners approval registry without guards';
+  end if;
 
   foreach v_name in array array[
     'affiliate_accounts',
@@ -44,6 +133,16 @@ begin
     'affiliate_didit_session_registry',
     'affiliate_didit_certification_sessions',
     'affiliate_didit_certification_events',
+    'affiliate_biometric_consent_attestations',
+    'affiliate_didit_purge_outbox',
+    'affiliate_didit_purge_events',
+    'affiliate_didit_purge_worker_state',
+    'affiliate_biometric_consent_withdrawals',
+    'affiliate_kyc_human_review_requests',
+    'affiliate_deployment_manifests',
+    'affiliate_deployment_manifest_bindings',
+    'affiliate_approval_packages',
+    'affiliate_release_gate_approval_bindings',
     'affiliate_link_claims',
     'affiliate_attributions',
     'affiliate_financial_facts',
@@ -214,10 +313,27 @@ begin
     'public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
     'public.admin_partners_kyc_certification_resume()',
     'public.admin_partners_kyc_certification_status()',
+    'public.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)',
+    'public.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamp with time zone,text)',
     'public.partners_service_kyc_certification_create_claim(text)',
     'public.partners_service_kyc_certification_binding_match(text,text)',
     'public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
     'public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)',
+    'public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_didit_purge_claim(integer,integer)',
+    'public.partners_service_didit_purge_complete(bigint,uuid,text)',
+    'public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',
+    'public.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)',
+    'public.partners_service_didit_purge_status()',
+    'public.partners_service_kyc_rights_get(uuid)',
+    'public.partners_service_biometric_consent_withdraw(uuid,text)',
+    'public.partners_service_kyc_human_review_request(uuid,text,text)',
+    'public.admin_partners_kyc_human_review_queue(integer,integer,text)',
+    'public.admin_partners_kyc_human_review_locator(text,text,text)',
+    'public.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)',
     'public.partners_worker_shadow_reconcile(text,timestamp with time zone,timestamp with time zone,boolean)',
     'public.admin_partners_payout_route_set(text,text,text,text,text,text)',
     'public.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
@@ -281,6 +397,7 @@ begin
     if v_signature like 'public.%revenuecat_transfer%'
        or v_signature like 'public.%revenuecat_entitlement_transfer%'
        or v_signature like 'public.partners_service_kyc_%'
+       or v_signature like 'public.partners_service_didit_purge_%'
        or v_signature like
          'public.partners_worker_revolut_dispute_won_%'
        or v_signature like
@@ -322,6 +439,7 @@ begin
     elsif v_signature like 'public.admin_partners_revolut_%'
       or v_signature like 'public.admin_partners_payout_route_%'
       or v_signature like 'public.admin_partners_kyc_certification_%'
+      or v_signature like 'public.admin_partners_kyc_human_review_%'
     then
       if has_function_privilege('anon', v_signature, 'EXECUTE')
          or not has_function_privilege(
@@ -354,6 +472,22 @@ begin
   end if;
 
   foreach v_signature in array array[
+    'public.partners_service_kyc_prepare(uuid,text,text,boolean,text)',
+    'affiliate_private.partners_service_kyc_prepare(uuid,text,text,boolean,text)',
+    'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text)',
+    'public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'affiliate_private.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text)',
+    'affiliate_private.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)'
+  ]
+  loop
+    if has_function_privilege('service_role', v_signature, 'EXECUTE') then
+      raise exception
+        'legacy non-biometric KYC service routine remains callable: %',
+        v_signature;
+    end if;
+  end loop;
+
+  foreach v_signature in array array[
     'affiliate_private.admin_partners_payout_route_set(text,text,text,text,text,text)',
     'affiliate_private.admin_partners_revolut_profile_set(uuid,text,text,text,text,text,text)',
     'affiliate_private.admin_partners_revolut_profile_hold(uuid,text,text,text,text)',
@@ -382,7 +516,9 @@ begin
     'affiliate_private.admin_partners_revolut_return_queue(integer,integer,text)',
     'affiliate_private.admin_partners_revolut_late_completion_review(text,text,text,text)',
     'affiliate_private.admin_partners_revolut_late_completion_decide(text,text,text,text)',
-    'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)'
+    'affiliate_private.admin_partners_revolut_late_completion_queue(integer,integer,text)',
+    'affiliate_private.admin_partners_kyc_human_review_locator(text,text,text)',
+    'affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)'
   ]
   loop
     if position(
@@ -393,7 +529,7 @@ begin
       ) = 0
     then
       raise exception
-        'restored Revolut manual Finance mutation lost AAL2: %',
+        'restored sensitive Partners Admin mutation lost AAL2: %',
         v_signature;
     end if;
   end loop;
@@ -403,6 +539,18 @@ begin
     'affiliate_private.partners_service_kyc_certification_binding_match(text,text)',
     'affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)',
     'affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text)',
+    'affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)',
+    'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)',
+    'affiliate_private.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'affiliate_private.partners_service_didit_purge_claim(integer,integer)',
+    'affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)',
+    'affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',
+    'affiliate_private.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)',
+    'affiliate_private.partners_service_didit_purge_status()',
+    'affiliate_private.partners_service_kyc_rights_get(uuid)',
+    'affiliate_private.partners_service_biometric_consent_withdraw(uuid,text)',
+    'affiliate_private.partners_service_kyc_human_review_request(uuid,text,text)',
     'affiliate_private.partners_service_revolut_beneficiary_binding_propose(text,text,text)',
     'affiliate_private.partners_service_revolut_statement_ingest(text,date,date,text,jsonb,text,text)',
     'affiliate_private.partners_worker_revolut_global_lease_acquire(text,text,integer)',
@@ -485,9 +633,13 @@ begin
   if position('for share' in lower(v_definition)) = 0
     or position('privacy_approved' in lower(v_definition)) = 0
     or position('partners_enabled' in lower(v_definition)) = 0
+    or position(
+      'partners_release_gate_approval_is_current' in lower(v_definition)
+    ) = 0
+    or position('and gate.satisfied' in lower(v_definition)) > 0
   then
     raise exception
-      'restored Didit certification pre-gate assertion lost its atomic row locks';
+      'restored Didit certification pre-gate assertion lost current approval evidence or atomic row locks';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
@@ -555,6 +707,21 @@ begin
   ) then
     raise exception
       'restore omitted the enabled before-update Partners release-gate AAL2 trigger';
+  end if;
+  if not exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    where trigger_row.tgrelid =
+        'affiliate_private.affiliate_release_gates'::regclass
+      and trigger_row.tgname = 'affiliate_release_gates_approval_required'
+      and trigger_row.tgfoid = to_regprocedure(
+        'affiliate_private.guard_partners_release_gate_approval()'
+      )
+      and trigger_row.tgenabled = 'O'
+      and not trigger_row.tgisinternal
+  ) then
+    raise exception
+      'restore omitted the immutable approval-package release-gate guard';
   end if;
 
   if to_regprocedure(
@@ -662,6 +829,103 @@ begin
   then
     raise exception
       'restored Didit certification status lost its bounded live-observer contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_prepare_v2_pre_withdrawal_20260804(uuid,text,text,text,boolean,text)'::regprocedure
+  );
+  if position('partners-biometric-consent-v1' in lower(v_definition)) = 0
+    or position(
+      'affiliate_biometric_consent_attestations' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored KYC prepare v2 implementation lost explicit versioned biometric consent';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)'::regprocedure
+  );
+  if position(
+      'affiliate_biometric_consent_withdrawals' in lower(v_definition)
+    ) = 0
+    or position(
+      'partners_service_kyc_prepare_v2_pre_withdrawal_20260804'
+      in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored KYC prepare v2 lost withdrawal enforcement or guarded delegation';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_biometric_consent_withdraw(uuid,text)'::regprocedure
+  );
+  if position('status = ''superseded''' in lower(v_definition)) = 0
+    or position('kyc_biometric_consent_withdrawn' in lower(v_definition)) = 0
+    or position('affiliate_biometric_consent_attestations' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored biometric-consent withdrawal lost its pending-session stop or audit';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_human_review_queue(integer,integer,text)'::regprocedure
+  );
+  if position('partners_require_capability(''risk'')' in lower(v_definition)) = 0
+    or position('partners_public_account_id' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored KYC human-review queue lost Risk authorization or pseudonymization';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamp with time zone,text,text)'::regprocedure
+  );
+  if position('partners_require_aal2' in lower(v_definition)) = 0
+    or position('p_evidence_sha256' in lower(v_definition)) = 0
+    or position('kyc_human_review_resolved' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored KYC human-review decision lost AAL2, evidence or audit';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer)'::regprocedure
+  );
+  if position(
+      'affiliate_biometric_consent_attestations' in lower(v_definition)
+    ) = 0
+    or position('p_provider_environment' in lower(v_definition)) = 0
+    or position('p_provider_config_fingerprint' in lower(v_definition)) = 0
+    or position('p_provider_session_ttl_seconds' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored KYC session recorder v2 lost consent or exact provider binding';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)'::regprocedure
+  );
+  if position('p_result not in (''deleted'', ''already_deleted'')' in lower(v_definition)) = 0
+    or position('provider_session_envelope = null' in lower(v_definition)) = 0
+    or position('partners_didit_purge_sync_source' in lower(v_definition)) = 0
+    or position('partners_service_activation_reconcile' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit purge completion lost idempotent proof or data minimization';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_approval_package_is_current(uuid,text)'::regprocedure
+  );
+  if position('partners_didit_purge_coverage_ready' in lower(v_definition)) = 0
+    or position(
+      'individual_verification_coverage_confirmed' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored verification coverage approval ignores provider deletion proof';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
@@ -838,6 +1102,8 @@ begin
             'affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
             'affiliate_private.admin_partners_kyc_certification_resume()',
             'affiliate_private.admin_partners_kyc_certification_status()',
+            'affiliate_private.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)',
+            'affiliate_private.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamp with time zone,text)',
             'affiliate_private.admin_partners_country_mapping_set(text,text,text,text)',
             'affiliate_private.admin_partners_currency_set(text,integer,text,text)',
             'affiliate_private.admin_partners_payout_provider_set(text,text,text,text,text)',
@@ -856,7 +1122,7 @@ begin
             'affiliate_private.admin_partners_revolut_statement_context()',
             'affiliate_private.admin_partners_revolut_reconciliation_review(text,text,text)',
             'affiliate_private.admin_partners_revolut_reconciliation_decide(text,text,text,text)',
-            'affiliate_private.admin_partners_revolut_payout_status()',
+            'affiliate_private.admin_partners_revolut_payout_status_approval_registry()',
             'affiliate_private.admin_partners_revolut_manual_batches(integer,integer,text)',
             'affiliate_private.admin_partners_revolut_reconciliation_queue(integer,integer,text)',
             'affiliate_private.admin_partners_revolut_manual_control_reject(text,text,text)',
@@ -910,6 +1176,19 @@ declare
   v_expected record;
   v_bad_entries bigint;
 begin
+  if (
+    select count(*)
+    from affiliate_private.affiliate_pilot_allowlist allowlist_row
+    where allowlist_row.status = 'active'
+      and (
+        allowlist_row.expires_at is null
+        or allowlist_row.expires_at > statement_timestamp()
+      )
+  ) > 50 then
+    raise exception
+      'restored Partners pilot exceeds the 50-member privacy boundary';
+  end if;
+
   for v_expected in
     select *
     from (
@@ -936,6 +1215,66 @@ begin
           'affiliate_didit_certification_sessions_validate',
           'affiliate_didit_certification_sessions',
           'guard_didit_certification_session_transition',
+          false
+        ),
+        (
+          'affiliate_biometric_consent_append_only',
+          'affiliate_biometric_consent_attestations',
+          'reject_partners_append_only_mutation',
+          false
+        ),
+        (
+          'affiliate_biometric_withdrawal_append_only',
+          'affiliate_biometric_consent_withdrawals',
+          'reject_partners_append_only_mutation',
+          false
+        ),
+        (
+          'affiliate_kyc_human_review_guard',
+          'affiliate_kyc_human_review_requests',
+          'guard_partners_kyc_human_review_mutation',
+          false
+        ),
+        (
+          'affiliate_didit_purge_events_append_only',
+          'affiliate_didit_purge_events',
+          'reject_partners_append_only_mutation',
+          false
+        ),
+        (
+          'affiliate_didit_purge_outbox_managed',
+          'affiliate_didit_purge_outbox',
+          'guard_didit_purge_managed_mutation',
+          false
+        ),
+        (
+          'affiliate_didit_purge_worker_state_managed',
+          'affiliate_didit_purge_worker_state',
+          'guard_didit_purge_managed_mutation',
+          false
+        ),
+        (
+          'affiliate_kyc_sessions_00_mark_purge_pending',
+          'affiliate_kyc_sessions',
+          'mark_member_didit_purge_pending',
+          false
+        ),
+        (
+          'affiliate_didit_certification_00_mark_purge_pending',
+          'affiliate_didit_certification_sessions',
+          'mark_certification_didit_purge_pending',
+          false
+        ),
+        (
+          'affiliate_accounts_00_didit_purge_guard',
+          'affiliate_accounts',
+          'guard_account_activation_until_didit_purged',
+          false
+        ),
+        (
+          'affiliate_events_00_didit_purge_activation_guard',
+          'affiliate_events',
+          'guard_didit_purge_activation_audit',
           false
         ),
         (
@@ -1334,6 +1673,85 @@ begin
   if v_bad_entries <> 0 then
     raise exception
       'restored Didit purpose registry is inconsistent with % source sessions',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from (
+    select session.id
+    from affiliate_private.affiliate_kyc_sessions session
+    where session.provider_session_hash is not null
+      and session.status <> 'pending'
+      and session.provider_purge_status = 'not_required'
+
+    union all
+
+    select session.id
+    from affiliate_private.affiliate_didit_certification_sessions session
+    where session.provider_session_hash is not null
+      and session.status in ('approved', 'declined', 'expired', 'quarantined')
+      and session.provider_purge_status = 'not_required'
+  ) unresolved_terminal_source;
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored Didit state contains % terminal sessions without deletion disposition',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_didit_purge_outbox outbox
+  left join affiliate_private.affiliate_didit_session_registry registry
+    on registry.provider_session_hash = outbox.provider_session_hash
+  where registry.provider_session_hash is null
+    or (
+      outbox.status = 'succeeded'
+      and (
+        outbox.provider_session_envelope is not null
+        or outbox.completed_at is null
+      )
+    );
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored Didit purge outbox contains % orphaned or non-minimized rows',
+      v_bad_entries;
+  end if;
+
+  if not exists (
+    select 1
+    from affiliate_private.affiliate_didit_purge_worker_state worker
+    where worker.worker_name = 'didit_purge'
+  ) then
+    raise exception 'restore omitted the Didit purge worker state singleton';
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_biometric_consent_withdrawals withdrawal
+  where not exists (
+    select 1
+    from affiliate_private.affiliate_biometric_consent_attestations consent
+    where consent.account_id = withdrawal.account_id
+      and consent.biometric_consent_version =
+        withdrawal.biometric_consent_version
+      and consent.consented_at <= withdrawal.withdrawn_at
+  );
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored biometric-consent withdrawals contain % ungrounded rows',
+      v_bad_entries;
+  end if;
+
+  select count(*)
+  into v_bad_entries
+  from affiliate_private.affiliate_kyc_human_review_requests review
+  join affiliate_private.affiliate_kyc_sessions session
+    on session.id = review.session_id
+  where session.account_id <> review.account_id;
+  if v_bad_entries <> 0 then
+    raise exception
+      'restored KYC human-review queue contains % cross-account rows',
       v_bad_entries;
   end if;
 

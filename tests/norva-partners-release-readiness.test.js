@@ -55,7 +55,9 @@ function readyEvidence() {
     terms_sha256: sha256('partners-terms-v1'),
     disclosure_version: 'partners-disclosure-v1',
     disclosure_sha256: sha256('partners-disclosure-v1'),
-    privacy_review_evidence: evidenceRef('privacy-review'),
+    privacy_pilot_self_assessment_evidence:
+      evidenceRef('privacy-pilot-self-assessment'),
+    privacy_public_release_review_evidence: null,
     public_surfaces: {
       verified_at: '2026-07-30T07:00:00Z',
       hash_basis: 'normalized_deployment_artifact',
@@ -177,6 +179,10 @@ function readyEvidence() {
 function generalizationEvidence() {
   const evidence = readyEvidence();
   evidence.status = 'generalization_ready';
+  evidence.legal.privacy_public_release_review_evidence = evidenceRef(
+    'privacy-public-release-review',
+    { verified_at: '2026-07-30T08:01:30Z' },
+  );
   evidence.release_gates.general_release_approved = true;
   evidence.release_gates.general_release_evidence =
     evidenceRef('general-release-approval', {
@@ -218,6 +224,15 @@ test('the committed release evidence template is valid and fail-closed', () => {
   assert.equal(template.providers.didit.config_fingerprint_sha256, null);
   assert.equal(template.providers.didit.workflow_version, null);
   assert.equal(template.providers.didit.environment_isolation_evidence, null);
+  assert.equal(template.schema_version, 6);
+  assert.equal(
+    template.legal.privacy_pilot_self_assessment_evidence,
+    null,
+  );
+  assert.equal(
+    template.legal.privacy_public_release_review_evidence,
+    null,
+  );
 });
 
 test('legacy free-text evidence journals are rejected', () => {
@@ -225,7 +240,7 @@ test('legacy free-text evidence journals are rejected', () => {
   legacy.schema_version = 1;
   assert.throws(
     () => validateEvidence(legacy),
-    /schema_version must equal 5/,
+    /schema_version must equal 6/,
   );
 });
 
@@ -240,6 +255,7 @@ test('pilot readiness requires traceability, live Didit and runtime proof', () =
     'payout_cycle_periods_overlap_or_unordered',
     'payout_cycles_outside_pilot_observation',
     'pilot_45_day_observation_not_proven',
+    'privacy_public_release_review_missing',
   ]);
   assert.equal(evidence.feature_flags.partners_payouts_live, false);
 
@@ -306,6 +322,24 @@ test('generalization requires ordered non-overlapping reconciled cycles', () => 
   assert.ok(
     evaluateEvidence(evidence).generalizationBlockers.includes(
       'payout_cycle_periods_overlap_or_unordered',
+    ),
+  );
+});
+
+test('the pilot self-assessment cannot authorize public generalization', () => {
+  const evidence = generalizationEvidence();
+  evidence.status = 'draft';
+  evidence.legal.privacy_public_release_review_evidence = null;
+  const blockers = evaluateEvidence(evidence).generalizationBlockers;
+  assert.ok(blockers.includes('privacy_public_release_review_missing'));
+
+  evidence.legal.privacy_public_release_review_evidence = evidenceRef(
+    'privacy-public-review-too-early',
+    { verified_at: '2026-06-10T08:00:00Z' },
+  );
+  assert.ok(
+    evaluateEvidence(evidence).generalizationBlockers.includes(
+      'privacy_public_release_review_predates_pilot_evidence',
     ),
   );
 });

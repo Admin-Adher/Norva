@@ -158,28 +158,33 @@ test('Didit certification RPC sanitizers expose no provider identifiers', () => 
     schema_version: 1,
     action: 'kyc_certification_result_applied',
     replayed: false,
+    purge_status: 'purge_pending',
     certification: { status: 'approved', verified: true },
   })), {
     schema_version: 1,
     action: 'kyc_certification_result_applied',
     replayed: false,
+    purge_status: 'purge_pending',
     certification: { status: 'approved', verified: true },
   });
   assert.deepEqual(plain(shared.sanitizeKycCertificationWebhookRpc({
     schema_version: 1,
     action: 'kyc_certification_result_applied',
     replayed: false,
+    purge_status: 'purged',
     certification: { status: 'approved', verified: false },
   })), {
     schema_version: 1,
     action: 'kyc_certification_result_applied',
     replayed: false,
+    purge_status: 'purged',
     certification: { status: 'approved', verified: false },
   });
   assert.deepEqual(plain(shared.sanitizeKycCertificationWebhookRpc({
     schema_version: 1,
     action: 'kyc_certification_result_quarantined',
     replayed: false,
+    purge_status: 'purge_pending',
     certification: {
       status: 'quarantined',
       verified: false,
@@ -189,6 +194,7 @@ test('Didit certification RPC sanitizers expose no provider identifiers', () => 
     schema_version: 1,
     action: 'kyc_certification_result_quarantined',
     replayed: false,
+    purge_status: 'purge_pending',
     certification: {
       status: 'quarantined',
       verified: false,
@@ -222,6 +228,7 @@ test('Didit certification RPC sanitizers expose no provider identifiers', () => 
       schema_version: 1,
       action: 'kyc_certification_result_applied',
       replayed: false,
+      purge_status: 'purge_pending',
       certification: {
         status: 'approved',
         verified: true,
@@ -493,13 +500,13 @@ test('certification start and recovery are POST-only with strict CORS and caller
   assert.match(activeBranch, /PARTNERS_RPC\.kycCertificationSessionRecord/);
   assert.match(
     activeBranch,
-    /diditConfigFingerprint\([\s\S]*DIDIT_CERTIFICATION_EXPECTED_WORKFLOW_VERSION/,
+    /diditConfigFingerprint\([\s\S]*DIDIT_PARTNERS_WORKFLOW_VERSION/,
   );
   assert.match(activeBranch, /p_provider_session_id: inspection\.session\.sessionId/);
   assert.match(activeBranch, /p_provider_workflow_id: inspection\.session\.workflowId/);
   assert.match(
     activeBranch,
-    /p_provider_workflow_version:[\s\S]*DIDIT_CERTIFICATION_EXPECTED_WORKFLOW_VERSION/,
+    /p_provider_workflow_version:[\s\S]*DIDIT_PARTNERS_WORKFLOW_VERSION/,
   );
   assert.ok(
     helper.indexOf('if (!claim.claimed)') < helper.indexOf('createDiditSession('),
@@ -584,10 +591,12 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   const webhook = read(
     'supabase/functions/norva-partners-kyc-webhook/index.ts',
   );
-  const memberCall = webhook.indexOf('"partners_service_kyc_webhook_apply"');
+  const memberCall = webhook.indexOf(
+    '"partners_service_kyc_webhook_apply_and_enqueue_purge"',
+  );
   const fallback = webhook.indexOf('error?.code === "P0006"', memberCall);
   const certificationCall = webhook.indexOf(
-    'PARTNERS_RPC.kycCertificationWebhookApply',
+    '"partners_service_kyc_certification_webhook_apply_and_enqueue_purge"',
     fallback,
   );
   const errorHandling = webhook.indexOf('if (error) {', certificationCall);
@@ -597,7 +606,7 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   );
   assert.doesNotMatch(
     webhook.slice(memberCall, fallback),
-    /kycCertificationWebhookApply/,
+    /kyc_certification_webhook_apply_and_enqueue_purge/,
   );
   assert.match(
     webhook.slice(errorHandling, errorHandling + 700),
@@ -607,5 +616,31 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   assert.doesNotMatch(
     webhook,
     /console\[[^\]]+\]\([^)]*(?:rawBody|event|session|decision|document|payload)/s,
+  );
+});
+
+test('terminal Didit evidence atomically enters the durable deletion outbox', () => {
+  const webhook = read(
+    'supabase/functions/norva-partners-kyc-webhook/index.ts',
+  );
+  const shared = read('supabase/functions/_shared/didit-partners.ts');
+  assert.match(webhook, /encryptDiditPurgeEnvelope/);
+  assert.match(webhook, /p_provider_session_envelope: providerSessionEnvelope/);
+  assert.match(
+    webhook,
+    /partners_service_kyc_webhook_apply_and_enqueue_purge/,
+  );
+  assert.match(
+    webhook,
+    /partners_service_kyc_certification_webhook_apply_and_enqueue_purge/,
+  );
+  assert.match(
+    shared,
+    /DIDIT_SESSION_DELETE_URL_PREFIX[\s\S]*\/delete\/[\s\S]*method: "DELETE"[\s\S]*redirect: "error"/,
+  );
+  assert.match(shared, /response\.status === 204[\s\S]*response\.status === 404/);
+  assert.doesNotMatch(
+    webhook,
+    /console\[[^\]]+\]\([^)]*(?:providerSessionId|apiKey)/s,
   );
 });

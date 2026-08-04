@@ -73,6 +73,8 @@ test('the operator must select every geographic and monetary pilot input explici
     'NORVA_PARTNERS_PILOT_CURRENCY_EXPONENT',
     'NORVA_PARTNERS_PILOT_THRESHOLD_MINOR',
     'NORVA_PARTNERS_PILOT_MINIMUM_AGE',
+    'NORVA_PARTNERS_CANDIDATE_COMMIT_SHA',
+    'NORVA_PARTNERS_DEPLOYMENT_ENVIRONMENT',
   ]) {
     assert.match(shell, new RegExp(`${name}:-}`), `${name} must have no default`);
     assert.ok(runbook.includes(name), `${name} must be documented`);
@@ -86,10 +88,20 @@ test('the operator must select every geographic and monetary pilot input explici
     'pilot_currency_exponent',
     'pilot_threshold_minor',
     'pilot_minimum_age',
+    'candidate_commit_sha',
+    'deployment_environment',
   ]) {
     assert.match(shell, new RegExp(`-v ${variable}=`));
     assert.match(sql, new RegExp(`:'?${variable}'?`));
   }
+  assert.match(
+    sql,
+    /package\.deployment_environment = :'deployment_environment'/,
+  );
+  assert.match(
+    sql,
+    /jsonb_array_length\(package\.jurisdiction_scope\) = 1/,
+  );
 });
 
 test('runtime validation inspects both healthy Edge replicas without printing secrets', () => {

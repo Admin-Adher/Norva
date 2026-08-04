@@ -159,7 +159,7 @@ EOF
 > system is ready` ; 935 666 media / 719 944 titles / 7 users (≈ prod à 95 lignes près =
 > snapshot au point du base-backup). **Preuve que les base-backups restaurent sans le WAL archivé.**
 
-### Répétition physique Partners avant migration
+### Répétition physique Partners avant et après migration
 
 Pour valider une release Partners sans modifier le checkout live, sans port
 exposé et sans aucune connexion du clone au réseau, exécuter le script depuis
@@ -167,6 +167,16 @@ un checkout/worktree du candidat avec son SHA complet :
 
 ```bash
 sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
+  predeploy \
+  <sha-git-complet-sur-40-caractères>
+```
+
+Après le déploiement biphasé et la création d'un nouveau base-backup R2, le
+contrôle postdéploiement utilise obligatoirement le même SHA et le mode opposé :
+
+```bash
+sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
+  postdeploy \
   <sha-git-complet-sur-40-caractères>
 ```
 
@@ -180,9 +190,12 @@ son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
 le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
 restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
 isolé, et leurs nombres total et actif sont contrôlés avant et après la
-répétition. Les quatre migrations ciblées sont ensuite rejouées dans une
-transaction unique. Le conteneur et le répertoire temporaire sont toujours
-supprimés par le trap de sortie.
+répétition. En `predeploy`, les 21 marqueurs doivent tous être absents et les
+dix migrations ciblées sont rejouées dans une transaction unique. En
+`postdeploy`, les 21 marqueurs doivent tous être présents : aucune migration
+n'est rejouée, puis le vérificateur et le pgTAP sont exécutés sur l'état déjà
+migré. Un état partiel est refusé dans les deux modes. Le conteneur et le
+répertoire temporaire sont toujours supprimés par le trap de sortie.
 
 La seule sortie durable est un `rehearsal-proof.log` privé (mode `0600`) et son
 fichier `.sha256` sous `norva-deploy-backups/`. Ils ne contiennent ni sortie SQL
@@ -190,9 +203,15 @@ brute, ni mot de passe, ni clé R2. Pour le même SHA candidat, le workflow CI
 exhaustif doit être vert et la preuve physique doit contenir `result=passed`
 ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
 de production.
-La preuve du candidat actuel doit aussi contenir `migrations_applied=4`,
-`migration_markers_before=0|0|0|0|0`, `migration_markers_after=1|1|1|1|1`,
-`migration_routines_verified=36` et `migration_relations_verified=3`.
+
+La preuve `predeploy` du candidat actuel doit contenir
+`rehearsal_mode=predeploy`, `migrations_applied=10`,
+`migration_replay_skipped=false`, 21 marqueurs `0` avant puis 21 marqueurs `1`
+après, `migration_routines_verified=119` et
+`migration_relations_verified=14`. La preuve `postdeploy` doit contenir
+`rehearsal_mode=postdeploy`, `migrations_applied=0`,
+`migration_replay_skipped=true`, et 21 marqueurs `1` avant comme après, avec les
+mêmes 119 routines et 14 relations vérifiées.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

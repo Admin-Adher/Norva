@@ -12,9 +12,9 @@ des preuves conservées ailleurs. Ne jamais y inscrire
 nom, e-mail, UUID utilisateur, code public de parrainage, document KYC,
 identifiant de paiement, token ou payload fournisseur.
 
-Le format courant est `schema_version=5`. Les anciens journaux à preuves texte,
+Le format courant est `schema_version=6`. Les anciens journaux à preuves texte,
 liés à un contrat provider obsolète ou portant encore une preuve « sandbox »
-pour le rail manuel sont volontairement refusés : repartir du template v5 et
+pour le rail manuel sont volontairement refusés : repartir du template v6 et
 rattacher les artefacts réels, sans convertir automatiquement des chaînes
 historiques non vérifiables.
 Le schéma est fermé récursivement : toute clé inconnue est refusée, y compris
@@ -47,7 +47,22 @@ Chaque champ `evidence` utilise le même objet strict :
 
 L'URL doit être HTTPS, sans credentials, query string ni fragment. Le
 `run_id` doit identifier un run ou une décision immuable et le SHA-256 doit
-porter sur l'artefact téléchargé depuis cette référence. Les domaines
+porter sur l'artefact téléchargé depuis cette référence. La section `legal`
+distingue obligatoirement deux preuves Privacy :
+
+- `privacy_pilot_self_assessment_evidence`, l'auto-évaluation RGPD interne
+  documentée, visée et immuable du pilote France sur invitation ;
+- `privacy_public_release_review_evidence`, une revue qualifiée et indépendante
+  distincte, laissée à `null` pendant le pilote et obligatoire avant
+  `generalization_ready`.
+
+Cette séparation n'emporte aucune désignation officielle de DPO. Elle empêche
+l'auto-évaluation du pilote d'être réutilisée comme autorisation d'ouverture
+publique. La revue de généralisation doit être postérieure aux 45 jours
+d'observation et aux deux cycles rapprochés ; l'approbation générale doit à son
+tour lui être postérieure.
+
+Les domaines
 d'exemple, localhost, valeurs `replace-me`, `run-123`, hashes répétés et autres
 placeholders sont refusés, y compris dans un journal encore `draft`.
 Les réseaux privés, loopback, link-local, metadata, `.internal` et `.local`
@@ -147,7 +162,8 @@ surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
 
 - `draft` : état normal du dépôt ; les flags peuvent tous rester faux et les
   dépendances externes sont encore absentes.
-- `pilot_ready` : au moins une juridiction a ses cinq portes approuvées,
+- `pilot_ready` : l'auto-évaluation RGPD interne du pilote est archivée, au
+  moins une juridiction a ses cinq portes approuvées,
   l'allowlist contient 20 à 50 personnes, le snapshot DB couvre programme,
   policies, devises, routes, allowlist, flags et gates, les providers et preuves
   runtime sont vérifiés, l'App Link a été rejoué depuis l'AAB signé par Google
@@ -182,7 +198,9 @@ surfaces et leurs marqueurs, mais ne remplace aucune approbation juridique.
   `partners_enabled`, `partners_invite_only`, `partners_shadow_mode` et
   `partners_tv_relay_enabled` sont vrais. `partners_payouts_live` reste faux
   dans ce snapshot de décision pré-bascule.
-- `generalization_ready` : les mêmes portes restent valides et les deux cycles
+- `generalization_ready` : les mêmes portes restent valides, la revue Privacy
+  qualifiée et indépendante de généralisation est archivée après l'observation
+  et les cycles, et les deux cycles
   de versement portent l'état `supervised_and_reconciled`, des périodes
   ordonnées non chevauchantes et des preuves de rapprochement distinctes ; le
   pilote possède exactement le nombre de jours UTC réellement écoulés (au
@@ -258,27 +276,32 @@ indépendantes restent nécessaires : décision sandbox non autoritaire, décisi
 live signée liée au même fingerprint/version et conflit environnement ou
 fingerprint effectivement mis en quarantaine.
 
-## Preuves externes obligatoires
+## Preuves protégées et externes obligatoires
 
 Le dépôt ne peut pas créer ces preuves à la place de l'opérateur :
 
-1. avis juridique et fiscal écrit pour chaque pays/subdivision ;
-2. versions et empreintes SHA-256 des Conditions Partners et de la disclosure,
+1. auto-évaluation RGPD interne du pilote suivant
+   `ops/partners/gdpr-self-assessment.example.md`, figée dans le stockage privé
+   et limitée au pilote France invite-only ; avant une généralisation, revue
+   Privacy qualifiée et indépendante distincte, sans imposer ni simuler une
+   désignation officielle de DPO ;
+2. avis juridique et fiscal écrit pour chaque pays/subdivision ;
+3. versions et empreintes SHA-256 des Conditions Partners et de la disclosure,
    plus preuve que les trois surfaces juridiques publiques servent réellement
    ces documents ;
-3. compte Didit KYC-only, workflow et webhook signés testés en sandbox puis
+4. compte Didit KYC-only, workflow et webhook signés testés en sandbox puis
    live ; fingerprint/config/version corrélés à la preuve live et preuve
    distincte de non-autorité sandbox + quarantaine sur conflit ;
-4. replay `/r/{code}` avec l'application installée depuis Google Play et signée
+5. replay `/r/{code}` avec l'application installée depuis Google Play et signée
    par Play App Signing ;
-5. snapshot DB sanitisé et immuable couvrant programme, policies pays,
+6. snapshot DB sanitisé et immuable couvrant programme, policies pays,
    métadonnées devise, routes payout, volume allowlist, flags et release gates ;
-6. contrat fiscal Web et rail de versement individuel sélectionnés et testés ;
+7. contrat fiscal Web et rail de versement individuel sélectionnés et testés ;
    le champ `providers.individual_payout.provider` rend le choix vérifiable ;
-7. registre Finance bénéficiaire, clé HMAC Edge versionnée, binding
+8. registre Finance bénéficiaire, clé HMAC Edge versionnée, binding
    maker-checker et révocation supervisée testés, avec une preuve ne contenant
    ni identifiant bancaire, ni UUID bénéficiaire, ni secret ;
-8. export autoritatif du relevé Revolut Business Basic réel dans la langue
+9. export autoritatif du relevé Revolut Business Basic réel dans la langue
    configurée, avec preuve du séparateur et des en-têtes effectivement servis ;
    l'import sanitisé reste limité aux références
    `NORVA-[A-F0-9]{12}`, lié par
@@ -302,25 +325,25 @@ Le dépôt ne peut pas créer ces preuves à la place de l'opérateur :
    incidents `settle_exact`, `remap_exact_and_settle` et
    `release_after_return`, ce dernier exigeant une observation terminale
    indépendante exacte. Aucun ajustement partiel ou de change n'est accepté ;
-9. livraisons sandbox Google Play et RevenueCat vérifiées. Pour Revolut
+10. livraisons sandbox Google Play et RevenueCat vérifiées. Pour Revolut
    Business API, le sandbox couvre uniquement l'authentification, l'idempotence
    et les contrats disponibles : `/pay/fields` n'y est pas disponible. La gate
    API exige en plus un micro-virement production supervisé, avec quote,
    transaction canonique et rapprochement exact archivés, ainsi qu'une preuve
    que `COMPLETED` reste observable jusqu'au rapprochement et qu'un relevé
    tardif `REVERTED` produit la contre-écriture attendue ;
-10. run GitHub Actions Partners du commit candidat vert, lint et Advisors verts ;
-11. backup offsite R2 récent, chiffré avec `BACKUP_AGE_RECIPIENT`, dont les
+11. run GitHub Actions Partners du commit candidat vert, lint et Advisors verts ;
+12. backup offsite R2 récent, chiffré avec `BACKUP_AGE_RECIPIENT`, dont les
    checksums ont été vérifiés ;
-12. restauration isolée réussie avec
+13. restauration isolée réussie avec
    `ops/hetzner/backup/verify-partners-restore.sql` ;
-13. worker financier et heartbeats frais, réconciliation shadow et cycle
+14. worker financier et heartbeats frais, réconciliation shadow et cycle
     alerte/rétablissement observés sur l'environnement déployé ; preuve que la
     route active est manuelle, que gate DB, flag DB et kill switch Edge API
     restent faux, et que les crons provider/API interdits
     (`norva-partners-payout` et `norva-partners-revolut-api`) sont absents ou
     inactifs ;
-14. 45 jours calendaires de pilote, deux cycles rapprochés et approbations
+15. 45 jours calendaires de pilote, deux cycles rapprochés et approbations
     distinctes Legal, Risk, Finance et Operations.
 
 Les quatre approbations et les deux rapprochements utilisent des URL, run IDs

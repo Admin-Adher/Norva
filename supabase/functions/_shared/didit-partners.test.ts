@@ -5,11 +5,15 @@ import {
   diditConfigFingerprint,
   DiditSessionNotResumableError,
   inspectDiditSessionList,
+  parseKycSessionInput,
+  purgeDiditSession,
   readBoundedDiditResponseBody,
   sanitizeDiditActiveSessionList,
   sanitizeDiditCreatedSession,
   sanitizeKycCertificationBindingMatchRpc,
   sanitizeKycCertificationCreateClaimRpc,
+  sanitizeKycPrepareRpc,
+  sanitizeKycSessionRecordRpc,
   sanitizeKycWebhookRpc,
   verifyAndNormalizeDiditWebhook,
   verifyDiditConsoleTestWebhook,
@@ -78,6 +82,7 @@ Deno.test("Didit RPC states cannot disguise sandbox as authoritative", () => {
     schema_version: 1,
     action: "kyc_result_observed",
     replayed: false,
+    purge_status: "not_required",
     environment: "sandbox",
     reason: "sandbox_non_authoritative",
   });
@@ -92,6 +97,7 @@ Deno.test("Didit RPC states cannot disguise sandbox as authoritative", () => {
       schema_version: 1,
       action: "kyc_result_observed",
       replayed: false,
+      purge_status: "not_required",
       environment: "live",
       reason: "sandbox_non_authoritative",
     });
@@ -99,6 +105,97 @@ Deno.test("Didit RPC states cannot disguise sandbox as authoritative", () => {
     rejected = true;
   }
   assert(rejected, "live cannot use the sandbox observation contract");
+});
+
+Deno.test("Member KYC requires dedicated biometric consent", () => {
+  const input = parseKycSessionInput({
+    language: "fr",
+    consentVersion: "partners-disclosure-v1",
+    biometricConsentVersion: "partners-biometric-consent-v1",
+    consentGranted: true,
+    capacityConfirmed: true,
+  });
+  assert(
+    input.biometricConsentVersion === "partners-biometric-consent-v1",
+    "dedicated biometric consent must survive parsing",
+  );
+  const prepared = sanitizeKycPrepareRpc({
+    schema_version: 1,
+    action: "kyc_ready",
+    replayed: false,
+    account: { id: `prt_${"a".repeat(24)}`, status: "pending_verification" },
+    kyc: {
+      provider: "didit",
+      readiness: "ready",
+      minimum_age: 18,
+      country_code: "FR",
+      capacity_required: true,
+      reservation_key: `kyr_${"b".repeat(24)}`,
+      biometric_consent_version: "partners-biometric-consent-v1",
+    },
+  });
+  assert(
+    prepared.kyc.biometric_consent_version ===
+      "partners-biometric-consent-v1",
+    "server biometric consent contract must remain exact",
+  );
+
+  let rejected = false;
+  try {
+    parseKycSessionInput({
+      language: "fr",
+      consentVersion: "partners-disclosure-v1",
+      biometricConsentVersion: "partners-biometric-consent-v0",
+      consentGranted: true,
+      capacityConfirmed: true,
+    });
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "stale biometric consent must fail closed");
+});
+
+Deno.test("member KYC record exposes only serialized session dispositions", () => {
+  const active = sanitizeKycSessionRecordRpc({
+    schema_version: 1,
+    action: "kyc_session_recorded",
+    replayed: false,
+    session_disposition: "active",
+    purge_status: "not_required",
+    kyc: { status: "pending", expires_at: null },
+  });
+  assert(
+    active.session_disposition === "active",
+    "a staged non-terminal session must remain resumable",
+  );
+
+  const withdrawn = sanitizeKycSessionRecordRpc({
+    schema_version: 1,
+    action: "kyc_session_recorded",
+    replayed: false,
+    session_disposition: "withdrawn",
+    purge_status: "purge_pending",
+    kyc: { status: "superseded", expires_at: null },
+  });
+  assert(
+    withdrawn.kyc.status === "superseded",
+    "withdrawal must sanitize to a terminal local session",
+  );
+
+  let rejected = false;
+  try {
+    sanitizeKycSessionRecordRpc({
+      schema_version: 1,
+      action: "kyc_session_recorded",
+      replayed: false,
+      session_disposition: "withdrawn",
+      purge_status: "not_required",
+      kyc: { status: "pending", expires_at: null },
+    });
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "withdrawal cannot be disguised as an active session");
 });
 
 Deno.test("Didit session response accepts the v3 OpenAPI shape but rejects KYB markers", () => {
@@ -365,10 +462,12 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     created_at: now - 4,
     application_id: baseConfig.applicationId,
     environment: "sandbox",
+    session_kind: "user",
+    sandbox_scenario: null,
     session_id: "99999999-8888-4777-8666-555555555555",
     status: "Approved",
     workflow_id: baseConfig.workflowId,
-    workflow_version: 4,
+    workflow_version: 1,
     decision: {
       id_verifications: [{
         node_id: baseConfig.idVerificationNodeId,
@@ -423,6 +522,99 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     "both full-body signature variants must normalize identically",
   );
 
+  for (
+    const documentedIndividualPayload of [
+      { ...payload, session_kind: undefined },
+      { ...payload, session_kind: null },
+    ]
+  ) {
+    const documentedRaw = new TextEncoder().encode(
+      JSON.stringify(documentedIndividualPayload),
+    );
+    const documentedHeaders = new Headers({
+      "X-Timestamp": String(now),
+      "X-Signature-V2": await hmacSha256Hex(
+        baseConfig.webhookSecret,
+        JSON.stringify(sortJson(documentedIndividualPayload)),
+      ),
+    });
+    const documented = await verifyAndNormalizeDiditWebhook(
+      documentedRaw,
+      documentedHeaders,
+      baseConfig,
+      now,
+    );
+    assert(
+      documented.providerSessionId === payload.session_id,
+      "documented individual KYC webhooks may omit session_kind",
+    );
+  }
+
+  for (
+    const invalidPayload of [
+      { ...payload, session_kind: "business" },
+      { ...payload, session_kind: "organization" },
+      { ...payload, workflow_type: "kyb" },
+      { ...payload, vendor_business_id: "business-marker" },
+      { ...payload, company_name: "Business marker" },
+      { ...payload, sandbox_scenario: { unexpected: true } },
+      { ...payload, workflow_version: 2 },
+    ]
+  ) {
+    const invalidRaw = new TextEncoder().encode(JSON.stringify(invalidPayload));
+    const invalidHeaders = new Headers({
+      "X-Timestamp": String(now),
+      "X-Signature-V2": await hmacSha256Hex(
+        baseConfig.webhookSecret,
+        JSON.stringify(sortJson(invalidPayload)),
+      ),
+    });
+    let contractRejected = false;
+    try {
+      await verifyAndNormalizeDiditWebhook(
+        invalidRaw,
+        invalidHeaders,
+        baseConfig,
+        now,
+      );
+    } catch {
+      contractRejected = true;
+    }
+    assert(
+      contractRejected,
+      "non-user, KYB-marked or workflow-drifted webhooks must fail closed",
+    );
+  }
+
+  const livePayload = {
+    ...payload,
+    environment: "live",
+    sandbox_scenario: "document_invalid",
+  };
+  const liveRaw = new TextEncoder().encode(JSON.stringify(livePayload));
+  const liveHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(livePayload)),
+    ),
+  });
+  let liveScenarioRejected = false;
+  try {
+    await verifyAndNormalizeDiditWebhook(
+      liveRaw,
+      liveHeaders,
+      { ...baseConfig, environment: "live" },
+      now,
+    );
+  } catch {
+    liveScenarioRejected = true;
+  }
+  assert(
+    liveScenarioRejected,
+    "a live webhook carrying a sandbox scenario must fail closed",
+  );
+
   let rejected = false;
   try {
     await verifyAndNormalizeDiditWebhook(
@@ -443,17 +635,22 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
   assert(rejected, "the envelope-only signature must never authorize KYC data");
 });
 
-Deno.test("Didit console probe is accepted only as a fully signed non-production shape", async () => {
+Deno.test("Didit console probe accepts only the signed, fully bound v3 test envelope", async () => {
   const now = 1_785_661_809;
   const payload = {
+    event_id: "12345678-1234-4234-8234-123456789abc",
     session_id: "99999999-8888-4777-8666-555555555555",
     status: "Approved",
     vendor_data: "test-vendor-data-123",
     webhook_type: "status.updated",
     timestamp: now,
     created_at: now,
+    application_id: baseConfig.applicationId,
+    environment: baseConfig.environment,
+    sandbox_scenario: null,
     workflow_id: baseConfig.workflowId,
-    metadata: { test_webhook: true },
+    workflow_version: 1,
+    metadata: {},
     decision: { status: "Approved" },
   };
   const raw = new TextEncoder().encode(JSON.stringify(payload, null, 2));
@@ -470,19 +667,19 @@ Deno.test("Didit console probe is accepted only as a fully signed non-production
     "the current authenticated console payload must be acknowledged",
   );
 
-  const withProductionEnvelope = {
+  const foreignApplication = {
     ...payload,
-    event_id: "12345678-1234-4234-8234-123456789abc",
+    application_id: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
   };
   const productionRaw = new TextEncoder().encode(
-    JSON.stringify(withProductionEnvelope),
+    JSON.stringify(foreignApplication),
   );
   const productionHeaders = new Headers({
     "X-Timestamp": String(now),
     "X-Didit-Test-Webhook": "true",
     "X-Signature-V2": await hmacSha256Hex(
       baseConfig.webhookSecret,
-      JSON.stringify(sortJson(withProductionEnvelope)),
+      JSON.stringify(sortJson(foreignApplication)),
     ),
   });
   assert(
@@ -492,7 +689,29 @@ Deno.test("Didit console probe is accepted only as a fully signed non-production
       baseConfig,
       now,
     )),
-    "a production-like event must never bypass normal event validation",
+    "a foreign application must never be acknowledged as a console probe",
+  );
+
+  const foreignEnvironment = { ...payload, environment: "live" };
+  const foreignEnvironmentRaw = new TextEncoder().encode(
+    JSON.stringify(foreignEnvironment),
+  );
+  const foreignEnvironmentHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Didit-Test-Webhook": "true",
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(foreignEnvironment)),
+    ),
+  });
+  assert(
+    !(await verifyDiditConsoleTestWebhook(
+      foreignEnvironmentRaw,
+      foreignEnvironmentHeaders,
+      baseConfig,
+      now,
+    )),
+    "a cross-environment probe must fail closed",
   );
 
   const tampered = new Headers(headers);
@@ -504,6 +723,57 @@ Deno.test("Didit console probe is accepted only as a fully signed non-production
     rejected = true;
   }
   assert(rejected, "an unsigned or tampered console probe must fail closed");
+});
+
+Deno.test("Didit terminal-session purge is bounded and replay-safe", async () => {
+  const sessionId = "11111111-2222-4333-8444-555555555555";
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const deleted = await purgeDiditSession(
+    baseConfig,
+    sessionId,
+    ((url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }) as typeof fetch,
+  );
+  assert(deleted === "deleted", "204 must prove first deletion");
+  assert(calls.length === 1, "purge must issue one request");
+  assert(
+    calls[0].url ===
+      `https://verification.didit.me/v3/session/${sessionId}/delete/`,
+    "purge must use the canonical Didit endpoint",
+  );
+  assert(calls[0].init?.method === "DELETE", "purge must use DELETE");
+  assert(
+    new Headers(calls[0].init?.headers).get("x-api-key") === baseConfig.apiKey,
+    "purge must authenticate server-side",
+  );
+  assert(
+    calls[0].init?.redirect === "error" &&
+      calls[0].init?.signal instanceof AbortSignal,
+    "purge must reject redirects and use a timeout signal",
+  );
+
+  const replayed = await purgeDiditSession(
+    baseConfig,
+    sessionId,
+    (() =>
+      Promise.resolve(new Response(null, { status: 404 }))) as typeof fetch,
+  );
+  assert(replayed === "already_deleted", "404 must be safe after a replay");
+
+  let rejected = false;
+  try {
+    await purgeDiditSession(
+      baseConfig,
+      sessionId,
+      (() =>
+        Promise.resolve(new Response(null, { status: 403 }))) as typeof fetch,
+    );
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "permission or provider failures must fail closed");
 });
 
 function sortJson(value: unknown): unknown {

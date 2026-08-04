@@ -1,12 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "status": "draft",
-  "package_key": "partners-france-p0-v1",
+  "package_key": "partners-france-invite-pilot-v3",
   "repository": "Admin-Adher/Norva",
   "candidate_commit_sha": null,
-  "target_environment": "sandbox",
+  "target_environment": "preproduction",
   "deployment_id": null,
   "contains_personal_data": false,
+  "release_scope": {
+    "access_mode": "invite_only",
+    "country_code": "FR",
+    "participant_cap": 50,
+    "public_release_eligible": false
+  },
   "program": {
     "version_key": null,
     "account_type": "individual",
@@ -78,10 +84,19 @@
       "approved": false,
       "decided_at": null,
       "valid_until": null,
-      "reviewer_role": "privacy_professional",
+      "reviewer_role": "privacy_accountable_owner",
+      "assessment_method": "documented_internal_gdpr_self_assessment_with_mandatory_dpia",
+      "dpo_designated": false,
+      "dpia_required": true,
+      "dpia_outcome": "pending",
+      "dpia_controller_validated_at": null,
+      "dpia_evidence": null,
+      "public_release_eligible": false,
       "reviewer_reference_sha256": null,
       "evidence": null,
       "checks": {
+        "gdpr_self_assessment_documented": false,
+        "records_of_processing_documented": false,
         "data_inventory_and_purposes_approved": false,
         "lawful_bases_approved": false,
         "subprocessor_disclosures_approved": false,
@@ -91,7 +106,15 @@
         "data_minimization_and_redaction_approved": false,
         "kyc_and_payout_notices_approved": false,
         "public_privacy_notice_approved": false,
-        "security_incident_notification_flow_approved": false
+        "security_incident_notification_flow_approved": false,
+        "dpo_mandatoriness_assessed": false,
+        "dpia_processing_and_purposes_documented": false,
+        "dpia_necessity_and_proportionality_assessed": false,
+        "dpia_risks_to_rights_and_freedoms_assessed": false,
+        "dpia_safeguards_and_residual_risk_assessed": false,
+        "dpia_controller_validation_recorded": false,
+        "dpia_prior_consultation_determined": false,
+        "pilot_scope_and_reassessment_triggers_approved": false
       }
     },
     "country_policy": {

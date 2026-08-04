@@ -44,7 +44,7 @@
   <main>
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: 3 August 2026</p>
+    <p class="updated">Last updated: 4 August 2026</p>
 
     <p>This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
       deletes information when you use the Norva apps (Android phone/tablet and Android TV) and the
@@ -89,6 +89,29 @@
       and advertising cookies on the web app to measure usage and how our ads perform — see
       <a href="#cookies">Cookies, analytics &amp; advertising</a> below. You can decline or withdraw
       this at any time.</p>
+    <p>Our legal bases depend on the purpose: performance of our contract for account, playback,
+      subscription and the optional Partners agreement; compliance with tax, accounting and other
+      applicable legal obligations; and our legitimate interests in service security, fraud
+      prevention, support and reliability, balanced against your rights. Optional analytics and
+      advertising use consent. For Didit's document, selfie, liveness and face-match verification,
+      Norva requests separate explicit consent before redirecting you to the hosted capture. You may
+      stop before capture or withdraw that consent from the Partners page; Support remains available
+      if the in-app control cannot be used. Withdrawal blocks any new biometric verification and may
+      make the optional Partners programme unavailable, but does not affect your ordinary Norva
+      subscription or the lawfulness of earlier processing. It does not itself erase an already
+      completed verification or records that must be kept for a legal claim, tax, accounting or
+      anti-fraud obligation; those records remain subject to the retention limits in section 5.</p>
+    <p>Didit uses automated systems to assess document integrity, liveness, face match and fraud
+      signals. Norva then applies the programme's configured age, country, legal-capacity and account
+      rules to the normalized result. An unsuccessful result can prevent activation of the optional
+      Partners account and referral link, but does not affect ordinary access to Norva. From the
+      Partners page you can contest an unsuccessful result and request a human review. A Risk
+      operator reviews the relevant result in Didit's secured console through an access that requires
+      MFA, authorization and an audited justification; the Norva Admin page does not expose identity
+      documents, biometric captures or the raw provider response. The review may uphold the result or
+      make a fresh verification available. This description explains the actual workflow and does not
+      predetermine whether any particular data-protection-law provision on solely automated decisions
+      applies to an individual case.</p>
 
     <h2 id="cookies">3. Cookies, analytics &amp; advertising</h2>
     <p>The first-party sign-up context described in section 1 is an operational account record,
@@ -126,7 +149,7 @@
         authentication messages, support communications and Norva Partners access-review
         decisions. Resend receives the destination email address, the minimum message content and
         delivery metadata needed to send and troubleshoot those messages.</li>
-      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification for Norva Partners, only when that programme and provider are enabled for your jurisdiction. Didit receives the information and captures needed to perform the verification under its own hosted flow. Norva retains only the minimum normalized outcome and provider reference needed for audit and does not copy identity-document images or biometric captures into the Norva database.</li>
+      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification for Norva Partners, only when that programme and provider are enabled for your jurisdiction. Didit acts as Norva's processor for the checks Norva configures and also describes itself as an independent controller for limited security, abuse-prevention, legal-compliance, audit-logging and legal-claims purposes. Before redirecting you, Norva links the <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Verification Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit End User Terms for Identity Verification</a> and requests explicit confirmation for document, selfie, liveness and face-match capture. Verification data may be processed outside the country where the flow starts; where required, Didit states that it uses safeguards such as adequacy decisions, standard contractual clauses or another recognized transfer mechanism. Norva retains only the minimum normalized outcome and provider reference needed for audit and does not copy identity-document images or biometric captures into the Norva database.</li>
       <li><strong>Telegram</strong> — delivery of operational new-sign-up notifications to a
         restricted administrator chat. These notifications may include a display name, masked email,
         sign-in method, whether sign-up used the web browser or Android mobile app, the Norva journey
@@ -186,8 +209,14 @@
       required by tax, accounting, anti-fraud and dispute-resolution law even after a Norva account
       is closed. KYC provider references and normalized outcomes are retained only for as long as
       necessary for those obligations. Identity-document images and biometric captures are not
-      copied into Norva's database; deletion inside the hosted verification provider follows the
-      configured provider retention policy and applicable legal holds.</p>
+      copied into Norva's database. Once Norva has safely committed an accepted terminal Didit
+      verification, it stores only the normalized minimum needed for eligibility and audit, then
+      requests deletion of the hosted verification session; a deletion failure is retried and blocks
+      successful webhook acknowledgement. Before any live France-pilot collection, Didit's
+      application-level retention must also be set to a maximum of one month and evidenced in the
+      private approval record, subject only to a documented applicable legal hold. Norva reassesses
+      this period before any broader
+      release.</p>
 
     <h2>6. Your rights &amp; deleting your account</h2>
     <p>You can access or update your information in the app, and you can request deletion of your

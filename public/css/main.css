@@ -18651,6 +18651,46 @@ html:not(.tv-mode) .home-state-inline {
   text-align: left;
 }
 
+.partners-kyc-rights {
+  justify-items: stretch;
+  min-height: 0;
+  margin-top: var(--space-xl);
+  gap: var(--space-md);
+  place-content: initial;
+  text-align: left;
+}
+
+.partners-kyc-rights h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: clamp(1.25rem, 3vw, 1.7rem);
+}
+
+.partners-kyc-rights > p,
+.partners-kyc-rights .partners-action-note {
+  max-width: none;
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.partners-kyc-rights .partners-join-form {
+  width: 100%;
+  margin: 0;
+}
+
+.partners-kyc-rights select {
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
 .partners-jurisdiction-card {
   justify-items: stretch;
   text-align: left;
@@ -19010,6 +19050,37 @@ html:not(.tv-mode) .home-state-inline {
   gap: var(--space-sm);
   max-width: 680px;
   margin-top: var(--space-xl);
+}
+
+.partners-provider-disclosure {
+  display: grid;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.partners-provider-disclosure strong {
+  color: var(--color-text-primary);
+}
+
+.partners-provider-disclosure a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--color-accent-hover);
+  font-weight: 700;
+  text-underline-offset: 0.2em;
+}
+
+.partners-provider-disclosure a:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .partners-consent-check {

@@ -17,6 +17,8 @@ PILOT_CURRENCY="${NORVA_PARTNERS_PILOT_CURRENCY:-}"
 PILOT_CURRENCY_EXPONENT="${NORVA_PARTNERS_PILOT_CURRENCY_EXPONENT:-}"
 PILOT_THRESHOLD_MINOR="${NORVA_PARTNERS_PILOT_THRESHOLD_MINOR:-}"
 PILOT_MINIMUM_AGE="${NORVA_PARTNERS_PILOT_MINIMUM_AGE:-}"
+CANDIDATE_COMMIT_SHA="${NORVA_PARTNERS_CANDIDATE_COMMIT_SHA:-}"
+DEPLOYMENT_ENVIRONMENT="${NORVA_PARTNERS_DEPLOYMENT_ENVIRONMENT:-}"
 
 FAILURES=0
 
@@ -56,6 +58,15 @@ validate_pilot_inputs() {
     && [[ "$PILOT_CURRENCY_EXPONENT" != '2' \
       || "$PILOT_THRESHOLD_MINOR" != '1000' ]]; then
     fail "pilot_input.usd_contract" "usd_requires_exponent_2_and_threshold_1000"
+  fi
+  if [[ ! "$CANDIDATE_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] \
+    && [[ ! "$CANDIDATE_COMMIT_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+    fail "pilot_input.candidate_commit" "explicit_lowercase_commit_sha_required"
+  fi
+  if [[ "$DEPLOYMENT_ENVIRONMENT" != 'preproduction' \
+    && "$DEPLOYMENT_ENVIRONMENT" != 'production' ]]; then
+    fail "pilot_input.deployment_environment" \
+      "explicit_preproduction_or_production_required"
   fi
 }
 
@@ -382,6 +393,8 @@ else
         -v pilot_currency_exponent="$PILOT_CURRENCY_EXPONENT" \
         -v pilot_threshold_minor="$PILOT_THRESHOLD_MINOR" \
         -v pilot_minimum_age="$PILOT_MINIMUM_AGE" \
+        -v candidate_commit_sha="$CANDIDATE_COMMIT_SHA" \
+        -v deployment_environment="$DEPLOYMENT_ENVIRONMENT" \
         -U "$DB_USER" -d "$DB_NAME" \
         -qAt -F '|' < "$SQL_FILE"
   )"; then

@@ -869,9 +869,11 @@ class AdminPage {
 @media(prefers-reduced-motion:reduce){#page-admin .crm-toast,#page-admin .crm-modal-back{animation:none;}}
 #page-admin .crm-modal-back{position:fixed;inset:0;z-index:70;background:#000b;display:flex;align-items:center;justify-content:center;padding:20px;animation:crmtoast .15s ease both;}
 #page-admin .crm-modal{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 24px 70px #000b;}
+#page-admin .crm-modal.is-wide{max-width:720px;}
 #page-admin .crm-modal h3{margin:0 0 8px;font-size:16px;color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal p{margin:0 0 16px;font-size:13.5px;color:var(--color-text-secondary,#9aa);line-height:1.55;white-space:pre-wrap;word-break:break-word;}
 #page-admin .crm-modal-input{width:100%;min-height:44px;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:16px;}
+#page-admin textarea.crm-modal-input{min-height:180px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.45;}
 #page-admin .crm-modal .mrow{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
 #page-admin .crm-modal button{min-height:44px;border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
@@ -1345,18 +1347,22 @@ class AdminPage {
             back.setAttribute('aria-labelledby', uid + 't');
             back.setAttribute('aria-describedby', uid + 'd');
             const promptAttrs = o.prompt ? [
-                `type="${AdminPage.esc(o.inputType || 'text')}"`,
+                !o.multiline ? `type="${AdminPage.esc(o.inputType || 'text')}"` : '',
                 'class="crm-modal-input"',
                 `aria-label="${AdminPage.esc(o.inputLabel || o.message || 'Saisie')}"`,
-                `value="${AdminPage.esc(o.def || '')}"`,
+                !o.multiline ? `value="${AdminPage.esc(o.def || '')}"` : '',
                 `autocomplete="${AdminPage.esc(o.autocomplete || 'off')}"`,
                 o.inputMode ? `inputmode="${AdminPage.esc(o.inputMode)}"` : '',
                 Number.isSafeInteger(o.maxLength) && o.maxLength > 0
                     ? `maxlength="${o.maxLength}"` : '',
                 o.pattern ? `pattern="${AdminPage.esc(o.pattern)}"` : ''
             ].filter(Boolean).join(' ') : '';
-            const promptHtml = o.prompt ? `<input ${promptAttrs} />` : '';
-            back.innerHTML = `<div class="crm-modal"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
+            const promptHtml = o.prompt
+                ? (o.multiline
+                    ? `<textarea ${promptAttrs} rows="${Number.isSafeInteger(o.rows) ? Math.min(18, Math.max(4, o.rows)) : 9}">${AdminPage.esc(o.def || '')}</textarea>`
+                    : `<input ${promptAttrs} />`)
+                : '';
+            back.innerHTML = `<div class="crm-modal${o.wide ? ' is-wide' : ''}"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
                 <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
             root.appendChild(back);
             if (shell) shell.setAttribute('inert', ''); // background can't be reached by pointer/tab/AT
@@ -1365,7 +1371,7 @@ class AdminPage {
             const cancelBtn = back.querySelector('.cancel');
             const cancelVal = o.prompt ? null : false;
             const okVal = () => o.prompt ? (input ? input.value.trim() : '') : true;
-            const focusables = () => Array.from(back.querySelectorAll('input,button')).filter(el => !el.disabled);
+            const focusables = () => Array.from(back.querySelectorAll('input,textarea,button')).filter(el => !el.disabled);
             const finish = (val) => {
                 document.removeEventListener('keydown', onKey, true);
                 if (shell) shell.removeAttribute('inert');
@@ -1385,6 +1391,7 @@ class AdminPage {
                 }
                 if (e.key === 'Enter') {
                     if (document.activeElement === cancelBtn) return; // let Enter cancel when Cancel is focused
+                    if (o.multiline && document.activeElement === input && !e.ctrlKey && !e.metaKey) return;
                     e.preventDefault(); finish(okVal());
                 }
             };
@@ -4653,6 +4660,11 @@ class AdminPage {
               <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Certification pré-gate Didit</h2><p>Preuve opérateur séparée des comptes Partners.</p><div class="ssub">Chargement…</div></section>
               <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true"><h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p><div class="ssub">Chargement…</div></section>
             </div>
+            <section id="partners-admin-kyc-human-reviews" class="partners-control-card" aria-busy="true">
+              <div class="partners-control-head"><div><h2>Recours humains KYC</h2>
+                <p>Demandes sanitisees, acces Didit audite et decision Risque/AAL2. Aucun document, e-mail, UUID utilisateur ou payload provider n'est affiche.</p></div></div>
+              <div class="ssub">Chargement des demandes de recours...</div>
+            </section>
             <section id="partners-admin-fiscal-profiles" class="partners-control-card" aria-busy="true">
               <div class="partners-control-head"><div><h2>Résidences fiscales à examiner</h2>
                 <p>File sanitisée Support + Finance. Aucun identifiant fiscal, document, e-mail ou UUID interne n’est affiché.</p></div></div>
@@ -5198,6 +5210,7 @@ class AdminPage {
             load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
             this._partnersLoadKycCertification({ force }),
             load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
+            load('kycHumanReviews', 'admin_partners_kyc_human_review_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersKycHumanReviews(d), 'partners-admin-kyc-human-reviews', 'Recours humains KYC'),
             this._partnersLoadFiscalProfiles({ force })
         ]);
         if (view === 'finance') return this._partnersLoadFinanceView({ force });
@@ -5677,6 +5690,7 @@ class AdminPage {
             kyc: () => load('kyc', 'admin_partners_kyc_quota', {}, (d) => this._renderPartnersKycQuota(d), 'partners-admin-kyc', 'KYC individuel'),
             kycCertification: () => this._partnersLoadKycCertification({ force: true }),
             risk: () => load('risk', 'admin_partners_risk_queue', { p_limit: 8, p_offset: 0, p_status: null }, (d) => this._renderPartnersRisk(d), 'partners-admin-risk', 'Risque'),
+            kycHumanReviews: () => load('kycHumanReviews', 'admin_partners_kyc_human_review_queue', { p_limit: 25, p_offset: 0, p_status: 'all' }, (d) => this._renderPartnersKycHumanReviews(d), 'partners-admin-kyc-human-reviews', 'Recours humains KYC'),
             fiscalProfiles: () => this._partnersLoadFiscalProfiles({ force: true }),
             configuration: () => load('configuration', 'admin_partners_configuration', {}, (d) => this._renderPartnersConfiguration(d), 'partners-admin-configuration', 'Configuration Partners'),
             revolut: () => load('revolut', 'admin_partners_revolut_payout_status', {}, (d) => this._renderPartnersRevolutStatus(d), this._partnersView === 'configuration' ? 'partners-admin-routes' : 'partners-admin-revolut', 'Revolut Business'),
@@ -7233,13 +7247,15 @@ class AdminPage {
     _renderPartnersConfiguration(data, { focusControl = '' } = {}) {
         const el = document.getElementById('partners-admin-configuration');
         if (!el) return;
-        if (data?.schema_version !== 1 || !Array.isArray(data.programs)
+        if (![1, 2].includes(Number(data?.schema_version)) || !Array.isArray(data.programs)
             || !Array.isArray(data.policies) || !data.configuration_counts) {
             this._partnersOpsUnavailable('partners-admin-configuration', 'Programme et release');
             return;
         }
         this._partnersConfiguration = data;
         const gates = Array.isArray(data.release_gates) ? data.release_gates : [];
+        const manifests = Array.isArray(data.deployment_manifests)
+            ? data.deployment_manifests : [];
         const counts = data.configuration_counts;
         const gateSatisfied = (key) => gates.some((gate) => (
             gate?.key === key && gate?.satisfied === true
@@ -7353,7 +7369,14 @@ class AdminPage {
                 action: 'release-gate',
                 key: gate?.key,
                 enabled: gate?.satisfied === true,
-                label: `Gate · ${gate?.key || 'inconnu'}`
+                label: `Gate · ${gate?.key || 'inconnu'}`,
+                approvalStatus: String(gate?.approval_status || (
+                    gate?.satisfied === true
+                        ? 'current'
+                        : (gate?.preproduction_satisfied === true
+                            ? 'current_preproduction' : 'not_satisfied')
+                )),
+                provenance: gate?.approval_provenance
             }))
         ].filter((row) => /^[a-z0-9_]+$/.test(String(row.key || ''))).map((row) => {
             const kind = row.action === 'release-flag' ? 'flag' : 'gate';
@@ -7362,10 +7385,20 @@ class AdminPage {
                 ? `<button type="button" class="partners-action${row.enabled ? ' is-danger' : ' is-success'}"
                     data-partners-action="${row.action}"
                     data-partners-key="${AdminPage.esc(row.key)}"
-                    data-partners-enabled="${targetEnabled ? 'true' : 'false'}">${row.enabled ? 'Désactiver' : 'Activer'}</button>`
+                    data-partners-enabled="${targetEnabled ? 'true' : 'false'}">${row.enabled
+                        ? 'Désactiver'
+                        : (kind === 'gate' ? 'Approuver avec preuves' : 'Activer')}</button>`
                 : `<span class="partners-state${row.enabled ? ' is-on' : ''}">${row.enabled ? 'Actif' : 'Inactif'} · lecture seule</span>`;
+            const approvalLabel = row.approvalStatus === 'current_preproduction'
+                ? 'courante en préproduction uniquement · aucune autorité live'
+                : row.approvalStatus;
+            const provenance = kind === 'gate' && row.provenance
+                ? `<small>Approbation ${AdminPage.esc(approvalLabel)} · package #${AdminPage.n(Number(row.provenance.package_version) || 0)} · ${AdminPage.esc(String(row.provenance.deployment_environment || 'environnement inconnu'))} · commit ${AdminPage.esc(String(row.provenance.source_commit_sha || '').slice(0, 12) || 'inconnu')} · expiration ${AdminPage.esc(AdminPage.timeAgo(row.provenance.expires_at))}</small>`
+                : (kind === 'gate'
+                    ? `<small>Approbation ${AdminPage.esc(row.approvalStatus || 'absente')} · aucune preuve courante</small>`
+                    : '');
             return `<div class="partners-control-item">
-              <span>${AdminPage.esc(row.label)}</span>
+              <span>${AdminPage.esc(row.label)}${provenance}</span>
               ${control}
             </div>`;
         }).join('');
@@ -7380,13 +7413,38 @@ class AdminPage {
             .map(([action, label]) => `<button type="button" class="partners-action"
                 data-partners-action="${action}">${label}</button>`)
             .join('');
+        const deploymentActions = this._partnersCanManageRelease === true
+            ? '<button type="button" class="partners-action" data-partners-action="release-manifest">Enregistrer un manifeste de déploiement</button>'
+            : '';
+        const deploymentRows = manifests.map((manifest) => {
+            const environment = String(manifest?.deployment_environment || '');
+            const version = Number(manifest?.manifest_version);
+            const manifestHash = String(manifest?.manifest_sha256 || '');
+            const commit = String(manifest?.source_commit_sha || '');
+            const rawKeys = Array.isArray(manifest?.document_keys)
+                ? manifest.document_keys : [];
+            const keys = rawKeys.filter((key) => (
+                /^[a-z][a-z0-9_]{2,63}$/.test(String(key || ''))
+            ));
+            if (!['preproduction', 'production'].includes(environment)
+                || !Number.isSafeInteger(version) || version < 1
+                || !/^[0-9a-f]{64}$/.test(manifestHash)
+                || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit)
+                || keys.length !== rawKeys.length) return '';
+            return `<div class="partners-control-item">
+              <span>${AdminPage.esc(environment)} · manifeste #${AdminPage.n(version)}
+                <small>commit ${AdminPage.esc(commit.slice(0, 12))} · empreinte ${AdminPage.esc(manifestHash.slice(0, 12))}… · ${AdminPage.n(keys.length)} preuve(s) · ${AdminPage.esc(AdminPage.timeAgo(manifest.registered_at))}</small>
+              </span>
+              <span class="partners-state is-on">Courant</span>
+            </div>`;
+        }).filter(Boolean).join('');
         el.removeAttribute('aria-busy');
         el.innerHTML = `<div class="partners-control-head">
             <div><h2>Programme, juridictions et release</h2><p>Les mutations exigent une justification auditée et les dépendances restent contrôlées côté serveur.</p></div>
             <span class="partners-state">${AdminPage.n(data.programs.length)} programme(s) · ${AdminPage.n(data.policies.length)} juridiction(s)</span>
           </div>
           <div class="partners-action-row">
-            ${configurationActions || '<span class="partners-state">Configuration en lecture seule pour vos capacités</span>'}
+            ${configurationActions}${deploymentActions}${configurationActions || deploymentActions ? '' : '<span class="partners-state">Configuration en lecture seule pour vos capacités</span>'}
           </div>
           <div class="partners-ops-stats" style="margin-top:12px">
             <div class="partners-ops-stat"><strong>${AdminPage.n(Number(counts.active_country_mappings) || 0)}</strong><span>mappings pays actifs</span></div>
@@ -7407,7 +7465,8 @@ class AdminPage {
             </nav>
           </section>
           <section aria-labelledby="partners-release-title">
-            <div class="partners-control-head" style="margin-top:14px"><div><h3 id="partners-release-title">Release</h3><p>Flags et gates autoritatifs.</p></div></div>
+            <div class="partners-control-head" style="margin-top:14px"><div><h3 id="partners-release-title">Release</h3><p>Chaque gate activée est liée à un manifeste, un commit, une juridiction et des preuves immuables.</p></div></div>
+            <div class="partners-control-grid">${deploymentRows || '<div class="ssub">Aucun manifeste de déploiement courant. Enregistrez d’abord le déploiement préproduction.</div>'}</div>
             ${releaseRows ? `<div class="partners-control-grid">${releaseRows}</div>` : '<div class="ssub">États de release indisponibles dans ce déploiement.</div>'}
           </section>
           <div class="ssub" style="margin-top:10px">${AdminPage.n(Number(counts.active_allowlist_entries) || 0)} compte(s) pilote autorisé(s).</div>`;
@@ -7580,6 +7639,10 @@ class AdminPage {
             ? String(focused?.dataset?.partnersAction || '') : '';
         el.innerHTML = `<h2>Certification pré-gate Didit</h2>
             <p>La décision signée reste consultable après fermeture du coupe-circuit. Une sandbox ne peut jamais valider la preuve live.</p>
+            <aside class="partners-provider-disclosure" aria-label="Informations juridiques Didit">
+              <strong>Avant d'utiliser votre identité réelle</strong>
+              <span>Norva demande cette certification ponctuelle et Didit fournit le parcours hébergé. Consultez la <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Norva</a>, la <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">notice de confidentialité Didit</a> et les <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">conditions Didit de vérification</a>.</span>
+            </aside>
             <div role="status" aria-live="polite" aria-atomic="true">${status}</div>`;
         if (el.dataset) el.dataset.partnersKycSignature = signature;
         if (focusWasInside) {
@@ -7700,6 +7763,102 @@ class AdminPage {
         el.innerHTML = `<h2>Risque</h2>
             <p>${AdminPage.n(data.total)} dossier(s) pseudonymisé(s). Les signaux réseau, documents et payloads provider ne sont pas affichés.</p>
             <div class="partners-ops-list">${rows || '<div class="ssub">Aucune revue en attente.</div>'}</div>`;
+    }
+
+    _renderPartnersKycHumanReviews(data) {
+        const el = document.getElementById('partners-admin-kyc-human-reviews');
+        if (!el) return;
+        const expectedKeys = [
+            'review_key',
+            'account_id',
+            'status',
+            'reason',
+            'resolution',
+            'verification_status',
+            'consent_status',
+            'requested_at',
+            'updated_at',
+            'resolved_at'
+        ].sort().join('|');
+        const valid = data?.schema_version === 1
+            && Number.isSafeInteger(data.total)
+            && data.total >= 0
+            && Array.isArray(data.items)
+            && data.items.length <= 100
+            && data.items.every((item) => item
+                && typeof item === 'object'
+                && !Array.isArray(item)
+                && Object.keys(item).sort().join('|') === expectedKeys
+                && /^khr_[0-9a-f]{24}$/.test(String(item.review_key || ''))
+                && /^prt_[0-9a-f]{24}$/.test(String(item.account_id || ''))
+                && ['requested', 'in_review', 'resolved'].includes(item.status)
+                && ['identity_result_contested', 'age_result_contested',
+                    'country_result_contested', 'verification_unavailable',
+                    'other_result_contested'].includes(item.reason)
+                && ['not_withdrawn', 'withdrawn'].includes(item.consent_status)
+                && Number.isFinite(Date.parse(String(item.requested_at || '')))
+                && Number.isFinite(Date.parse(String(item.updated_at || ''))));
+        if (!valid) {
+            this._partnersOpsUnavailable(
+                'partners-admin-kyc-human-reviews',
+                'Recours humains KYC'
+            );
+            return;
+        }
+        const reasonLabels = {
+            identity_result_contested: 'Identite contestee',
+            age_result_contested: 'Age conteste',
+            country_result_contested: 'Pays conteste',
+            verification_unavailable: 'Verification impossible',
+            other_result_contested: 'Autre resultat conteste'
+        };
+        const statusLabels = {
+            requested: 'A prendre en charge',
+            in_review: 'Revue humaine en cours',
+            resolved: 'Recours traite'
+        };
+        const resolutionLabels = {
+            original_decision_upheld: 'Decision initiale maintenue',
+            reverification_available: 'Nouvelle verification autorisee'
+        };
+        const canDecide = this._partnersCapabilities.risk === true;
+        const rows = data.items.map((item) => {
+            const key = String(item.review_key);
+            const actions = [];
+            if (canDecide && item.status !== 'resolved') {
+                actions.push(`<button type="button" class="partners-action"
+                    data-partners-action="kyc-human-review-locator"
+                    data-partners-review-key="${AdminPage.esc(key)}"
+                    data-partners-enabled="true">Ouvrir dans Didit</button>`);
+            }
+            if (canDecide && item.status === 'requested') {
+                actions.push(`<button type="button" class="partners-action is-success"
+                    data-partners-action="kyc-human-review-start"
+                    data-partners-review-key="${AdminPage.esc(key)}"
+                    data-partners-enabled="true">Prendre en charge</button>`);
+            }
+            if (canDecide && item.status === 'in_review') {
+                actions.push(`<button type="button" class="partners-action"
+                    data-partners-action="kyc-human-review-uphold"
+                    data-partners-review-key="${AdminPage.esc(key)}"
+                    data-partners-enabled="true">Maintenir</button>`);
+                actions.push(`<button type="button" class="partners-action is-success"
+                    data-partners-action="kyc-human-review-reverify"
+                    data-partners-review-key="${AdminPage.esc(key)}"
+                    data-partners-enabled="true">Autoriser un nouveau controle</button>`);
+            }
+            return `<article class="partners-ops-row" data-partners-review="${AdminPage.esc(key)}">
+                <span><strong>${AdminPage.esc(key)}</strong> · ${AdminPage.esc(String(item.account_id))}
+                  <small>${AdminPage.esc(reasonLabels[item.reason])} · ${AdminPage.esc(statusLabels[item.status])} · consentement ${AdminPage.esc(item.consent_status === 'withdrawn' ? 'retire' : 'non retire')} · ${AdminPage.esc(AdminPage.timeAgo(item.updated_at))}</small>
+                  ${item.resolution ? `<small>${AdminPage.esc(resolutionLabels[item.resolution] || item.resolution)}</small>` : ''}
+                </span>
+                <div class="partners-risk-actions">${actions.join('') || '<span class="partners-state">Lecture seule</span>'}</div>
+              </article>`;
+        }).join('');
+        el.removeAttribute('aria-busy');
+        el.innerHTML = `<div class="partners-control-head"><div><h2>Recours humains KYC</h2>
+            <p>${AdminPage.n(data.total)} demande(s) sanitisee(s). Le localisateur opaque n'est revele qu'apres MFA AAL2, capacite Risque, confirmation et justification auditee.</p></div></div>
+            <div class="partners-ops-list">${rows || '<div class="ssub">Aucun recours KYC.</div>'}</div>`;
     }
 
     _renderPartnersPayouts(data, batchesData, { failedKey = '' } = {}) {
@@ -8627,6 +8786,74 @@ class AdminPage {
         return value;
     }
 
+    async _partnersPromptJson(message, defaultValue, validate, invalidMessage) {
+        const raw = await this._modal({
+            title: 'Preuve immuable',
+            message,
+            prompt: true,
+            multiline: true,
+            wide: true,
+            rows: 12,
+            maxLength: 12000,
+            def: JSON.stringify(defaultValue || {}, null, 2),
+            okLabel: 'Valider le manifeste'
+        });
+        if (raw === null) return null;
+        try {
+            const parsed = JSON.parse(String(raw));
+            if (typeof validate === 'function' && !validate(parsed)) {
+                throw new Error('invalid_json_contract');
+            }
+            return parsed;
+        } catch (_) {
+            this._toast(invalidMessage || 'JSON invalide. Aucune action n’a été exécutée.', 'err');
+            return null;
+        }
+    }
+
+    _partnersApprovalRequiredDocuments(gateKey) {
+        const specialized = {
+            privacy_approved: [
+                'biometric_consent',
+                'dpia',
+                'gdpr_self_assessment',
+                'privacy_notice',
+                'records_of_processing'
+            ],
+            legal_and_tax_approved: ['legal_tax_review', 'partners_terms'],
+            individual_verification_coverage_confirmed: ['kyc_certification'],
+            individual_payout_coverage_confirmed: ['payout_coverage_review'],
+            country_policy_approved: ['country_policy_review', 'payout_corridor_review'],
+            financial_data_contract_approved: ['financial_contract_test'],
+            shadow_reconciliation_clean: ['shadow_reconciliation_report'],
+            backup_restore_verified: ['restore_rehearsal_proof'],
+            payout_execution_adapter_verified: ['payout_execution_test'],
+            manual_payout_workflow_verified: ['manual_payout_runbook_test'],
+            revolut_api_adapter_verified: ['revolut_api_certification'],
+            tv_relay_security_verified: ['tv_relay_security_review'],
+            general_release_approved: ['release_readiness_report']
+        }[String(gateKey || '')];
+        return Array.isArray(specialized)
+            ? ['approval_record', 'deployment_proof', ...specialized]
+            : [];
+    }
+
+    _partnersEvidenceHashesValid(value, requiredKeys = []) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        const entries = Object.entries(value);
+        if (entries.length < 1 || entries.length > 64) return false;
+        const hashes = [];
+        for (const [key, hash] of entries) {
+            if (!/^[a-z][a-z0-9_]{2,63}$/.test(key)
+                || typeof hash !== 'string'
+                || !/^[0-9a-f]{64}$/.test(hash)
+                || /^0{64}$/.test(hash)) return false;
+            hashes.push(hash);
+        }
+        return new Set(hashes).size === hashes.length
+            && requiredKeys.every((key) => Object.hasOwn(value, key));
+    }
+
     async _partnersJustification(label) {
         return this._partnersPrompt(
             `Justification auditée pour « ${label} » (12 à 1000 caractères) :`,
@@ -9362,6 +9589,87 @@ class AdminPage {
                     this._partnersRequests.delete(requestKey);
                 }
             }
+        }
+
+        if (['kyc-human-review-locator', 'kyc-human-review-start',
+            'kyc-human-review-uphold', 'kyc-human-review-reverify'].includes(action)) {
+            if (!enabled || this._partnersCapabilities.risk !== true) return false;
+            const reviewKey = String(button.dataset.partnersReviewKey || '');
+            if (!/^khr_[0-9a-f]{24}$/.test(reviewKey)) return false;
+            if (action === 'kyc-human-review-locator') {
+                const confirmation = await this._partnersTypedConfirmation(`LOOKUP:${reviewKey}`);
+                if (!confirmation) return false;
+                const justification = await this._partnersJustification(
+                    `consultation Didit du recours ${reviewKey}`
+                );
+                if (!justification) return false;
+                const result = await this._rpc('admin_partners_kyc_human_review_locator', {
+                    p_review_key: reviewKey,
+                    p_confirmation: confirmation,
+                    p_justification: justification
+                });
+                const lookup = result?.lookup;
+                if (result?.schema_version !== 1
+                    || result?.action !== 'kyc_human_review_locator_accessed'
+                    || !lookup
+                    || lookup.review_key !== reviewKey
+                    || lookup.provider !== 'didit'
+                    || !/^kyr_[0-9a-f]{24}$/.test(String(lookup.vendor_data || ''))) {
+                    throw new Error('invalid_kyc_human_review_locator_response');
+                }
+                if (typeof navigator.clipboard?.writeText !== 'function') {
+                    throw new Error('secure_clipboard_unavailable');
+                }
+                await navigator.clipboard.writeText(lookup.vendor_data);
+                return 'Localisateur Didit opaque copie. Collez-le dans la console Didit; il n est ni affiche ni conserve par cette page.';
+            }
+
+            const actionMap = {
+                'kyc-human-review-start': {
+                    rpcAction: 'start',
+                    confirmation: `START:${reviewKey}`,
+                    label: `prise en charge du recours ${reviewKey}`
+                },
+                'kyc-human-review-uphold': {
+                    rpcAction: 'resolve_upheld',
+                    confirmation: `RESOLVE-UPHOLD:${reviewKey}`,
+                    label: `maintien de la decision KYC pour ${reviewKey}`
+                },
+                'kyc-human-review-reverify': {
+                    rpcAction: 'resolve_reverification',
+                    confirmation: `RESOLVE-REVERIFY:${reviewKey}`,
+                    label: `nouvelle verification KYC pour ${reviewKey}`
+                }
+            };
+            const operation = actionMap[action];
+            const confirmation = await this._partnersTypedConfirmation(operation.confirmation);
+            if (!confirmation) return false;
+            const justification = await this._partnersJustification(operation.label);
+            if (!justification) return false;
+            const evidence = operation.rpcAction === 'start'
+                ? null
+                : await this._partnersPickEvidenceHash();
+            if (operation.rpcAction !== 'start' && !evidence) return false;
+            const result = await this._rpc('admin_partners_kyc_human_review_decide', {
+                p_review_key: reviewKey,
+                p_action: operation.rpcAction,
+                p_evidence_sha256: evidence?.hash || null,
+                p_evidence_observed_at: evidence?.observedAt || null,
+                p_confirmation: confirmation,
+                p_justification: justification
+            });
+            const expectedAction = operation.rpcAction === 'start'
+                ? 'kyc_human_review_started'
+                : 'kyc_human_review_resolved';
+            if (result?.schema_version !== 1
+                || result?.action !== expectedAction
+                || result?.review?.key !== reviewKey
+                || !['in_review', 'resolved'].includes(result?.review?.status)) {
+                throw new Error('invalid_kyc_human_review_decision_response');
+            }
+            return operation.rpcAction === 'start'
+                ? 'Recours pris en charge par un operateur Risque.'
+                : 'Recours resolu avec preuve locale hachee; aucun document n a ete envoye a Norva.';
         }
 
         if (['access-request-approve', 'access-request-decline'].includes(action)) {
@@ -10465,11 +10773,225 @@ class AdminPage {
             return `Capacité ${capability} ${enabled ? 'activée' : 'retirée'} pour ${subjectEmail}.`;
         }
 
+        if (action === 'release-manifest') {
+            if (this._partnersCanManageRelease !== true) return false;
+            const configuration = this._partnersConfiguration;
+            if (![1, 2].includes(Number(configuration?.schema_version))) {
+                throw new Error('partners_configuration_unavailable');
+            }
+            const current = Array.isArray(configuration.deployment_manifests)
+                ? configuration.deployment_manifests.find((item) => (
+                    item?.deployment_environment === 'preproduction'
+                )) : null;
+            const environment = await this._partnersPrompt(
+                'Environnement exact du manifeste (preproduction ou production) :',
+                'preproduction',
+                (value) => ['preproduction', 'production'].includes(value),
+                'Environnement invalide.'
+            );
+            if (!environment) return false;
+            const commit = await this._partnersPrompt(
+                'SHA complet du commit réellement déployé :',
+                current?.source_commit_sha || '',
+                (value) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value),
+                'Le SHA du commit doit contenir exactement 40 ou 64 caractères hexadécimaux minuscules.'
+            );
+            if (!commit) return false;
+            const deploymentKey = await this._partnersPrompt(
+                'Clé immuable du déploiement (preuve, run ou invocation) :',
+                current?.deployment_key || `${environment}-${commit.slice(0, 12)}`,
+                (value) => value.length >= 3 && value.length <= 128
+                    && /^[A-Za-z0-9][A-Za-z0-9._:/-]+$/.test(value),
+                'Clé de déploiement invalide.'
+            );
+            if (!deploymentKey) return false;
+            const deploymentHash = await this._partnersPrompt(
+                'SHA-256 de la preuve immuable du déploiement :',
+                '',
+                (value) => /^[0-9a-f]{64}$/.test(value) && !/^0{64}$/.test(value),
+                'Empreinte SHA-256 de déploiement invalide.'
+            );
+            if (!deploymentHash) return false;
+            const documentHashes = await this._partnersPromptJson(
+                'Associez chaque preuve documentaire à son SHA-256. deployment_proof est obligatoire. Les valeurs doivent provenir du registre privé contrôlé, jamais de texte inventé.',
+                { deployment_proof: deploymentHash },
+                (value) => this._partnersEvidenceHashesValid(value, ['deployment_proof']),
+                'Le manifeste documentaire est invalide ou ne contient pas deployment_proof.'
+            );
+            if (!documentHashes) return false;
+            if (documentHashes.deployment_proof !== deploymentHash) {
+                this._toast('deployment_proof doit être identique à la preuve du déploiement.', 'err');
+                return false;
+            }
+            const justification = await this._partnersJustification(
+                `enregistrement du manifeste ${environment} ${commit.slice(0, 12)}`
+            );
+            if (!justification) return false;
+            const confirmation = await this._partnersTypedConfirmation(
+                `REGISTER-MANIFEST:${environment}:${commit}:${deploymentHash}`
+            );
+            if (!confirmation) return false;
+            const result = await this._rpc(
+                'admin_partners_deployment_manifest_register',
+                {
+                    p_deployment_environment: environment,
+                    p_source_commit_sha: commit,
+                    p_deployment_key: deploymentKey,
+                    p_deployment_evidence_sha256: deploymentHash,
+                    p_document_hashes: documentHashes,
+                    p_justification: justification
+                }
+            );
+            if (result?.schema_version !== 1
+                || !['deployment_manifest_registered', 'deployment_manifest_unchanged']
+                    .includes(String(result?.action || ''))
+                || result?.deployment?.environment !== environment
+                || result?.deployment?.source_commit_sha !== commit
+                || result?.deployment?.deployment_key !== deploymentKey
+                || result?.deployment?.deployment_evidence_sha256 !== deploymentHash
+                || !/^[0-9a-f]{64}$/.test(String(result?.deployment?.manifest_sha256 || ''))) {
+                throw new Error('invalid_partners_deployment_manifest_response');
+            }
+            return result.action === 'deployment_manifest_unchanged'
+                ? 'Le manifeste courant était déjà enregistré à l’identique.'
+                : `Manifeste ${environment} #${AdminPage.n(Number(result.deployment.manifest_version) || 0)} enregistré.`;
+        }
+
         if (action === 'release-flag' || action === 'release-gate') {
             const key = String(button.dataset.partnersKey || '');
             if (!/^[a-z0-9_]+$/.test(key)) return false;
             const kind = action === 'release-flag' ? 'flag' : 'gate';
             if (!this._partnersCanUseReleaseControl(kind, key, enabled)) return false;
+            if (action === 'release-gate' && enabled) {
+                const configuration = this._partnersConfiguration;
+                const manifests = Array.isArray(configuration?.deployment_manifests)
+                    ? configuration.deployment_manifests : [];
+                if (Number(configuration?.schema_version) !== 2 || manifests.length < 1) {
+                    this._toast('Enregistrez d’abord un manifeste de déploiement courant pour l’environnement visé.', 'err');
+                    return false;
+                }
+                const environment = await this._partnersPrompt(
+                    'Environnement exact couvert : production peut autoriser le live ; preproduction sert uniquement aux preuves de readiness et à la certification Didit supervisée.',
+                    manifests.some((item) => item?.deployment_environment === 'production')
+                        ? 'production' : String(manifests[0]?.deployment_environment || ''),
+                    (value) => manifests.some((item) => (
+                        item?.deployment_environment === value
+                    )),
+                    'Aucun manifeste courant ne correspond à cet environnement.'
+                );
+                if (!environment) return false;
+                const manifest = manifests.find((item) => (
+                    item?.deployment_environment === environment
+                ));
+                const programDefault = configuration.programs.find((program) => (
+                    program?.status === 'active'
+                ))?.version_key || configuration.programs[0]?.version_key || '';
+                const programKey = await this._partnersPrompt(
+                    'Version exacte du programme approuvé :',
+                    programDefault,
+                    (value) => configuration.programs.some((program) => (
+                        program?.version_key === value
+                            && ['draft', 'active'].includes(program?.status)
+                    )),
+                    'Programme indisponible.'
+                );
+                if (!programKey) return false;
+                const programPolicies = configuration.policies.filter((policy) => (
+                    policy?.program_version_key === programKey
+                ));
+                const jurisdictions = await this._partnersPromptJson(
+                    'Juridictions exactes couvertes. Le pilote France sans subdivision doit être [{"country_code":"FR","subdivision_code":null}].',
+                    programPolicies.slice(0, 1).map((policy) => ({
+                        country_code: policy.country_code,
+                        subdivision_code: policy.subdivision_code || null
+                    })),
+                    (value) => Array.isArray(value) && value.length >= 1
+                        && value.length <= 100
+                        && value.every((scope) => {
+                            if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return false;
+                            const keys = Object.keys(scope);
+                            return keys.includes('country_code') && keys.length <= 2
+                                && /^[A-Z]{2}$/.test(String(scope.country_code || ''))
+                                && (scope.subdivision_code == null
+                                    || (/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(String(scope.subdivision_code))
+                                        && String(scope.subdivision_code).length <= 12));
+                        })
+                        && new Set(value.map((scope) => (
+                            `${scope.country_code}:${scope.subdivision_code || ''}`
+                        ))).size === value.length,
+                    'Périmètre de juridictions invalide ou dupliqué.'
+                );
+                if (!jurisdictions) return false;
+                const required = this._partnersApprovalRequiredDocuments(key);
+                if (required.length < 1) throw new Error('unknown_partners_gate_contract');
+                const evidenceDefaults = Object.fromEntries(required.map((documentKey) => (
+                    [documentKey, '']
+                )));
+                const documentHashes = await this._partnersPromptJson(
+                    `Renseignez les SHA-256 des preuves requises : ${required.join(', ')}. Chaque hash doit aussi appartenir au manifeste courant.`,
+                    evidenceDefaults,
+                    (value) => this._partnersEvidenceHashesValid(value, required),
+                    'Le package de preuves est incomplet ou invalide.'
+                );
+                if (!documentHashes) return false;
+                const expiresDefault = new Date(
+                    Date.now() + 30 * 24 * 60 * 60 * 1000
+                ).toISOString();
+                const expiresAt = await this._partnersPrompt(
+                    'Expiration ISO-8601 de cette approbation (maximum 366 jours) :',
+                    expiresDefault,
+                    (value) => {
+                        const at = Date.parse(value);
+                        return Number.isFinite(at)
+                            && at > Date.now() + 5 * 60 * 1000
+                            && at <= Date.now() + 366 * 24 * 60 * 60 * 1000;
+                    },
+                    'Expiration invalide.'
+                );
+                if (!expiresAt) return false;
+                const justification = await this._partnersJustification(
+                    `approbation documentée de ${key}`
+                );
+                if (!justification) return false;
+                const confirmation = await this._partnersTypedConfirmation(
+                    `APPROVE-GATE:${key}:${programKey}:${environment}:${String(manifest.source_commit_sha || '')}`
+                );
+                if (!confirmation) return false;
+                const result = await this._rpc(
+                    'admin_partners_release_gate_approve',
+                    {
+                        p_gate_key: key,
+                        p_program_version_key: programKey,
+                        p_jurisdictions: jurisdictions,
+                        p_document_hashes: documentHashes,
+                        p_source_commit_sha: manifest.source_commit_sha,
+                        p_deployment_environment: environment,
+                        p_deployment_key: manifest.deployment_key,
+                        p_deployment_evidence_sha256:
+                            manifest.deployment_evidence_sha256,
+                        p_expires_at: new Date(expiresAt).toISOString(),
+                        p_justification: justification
+                    }
+                );
+                if (result?.schema_version !== 1
+                    || !['release_gate_approved', 'release_gate_approval_renewed']
+                        .includes(String(result?.action || ''))
+                    || result?.gate_key !== key
+                    || result?.satisfied !== true
+                    || result?.effective !== true
+                    || result?.recorded_satisfied !== true
+                    || !/^[0-9a-f]{64}$/.test(String(result?.approval?.package_sha256 || ''))
+                    || result?.approval?.source_commit_sha !== manifest.source_commit_sha
+                    || result?.approval?.deployment_environment !== environment) {
+                    throw new Error('invalid_partners_release_gate_approval_response');
+                }
+                if (environment === 'preproduction') {
+                    return `Gate ${key} prouvée pour la préproduction et la certification supervisée. L’autorité live reste fermée.`;
+                }
+                return result.action === 'release_gate_approval_renewed'
+                    ? `Gate ${key} renouvelée en production avec un nouveau package de preuves.`
+                    : `Gate ${key} approuvée en production avec un package de preuves immuable.`;
+            }
             const confirmed = await this._confirm(
                 `${enabled ? 'Activer' : 'Désactiver'} le ${kind} « ${key} » ? Les dépendances seront revérifiées dans la même transaction.`,
                 { danger: !enabled, okLabel: enabled ? 'Activer' : 'Désactiver' }

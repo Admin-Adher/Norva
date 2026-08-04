@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "status": "draft",
   "release_key": "partners-pilot-draft",
   "candidate_commit_sha": null,
@@ -18,7 +18,8 @@
     "terms_sha256": null,
     "disclosure_version": null,
     "disclosure_sha256": null,
-    "privacy_review_evidence": null,
+    "privacy_pilot_self_assessment_evidence": null,
+    "privacy_public_release_review_evidence": null,
     "public_surfaces": {
       "verified_at": null,
       "hash_basis": "normalized_deployment_artifact",

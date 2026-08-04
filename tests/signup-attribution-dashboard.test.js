@@ -201,7 +201,7 @@ test('Admin CRM clearly distinguishes payment country from signup acquisition', 
 });
 
 test('privacy notice documents first-party signup context and no raw IP retention', () => {
-  assert.match(privacy, /Last updated: 3 August 2026/);
+  assert.match(privacy, /Last updated: 4 August 2026/);
   assert.match(privacy, /Sign-up context/);
   assert.match(privacy, /approximate country\/region\/city supplied by Cloudflare/);
   assert.match(privacy, /does not retain the raw IP address in this record/);

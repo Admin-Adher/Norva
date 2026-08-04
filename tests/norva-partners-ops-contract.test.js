@@ -522,6 +522,12 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   assert.match(rehearsal, /if \[\[ "\$\{EUID\}" -ne 0 \]\]/);
   assert.match(rehearsal, /flock -n 9/);
+  assert.match(rehearsal, /if \[\[ "\$#" -ne 2 \]\]/);
+  assert.match(
+    rehearsal,
+    /REHEARSAL_MODE="\$\{1:-\}"[\s\S]*predeploy[\s\S]*postdeploy/,
+  );
+  assert.match(rehearsal, /TARGET_SHA="\$\{2:-\}"/);
   assert.match(rehearsal, /\^\[0-9a-f\]\{40\}\$/);
   assert.match(rehearsal, /GIT=\(git -c "safe\.directory=\$REPO_ROOT" -C "\$REPO_ROOT"\)/);
   assert.match(rehearsal, /"\$\{GIT\[@\]\}" show "\$TARGET_SHA:\$candidate_file"/);
@@ -586,25 +592,79 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const releaseGateAal2Migration = rehearsal.indexOf(
     '20260803204442_partners_release_gate_aal2.sql',
   );
+  const approvalRegistryMigration = rehearsal.indexOf(
+    '20260804083541_partners_approval_registry.sql',
+  );
+  const biometricConsentMigration = rehearsal.indexOf(
+    '20260804084500_partners_biometric_consent_contract.sql',
+  );
+  const diditPurgeMigration = rehearsal.indexOf(
+    '20260804093000_partners_didit_purge_outbox.sql',
+  );
+  const privacyRightsMigration = rehearsal.indexOf(
+    '20260804160000_partners_privacy_rights_human_review.sql',
+  );
+  const reverificationOverrideMigration = rehearsal.indexOf(
+    '20260804165000_partners_kyc_reverification_override.sql',
+  );
+  const biometricEnforcementMigration = rehearsal.indexOf(
+    '20260804170000_partners_biometric_consent_enforcement.sql',
+  );
   assert.ok(
     operatorCapabilitiesMigration < accessDecisionEmailMigration
       && accessDecisionEmailMigration < diditCertificationMigration
-      && diditCertificationMigration < releaseGateAal2Migration,
-    'operator capabilities, decision email, Didit certification and release-gate AAL2 must keep their atomic replay order',
+      && diditCertificationMigration < releaseGateAal2Migration
+      && releaseGateAal2Migration < approvalRegistryMigration
+      && approvalRegistryMigration < biometricConsentMigration
+      && biometricConsentMigration < diditPurgeMigration
+      && diditPurgeMigration < privacyRightsMigration
+      && privacyRightsMigration < reverificationOverrideMigration
+      && reverificationOverrideMigration < biometricEnforcementMigration,
+    'the ten pending Partners migrations must keep their atomic final-state replay order',
   );
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_THREE"/);
   assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FOUR"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_FIVE"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SIX"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_SEVEN"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_EIGHT"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_NINE"/);
+  assert.match(rehearsal, /-f "\/candidate\/\$MIGRATION_TEN"/);
   assert.match(rehearsal, /migration_three_sha256=/);
   assert.match(rehearsal, /migration_four_sha256=/);
+  assert.match(rehearsal, /migration_five_sha256=/);
+  assert.match(rehearsal, /migration_six_sha256=/);
+  assert.match(rehearsal, /migration_seven_sha256=/);
+  assert.match(rehearsal, /migration_eight_sha256=/);
+  assert.match(rehearsal, /migration_nine_sha256=/);
+  assert.match(rehearsal, /migration_ten_sha256=/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
-  assert.match(rehearsal, /"0\|0\|0\|0\|0"/);
-  assert.match(rehearsal, /"1\|1\|1\|1\|1"/);
-  assert.match(rehearsal, /migrations_applied=4/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "36\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=36/);
-  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "3\|0"/);
-  assert.match(rehearsal, /migration_relations_verified=3/);
+  assert.match(rehearsal, /"0(?:\|0){20}"/);
+  assert.match(rehearsal, /"1(?:\|1){20}"/);
+  assert.match(
+    rehearsal,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="0(?:\|0){20}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="1(?:\|1){20}"/,
+  );
+  assert.match(
+    rehearsal,
+    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=10[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
+  );
+  assert.equal(
+    (rehearsal.match(/--single-transaction/g) || []).length,
+    1,
+    'only predeploy may execute the migration transaction',
+  );
+  assert.match(rehearsal, /migrations_applied=\$MIGRATIONS_APPLIED/);
+  assert.match(
+    rehearsal,
+    /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
+  );
+  assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "119\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=119/);
+  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "14\|0"/);
+  assert.match(rehearsal, /migration_relations_verified=14/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
   assert.match(rehearsal, /affiliate_restore_compatibility\.sql/);
   assert.match(workflow, /affiliate_restore_compatibility\.sql/);
@@ -613,6 +673,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     'affiliate_access_requests.sql',
     'affiliate_dispute_won.sql',
     'affiliate_fiscal_payout_onboarding.sql',
+    'affiliate_kyc_reverification_override.sql',
     'affiliate_member_write_rate_limits.sql',
     'affiliate_revolut_manual_hybrid.sql',
     'revenuecat_transfer.sql',
@@ -682,6 +743,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     restoreGuide,
     /sudo bash ops\/hetzner\/backup\/rehearse-partners-physical\.sh/,
   );
+  assert.match(restoreGuide, /predeploy/);
+  assert.match(restoreGuide, /postdeploy/);
+  assert.match(restoreGuide, /migrations_applied=10/);
+  assert.match(restoreGuide, /migrations_applied=0/);
+  assert.match(restoreGuide, /migration_replay_skipped=true/);
   assert.match(restoreGuide, /--network none/);
   assert.match(restoreGuide, /result=passed/);
   assert.match(restoreGuide, /pgtap_profile=physical_restore_compatible_v1/);
@@ -1058,6 +1124,9 @@ test('offsite Partners backup is scheduled, least-privilege and secret-backed', 
 test('self-hosted Edge runtimes receive the complete fail-closed Partners configuration surface', () => {
   const compose = read('ops/hetzner/docker-compose.supabase.yml');
   const example = read('ops/hetzner/.env.hetzner.example');
+  const pilotPreactivation = read(
+    'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh',
+  );
   const required = [
     'NORVA_PARTNERS_ALLOWED_ORIGINS',
     'NORVA_PARTNERS_DEVICE_ALLOWED_ORIGINS',
@@ -1106,6 +1175,21 @@ test('self-hosted Edge runtimes receive the complete fail-closed Partners config
   assert.match(
     compose,
     /NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:\s*\$\{NORVA_PARTNERS_DIDIT_CERTIFICATION_ENABLED:-false\}/,
+  );
+  assert.match(
+    compose,
+    /NORVA_PARTNERS_TV_RELAY_HANDOFF_URL:\s*\$\{NORVA_PARTNERS_TV_RELAY_HANDOFF_URL:-https:\/\/norva\.tv\/app\.html\}/,
+    'both Edge replicas must default to the Android TV canonical relay landing',
+  );
+  assert.match(
+    example,
+    /^NORVA_PARTNERS_TV_RELAY_HANDOFF_URL=https:\/\/norva\.tv\/app\.html$/m,
+    'the self-host example must use the exact Android TV relay landing',
+  );
+  assert.match(
+    pilotPreactivation,
+    /require_exact "\$container" NORVA_PARTNERS_TV_RELAY_HANDOFF_URL https:\/\/norva\.tv\/app\.html "\$target_name"/,
+    'pilot preactivation must reject an Edge replica with a drifting relay landing',
   );
   assert.doesNotMatch(
     example,

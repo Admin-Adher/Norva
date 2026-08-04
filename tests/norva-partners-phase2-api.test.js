@@ -229,12 +229,14 @@ test('Didit webhook RPC sanitizer separates applied, sandbox and quarantine stat
     schema_version: 1,
     action: 'kyc_result_observed',
     replayed: false,
+    purge_status: 'not_required',
     environment: 'sandbox',
     reason: 'sandbox_non_authoritative',
   })), {
     schema_version: 1,
     action: 'kyc_result_observed',
     replayed: false,
+    purge_status: 'not_required',
     environment: 'sandbox',
     reason: 'sandbox_non_authoritative',
   });
@@ -242,12 +244,14 @@ test('Didit webhook RPC sanitizer separates applied, sandbox and quarantine stat
     schema_version: 1,
     action: 'kyc_result_quarantined',
     replayed: true,
+    purge_status: 'purge_pending',
     environment: 'live',
     reason: 'provider_config_mismatch',
   })), {
     schema_version: 1,
     action: 'kyc_result_quarantined',
     replayed: true,
+    purge_status: 'purge_pending',
     environment: 'live',
     reason: 'provider_config_mismatch',
   });
@@ -256,6 +260,7 @@ test('Didit webhook RPC sanitizer separates applied, sandbox and quarantine stat
       schema_version: 1,
       action: 'kyc_result_observed',
       replayed: false,
+      purge_status: 'not_required',
       environment: 'live',
       reason: 'sandbox_non_authoritative',
     },
@@ -263,6 +268,7 @@ test('Didit webhook RPC sanitizer separates applied, sandbox and quarantine stat
       schema_version: 1,
       action: 'kyc_result_quarantined',
       replayed: false,
+      purge_status: 'purge_pending',
       environment: 'sandbox',
       reason: 'dogfood_override',
     },
@@ -344,6 +350,7 @@ test('KYC session input is exact and consent version is supplied by the sanitize
   const expected = {
     language: 'fr',
     consentVersion: 'partners-fr-v1',
+    biometricConsentVersion: 'partners-biometric-consent-v1',
     consentGranted: true,
     capacityConfirmed: true,
   };
@@ -353,6 +360,7 @@ test('KYC session input is exact and consent version is supplied by the sanitize
     { ...expected, capacityConfirmed: false },
     { ...expected, language: 'fr-FR' },
     { ...expected, consentVersion: 'x' },
+    { ...expected, biometricConsentVersion: 'partners-biometric-consent-v0' },
     { ...expected, businessName: 'Forbidden KYB' },
   ]) {
     assert.throws(() => parseKycSessionInput(invalid));
@@ -394,13 +402,13 @@ test('Didit session creation sends no identity, contact, document or biometric d
     vendor_data: vendorData,
     status: 'Not Started',
     workflow_id: workflowId,
-    workflow_version: 4,
+    workflow_version: 1,
     callback: 'https://norva.tv/partners-kyc-return',
   }, config, vendorData));
   assert.deepEqual(created, {
     sessionId,
     workflowId,
-    workflowVersion: 4,
+    workflowVersion: 1,
     providerStatus: 'not_started',
     hostedUrl: 'https://verify.didit.me/fr/session/opaque-token',
   });
@@ -420,7 +428,7 @@ test('Didit session creation sends no identity, contact, document or biometric d
       vendor_data: vendorData,
       status: 'Not Started',
       workflow_id: workflowId,
-      workflow_version: 4,
+      workflow_version: 1,
       callback: 'https://norva.tv/partners-kyc-return',
       ...mutation,
     }, config, vendorData));
@@ -446,7 +454,7 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
     session_id: sessionId,
     status: 'Approved',
     workflow_id: workflowId,
-    workflow_version: 4,
+    workflow_version: 1,
     vendor_data: 'nvp_private',
     decision: {
       id_verifications: [{
@@ -484,12 +492,12 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
     config,
     timestamp,
   ));
-  const expectedFingerprint = await diditConfigFingerprint(config, 4);
+  const expectedFingerprint = await diditConfigFingerprint(config, 1);
   assert.deepEqual(result, {
     providerEventId: eventId,
     providerSessionId: sessionId,
     providerWorkflowId: workflowId,
-    providerWorkflowVersion: 4,
+    providerWorkflowVersion: 1,
     providerEnvironment: 'sandbox',
     providerConfigFingerprint: expectedFingerprint,
     providerStatus: 'approved',
@@ -601,47 +609,41 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
   const crossEnvironmentRaw = Buffer.from(
     JSON.stringify(crossEnvironmentPayload),
   );
-  const crossEnvironmentResult = plain(
-    await verifyAndNormalizeDiditWebhook(
-      new Uint8Array(crossEnvironmentRaw),
-      new Headers({
-        'X-Timestamp': String(timestamp),
-        'X-Signature': cryptoNode.createHmac('sha256', webhookSecret)
-          .update(crossEnvironmentRaw)
-          .digest('hex'),
-      }),
-      config,
-      timestamp,
-    ),
-  );
-  assert.equal(
-    crossEnvironmentResult.providerEnvironment,
-    'live',
-    'a valid signed environment mismatch must reach SQL quarantine',
-  );
-  assert.equal(
-    crossEnvironmentResult.providerConfigFingerprint,
-    await diditConfigFingerprint({ ...config, environment: 'live' }, 4),
-    'the event fingerprint uses the provider-signed environment',
-  );
+  await assert.rejects(() => verifyAndNormalizeDiditWebhook(
+    new Uint8Array(crossEnvironmentRaw),
+    new Headers({
+      'X-Timestamp': String(timestamp),
+      'X-Signature': cryptoNode.createHmac('sha256', webhookSecret)
+        .update(crossEnvironmentRaw)
+        .digest('hex'),
+    }),
+    config,
+    timestamp,
+  ), undefined, 'a signed environment mismatch must fail before persistence');
 });
 
-test('Didit console probe requires a full-body signature and an explicitly non-production envelope', async () => {
+test('Didit console probe requires a full-body signature and the exact v3 binding', async () => {
   const {
     loadDiditConfig,
     verifyDiditConsoleTestWebhook,
   } = bundled('supabase/functions/_shared/didit-partners.ts');
-  const config = loadDiditConfig((name) => diditConfig()[name]);
+  const liveValues = diditConfig({ DIDIT_ENVIRONMENT: 'live' });
+  const config = loadDiditConfig((name) => liveValues[name]);
   const timestamp = 1785661809;
   const payload = {
+    event_id: eventId,
     session_id: sessionId,
     status: 'Approved',
     vendor_data: 'test-vendor-data-123',
     webhook_type: 'status.updated',
     timestamp,
     created_at: timestamp,
+    application_id: applicationId,
+    environment: 'live',
+    sandbox_scenario: null,
     workflow_id: workflowId,
-    metadata: { test_webhook: true },
+    workflow_version: 1,
+    metadata: {},
     decision: { status: 'Approved' },
   };
   async function headersFor(body) {
@@ -661,13 +663,24 @@ test('Didit console probe requires a full-body signature and an explicitly non-p
     timestamp,
   ), true);
 
-  const productionLike = { ...payload, event_id: eventId };
+  const foreignApplication = {
+    ...payload,
+    application_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+  };
   assert.equal(await verifyDiditConsoleTestWebhook(
-    new Uint8Array(Buffer.from(JSON.stringify(productionLike))),
-    await headersFor(productionLike),
+    new Uint8Array(Buffer.from(JSON.stringify(foreignApplication))),
+    await headersFor(foreignApplication),
     config,
     timestamp,
-  ), false, 'any production envelope field must force the normal reducer path');
+  ), false, 'a foreign application must fail closed');
+
+  const foreignEnvironment = { ...payload, environment: 'sandbox' };
+  assert.equal(await verifyDiditConsoleTestWebhook(
+    new Uint8Array(Buffer.from(JSON.stringify(foreignEnvironment))),
+    await headersFor(foreignEnvironment),
+    config,
+    timestamp,
+  ), false, 'a foreign environment must fail closed');
 
   const tampered = await headersFor(payload);
   tampered.set('X-Signature-V2', '0'.repeat(64));
@@ -679,7 +692,7 @@ test('Didit console probe requires a full-body signature and an explicitly non-p
   ));
 });
 
-test('Didit webhook rejects foreign envelopes but preserves signed workflow drift for SQL quarantine', async () => {
+test('Didit webhook rejects foreign bindings and preserves node drift for SQL quarantine', async () => {
   const {
     diditConfigFingerprint,
     loadDiditConfig,
@@ -731,25 +744,14 @@ test('Didit webhook rejects foreign envelopes but preserves signed workflow drif
   }));
 
   const baselineFingerprint = await diditConfigFingerprint(config, 1);
-  const workflowDrift = plain(await signed({
+  await assert.rejects(() => signed({
     ...base,
     workflow_id: applicationId,
   }));
-  assert.equal(workflowDrift.providerWorkflowId, applicationId);
-  assert.notEqual(
-    workflowDrift.providerConfigFingerprint,
-    baselineFingerprint,
-  );
-
-  const versionDrift = plain(await signed({
+  await assert.rejects(() => signed({
     ...base,
     workflow_version: 2,
   }));
-  assert.equal(versionDrift.providerWorkflowVersion, 2);
-  assert.notEqual(
-    versionDrift.providerConfigFingerprint,
-    baselineFingerprint,
-  );
 
   const nodeDrift = plain(await signed({
     ...base,
@@ -1105,8 +1107,8 @@ test('Didit Edge and SQL boundaries require immutable environment bindings', () 
   );
   assert.match(
     read('supabase/functions/_shared/didit-partners.ts'),
-    /metadata\?\.test_webhook !== true[\s\S]*productionEnvelopeFields\.some\(\(key\) => Object\.hasOwn\(raw, key\)\)/,
-    'only a signed console marker with an explicitly non-production envelope may bypass SQL',
+    /X-Didit-Test-Webhook[\s\S]*uuid\(raw\.application_id\) !== config\.applicationId[\s\S]*raw\.environment !== config\.environment[\s\S]*uuid\(raw\.workflow_id\) !== config\.workflowId/,
+    'only a signed console marker with the exact v3 binding may bypass SQL',
   );
   assert.doesNotMatch(
     webhook,

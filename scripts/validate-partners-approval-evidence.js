@@ -32,6 +32,8 @@ const LEGAL_CHECKS = [
   'refund_chargeback_and_reversal_rules_approved',
 ];
 const PRIVACY_CHECKS = [
+  'gdpr_self_assessment_documented',
+  'records_of_processing_documented',
   'data_inventory_and_purposes_approved',
   'lawful_bases_approved',
   'subprocessor_disclosures_approved',
@@ -42,6 +44,14 @@ const PRIVACY_CHECKS = [
   'kyc_and_payout_notices_approved',
   'public_privacy_notice_approved',
   'security_incident_notification_flow_approved',
+  'dpo_mandatoriness_assessed',
+  'dpia_processing_and_purposes_documented',
+  'dpia_necessity_and_proportionality_assessed',
+  'dpia_risks_to_rights_and_freedoms_assessed',
+  'dpia_safeguards_and_residual_risk_assessed',
+  'dpia_controller_validation_recorded',
+  'dpia_prior_consultation_determined',
+  'pilot_scope_and_reassessment_triggers_approved',
 ];
 const COUNTRY_CHECKS = [
   'legal_and_tax_dependency_approved',
@@ -120,8 +130,9 @@ function validateChecks(value, keys, trail) {
   }
 }
 
-function validateDecision(value, key, role, checks, nowMs) {
+function validateDecision(value, key, role, checks, nowMs, options = {}) {
   const trail = `decisions.${key}`;
+  const extraKeys = options.extraKeys || [];
   assertExactKeys(value, [
     'approved',
     'checks',
@@ -130,6 +141,7 @@ function validateDecision(value, key, role, checks, nowMs) {
     'reviewer_reference_sha256',
     'reviewer_role',
     'valid_until',
+    ...extraKeys,
   ], trail);
   assert(typeof value.approved === 'boolean', `${trail}.approved must be boolean`);
   assert(value.reviewer_role === role,
@@ -142,6 +154,7 @@ function validateDecision(value, key, role, checks, nowMs) {
   );
   assertOptionalEvidence(value.evidence, `${trail}.evidence`, nowMs);
   validateChecks(value.checks, checks, `${trail}.checks`);
+  if (options.validateExtra) options.validateExtra(value, trail);
 }
 
 function validateApprovalPackage(value, options = {}) {
@@ -157,11 +170,12 @@ function validateApprovalPackage(value, options = {}) {
     'package_key',
     'program',
     'repository',
+    'release_scope',
     'schema_version',
     'status',
     'target_environment',
   ], 'approval package');
-  assert(value.schema_version === 1, 'schema_version must be 1');
+  assert(value.schema_version === 3, 'schema_version must be 3');
   assert(['draft', 'approved'].includes(value.status),
     'status must be draft or approved');
   assert(VERSION_KEY.test(value.package_key || ''),
@@ -174,10 +188,25 @@ function validateApprovalPackage(value, options = {}) {
   assert(value.deployment_id === null
     || DEPLOYMENT_ID.test(value.deployment_id),
   'deployment_id must be null or an opaque deployment identifier');
-  assert(['sandbox', 'production'].includes(value.target_environment),
-    'target_environment must be sandbox or production');
+  assert(['preproduction', 'production'].includes(value.target_environment),
+    'target_environment must be preproduction or production');
   assert(value.contains_personal_data === false,
     'contains_personal_data must remain false');
+
+  assertExactKeys(value.release_scope, [
+    'access_mode',
+    'country_code',
+    'participant_cap',
+    'public_release_eligible',
+  ], 'release_scope');
+  assert(value.release_scope.access_mode === 'invite_only',
+    'release_scope.access_mode must remain invite_only');
+  assert(value.release_scope.country_code === 'FR',
+    'release_scope.country_code must remain FR for this pilot contract');
+  assert(value.release_scope.participant_cap === 50,
+    'release_scope.participant_cap must remain 50');
+  assert(value.release_scope.public_release_eligible === false,
+    'internal self-assessment must never authorize a public release');
 
   assertExactKeys(value.program, [
     'account_type',
@@ -262,6 +291,8 @@ function validateApprovalPackage(value, options = {}) {
     'jurisdiction.individual_available must be boolean');
   assertOptionalTimestamp(value.jurisdiction.effective_from,
     'jurisdiction.effective_from');
+  assert(value.jurisdiction.country_code === value.release_scope.country_code,
+    'jurisdiction.country_code must match release_scope.country_code');
 
   assertExactKeys(value.documents, [
     'disclosure_sha256',
@@ -335,9 +366,48 @@ function validateApprovalPackage(value, options = {}) {
   validateDecision(
     value.decisions.privacy,
     'privacy',
-    'privacy_professional',
+    'privacy_accountable_owner',
     PRIVACY_CHECKS,
     nowMs,
+    {
+      extraKeys: [
+        'assessment_method',
+        'dpo_designated',
+        'dpia_controller_validated_at',
+        'dpia_evidence',
+        'dpia_outcome',
+        'dpia_required',
+        'public_release_eligible',
+      ],
+      validateExtra: (decision, trail) => {
+        assert(
+          decision.assessment_method
+            === 'documented_internal_gdpr_self_assessment_with_mandatory_dpia',
+          `${trail}.assessment_method must include the mandatory DPIA`,
+        );
+        assert(decision.dpo_designated === false,
+          `${trail}.dpo_designated must remain false`);
+        assert(decision.dpia_required === true,
+          `${trail}.dpia_required must remain true`);
+        assert([
+          'pending',
+          'residual_risk_acceptable',
+          'prior_consultation_required',
+        ].includes(decision.dpia_outcome),
+        `${trail}.dpia_outcome is invalid`);
+        assertOptionalTimestamp(
+          decision.dpia_controller_validated_at,
+          `${trail}.dpia_controller_validated_at`,
+        );
+        assertOptionalEvidence(
+          decision.dpia_evidence,
+          `${trail}.dpia_evidence`,
+          nowMs,
+        );
+        assert(decision.public_release_eligible === false,
+          `${trail}.public_release_eligible must remain false`);
+      },
+    },
   );
   validateDecision(
     value.decisions.country_policy,
@@ -361,6 +431,7 @@ function validateApprovalPackage(value, options = {}) {
     ].map((field) => value.documents.public_surfaces[field]),
     ...Object.values(value.dependencies),
     ...Object.values(value.decisions).map((decision) => decision.evidence),
+    value.decisions.privacy.dpia_evidence,
   ].filter(Boolean);
   const identities = references.map(evidenceIdentity);
   assert(new Set(identities).size === identities.length,
@@ -403,6 +474,31 @@ function decisionBlockers(value, key, nowMs) {
     const verifiedAt = parseTimestamp(decision.evidence.verified_at);
     if (verifiedAt === null || verifiedAt < decidedAt) {
       blockers.push(`${key}_evidence_predates_decision`);
+    }
+  }
+  if (key === 'privacy') {
+    const dpiaValidatedAt = parseTimestamp(
+      decision.dpia_controller_validated_at,
+    );
+    if (decision.dpia_outcome === 'pending') {
+      blockers.push('privacy_dpia_pending');
+    } else if (decision.dpia_outcome === 'prior_consultation_required') {
+      blockers.push('privacy_dpia_prior_consultation_required');
+    }
+    if (dpiaValidatedAt === null
+      || dpiaValidatedAt > nowMs
+      || (decidedAt !== null && dpiaValidatedAt > decidedAt)) {
+      blockers.push('privacy_dpia_controller_validation_invalid');
+    }
+    if (!isEvidenceReference(decision.dpia_evidence, nowMs)) {
+      blockers.push('privacy_dpia_evidence_missing');
+    } else {
+      const dpiaEvidenceAt = parseTimestamp(
+        decision.dpia_evidence.verified_at,
+      );
+      if (dpiaValidatedAt !== null && dpiaEvidenceAt < dpiaValidatedAt) {
+        blockers.push('privacy_dpia_evidence_predates_validation');
+      }
     }
   }
   return blockers;
@@ -483,9 +579,13 @@ function approvalBlockers(value, options = {}) {
   const privacyEvidenceAt = value.decisions.privacy.evidence
     ? parseTimestamp(value.decisions.privacy.evidence.verified_at)
     : null;
+  const dpiaEvidenceAt = value.decisions.privacy.dpia_evidence
+    ? parseTimestamp(value.decisions.privacy.dpia_evidence.verified_at)
+    : null;
   const cutoff = Math.max(
     ...dependencyTimes.filter(Number.isFinite),
-    ...[legalEvidenceAt, privacyEvidenceAt].filter(Number.isFinite),
+    ...[legalEvidenceAt, privacyEvidenceAt, dpiaEvidenceAt]
+      .filter(Number.isFinite),
   );
   if (Number.isFinite(cutoff)
     && (countryDecisionAt === null || countryDecisionAt <= cutoff)) {

@@ -460,6 +460,13 @@ services:
       DIDIT_ID_VERIFICATION_NODE_ID: ${DIDIT_ID_VERIFICATION_NODE_ID:-}
       DIDIT_LIVENESS_NODE_ID: ${DIDIT_LIVENESS_NODE_ID:-}
       DIDIT_FACE_MATCH_NODE_ID: ${DIDIT_FACE_MATCH_NODE_ID:-}
+      # AES-256-GCM keyring for the private Didit deletion outbox. Keep at most
+      # four versions during rotation; the active version encrypts new work.
+      NORVA_PARTNERS_DIDIT_PURGE_KEYS_JSON: ${NORVA_PARTNERS_DIDIT_PURGE_KEYS_JSON:-}
+      NORVA_PARTNERS_DIDIT_PURGE_ACTIVE_KEY_VERSION: ${NORVA_PARTNERS_DIDIT_PURGE_ACTIVE_KEY_VERSION:-}
+      NORVA_PARTNERS_DIDIT_PURGE_BATCH: ${NORVA_PARTNERS_DIDIT_PURGE_BATCH:-10}
+      NORVA_PARTNERS_DIDIT_PURGE_MAX_BATCHES: ${NORVA_PARTNERS_DIDIT_PURGE_MAX_BATCHES:-2}
+      NORVA_PARTNERS_DIDIT_PURGE_LEASE_SECONDS: ${NORVA_PARTNERS_DIDIT_PURGE_LEASE_SECONDS:-60}
       # Exceptional Admin+Risk+AAL2 path used only to certify the live Didit
       # workflow before the KYC coverage release gate. It cannot create a
       # partner account or promote a gate and remains closed by default.

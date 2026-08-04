@@ -3,8 +3,9 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, apply the four pending Partners migrations atomically, then
-# run the restore verifier and the data-compatible Partners restore pgTAP.
+# PostgreSQL clone, either apply the ten pending Partners migrations atomically
+# (`predeploy`) or prove that they are already present without replaying them
+# (`postdeploy`), then run the verifier and restore-compatible pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
 # root-owned. The live container is inspected and receives one read-only SHOW
@@ -14,7 +15,8 @@
 # and pass/fail summaries.
 #
 # Usage:
-#   sudo bash ops/hetzner/backup/rehearse-partners-physical.sh <40-char-sha>
+#   sudo bash ops/hetzner/backup/rehearse-partners-physical.sh \
+#     <predeploy|postdeploy> <40-char-sha>
 # =============================================================================
 
 set -Eeuo pipefail
@@ -58,9 +60,23 @@ if [[ ! -f "$CONFIGURED_OPS_DIR/.env" ]]; then
   exit 1
 fi
 
-TARGET_SHA="${1:-}"
+if [[ "$#" -ne 2 ]]; then
+  printf 'ERROR: usage: %s <predeploy|postdeploy> <40-char-sha>.\n' \
+    "$SCRIPT_NAME" >&2
+  exit 1
+fi
+
+REHEARSAL_MODE="${1:-}"
+if [[ "$REHEARSAL_MODE" != "predeploy" \
+    && "$REHEARSAL_MODE" != "postdeploy" ]]; then
+  printf 'ERROR: pass an explicit rehearsal mode: predeploy or postdeploy.\n' >&2
+  exit 1
+fi
+readonly REHEARSAL_MODE
+
+TARGET_SHA="${2:-}"
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-  printf 'ERROR: pass the exact 40-character lowercase candidate commit SHA.\n' >&2
+  printf 'ERROR: pass the exact 40-character lowercase candidate commit SHA after the mode.\n' >&2
   exit 1
 fi
 GIT=(git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT")
@@ -82,6 +98,12 @@ readonly MIGRATION_ONE="supabase/migrations/20260803082211_partners_admin_operat
 readonly MIGRATION_TWO="supabase/migrations/20260803084051_partners_access_request_decision_email.sql"
 readonly MIGRATION_THREE="supabase/migrations/20260803160730_partners_didit_certification_pre_gate.sql"
 readonly MIGRATION_FOUR="supabase/migrations/20260803204442_partners_release_gate_aal2.sql"
+readonly MIGRATION_FIVE="supabase/migrations/20260804083541_partners_approval_registry.sql"
+readonly MIGRATION_SIX="supabase/migrations/20260804084500_partners_biometric_consent_contract.sql"
+readonly MIGRATION_SEVEN="supabase/migrations/20260804093000_partners_didit_purge_outbox.sql"
+readonly MIGRATION_EIGHT="supabase/migrations/20260804160000_partners_privacy_rights_human_review.sql"
+readonly MIGRATION_NINE="supabase/migrations/20260804165000_partners_kyc_reverification_override.sql"
+readonly MIGRATION_TEN="supabase/migrations/20260804170000_partners_biometric_consent_enforcement.sql"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -94,6 +116,12 @@ readonly -a CANDIDATE_FILES=(
   "$MIGRATION_TWO"
   "$MIGRATION_THREE"
   "$MIGRATION_FOUR"
+  "$MIGRATION_FIVE"
+  "$MIGRATION_SIX"
+  "$MIGRATION_SEVEN"
+  "$MIGRATION_EIGHT"
+  "$MIGRATION_NINE"
+  "$MIGRATION_TEN"
   "$VERIFIER"
   "${RESTORE_PGTAP_FILES[@]}"
 )
@@ -221,6 +249,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
 proof_line "format=norva-partners-physical-rehearsal-v1"
+proof_line "rehearsal_mode=$REHEARSAL_MODE"
 proof_line "candidate_sha=$TARGET_SHA"
 proof_line "started_at=$(date -u +%FT%TZ)"
 proof_line "network_mode=none"
@@ -247,6 +276,12 @@ proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | a
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
 proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
 proof_line "migration_four_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FOUR" | awk '{print $1}')"
+proof_line "migration_five_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FIVE" | awk '{print $1}')"
+proof_line "migration_six_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_SIX" | awk '{print $1}')"
+proof_line "migration_seven_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_SEVEN" | awk '{print $1}')"
+proof_line "migration_eight_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_EIGHT" | awk '{print $1}')"
+proof_line "migration_nine_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_NINE" | awk '{print $1}')"
+proof_line "migration_ten_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TEN" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
 if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
@@ -545,16 +580,22 @@ if [[ ! "$BASELINE_SENSITIVE_STATE" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9a-f]{64}$ ]]
   fail
 fi
 
-CURRENT_STEP="pending migration precondition"
+CURRENT_STEP="migration-state precondition"
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_approval_packages') is not null)::int::text || '|' || (to_regprocedure('public.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamptz,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_release_gate_approval_is_current(text)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_deployment_manifests') is not null)::int::text || '|' || (to_regprocedure('public.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_pilot_allowlist_limit()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_biometric_consent_attestations') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_purge_outbox') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_didit_purge_claim(integer,integer)') is not null)::int::text || '|' || (not has_function_privilege('service_role','public.partners_service_kyc_prepare(uuid,text,text,boolean,text)','EXECUTE'))::int::text || '|' || (not has_function_privilege('service_role','public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)','EXECUTE'))::int::text || '|' || (to_regclass('affiliate_private.affiliate_biometric_consent_withdrawals') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_kyc_human_review_requests') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_rights_get(uuid)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_kyc_reverification_grants') is not null)::int::text;" \
   2> "$RAW_DIR/migration-precondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "0|0|0|0|0" ]]; then
+if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
+  EXPECTED_MARKERS_BEFORE="0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0"
+else
+  EXPECTED_MARKERS_BEFORE="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
+fi
+readonly EXPECTED_MARKERS_BEFORE
+if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
   fail
 fi
 proof_line "migration_markers_before=$MIGRATION_MARKERS"
 
-CURRENT_STEP="atomic Partners migration application"
+CURRENT_STEP="mode-specific Partners migration handling"
 PSQL_TIMEOUT_SECONDS="${PARTNERS_REHEARSAL_PSQL_TIMEOUT_SECONDS:-3600}"
 if [[ ! "$PSQL_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{2,5}$ ]]; then
   fail
@@ -562,21 +603,36 @@ fi
 # Every timed psql invocation below reads an already-mounted file with -f.
 # Do not attach Docker stdin (-i): GNU timeout places its child in a separate
 # process group, so an ssh -t run could otherwise suspend docker exec on SIGTTIN.
-if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
-    docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
-      psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-        --single-transaction \
-        -f "/candidate/$MIGRATION_ONE" \
-        -f "/candidate/$MIGRATION_TWO" \
-        -f "/candidate/$MIGRATION_THREE" \
-        -f "/candidate/$MIGRATION_FOUR" \
-      > "$RAW_DIR/migrations.log" 2>&1; then
-  fail
+MIGRATIONS_APPLIED=0
+MIGRATIONS_ATOMIC="not_applicable"
+MIGRATION_REPLAY_SKIPPED="true"
+if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
+  if ! timeout --signal=TERM --kill-after=30s "$PSQL_TIMEOUT_SECONDS" \
+      docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
+        psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+          --single-transaction \
+          -f "/candidate/$MIGRATION_ONE" \
+          -f "/candidate/$MIGRATION_TWO" \
+          -f "/candidate/$MIGRATION_THREE" \
+          -f "/candidate/$MIGRATION_FOUR" \
+          -f "/candidate/$MIGRATION_FIVE" \
+          -f "/candidate/$MIGRATION_SIX" \
+          -f "/candidate/$MIGRATION_SEVEN" \
+          -f "/candidate/$MIGRATION_EIGHT" \
+          -f "/candidate/$MIGRATION_NINE" \
+          -f "/candidate/$MIGRATION_TEN" \
+        > "$RAW_DIR/migrations.log" 2>&1; then
+    fail
+  fi
+  MIGRATIONS_APPLIED=10
+  MIGRATIONS_ATOMIC="true"
+  MIGRATION_REPLAY_SKIPPED="false"
 fi
+readonly MIGRATIONS_APPLIED MIGRATIONS_ATOMIC MIGRATION_REPLAY_SKIPPED
 MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text;" \
+  "select (to_regprocedure('public.admin_partners_capability_operators()') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_access_decision_email_enqueue()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_session_registry') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_release_gate_activation_aal2()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_approval_packages') is not null)::int::text || '|' || (to_regprocedure('public.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamptz,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.partners_release_gate_approval_is_current(text)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_deployment_manifests') is not null)::int::text || '|' || (to_regprocedure('public.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)') is not null)::int::text || '|' || (to_regprocedure('affiliate_private.guard_partners_pilot_allowlist_limit()') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_biometric_consent_attestations') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_didit_purge_outbox') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_didit_purge_claim(integer,integer)') is not null)::int::text || '|' || (not has_function_privilege('service_role','public.partners_service_kyc_prepare(uuid,text,text,boolean,text)','EXECUTE'))::int::text || '|' || (not has_function_privilege('service_role','public.partners_service_kyc_session_record(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)','EXECUTE'))::int::text || '|' || (to_regclass('affiliate_private.affiliate_biometric_consent_withdrawals') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_kyc_human_review_requests') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_kyc_rights_get(uuid)') is not null)::int::text || '|' || (to_regclass('affiliate_private.affiliate_kyc_reverification_grants') is not null)::int::text;" \
   2> "$RAW_DIR/migration-postcondition.log")" || fail
-if [[ "$MIGRATION_MARKERS" != "1|1|1|1|1" ]]; then
+if [[ "$MIGRATION_MARKERS" != "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -620,7 +676,90 @@ with expected(signature) as (
     ('public.partners_service_kyc_certification_create_claim(text)'),
     ('public.partners_service_kyc_certification_binding_match(text,text)'),
     ('public.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)'),
-    ('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)')
+    ('public.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)'),
+    ('affiliate_private.valid_partners_approval_document_hashes(jsonb)'),
+    ('affiliate_private.valid_partners_approval_jurisdiction_scope(jsonb)'),
+    ('affiliate_private.partners_approval_required_document_keys(text)'),
+    ('affiliate_private.partners_approval_package_sha256(text,integer,text,text,jsonb,jsonb,text,text,text,text,text,text,timestamptz,timestamptz,text)'),
+    ('affiliate_private.partners_deployment_manifest_sha256(text,integer,text,text,text,jsonb,text,timestamptz,text)'),
+    ('affiliate_private.guard_partners_deployment_manifest_insert()'),
+    ('affiliate_private.reject_partners_deployment_manifest_mutation()'),
+    ('affiliate_private.guard_partners_deployment_manifest_binding()'),
+    ('affiliate_private.guard_partners_approval_package_insert()'),
+    ('affiliate_private.reject_partners_approval_package_mutation()'),
+    ('affiliate_private.guard_partners_approval_binding_mutation()'),
+    ('affiliate_private.partners_program_approval_snapshot_sha256(uuid)'),
+    ('affiliate_private.partners_country_policy_approval_snapshot_sha256(uuid)'),
+    ('affiliate_private.partners_approval_package_is_current(uuid,text)'),
+    ('affiliate_private.partners_approval_package_is_current(uuid,text,text)'),
+    ('affiliate_private.partners_release_gate_approval_is_current(text)'),
+    ('affiliate_private.release_gates_satisfied(text[])'),
+    ('affiliate_private.partners_approval_gate_covers_policy(text,uuid,text,text)'),
+    ('affiliate_private.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)'),
+    ('public.admin_partners_deployment_manifest_register(text,text,text,text,jsonb,text)'),
+    ('affiliate_private.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamptz,text)'),
+    ('public.admin_partners_release_gate_approve(text,text,jsonb,jsonb,text,text,text,text,timestamptz,text)'),
+    ('affiliate_private.guard_partners_release_gate_approval()'),
+    ('affiliate_private.clear_partners_release_gate_approval()'),
+    ('affiliate_private.guard_partners_program_approved_scope()'),
+    ('affiliate_private.guard_partners_country_policy_approved_scope()'),
+    ('affiliate_private.guard_partners_pilot_allowlist_limit()'),
+    ('affiliate_private.admin_partners_configuration_pre_approval_registry_20260804()'),
+    ('affiliate_private.admin_partners_configuration()'),
+    ('public.admin_partners_configuration()'),
+    ('affiliate_private.admin_partners_revolut_payout_status()'),
+    ('affiliate_private.admin_partners_revolut_payout_status_approval_registry()'),
+    ('public.admin_partners_revolut_payout_status()'),
+    ('affiliate_private.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)'),
+    ('public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)'),
+    ('affiliate_private.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)'),
+    ('public.partners_service_kyc_session_record_v2(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer)'),
+    ('affiliate_private.guard_didit_purge_managed_mutation()'),
+    ('affiliate_private.mark_member_didit_purge_pending()'),
+    ('affiliate_private.mark_certification_didit_purge_pending()'),
+    ('affiliate_private.guard_account_activation_until_didit_purged()'),
+    ('affiliate_private.guard_didit_purge_activation_audit()'),
+    ('affiliate_private.partners_didit_purge_public_status(text)'),
+    ('affiliate_private.partners_didit_purge_sync_source(text,text,timestamptz)'),
+    ('affiliate_private.partners_didit_purge_stage_member(text,text,text)'),
+    ('affiliate_private.partners_didit_purge_activate_staged(text,text)'),
+    ('affiliate_private.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer,text)'),
+    ('public.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer,text)'),
+    ('affiliate_private.partners_didit_purge_enqueue(text,text,text)'),
+    ('affiliate_private.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('affiliate_private.partners_service_didit_purge_claim(integer,integer)'),
+    ('affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)'),
+    ('affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)'),
+    ('affiliate_private.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)'),
+    ('affiliate_private.partners_service_didit_purge_status()'),
+    ('public.partners_service_didit_purge_claim(integer,integer)'),
+    ('public.partners_service_didit_purge_complete(bigint,uuid,text)'),
+    ('public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)'),
+    ('public.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)'),
+    ('public.partners_service_didit_purge_status()'),
+    ('affiliate_private.partners_didit_purge_coverage_ready()'),
+    ('affiliate_private.partners_service_kyc_prepare_v2_pre_withdrawal_20260804(uuid,text,text,text,boolean,text)'),
+    ('affiliate_private.partners_service_kyc_session_record_v3_pre_withdrawal_20260804(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer,text)'),
+    ('affiliate_private.guard_partners_kyc_human_review_mutation()'),
+    ('affiliate_private.partners_kyc_rights_snapshot(uuid)'),
+    ('affiliate_private.partners_service_kyc_rights_get(uuid)'),
+    ('public.partners_service_kyc_rights_get(uuid)'),
+    ('affiliate_private.partners_service_biometric_consent_withdraw(uuid,text)'),
+    ('public.partners_service_biometric_consent_withdraw(uuid,text)'),
+    ('affiliate_private.partners_service_kyc_human_review_request(uuid,text,text)'),
+    ('public.partners_service_kyc_human_review_request(uuid,text,text)'),
+    ('affiliate_private.admin_partners_kyc_human_review_queue(integer,integer,text)'),
+    ('public.admin_partners_kyc_human_review_queue(integer,integer,text)'),
+    ('affiliate_private.admin_partners_kyc_human_review_locator(text,text,text)'),
+    ('public.admin_partners_kyc_human_review_locator(text,text,text)'),
+    ('affiliate_private.admin_partners_kyc_human_review_decide(text,text,text,timestamptz,text,text)'),
+    ('public.admin_partners_kyc_human_review_decide(text,text,text,timestamptz,text,text)'),
+    ('affiliate_private.guard_kyc_reverification_grant_mutation()'),
+    ('affiliate_private.partners_service_kyc_prepare_reverification_once_v2(uuid,text,text,text,boolean,text)'),
+    ('affiliate_private.admin_partners_kyc_human_review_decide_pre_reverification_grant_20260804(text,text,text,timestamptz,text,text)')
 )
 select count(*)::text || '|' || count(*) filter (
   where routine.oid is null
@@ -631,7 +770,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "36|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "119|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -640,7 +779,18 @@ with expected(relation_name) as (
   values
     ('affiliate_private.affiliate_didit_session_registry'),
     ('affiliate_private.affiliate_didit_certification_sessions'),
-    ('affiliate_private.affiliate_didit_certification_events')
+    ('affiliate_private.affiliate_didit_certification_events'),
+    ('affiliate_private.affiliate_deployment_manifests'),
+    ('affiliate_private.affiliate_deployment_manifest_bindings'),
+    ('affiliate_private.affiliate_approval_packages'),
+    ('affiliate_private.affiliate_release_gate_approval_bindings'),
+    ('affiliate_private.affiliate_biometric_consent_attestations'),
+    ('affiliate_private.affiliate_didit_purge_outbox'),
+    ('affiliate_private.affiliate_didit_purge_events'),
+    ('affiliate_private.affiliate_didit_purge_worker_state'),
+    ('affiliate_private.affiliate_biometric_consent_withdrawals'),
+    ('affiliate_private.affiliate_kyc_human_review_requests'),
+    ('affiliate_private.affiliate_kyc_reverification_grants')
 )
 select count(*)::text || '|' || count(*) filter (
   where relation.oid is null
@@ -652,15 +802,16 @@ left join pg_catalog.pg_class relation
   on relation.oid = to_regclass(expected.relation_name);
 SQL
 )" || fail
-if [[ "$RELATION_OWNER_CHECK" != "3|0" ]]; then
+if [[ "$RELATION_OWNER_CHECK" != "14|0" ]]; then
   fail
 fi
-proof_line "migrations_applied=4"
-proof_line "migrations_atomic=true"
+proof_line "migrations_applied=$MIGRATIONS_APPLIED"
+proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
+proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=36"
+proof_line "migration_routines_verified=119"
 proof_line "migration_relation_owner=supabase_admin"
-proof_line "migration_relations_verified=3"
+proof_line "migration_relations_verified=14"
 
 CURRENT_STEP="post-migration sensitive-state verification"
 POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \

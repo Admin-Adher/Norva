@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
+  PRIVACY_CHECKS,
   evaluateApprovalPackage,
   validateApprovalPackage,
 } = require('../scripts/validate-partners-approval-evidence.js');
@@ -110,6 +111,12 @@ function readyPackage() {
     'privacy-decision',
     '2026-08-03T09:36:00Z',
   );
+  privacy.dpia_outcome = 'residual_risk_acceptable';
+  privacy.dpia_controller_validated_at = '2026-08-03T09:33:00Z';
+  privacy.dpia_evidence = evidenceRef(
+    'privacy-dpia',
+    '2026-08-03T09:34:00Z',
+  );
   Object.keys(privacy.checks).forEach((key) => {
     privacy.checks[key] = true;
   });
@@ -139,6 +146,30 @@ test('approval evidence template is strict, valid and fail-closed', () => {
   assert.match(
     workflow,
     /validate-partners-approval-evidence\.js[\s\S]*approval-evidence\.example\.json/,
+  );
+  assert.equal(template.schema_version, 3);
+  assert.equal(template.target_environment, 'preproduction');
+  assert.deepEqual(template.release_scope, {
+    access_mode: 'invite_only',
+    country_code: 'FR',
+    participant_cap: 50,
+    public_release_eligible: false,
+  });
+  assert.equal(
+    template.decisions.privacy.assessment_method,
+    'documented_internal_gdpr_self_assessment_with_mandatory_dpia',
+  );
+  assert.equal(template.decisions.privacy.dpo_designated, false);
+  assert.equal(template.decisions.privacy.dpia_required, true);
+  assert.equal(template.decisions.privacy.dpia_outcome, 'pending');
+  assert.equal(template.decisions.privacy.dpia_evidence, null);
+  assert.equal(template.decisions.privacy.public_release_eligible, false);
+
+  const sandboxDeployment = clone(template);
+  sandboxDeployment.target_environment = 'sandbox';
+  assert.throws(
+    () => validateApprovalPackage(sandboxDeployment),
+    /target_environment must be preproduction or production/,
   );
 });
 
@@ -177,6 +208,81 @@ test('a checked box cannot replace reviewer and immutable evidence', () => {
   assert.ok(result.blockers.legal_and_tax.includes(
     'legal_and_tax_evidence_missing',
   ));
+});
+
+test('Privacy remains blocked without a completed, controller-validated DPIA', () => {
+  const missing = readyPackage();
+  missing.decisions.privacy.dpia_outcome = 'pending';
+  missing.decisions.privacy.dpia_controller_validated_at = null;
+  missing.decisions.privacy.dpia_evidence = null;
+  const missingResult = evaluateApprovalPackage(missing, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.ok(missingResult.blockers.privacy.includes('privacy_dpia_pending'));
+  assert.ok(missingResult.blockers.privacy.includes(
+    'privacy_dpia_controller_validation_invalid',
+  ));
+  assert.ok(missingResult.blockers.privacy.includes(
+    'privacy_dpia_evidence_missing',
+  ));
+
+  const consultation = readyPackage();
+  consultation.decisions.privacy.dpia_outcome =
+    'prior_consultation_required';
+  const consultationResult = evaluateApprovalPackage(consultation, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.ok(consultationResult.blockers.privacy.includes(
+    'privacy_dpia_prior_consultation_required',
+  ));
+});
+
+test('the internal assessment is restricted to the France invite-only pilot', () => {
+  const publicScope = readyPackage();
+  publicScope.release_scope.access_mode = 'public';
+  publicScope.release_scope.public_release_eligible = true;
+  publicScope.decisions.privacy.public_release_eligible = true;
+  assert.throws(
+    () => validateApprovalPackage(publicScope),
+    /release_scope\.access_mode must remain invite_only/,
+  );
+
+  const designatedDpo = readyPackage();
+  designatedDpo.decisions.privacy.reviewer_role = 'privacy_professional';
+  designatedDpo.decisions.privacy.dpo_designated = true;
+  assert.throws(
+    () => validateApprovalPackage(designatedDpo),
+    /reviewer_role must be privacy_accountable_owner/,
+  );
+
+  const wrongCountry = readyPackage();
+  wrongCountry.jurisdiction.country_code = 'BE';
+  assert.throws(
+    () => validateApprovalPackage(wrongCountry),
+    /jurisdiction\.country_code must match release_scope\.country_code/,
+  );
+});
+
+test('the GDPR self-assessment template mirrors every privacy control and AAL2', () => {
+  const selfAssessment = fs.readFileSync(
+    path.join(root, 'ops/partners/gdpr-self-assessment.example.md'),
+    'utf8',
+  );
+  for (const check of PRIVACY_CHECKS) {
+    assert.match(selfAssessment, new RegExp(`\\b${check}\\b`));
+  }
+  assert.match(selfAssessment, /privacy_accountable_owner/);
+  assert.match(selfAssessment, /aucune désignation officielle de DPO/i);
+  assert.match(selfAssessment, /AIPD\/DPIA obligatoire/i);
+  assert.match(selfAssessment, /données sensibles ou hautement personnelles/i);
+  assert.match(selfAssessment, /exclusion du bénéfice d'un droit ou d'un contrat/i);
+  assert.match(selfAssessment, /nécessité et proportionnalité/i);
+  assert.match(selfAssessment, /risques pour les droits et libertés/i);
+  assert.match(selfAssessment, /consultation préalable de la CNIL/i);
+  assert.match(selfAssessment, /ce modèle ne fabrique ni sa décision, ni sa signature/i);
+  assert.match(selfAssessment, /https:\/\/www\.cnil\.fr\/fr\/ce-quil-faut-savoir/);
+  assert.match(selfAssessment, /JWT[\s\S]*AAL2/);
+  assert.match(selfAssessment, /stockage privé immuable/);
 });
 
 test('country approval must follow every authoritative dependency', () => {

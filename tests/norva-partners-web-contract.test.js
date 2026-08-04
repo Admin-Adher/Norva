@@ -394,6 +394,7 @@ test('Partners KYC starts only from explicit versioned consent and trusts only D
   const result = await cloud.partners.startKyc({
     language: 'FR',
     consentVersion: 'partners-fr-v1',
+    biometricConsentVersion: 'partners-biometric-consent-v1',
     capacityConfirmed: true,
     idempotencyKey: 'kyc:0123456789abcdef',
   });
@@ -406,6 +407,7 @@ test('Partners KYC starts only from explicit versioned consent and trusts only D
   assert.deepEqual(JSON.parse(requests[0].options.body), {
     language: 'fr',
     consentVersion: 'partners-fr-v1',
+    biometricConsentVersion: 'partners-biometric-consent-v1',
     consentGranted: true,
     capacityConfirmed: true,
   });
@@ -417,6 +419,7 @@ test('Partners KYC starts only from explicit versioned consent and trusts only D
     () => cloud.partners.startKyc({
       language: 'fr',
       consentVersion: 'partners-fr-v1',
+      biometricConsentVersion: 'partners-biometric-consent-v1',
       capacityConfirmed: false,
       idempotencyKey: 'kyc:0123456789abcdef',
     }),
@@ -437,6 +440,7 @@ test('Partners KYC starts only from explicit versioned consent and trusts only D
     invalid.cloud.partners.startKyc({
       language: 'fr',
       consentVersion: 'partners-fr-v1',
+      biometricConsentVersion: 'partners-biometric-consent-v1',
       capacityConfirmed: true,
       idempotencyKey: 'kyc:fedcba9876543210',
     }),
@@ -516,6 +520,15 @@ test('Partners payout profile is masked, read-only and fail-closed', async () =>
   assert.equal(JSON.stringify(profile).includes('beneficiaryTokenRef'), false);
 
   assert.equal(get.cloud.partners.saveTokenizedPayoutProfile, undefined);
+});
+
+test('Partners discloses Didit processor notices before hosted biometric capture', () => {
+  const source = pageSource;
+  assert.match(source, /Norva requests this eligibility check and Didit provides the secure hosted identity-verification flow/);
+  assert.match(source, /https:\/\/didit\.me\/terms\/verification-privacy-notice\//);
+  assert.match(source, /https:\/\/didit\.me\/terms\/identity-verification\//);
+  assert.match(source, /explicitly consent to document, selfie, liveness and face-match capture/);
+  assert.match(source, /data-partners-kyc-consent/);
 });
 
 test('Partners tax self-certification and Revolut manual setup expose no financial identifiers', async () => {
@@ -1674,6 +1687,10 @@ test('hosted Didit hand-off requires both confirmations and preserves its retry 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].language, 'en');
   assert.equal(calls[0].consentVersion, 'partners-fr-v1');
+  assert.equal(
+    calls[0].biometricConsentVersion,
+    'partners-biometric-consent-v1',
+  );
   assert.equal(calls[0].capacityConfirmed, true);
   assert.match(calls[0].idempotencyKey, /^norva\.kyc-session\./);
   assert.equal(assigned, 'https://verify.didit.me/session/opaque-result');
@@ -2245,7 +2262,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=6"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=7"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -2426,12 +2443,12 @@ test('Partners route participates in bounded native continuity without storing p
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
   assert.match(htmlSource, /main\.css\?v=98/);
-  assert.match(htmlSource, /cloudApi\.js\?v=56/);
+  assert.match(htmlSource, /cloudApi\.js\?v=58/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=6/);
-  assert.match(htmlSource, /app\.js\?v=67/);
-  assert.match(appSource, /AdminPage\.js\?v=110/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=7/);
+  assert.match(htmlSource, /app\.js\?v=68/);
+  assert.match(appSource, /AdminPage\.js\?v=111/);
 });
 
 test('Didit return identifiers are scrubbed before analytics, referrers or auth redirects', () => {

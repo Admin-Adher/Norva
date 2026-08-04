@@ -12,10 +12,9 @@ export const PARTNERS_TV_RELAY_RPC = Object.freeze({
 });
 
 const DEVICE_TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/;
-const RELAY_TOKEN_PATTERN =
-  /^v1\.([A-Za-z0-9_-]{43})\.([0-9a-f]{64})$/;
+const RELAY_TOKEN_PATTERN = /^v1\.([A-Za-z0-9_-]{43})\.([0-9a-f]{64})$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
-const NORVA_HANDOFF_HOST_PATTERN = /^(?:[a-z0-9-]+\.)*norva\.tv$/;
+export const PARTNERS_TV_RELAY_HANDOFF_URL = "https://norva.tv/app.html";
 
 export type TvRelayConfig = {
   secret: string;
@@ -75,24 +74,8 @@ export function loadTvRelayConfig(
     secret.length < 32 ||
     secret.length > 512 ||
     /[\u0000-\u001f\u007f]/.test(secret) ||
+    handoffUrl !== PARTNERS_TV_RELAY_HANDOFF_URL ||
     !/^(?:1[2-9][0-9]|[2-5][0-9]{2}|600)$/.test(ttlRaw)
-  ) {
-    return null;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(handoffUrl);
-  } catch {
-    return null;
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    !NORVA_HANDOFF_HOST_PATTERN.test(parsed.hostname) ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash ||
-    parsed.pathname === "/"
   ) {
     return null;
   }
@@ -106,7 +89,7 @@ export function loadTvRelayConfig(
   }
   return {
     secret,
-    handoffUrl: parsed.toString().replace(/\/$/, ""),
+    handoffUrl: PARTNERS_TV_RELAY_HANDOFF_URL,
     ttlSeconds,
   };
 }
