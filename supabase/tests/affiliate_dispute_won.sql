@@ -367,7 +367,14 @@ insert into affiliate_private.affiliate_accounts (
   terms_version_accepted,
   contract_accepted_at,
   disclosure_version_accepted,
-  disclosure_accepted_at
+  disclosure_accepted_at,
+  member_status,
+  member_program_version_id,
+  member_terms_version_accepted,
+  member_terms_accepted_at,
+  member_disclosure_version_accepted,
+  member_disclosure_accepted_at,
+  member_joined_at
 )
 values (
   '23000000-0000-4000-8000-000000000001',
@@ -385,6 +392,13 @@ values (
   'partners-terms-v1',
   now() - interval '1 day',
   'partners-disclosure-v1',
+  now() - interval '1 day',
+  'active',
+  '21000000-0000-4000-8000-000000000001',
+  'partners-terms-v1',
+  now() - interval '1 day',
+  'partners-disclosure-v1',
+  now() - interval '1 day',
   now() - interval '1 day'
 );
 

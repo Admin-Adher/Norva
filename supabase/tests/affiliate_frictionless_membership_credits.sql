@@ -556,13 +556,33 @@ select extensions.ok(
 );
 
 select extensions.ok(
-  (
-    select pg_get_constraintdef(constraint_row.oid)
-    from pg_constraint constraint_row
-    where constraint_row.conrelid =
-      'affiliate_private.affiliate_service_idempotency'::regclass
-      and constraint_row.conname = 'affiliate_service_idempotency_operation'
-  ) like '%membership_join%access_credit_quote%access_credit_redeem%'
+  not exists (
+    select 1
+    from unnest(array[
+      'application',
+      'terms_acceptance',
+      'link_rotation',
+      'kyc_prepare',
+      'kyc_session_record',
+      'referral_claim',
+      'payout_profile',
+      'tv_relay_consume',
+      'access_request',
+      'fiscal_profile_self_attestation',
+      'payout_onboarding',
+      'membership_join',
+      'access_credit_quote',
+      'access_credit_redeem'
+    ]::text[]) expected(operation)
+    where (
+      select pg_get_constraintdef(constraint_row.oid)
+      from pg_constraint constraint_row
+      where constraint_row.conrelid =
+        'affiliate_private.affiliate_service_idempotency'::regclass
+        and constraint_row.conname =
+          'affiliate_service_idempotency_operation'
+    ) not like '%' || expected.operation || '%'
+  )
   and exists (
     select 1
     from pg_constraint constraint_row
@@ -571,7 +591,7 @@ select extensions.ok(
       and constraint_row.contype = 'u'
       and pg_get_constraintdef(constraint_row.oid) like '%quote_id%'
   ),
-  'join, quote and redemption are idempotent and each quote spends once'
+  'legacy and frictionless mutations remain idempotent and each quote spends once'
 );
 
 select extensions.ok(

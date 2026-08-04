@@ -284,9 +284,9 @@ select extensions.throws_ok(
       'fiscal.limit.00000001'
     )
   $$,
-  'P0001',
-  'active verified Partners account is required',
-  'the later fiscal state mutation can reject after the separate reservation'
+  'P1001',
+  'Partners membership is required for KYC',
+  'cash onboarding rejects a non-member after the separate reservation'
 );
 
 reset role;

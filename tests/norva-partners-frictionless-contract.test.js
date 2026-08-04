@@ -805,6 +805,47 @@ test('membership is public while the cash pilot remains independently allowliste
   );
 });
 
+test('frictionless idempotency extends every legacy operation without narrowing it', () => {
+  const requiredOperations = [
+    'application',
+    'terms_acceptance',
+    'link_rotation',
+    'kyc_prepare',
+    'kyc_session_record',
+    'referral_claim',
+    'payout_profile',
+    'tv_relay_consume',
+    'access_request',
+    'fiscal_profile_self_attestation',
+    'payout_onboarding',
+    'membership_join',
+    'access_credit_quote',
+    'access_credit_redeem',
+  ];
+  const membershipConstraint = migrationSource.slice(
+    migrationSource.indexOf(
+      'add constraint affiliate_service_idempotency_operation',
+    ),
+    migrationSource.indexOf(
+      '-- The Edge boundary reserves a durable slot',
+    ),
+  );
+  const payoutConstraint = payoutMigrationSource.slice(
+    payoutMigrationSource.indexOf(
+      'add constraint affiliate_service_idempotency_operation_v4',
+    ),
+    payoutMigrationSource.indexOf(
+      'create index if not exists affiliate_service_idempotency_country_bind_idx',
+    ),
+  );
+
+  for (const operation of requiredOperations) {
+    assert.match(membershipConstraint, new RegExp(`'${operation}'`));
+    assert.match(payoutConstraint, new RegExp(`'${operation}'`));
+  }
+  assert.match(payoutConstraint, /'payout_country_bind'/);
+});
+
 test('Didit KYC is locked to the explicit cash journey before every prepare branch', () => {
   const guardStart = payoutMigrationSource.indexOf(
     'affiliate_private.partners_assert_kyc_cash_eligibility(p_user_id uuid)',

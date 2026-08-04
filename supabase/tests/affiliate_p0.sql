@@ -946,7 +946,7 @@ select extensions.throws_ok(
     )
   $$,
   '42501',
-  'Partners release gate activation requires AAL2',
+  'Risk Partners approval requires AAL2',
   'AAL1 cannot activate privacy_approved even with Risk authority'
 );
 
@@ -1334,20 +1334,24 @@ select extensions.is(
   'a server-verified account activates after every gate passes'
 );
 select extensions.is(
-  public.partners_service_rotate_link(
+  public.partners_service_join_v2(
     '10000000-0000-4000-8000-000000000002',
-    'links.integration.0001'
+    true,
+    true,
+    'membership.integration.0001'
   ) ->> 'action',
-  'link_rotated',
-  'an active account can create its first sharing link'
+  'membership_joined',
+  'an eligible user explicitly joins before receiving a sharing link'
 );
 select extensions.is(
-  public.partners_service_rotate_link(
+  public.partners_service_join_v2(
     '10000000-0000-4000-8000-000000000002',
-    'links.integration.0001'
+    true,
+    true,
+    'membership.integration.0001'
   ) ->> 'replayed',
   'true',
-  'link retries replay without rotating again'
+  'membership retries replay without creating another link'
 );
 
 reset role;
@@ -1358,7 +1362,7 @@ select extensions.is(
     from affiliate_private.affiliate_links
   ),
   1::bigint,
-  'a replayed link request creates no extra link'
+  'a replayed membership request creates no extra link'
 );
 select extensions.is(
   (
@@ -1367,7 +1371,7 @@ select extensions.is(
     where status = 'active'
   ),
   1::bigint,
-  'exactly one active link exists after initial creation'
+  'exactly one active link exists after joining'
 );
 
 set local role service_role;

@@ -748,7 +748,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /restore_pgtap_transaction_guard=true/);
   assert.match(
     workflow,
-    /Run exhaustive Partners pgTAP tests on the fresh database[\s\S]*?revenuecat_transfer\.sql[\s\S]*?Run the data-compatible physical restore contract[\s\S]*?affiliate_restore_compatibility\.sql/,
+    /Run exhaustive Partners pgTAP tests on the fresh database[\s\S]*?affiliate_frictionless_membership_credits\.sql[\s\S]*?revenuecat_transfer\.sql[\s\S]*?Run the data-compatible physical restore contract[\s\S]*?affiliate_restore_compatibility\.sql/,
   );
 
   const normalizedRestorePgTap = restorePgTap.trim();
