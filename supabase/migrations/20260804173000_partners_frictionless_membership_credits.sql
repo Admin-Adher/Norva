@@ -464,6 +464,10 @@ $$;
 do $partners_member_predicate_upgrade$
 declare
   v_change record;
+  v_financial_signature constant text :=
+    'affiliate_private.partners_worker_financial_fact_ingest(text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz)';
+  v_financial_gate_pattern constant text := $pattern$and[[:space:]]*\([[:space:]]*coalesce\(\([[:space:]]*select f\.enabled[[:space:]]*from public\.admin_feature_flags f[[:space:]]*where f\.key = 'partners_shadow_mode'[[:space:]]*\), false\)[[:space:]]*or[[:space:]]*coalesce\(\([[:space:]]*select f\.enabled[[:space:]]*from public\.admin_feature_flags f[[:space:]]*where f\.key = 'partners_payouts_live'[[:space:]]*\), false\)[[:space:]]*\)$pattern$;
+  v_financial_gate_replacement constant text := E'and coalesce((\n        select flag.enabled\n        from public.admin_feature_flags flag\n        where flag.key = ''partners_earnings_enabled''\n      ), false)';
   v_oid regprocedure;
   v_definition text;
   v_rewritten text;
@@ -490,11 +494,6 @@ begin
         'affiliate_private.partners_worker_financial_fact_ingest(text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz)',
         'v_account.status = ''active''',
         'v_account.member_status = ''active'''
-      ),
-      (
-        'affiliate_private.partners_worker_financial_fact_ingest(text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz)',
-        E'and (\n        coalesce((\n          select f.enabled\n          from public.admin_feature_flags f\n          where f.key = ''partners_shadow_mode''\n        ), false)\n        or coalesce((\n          select f.enabled\n          from public.admin_feature_flags f\n          where f.key = ''partners_payouts_live''\n        ), false)\n      )',
-        E'and coalesce((\n        select flag.enabled\n        from public.admin_feature_flags flag\n        where flag.key = ''partners_earnings_enabled''\n      ), false)'
       ),
       (
         'affiliate_private.partners_worker_commission_job_complete_pre_financial_fence(text,text,text,text,text)',
@@ -531,6 +530,31 @@ begin
     end if;
     execute v_rewritten;
   end loop;
+
+  -- pg_get_functiondef() preserves the formatting of restored routine bodies.
+  -- Match this one legacy gate structurally, while still requiring exactly one
+  -- occurrence before changing it. This accepts harmless whitespace drift but
+  -- fails closed on any semantic or duplicate-body drift.
+  v_oid := to_regprocedure(v_financial_signature);
+  if v_oid is null then
+    raise exception 'required Partners routine is unavailable: %',
+      v_financial_signature using errcode = '55000';
+  end if;
+  select pg_get_functiondef(v_oid::oid) into v_definition;
+  if regexp_count(v_definition, v_financial_gate_pattern) <> 1 then
+    raise exception 'Partners routine contract drifted: % / earnings gate',
+      v_financial_signature using errcode = '55000';
+  end if;
+  v_rewritten := regexp_replace(
+    v_definition,
+    v_financial_gate_pattern,
+    v_financial_gate_replacement
+  );
+  if v_rewritten = v_definition then
+    raise exception 'Partners routine contract drifted: % / earnings gate',
+      v_financial_signature using errcode = '55000';
+  end if;
+  execute v_rewritten;
 end;
 $partners_member_predicate_upgrade$;
 

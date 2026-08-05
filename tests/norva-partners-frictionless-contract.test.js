@@ -812,6 +812,34 @@ test('sharing remains bound to membership while legacy cash status can change in
   );
 });
 
+test('restored financial gates accept whitespace drift but fail closed on semantic drift', () => {
+  const rewriteStart = migrationSource.indexOf(
+    'do $partners_member_predicate_upgrade$',
+  );
+  const rewriteEnd = migrationSource.indexOf(
+    '$partners_member_predicate_upgrade$;',
+    rewriteStart + 1,
+  );
+  const rewrite = migrationSource.slice(rewriteStart, rewriteEnd);
+  const exactReplacementMatrix = rewrite.slice(
+    rewrite.indexOf('from (values'),
+    rewrite.indexOf(') as changes(signature, old_fragment, new_fragment)'),
+  );
+
+  assert.ok(rewriteStart > 0 && rewriteEnd > rewriteStart);
+  assert.match(rewrite, /v_financial_gate_pattern constant text/);
+  assert.match(rewrite, /and\[\[:space:\]\]\*\\\(/);
+  assert.match(rewrite, /regexp_count\(v_definition, v_financial_gate_pattern\) <> 1/);
+  assert.match(
+    rewrite,
+    /regexp_replace\([\s\S]*?v_financial_gate_pattern,[\s\S]*?v_financial_gate_replacement/,
+  );
+  assert.match(rewrite, /where f\\\.key = 'partners_shadow_mode'/);
+  assert.match(rewrite, /where f\\\.key = 'partners_payouts_live'/);
+  assert.match(rewrite, /where flag\.key = ''partners_earnings_enabled''/);
+  assert.doesNotMatch(exactReplacementMatrix, /partners_shadow_mode|partners_payouts_live/);
+});
+
 test('frictionless idempotency extends every legacy operation without narrowing it', () => {
   const requiredOperations = [
     'application',
