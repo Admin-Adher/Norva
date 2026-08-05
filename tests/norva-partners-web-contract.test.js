@@ -1789,7 +1789,7 @@ test('Clipboard rejection falls back to the complete disclosure payload and rest
   const payload = [
     'Discover Norva — one media ecosystem across Web, Android and TV.',
     '',
-    'Partner link · I may receive 20% of eligible Norva payments excluding tax.',
+    'Publicité — lien partenaire Norva · Je peux recevoir 20 % des paiements Norva éligibles hors taxes.',
     `https://norva.tv/r/${'A'.repeat(32)}`,
   ].join('\n');
   const restoredRanges = [];
@@ -1920,6 +1920,34 @@ test('dashboard Copy action uses the canonical disclosure payload, never the bar
   assert.match(copied, /Earnings are not guaranteed/);
   assert.match(copied, new RegExp(`${'A'.repeat(32)}$`));
   assert.equal(status, 'Referral message and required disclosure copied.');
+});
+
+test('share disclosure follows the audience language contract', () => {
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: {
+      documentElement: { lang: 'fr-FR' },
+      getElementById: () => null,
+    },
+    navigator: { language: 'en-US', onLine: true },
+    AbortController,
+    Intl,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (callback) => callback(),
+    history: { back() {} },
+  });
+  window.window = window;
+  vm.runInContext(pageSource, context, {
+    filename: 'public/js/pages/PartnersPage.js',
+  });
+  const page = new window.PartnersPage({
+    currentUser: { cloud: true, device: false },
+  });
+  const disclosure = page.shareDisclosure(validEnvelope().data);
+  assert.match(disclosure, /^Publicité — lien partenaire Norva/);
+  assert.match(disclosure, /Je peux recevoir 20 %/);
 });
 
 test('double clipboard failure returns one stable public error without success', async () => {
@@ -2289,7 +2317,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=7"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=8"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -2301,9 +2329,10 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(settingsSource, /void this\.refreshPartnersEntry\(\)\.catch\(\(\) => \{\}\)/);
   assert.doesNotMatch(pageSource, /localStorage|sessionStorage/);
   assert.doesNotMatch(pageSource, /referral[_-]?(?:code|token)\s*=/i);
-  assert.match(pageSource, /data-partners-join disabled/);
-  assert.match(pageSource, /data-partners-individual-confirm/);
+  assert.match(pageSource, /data-partners-membership-join disabled/);
   assert.match(pageSource, /data-partners-terms-confirm/);
+  assert.match(pageSource, /data-partners-disclosure-confirm/);
+  assert.match(pageSource, /without KYC; Didit is reserved for optional cash transfers/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.apply/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.acceptTerms/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.rotateLink/);
@@ -2320,8 +2349,8 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(pageSource, /'pending'/);
   assert.match(pageSource, /'dashboard'/);
   assert.match(pageSource, /Each threshold is exact in its named settlement currency/);
-  assert.match(pageSource, /Norva covers payout-transfer fees on supported routes/);
-  assert.match(pageSource, /never silently converted/);
+  assert.match(pageSource, /Norva absorbs payout-transfer fees on supported routes/);
+  assert.match(pageSource, /without KYC through an exact server quote/);
   assert.match(cloudSource, /value\.USD === 1000/);
   assert.match(cloudSource, /data\.policy\.payout_currencies\.some/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.dashboard/);
@@ -2331,6 +2360,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   const partnersNamespace = cloudSource.slice(partnersNamespaceStart, partnersNamespaceEnd);
   for (const binding of [
     'bootstrap: partnersBootstrap',
+    'join: partnersJoin',
     'get: partnersAccessRequestGet',
     'request: partnersAccessRequestSubmit',
     'apply: partnersApply',
@@ -2373,7 +2403,10 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
     assert.match(pageSource, new RegExp(`['"]${reason}['"]`));
   }
   assert.match(pageSource, /data\.eligibility\.eligible\s*\?\s*'discovery'/);
-  assert.match(pageSource, /Identity, age and applicable jurisdiction policy/);
+  assert.match(
+    pageSource,
+    /Identity verification is never required to share, earn or convert/,
+  );
   assert.match(pageSource, /header\('Checking availability', 'partners-title'\)/);
   assert.match(pageSource, /Attribution window:<\/strong> \$\{days\} days/);
   assert.match(
@@ -2470,10 +2503,10 @@ test('Partners route participates in bounded native continuity without storing p
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
   assert.match(htmlSource, /main\.css\?v=98/);
-  assert.match(htmlSource, /cloudApi\.js\?v=58/);
+  assert.match(htmlSource, /cloudApi\.js\?v=59/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=7/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=8/);
   assert.match(htmlSource, /app\.js\?v=68/);
   assert.match(appSource, /AdminPage\.js\?v=111/);
 });

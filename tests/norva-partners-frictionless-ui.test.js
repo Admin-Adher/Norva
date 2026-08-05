@@ -224,6 +224,13 @@ test('active dashboard prioritises available, pending and Norva conversion', () 
         unit_duration_days: 30,
         minimum_months: 1,
         maximum_months: 12,
+        reference_currency: 'USD',
+        reference_currency_exponent: 2,
+        reference_unit_amount_minor: 499,
+        fx_rate_snapshot_key: null,
+        fx_rate_source: null,
+        fx_observed_at: null,
+        fx_valid_until: null,
       },
     },
     overlay: null,
@@ -250,7 +257,7 @@ test('access-credit labels preserve the canonical Plus and Family prices', () =>
   assert.match(page.formatMinor(899, 'USD'), /8[.,]99/);
 });
 
-test('non-USD balances remain visible and never become a zero or KYC conversion prompt', () => {
+test('non-USD balances convert through exact server FX without a KYC prompt', () => {
   const { page } = loadPage();
   const metrics = control();
   const content = control();
@@ -277,16 +284,33 @@ test('non-USD balances remain visible and never become a zero or KYC conversion 
     }],
     next_maturation_at: null,
     credit_readiness: {
-      ready: false,
-      reason: 'currency_not_supported',
-      catalog: null,
+      ready: true,
+      reason: null,
+      catalog: {
+        catalog_key: 'acc_p0_usd_plus_month_v1',
+        plan_code: 'plus',
+        currency: 'EUR',
+        currency_exponent: 2,
+        unit_amount_minor: 454,
+        unit_duration_days: 30,
+        minimum_months: 1,
+        maximum_months: 12,
+        reference_currency: 'USD',
+        reference_currency_exponent: 2,
+        reference_unit_amount_minor: 499,
+        fx_rate_snapshot_key: `fxr_${'a'.repeat(24)}`,
+        fx_rate_source: 'ecb_reference',
+        fx_observed_at: '2026-08-05T08:00:00Z',
+        fx_valid_until: '2026-08-06T08:00:00Z',
+      },
     },
     history: { status: 'all', items: [], next_cursor: null },
   });
 
   assert.match(metrics.innerHTML, /12[.,]50/);
-  assert.match(content.innerHTML, /available only from your USD balance/i);
-  assert.match(content.innerHTML, /Other currency balances stay separate/i);
+  assert.match(content.innerHTML, /Convert to Norva Plus/i);
+  assert.match(content.innerHTML, /dated, immutable rate/i);
+  assert.match(content.innerHTML, /Review conversion/i);
   assert.doesNotMatch(content.innerHTML, /data-partners-cash-kyc-form|€0[.,]00/);
 });
 

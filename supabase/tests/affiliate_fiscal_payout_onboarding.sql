@@ -1108,7 +1108,10 @@ begin
     'approval_record', repeat('1', 64),
     'deployment_proof', repeat('2', 64),
     'legal_tax_review', repeat('3', 64),
+    'owner_risk_acceptance', repeat('0a', 32),
     'partners_terms', repeat('4', 64),
+    'partners_disclosure', repeat('0b', 32),
+    'tax_operating_policy', repeat('0c', 32),
     'dpia', repeat('5', 64),
     'gdpr_self_assessment', repeat('6', 64),
     'biometric_consent', repeat('f', 64),
@@ -1208,12 +1211,15 @@ begin
     ) || case v_gate
       when 'legal_and_tax_approved' then jsonb_build_object(
         'legal_tax_review', repeat('3', 64),
-        'partners_terms', repeat('4', 64)
+        'owner_risk_acceptance', repeat('0a', 32),
+        'partners_terms', repeat('4', 64),
+        'partners_disclosure', repeat('0b', 32),
+        'tax_operating_policy', repeat('0c', 32)
       )
       when 'membership_privacy_approved' then jsonb_build_object(
-        'gdpr_self_assessment', repeat('6', 64),
-        'privacy_notice', repeat('7', 64),
-        'records_of_processing', repeat('8', 64)
+        'membership_privacy_notice', repeat('6', 64),
+        'membership_records_of_processing', repeat('7', 64),
+        'membership_minimization_review', repeat('8', 64)
       )
       when 'privacy_approved' then jsonb_build_object(
         'dpia', repeat('5', 64),

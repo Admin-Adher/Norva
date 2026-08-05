@@ -1,16 +1,36 @@
 # Norva Partners — Spécification produit, UX et technique P0
 
+> **Avenant exécutoire du 5 août 2026.** En cas de contradiction avec une
+> section historique ci-dessous, le parcours déployé et cet avenant prévalent.
+> Tout compte Norva confirmé peut adhérer au programme individuel, accepter les
+> Conditions et la disclosure, obtenir son lien, attribuer des filleuls,
+> accumuler une commission et convertir un solde disponible en accès Norva
+> **sans KYC, profil fiscal, pays cash ni coordonnées bancaires**. Le membre
+> atteste par son acceptation qu'il possède l'âge et la capacité locale requis.
+> Didit, la vérification d'âge/pays/capacité, le profil fiscal, le bénéficiaire
+> tokenisé et un corridor `revolut_manual` ne sont demandés que si le membre
+> choisit le virement. Le cash P0 reste France, allowlist, 18+, maker-checker et
+> frais absorbés par Norva. Les sociétés/KYB restent hors P0. La référence
+> financière et le seuil cash mondial restent `USD 10.00`; le crédit Plus vaut
+> `USD 4.99` par tranche de 30 jours. La position interne et l'acceptation de
+> risque propriétaire sont documentées dans
+> `NORVA-PARTNERS-INTERNAL-LEGAL-TAX-REVIEW.md` et
+> `NORVA-PARTNERS-TAX-OPERATING-POLICY.md`. La matrice qui sépare livraison,
+> preuve runtime et preuve humaine figure dans
+> `NORVA-PARTNERS-PRODUCTION-CERTIFICATION-12.md`.
+
 **Statut :** socle P0 livré en mode fail-closed ; pilote non activé tant que
 Didit, le rail de versement individuel, le parcours fiscal Web, les juridictions
 et les preuves runtime ne sont pas configurés et validés
 **Date :** 29 juillet 2026
 **Marché cible :** mondial
 **Modèle :** affiliation directe, 20 % récurrents, sans multiniveau
-**Type de partenaire P0 :** personne physique uniquement, KYC sans KYB
+**Type de partenaire P0 :** personne physique uniquement ; KYC uniquement pour
+le virement cash, sans KYB
 **Devise commerciale et de référence :** USD
 **Seuil mondial de référence :** 10,00 USD, soit 1 000 unités mineures
-**Déploiement initial :** invitation, 20 à 50 partenaires dans une allowlist de
-pays couverts à la fois par le prestataire KYC et le rail de versement individuel
+**Déploiement initial :** adhésion publique sans KYC ; cohorte cash France de
+20 à 50 partenaires maximum sur allowlist
 
 ## 1. Décision produit
 

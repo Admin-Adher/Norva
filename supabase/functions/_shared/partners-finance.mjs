@@ -219,6 +219,39 @@ export function revolutPartnerObservation(input, now = new Date()) {
     textOrNull(input?.transactionId);
   if (!transactionId) return null;
 
+  const orderCurrency = currencyOrNull(order.currency ?? input?.currency);
+  const orderGross = nonNegativeSafeIntegerOrNull(
+    order.amount ?? input?.grossMinor,
+  );
+  const authoritative = recordOrEmpty(input?.authoritativeFinancial);
+  const authoritativeCurrency = currencyOrNull(authoritative.currency);
+  const authoritativeExponent = boundedIntegerOrNull(
+    authoritative.currency_exponent,
+    0,
+    6,
+  );
+  const authoritativeGross = nonNegativeSafeIntegerOrNull(
+    authoritative.gross_minor,
+  );
+  const authoritativeDiscount = nonNegativeSafeIntegerOrNull(
+    authoritative.discount_minor,
+  );
+  const authoritativeTax = nonNegativeSafeIntegerOrNull(
+    authoritative.tax_minor,
+  );
+  const authoritativeEligible = nonNegativeSafeIntegerOrNull(
+    authoritative.eligible_minor,
+  );
+  const complete = authoritativeCurrency !== null &&
+    authoritativeCurrency === orderCurrency &&
+    authoritativeExponent !== null &&
+    authoritativeGross !== null &&
+    authoritativeGross === orderGross &&
+    authoritativeDiscount !== null &&
+    authoritativeTax !== null &&
+    authoritativeTax <= authoritativeGross &&
+    authoritativeEligible === authoritativeGross - authoritativeTax;
+
   return buildPartnerFinancialObservation({
     referredUserId: input?.referredUserId,
     rail: "web",
@@ -229,20 +262,84 @@ export function revolutPartnerObservation(input, now = new Date()) {
     transactionId,
     parentTransactionId: textOrNull(order.related_order_id) ??
       textOrNull(input?.parentTransactionId),
-    currency: currencyOrNull(order.currency ?? input?.currency),
-    // Revolut's order amount is explicitly expressed in minor units. Tax,
-    // discounts and the eligible base are not explicit in the order contract,
-    // so they remain null and the database blocks commission creation.
-    currencyExponent: null,
-    grossMinor: nonNegativeSafeIntegerOrNull(order.amount ?? input?.grossMinor),
-    discountMinor: null,
-    taxMinor: null,
-    eligibleMinor: null,
+    currency: orderCurrency,
+    // Revolut proves gross minor units. The remaining components become
+    // commissionable only after the service-only, versioned tax resolver has
+    // returned a self-consistent contract for this exact order.
+    currencyExponent: complete ? authoritativeExponent : null,
+    grossMinor: orderGross,
+    discountMinor: complete ? authoritativeDiscount : null,
+    taxMinor: complete ? authoritativeTax : null,
+    eligibleMinor: complete ? authoritativeEligible : null,
     observedAt: isoOrNow(
       order.updated_at ?? order.created_at ?? input?.observedAt,
       now,
     ),
   });
+}
+
+export async function resolveWebTaxForObservation(db, observation) {
+  if (!observation) return null;
+  if (observation.rail !== "web") {
+    throw new Error("partners_web_tax_invalid_rail");
+  }
+  const parentTransactionHash = observation.parentTransactionId
+    ? await sha256Hex(observation.parentTransactionId)
+    : null;
+  const { data, error } = await db.rpc("partners_worker_web_tax_resolve", {
+    p_user_id: observation.referredUserId,
+    p_event_type: observation.eventType,
+    p_environment: observation.environment,
+    p_currency: observation.currency,
+    p_currency_exponent: 2,
+    p_gross_minor: observation.grossMinor,
+    p_parent_transaction_hash: parentTransactionHash,
+    p_observed_at: observation.observedAt,
+  });
+  if (error) {
+    const code = textOrNull(error.code, 16) ?? "unknown";
+    throw new Error(`partners_web_tax_resolve_failed:${code}`);
+  }
+  const result = unwrapRpcJson(data);
+  if (
+    Number(result?.schema_version) !== 1 ||
+    result?.action !== "web_tax_resolved" ||
+    !["complete", "incomplete"].includes(String(result?.status ?? ""))
+  ) throw new Error("partners_web_tax_resolve_invalid_response");
+  if (result.status === "incomplete") return observation;
+
+  const financial = recordOrEmpty(result.financial);
+  const resolved = buildPartnerFinancialObservation({
+    ...observation,
+    currency: financial.currency,
+    currencyExponent: financial.currency_exponent,
+    grossMinor: financial.gross_minor,
+    discountMinor: financial.discount_minor,
+    taxMinor: financial.tax_minor,
+    eligibleMinor: financial.eligible_minor,
+  });
+  if (
+    resolved.currency !== observation.currency ||
+    resolved.grossMinor !== observation.grossMinor ||
+    resolved.currencyExponent === null ||
+    resolved.discountMinor === null ||
+    resolved.taxMinor === null ||
+    resolved.eligibleMinor === null ||
+    resolved.taxMinor > resolved.grossMinor ||
+    resolved.eligibleMinor !== resolved.grossMinor - resolved.taxMinor
+  ) throw new Error("partners_web_tax_resolve_invalid_financial_contract");
+  return resolved;
+}
+
+export async function resolveRevolutPartnerObservation(
+  db,
+  input,
+  now = new Date(),
+) {
+  return await resolveWebTaxForObservation(
+    db,
+    revolutPartnerObservation(input, now),
+  );
 }
 
 export function revolutDisputePartnerObservation(input, now = new Date()) {

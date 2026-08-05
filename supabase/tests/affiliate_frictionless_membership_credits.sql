@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(77);
+select extensions.plan(78);
 
 select extensions.has_column(
   'affiliate_private',
@@ -296,7 +296,7 @@ select extensions.ok(
     where constraint_row.conrelid =
       'affiliate_private.affiliate_access_credit_quotes'::regclass
       and constraint_row.conname = 'affiliate_access_credit_quotes_amounts'
-  ) like '%total_amount_minor = (unit_amount_minor * months)%'
+  ) like '%reference_total_amount_minor = (reference_unit_amount_minor * months)%'
   and (
     select position(
       '00:20:00'
@@ -525,7 +525,7 @@ select extensions.ok(
   and lower(pg_get_functiondef(
     'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
   )) ~ '''partner_access_credit_clearing''[[:space:]]*,[[:space:]]*''credit''',
-  'redemption atomically spends available USD under the canonical balance lock'
+  'redemption atomically spends the quoted source-currency balance under the canonical balance lock'
 );
 
 select extensions.ok(
@@ -881,7 +881,7 @@ select extensions.ok(
     ))
   ) > 0
   and position(
-    '''currency_not_supported'''
+    '''fx_rate_unavailable'''
     in lower(pg_get_functiondef(
       'affiliate_private.partners_service_access_credit_status(uuid)'::regprocedure
     ))
@@ -910,6 +910,12 @@ select extensions.ok(
   ) > 0
   and position(
     'errcode = ''p1005'''
+    in lower(pg_get_functiondef(
+      'affiliate_private.partners_service_access_credit_quote(uuid,integer,text)'::regprocedure
+    ))
+  ) > 0
+  and position(
+    'errcode = ''p1008'''
     in lower(pg_get_functiondef(
       'affiliate_private.partners_service_access_credit_quote(uuid,integer,text)'::regprocedure
     ))
@@ -1240,9 +1246,9 @@ select extensions.ok(
   ) @> array[
     'approval_record',
     'deployment_proof',
-    'gdpr_self_assessment',
-    'privacy_notice',
-    'records_of_processing'
+    'membership_privacy_notice',
+    'membership_records_of_processing',
+    'membership_minimization_review'
   ]::text[]
   and position(
     '''membership_privacy_approved'''
@@ -1737,7 +1743,7 @@ select extensions.throws_ok(
   $$,
   'P1004',
   'insufficient available Partner balance',
-  'P1004 maps an insufficient available USD balance at quote time'
+  'P1004 maps an insufficient available source-currency balance at quote time'
 );
 
 create or replace function pg_temp.stage_frictionless_financial_fact(
@@ -2163,6 +2169,10 @@ insert into affiliate_private.affiliate_access_credit_quotes (
   months,
   unit_amount_minor,
   total_amount_minor,
+  reference_currency,
+  reference_currency_exponent,
+  reference_unit_amount_minor,
+  reference_total_amount_minor,
   duration_days,
   expires_at,
   redeemed_at,
@@ -2177,6 +2187,10 @@ select
   'USD',
   2,
   1,
+  499,
+  499,
+  'USD',
+  2,
   499,
   499,
   30,
@@ -2763,6 +2777,117 @@ select extensions.ok(
     'f4000000-0000-4000-8000-000000000004'
   ),
   'financially clear account deletion revokes sharing and closes membership'
+);
+
+insert into affiliate_private.affiliate_currency_metadata (
+  currency_code, exponent, status, configured_by_pseudonym, justification
+) values (
+  'EUR', 2, 'active', repeat('e', 64),
+  'Exact EUR access-credit integration test metadata.'
+) on conflict (currency_code) do nothing;
+
+create or replace function pg_temp.stage_frictionless_eur_fact()
+returns text
+language plpgsql
+as $test$
+declare
+  v_attribution_id uuid;
+  v_fact_id uuid;
+  v_job_key text;
+begin
+  select attribution.id into strict v_attribution_id
+  from affiliate_private.affiliate_attributions attribution
+  where attribution.referred_user_id =
+    'f4000000-0000-4000-8000-000000000003';
+  insert into affiliate_private.affiliate_financial_facts (
+    transaction_hash, parent_transaction_hash, referred_user_id,
+    attribution_id, rail, event_type, environment, facts_status,
+    currency, currency_exponent, gross_minor, discount_minor,
+    tax_minor, eligible_minor, occurred_at
+  ) values (
+    repeat('e', 64), null,
+    'f4000000-0000-4000-8000-000000000003', v_attribution_id,
+    'web', 'renewal', 'production', 'complete', 'EUR', 2,
+    2495, 0, 0, 2495, now() - interval '46 days'
+  ) returning id into v_fact_id;
+  insert into affiliate_private.affiliate_commission_jobs (fact_id, job_kind)
+  values (v_fact_id, 'accrual') returning job_key into v_job_key;
+  return v_job_key;
+end;
+$test$;
+
+select pg_temp.stage_frictionless_eur_fact();
+select pg_temp.complete_frictionless_commission_job(
+  repeat('e', 64), 'frictionless-eur-worker', repeat('1', 64)
+);
+select pg_temp.complete_frictionless_maturation_job(
+  repeat('e', 64), 'frictionless-eur-release', repeat('2', 64)
+);
+
+insert into affiliate_private.affiliate_fx_rate_snapshots (
+  snapshot_key, source_currency, source_exponent, source_units_minor,
+  target_currency, target_exponent, target_units_minor, rate_source,
+  observed_at, valid_until, evidence_sha256, idempotency_key,
+  payload_sha256, recorded_by_pseudonym, justification
+) values (
+  'fxr_eeeeeeeeeeeeeeeeeeeeeeee', 'EUR', 2, 100,
+  'USD', 2, 110, 'finance_manual', now() - interval '1 minute',
+  now() + interval '1 day', repeat('3', 64),
+  'frictionless.fx.eur.0001', repeat('4', 64), repeat('5', 64),
+  'Exact EUR to USD snapshot for access-credit integration test.'
+);
+
+insert into frictionless_test_state (state_key, json_value)
+values (
+  'eur_quote',
+  public.partners_service_access_credit_quote(
+    'f4000000-0000-4000-8000-000000000001',
+    1,
+    'frictionless.eur.quote.0001'
+  )
+);
+insert into frictionless_test_state (state_key, json_value)
+select
+  'eur_redeem',
+  public.partners_service_access_credit_redeem(
+    'f4000000-0000-4000-8000-000000000001',
+    quote.json_value #>> '{quote,key}',
+    'frictionless.eur.redeem.0001'
+  )
+from frictionless_test_state quote
+where quote.state_key = 'eur_quote';
+
+select extensions.ok(
+  (
+    select quote.json_value #>> '{quote,currency}' = 'EUR'
+      and (quote.json_value #>> '{quote,total_amount_minor}')::bigint = 454
+      and quote.json_value #>> '{quote,reference_currency}' = 'USD'
+      and (quote.json_value #>> '{quote,reference_total_amount_minor}')::bigint = 499
+      and quote.json_value #>> '{quote,fx_rate_snapshot_key}' =
+        'fxr_eeeeeeeeeeeeeeeeeeeeeeee'
+    from frictionless_test_state quote
+    where quote.state_key = 'eur_quote'
+  )
+  and (
+    select redemption.json_value #>> '{redemption,currency}' = 'EUR'
+      and (redemption.json_value #>> '{redemption,amount_minor}')::bigint = 454
+      and (redemption.json_value #>> '{redemption,reference_amount_minor}')::bigint = 499
+      and (redemption.json_value #>> '{balance,available_minor}')::bigint = 45
+    from frictionless_test_state redemption
+    where redemption.state_key = 'eur_redeem'
+  )
+  and exists (
+    select 1
+    from affiliate_private.affiliate_access_credit_redemptions redemption
+    join affiliate_private.affiliate_fx_rate_snapshots rate
+      on rate.id = redemption.fx_rate_snapshot_id
+    where redemption.currency = 'EUR'
+      and redemption.amount_minor = 454
+      and redemption.reference_currency = 'USD'
+      and redemption.reference_amount_minor = 499
+      and rate.snapshot_key = 'fxr_eeeeeeeeeeeeeeeeeeeeeeee'
+  ),
+  'a non-USD balance converts without KYC through one immutable exact FX quote'
 );
 
 select * from extensions.finish();

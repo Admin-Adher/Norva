@@ -172,6 +172,7 @@ begin
     'affiliate_access_credit_catalog',
     'affiliate_access_credit_quotes',
     'affiliate_access_credit_redemptions',
+    'affiliate_web_tax_policies',
     'affiliate_link_claims',
     'affiliate_attributions',
     'affiliate_financial_facts',
@@ -226,6 +227,7 @@ begin
     ('affiliate_private'::text, 'affiliate_access_credit_catalog'::text),
     ('affiliate_private', 'affiliate_access_credit_quotes'),
     ('affiliate_private', 'affiliate_access_credit_redemptions'),
+    ('affiliate_private', 'affiliate_web_tax_policies'),
     ('public', 'cloud_access_grants')
   ) expected(schema_name, relation_name)
   left join pg_catalog.pg_namespace namespace
@@ -519,6 +521,8 @@ begin
       ('affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)', true, 'v', 'service_role'),
       ('affiliate_private.partners_account_deletion_ready(uuid)', true, 's', 'owner'),
       ('affiliate_private.partners_access_credit_balances(uuid)', true, 's', 'owner'),
+      ('affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)', false, 'i', 'owner'),
+      ('affiliate_private.partners_access_credit_offer(uuid,integer)', true, 'v', 'owner'),
       ('affiliate_private.partners_account_balances(uuid)', true, 's', 'owner'),
       ('affiliate_private.partners_cash_readiness(uuid)', true, 's', 'owner'),
       ('affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)', true, 'v', 'service_role'),
@@ -546,6 +550,8 @@ begin
       ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)', true, 'v', 'service_role'),
       ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)', true, 'v', 'service_role'),
       ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)', true, 'v', 'authenticated'),
+      ('affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)', true, 'v', 'owner'),
+      ('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)', true, 'v', 'service_role'),
       ('affiliate_private.is_managed_partners_flag(text)', false, 'i', 'owner'),
       ('affiliate_private.partners_require_control_access(text,text,boolean)', true, 's', 'owner'),
       ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)', true, 'v', 'authenticated'),
@@ -1430,11 +1436,18 @@ begin
     or affiliate_private.partners_approval_required_document_keys(
       'membership_privacy_approved'
     ) <> array[
-      'approval_record', 'deployment_proof', 'gdpr_self_assessment',
-      'privacy_notice', 'records_of_processing'
+      'approval_record', 'deployment_proof', 'membership_privacy_notice',
+      'membership_records_of_processing', 'membership_minimization_review'
+    ]::text[]
+    or affiliate_private.partners_approval_required_document_keys(
+      'legal_and_tax_approved'
+    ) <> array[
+      'approval_record', 'deployment_proof', 'legal_tax_review',
+      'owner_risk_acceptance', 'partners_terms', 'partners_disclosure',
+      'tax_operating_policy'
     ]::text[]
   then
-    raise exception 'restore omitted the membership privacy approval contract';
+    raise exception 'restore omitted a Partners approval evidence contract';
   end if;
 
   if exists (
@@ -2833,8 +2846,76 @@ begin
         and pg_catalog.pg_get_constraintdef(constraint_row.oid)
           like '%partner_access_credit_clearing%'
     )
+    or not exists (
+      select 1
+      from information_schema.columns column_row
+      where column_row.table_schema = 'affiliate_private'
+        and column_row.table_name = 'affiliate_access_credit_quotes'
+        and column_row.column_name = 'reference_total_amount_minor'
+        and column_row.is_nullable = 'NO'
+    )
+    or not exists (
+      select 1
+      from information_schema.columns column_row
+      where column_row.table_schema = 'affiliate_private'
+        and column_row.table_name = 'affiliate_access_credit_redemptions'
+        and column_row.column_name = 'reference_amount_minor'
+        and column_row.is_nullable = 'NO'
+    )
+    or position(
+      'affiliate_fx_rate_snapshots'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_access_credit_offer(uuid,integer)'
+      )))
+    ) = 0
+    or position(
+      'partners_cash_readiness'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'
+      )))
+    ) > 0
   then
-    raise exception 'restore omitted the exact P0 access-credit ledger contract';
+    raise exception 'restore omitted the exact multi-currency access-credit contract';
+  end if;
+
+  if not exists (
+      select 1
+      from affiliate_private.affiliate_web_tax_policies policy
+      where policy.policy_key = 'wtp_fr_usd_owner_v1'
+        and policy.status = 'active'
+        and policy.country_code = 'FR'
+        and policy.currency = 'USD'
+        and policy.currency_exponent = 2
+        and policy.calculation_mode = 'gross_is_net'
+        and policy.tax_rate_bps = 0
+        and policy.approved_by_role = 'accountable_owner'
+        and not policy.external_review
+        and policy.effective_until <=
+          policy.effective_from + interval '90 days'
+    )
+    or has_function_privilege(
+      'anon',
+      'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+      'EXECUTE'
+    )
+    or has_function_privilege(
+      'authenticated',
+      'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+      'EXECUTE'
+    )
+    or not has_function_privilege(
+      'service_role',
+      'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+      'EXECUTE'
+    )
+    or position(
+      'financial_fact_unavailable'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'
+      )))
+    ) = 0
+  then
+    raise exception 'restore omitted the fail-closed Web tax contract';
   end if;
 
   select count(*)
@@ -2894,6 +2975,11 @@ begin
     or quote.currency_exponent <> redemption.currency_exponent
     or quote.months <> redemption.months
     or quote.total_amount_minor <> redemption.amount_minor
+    or quote.reference_currency <> redemption.reference_currency
+    or quote.reference_currency_exponent <>
+      redemption.reference_currency_exponent
+    or quote.reference_total_amount_minor <> redemption.reference_amount_minor
+    or quote.fx_rate_snapshot_id is distinct from redemption.fx_rate_snapshot_id
     or quote.duration_days <> redemption.duration_days
     or entry.account_id <> redemption.account_id
     or entry.entry_kind <> 'access_credit_redemption'

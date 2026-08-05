@@ -322,6 +322,13 @@ async function mountPartners(page, initialState) {
             unit_duration_days: 30,
             minimum_months: 1,
             maximum_months: 12,
+            reference_currency: 'USD',
+            reference_currency_exponent: 2,
+            reference_unit_amount_minor: 499,
+            fx_rate_snapshot_key: null,
+            fx_rate_source: null,
+            fx_observed_at: null,
+            fx_valid_until: null,
           },
         },
         cash_readiness: { ready: false, reason: cashReason },
@@ -399,7 +406,7 @@ async function mountPartners(page, initialState) {
               version: '2026-07-29',
               correlationId: 'e2e-credit-quote',
               data: {
-                schema_version: 1,
+                schema_version: 2,
                 action: 'access_credit_quoted',
                 replayed: false,
                 quote: {
@@ -411,6 +418,14 @@ async function mountPartners(page, initialState) {
                   months: input.months,
                   unit_amount_minor: 499,
                   total_amount_minor: 499 * input.months,
+                  reference_currency: 'USD',
+                  reference_currency_exponent: 2,
+                  reference_unit_amount_minor: 499,
+                  reference_total_amount_minor: 499 * input.months,
+                  fx_rate_snapshot_key: null,
+                  fx_rate_source: null,
+                  fx_observed_at: null,
+                  fx_valid_until: null,
                   duration_days: 30 * input.months,
                   expires_at: '2026-08-04T12:10:00Z',
                 },
@@ -428,7 +443,7 @@ async function mountPartners(page, initialState) {
               version: '2026-07-29',
               correlationId: 'e2e-credit-redeem',
               data: {
-                schema_version: 1,
+                schema_version: 2,
                 action: 'access_credit_redeemed',
                 replayed: false,
                 redemption: {
@@ -437,6 +452,12 @@ async function mountPartners(page, initialState) {
                   currency: 'USD',
                   currency_exponent: 2,
                   amount_minor: 499,
+                  reference_currency: 'USD',
+                  reference_currency_exponent: 2,
+                  reference_amount_minor: 499,
+                  fx_rate_snapshot_key: null,
+                  fx_rate_source: null,
+                  fx_observed_at: null,
                   months: 1,
                 },
                 grant: {
@@ -925,12 +946,12 @@ test('confirmed user joins and receives a referral link without KYC or country i
   ))).toBe(true);
 });
 
-test('available USD balance converts to Norva Plus without KYC', async ({ page }) => {
+test('available balance converts to Norva Plus without KYC', async ({ page }) => {
   await mountPartners(page, 'member-active');
 
   await expect(page.getByRole('heading', { name: 'Convert to Norva Plus' }))
     .toBeVisible();
-  await expect(page.getByText('P0 conversion is USD-only with no implicit FX.'))
+  await expect(page.getByText(/references \$4\.99/))
     .toBeVisible();
   await page.locator('[data-partners-credit-quote]').click();
 
@@ -1002,65 +1023,30 @@ test('cash journey asks for an explicit country before offering Didit KYC', asyn
   await expect(page.locator('.partners-shell')).not.toHaveAttribute('inert', '');
 });
 
-test('legacy v1 individual application stays gated and reaches the explicit hosted-KYC step', async ({
+test('legacy v1 discovery fails closed and cannot create membership or start KYC', async ({
   page,
 }) => {
   await mountPartners(page, 'discovery');
 
   await expect(page.getByRole('heading', {
-    name: /Earn 20% while they stay subscribed/i,
+    name: /Refresh to load the current Partners contract/i,
   })).toBeVisible();
-  await expect(page.getByRole('heading', {
-    name: 'Payout thresholds before you accept',
-  })).toBeVisible();
-  await expect(page.locator('section[aria-labelledby="partners-payout-thresholds-discovery"]'))
-    .toContainText('USD reference');
-  await expect(page.locator('dl[aria-label="Exact settlement payout thresholds for your policy"]'))
-    .toContainText('EUR settlement');
-  await expect(page.locator('dl[aria-label="Exact settlement payout thresholds for your policy"]'))
-    .not.toContainText('USD settlement');
-  expect(await page.locator('section[aria-labelledby="partners-payout-thresholds-discovery"]')
-    .evaluate((element) => Boolean(
-      element.compareDocumentPosition(
-        document.querySelector('[data-partners-join-form]')
-      ) & Node.DOCUMENT_POSITION_FOLLOWING
-    ))).toBe(true);
-
-  const join = page.locator('[data-partners-join]');
-  await expect(join).toBeDisabled();
-  await page.locator('[data-partners-individual-confirm]').check();
-  await expect(join).toBeDisabled();
-  await page.locator('[data-partners-terms-confirm]').check();
-  await expect(join).toBeEnabled();
-
-  if ((await page.viewportSize()).width <= 480) {
-    expect(await join.evaluate((element) => element.getBoundingClientRect().height))
-      .toBeGreaterThanOrEqual(44);
-  }
-
-  await join.click();
-  await expect(page.getByRole('heading', {
-    name: /Verify your identity to activate your partner link/i,
-  })).toBeVisible();
-  await expect(page.locator('[data-partners-start-kyc]')).toBeDisabled();
-  await expect(page.locator('[data-partners-action-status]')).not.toContainText(
-    /provider|token|uuid|sql/i,
-  );
+  await expect(page.getByText(
+    /will not start identity verification or create a membership from stale rules/i,
+  )).toBeVisible();
+  await expect(page.locator('[data-partners-retry]')).toBeVisible();
+  await expect(page.locator(
+    '[data-partners-join], [data-partners-membership-join], [data-partners-start-kyc]',
+  )).toHaveCount(0);
 
   const calls = await page.evaluate(() => window.__partnerCalls);
-  expect(calls.apply).toHaveLength(1);
-  expect(calls.apply[0]).toMatchObject({
-    accountType: 'individual',
-    countryCode: 'FR',
-    subdivisionCode: 'FR-IDF',
-  });
-  expect(calls.apply[0].idempotencyKey).toMatch(/^norva\.application\./);
-  expect(calls.acceptTerms).toHaveLength(1);
-  expect(calls.acceptTerms[0]).toMatchObject({
-    termsVersion: 'partners-fr-v1',
-    disclosureVersion: 'partners-fr-v1',
-  });
-  expect(JSON.stringify(calls)).not.toMatch(/userId|user_id|verification_reference/i);
+  expect(calls.apply).toHaveLength(0);
+  expect(calls.acceptTerms).toHaveLength(0);
+  expect(calls.join).toHaveLength(0);
+  expect(calls.startKyc).toHaveLength(0);
+  expect(JSON.stringify(calls)).not.toMatch(
+    /userId|user_id|verification_reference/i,
+  );
 });
 
 test('legacy v1 Didit hand-off requires fresh identity and capacity confirmations', async ({ page }) => {
@@ -1110,36 +1096,25 @@ test('legacy v1 Didit hand-off requires fresh identity and capacity confirmation
   expect(JSON.stringify(startKycCalls[0])).not.toMatch(/document|selfie|userId|user_id/i);
 });
 
-test('legacy v1 partial application failure reloads authoritative state without posting the application twice', async ({
+test('legacy v1 refresh upgrades to v2 membership without posting legacy writes', async ({
   page,
 }) => {
   await mountPartners(page, 'discovery');
   await page.evaluate(() => {
-    window.NorvaCloud.partners.acceptTerms = async (input) => {
-      window.__partnerCalls.acceptTerms.push({ ...input });
-      const error = new Error('private provider detail');
-      error.code = 'provider_temporarily_unavailable';
-      throw error;
-    };
+    window.__partnerState = 'member-discovery';
   });
 
-  await page.locator('[data-partners-individual-confirm]').check();
-  await page.locator('[data-partners-terms-confirm]').check();
-  await page.locator('[data-partners-join]').click();
+  await page.locator('[data-partners-retry]').click();
 
   await expect(page.getByRole('heading', {
-    name: /Review the current programme terms to continue/i,
+    name: /Share Norva\. Earn 20% on eligible renewals/i,
   })).toBeVisible();
-  await expect(page.locator('[data-partners-action-status]')).toContainText(
-    'identity provider is temporarily unavailable',
-  );
-  await expect(page.locator('[data-partners-action-status]')).not.toContainText(
-    'private provider detail',
-  );
-  expect(await page.evaluate(() => window.__partnerCalls.apply.length)).toBe(1);
-  expect(await page.evaluate(
-    () => window.__partnersPage._actionKeys.has('application'),
-  )).toBe(true);
+  await expect(page.locator('[data-partners-membership-join]')).toBeDisabled();
+  const calls = await page.evaluate(() => window.__partnerCalls);
+  expect(calls.bootstrap.length).toBeGreaterThanOrEqual(2);
+  expect(calls.apply).toHaveLength(0);
+  expect(calls.acceptTerms).toHaveLength(0);
+  expect(calls.startKyc).toHaveLength(0);
 });
 
 test('active dashboard exposes the real link, disclosure, filters and accessible QR', async ({
@@ -1244,7 +1219,7 @@ test('Copy share text keeps the disclosure and URL in one canonical payload', as
   const expected = [
     'Discover Norva — one media ecosystem across Web, Android and TV.',
     '',
-    'Partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
+    'Advertising — Norva partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
     url,
   ].join('\n');
   expect(await page.evaluate(() => window.__partnerClipboardCopy)).toBe(expected);
@@ -1299,7 +1274,7 @@ test('share fallback copies the complete disclosure through the browser selectio
   const expected = [
     'Discover Norva — one media ecosystem across Web, Android and TV.',
     '',
-    'Partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
+    'Advertising — Norva partner link · I may receive 20% of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.',
     url,
   ].join('\n');
   await expect(page.locator('[data-partners-action-status]')).toContainText(

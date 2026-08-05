@@ -16,6 +16,9 @@ const migration = read(
 const deploymentManifestEventContract = read(
   'supabase/migrations/20260804165500_partners_deployment_manifest_event_contract.sql',
 );
+const ownerRiskMigration = read(
+  'supabase/migrations/20260805124714_partners_owner_legal_tax_risk_acceptance.sql',
+);
 const preactivation = read(
   'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql',
 );
@@ -174,6 +177,25 @@ test('packages seal program, jurisdiction, documents, commit and deployment', ()
   assert.match(
     migration,
     /when 'privacy_approved'[\s\S]*'dpia'[\s\S]*'gdpr_self_assessment'[\s\S]*'biometric_consent'[\s\S]*'records_of_processing'/i,
+  );
+});
+
+test('owner-risk mode is explicit and cannot impersonate professional review', () => {
+  assert.match(
+    ownerRiskMigration,
+    /when 'membership_privacy_approved'[\s\S]*'membership_privacy_notice'[\s\S]*'membership_records_of_processing'[\s\S]*'membership_minimization_review'/i,
+  );
+  assert.match(
+    ownerRiskMigration,
+    /when 'legal_and_tax_approved'[\s\S]*'legal_tax_review'[\s\S]*'owner_risk_acceptance'[\s\S]*'partners_terms'[\s\S]*'partners_disclosure'[\s\S]*'tax_operating_policy'/i,
+  );
+  assert.match(
+    ownerRiskMigration,
+    /never impersonates professional advice/i,
+  );
+  assert.match(
+    runbook,
+    /position juridique\/fiscale et risque propriétaire/i,
   );
 });
 

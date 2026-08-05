@@ -3,9 +3,9 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either apply the three frictionless Partners migrations
-# still pending after the audited ab464fe4 production baseline atomically
-# (`predeploy`) or prove that they are already present without replaying them
+# PostgreSQL clone, either apply the owner-risk transparency migration still
+# pending after the audited 3fd939e production baseline atomically
+# (`predeploy`) or prove that it is already present without replaying it
 # (`postdeploy`), then run the verifier and restore-compatible pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
@@ -95,12 +95,15 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly BASELINE_CONTRACT="ab464fe4"
-readonly MIGRATION_ONE="supabase/migrations/20260804173000_partners_frictionless_membership_credits.sql"
-readonly MIGRATION_TWO="supabase/migrations/20260804173500_partners_payout_country_and_member_link_v2.sql"
-readonly MIGRATION_THREE="supabase/migrations/20260804174000_partners_frictionless_release_controls.sql"
-readonly BASELINE_MARKERS_AB464FE4="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
+readonly BASELINE_CONTRACT="3fd939e"
+readonly MIGRATION_ONE="supabase/migrations/20260805124714_partners_owner_legal_tax_risk_acceptance.sql"
+readonly MIGRATION_TWO="supabase/migrations/20260805142416_partners_multicurrency_access_credits.sql"
+readonly MIGRATION_THREE="supabase/migrations/20260805142422_partners_web_tax_contract.sql"
+readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
+readonly OWNER_RISK_MARKER_COMPLETE="1"
+readonly MULTICURRENCY_MARKERS_COMPLETE="1|1"
+readonly WEB_TAX_MARKERS_COMPLETE="1|1"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -263,7 +266,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=22"
+proof_line "baseline_markers_verified=25"
 proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | awk '{print $1}')"
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
 proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
@@ -575,13 +578,22 @@ DEPLOYMENT_MANIFEST_EVENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 FRICTIONLESS_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (to_regclass('affiliate_private.affiliate_access_credit_catalog') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_payout_country_bind(uuid,text,text)') is not null)::int::text || '|' || (exists (select 1 from affiliate_private.affiliate_release_gates where gate_key = 'membership_privacy_approved'))::int::text;" \
   2> "$RAW_DIR/frictionless-migration-precondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}"
+OWNER_RISK_MIGRATION_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (affiliate_private.partners_approval_required_document_keys('legal_and_tax_approved') @> array['owner_risk_acceptance','partners_disclosure','tax_operating_policy']::text[])::int::text;" \
+  2> "$RAW_DIR/owner-risk-migration-precondition.log")" || fail
+MULTICURRENCY_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regprocedure('affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)') is not null)::int::text || '|' || (exists (select 1 from information_schema.columns where table_schema = 'affiliate_private' and table_name = 'affiliate_access_credit_quotes' and column_name = 'reference_total_amount_minor') and exists (select 1 from information_schema.columns where table_schema = 'affiliate_private' and table_name = 'affiliate_access_credit_redemptions' and column_name = 'reference_amount_minor'))::int::text;" \
+  2> "$RAW_DIR/multicurrency-migration-precondition.log")" || fail
+WEB_TAX_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regclass('affiliate_private.affiliate_web_tax_policies') is not null)::int::text || '|' || (to_regprocedure('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)') is not null)::int::text;" \
+  2> "$RAW_DIR/web-tax-migration-precondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # The first 22 independent markers are the exact audited ab464fe4 baseline.
-  # None of the three frictionless migrations may be partially present.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_MARKERS_AB464FE4}|0|0|0"
+  # The first 25 markers are the exact audited 3fd939e baseline. The new
+  # owner decision, FX and Web-tax contracts must all be absent before replay.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|0|0|0|0|0"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_MARKERS_AB464FE4}|${FRICTIONLESS_MARKERS_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -645,8 +657,17 @@ DEPLOYMENT_MANIFEST_EVENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 FRICTIONLESS_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (to_regclass('affiliate_private.affiliate_access_credit_catalog') is not null)::int::text || '|' || (to_regprocedure('public.partners_service_payout_country_bind(uuid,text,text)') is not null)::int::text || '|' || (exists (select 1 from affiliate_private.affiliate_release_gates where gate_key = 'membership_privacy_approved'))::int::text;" \
   2> "$RAW_DIR/frictionless-migration-postcondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_MARKERS_AB464FE4}|${FRICTIONLESS_MARKERS_COMPLETE}" ]]; then
+OWNER_RISK_MIGRATION_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (affiliate_private.partners_approval_required_document_keys('legal_and_tax_approved') @> array['owner_risk_acceptance','partners_disclosure','tax_operating_policy']::text[])::int::text;" \
+  2> "$RAW_DIR/owner-risk-migration-postcondition.log")" || fail
+MULTICURRENCY_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regprocedure('affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)') is not null)::int::text || '|' || (exists (select 1 from information_schema.columns where table_schema = 'affiliate_private' and table_name = 'affiliate_access_credit_quotes' and column_name = 'reference_total_amount_minor') and exists (select 1 from information_schema.columns where table_schema = 'affiliate_private' and table_name = 'affiliate_access_credit_redemptions' and column_name = 'reference_amount_minor'))::int::text;" \
+  2> "$RAW_DIR/multicurrency-migration-postcondition.log")" || fail
+WEB_TAX_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regclass('affiliate_private.affiliate_web_tax_policies') is not null)::int::text || '|' || (to_regprocedure('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)') is not null)::int::text;" \
+  2> "$RAW_DIR/web-tax-migration-postcondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -781,6 +802,8 @@ with expected(signature) as (
     ('affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)'),
     ('affiliate_private.partners_account_deletion_ready(uuid)'),
     ('affiliate_private.partners_access_credit_balances(uuid)'),
+    ('affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)'),
+    ('affiliate_private.partners_access_credit_offer(uuid,integer)'),
     ('affiliate_private.partners_account_balances(uuid)'),
     ('affiliate_private.partners_cash_readiness(uuid)'),
     ('affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)'),
@@ -808,6 +831,8 @@ with expected(signature) as (
     ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)'),
     ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)'),
     ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)'),
+    ('affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'),
+    ('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'),
     ('affiliate_private.is_managed_partners_flag(text)'),
     ('affiliate_private.partners_require_control_access(text,text,boolean)'),
     ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)'),
@@ -823,7 +848,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "158|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "162|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -847,6 +872,7 @@ with expected(relation_name) as (
     ('affiliate_private.affiliate_access_credit_catalog'),
     ('affiliate_private.affiliate_access_credit_quotes'),
     ('affiliate_private.affiliate_access_credit_redemptions'),
+    ('affiliate_private.affiliate_web_tax_policies'),
     ('public.cloud_access_grants')
 )
 select count(*)::text || '|' || count(*) filter (
@@ -859,16 +885,16 @@ left join pg_catalog.pg_class relation
   on relation.oid = to_regclass(expected.relation_name);
 SQL
 )" || fail
-if [[ "$RELATION_OWNER_CHECK" != "18|0" ]]; then
+if [[ "$RELATION_OWNER_CHECK" != "19|0" ]]; then
   fail
 fi
 proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=158"
+proof_line "migration_routines_verified=162"
 proof_line "migration_relation_owner=supabase_admin"
-proof_line "migration_relations_verified=18"
+proof_line "migration_relations_verified=19"
 
 CURRENT_STEP="post-migration sensitive-state verification"
 POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \

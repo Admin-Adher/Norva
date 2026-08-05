@@ -725,25 +725,29 @@ reconstruire la taxe depuis RevenueCat.
 
 ## 3. Ordre de déploiement
 
-La baseline de production certifiée est le commit `ab464fe4`, postdeploy vert,
-avec toutes les migrations jusqu'à
-`20260804170000_partners_biometric_consent_enforcement.sql`. Ne jamais rejouer
-ce socle. La prochaine répétition physique `predeploy` doit exiger cette
-baseline présente et exactement les trois migrations suivantes absentes :
+La baseline de production certifiée est le commit `3fd939e`, postdeploy vert,
+avec les trois migrations frictionless jusqu'à
+`20260804174000_partners_frictionless_release_controls.sql`. Ne jamais rejouer
+ce socle. La prochaine répétition physique `predeploy` doit exiger les 25
+marqueurs de cette baseline présents et les trois migrations suivantes
+absentes :
 
-1. `20260804173000_partners_frictionless_membership_credits.sql` ;
-2. `20260804173500_partners_payout_country_and_member_link_v2.sql` ;
-3. `20260804174000_partners_frictionless_release_controls.sql`.
+1. `20260805124714_partners_owner_legal_tax_risk_acceptance.sql` ;
+2. `20260805142416_partners_multicurrency_access_credits.sql` ;
+3. `20260805142422_partners_web_tax_contract.sql`.
 
-Appliquer ces trois migrations, dans cet ordre, dans une seule fenêtre DB
-transactionnelle avec tous les flags inertes. La troisième migration porte la
-séparation des gates et du contrôle de release : ne pas intercaler Edge entre
-`173500` et `174000`. Rejouer ensuite pgTAP, lint/Advisors et les invariants de
+Appliquer ces trois migrations dans une seule fenêtre DB transactionnelle avec
+tous les flags inertes. Elles remplacent le contrat de pièces exigées par la
+gate juridique/fiscale, rendent le crédit d'accès multi-devise avec snapshot FX
+immuable et ajoutent le contrat fiscal Web France/USD autoritatif et fail-closed.
+Elles ne doivent modifier ni programme, ni membre, ni écriture financière
+historique. Rejouer ensuite pgTAP, lint/Advisors et les invariants de
 restauration. Puis recréer `functions`, vérifier sa santé et les contrats V2,
 recréer `functions2`, refaire les contrôles, et valider la parité Kong/Edge.
-Seulement après cette parité, approuver `membership_privacy_approved` et lever
-séparément les flags d'adhésion, earnings et crédit. Didit, la fiscalité et le
-cash restent inertes pour tout compte hors cohorte.
+Seulement après cette parité, enregistrer le package propriétaire transparent,
+approuver `legal_and_tax_approved` et `membership_privacy_approved`, puis lever
+séparément les flags d'adhésion, earnings et crédit. Didit, la fiscalité cash et
+les virements restent inertes pour tout compte hors cohorte.
 
 La preuve `postdeploy` doit restaurer un base-backup R2 capturé après cette
 fenêtre, constater `migrations_applied=0`, `migration_replay_skipped=true`, les
@@ -753,8 +757,11 @@ contrôlé, une suppression Didit `204|404`, un heartbeat frais et zéro
 dead-letter.
 
 1. sauvegarde logique et contrôle de restauration ;
-2. fenêtre DB transactionnelle `173000 -> 173500 -> 174000`, puis pgTAP,
-   lint/Advisors et postconditions de séparation des gates ;
+2. fenêtre DB transactionnelle unique pour les migrations
+   `20260805124714_partners_owner_legal_tax_risk_acceptance.sql`,
+   `20260805142416_partners_multicurrency_access_credits.sql` et
+   `20260805142422_partners_web_tax_contract.sql`, puis pgTAP, lint/Advisors et
+   postconditions des contrats propriétaire, FX et fiscal Web ;
 3. écrire explicitement `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans
    l'environnement Hetzner avant de déployer l'Edge ;
 4. déployer/recréer d'abord le service `functions`, attendre sa santé, puis
@@ -1328,13 +1335,13 @@ ne justifient aucun retry agressif côté client.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | baseline production `ab464fe4` postdeploy certifiée ; `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` sur restaurations isolées | sans rejouer la baseline, appliquer exactement `20260804173000`, `20260804173500`, `20260804174000` dans cet ordre et une seule fenêtre DB transactionnelle avec flags inertes ; déployer ensuite les deux Edge V2, vérifier la parité, puis seulement approuver les gates et activer les flags |
+| Migrations/RPC Partners | livrées | baseline production `3fd939e` postdeploy certifiée ; `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` sur restaurations isolées | sans rejouer la baseline, appliquer atomiquement les trois migrations propriétaire, crédit multi-devise et fiscalité Web listées dans l'ordre de déploiement, avec flags inertes ; déployer ensuite les surfaces Web/Edge du même commit, vérifier la parité, puis seulement enregistrer le package propriétaire et approuver les gates |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
-| API membre, demandes d'accès cash, referral, crédit et TV | livrées | entrée visible à tout compte Cloud Web/mobile ; compte confirmé + `membership_privacy_approved` -> `/join` public sans pays/KYC -> lien/partage ; access-request ne sert qu'à la cohorte cash ; attribution et J+45 sous `partners_earnings_enabled` ; quote/redeem Plus `USD 499` sans KYC sous `partners_credit_redemptions_enabled` ; hors cohorte, `cash_pilot_not_allowed` sans collecte payout ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer les flags à `false`, valider chaque couche puis lever `partners_enabled` avec `partners_invite_only=false`; conserver `partners_cash_pilot_allowlist_only=true`; synchroniser les secrets HMAC et publier les App Links |
+| API membre, demandes d'accès cash, referral, crédit et TV | livrées | entrée visible à tout compte Cloud Web/mobile ; compte confirmé + `membership_privacy_approved` -> `/join` public sans pays/KYC -> lien/partage ; access-request ne sert qu'à la cohorte cash ; attribution et J+45 sous `partners_earnings_enabled` ; quote/redeem Plus au prix de référence `USD 499`, avec débit exact de la devise source et snapshot FX immuable, sans KYC sous `partners_credit_redemptions_enabled` ; hors cohorte, `cash_pilot_not_allowed` sans collecte payout ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer les flags à `false`, valider chaque couche puis lever `partners_enabled` avec `partners_invite_only=false`; conserver `partners_cash_pilot_allowlist_only=true`; synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC cash-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; aucune session n'est créée avant le choix cash et le pays payout explicite | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter ; un échec n'altère ni membership, lien, maturation ni crédit | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
 | Worker commission/J+45/shadow | livré | capture → accrual → J+45/reversal → shadow sans écart ; heartbeats frais | réutiliser le secret cron existant vérifié par `norva_verify_cron_secret`, confirmer son entrée Vault et créer le job `pg_cron` |
 | Google Play Orders | producteur exact livré, inactif sans secrets/devise | capture/renewal/refund exacts, nanos sans arrondi, réponse PII non persistée, quota réservé aux comptes attribués | injecter le compte de service dédié, autoriser le package, configurer les exposants ISO actifs |
-| RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; Web reste incomplet sans ventilation fiscale | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé et aucun `tax=0` supposé | activer les événements provider et secrets par environnement ; sélectionner un moteur/contrat fiscal Web avant commission |
+| RevenueCat/Revolut | producteurs, TRANSFER entitlement et contre-correction livrés ; contrat fiscal Web France/USD versionné et autoritatif livré | HMAC/replay, source expirée, nouvel achat préservé, ordre inversé ; capture/refund/chargeback Web résolus par policy exacte ; toute juridiction, devise ou policy absente reste `incomplete` sans commission | activer les événements provider et secrets par environnement ; renouveler ou remplacer explicitement la policy avant son expiration et avant toute extension pays/devise |
 | `DISPUTE_WON` | contre-correction append-only livrée | LOST/WON rejoués, WON avant LOST, reversal/release partiels, restauration exacte et réconciliation propre | activer l'événement Revolut et vérifier la lecture autoritative sur l'environnement disponible |
 | Payout onboarding/dispatch | `revolut_manual` livré pour Basic : lots exacts, référence `NORVA-[A-F0-9]{12}`, acquittement `YES` sans identifiant bancaire saisi, import de relevé sanitisé, incidents append-only, double validation et ledger de règlement ; `revolut_api` livré mais multi-gated | cycle J+45 → lot → export/hash → saisie manuelle → relevé → rapprochement exact, doublon/montant/devise inconnus quarantainés, deux acteurs Finance distincts ; route manuelle active, gate DB API, flag DB API et kill switch Edge à `false`, aucun cron API/provider | configurer uniquement les corridors Revolut manuels, réaliser deux cycles supervisés et conserver les secrets Business API absents tant qu'aucun upgrade n'est décidé |
 | Admin/alertes | surfaces, file de demandes d'accès cash, gates Membership/Cash Privacy, heartbeats et relais Ops Telegram/e-mail livrés | Support|Risk lit la file sanitisée ; seule Risk+AAL2 décide ; `membership_privacy_approved` exige notice/ROPA/minimisation, `privacy_approved` exige AIPD/consentement Didit ; une décision d'accès ajoute uniquement l'allowlist cash ; capacités vérifiées, agrégats redacted, snapshot service-role et cycle alerte/rétablissement réels | attribuer Support/Risk/Finance et vérifier les deux canaux sur un incident sandbox |

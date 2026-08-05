@@ -1,5 +1,14 @@
 # Norva Partners — Backlog d'implémentation P0 ordonné
 
+> **État directeur au 5 août 2026.** Le modèle frictionless remplace le parcours
+> historique « KYC avant lien » : adhésion, lien, attribution, commission,
+> maturation et conversion en accès Norva sont sans KYC. Didit et le profil
+> fiscal/bénéficiaire ne concernent que le virement cash. L'adhésion est
+> publique ; le cash initial reste France, allowlist, `revolut_manual`, deux
+> opérateurs Finance MFA et `partners_payouts_live=false` hors fenêtre de lot.
+> Les tickets plus bas qui exigent KYC/pays avant la création du lien décrivent
+> l'ancien ordre et sont réputés satisfaits uniquement selon cette séparation.
+
 **Date :** 30 juillet 2026
 **Source produit :** [NORVA-PARTNERS-P0.md](./NORVA-PARTNERS-P0.md)
 **Statut :** socle P0 livré en mode fail-closed ; pilote non activé tant que

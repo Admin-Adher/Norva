@@ -2,7 +2,10 @@
 
 Le dépôt contient le socle P0 en mode fail-closed. Ce document évite de
 confondre « code livré » avec « pilote activable » et « versements
-généralisables ».
+généralisables ». Les douze contrôles et leur nature de preuve sont recensés
+dans `NORVA-PARTNERS-PRODUCTION-CERTIFICATION-12.md` ; cette matrice n'autorise
+jamais à remplacer une session Didit, un virement, un rapprochement ou du temps
+réellement écoulé par une fixture.
 
 ## Artefact
 
@@ -129,7 +132,7 @@ restreindre **Partners Release** à la branche protégée `main`. Le workflow no
 constitue jamais une preuve autonome de readiness.
 
 L'artefact versionné de disclosure P0 est
-`ops/partners/disclosures/partners-disclosure-v1.txt`. Calculer et consigner les
+`ops/partners/disclosures/partners-disclosure-v2.txt`. Calculer et consigner les
 empreintes de l'artefact de build déployé et de
 `public/partners-terms.html`, par exemple
 avec `sha256sum` sous Linux ou `Get-FileHash -Algorithm SHA256` sous PowerShell.

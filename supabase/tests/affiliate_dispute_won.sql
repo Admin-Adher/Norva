@@ -172,7 +172,10 @@ begin
     'approval_record', repeat('1', 64),
     'deployment_proof', repeat('2', 64),
     'legal_tax_review', repeat('3', 64),
+    'owner_risk_acceptance', repeat('0a', 32),
     'partners_terms', repeat('4', 64),
+    'partners_disclosure', repeat('0b', 32),
+    'tax_operating_policy', repeat('0c', 32),
     'dpia', repeat('5', 64),
     'gdpr_self_assessment', repeat('6', 64),
     'biometric_consent', repeat('f', 64),
@@ -245,7 +248,10 @@ begin
     ) || case v_gate
       when 'legal_and_tax_approved' then jsonb_build_object(
         'legal_tax_review', repeat('3', 64),
-        'partners_terms', repeat('4', 64)
+        'owner_risk_acceptance', repeat('0a', 32),
+        'partners_terms', repeat('4', 64),
+        'partners_disclosure', repeat('0b', 32),
+        'tax_operating_policy', repeat('0c', 32)
       )
       when 'privacy_approved' then jsonb_build_object(
         'dpia', repeat('5', 64),

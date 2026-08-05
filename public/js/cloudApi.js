@@ -1971,11 +1971,37 @@
             'currency_exponent',
             'available_minor'
         ])
-            || balance.currency !== 'USD'
-            || balance.currency_exponent !== 2
+            || !/^[A-Z]{3}$/.test(balance.currency)
+            || !Number.isSafeInteger(balance.currency_exponent)
+            || balance.currency_exponent < 0
+            || balance.currency_exponent > 6
             || !Number.isSafeInteger(balance.available_minor)
             || balance.available_minor < 0) invalid();
         return balance;
+    }
+
+    function validatePartnersAccessCreditFx(value, sourceCurrency, invalid, {
+        validUntil = true
+    } = {}) {
+        if (value.reference_currency !== 'USD'
+            || value.reference_currency_exponent !== 2
+            || value.reference_unit_amount_minor !== 499) invalid();
+        if (sourceCurrency === 'USD') {
+            if (value.fx_rate_snapshot_key !== null
+                || value.fx_rate_source !== null
+                || value.fx_observed_at !== null
+                || (validUntil && value.fx_valid_until !== null)) invalid();
+            return;
+        }
+        if (!/^fxr_[0-9a-f]{24}$/.test(value.fx_rate_snapshot_key)
+            || !['ecb_reference', 'revolut_quote', 'finance_manual'].includes(
+                value.fx_rate_source
+            )
+            || !isIsoTimestamp(value.fx_observed_at)
+            || (validUntil && (!isIsoTimestamp(value.fx_valid_until)
+                || Date.parse(value.fx_valid_until) <= Date.parse(
+                    value.fx_observed_at
+                )))) invalid();
     }
 
     function validatePartnersAccessCreditQuote(payload) {
@@ -1992,7 +2018,7 @@
             ])) invalid();
         const data = payload.data;
         const quote = data.quote;
-        if (data.schema_version !== 1
+        if (data.schema_version !== 2
             || data.action !== 'access_credit_quoted'
             || typeof data.replayed !== 'boolean'
             || !hasExactKeys(quote, [
@@ -2004,23 +2030,42 @@
                 'months',
                 'unit_amount_minor',
                 'total_amount_minor',
+                'reference_currency',
+                'reference_currency_exponent',
+                'reference_unit_amount_minor',
+                'reference_total_amount_minor',
+                'fx_rate_snapshot_key',
+                'fx_rate_source',
+                'fx_observed_at',
+                'fx_valid_until',
                 'duration_days',
                 'expires_at'
             ])
             || !PARTNERS_CREDIT_QUOTE_KEY_PATTERN.test(quote.key)
             || quote.status !== 'open'
-            || quote.currency !== 'USD'
-            || quote.currency_exponent !== 2
+            || !/^[A-Z]{3}$/.test(quote.currency)
+            || !Number.isSafeInteger(quote.currency_exponent)
+            || quote.currency_exponent < 0
+            || quote.currency_exponent > 6
             || quote.plan_code !== 'plus'
             || !Number.isSafeInteger(quote.months)
             || quote.months < 1
             || quote.months > 12
-            || quote.unit_amount_minor !== 499
-            || quote.total_amount_minor !== quote.months * 499
+            || !Number.isSafeInteger(quote.unit_amount_minor)
+            || quote.unit_amount_minor < 1
+            || !Number.isSafeInteger(quote.total_amount_minor)
+            || quote.total_amount_minor < 1
+            || quote.reference_currency !== 'USD'
+            || quote.reference_currency_exponent !== 2
+            || quote.reference_unit_amount_minor !== 499
+            || quote.reference_total_amount_minor !== quote.months * 499
             || quote.duration_days !== quote.months * 30
             || !isIsoTimestamp(quote.expires_at)) invalid();
+        validatePartnersAccessCreditFx(quote, quote.currency, invalid);
         validatePartnersAvailableBalance(data.balance, invalid);
-        if (data.balance.available_minor < quote.total_amount_minor) invalid();
+        if (data.balance.currency !== quote.currency
+            || data.balance.currency_exponent !== quote.currency_exponent
+            || data.balance.available_minor < quote.total_amount_minor) invalid();
         return deepFreeze(cloneJson(payload));
     }
 
@@ -2041,7 +2086,7 @@
         const data = payload.data;
         const redemption = data.redemption;
         const grant = data.grant;
-        if (data.schema_version !== 1
+        if (data.schema_version !== 2
             || data.action !== 'access_credit_redeemed'
             || typeof data.replayed !== 'boolean'
             || !hasExactKeys(redemption, [
@@ -2050,16 +2095,28 @@
                 'currency',
                 'currency_exponent',
                 'amount_minor',
+                'reference_currency',
+                'reference_currency_exponent',
+                'reference_amount_minor',
+                'fx_rate_snapshot_key',
+                'fx_rate_source',
+                'fx_observed_at',
                 'months'
             ])
             || !PARTNERS_CREDIT_REDEMPTION_KEY_PATTERN.test(redemption.key)
             || redemption.status !== 'granted'
-            || redemption.currency !== 'USD'
-            || redemption.currency_exponent !== 2
+            || !/^[A-Z]{3}$/.test(redemption.currency)
+            || !Number.isSafeInteger(redemption.currency_exponent)
+            || redemption.currency_exponent < 0
+            || redemption.currency_exponent > 6
             || !Number.isSafeInteger(redemption.months)
             || redemption.months < 1
             || redemption.months > 12
-            || redemption.amount_minor !== redemption.months * 499
+            || !Number.isSafeInteger(redemption.amount_minor)
+            || redemption.amount_minor < 1
+            || redemption.reference_currency !== 'USD'
+            || redemption.reference_currency_exponent !== 2
+            || redemption.reference_amount_minor !== redemption.months * 499
             || !hasExactKeys(grant, [
                 'key',
                 'status',
@@ -2081,7 +2138,14 @@
                     || !isIsoTimestamp(grant.active_until)
                     || Date.parse(grant.active_until) <= Date.parse(grant.active_from)
                 : grant.active_from !== null || grant.active_until !== null)) invalid();
+        validatePartnersAccessCreditFx({
+            ...redemption,
+            reference_unit_amount_minor: 499,
+            fx_valid_until: null
+        }, redemption.currency, invalid, { validUntil: false });
         validatePartnersAvailableBalance(data.balance, invalid);
+        if (data.balance.currency !== redemption.currency
+            || data.balance.currency_exponent !== redemption.currency_exponent) invalid();
         validatePartnersAccessOverlay(data.overlay, invalid);
         return deepFreeze(cloneJson(payload));
     }
@@ -2103,7 +2167,7 @@
                 'provider'
             ])) invalid();
         const data = payload.data;
-        if (data.schema_version !== 1
+        if (data.schema_version !== 2
             || data.action !== 'access_credit_status'
             || !hasExactKeys(data.balance, [
                 'currency',
@@ -2113,8 +2177,10 @@
                 'recovery_due_minor',
                 'redeemed_minor'
             ])
-            || data.balance.currency !== 'USD'
-            || data.balance.currency_exponent !== 2
+            || !/^[A-Z]{3}$/.test(data.balance.currency)
+            || !Number.isSafeInteger(data.balance.currency_exponent)
+            || data.balance.currency_exponent < 0
+            || data.balance.currency_exponent > 6
             || ['pending_minor', 'available_minor', 'recovery_due_minor', 'redeemed_minor']
                 .some((key) => !Number.isSafeInteger(data.balance[key])
                     || data.balance[key] < 0)
@@ -2129,18 +2195,36 @@
                 'unit_amount_minor',
                 'unit_duration_days',
                 'minimum_months',
-                'maximum_months'
+                'maximum_months',
+                'reference_currency',
+                'reference_currency_exponent',
+                'reference_unit_amount_minor',
+                'fx_rate_snapshot_key',
+                'fx_rate_source',
+                'fx_observed_at',
+                'fx_valid_until'
             ])
                 || !/^acc_[a-z0-9][a-z0-9._-]{2,63}$/.test(
                     data.catalog.catalog_key
                 )
                 || data.catalog.plan_code !== 'plus'
-                || data.catalog.currency !== 'USD'
-                || data.catalog.currency_exponent !== 2
-                || data.catalog.unit_amount_minor !== 499
+                || !/^[A-Z]{3}$/.test(data.catalog.currency)
+                || !Number.isSafeInteger(data.catalog.currency_exponent)
+                || data.catalog.currency_exponent < 0
+                || data.catalog.currency_exponent > 6
+                || !Number.isSafeInteger(data.catalog.unit_amount_minor)
+                || data.catalog.unit_amount_minor < 1
+                || data.catalog.reference_currency !== 'USD'
+                || data.catalog.reference_currency_exponent !== 2
+                || data.catalog.reference_unit_amount_minor !== 499
                 || data.catalog.unit_duration_days !== 30
                 || data.catalog.minimum_months !== 1
                 || data.catalog.maximum_months !== 12) invalid();
+            validatePartnersAccessCreditFx(
+                data.catalog,
+                data.catalog.currency,
+                invalid
+            );
         }
         if (!hasExactKeys(data.credit_readiness, ['ready', 'reason'])
             || typeof data.credit_readiness.ready !== 'boolean'
@@ -2150,11 +2234,11 @@
                     'membership_required',
                     'credits_disabled',
                     'catalog_unavailable',
-                    'currency_not_supported'
+                    'fx_rate_unavailable'
                 ].includes(data.credit_readiness.reason))
             || (data.credit_readiness.reason === 'catalog_unavailable'
                 && data.catalog !== null)
-            || (data.credit_readiness.reason === 'currency_not_supported'
+            || (data.credit_readiness.reason === 'fx_rate_unavailable'
                 && data.catalog !== null)
             || !hasExactKeys(data.cash_readiness, ['ready', 'reason'])
             || typeof data.cash_readiness.ready !== 'boolean'
@@ -2403,12 +2487,6 @@
                     ) >= 0)) invalid();
         }
         if (!isIsoTimestamp(data.next_maturation_at, true)) invalid();
-        const hasUsdBalance = data.balances.some((entry) => (
-            entry.currency === 'USD'
-        ));
-        const hasOnlyUnsupportedCurrency = data.balances.length > 0
-            && !hasUsdBalance;
-
         const credit = data.credit_readiness;
         if (!hasExactKeys(credit, ['ready', 'reason', 'catalog'])
             || typeof credit.ready !== 'boolean') invalid();
@@ -2421,28 +2499,54 @@
                 'unit_amount_minor',
                 'unit_duration_days',
                 'minimum_months',
-                'maximum_months'
+                'maximum_months',
+                'reference_currency',
+                'reference_currency_exponent',
+                'reference_unit_amount_minor',
+                'fx_rate_snapshot_key',
+                'fx_rate_source',
+                'fx_observed_at',
+                'fx_valid_until'
             ])
                 || !/^acc_[a-z0-9][a-z0-9._-]{2,63}$/.test(
                     credit.catalog.catalog_key
                 )
                 || credit.catalog.plan_code !== 'plus'
-                || credit.catalog.currency !== 'USD'
-                || credit.catalog.currency_exponent !== 2
-                || credit.catalog.unit_amount_minor !== 499
+                || !/^[A-Z]{3}$/.test(credit.catalog.currency)
+                || !Number.isSafeInteger(credit.catalog.currency_exponent)
+                || credit.catalog.currency_exponent < 0
+                || credit.catalog.currency_exponent > 6
+                || !Number.isSafeInteger(credit.catalog.unit_amount_minor)
+                || credit.catalog.unit_amount_minor < 1
+                || credit.catalog.reference_currency !== 'USD'
+                || credit.catalog.reference_currency_exponent !== 2
+                || credit.catalog.reference_unit_amount_minor !== 499
                 || credit.catalog.unit_duration_days !== 30
                 || credit.catalog.minimum_months !== 1
                 || credit.catalog.maximum_months !== 12) invalid();
+            validatePartnersAccessCreditFx(
+                credit.catalog,
+                credit.catalog.currency,
+                invalid
+            );
+            if (data.balances.some((balance) => balance.available_minor > 0)
+                && !data.balances.some((balance) => (
+                    balance.currency === credit.catalog.currency
+                    && balance.currency_exponent === credit.catalog.currency_exponent
+                    && balance.available_minor > 0
+                ))) invalid();
         }
         const expectedCreditReason = data.membership.status !== 'active'
             ? 'membership_required'
             : !data.flags.partners_credit_redemptions_enabled
                 ? 'credits_disabled'
-                : hasOnlyUnsupportedCurrency
-                    ? 'currency_not_supported'
-                    : credit.catalog === null
-                        ? 'catalog_unavailable'
-                        : null;
+                : credit.reason;
+        if (credit.reason !== null && ![
+            'membership_required',
+            'credits_disabled',
+            'catalog_unavailable',
+            'fx_rate_unavailable'
+        ].includes(credit.reason)) invalid();
         if (credit.ready !== (expectedCreditReason === null)
             || credit.reason !== expectedCreditReason
             || (expectedCreditReason !== null && credit.catalog !== null)) invalid();

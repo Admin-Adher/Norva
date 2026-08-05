@@ -1610,7 +1610,7 @@ class PartnersPage {
                             </div>
                             <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
                         </form>
-                        <p class="partners-disclosure">Earnings are not guaranteed. Commission is ${rate} of eligible payments excluding tax after discounts. Refunds and chargebacks reverse the related commission. Available USD balances can fund Norva access without KYC; cash transfers require identity, fiscal and payout checks.</p>
+                        <p class="partners-disclosure">Earnings are not guaranteed. Commission is ${rate} of eligible payments excluding tax after discounts. Refunds and chargebacks reverse the related commission. Any supported balance can fund Norva access without KYC through an exact server quote; cash transfers require identity, fiscal and payout checks.</p>
                     </div>
                     <aside class="partners-program-card" aria-labelledby="partners-program-title">
                         <h2 id="partners-program-title">Clear from day one</h2>
@@ -1749,74 +1749,22 @@ class PartnersPage {
     }
 
     renderDiscovery(data) {
-        const program = data.program;
-        const policy = data.policy;
-        const rate = this.percent(program?.commission_rate_bps);
-        const maturity = program.maturation_days;
-        const region = this.regionLabel(policy);
-        const age = policy.minimum_age;
-        const eligibility = region ? `Eligible policy · ${region}` : 'Eligible individual account';
-        const referenceThreshold = this.referencePayoutThreshold(program);
-
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
                 ${this.header('Norva Partners')}
-                <section class="partners-discovery-grid">
-                    <div class="partners-discovery-copy">
-                        <span class="partners-eyebrow">Norva Partners · Individuals only</span>
-                        <h1 id="partners-title" class="partners-display" tabindex="-1">Earn ${rate} while they stay subscribed.</h1>
-                        <p class="partners-lead">Receive ${rate} of each eligible payment from people who join through your link, for as long as their subscription remains active.</p>
-                        <span class="partners-status-pill partners-status-success">${this.escape(eligibility)}</span>
-                        ${this.payoutThresholdDisclosure(program, policy, 'discovery')}
-                        <form class="partners-join-form" data-partners-join-form novalidate>
-                            <label class="partners-consent-check">
-                                <input type="checkbox" data-partners-individual-confirm>
-                                <span>I apply as an individual and confirm that I meet the ${age}+ age and legal-capacity policy shown for ${this.escape(region)}.</span>
-                            </label>
-                            <label class="partners-consent-check">
-                                <input type="checkbox" data-partners-terms-confirm>
-                                <span>I accept the <a href="/partners-terms.html?version=${encodeURIComponent(policy.terms_version)}" target="_blank" rel="noopener">Norva Partners terms</a> (${this.escape(policy.terms_version)}) and the programme disclosure (${this.escape(policy.disclosure_version)}).</span>
-                            </label>
-                            <div class="partners-actions">
-                                <button class="btn btn-primary partners-primary-action" type="submit"
-                                    data-partners-join disabled aria-describedby="partners-activation-note">Join Norva Partners</button>
-                                <span id="partners-activation-note" class="partners-action-note">Your link stays locked until identity verification is confirmed by the hosted KYC provider.</span>
-                            </div>
-                            <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
-                        </form>
-                        <p class="partners-disclosure">Earnings vary and are not guaranteed. Commission is ${rate} of the amount excluding tax actually paid after discounts. Refunds and chargebacks are reversed. Payment-processing fees do not reduce the commission base, and Norva covers payout-transfer fees on supported routes. Balances remain in their authoritative transaction and settlement currencies; they are never silently converted.</p>
-                    </div>
-                    <aside class="partners-program-card" aria-labelledby="partners-program-title">
-                        <h2 id="partners-program-title">Programme rules</h2>
-                        <dl class="partners-program-facts">
-                            <div><dt>Recurring commission</dt><dd>${rate}</dd></div>
-                            <div><dt>Attribution window</dt><dd>${program.attribution_window_days} days</dd></div>
-                            <div><dt>Validation period</dt><dd>${maturity} days</dd></div>
-                            <div><dt>Reference payout threshold</dt><dd>${this.escape(referenceThreshold)}</dd></div>
-                            <div><dt>Referral model</dt><dd>Direct only</dd></div>
-                            <div><dt>Verification</dt><dd>Individual KYC</dd></div>
-                        </dl>
-                        <p>No business account, KYB flow or guaranteed income is included in P0.</p>
-                        ${this.programWindowNote(program)}
-                    </aside>
-                </section>
-                ${this.steps(program)}
-                <section class="partners-consent-card" aria-labelledby="partners-readiness-title">
+                <section class="partners-consent-card" aria-labelledby="partners-title">
                     <div>
-                        <span class="partners-eyebrow">Secure activation</span>
-                        <h2 id="partners-readiness-title">Identity, age and applicable jurisdiction policy are checked securely.</h2>
-                        <p>The hosted KYC journey verifies individual identity. Norva applies the minimum-age and jurisdiction policy returned by its authoritative server. Norva never asks you to upload an identity document into this page.</p>
+                        <span class="partners-eyebrow">Secure programme update</span>
+                        <h1 id="partners-title" tabindex="-1">Refresh to load the current Partners contract.</h1>
+                        <p>This compatibility response is from an older server contract. Norva will not start identity verification or create a membership from stale rules. The current journey lets individuals join, share, earn and convert to Norva access without KYC; Didit is reserved for optional cash transfers.</p>
                     </div>
-                    <ul>
-                        <li>Minimum age under the active policy: ${age}+</li>
-                        <li>Local capacity and programme terms must be confirmed.</li>
-                        <li>Tax and payout details are required before the first payment, not before discovery.</li>
-                    </ul>
+                    <button class="btn btn-primary partners-primary-action" type="button" data-partners-retry>Refresh securely</button>
                 </section>
-                ${this.liveRegion('Norva Partners is available. Review the individual programme confirmations to apply.')}
+                ${this.liveRegion('A current Norva Partners contract is required. Refresh the page to continue.')}
             </main>`;
         this.bindCommonActions();
-        this.bindDiscoveryActions(data);
+        this.container.querySelector('[data-partners-retry]')
+            ?.addEventListener('click', () => this.reload());
         this.focusTitle();
     }
 
@@ -2456,7 +2404,7 @@ class PartnersPage {
             quote_expired: 'This quote expired. Close this review and create a fresh quote.',
             insufficient_balance: 'Your available balance changed and is now too low. Close this review and refresh your balance.',
             catalog_unavailable: 'The authoritative Norva access catalogue is temporarily unavailable.',
-            currency_not_supported: 'Norva access conversion currently uses only your available USD balance. Other currencies remain separate and unchanged.',
+            fx_rate_unavailable: 'A current verified exchange rate is unavailable for this balance. Your money remains unchanged; refresh after Finance publishes a new rate.',
             quote_conflict: 'This quote has already been used or replaced. Close this review and refresh your balance.',
             partners_kyc_consent_invalid: 'Review and confirm the current verification statements before continuing.',
             partners_kyc_review_reason_invalid: 'Choose what the human reviewer should check before submitting.',
@@ -2975,12 +2923,12 @@ class PartnersPage {
             : ({
                 credits_disabled: 'Balance conversion is temporarily paused. Your balance remains unchanged.',
                 catalog_unavailable: 'The authoritative Norva access catalogue is temporarily unavailable.',
-                currency_not_supported: 'Conversion to Norva access is available only from your USD balance for now. Other currency balances stay separate and are never shown as zero or converted automatically.',
+                fx_rate_unavailable: 'A current verified exchange rate is unavailable for this balance. Nothing is converted automatically and your balance remains unchanged.',
                 membership_required: 'An active Partners membership is required.'
             })[credit.reason] || 'Balance conversion is temporarily unavailable.';
         const monthOptions = catalog && maximumAffordable > 0
             ? Array.from({ length: maximumAffordable }, (_, index) => index + 1)
-                .map((months) => `<option value="${months}">${months} month${months === 1 ? '' : 's'} · ${this.escape(this.formatMinor(catalog.unit_amount_minor * months, catalog.currency))}</option>`)
+                .map((months) => `<option value="${months}">${months} month${months === 1 ? '' : 's'} · up to ${this.escape(this.formatMinor(catalog.unit_amount_minor * months, catalog.currency))}</option>`)
                 .join('')
             : '<option value="1">1 month</option>';
         const conversionCard = `<aside class="partners-program-card partners-credit-card" aria-labelledby="partners-credit-title">
@@ -2994,7 +2942,7 @@ class PartnersPage {
                 <button class="btn btn-primary partners-primary-action" type="submit"
                     data-partners-credit-quote ${canConvert ? '' : 'disabled'}>Review conversion</button>
             </form>
-            <p class="partners-action-note">No KYC is required. ${catalog ? `Each credited ${this.escape(planLabel)} month is ${catalog.unit_duration_days} days. ` : ''}P0 conversion is USD-only with no implicit FX. Other balances remain in their authoritative currency. An active paid subscription stays in control; converted access waits safely and resumes afterward.</p>
+            <p class="partners-action-note">No KYC is required. ${catalog ? `Each credited ${this.escape(planLabel)} month is ${catalog.unit_duration_days} days and references ${this.escape(this.formatMinor(catalog.reference_unit_amount_minor, catalog.reference_currency))}. ` : ''}A non-USD balance is debited only through the dated, immutable rate shown in the server quote. An active paid subscription stays in control; converted access waits safely and resumes afterward.</p>
         </aside>`;
 
         const filters = [
@@ -3215,6 +3163,8 @@ class PartnersPage {
                 </header>
                 <dl class="partners-program-facts partners-credit-summary">
                     <div><dt>Available balance used</dt><dd>${this.escape(this.formatMinor(quote.total_amount_minor, quote.currency))}</dd></div>
+                    <div><dt>Norva reference value</dt><dd>${this.escape(this.formatMinor(quote.reference_total_amount_minor, quote.reference_currency))}</dd></div>
+                    ${quote.fx_rate_snapshot_key ? `<div><dt>Verified exchange rate</dt><dd>${this.escape(this.formatDateTime(quote.fx_observed_at))} · valid for this quote</dd></div>` : ''}
                     <div><dt>Norva access</dt><dd>${this.escape(planLabel)} · ${this.escape(monthsLabel)}</dd></div>
                     <div><dt>Identity verification</dt><dd>Not required</dd></div>
                 </dl>
@@ -3781,8 +3731,12 @@ class PartnersPage {
     }
 
     shareDisclosure(bootstrap) {
-        const rate = this.percent(bootstrap.program.commission_rate_bps);
-        return `Partner link · I may receive ${rate} of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.`;
+        const rate = this.percent(bootstrap.program.commission_rate_bps).replace(/%$/, ' %');
+        if (this.partnerLanguage() === 'fr') {
+            return `Publicité — lien partenaire Norva · Je peux recevoir ${rate} des paiements Norva éligibles hors taxes. Les gains ne sont pas garantis. Norva est un lecteur multimédia ; aucun contenu ni abonnement TV n’est inclus.`;
+        }
+        const compactRate = rate.replace(' %', '%');
+        return `Advertising — Norva partner link · I may receive ${compactRate} of eligible Norva payments excluding tax. Earnings are not guaranteed. Norva is a media player; no content or TV subscription is included.`;
     }
 
     shareContent(url, bootstrap) {

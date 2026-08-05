@@ -141,7 +141,7 @@ function validPayoutCountry() {
 
 function validQuote() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: 'access_credit_quoted',
     replayed: false,
     quote: {
@@ -153,6 +153,14 @@ function validQuote() {
       months: 2,
       unit_amount_minor: 499,
       total_amount_minor: 998,
+      reference_currency: 'USD',
+      reference_currency_exponent: 2,
+      reference_unit_amount_minor: 499,
+      reference_total_amount_minor: 998,
+      fx_rate_snapshot_key: null,
+      fx_rate_source: null,
+      fx_observed_at: null,
+      fx_valid_until: null,
       duration_days: 60,
       expires_at: '2026-08-04T10:15:00Z',
     },
@@ -166,7 +174,7 @@ function validQuote() {
 
 function validRedemption() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: 'access_credit_redeemed',
     replayed: false,
     redemption: {
@@ -175,6 +183,12 @@ function validRedemption() {
       currency: 'USD',
       currency_exponent: 2,
       amount_minor: 499,
+      reference_currency: 'USD',
+      reference_currency_exponent: 2,
+      reference_amount_minor: 499,
+      fx_rate_snapshot_key: null,
+      fx_rate_source: null,
+      fx_observed_at: null,
       months: 1,
     },
     grant: {
@@ -197,7 +211,7 @@ function validRedemption() {
 
 function validStatus() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: 'access_credit_status',
     balance: {
       currency: 'USD',
@@ -216,6 +230,13 @@ function validStatus() {
       unit_duration_days: 30,
       minimum_months: 1,
       maximum_months: 12,
+      reference_currency: 'USD',
+      reference_currency_exponent: 2,
+      reference_unit_amount_minor: 499,
+      fx_rate_snapshot_key: null,
+      fx_rate_source: null,
+      fx_observed_at: null,
+      fx_valid_until: null,
     },
     next_maturation_at: null,
     credit_readiness: { ready: true, reason: null },
@@ -300,6 +321,13 @@ function validDashboardV2() {
         unit_duration_days: 30,
         minimum_months: 1,
         maximum_months: 12,
+        reference_currency: 'USD',
+        reference_currency_exponent: 2,
+        reference_unit_amount_minor: 499,
+        fx_rate_snapshot_key: null,
+        fx_rate_source: null,
+        fx_observed_at: null,
+        fx_valid_until: null,
       },
     },
     cash_readiness: bootstrap.cash_readiness,
@@ -457,7 +485,7 @@ test('Edge sanitizers fail closed on price, state and provider contract drift', 
   unsupportedCurrencyStatus.catalog = null;
   unsupportedCurrencyStatus.credit_readiness = {
     ready: false,
-    reason: 'currency_not_supported',
+    reason: 'fx_rate_unavailable',
   };
   unsupportedCurrencyStatus.balance = {
     currency: 'USD',
@@ -476,7 +504,7 @@ test('Edge sanitizers fail closed on price, state and provider contract drift', 
   ));
 
   const clientPriced = validQuote();
-  clientPriced.quote.unit_amount_minor = 500;
+  clientPriced.quote.reference_unit_amount_minor = 500;
   assert.throws(() => sanitizeAccessCreditQuoteData(clientPriced));
   const extra = validRedemption();
   extra.grant.provider_payload = { raw: true };
@@ -544,7 +572,7 @@ test('bootstrap and dashboard v2 stay exact across Edge and Web validators', asy
   }];
   nonUsdDashboard.credit_readiness = {
     ready: false,
-    reason: 'currency_not_supported',
+    reason: 'fx_rate_unavailable',
     catalog: null,
   };
   assert.doesNotThrow(() => sanitizeDashboardData(
@@ -649,7 +677,7 @@ test('bootstrap and dashboard v2 stay exact across Edge and Web validators', asy
   assert.equal(webNonUsd.data.balances[0].currency, 'EUR');
   assert.equal(
     webNonUsd.data.credit_readiness.reason,
-    'currency_not_supported',
+    'fx_rate_unavailable',
   );
 });
 

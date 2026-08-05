@@ -94,6 +94,14 @@ seule autorité.
 Une erreur liste les pièces obligatoires manquantes, sans accepter une valeur
 par défaut ni fabriquer une approbation.
 
+Pour `legal_and_tax_approved`, l'adhésion individuelle mondiale avec cash
+limité au pilote France peut reposer sur une acceptation interne explicite du
+risque par le propriétaire, mais le package doit alors
+sceller séparément `legal_tax_review`, `owner_risk_acceptance`,
+`partners_terms`, `partners_disclosure` et `tax_operating_policy`. L'interface
+la nomme « position juridique/fiscale et risque propriétaire » ; elle ne doit
+jamais la présenter comme une consultation ou une signature professionnelle.
+
 ## Séparation préproduction / production
 
 Les packages sont autoritaires uniquement dans l’environnement qu’ils
@@ -108,8 +116,10 @@ nouveau manifeste et de nouveaux packages liés aux preuves de production.
 
 - Une expiration, une modification du programme ou une modification de policy
   rend immédiatement la gate ineffective dans `release_gates_satisfied`.
-- L’activation d’un programme exige que `legal_and_tax_approved` et
-  `privacy_approved` soient liés à ce même programme.
+- L’activation d’un programme et l’adhésion sans KYC exigent que
+  `legal_and_tax_approved` et `membership_privacy_approved` soient liés à ce
+  même programme. La gate `privacy_approved` reste distincte et protège
+  uniquement le parcours cash Didit.
 - L’ouverture d’une policy exige que les packages Legal, Privacy et Country
   couvrent exactement son couple pays/subdivision.
 - Une mutation substantielle déjà approuvée est bloquée : il faut révoquer les

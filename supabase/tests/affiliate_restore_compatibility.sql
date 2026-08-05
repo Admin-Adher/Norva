@@ -2,10 +2,10 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(106);
+select extensions.plan(108);
 
 -- One immutable catalogue keeps the audited ab464fe4 production baseline and
--- exactly the three frictionless migrations under the same
+-- the frictionless baseline and the three production-finalization migrations
 -- existence, ownership, security, volatility and ACL assertions without
 -- creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
@@ -135,6 +135,8 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_member_write_reserve(uuid,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_account_deletion_ready(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_access_credit_balances(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)","security_definer":false,"volatility":"i","access_role":"owner"},
+  {"signature":"affiliate_private.partners_access_credit_offer(uuid,integer)","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.partners_account_balances(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_cash_readiness(uuid)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_service_join_v2(uuid,boolean,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
@@ -162,6 +164,8 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.is_managed_partners_flag(text)","security_definer":false,"volatility":"i","access_role":"owner"},
   {"signature":"affiliate_private.partners_require_control_access(text,text,boolean)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"authenticated"},
@@ -186,7 +190,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  158::bigint,
+  162::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -209,7 +213,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  158::bigint,
+  162::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -226,7 +230,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 158
+    select count(*) = 162
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -248,7 +252,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 158
+    select count(*) = 162
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -272,7 +276,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 158
+    select count(*) = 162
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -902,6 +906,7 @@ select extensions.ok(
         ('affiliate_private', 'affiliate_access_credit_catalog', false),
         ('affiliate_private', 'affiliate_access_credit_quotes', false),
         ('affiliate_private', 'affiliate_access_credit_redemptions', false),
+        ('affiliate_private', 'affiliate_web_tax_policies', false),
         ('public', 'cloud_access_grants', true)
     ), inspected as (
       select
@@ -918,7 +923,7 @@ select extensions.ok(
         and relation.relname = expected.relation_name
         and relation.relkind in ('r', 'p')
     )
-    select count(*) = 4
+    select count(*) = 5
       and bool_and(oid is not null)
       and bool_and(relrowsecurity)
       and bool_and(owner_matches)
@@ -939,7 +944,7 @@ select extensions.ok(
       ))
     from inspected
   ),
-  'frictionless relations retain their owner, RLS and exact API ACLs'
+  'frictionless and tax-policy relations retain owner, RLS and exact API ACLs'
 );
 
 select extensions.ok(
@@ -1037,9 +1042,20 @@ select extensions.ok(
   ) = array[
     'approval_record',
     'deployment_proof',
-    'gdpr_self_assessment',
-    'privacy_notice',
-    'records_of_processing'
+    'membership_privacy_notice',
+    'membership_records_of_processing',
+    'membership_minimization_review'
+  ]::text[]
+  and affiliate_private.partners_approval_required_document_keys(
+    'legal_and_tax_approved'
+  ) = array[
+    'approval_record',
+    'deployment_proof',
+    'legal_tax_review',
+    'owner_risk_acceptance',
+    'partners_terms',
+    'partners_disclosure',
+    'tax_operating_policy'
   ]::text[]
   and position(
     'membership_privacy_approved'
@@ -1051,7 +1067,7 @@ select extensions.ok(
         and constraint_row.conname = 'affiliate_release_gates_key'
     ))
   ) > 0,
-  'the nine managed flags and membership privacy gate survive restoration'
+  'managed flags and both membership and owner-risk approval contracts survive restoration'
 );
 
 select extensions.ok(
@@ -1172,7 +1188,84 @@ select extensions.ok(
       and pg_catalog.pg_get_constraintdef(constraint_row.oid)
         like '%partner_access_credit_clearing%'
   ),
-  'the exact P0 USD Plus catalogue and access-credit ledger contract remain'
+  'the exact P0 USD Plus reference catalogue and multi-currency access-credit ledger contract remain'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'affiliate_private'
+      and column_row.table_name = 'affiliate_access_credit_quotes'
+      and column_row.column_name = 'reference_total_amount_minor'
+      and column_row.is_nullable = 'NO'
+  )
+  and exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'affiliate_private'
+      and column_row.table_name = 'affiliate_access_credit_redemptions'
+      and column_row.column_name = 'reference_amount_minor'
+      and column_row.is_nullable = 'NO'
+  )
+  and position(
+    'ceil('
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_fx_source_amount_ceil(bigint,bigint,bigint)'
+    )))
+  ) > 0
+  and position(
+    'affiliate_fx_rate_snapshots'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_access_credit_offer(uuid,integer)'
+    )))
+  ) > 0
+  and position(
+    'partners_cash_readiness'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'
+    )))
+  ) = 0,
+  'access credits debit any supported balance through immutable exact FX without a KYC dependency'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_web_tax_policies policy
+    where policy.policy_key = 'wtp_fr_usd_owner_v1'
+      and policy.status = 'active'
+      and policy.country_code = 'FR'
+      and policy.currency = 'USD'
+      and policy.currency_exponent = 2
+      and policy.calculation_mode = 'gross_is_net'
+      and policy.tax_rate_bps = 0
+      and policy.approved_by_role = 'accountable_owner'
+      and not policy.external_review
+      and policy.effective_until <= policy.effective_from + interval '90 days'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)',
+    'EXECUTE'
+  )
+  and position(
+    'financial_fact_unavailable'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'
+    )))
+  ) > 0,
+  'Web commissions use a time-bounded owner policy and fail closed without authoritative country or lineage'
 );
 
 select extensions.ok(
@@ -1223,6 +1316,12 @@ select extensions.ok(
       or quote.currency_exponent <> redemption.currency_exponent
       or quote.months <> redemption.months
       or quote.total_amount_minor <> redemption.amount_minor
+      or quote.reference_currency <> redemption.reference_currency
+      or quote.reference_currency_exponent <>
+        redemption.reference_currency_exponent
+      or quote.reference_total_amount_minor <>
+        redemption.reference_amount_minor
+      or quote.fx_rate_snapshot_id is distinct from redemption.fx_rate_snapshot_id
       or quote.duration_days <> redemption.duration_days
       or entry.account_id <> redemption.account_id
       or entry.entry_kind <> 'access_credit_redemption'

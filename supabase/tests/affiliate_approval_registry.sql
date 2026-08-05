@@ -318,8 +318,14 @@ select extensions.is(
       'biometric_consent', repeat('d', 64),
       'privacy_notice', repeat('5', 64),
       'records_of_processing', repeat('6', 64),
+      'membership_privacy_notice', repeat('11', 32),
+      'membership_records_of_processing', repeat('12', 32),
+      'membership_minimization_review', repeat('13', 32),
       'legal_tax_review', repeat('7', 64),
+      'owner_risk_acceptance', repeat('0a', 32),
       'partners_terms', repeat('8', 64),
+      'partners_disclosure', repeat('0b', 32),
+      'tax_operating_policy', repeat('0c', 32),
       'country_policy_review', repeat('9', 64),
       'payout_corridor_review', repeat('c', 64)
     ),
@@ -343,8 +349,14 @@ select extensions.is(
       'biometric_consent', repeat('d', 64),
       'privacy_notice', repeat('5', 64),
       'records_of_processing', repeat('6', 64),
+      'membership_privacy_notice', repeat('11', 32),
+      'membership_records_of_processing', repeat('12', 32),
+      'membership_minimization_review', repeat('13', 32),
       'legal_tax_review', repeat('7', 64),
+      'owner_risk_acceptance', repeat('0a', 32),
       'partners_terms', repeat('8', 64),
+      'partners_disclosure', repeat('0b', 32),
+      'tax_operating_policy', repeat('0c', 32),
       'country_policy_review', repeat('9', 64),
       'payout_corridor_review', repeat('c', 64)
     ),
@@ -453,9 +465,9 @@ select extensions.ok(
   ) @> array[
     'approval_record',
     'deployment_proof',
-    'gdpr_self_assessment',
-    'privacy_notice',
-    'records_of_processing'
+    'membership_privacy_notice',
+    'membership_records_of_processing',
+    'membership_minimization_review'
   ]::text[]
   and not (
     affiliate_private.partners_approval_required_document_keys(
@@ -488,7 +500,10 @@ select extensions.is(
       'approval_record', repeat('1', 64),
       'deployment_proof', repeat('b', 64),
       'legal_tax_review', repeat('7', 64),
-      'partners_terms', repeat('8', 64)
+      'owner_risk_acceptance', repeat('0a', 32),
+      'partners_terms', repeat('8', 64),
+      'partners_disclosure', repeat('0b', 32),
+      'tax_operating_policy', repeat('0c', 32)
     ),
     repeat('a', 40),
     'production',
@@ -522,9 +537,9 @@ select extensions.is(
     jsonb_build_object(
       'approval_record', repeat('1', 64),
       'deployment_proof', repeat('b', 64),
-      'gdpr_self_assessment', repeat('4', 64),
-      'privacy_notice', repeat('5', 64),
-      'records_of_processing', repeat('6', 64)
+      'membership_privacy_notice', repeat('11', 32),
+      'membership_records_of_processing', repeat('12', 32),
+      'membership_minimization_review', repeat('13', 32)
     ),
     repeat('a', 40),
     'production',
@@ -784,8 +799,14 @@ select extensions.is(
       'biometric_consent', repeat('d', 64),
       'privacy_notice', repeat('5', 64),
       'records_of_processing', repeat('6', 64),
+      'membership_privacy_notice', repeat('11', 32),
+      'membership_records_of_processing', repeat('12', 32),
+      'membership_minimization_review', repeat('13', 32),
       'legal_tax_review', repeat('7', 64),
+      'owner_risk_acceptance', repeat('0a', 32),
       'partners_terms', repeat('8', 64),
+      'partners_disclosure', repeat('0b', 32),
+      'tax_operating_policy', repeat('0c', 32),
       'country_policy_review', repeat('9', 64),
       'payout_corridor_review', repeat('c', 64)
     ),
@@ -906,8 +927,14 @@ select extensions.is(
       'biometric_consent', repeat('d', 64),
       'privacy_notice', repeat('5', 64),
       'records_of_processing', repeat('6', 64),
+      'membership_privacy_notice', repeat('11', 32),
+      'membership_records_of_processing', repeat('12', 32),
+      'membership_minimization_review', repeat('13', 32),
       'legal_tax_review', repeat('7', 64),
+      'owner_risk_acceptance', repeat('0a', 32),
       'partners_terms', repeat('8', 64),
+      'partners_disclosure', repeat('0b', 32),
+      'tax_operating_policy', repeat('0c', 32),
       'country_policy_review', repeat('9', 64),
       'payout_corridor_review', repeat('c', 64)
     ),

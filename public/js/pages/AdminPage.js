@@ -7390,7 +7390,7 @@ class AdminPage {
             partners_revolut_api_enabled: 'API Revolut Business'
         };
         const releaseGateLabels = {
-            legal_and_tax_approved: 'Validation juridique et fiscale',
+            legal_and_tax_approved: 'Position juridique/fiscale et risque propriétaire',
             membership_privacy_approved: 'Privacy de l’adhésion publique',
             privacy_approved: 'AIPD Privacy du virement cash',
             country_policy_approved: 'Politique pays du virement cash',
@@ -8876,7 +8876,13 @@ class AdminPage {
                 'privacy_notice',
                 'records_of_processing'
             ],
-            legal_and_tax_approved: ['legal_tax_review', 'partners_terms'],
+            legal_and_tax_approved: [
+                'legal_tax_review',
+                'owner_risk_acceptance',
+                'partners_terms',
+                'partners_disclosure',
+                'tax_operating_policy'
+            ],
             individual_verification_coverage_confirmed: ['kyc_certification'],
             individual_payout_coverage_confirmed: ['payout_coverage_review'],
             country_policy_approved: ['country_policy_review', 'payout_corridor_review'],
@@ -11109,14 +11115,14 @@ class AdminPage {
             if (!thresholdsRaw) return false;
             const terms = await this._partnersPrompt(
                 'Version des conditions Partners :',
-                'partners-terms-v1',
+                'partners-terms-global-frcash-p0-v3',
                 (value) => slug.test(value),
                 'Version des conditions invalide.'
             );
             if (!terms) return false;
             const disclosure = await this._partnersPrompt(
                 'Version de la notice de transparence :',
-                'partners-disclosure-v1',
+                'partners-disclosure-v2',
                 (value) => slug.test(value),
                 'Version de notice invalide.'
             );

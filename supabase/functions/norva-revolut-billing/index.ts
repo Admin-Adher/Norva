@@ -33,8 +33,8 @@ import { renderReceipt } from "../_shared/lifecycle-email.ts";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 import {
   ingestPartnerFinancialFact,
+  resolveRevolutPartnerObservation,
   revolutEnvironment,
-  revolutPartnerObservation,
 } from "../_shared/partners-finance.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -1129,7 +1129,7 @@ async function chargeUser(
       }, { onConflict: "pi_id", ignoreDuplicates: true });
       if (ledgerError) throw new Error(`billing_ledger_write_failed:${ledgerError.message}`);
       if (!result.orderId) throw new Error("captured_payment_missing_order_id");
-      const partnersObservation = revolutPartnerObservation({
+      const partnersObservation = await resolveRevolutPartnerObservation(db, {
         order: {
           id: result.orderId,
           state: "COMPLETED",

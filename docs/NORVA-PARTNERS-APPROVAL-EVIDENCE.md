@@ -18,7 +18,7 @@ virement. Les preuves Didit, fiscales et corridor ne conditionnent que la
 capacité optionnelle de demander et recevoir un virement cash. Aucun validateur
 ou gate de payout ne doit être réutilisé pour bloquer la couche sans KYC.
 
-Le contrat courant est `schema_version=4`. Il autorise l'adhésion publique tout
+Le contrat courant est `schema_version=5`. Il autorise l'adhésion publique tout
 en maintenant les virements cash France en `allowlist_only`, avec un plafond de
 50 participants et `cash_public_release_eligible=false`. Étendre le cash à un
 autre pays ou au-delà de cette cohorte exige un nouveau contrat, une nouvelle
@@ -78,9 +78,29 @@ Le template utilise `preproduction`. Le mode CLI `--require-all` reste réservé
 à un paquet `production` complet : il ne transforme jamais une validation de
 préproduction ou une preuve sandbox Didit en autorisation de mise en service.
 
-## Ce que Legal et fiscal doivent approuver
+## Décision juridique et fiscale
 
-Le professionnel juridique/fiscal produit un artefact distinct couvrant :
+La revue par un professionnel reste le mode recommandé. Pour le seul pilote
+individuel France, le propriétaire peut toutefois décider de lancer sur la base
+d'une revue interne documentée et accepter explicitement le risque résiduel.
+Ce mode ne doit jamais être affiché comme un avis professionnel : il conserve
+exactement `reviewer_role=accountable_owner`,
+`assessment_method=documented_internal_legal_tax_review_with_owner_risk_acceptance`,
+`external_professional_review_obtained=false`,
+`owner_risk_accepted=true` et
+`launch_scope=global_individual_membership_france_cash_pilot`. Cette portée
+autorise l'adhésion individuelle et le crédit d'accès dans les pays où Norva
+rend le programme visible, mais maintient le cash au pilote France sur
+allowlist. Sa durée
+de validité ne peut dépasser 90 jours.
+
+Le package exige alors cinq preuves spécialisées : la revue interne, une
+acceptation propriétaire distincte, les Conditions Partners, la disclosure et
+la politique fiscale opérationnelle. L'Admin et le registre conservent les
+noms de ces preuves afin que l'absence d'avis externe ne puisse pas être
+masquée.
+
+La décision documentée couvre :
 
 1. le programme réservé aux personnes physiques et l'absence de KYB dans ce
    périmètre initial ;
@@ -100,6 +120,9 @@ Le professionnel juridique/fiscal produit un artefact distinct couvrant :
 
 Toutes les cases `decisions.legal_and_tax.checks` doivent être explicitement
 vraies. Une absence ou une réserve non résolue reste `false` et bloque la gate.
+Cette exception opérationnelle n'autorise ni une juridiction autre que la
+France, ni une ouverture publique du cash, ni une affirmation de conformité
+juridique garantie.
 
 ## Décision Membership Privacy pour l'adhésion publique
 

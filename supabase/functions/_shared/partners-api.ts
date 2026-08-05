@@ -87,6 +87,7 @@ export type PublicErrorCode =
   | "quote_expired"
   | "insufficient_balance"
   | "catalog_unavailable"
+  | "fx_rate_unavailable"
   | "quote_conflict"
   | "payout_country_unavailable"
   | "partners_action_not_allowed"
@@ -1940,7 +1941,7 @@ export function sanitizeAccessCreditQuoteData(
     "balance",
   ]);
   if (
-    root.schema_version !== 1 ||
+    root.schema_version !== 2 ||
     root.action !== "access_credit_quoted"
   ) throw new BootstrapContractError();
   const quote = exactRecord(root.quote, [
@@ -1952,6 +1953,14 @@ export function sanitizeAccessCreditQuoteData(
     "months",
     "unit_amount_minor",
     "total_amount_minor",
+    "reference_currency",
+    "reference_currency_exponent",
+    "reference_unit_amount_minor",
+    "reference_total_amount_minor",
+    "fx_rate_snapshot_key",
+    "fx_rate_source",
+    "fx_observed_at",
+    "fx_valid_until",
     "duration_days",
     "expires_at",
   ]);
@@ -1966,21 +1975,33 @@ export function sanitizeAccessCreditQuoteData(
     1,
     Number.MAX_SAFE_INTEGER,
   );
+  const currency = contractPatternString(quote.currency, CURRENCY_PATTERN, 3);
+  const currencyExponent = integerBetween(quote.currency_exponent, 0, 6);
+  const referenceTotal = integerBetween(
+    quote.reference_total_amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const fx = sanitizeAccessCreditFxEvidence(quote, currency);
   if (
     quote.status !== "open" ||
-    quote.currency !== "USD" ||
-    quote.currency_exponent !== 2 ||
     quote.plan_code !== "plus" ||
-    unitAmount !== 499 ||
-    totalAmount !== unitAmount * months ||
+    quote.reference_currency !== "USD" ||
+    quote.reference_currency_exponent !== 2 ||
+    quote.reference_unit_amount_minor !== 499 ||
+    referenceTotal !== 499 * months ||
     quote.duration_days !== months * 30
   ) throw new BootstrapContractError();
   const balance = sanitizeAvailableBalance(root.balance);
-  if (balance.available_minor < totalAmount) {
+  if (
+    balance.currency !== currency ||
+    balance.currency_exponent !== currencyExponent ||
+    balance.available_minor < totalAmount
+  ) {
     throw new BootstrapContractError();
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: "access_credit_quoted",
     replayed: strictBoolean(root.replayed),
     quote: {
@@ -1990,12 +2011,17 @@ export function sanitizeAccessCreditQuoteData(
         28,
       ),
       status: "open",
-      currency: "USD",
-      currency_exponent: 2,
+      currency,
+      currency_exponent: currencyExponent,
       plan_code: "plus",
       months,
       unit_amount_minor: unitAmount,
       total_amount_minor: totalAmount,
+      reference_currency: "USD",
+      reference_currency_exponent: 2,
+      reference_unit_amount_minor: 499,
+      reference_total_amount_minor: referenceTotal,
+      ...fx,
       duration_days: months * 30,
       expires_at: isoTimestamp(quote.expires_at, false),
     },
@@ -2016,7 +2042,7 @@ export function sanitizeAccessCreditRedemptionData(
     "overlay",
   ]);
   if (
-    root.schema_version !== 1 ||
+    root.schema_version !== 2 ||
     root.action !== "access_credit_redeemed"
   ) throw new BootstrapContractError();
 
@@ -2026,6 +2052,12 @@ export function sanitizeAccessCreditRedemptionData(
     "currency",
     "currency_exponent",
     "amount_minor",
+    "reference_currency",
+    "reference_currency_exponent",
+    "reference_amount_minor",
+    "fx_rate_snapshot_key",
+    "fx_rate_source",
+    "fx_observed_at",
     "months",
   ]);
   const months = integerBetween(redemption.months, 1, 12);
@@ -2034,11 +2066,37 @@ export function sanitizeAccessCreditRedemptionData(
     1,
     Number.MAX_SAFE_INTEGER,
   );
+  const currency = contractPatternString(
+    redemption.currency,
+    CURRENCY_PATTERN,
+    3,
+  );
+  const currencyExponent = integerBetween(
+    redemption.currency_exponent,
+    0,
+    6,
+  );
+  const referenceAmount = integerBetween(
+    redemption.reference_amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const fx = sanitizeAccessCreditFxEvidence({
+    reference_currency: redemption.reference_currency,
+    reference_currency_exponent: redemption.reference_currency_exponent,
+    reference_unit_amount_minor: 499,
+    fx_rate_snapshot_key: redemption.fx_rate_snapshot_key,
+    fx_rate_source: redemption.fx_rate_source,
+    fx_observed_at: redemption.fx_observed_at,
+    fx_valid_until: redemption.fx_observed_at === null
+      ? null
+      : redemption.fx_observed_at,
+  }, currency, false);
   if (
     redemption.status !== "granted" ||
-    redemption.currency !== "USD" ||
-    redemption.currency_exponent !== 2 ||
-    amountMinor !== 499 * months
+    redemption.reference_currency !== "USD" ||
+    redemption.reference_currency_exponent !== 2 ||
+    referenceAmount !== 499 * months
   ) throw new BootstrapContractError();
 
   const grant = exactRecord(root.grant, [
@@ -2073,7 +2131,7 @@ export function sanitizeAccessCreditRedemptionData(
   ) throw new BootstrapContractError();
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: "access_credit_redeemed",
     replayed: strictBoolean(root.replayed),
     redemption: {
@@ -2083,9 +2141,15 @@ export function sanitizeAccessCreditRedemptionData(
         28,
       ),
       status: "granted",
-      currency: "USD",
-      currency_exponent: 2,
+      currency,
+      currency_exponent: currencyExponent,
       amount_minor: amountMinor,
+      reference_currency: "USD",
+      reference_currency_exponent: 2,
+      reference_amount_minor: referenceAmount,
+      fx_rate_snapshot_key: fx.fx_rate_snapshot_key,
+      fx_rate_source: fx.fx_rate_source,
+      fx_observed_at: fx.fx_observed_at,
       months,
     },
     grant: {
@@ -2101,7 +2165,14 @@ export function sanitizeAccessCreditRedemptionData(
       active_from: activeFrom,
       active_until: activeUntil,
     },
-    balance: sanitizeAvailableBalance(root.balance),
+    balance: (() => {
+      const balance = sanitizeAvailableBalance(root.balance);
+      if (
+        balance.currency !== currency ||
+        balance.currency_exponent !== currencyExponent
+      ) throw new BootstrapContractError();
+      return balance;
+    })(),
     overlay: sanitizeAccessGrantOverlay(root.overlay),
   };
 }
@@ -2121,7 +2192,7 @@ export function sanitizeAccessCreditStatusData(
     "provider",
   ]);
   if (
-    root.schema_version !== 1 ||
+    root.schema_version !== 2 ||
     root.action !== "access_credit_status"
   ) throw new BootstrapContractError();
   const provider = sanitizeAccessProvider(root.provider);
@@ -2135,7 +2206,7 @@ export function sanitizeAccessCreditStatusData(
   );
   const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
   return {
-    schema_version: 1,
+    schema_version: 2,
     action: "access_credit_status",
     balance: sanitizeAccessCreditBalance(root.balance),
     catalog,
@@ -2415,8 +2486,6 @@ function sanitizeDashboardV2Data(
       index > 0 && balanceCurrencies[index - 1].localeCompare(currency) >= 0
     )
   ) throw new BootstrapContractError();
-  const hasUsdBalance = balanceCurrencies.includes("USD");
-  const hasOnlyUnsupportedCurrency = balances.length > 0 && !hasUsdBalance;
   const provider = sanitizeAccessProvider(root.provider);
   const overlay = sanitizeAccessGrantOverlay(root.overlay, provider);
 
@@ -2433,6 +2502,15 @@ function sanitizeDashboardV2Data(
     catalog !== null,
     true,
   );
+  if (
+    catalog !== null &&
+    balances.some((balance) => Number(balance.available_minor) > 0) &&
+    !balances.some((balance) =>
+      balance.currency === catalog.currency &&
+      balance.currency_exponent === catalog.currency_exponent &&
+      Number(balance.available_minor) > 0
+    )
+  ) throw new BootstrapContractError();
   const cashReadiness = sanitizeCashReadiness(root.cash_readiness);
 
   const history = exactRecord(root.history, [
@@ -2505,11 +2583,7 @@ function sanitizeDashboardV2Data(
     ? "membership_required"
     : !flags.partners_credit_redemptions_enabled
     ? "credits_disabled"
-    : hasOnlyUnsupportedCurrency
-    ? "currency_not_supported"
-    : catalog === null
-    ? "catalog_unavailable"
-    : null;
+    : creditReadiness.reason;
   if (
     (link !== null && membership.status !== "active") ||
     (cashReadiness.reason === "cash_pilot_not_allowed" &&
@@ -2581,6 +2655,11 @@ export function mapDatabaseError(
       status: 409,
       code: "quote_conflict",
       message: "This access credit quote is no longer available.",
+    },
+    P1008: {
+      status: 503,
+      code: "fx_rate_unavailable",
+      message: "A current verified exchange rate is unavailable for this balance.",
     },
     P1007: {
       status: 422,
@@ -2766,8 +2845,8 @@ function sanitizeV2Program(value: unknown): Record<string, unknown> {
 }
 
 function sanitizeAvailableBalance(value: unknown): {
-  currency: "USD";
-  currency_exponent: 2;
+  currency: string;
+  currency_exponent: number;
   available_minor: number;
 } {
   const balance = exactRecord(value, [
@@ -2775,13 +2854,9 @@ function sanitizeAvailableBalance(value: unknown): {
     "currency_exponent",
     "available_minor",
   ]);
-  if (
-    balance.currency !== "USD" ||
-    balance.currency_exponent !== 2
-  ) throw new BootstrapContractError();
   return {
-    currency: "USD",
-    currency_exponent: 2,
+    currency: contractPatternString(balance.currency, CURRENCY_PATTERN, 3),
+    currency_exponent: integerBetween(balance.currency_exponent, 0, 6),
     available_minor: integerBetween(
       balance.available_minor,
       0,
@@ -2799,13 +2874,9 @@ function sanitizeAccessCreditBalance(value: unknown): Record<string, unknown> {
     "recovery_due_minor",
     "redeemed_minor",
   ]);
-  if (
-    balance.currency !== "USD" ||
-    balance.currency_exponent !== 2
-  ) throw new BootstrapContractError();
   return {
-    currency: "USD",
-    currency_exponent: 2,
+    currency: contractPatternString(balance.currency, CURRENCY_PATTERN, 3),
+    currency_exponent: integerBetween(balance.currency_exponent, 0, 6),
     pending_minor: integerBetween(
       balance.pending_minor,
       0,
@@ -2874,12 +2945,27 @@ function sanitizeAccessCreditCatalog(value: unknown): Record<string, unknown> {
     "unit_duration_days",
     "minimum_months",
     "maximum_months",
+    "reference_currency",
+    "reference_currency_exponent",
+    "reference_unit_amount_minor",
+    "fx_rate_snapshot_key",
+    "fx_rate_source",
+    "fx_observed_at",
+    "fx_valid_until",
   ]);
+  const currency = contractPatternString(catalog.currency, CURRENCY_PATTERN, 3);
+  const currencyExponent = integerBetween(catalog.currency_exponent, 0, 6);
+  const unitAmount = integerBetween(
+    catalog.unit_amount_minor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const fx = sanitizeAccessCreditFxEvidence(catalog, currency);
   if (
     catalog.plan_code !== "plus" ||
-    catalog.currency !== "USD" ||
-    catalog.currency_exponent !== 2 ||
-    catalog.unit_amount_minor !== 499 ||
+    catalog.reference_currency !== "USD" ||
+    catalog.reference_currency_exponent !== 2 ||
+    catalog.reference_unit_amount_minor !== 499 ||
     catalog.unit_duration_days !== 30 ||
     catalog.minimum_months !== 1 ||
     catalog.maximum_months !== 12
@@ -2891,12 +2977,65 @@ function sanitizeAccessCreditCatalog(value: unknown): Record<string, unknown> {
       68,
     ),
     plan_code: "plus",
-    currency: "USD",
-    currency_exponent: 2,
-    unit_amount_minor: 499,
+    currency,
+    currency_exponent: currencyExponent,
+    unit_amount_minor: unitAmount,
     unit_duration_days: 30,
     minimum_months: 1,
     maximum_months: 12,
+    reference_currency: "USD",
+    reference_currency_exponent: 2,
+    reference_unit_amount_minor: 499,
+    ...fx,
+  };
+}
+
+function sanitizeAccessCreditFxEvidence(
+  value: unknown,
+  sourceCurrency: string,
+  requireValidUntil = true,
+): Record<string, unknown> {
+  if (!isRecord(value)) throw new BootstrapContractError();
+  if (
+    value.reference_currency !== "USD" ||
+    value.reference_currency_exponent !== 2 ||
+    value.reference_unit_amount_minor !== 499
+  ) throw new BootstrapContractError();
+  if (sourceCurrency === "USD") {
+    if (
+      value.fx_rate_snapshot_key !== null ||
+      value.fx_rate_source !== null ||
+      value.fx_observed_at !== null ||
+      (requireValidUntil && value.fx_valid_until !== null)
+    ) throw new BootstrapContractError();
+    return {
+      fx_rate_snapshot_key: null,
+      fx_rate_source: null,
+      fx_observed_at: null,
+      ...(requireValidUntil ? { fx_valid_until: null } : {}),
+    };
+  }
+  const observedAt = isoTimestamp(value.fx_observed_at, false);
+  const validUntil = requireValidUntil
+    ? isoTimestamp(value.fx_valid_until, false)
+    : null;
+  if (
+    requireValidUntil &&
+    Date.parse(String(validUntil)) <= Date.parse(String(observedAt))
+  ) throw new BootstrapContractError();
+  return {
+    fx_rate_snapshot_key: contractPatternString(
+      value.fx_rate_snapshot_key,
+      /^fxr_[0-9a-f]{24}$/,
+      28,
+    ),
+    fx_rate_source: enumString(value.fx_rate_source, new Set([
+      "ecb_reference",
+      "revolut_quote",
+      "finance_manual",
+    ])),
+    fx_observed_at: observedAt,
+    ...(requireValidUntil ? { fx_valid_until: validUntil } : {}),
   };
 }
 
@@ -2913,13 +3052,13 @@ function sanitizeCreditReadiness(
       "membership_required",
       "credits_disabled",
       "catalog_unavailable",
-      ...(allowCurrencyNotSupported ? ["currency_not_supported"] : []),
+      ...(allowCurrencyNotSupported ? ["fx_rate_unavailable"] : []),
     ]));
   if (
     (ready && (reason !== null || hasCatalog === false)) ||
     (!ready && reason === null) ||
     (reason === "catalog_unavailable" && hasCatalog === true) ||
-    (reason === "currency_not_supported" && hasCatalog !== false)
+    (reason === "fx_rate_unavailable" && hasCatalog !== false)
   ) throw new BootstrapContractError();
   return { ready, reason };
 }

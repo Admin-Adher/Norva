@@ -207,6 +207,85 @@ test('Revolut maps only settled economic orders and never invents components', a
   }, now), null);
 });
 
+test('Revolut becomes commissionable only through the authoritative Web tax RPC', async () => {
+  const { resolveRevolutPartnerObservation } = await finance();
+  const calls = [];
+  const db = {
+    async rpc(name, args) {
+      calls.push({ name, args });
+      return {
+        data: {
+          schema_version: 1,
+          action: 'web_tax_resolved',
+          status: 'complete',
+          reason: null,
+          financial: {
+            currency: 'USD',
+            currency_exponent: 2,
+            gross_minor: 499,
+            discount_minor: 0,
+            tax_minor: 0,
+            eligible_minor: 499,
+          },
+          policy: {
+            policy_key: 'wtp_fr_usd_owner_v1',
+          },
+        },
+        error: null,
+      };
+    },
+  };
+  const observation = await resolveRevolutPartnerObservation(db, {
+    order: {
+      id: 'order_tax_resolved_1',
+      state: 'COMPLETED',
+      amount: 499,
+      currency: 'USD',
+      updated_at: now.toISOString(),
+    },
+    referredUserId: userId,
+    kind: 'renewal',
+    environment: 'production',
+  }, now);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'partners_worker_web_tax_resolve');
+  assert.equal(calls[0].args.p_environment, 'production');
+  assert.equal(calls[0].args.p_currency_exponent, 2);
+  assert.equal(observation.currencyExponent, 2);
+  assert.equal(observation.taxMinor, 0);
+  assert.equal(observation.eligibleMinor, 499);
+
+  const incomplete = await resolveRevolutPartnerObservation({
+    async rpc() {
+      return {
+        data: {
+          schema_version: 1,
+          action: 'web_tax_resolved',
+          status: 'incomplete',
+          reason: 'tax_policy_unavailable',
+          financial: null,
+          policy: null,
+        },
+        error: null,
+      };
+    },
+  }, {
+    order: {
+      id: 'order_tax_missing_1',
+      state: 'COMPLETED',
+      amount: 499,
+      currency: 'USD',
+    },
+    referredUserId: userId,
+    kind: 'renewal',
+    environment: 'production',
+  }, now);
+  assert.equal(incomplete.currencyExponent, null);
+  assert.equal(incomplete.taxMinor, null);
+  assert.equal(incomplete.eligibleMinor, null);
+});
+
 test('Revolut DISPUTE_LOST maps one authoritative idempotent chargeback', async () => {
   const {
     partnerFinancialFactRpcArgs,

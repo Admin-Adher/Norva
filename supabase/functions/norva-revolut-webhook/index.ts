@@ -32,10 +32,11 @@ import { getPrices } from "../_shared/prices.ts";
 import {
   enqueuePartnerChargebackReversal,
   ingestPartnerFinancialFact,
+  resolveRevolutPartnerObservation,
+  resolveWebTaxForObservation,
   revolutDisputePartnerObservation,
   revolutDisputeWonPartnerObservation,
   revolutEnvironment,
-  revolutPartnerObservation,
   revolutWebhookSignatureMatches,
   sha256Hex,
 } from "../_shared/partners-finance.mjs";
@@ -202,11 +203,14 @@ Deno.serve(async (req) => {
           conflict: correctionResult.conflict,
         }, 202);
       }
-      const partnersObservation = revolutDisputePartnerObservation({
-        dispute,
-        referredUserId: disputeUserId,
-        environment: PARTNERS_ENVIRONMENT,
-      });
+      const partnersObservation = await resolveWebTaxForObservation(
+        admin,
+        revolutDisputePartnerObservation({
+          dispute,
+          referredUserId: disputeUserId,
+          environment: PARTNERS_ENVIRONMENT,
+        }),
+      );
       if (!partnersObservation) {
         throw new Error("lost dispute has no authoritative financial identity");
       }
@@ -336,7 +340,7 @@ Deno.serve(async (req) => {
         if (completeError) {
           throw new Error(`refund completion failed: ${completeError.message}`);
         }
-        const partnersObservation = revolutPartnerObservation({
+        const partnersObservation = await resolveRevolutPartnerObservation(admin, {
           order: stringOrNull(order.id) ? order : { ...order, id: orderId },
           referredUserId: refundAttempt.user_id,
           environment: PARTNERS_ENVIRONMENT,
@@ -427,7 +431,7 @@ Deno.serve(async (req) => {
           relatedOrderId,
         );
         if (refundUserId) {
-          const partnersObservation = revolutPartnerObservation({
+          const partnersObservation = await resolveRevolutPartnerObservation(admin, {
             order: stringOrNull(order.id) ? order : { ...order, id: orderId },
             referredUserId: refundUserId,
             environment: PARTNERS_ENVIRONMENT,
@@ -466,7 +470,7 @@ Deno.serve(async (req) => {
         // journal catches up; the operator can then reconcile it safely.
         throw new Error("completed chargeback has no durable local owner");
       }
-      const partnersObservation = revolutPartnerObservation({
+      const partnersObservation = await resolveRevolutPartnerObservation(admin, {
         order: stringOrNull(order.id) ? order : { ...order, id: orderId },
         referredUserId: chargebackUserId,
         environment: PARTNERS_ENVIRONMENT,
@@ -656,7 +660,7 @@ Deno.serve(async (req) => {
         );
       }
     }
-    const partnersObservation = revolutPartnerObservation({
+    const partnersObservation = await resolveRevolutPartnerObservation(admin, {
       order: stringOrNull(order.id) ? order : { ...order, id: orderId },
       referredUserId: userId,
       kind: anchoredKind,

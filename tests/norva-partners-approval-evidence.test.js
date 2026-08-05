@@ -113,6 +113,8 @@ function readyPackage() {
   const legal = value.decisions.legal_and_tax;
   legal.approved = true;
   legal.decided_at = '2026-08-03T09:30:00Z';
+  legal.valid_until = '2026-10-31T09:30:00Z';
+  legal.owner_risk_accepted = true;
   legal.reviewer_reference_sha256 = sha256('legal-reviewer-reference');
   legal.evidence = evidenceRef('legal-decision', '2026-08-03T09:31:00Z');
   Object.keys(legal.checks).forEach((key) => { legal.checks[key] = true; });
@@ -184,8 +186,21 @@ test('approval evidence template is strict, valid and fail-closed', () => {
     workflow,
     /validate-partners-approval-evidence\.js[\s\S]*approval-evidence\.example\.json/,
   );
-  assert.equal(template.schema_version, 4);
+  assert.equal(template.schema_version, 5);
   assert.equal(template.target_environment, 'preproduction');
+  assert.equal(
+    template.decisions.legal_and_tax.assessment_method,
+    'documented_internal_legal_tax_review_with_owner_risk_acceptance',
+  );
+  assert.equal(
+    template.decisions.legal_and_tax.external_professional_review_obtained,
+    false,
+  );
+  assert.equal(template.decisions.legal_and_tax.owner_risk_accepted, false);
+  assert.equal(
+    template.decisions.legal_and_tax.launch_scope,
+    'global_individual_membership_france_cash_pilot',
+  );
   assert.deepEqual(template.release_scope, {
     membership_access_mode: 'public',
     membership_public_release_eligible: true,
@@ -256,6 +271,33 @@ test('a checked box cannot replace reviewer and immutable evidence', () => {
   assert.ok(result.blockers.legal_and_tax.includes(
     'legal_and_tax_evidence_missing',
   ));
+});
+
+test('internal legal-tax approval is transparent, owner-accepted and short-lived', () => {
+  const noAcceptance = readyPackage();
+  noAcceptance.decisions.legal_and_tax.owner_risk_accepted = false;
+  const noAcceptanceResult = evaluateApprovalPackage(noAcceptance, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.ok(noAcceptanceResult.blockers.legal_and_tax.includes(
+    'legal_and_tax_owner_risk_not_accepted',
+  ));
+
+  const tooLong = readyPackage();
+  tooLong.decisions.legal_and_tax.valid_until = '2027-08-03T09:30:00Z';
+  const tooLongResult = evaluateApprovalPackage(tooLong, {
+    nowMs: Date.parse('2026-08-03T10:00:00Z'),
+  });
+  assert.ok(tooLongResult.blockers.legal_and_tax.includes(
+    'legal_and_tax_internal_review_validity_exceeds_90_days',
+  ));
+
+  const disguised = readyPackage();
+  disguised.decisions.legal_and_tax.external_professional_review_obtained = true;
+  assert.throws(
+    () => validateApprovalPackage(disguised),
+    /external_professional_review_obtained must be false/,
+  );
 });
 
 test('Privacy remains blocked without a completed, controller-validated DPIA', () => {

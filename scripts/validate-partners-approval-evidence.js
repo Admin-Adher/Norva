@@ -25,7 +25,9 @@ const LEGAL_CHECKS = [
   'recurring_commission_model_approved',
   'attribution_and_maturation_rules_approved',
   'threshold_and_fee_policy_approved',
+  'access_credit_tax_treatment_approved',
   'individual_tax_reporting_approved',
+  'global_membership_residual_risk_accepted',
   'sanctions_and_restricted_destinations_reviewed',
   'terms_and_disclosure_approved',
   'kyc_only_without_kyb_scope_approved',
@@ -153,8 +155,11 @@ function validateDecision(value, key, role, checks, nowMs, options = {}) {
     ...extraKeys,
   ], trail);
   assert(typeof value.approved === 'boolean', `${trail}.approved must be boolean`);
-  assert(value.reviewer_role === role,
-    `${trail}.reviewer_role must be ${role}`);
+  const roles = Array.isArray(role) ? role : [role];
+  assert(roles.includes(value.reviewer_role),
+    roles.length === 1
+      ? `${trail}.reviewer_role must be ${roles[0]}`
+      : `${trail}.reviewer_role must be one of: ${roles.join(', ')}`);
   assertOptionalTimestamp(value.decided_at, `${trail}.decided_at`);
   assertOptionalTimestamp(value.valid_until, `${trail}.valid_until`);
   assertOptionalSha(
@@ -184,7 +189,7 @@ function validateApprovalPackage(value, options = {}) {
     'status',
     'target_environment',
   ], 'approval package');
-  assert(value.schema_version === 4, 'schema_version must be 4');
+  assert(value.schema_version === 5, 'schema_version must be 5');
   assert(['draft', 'approved'].includes(value.status),
     'status must be draft or approved');
   assert(VERSION_KEY.test(value.package_key || ''),
@@ -379,9 +384,44 @@ function validateApprovalPackage(value, options = {}) {
   validateDecision(
     value.decisions.legal_and_tax,
     'legal_and_tax',
-    'legal_and_tax_professional',
+    ['legal_and_tax_professional', 'accountable_owner'],
     LEGAL_CHECKS,
     nowMs,
+    {
+      extraKeys: [
+        'assessment_method',
+        'external_professional_review_obtained',
+        'launch_scope',
+        'owner_risk_accepted',
+      ],
+      validateExtra: (decision, trail) => {
+        assert(
+          decision.launch_scope
+            === 'global_individual_membership_france_cash_pilot',
+          `${trail}.launch_scope must remain `
+            + 'global_individual_membership_france_cash_pilot',
+        );
+        assert(typeof decision.external_professional_review_obtained
+          === 'boolean',
+        `${trail}.external_professional_review_obtained must be boolean`);
+        assert(typeof decision.owner_risk_accepted === 'boolean',
+          `${trail}.owner_risk_accepted must be boolean`);
+        if (decision.assessment_method === 'qualified_professional_review') {
+          assert(decision.reviewer_role === 'legal_and_tax_professional',
+            `${trail}.reviewer_role must be legal_and_tax_professional`);
+          assert(decision.external_professional_review_obtained === true,
+            `${trail}.external_professional_review_obtained must be true`);
+        } else {
+          assert(decision.assessment_method
+            === 'documented_internal_legal_tax_review_with_owner_risk_acceptance',
+          `${trail}.assessment_method is invalid`);
+          assert(decision.reviewer_role === 'accountable_owner',
+            `${trail}.reviewer_role must be accountable_owner`);
+          assert(decision.external_professional_review_obtained === false,
+            `${trail}.external_professional_review_obtained must be false`);
+        }
+      },
+    },
   );
   validateDecision(
     value.decisions.membership_privacy,
@@ -525,6 +565,21 @@ function decisionBlockers(value, key, nowMs) {
   }
   if (Object.values(decision.checks).some((passed) => passed !== true)) {
     blockers.push(`${key}_checks_incomplete`);
+  }
+  if (key === 'legal_and_tax') {
+    if (decision.owner_risk_accepted !== true) {
+      blockers.push('legal_and_tax_owner_risk_not_accepted');
+    }
+    if (decision.assessment_method
+      === 'documented_internal_legal_tax_review_with_owner_risk_acceptance') {
+      const maximumInternalValidity = decidedAt === null
+        ? null
+        : decidedAt + (90 * 24 * 60 * 60 * 1000);
+      if (expiresAt === null || maximumInternalValidity === null
+        || expiresAt > maximumInternalValidity) {
+        blockers.push('legal_and_tax_internal_review_validity_exceeds_90_days');
+      }
+    }
   }
   if (decidedAt !== null && decision.evidence) {
     const verifiedAt = parseTimestamp(decision.evidence.verified_at);
