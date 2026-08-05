@@ -400,9 +400,9 @@ as $fixture$
     'deployment_proof', repeat('02', 32)
   ) || case p_gate
     when 'membership_privacy_approved' then jsonb_build_object(
-      'membership_privacy_notice', repeat('04', 32),
-      'membership_records_of_processing', repeat('06', 32),
-      'membership_minimization_review', repeat('07', 32)
+      'membership_privacy_notice', repeat('16', 32),
+      'membership_records_of_processing', repeat('17', 32),
+      'membership_minimization_review', repeat('18', 32)
     )
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('03', 32),
@@ -413,10 +413,10 @@ as $fixture$
     )
     when 'legal_and_tax_approved' then jsonb_build_object(
       'legal_tax_review', repeat('08', 32),
-      'owner_risk_acceptance', repeat('0a', 32),
+      'owner_risk_acceptance', repeat('19', 32),
       'partners_terms', repeat('09', 32),
-      'partners_disclosure', repeat('0b', 32),
-      'tax_operating_policy', repeat('0c', 32)
+      'partners_disclosure', repeat('1a', 32),
+      'tax_operating_policy', repeat('1b', 32)
     )
     when 'individual_verification_coverage_confirmed' then
       jsonb_build_object('kyc_certification', repeat('0a', 32))

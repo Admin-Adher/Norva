@@ -492,7 +492,7 @@ select extensions.ok(
 
 select extensions.ok(
   position(
-    'partners_balance_lock(v_account.id, ''usd'')'
+    'partners_balance_lock(v_account.id, v_quote.currency)'
     in lower(pg_get_functiondef(
       'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
     ))
@@ -503,13 +503,13 @@ select extensions.ok(
       'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
     ))
   ) < position(
-    'partners_balance_lock(v_account.id, ''usd'')'
+    'partners_balance_lock(v_account.id, v_quote.currency)'
     in lower(pg_get_functiondef(
       'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
     ))
   )
   and position(
-    'partners_balance_lock(v_account.id, ''usd'')'
+    'partners_balance_lock(v_account.id, v_quote.currency)'
     in lower(pg_get_functiondef(
       'affiliate_private.partners_service_access_credit_redeem(uuid,text,text)'::regprocedure
     ))

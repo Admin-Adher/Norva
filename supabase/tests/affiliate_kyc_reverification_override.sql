@@ -278,9 +278,9 @@ as $fixture$
       'tax_operating_policy', repeat('0c', 32)
     )
     when 'membership_privacy_approved' then jsonb_build_object(
-      'membership_privacy_notice', repeat('6', 64),
-      'membership_records_of_processing', repeat('7', 64),
-      'membership_minimization_review', repeat('8', 64)
+      'membership_privacy_notice', repeat('10', 32),
+      'membership_records_of_processing', repeat('11', 32),
+      'membership_minimization_review', repeat('12', 32)
     )
     when 'privacy_approved' then jsonb_build_object(
       'dpia', repeat('5', 64),
