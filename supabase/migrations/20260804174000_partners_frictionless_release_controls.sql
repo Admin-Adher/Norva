@@ -112,7 +112,11 @@ begin
     raise exception 'required programme approval guard is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position(v_replacement in v_definition) > 0
     or position(v_expected in v_definition) = 0
   then
@@ -142,7 +146,11 @@ begin
     raise exception 'required programme activation routine is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_wrapper_oid::oid) into v_wrapper_definition;
+  select replace(
+    pg_get_functiondef(v_wrapper_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_wrapper_definition;
   if position(
     'admin_partners_program_activate_pre_aal2_20260802' in
     v_wrapper_definition
@@ -152,7 +160,11 @@ begin
     raise exception 'programme activation AAL2 wrapper contract drifted'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position(v_replacement in v_definition) > 0
     or position(v_expected in v_definition) = 0
   then

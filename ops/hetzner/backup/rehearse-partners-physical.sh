@@ -605,10 +605,30 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
       docker exec -u "$PG_UID_GID" "$CONTAINER_NAME" \
         psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
           --single-transaction \
+          -c '\echo NORVA_MIGRATION_ONE_START' \
           -f "/candidate/$MIGRATION_ONE" \
+          -c '\echo NORVA_MIGRATION_ONE_COMPLETE' \
+          -c '\echo NORVA_MIGRATION_TWO_START' \
           -f "/candidate/$MIGRATION_TWO" \
+          -c '\echo NORVA_MIGRATION_TWO_COMPLETE' \
+          -c '\echo NORVA_MIGRATION_THREE_START' \
           -f "/candidate/$MIGRATION_THREE" \
+          -c '\echo NORVA_MIGRATION_THREE_COMPLETE' \
         > "$RAW_DIR/migrations.log" 2>&1; then
+    MIGRATION_FAILURE_STAGE="$(
+      grep -E '^NORVA_MIGRATION_(ONE|TWO|THREE)_(START|COMPLETE)$' \
+        "$RAW_DIR/migrations.log" | tail -n 1 || true
+    )"
+    case "$MIGRATION_FAILURE_STAGE" in
+      NORVA_MIGRATION_ONE_START|NORVA_MIGRATION_ONE_COMPLETE|\
+      NORVA_MIGRATION_TWO_START|NORVA_MIGRATION_TWO_COMPLETE|\
+      NORVA_MIGRATION_THREE_START|NORVA_MIGRATION_THREE_COMPLETE)
+        proof_line "migration_failure_stage=$MIGRATION_FAILURE_STAGE"
+        ;;
+      *)
+        proof_line "migration_failure_stage=unknown"
+        ;;
+    esac
     fail
   fi
   MIGRATIONS_APPLIED=3

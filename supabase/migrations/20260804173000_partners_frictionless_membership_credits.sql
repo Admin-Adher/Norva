@@ -517,7 +517,11 @@ begin
       raise exception 'required Partners routine is unavailable: %',
         v_change.signature using errcode = '55000';
     end if;
-    select pg_get_functiondef(v_oid::oid) into v_definition;
+    select replace(
+      pg_get_functiondef(v_oid::oid),
+      chr(13) || chr(10),
+      chr(10)
+    ) into v_definition;
     v_rewritten := replace(
       v_definition,
       v_change.old_fragment,
@@ -540,7 +544,11 @@ begin
     raise exception 'required Partners routine is unavailable: %',
       v_financial_signature using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if regexp_count(v_definition, v_financial_gate_pattern) <> 1 then
     raise exception 'Partners routine contract drifted: % / earnings gate',
       v_financial_signature using errcode = '55000';
@@ -1085,7 +1093,11 @@ begin
     raise exception 'Partners deletion preparation function is unavailable'
       using errcode = '55000';
   end if;
-  v_definition := pg_get_functiondef(v_oid);
+  v_definition := replace(
+    pg_get_functiondef(v_oid),
+    chr(13) || chr(10),
+    chr(10)
+  );
   v_rewritten := v_definition;
 
   v_expected := E'  for v_account in\n    select a.*\n    from affiliate_private.affiliate_accounts a\n    where a.user_id = p_user_id';
@@ -1112,7 +1124,11 @@ begin
     raise exception 'Partners Risk account action is unavailable'
       using errcode = '55000';
   end if;
-  v_definition := pg_get_functiondef(v_oid);
+  v_definition := replace(
+    pg_get_functiondef(v_oid),
+    chr(13) || chr(10),
+    chr(10)
+  );
   v_rewritten := v_definition;
 
   v_expected := E'  v_target_status text;\n  v_actor text;';

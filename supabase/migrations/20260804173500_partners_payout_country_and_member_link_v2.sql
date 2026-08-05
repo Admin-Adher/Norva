@@ -424,7 +424,11 @@ begin
     raise exception 'required canonical Partners KYC routine is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position(
     'partners_assert_kyc_cash_eligibility' in lower(v_definition)
   ) > 0 then
@@ -466,7 +470,11 @@ begin
     raise exception 'required fiscal self-attestation routine is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position('partners_assert_kyc_cash_eligibility' in lower(v_definition)) > 0
     or position(v_expected in v_definition) = 0
   then
@@ -501,7 +509,11 @@ begin
     raise exception 'required payout-onboarding routine is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position('partners_assert_kyc_cash_eligibility' in lower(v_definition)) > 0
     or position(v_expected in v_definition) = 0
   then
@@ -585,7 +597,11 @@ begin
     raise exception 'required manual payout batch routine is unavailable'
       using errcode = '55000';
   end if;
-  select pg_get_functiondef(v_oid::oid) into v_definition;
+  select replace(
+    pg_get_functiondef(v_oid::oid),
+    chr(13) || chr(10),
+    chr(10)
+  ) into v_definition;
   if position('partners_cash_pilot_allowlist_only' in lower(v_definition)) > 0
     or position(v_lock_expected in v_definition) = 0
     or position(v_batch_expected in v_definition) = 0

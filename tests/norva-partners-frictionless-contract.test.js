@@ -22,6 +22,9 @@ const migrationSource = read(
 const payoutMigrationSource = read(
   'supabase/migrations/20260804173500_partners_payout_country_and_member_link_v2.sql',
 );
+const releaseMigrationSource = read(
+  'supabase/migrations/20260804174000_partners_frictionless_release_controls.sql',
+);
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -838,6 +841,21 @@ test('restored financial gates accept whitespace drift but fail closed on semant
   assert.match(rewrite, /where f\\\.key = 'partners_payouts_live'/);
   assert.match(rewrite, /where flag\.key = ''partners_earnings_enabled''/);
   assert.doesNotMatch(exactReplacementMatrix, /partners_shadow_mode|partners_payouts_live/);
+});
+
+test('every restored routine rewrite normalizes CRLF before exact contract checks', () => {
+  for (const [source, expectedDefinitions] of [
+    [migrationSource, 4],
+    [payoutMigrationSource, 4],
+    [releaseMigrationSource, 3],
+  ]) {
+    const definitions = source.match(/pg_get_functiondef\([^\n]+\)/g) || [];
+    const normalizations = source.match(
+      /replace\(\s*pg_get_functiondef\([^)]*\),\s*chr\(13\) \|\| chr\(10\),\s*chr\(10\)\s*\)/g,
+    ) || [];
+    assert.equal(definitions.length, expectedDefinitions);
+    assert.equal(normalizations.length, expectedDefinitions);
+  }
 });
 
 test('frictionless idempotency extends every legacy operation without narrowing it', () => {

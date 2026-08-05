@@ -679,6 +679,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     3,
     'predeploy replays exactly the three candidate migrations',
   );
+  assert.match(rehearsal, /NORVA_MIGRATION_ONE_START/);
+  assert.match(rehearsal, /NORVA_MIGRATION_TWO_START/);
+  assert.match(rehearsal, /NORVA_MIGRATION_THREE_START/);
+  assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
+  assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.doesNotMatch(rehearsal, /MIGRATION_(?:FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN)/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
   assert.match(rehearsal, /baseline_markers_verified=22/);
