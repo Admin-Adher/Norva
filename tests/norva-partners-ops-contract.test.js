@@ -755,7 +755,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(108\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(109\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(

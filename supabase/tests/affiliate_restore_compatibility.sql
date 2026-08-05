@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(108);
+select extensions.plan(109);
 
 -- One immutable catalogue keeps the audited ab464fe4 production baseline and
 -- the frictionless baseline and the three production-finalization migrations
@@ -370,7 +370,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 77
+    select count(*) = 80
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
