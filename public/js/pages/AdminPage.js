@@ -10996,17 +10996,21 @@ class AdminPage {
                     'Le package de preuves est incomplet ou invalide.'
                 );
                 if (!documentHashes) return false;
+                const maximumValidityDays = key === 'legal_and_tax_approved'
+                    ? 90
+                    : 366;
                 const expiresDefault = new Date(
                     Date.now() + 30 * 24 * 60 * 60 * 1000
                 ).toISOString();
                 const expiresAt = await this._partnersPrompt(
-                    'Expiration ISO-8601 de cette approbation (maximum 366 jours) :',
+                    `Expiration ISO-8601 de cette approbation (maximum ${maximumValidityDays} jours) :`,
                     expiresDefault,
                     (value) => {
                         const at = Date.parse(value);
                         return Number.isFinite(at)
                             && at > Date.now() + 5 * 60 * 1000
-                            && at <= Date.now() + 366 * 24 * 60 * 60 * 1000;
+                            && at <= Date.now()
+                                + maximumValidityDays * 24 * 60 * 60 * 1000;
                     },
                     'Expiration invalide.'
                 );

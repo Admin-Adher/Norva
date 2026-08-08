@@ -491,6 +491,34 @@ select extensions.throws_ok(
   'approval package evidence cannot be rewritten'
 );
 
+select extensions.throws_ok(
+  $$
+    select public.admin_partners_release_gate_approve(
+      'legal_and_tax_approved',
+      'approval-registry-test-v1',
+      '[{"country_code":"FR"}]'::jsonb,
+      jsonb_build_object(
+        'approval_record', repeat('1', 64),
+        'deployment_proof', repeat('b', 64),
+        'legal_tax_review', repeat('7', 64),
+        'owner_risk_acceptance', repeat('0a', 32),
+        'partners_terms', repeat('8', 64),
+        'partners_disclosure', repeat('0b', 32),
+        'tax_operating_policy', repeat('0c', 32)
+      ),
+      repeat('a', 40),
+      'production',
+      'approval-registry-test-deployment',
+      repeat('b', 64),
+      now() + interval '91 days',
+      'An overlong owner legal and tax review must fail closed.'
+    )
+  $$,
+  '23514',
+  'new row for relation "affiliate_approval_packages" violates check constraint "affiliate_approval_packages_owner_review_validity"',
+  'owner legal and tax risk acceptance cannot authorize more than 90 days'
+);
+
 select extensions.is(
   public.admin_partners_release_gate_approve(
     'legal_and_tax_approved',

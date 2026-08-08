@@ -605,6 +605,16 @@ select extensions.ok(
   )
   and exists (
     select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+        'affiliate_private.affiliate_approval_packages'::regclass
+      and constraint_row.conname =
+        'affiliate_approval_packages_owner_review_validity'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+  )
+  and exists (
+    select 1
     from pg_catalog.pg_trigger trigger_row
     where trigger_row.tgrelid =
         'affiliate_private.affiliate_approval_packages'::regclass
@@ -640,7 +650,7 @@ select extensions.ok(
         or allowlist_row.expires_at > statement_timestamp()
       )
   ) <= 50,
-  'restored manifests, approvals and the transactional pilot cap remain guarded'
+  'restored manifests, 90-day owner approvals and the transactional pilot cap remain guarded'
 );
 
 select extensions.ok(

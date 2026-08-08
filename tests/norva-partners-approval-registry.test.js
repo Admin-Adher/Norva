@@ -23,6 +23,13 @@ const preactivation = read(
   'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql',
 );
 const runbook = read('docs/NORVA-PARTNERS-APPROVAL-REGISTRY.md');
+const adminPage = read('public/js/pages/AdminPage.js');
+const allMigrations = fs
+  .readdirSync(path.join(root, 'supabase', 'migrations'))
+  .filter((file) => file.endsWith('.sql'))
+  .sort()
+  .map((file) => read(path.join('supabase', 'migrations', file)))
+  .join('\n');
 
 test('approval evidence is private, RLS protected and append-only', () => {
   assert.match(
@@ -196,6 +203,25 @@ test('owner-risk mode is explicit and cannot impersonate professional review', (
   assert.match(
     runbook,
     /position juridique\/fiscale et risque propriétaire/i,
+  );
+});
+
+test('internal legal and tax owner review cannot authorize more than 90 days', () => {
+  assert.match(
+    allMigrations,
+    /constraint affiliate_approval_packages_owner_review_validity[\s\S]*gate_key <> 'legal_and_tax_approved'[\s\S]*expires_at <= approved_at \+ interval '90 days'/i,
+  );
+  assert.match(
+    allMigrations,
+    /validate constraint affiliate_approval_packages_owner_review_validity/i,
+  );
+  assert.match(
+    adminPage,
+    /const maximumValidityDays = key === 'legal_and_tax_approved'\s*\? 90\s*: 366/i,
+  );
+  assert.match(
+    adminPage,
+    /maximum \$\{maximumValidityDays\} jours/i,
   );
 });
 
