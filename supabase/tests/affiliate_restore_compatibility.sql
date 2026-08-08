@@ -2,12 +2,11 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(109);
+select extensions.plan(110);
 
--- One immutable catalogue keeps the audited ab464fe4 production baseline and
--- the frictionless baseline and the three production-finalization migrations
--- existence, ownership, security, volatility and ACL assertions without
--- creating any object in the restored database.
+-- One immutable catalogue keeps existence, ownership, security, volatility
+-- and ACL assertions for the audited eda071e baseline plus the bootstrap
+-- boolean hotfix without creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_actor_is_live_admin(text)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_has_capability(text)","security_definer":true,"volatility":"s","access_role":"owner"},
@@ -651,6 +650,19 @@ select extensions.ok(
       )
   ) <= 50,
   'restored manifests, 90-day owner approvals and the transactional pilot cap remain guarded'
+);
+
+select extensions.ok(
+  regexp_replace(
+    lower(pg_get_functiondef(
+      'affiliate_private.partners_service_bootstrap_v2(uuid)'::regprocedure
+    )),
+    '[[:space:]]+',
+    ' ',
+    'g'
+  ) like
+    '%''ready'', coalesce( v_account.member_status = ''active'' and v_credits_enabled, false )%',
+  'restored bootstrap emits explicit boolean false for non-member credit readiness'
 );
 
 select extensions.ok(

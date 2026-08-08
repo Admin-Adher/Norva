@@ -25,6 +25,9 @@ const payoutMigrationSource = read(
 const releaseMigrationSource = read(
   'supabase/migrations/20260804174000_partners_frictionless_release_controls.sql',
 );
+const bootstrapBooleanMigrationSource = read(
+  'supabase/migrations/20260809090000_partners_bootstrap_nonmember_boolean.sql',
+);
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -833,6 +836,10 @@ test('membership is public while the cash pilot remains independently allowliste
   assert.match(
     payoutMigrationSource,
     /flag\.key = 'partners_cash_pilot_allowlist_only'[\s\S]*?'cash_pilot_not_allowed'/,
+  );
+  assert.match(
+    bootstrapBooleanMigrationSource,
+    /'ready',\s*coalesce\([\s\S]*?v_account\.member_status = 'active'[\s\S]*?and v_credits_enabled,[\s\S]*?false[\s\S]*?\)/,
   );
 });
 

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(78);
+select extensions.plan(79);
 
 select extensions.has_column(
   'affiliate_private',
@@ -1483,6 +1483,18 @@ select extensions.ok(
     where state.state_key = 'public_membership_cash_pilot_bootstrap'
   ),
   'bootstrap keeps membership public while the cash pilot remains allowlisted'
+);
+
+select extensions.ok(
+  (
+    select jsonb_typeof(
+      state.json_value #> '{credit_readiness,ready}'
+    ) = 'boolean'
+      and state.json_value #>> '{credit_readiness,ready}' = 'false'
+    from frictionless_test_state state
+    where state.state_key = 'public_membership_cash_pilot_bootstrap'
+  ),
+  'bootstrap serializes non-member credit readiness as boolean false'
 );
 
 select extensions.is(

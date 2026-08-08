@@ -653,41 +653,28 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260805124714_partners_owner_legal_tax_risk_acceptance\.sql/,
+    /20260809090000_partners_bootstrap_nonmember_boolean\.sql/,
   );
-  assert.match(
-    rehearsal,
-    /20260805142416_partners_multicurrency_access_credits\.sql/,
-  );
-  assert.match(
-    rehearsal,
-    /20260805142422_partners_web_tax_contract\.sql/,
-  );
-  assert.match(
-    rehearsal,
-    /20260808214500_partners_owner_review_validity_cap\.sql/,
-  );
-  assert.match(rehearsal, /BASELINE_CONTRACT="3fd939e"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="eda071e"/);
   assert.equal(
-    (rehearsal.match(/readonly MIGRATION_[A-Z]+=/g) || []).length,
-    4,
-    'the post-3fd939e finalization lot contains exactly four migrations',
+    (rehearsal.match(/readonly HOTFIX_MIGRATION=/g) || []).length,
+    1,
+    'the post-eda071e hotfix lot contains exactly one migration',
   );
-  for (const name of ['ONE', 'TWO', 'THREE', 'FOUR']) {
-    assert.match(rehearsal, new RegExp(`-f "\\/candidate\\/\\$MIGRATION_${name}"`));
-    assert.match(rehearsal, new RegExp(`NORVA_MIGRATION_${name}_START`));
-    assert.match(rehearsal, new RegExp(`migration_${name.toLowerCase()}_sha256=`));
-  }
+  assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
+  assert.match(rehearsal, /-f "\/candidate\/\$HOTFIX_MIGRATION"/);
+  assert.match(rehearsal, /NORVA_HOTFIX_MIGRATION_START/);
+  assert.match(rehearsal, /NORVA_HOTFIX_MIGRATION_COMPLETE/);
+  assert.match(rehearsal, /hotfix_migration_sha256=/);
   assert.equal(
-    (rehearsal.match(/-f "\/candidate\/\$MIGRATION_[A-Z]+"/g) || []).length,
-    4,
-    'predeploy replays exactly the four candidate migrations',
+    (rehearsal.match(/-f "\/candidate\/\$HOTFIX_MIGRATION"/g) || []).length,
+    1,
+    'predeploy replays exactly the one candidate hotfix migration',
   );
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
-  assert.doesNotMatch(rehearsal, /MIGRATION_(?:FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN)/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=25/);
+  assert.match(rehearsal, /baseline_markers_verified=31/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -696,13 +683,14 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /MULTICURRENCY_MARKERS_COMPLETE="1\|1"/);
   assert.match(rehearsal, /WEB_TAX_MARKERS_COMPLETE="1\|1"/);
   assert.match(rehearsal, /OWNER_REVIEW_VALIDITY_MARKER_COMPLETE="1"/);
+  assert.match(rehearsal, /BOOTSTRAP_BOOLEAN_MARKER_COMPLETE="1"/);
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|0\|0\|0\|0\|0\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
-    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=4[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
+    /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=1[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,
   );
   assert.equal(
     (rehearsal.match(/--single-transaction/g) || []).length,
@@ -760,7 +748,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(109\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(110\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(
@@ -823,8 +811,8 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(restoreGuide, /predeploy/);
   assert.match(restoreGuide, /postdeploy/);
-  assert.match(restoreGuide, /baseline_contract=3fd939e/);
-  assert.match(restoreGuide, /migrations_applied=4/);
+  assert.match(restoreGuide, /baseline_contract=eda071e/);
+  assert.match(restoreGuide, /migrations_applied=1/);
   assert.match(restoreGuide, /migrations_applied=0/);
   assert.match(restoreGuide, /NORVA_SKIP_BASE_RETENTION=true/);
   assert.match(restoreGuide, /base-YYYYMMDD-HHMMSS/);

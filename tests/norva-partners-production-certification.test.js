@@ -21,14 +21,11 @@ test('Partners production certification keeps all twelve controls explicit', () 
   assert.doesNotMatch(certification, /avis professionnel (?:obtenu|validé)/i);
 });
 
-test('the restore runbook describes the exact four-migration candidate contract', () => {
+test('the restore runbook describes the exact post-eda071e hotfix contract', () => {
   const restore = read('ops/hetzner/backup/RESTORE.md');
 
-  assert.match(restore, /20260805124714_partners_owner_legal_tax_risk_acceptance\.sql/);
-  assert.match(restore, /20260805142416_partners_multicurrency_access_credits\.sql/);
-  assert.match(restore, /20260805142422_partners_web_tax_contract\.sql/);
-  assert.match(restore, /20260808214500_partners_owner_review_validity_cap\.sql/);
-  assert.match(restore, /`migrations_applied=4`/);
+  assert.match(restore, /20260809090000_partners_bootstrap_nonmember_boolean\.sql/);
+  assert.match(restore, /`migrations_applied=1`/);
   assert.match(restore, /`migration_routines_verified=162`/);
   assert.match(restore, /`migration_relations_verified=19`/);
 });

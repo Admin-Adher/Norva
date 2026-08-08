@@ -725,31 +725,25 @@ reconstruire la taxe depuis RevenueCat.
 
 ## 3. Ordre de déploiement
 
-La baseline de production certifiée est le commit `3fd939e`, postdeploy vert,
-avec les trois migrations frictionless jusqu'à
-`20260804174000_partners_frictionless_release_controls.sql`. Ne jamais rejouer
-ce socle. La prochaine répétition physique `predeploy` doit exiger les 25
-marqueurs de cette baseline présents et les quatre migrations suivantes
-absentes :
+La baseline de production certifiée est le commit `eda071e`, avec déploiement,
+base-backup et répétition physique `postdeploy` verts. Elle contient déjà les
+quatre migrations de finalisation propriétaire, crédit multi-devise, fiscalité
+Web et plafond de validité. Ne jamais les rejouer. La prochaine répétition
+physique `predeploy` doit exiger ses 31 marqueurs présents et uniquement le
+marqueur du correctif bootstrap absent :
 
-1. `20260805124714_partners_owner_legal_tax_risk_acceptance.sql` ;
-2. `20260805142416_partners_multicurrency_access_credits.sql` ;
-3. `20260805142422_partners_web_tax_contract.sql` ;
-4. `20260808214500_partners_owner_review_validity_cap.sql`.
+1. `20260809090000_partners_bootstrap_nonmember_boolean.sql`.
 
-Appliquer ces quatre migrations dans une seule fenêtre DB transactionnelle avec
-tous les flags inertes. Elles remplacent le contrat de pièces exigées par la
-gate juridique/fiscale, rendent le crédit d'accès multi-devise avec snapshot FX
-immuable, ajoutent le contrat fiscal Web France/USD autoritatif et fail-closed,
-et bornent l'acceptation interne juridico-fiscale à 90 jours.
-Elles ne doivent modifier ni programme, ni membre, ni écriture financière
-historique. Rejouer ensuite pgTAP, lint/Advisors et les invariants de
-restauration. Puis recréer `functions`, vérifier sa santé et les contrats V2,
-recréer `functions2`, refaire les contrôles, et valider la parité Kong/Edge.
-Seulement après cette parité, enregistrer le package propriétaire transparent,
-approuver `legal_and_tax_approved` et `membership_privacy_approved`, puis lever
-séparément les flags d'adhésion, earnings et crédit. Didit, la fiscalité cash et
-les virements restent inertes pour tout compte hors cohorte.
+Appliquer cette migration dans une seule fenêtre DB transactionnelle. Elle ne
+modifie aucune donnée métier : elle rend seulement explicite le booléen JSON
+`credit_readiness.ready=false` avant l'adhésion, au lieu de sérialiser `null` et
+de faire rejeter le bootstrap par le contrat Edge. Rejouer ensuite pgTAP,
+lint/Advisors et les invariants de restauration. Comme le code Edge ne change
+pas, une recréation des replicas n'est pas requise pour ce correctif SQL ; la
+parité et la santé des deux replicas restent toutefois contrôlées. Les gates et
+flags actifs doivent ensuite être rattachés au manifeste du nouveau commit.
+Didit, la fiscalité cash et les virements restent inertes pour tout compte hors
+cohorte.
 
 La preuve `postdeploy` doit restaurer un base-backup R2 capturé après cette
 fenêtre, constater `migrations_applied=0`, `migration_replay_skipped=true`, les
@@ -759,11 +753,9 @@ contrôlé, une suppression Didit `204|404`, un heartbeat frais et zéro
 dead-letter.
 
 1. sauvegarde logique et contrôle de restauration ;
-2. fenêtre DB transactionnelle unique pour les migrations
-   `20260805124714_partners_owner_legal_tax_risk_acceptance.sql`,
-   `20260805142416_partners_multicurrency_access_credits.sql` et
-   `20260805142422_partners_web_tax_contract.sql`, puis pgTAP, lint/Advisors et
-   postconditions des contrats propriétaire, FX et fiscal Web ;
+2. fenêtre DB transactionnelle unique pour
+   `20260809090000_partners_bootstrap_nonmember_boolean.sql`, puis pgTAP,
+   lint/Advisors et postcondition du booléen non-membre ;
 3. écrire explicitement `NORVA_PARTNERS_ACCESS_REQUESTS_ENABLED=false` dans
    l'environnement Hetzner avant de déployer l'Edge ;
 4. déployer/recréer d'abord le service `functions`, attendre sa santé, puis
@@ -1337,7 +1329,7 @@ ne justifient aucun retry agressif côté client.
 
 | Contrôle | État du dépôt | Validation attendue avant activation | Action externe |
 |---|---|---|---|
-| Migrations/RPC Partners | livrées | baseline production `3fd939e` postdeploy certifiée ; `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` sur restaurations isolées | sans rejouer la baseline, appliquer atomiquement les quatre migrations propriétaire, crédit multi-devise, fiscalité Web et plafond de validité listées dans l'ordre de déploiement, avec flags inertes ; déployer ensuite les surfaces Web/Edge du même commit, vérifier la parité, puis seulement enregistrer le package propriétaire et approuver les gates |
+| Migrations/RPC Partners | livrées | baseline production `eda071e` postdeploy certifiée ; `supabase db start`, puis `db reset --local --no-seed`, pgTAP, lint et Advisors verts ; répétitions `predeploy` puis `postdeploy` sur restaurations isolées | sans rejouer la baseline, appliquer atomiquement le seul hotfix bootstrap booléen, vérifier la parité, puis enregistrer le manifeste du même commit et renouveler les gates exactes |
 | Type-check Edge Partners | config et lock Deno dédiés | Deno `2.9.4`, mêmes entrypoints et `deno check --frozen` verts | ne régénérer `deno.partners.lock` qu'intentionnellement, avec le même runtime et `--frozen=false`, puis revoir le diff |
 | API membre, demandes d'accès cash, referral, crédit et TV | livrées | entrée visible à tout compte Cloud Web/mobile ; compte confirmé + `membership_privacy_approved` -> `/join` public sans pays/KYC -> lien/partage ; access-request ne sert qu'à la cohorte cash ; attribution et J+45 sous `partners_earnings_enabled` ; quote/redeem Plus au prix de référence `USD 499`, avec débit exact de la devise source et snapshot FX immuable, sans KYC sous `partners_credit_redemptions_enabled` ; hors cohorte, `cash_pilot_not_allowed` sans collecte payout ; contrats Node, E2E Web/mobile et replay émulateur TV | déployer les flags à `false`, valider chaque couche puis lever `partners_enabled` avec `partners_invite_only=false`; conserver `partners_cash_pilot_allowlist_only=true`; synchroniser les secrets HMAC et publier les App Links |
 | Didit KYC cash-only et suppression provider | code, consentement biométrique versionné, outbox chiffrée et worker borné livrés ; aucune session n'est créée avant le choix cash et le pays payout explicite | session sandbox non autoritaire, session live liée au fingerprint/version déployés, webhook KYC documenté avec `session_kind` absent ou `user`, refus de tout marqueur KYB, suppression `204|404`, replay, backoff, heartbeat frais et zéro dead-letter ; un échec n'altère ni membership, lien, maturation ni crédit | renseigner API key, workflow/application/node IDs, webhook secret/URL/callback et keyring de purge identique sur les deux replicas ; enregistrer le cron de purge après smoke test et archiver trois preuves distinctes sans secrets |
