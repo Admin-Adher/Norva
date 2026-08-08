@@ -3,9 +3,9 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either apply the owner-risk transparency migration still
+# PostgreSQL clone, either apply the four finalization migrations still
 # pending after the audited 3fd939e production baseline atomically
-# (`predeploy`) or prove that it is already present without replaying it
+# (`predeploy`) or prove that they are already present without replaying them
 # (`postdeploy`), then run the verifier and restore-compatible pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
@@ -99,11 +99,13 @@ readonly BASELINE_CONTRACT="3fd939e"
 readonly MIGRATION_ONE="supabase/migrations/20260805124714_partners_owner_legal_tax_risk_acceptance.sql"
 readonly MIGRATION_TWO="supabase/migrations/20260805142416_partners_multicurrency_access_credits.sql"
 readonly MIGRATION_THREE="supabase/migrations/20260805142422_partners_web_tax_contract.sql"
+readonly MIGRATION_FOUR="supabase/migrations/20260808214500_partners_owner_review_validity_cap.sql"
 readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly OWNER_RISK_MARKER_COMPLETE="1"
 readonly MULTICURRENCY_MARKERS_COMPLETE="1|1"
 readonly WEB_TAX_MARKERS_COMPLETE="1|1"
+readonly OWNER_REVIEW_VALIDITY_MARKER_COMPLETE="1"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -115,6 +117,7 @@ readonly -a CANDIDATE_FILES=(
   "$MIGRATION_ONE"
   "$MIGRATION_TWO"
   "$MIGRATION_THREE"
+  "$MIGRATION_FOUR"
   "$VERIFIER"
   "${RESTORE_PGTAP_FILES[@]}"
 )
@@ -270,6 +273,7 @@ proof_line "baseline_markers_verified=25"
 proof_line "migration_one_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_ONE" | awk '{print $1}')"
 proof_line "migration_two_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_TWO" | awk '{print $1}')"
 proof_line "migration_three_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_THREE" | awk '{print $1}')"
+proof_line "migration_four_sha256=$(sha256sum "$CANDIDATE_DIR/$MIGRATION_FOUR" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
 if ! docker inspect "$DB_CONTAINER" >/dev/null 2>&1; then
@@ -587,13 +591,17 @@ MULTICURRENCY_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 WEB_TAX_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (to_regclass('affiliate_private.affiliate_web_tax_policies') is not null)::int::text || '|' || (to_regprocedure('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)') is not null)::int::text;" \
   2> "$RAW_DIR/web-tax-migration-precondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}"
+OWNER_REVIEW_VALIDITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select exists (select 1 from pg_catalog.pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_approval_packages'::regclass and constraint_row.conname = 'affiliate_approval_packages_owner_review_validity' and constraint_row.contype = 'c' and constraint_row.convalidated)::int::text;" \
+  2> "$RAW_DIR/owner-review-validity-precondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
   # The first 25 markers are the exact audited 3fd939e baseline. The new
-  # owner decision, FX and Web-tax contracts must all be absent before replay.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|0|0|0|0|0"
+  # owner decision, FX, Web-tax and review-validity contracts must all be
+  # absent before replay.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|0|0|0|0|0|0"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -626,15 +634,19 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
           -c '\echo NORVA_MIGRATION_THREE_START' \
           -f "/candidate/$MIGRATION_THREE" \
           -c '\echo NORVA_MIGRATION_THREE_COMPLETE' \
+          -c '\echo NORVA_MIGRATION_FOUR_START' \
+          -f "/candidate/$MIGRATION_FOUR" \
+          -c '\echo NORVA_MIGRATION_FOUR_COMPLETE' \
         > "$RAW_DIR/migrations.log" 2>&1; then
     MIGRATION_FAILURE_STAGE="$(
-      grep -E '^NORVA_MIGRATION_(ONE|TWO|THREE)_(START|COMPLETE)$' \
+      grep -E '^NORVA_MIGRATION_(ONE|TWO|THREE|FOUR)_(START|COMPLETE)$' \
         "$RAW_DIR/migrations.log" | tail -n 1 || true
     )"
     case "$MIGRATION_FAILURE_STAGE" in
       NORVA_MIGRATION_ONE_START|NORVA_MIGRATION_ONE_COMPLETE|\
       NORVA_MIGRATION_TWO_START|NORVA_MIGRATION_TWO_COMPLETE|\
-      NORVA_MIGRATION_THREE_START|NORVA_MIGRATION_THREE_COMPLETE)
+      NORVA_MIGRATION_THREE_START|NORVA_MIGRATION_THREE_COMPLETE|\
+      NORVA_MIGRATION_FOUR_START|NORVA_MIGRATION_FOUR_COMPLETE)
         proof_line "migration_failure_stage=$MIGRATION_FAILURE_STAGE"
         ;;
       *)
@@ -643,7 +655,7 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
     esac
     fail
   fi
-  MIGRATIONS_APPLIED=3
+  MIGRATIONS_APPLIED=4
   MIGRATIONS_ATOMIC="true"
   MIGRATION_REPLAY_SKIPPED="false"
 fi
@@ -666,8 +678,11 @@ MULTICURRENCY_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 WEB_TAX_MIGRATION_MARKERS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (to_regclass('affiliate_private.affiliate_web_tax_policies') is not null)::int::text || '|' || (to_regprocedure('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)') is not null)::int::text;" \
   2> "$RAW_DIR/web-tax-migration-postcondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}" ]]; then
+OWNER_REVIEW_VALIDITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select exists (select 1 from pg_catalog.pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_approval_packages'::regclass and constraint_row.conname = 'affiliate_approval_packages_owner_review_validity' and constraint_row.contype = 'c' and constraint_row.convalidated)::int::text;" \
+  2> "$RAW_DIR/owner-review-validity-postcondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
