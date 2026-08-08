@@ -334,27 +334,27 @@
                 </div>
                 <div class="field">
                     <label for="source-name">Name</label>
-                    <input id="source-name" type="text" maxlength="80" placeholder="Family IPTV">
+                    <input id="source-name" type="text" maxlength="80" placeholder="Family IPTV" autocomplete="off">
                 </div>
                 <div id="xtream-fields">
                     <div class="field">
                         <label for="xtream-url">Provider URL or complete Xtream link</label>
-                        <input id="xtream-url" type="url" placeholder="https://provider.example/get.php?username=...&password=...">
+                        <input id="xtream-url" type="url" placeholder="https://provider.example/get.php?username=...&password=..." autocomplete="off" autocapitalize="none" spellcheck="false">
                         <p class="muted" id="xtream-link-hint">Paste the complete link from your TV service, or enter the fields separately.</p>
                     </div>
                     <div class="field">
                         <label for="xtream-username">Username</label>
-                        <input id="xtream-username" type="text" autocomplete="username">
+                        <input id="xtream-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
                     <div class="field">
                         <label for="xtream-password">Password</label>
-                        <input id="xtream-password" type="password" autocomplete="current-password">
+                        <input id="xtream-password" type="password" autocomplete="new-password">
                     </div>
                 </div>
                 <div id="m3u-fields" class="hidden">
                     <div class="field">
                         <label for="m3u-url">Playlist URL</label>
-                        <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
+                        <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
                 </div>
                 <button class="btn primary" id="add-source-button" type="button">Add provider</button>
