@@ -271,6 +271,10 @@ test('Didit certification preflight exposes only exact booleans and consistent r
       ...expected,
       requirements: { ...requirements, aal2: false, fresh_aal2: true },
     },
+    {
+      ...expected,
+      requirements: { ...requirements, privacy_approved: 'true' },
+    },
     { ...expected, requirements: { ...requirements, operator_id: 'forbidden' } },
     { ...expected, provider_session_id: 'forbidden' },
   ]) {

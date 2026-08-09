@@ -589,22 +589,36 @@ export function sanitizeKycCertificationPreflightRpc(
     "aal2",
     "fresh_aal2",
   ]);
-  const values = Object.values(requirements);
+  const privacyApproved = requirements.privacy_approved;
+  const coverageOpen = requirements.coverage_open;
+  const partnersMembershipClosed = requirements.partners_membership_closed;
+  const cashPayoutsClosed = requirements.cash_payouts_closed;
+  const tvRelayClosed = requirements.tv_relay_closed;
+  const revolutApiClosed = requirements.revolut_api_closed;
+  const aal2 = requirements.aal2;
+  const freshAal2 = requirements.fresh_aal2;
   if (
     root.schema_version !== 1 ||
     root.action !== "kyc_certification_preflight" ||
     typeof root.ready !== "boolean" ||
-    values.some((value) => typeof value !== "boolean") ||
+    typeof privacyApproved !== "boolean" ||
+    typeof coverageOpen !== "boolean" ||
+    typeof partnersMembershipClosed !== "boolean" ||
+    typeof cashPayoutsClosed !== "boolean" ||
+    typeof tvRelayClosed !== "boolean" ||
+    typeof revolutApiClosed !== "boolean" ||
+    typeof aal2 !== "boolean" ||
+    typeof freshAal2 !== "boolean" ||
     root.ready !== (
-      requirements.privacy_approved === true &&
-      requirements.coverage_open === true &&
-      requirements.partners_membership_closed === true &&
-      requirements.cash_payouts_closed === true &&
-      requirements.tv_relay_closed === true &&
-      requirements.revolut_api_closed === true &&
-      requirements.fresh_aal2 === true
+      privacyApproved === true &&
+      coverageOpen === true &&
+      partnersMembershipClosed === true &&
+      cashPayoutsClosed === true &&
+      tvRelayClosed === true &&
+      revolutApiClosed === true &&
+      freshAal2 === true
     ) ||
-    (requirements.fresh_aal2 === true && requirements.aal2 !== true)
+    (freshAal2 === true && aal2 !== true)
   ) {
     throw new DiditContractError();
   }
@@ -613,14 +627,14 @@ export function sanitizeKycCertificationPreflightRpc(
     action: "kyc_certification_preflight",
     ready: root.ready,
     requirements: {
-      privacy_approved: requirements.privacy_approved,
-      coverage_open: requirements.coverage_open,
-      partners_membership_closed: requirements.partners_membership_closed,
-      cash_payouts_closed: requirements.cash_payouts_closed,
-      tv_relay_closed: requirements.tv_relay_closed,
-      revolut_api_closed: requirements.revolut_api_closed,
-      aal2: requirements.aal2,
-      fresh_aal2: requirements.fresh_aal2,
+      privacy_approved: privacyApproved,
+      coverage_open: coverageOpen,
+      partners_membership_closed: partnersMembershipClosed,
+      cash_payouts_closed: cashPayoutsClosed,
+      tv_relay_closed: tvRelayClosed,
+      revolut_api_closed: revolutApiClosed,
+      aal2,
+      fresh_aal2: freshAal2,
     },
   };
 }
