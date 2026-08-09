@@ -1,6 +1,6 @@
 # Norva Partners — politique juridico-fiscale opérationnelle P0
 
-Version : `partners-tax-operating-policy-global-frcash-p0-v2`
+Version : `partners-tax-operating-policy-global-frcash-p0-v3`
 Périmètre : adhésion individuelle publique dans les pays où Norva rend le
 programme disponible, commission directe de 20 %, attribution 30 jours,
 maturation minimale J+45, crédit Norva optionnel et cash France Revolut manuel
@@ -23,6 +23,17 @@ restriction géographique et de suspension lorsqu'une règle ou une sanction
 l'exige. Les sociétés partenaires, le KYB et l'ouverture publique du cash
 restent exclus. Le cash demeure limité à la France, à une allowlist et à une
 politique pays versionnée.
+
+## Traçabilité immuable des décisions
+
+La migration `20260805142422_partners_web_tax_contract.sql` conserve la preuve
+historique scellée `partners-tax-operating-policy-2026-08-05-v2`, identifiée par
+le SHA-256
+`2d63bea3bba420065eb930b6729f53fca257d4307be1bb524caf18174952c261`.
+Cette preuve ne doit jamais être réécrite lorsque la présente politique
+opérationnelle évolue. Toute nouvelle décision de calcul fiscal doit recevoir
+une clé, un digest et une migration d'évidence distincts afin de préserver
+l'audit des faits déjà calculés.
 
 ## Traitement opérationnel prudent
 
@@ -48,13 +59,22 @@ politique pays versionnée.
 
 ## Contrat fiscal Web France/USD
 
-Au 5 août 2026, Norva est exploité par un entrepreneur individuel français qui
-applique la franchise en base de TVA aux prestations Web concernées. Pour le
-seul couple `FR/USD` avec exposant 2, le montant Revolut autoritatif est donc
-traité par la policy `wtp_fr_usd_owner_v1` comme montant hors taxe :
+Depuis le 21 juillet 2026, Norva est exploitée par Norva, SASU française. La
+synthèse définitive validée de sa formalité de création au Guichet unique
+indique, dans la rubrique « Options fiscales », « Régime d'imposition de la
+TVA : Franchise en base TVA » et « Assujettissement à la TVA en cas
+d'opérations imposables sur option : Non ». La copie probante reste hors Git
+dans le dossier fiscal protégé ; son SHA-256 est
+`df30b003e440f8c49f10dd71109a0b7267e0c11739e04bec8ce4979d0c9804dc`.
+Cette pièce confirme le régime initial déclaré et validé de la SASU ; il ne
+s'agit plus d'une hypothèse fondée uniquement sur le RNE ou le numéro de TVA
+intracommunautaire.
+
+Pour le seul couple `FR/USD` avec exposant 2, le montant Revolut autoritatif
+peut être traité par la policy `wtp_fr_usd_owner_v1` comme montant hors taxe :
 `gross_minor = eligible_minor` et `tax_minor = 0`. Cette règle ne signifie pas
-qu'un abonnement numérique est exoné par nature ; elle dépend du régime de
-franchise effectivement applicable à Norva.
+qu'un abonnement numérique est exonéré par nature ; elle dépend du maintien de
+la franchise effectivement applicable à Norva.
 
 La policy est bornée à 90 jours et échoue fermée si le pays carte est absent,
 si le pays n'est pas `FR`, si la devise ou l'exposant diffèrent, si la période

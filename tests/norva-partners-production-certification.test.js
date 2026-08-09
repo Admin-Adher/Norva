@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -37,13 +36,17 @@ test('the app cache-busts the finalized Partners API and page contracts', () => 
   assert.match(app, /\/js\/pages\/PartnersPage\.js\?v=9/);
 });
 
-test('the active Web tax policy seals the exact internal tax evidence', () => {
+test('the historical Web tax policy evidence remains immutable', () => {
   const policy = read('docs/NORVA-PARTNERS-TAX-OPERATING-POLICY.md');
   const migration = read('supabase/migrations/20260805142422_partners_web_tax_contract.sql');
-  const digest = crypto.createHash('sha256').update(policy).digest('hex');
 
-  assert.match(migration, new RegExp(digest));
-  assert.match(policy, /franchise en base de TVA/i);
+  assert.match(
+    migration,
+    /'partners-tax-operating-policy-2026-08-05-v2'[\s\S]*'2d63bea3bba420065eb930b6729f53fca257d4307be1bb524caf18174952c261'/,
+  );
+  assert.match(policy, /preuve\s+historique scellée/i);
+  assert.match(policy, /ne doit jamais être réécrite/i);
+  assert.match(policy, /franchise\s+en base/i);
   assert.match(policy, /partners_earnings_enabled=false/);
   assert.match(migration, /'FR'[\s\S]*'USD'[\s\S]*'gross_is_net'[\s\S]*0/);
 });

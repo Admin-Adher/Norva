@@ -26,16 +26,26 @@ Toutes les affirmations chiffrées ci-dessous ont été vérifiées de manière 
 
 ## 1. Vos obligations aujourd'hui
 
-Situation : EI/micro-entrepreneur établi en France, sous **franchise en base de TVA** (CA de services < 37 500 €), deux canaux de vente.
+Situation au 9 août 2026 : **Norva SASU**, SIREN 108 055 237, établie en
+France, deux canaux de vente. Le passage de l'entreprise individuelle à la SASU
+rend obsolètes les références au régime micro-social et au plafond de la
+micro-entreprise. La synthèse définitive validée de la formalité de création au
+Guichet unique confirme, dans « Options fiscales », le régime « Franchise en
+base TVA » et l'absence d'option d'assujettissement. La pièce source est gardée
+hors Git dans le dossier fiscal protégé ; son SHA-256 est
+`df30b003e440f8c49f10dd71109a0b7267e0c11739e04bec8ce4979d0c9804dc`.
+La franchise n'est donc plus une hypothèse de travail. Son maintien reste
+conditionné au respect continu des seuils et à l'absence d'option ou de
+changement ultérieur de régime.
 
 **Canal Google Play — vous n'avez AUCUNE TVA consommateur à gérer.** L'article 9a du règlement d'exécution (UE) 282/2011 (validé par la CJUE, aff. C-695/20 *Fenix* ; confirmé pour les app stores par l'arrêt C-101/24 *Xyrality* du **9 octobre 2025** [corrigé — pas mars 2026]) fait de Google le « fournisseur présumé » : Google détermine, facture et reverse lui-même la TVA de chaque consommateur UE. Sa documentation le dit verbatim : « Google is responsible for determining, charging, and remitting VAT for all Google Play Store purchases… » (https://support.google.com/googleplay/android-developer/answer/138000). Votre seule opération est une **prestation B2B réputée fournie à l'entité irlandaise de Google** (Google Commerce Ltd / Google Ireland Ltd), localisée en Irlande (art. 44 directive / art. 259, 1° CGI), autoliquidée par Google (art. 196). **Attention** : cela ne vaut que pour le système de facturation Google Play — si vous activez un jour l'« alternative billing » EEE, la TVA consommateur retombe sur vous.
 
 Cette prestation B2B déclenche néanmoins **deux formalités françaises dès aujourd'hui** :
-1. **Demander (gratuitement) un numéro de TVA intracommunautaire** à votre SIE — obligatoire pour ces prestations B2B intra-UE, et cela ne fait PAS perdre la franchise (https://www.impots.gouv.fr/professionnel/questions/je-suis-micro-entrepreneur-ou-la-tete-dune-micro-entreprise-ai-je-des).
+1. **Vérifier le numéro de TVA intracommunautaire FR65 108055237 auprès du SIE** — le numéro est requis pour ces prestations B2B intra-UE ; cette vérification ne remplace pas la surveillance d'une option ou d'une future sortie de franchise.
 2. **Déposer une DES (Déclaration Européenne de Services)** chaque mois où Google vous verse des revenus, au plus tard le **10e jour ouvrable du mois suivant**, via douane.gouv.fr (les bénéficiaires de la franchise sont les seuls autorisés au formulaire papier CERFA 13694). Pénalité : 750 € par DES manquante (1 500 € au-delà de 30 jours après mise en demeure) (https://www.douane.gouv.fr/fiche/la-declaration-europeenne-de-services-des ; échéancier confirmé par https://www.impots.gouv.fr/pro-12022026-entreprises-soumises-la-tva-des).
 
 **Canal web direct (Revolut Merchant, prix en USD)** — c'est vous le fournisseur B2C :
-- **Clients français** : franchise en base → aucune TVA facturée, mention « TVA non applicable, art. 293 B du CGI » (à partir du 1er septembre 2026 : « art. L. 223-3 du CIBS », ancienne mention tolérée jusqu'au 31/12/2027) (https://entreprendre.service-public.gouv.fr/vosdroits/F21746).
+- **Clients français** : sous la franchise en base déclarée de la SASU → aucune TVA facturée, mention « TVA non applicable, art. 293 B du CGI » (à partir du 1er septembre 2026 : « art. L. 223-3 du CIBS », ancienne mention tolérée jusqu'au 31/12/2027) (https://entreprendre.service-public.gouv.fr/vosdroits/F21746).
 - **Clients des autres pays UE** : un abonnement streaming/IPTV est un service électronique (TBE) taxable en principe dans le pays du client (art. 259 D CGI / art. 58 directive, BOFiP BOI-TVA-CHAMP-20-50-40-20). MAIS tant que vos ventes B2C transfrontalières UE (hors France, hors Play) restent **< 10 000 € HT sur l'année en cours ET l'année précédente**, le lieu de taxation reste la France → couvert par la franchise → **zéro TVA, zéro OSS**.
 - **Clients hors UE** : hors champ de la TVA UE, mais pas forcément sans obligation locale — voir le point UK ci-dessous.
 
@@ -43,7 +53,13 @@ Cette prestation B2B déclenche néanmoins **deux formalités françaises dès a
 
 **Achats B2B étrangers** : même sous franchise, tout service taxable acheté à un prestataire UE/étranger (hébergement, SaaS, publicité…) doit être **autoliquidé** dès le premier euro via une CA3 ponctuelle, TVA non déductible (art. 283-2 CGI) (https://www.impots.gouv.fr/professionnel/questions/je-suis-micro-entrepreneur-ou-la-tete-dune-micro-entreprise-ai-je-des). Nuance : les frais d'acquiring de Revolut sont typiquement des services financiers **exonérés** (art. 135-1-d directive) → pas de TVA à autoliquider dessus si facturés comme tels.
 
-**En résumé aujourd'hui** : pas de TVA à facturer nulle part (si < 10 000 € de ventes web UE hors France et aucun client UK), mais : numéro de TVA intracom + DES mensuelle (Google), autoliquidation des achats de services étrangers taxables, et surveillance des compteurs de seuils.
+**En résumé aujourd'hui** : le régime initial de franchise de la SASU est
+documenté. La conclusion « pas de TVA à facturer » ne reste valable que tant
+que les ventes web UE hors France restent sous 10 000 €, que Norva demeure sous
+les seuils de franchise applicables, qu'aucune option TVA n'est exercée et
+qu'il n'existe aucun client UK. Restent dans tous les cas à piloter : numéro de
+TVA intracom, DES mensuelle (Google), traitement des achats de services
+étrangers taxables et surveillance des seuils.
 
 ---
 
@@ -55,7 +71,7 @@ Cette prestation B2B déclenche néanmoins **deux formalités françaises dès a
 | **Franchise FR — seuil de base** | **37 500 € HT** | CA des opérations **« réalisées en France »** (art. 293 D CGI) : ventes web aux clients FR + ventes web autres-UE tant que < 10 000 €. **Google Play est EXCLU** (prestation localisée en Irlande — https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000019288097) | Dépassé en année N (sans franchir 41 250 €) → TVA française à facturer à partir du **1er janvier N+1**. L'ancienne tolérance de 2 ans est supprimée depuis 2025 (https://entreprendre.service-public.gouv.fr/vosdroits/F21746) |
 | **Franchise FR — seuil majoré** | **41 250 € HT** | Même base | TVA due **dès le jour du dépassement** (plus de rétroactivité au 1er du mois) (https://www.impots.gouv.fr/professionnel/questions/en-tant-que-micro-entrepreneur-puis-je-etre-redevable-de-la-tva). NB : le seuil unique à 25 000 € de la LF 2025 n'a jamais été appliqué — abrogé par la loi n° 2025-1044 du 3 nov. 2025 ; la LF 2026 (loi n° 2026-103 du 19 fév. 2026) n'y touche pas |
 | **Régime PME UE (numéro EX)** | **100 000 €** de CA annuel Union (N et N-1) | **TOUTES** les prestations localisées dans l'UE : ventes web FR + ventes web autres-UE **+ les versements Google Play** (B2B localisé en Irlande = dans l'Union). Déduction directe des notes explicatives CE, à confirmer avec l'expert-comptable (https://sme-vat-rules.ec.europa.eu/system/files/2024-10/sme-explanatory-notes_en.pdf) | Au-delà : **exclusion immédiate** du régime EX dans tous les États, déclaration de dépassement sous **15 jours**, la TVA de destination devient due (OSS ou immatriculations locales), quarantaine avant ré-entrée. Condition supplémentaire : rester sous le seuil national de franchise de chaque État visé |
-| **Plafond micro-entreprise (services)** | **83 600 €** de recettes HT (2026-2028, arrêté du 27 janv. 2026) — **le chiffre de 77 700 € est obsolète depuis le 1/1/2026** [corrigé] | TOUTES les recettes encaissées, **y compris les versements Google Play** (pas de carve-out territorial) (https://entreprendre.service-public.gouv.fr/actualites/A18813) | Deux années consécutives au-dessus → sortie du régime micro (IR + social) vers un régime réel. Événement distinct de la TVA : entre 37 500 € et 83 600 €, on reste micro-entrepreneur tout en étant redevable de la TVA |
+| **Plafond micro-entreprise (historique)** | **Non applicable à Norva SASU** | L'ancien compteur EI doit rester archivé pour la traçabilité, sans être présenté comme une obligation courante de la société | Utiliser les obligations comptables et fiscales propres à la SASU ; ne pas déclencher d'action « sortie du régime micro » |
 | **Seuil « preuve unique »** | **100 000 €/an** de ventes TBE (art. 24b §2, règl. 282/2011, N et N-1) | Ventes TBE relevant de la présomption générale (canal web) | En dessous : **1 seul** élément de preuve de localisation suffit (fourni par un tiers de la chaîne, items a-e de l'art. 24f — le pays BIN de la carte via Revolut est l'ancre idéale). Au-delà (effet immédiat en cours d'année) : **2 éléments non contradictoires** obligatoires (https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32017R2459) |
 | **Hors UE — UK** | **0 £** | Toute vente B2C numérique à un consommateur UK (canal web) | Immatriculation + 20 % dès la 1re vente (https://www.gov.uk/guidance/the-vat-rules-if-you-supply-digital-services-to-private-consumers) |
 | **Hors UE — Suisse** | **CHF 100 000 de CA MONDIAL** (de prestations de type taxable) | Tout le CA mondial d'abonnements, dès qu'il existe des clients B2C suisses | Immatriculation TVA suisse (taux 8,1 %), représentant fiscal (https://www.rsm.global/switzerland/en/news/foreign-providers-digital-services-switzerland-overview-vat-obligations) |
@@ -97,7 +113,7 @@ Le régime pertinent est l'**OSS régime de l'Union**, géré depuis la France. 
 | TVA consommateur UE | Vous (selon les paliers de la section 2) | **Google**, intégralement |
 | Compte dans le seuil 10 000 € UE | **Oui** (ventes autres-UE seulement) | **Non** |
 | Compte dans la franchise FR 37 500 € | **Oui** (ventes localisées en France) | **Non** (B2B localisé en Irlande) |
-| Compte dans le plafond micro 83 600 € | Oui | **Oui** |
+| Compte dans le plafond micro 83 600 € | **Non applicable à la SASU** | **Non applicable à la SASU** |
 | Compte dans les 100 000 € du régime EX | Oui (ventes UE) | **Oui** (déduction des notes CE — à valider avec l'expert-comptable) |
 | Va dans la déclaration OSS | Oui (clients autres-UE) | **Jamais** |
 | Obligation déclarative | OSS trimestriel (si > 10 k€) ; rien sous les seuils | **DES mensuelle** (10e jour ouvrable du mois suivant) + numéro de TVA intracom |
@@ -127,10 +143,13 @@ Utiliser l'un pour l'autre serait une erreur. Si Revolut règle en EUR, l'EUR cr
 1. `FR_franchise` : ventes web localisées en France (clients FR + autres-UE tant que < 10 k€), HT, année civile → jauges 37 500 / 41 250 € ; alerte préparatoire vers 35 000 € ;
 2. `EU_10k` : ventes web B2C aux consommateurs autres-UE, année N **et** N-1 → jauge 10 000 € ;
 3. `EU_SME_100k` : ventes web UE (FR incluse) **+ versements Play**, N et N-1 → jauge 100 000 € (pertinent si option numéro EX) ;
-4. `micro_83600` : toutes recettes encaissées HT (web + Play) → jauge 83 600 € ;
+4. `micro_83600` : compteur historique EI, à masquer des actions courantes de la SASU et à conserver uniquement comme archive de transition ;
 5. `evidence_100k` : ventes TBE canal web → bascule 1 preuve → 2 preuves ;
 6. `UK / CH / NO` : revenu par juridiction (UK : toute vente = alerte immédiate ; CH : CA mondial vs CHF 100 000 dès qu'un client suisse existe ; NO : NOK 50 000 sur 12 mois glissants).
-La TVA étrangère collectée via OSS est **exclue** du CA déclaré à l'URSSAF (règle du CA hors taxes — https://www.autoentrepreneur.urssaf.fr/portail/accueil/une-question/toutes-les-fiches-pratiques/determiner-mon-chiffre-daffaires.html).
+La référence à une déclaration de chiffre d'affaires micro-entrepreneur à
+l'URSSAF est historique et ne s'applique plus à Norva SASU. Les bases HT,
+encaissements, commissions de stores et taxes restent néanmoins séparés dans la
+comptabilité et dans les exports du dashboard.
 
 **E. Calendrier intégré** : DES mensuelle (10e jour ouvrable) ; OSS 30/04, 31/07, 31/10, 31/01 (sans report, néant obligatoire) ; si régime EX : rapport trimestriel des CA dans les 27 États sous 1 mois (mêmes dates) + alerte « dépassement 100 k€ » à notifier sous 15 jours ; à partir de 2027, si redevable en France : **CA3 trimestrielle** (le régime réel simplifié / CA12 est supprimé au 1er janvier 2027 par l'art. 38 de la LF 2025 — ne rien construire autour de la CA12) (https://www.legifiscal.fr/actualites-fiscales/4052-loi-finances-2025-reforme-regime-simplifie-tva-compter-2027.html).
 

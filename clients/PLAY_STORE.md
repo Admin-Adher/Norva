@@ -51,8 +51,8 @@ default), this is your *upload* key; Google holds the app signing key.
 - Hosted at `https://norva.tv/privacy.html` and `…/terms.html`, linked in-app
   (login screen + Settings → Account) and in the web footer.
 - **[console]** Paste the privacy policy URL in the Play Console store listing.
-- ✅ Operator/legal entity filled in with real data (Adrien Hernandez EI,
-  RCS Paris 824 852 081) across `privacy.html`, `terms.html` and
+- ✅ Operator/legal entity filled in with real data (Norva SASU,
+  RCS Paris 108 055 237) across `privacy.html`, `terms.html` and
   `mentions-legales.html`; French governing law + consumer mediator (CM2C) set.
 
 ## 4. Account deletion — **[repo, done] + [console]**

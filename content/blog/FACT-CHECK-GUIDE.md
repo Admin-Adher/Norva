@@ -45,7 +45,7 @@ Les formulations suivantes sont confirmées :
 - Le trafic vers le cloud Norva est protégé en transit par HTTPS.
 - Les mots de passe sont stockés sous forme hachée par le prestataire d’authentification.
 - L’utilisateur peut demander la suppression de son compte depuis l’application ou la page prévue à cet effet.
-- Norva est exploité par une entreprise individuelle française enregistrée sous le numéro RCS 824 852 081.
+- Norva est exploité par Norva, SASU française au capital de 100 EUR, enregistrée au RCS de Paris sous le SIREN 108 055 237.
 
 ## 3. Qualificatifs obligatoires
 
