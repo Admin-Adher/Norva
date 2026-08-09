@@ -616,7 +616,10 @@ select extensions.ok(
       and (preflight #>> '{requirements,coverage_open}')::boolean
       and not (preflight #>> '{requirements,aal2}')::boolean
       and not (preflight #>> '{requirements,fresh_aal2}')::boolean
-      and jsonb_object_length(preflight -> 'requirements') = 8
+      and (
+        select count(*)
+        from jsonb_object_keys(preflight -> 'requirements')
+      ) = 8
     from (
       select public.admin_partners_kyc_certification_preflight() as preflight
     ) observed

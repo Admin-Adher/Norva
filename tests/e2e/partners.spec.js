@@ -911,7 +911,7 @@ test('confirmed user joins and receives a referral link without KYC or country i
   await expect(page.getByRole('heading', {
     name: /Share Norva\. Earn 20% on eligible renewals/i,
   })).toBeVisible();
-  await expect(page.getByText('No KYC, tax profile or payout destination is requested at this step.'))
+  await expect(page.getByText('No identity documents, tax details or payout destination are requested when you join.'))
     .toBeVisible();
 
   const join = page.locator('[data-partners-membership-join]');
