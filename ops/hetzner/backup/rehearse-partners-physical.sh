@@ -3,9 +3,9 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either apply the bootstrap boolean hotfix still pending
-# after the audited eda071e production baseline atomically (`predeploy`) or
-# prove that it is already present without replaying it (`postdeploy`), then
+# PostgreSQL clone, either apply the guided Didit certification preflight still
+# pending after the audited d5d596b production baseline atomically (`predeploy`)
+# or prove that it is already present without replaying it (`postdeploy`), then
 # run the verifier and restore-compatible pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
@@ -95,8 +95,8 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly BASELINE_CONTRACT="eda071e"
-readonly HOTFIX_MIGRATION="supabase/migrations/20260809090000_partners_bootstrap_nonmember_boolean.sql"
+readonly BASELINE_CONTRACT="d5d596b"
+readonly HOTFIX_MIGRATION="supabase/migrations/20260809125731_partners_didit_guided_preflight.sql"
 readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly OWNER_RISK_MARKER_COMPLETE="1"
@@ -104,6 +104,7 @@ readonly MULTICURRENCY_MARKERS_COMPLETE="1|1"
 readonly WEB_TAX_MARKERS_COMPLETE="1|1"
 readonly OWNER_REVIEW_VALIDITY_MARKER_COMPLETE="1"
 readonly BOOTSTRAP_BOOLEAN_MARKER_COMPLETE="1"
+readonly DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE="1"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -264,7 +265,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=31"
+proof_line "baseline_markers_verified=32"
 proof_line "hotfix_migration_sha256=$(sha256sum "$CANDIDATE_DIR/$HOTFIX_MIGRATION" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
@@ -589,13 +590,16 @@ OWNER_REVIEW_VALIDITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 BOOTSTRAP_BOOLEAN_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (regexp_replace(lower(pg_get_functiondef('affiliate_private.partners_service_bootstrap_v2(uuid)'::regprocedure)), '[[:space:]]+', ' ', 'g') like '%''ready'', coalesce( v_account.member_status = ''active'' and v_credits_enabled, false )%')::int::text;" \
   2> "$RAW_DIR/bootstrap-boolean-precondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}"
+DIDIT_GUIDED_PREFLIGHT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regprocedure('public.admin_partners_kyc_certification_preflight()') is not null)::int::text;" \
+  2> "$RAW_DIR/didit-guided-preflight-precondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # The first 31 markers are the exact audited eda071e baseline. Only the
-  # non-member bootstrap boolean contract must be absent before replay.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|0"
+  # The first 32 markers are the exact audited d5d596b baseline. Only the
+  # guided Didit preflight contract must be absent before replay.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|0"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -666,8 +670,11 @@ OWNER_REVIEW_VALIDITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 BOOTSTRAP_BOOLEAN_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (regexp_replace(lower(pg_get_functiondef('affiliate_private.partners_service_bootstrap_v2(uuid)'::regprocedure)), '[[:space:]]+', ' ', 'g') like '%''ready'', coalesce( v_account.member_status = ''active'' and v_credits_enabled, false )%')::int::text;" \
   2> "$RAW_DIR/bootstrap-boolean-postcondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}" ]]; then
+DIDIT_GUIDED_PREFLIGHT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (to_regprocedure('public.admin_partners_kyc_certification_preflight()') is not null)::int::text;" \
+  2> "$RAW_DIR/didit-guided-preflight-postcondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
