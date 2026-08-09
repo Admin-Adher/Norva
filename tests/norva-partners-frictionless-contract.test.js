@@ -480,7 +480,15 @@ test('Edge sanitizers fail closed on price, state and provider contract drift', 
     sanitizeLinkMutationData,
     sanitizePayoutCountryMutationData,
   } = helpers();
-  assert.doesNotThrow(() => sanitizeJoinData(validJoin()));
+  const rawJoin = { ...validJoin(), changed: true };
+  assert.equal(
+    JSON.stringify(sanitizeJoinData(rawJoin)),
+    JSON.stringify(validJoin()),
+  );
+  const missingChanged = validJoin();
+  assert.throws(() => sanitizeJoinData(missingChanged));
+  const invalidChanged = { ...validJoin(), changed: 'true' };
+  assert.throws(() => sanitizeJoinData(invalidChanged));
   assert.doesNotThrow(() => sanitizeAccessCreditQuoteData(validQuote()));
   assert.doesNotThrow(() => sanitizeAccessCreditRedemptionData(validRedemption()));
   assert.doesNotThrow(() => sanitizeAccessCreditStatusData(validStatus()));

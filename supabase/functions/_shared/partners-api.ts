@@ -1795,6 +1795,7 @@ export function sanitizeJoinData(raw: unknown): Record<string, unknown> {
     "schema_version",
     "action",
     "replayed",
+    "changed",
     "membership",
     "program",
     "link",
@@ -1806,6 +1807,7 @@ export function sanitizeJoinData(raw: unknown): Record<string, unknown> {
     root.action !== "membership_joined" ||
     root.next_action !== "share_link"
   ) throw new BootstrapContractError();
+  strictBoolean(root.changed);
 
   const membership = exactRecord(root.membership, [
     "status",
