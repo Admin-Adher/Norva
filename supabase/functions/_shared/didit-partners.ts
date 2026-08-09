@@ -72,6 +72,22 @@ export type KycCertificationInput = {
   justification: string;
 };
 
+export type KycCertificationPreflightRpcResult = {
+  schema_version: 1;
+  action: "kyc_certification_preflight";
+  ready: boolean;
+  requirements: {
+    privacy_approved: boolean;
+    coverage_open: boolean;
+    partners_membership_closed: boolean;
+    cash_payouts_closed: boolean;
+    tv_relay_closed: boolean;
+    revolut_api_closed: boolean;
+    aal2: boolean;
+    fresh_aal2: boolean;
+  };
+};
+
 export type DiditCreatedSession = {
   sessionId: string;
   workflowId: string;
@@ -551,6 +567,61 @@ export function parseKycCertificationInput(
     capacityConfirmed: true,
     confirmation: DIDIT_CERTIFICATION_CONFIRMATION,
     justification,
+  };
+}
+
+export function sanitizeKycCertificationPreflightRpc(
+  raw: unknown,
+): KycCertificationPreflightRpcResult {
+  const root = exactRecord(raw, [
+    "schema_version",
+    "action",
+    "ready",
+    "requirements",
+  ]);
+  const requirements = exactRecord(root.requirements, [
+    "privacy_approved",
+    "coverage_open",
+    "partners_membership_closed",
+    "cash_payouts_closed",
+    "tv_relay_closed",
+    "revolut_api_closed",
+    "aal2",
+    "fresh_aal2",
+  ]);
+  const values = Object.values(requirements);
+  if (
+    root.schema_version !== 1 ||
+    root.action !== "kyc_certification_preflight" ||
+    typeof root.ready !== "boolean" ||
+    values.some((value) => typeof value !== "boolean") ||
+    root.ready !== (
+      requirements.privacy_approved === true &&
+      requirements.coverage_open === true &&
+      requirements.partners_membership_closed === true &&
+      requirements.cash_payouts_closed === true &&
+      requirements.tv_relay_closed === true &&
+      requirements.revolut_api_closed === true &&
+      requirements.fresh_aal2 === true
+    ) ||
+    (requirements.fresh_aal2 === true && requirements.aal2 !== true)
+  ) {
+    throw new DiditContractError();
+  }
+  return {
+    schema_version: 1,
+    action: "kyc_certification_preflight",
+    ready: root.ready,
+    requirements: {
+      privacy_approved: requirements.privacy_approved,
+      coverage_open: requirements.coverage_open,
+      partners_membership_closed: requirements.partners_membership_closed,
+      cash_payouts_closed: requirements.cash_payouts_closed,
+      tv_relay_closed: requirements.tv_relay_closed,
+      revolut_api_closed: requirements.revolut_api_closed,
+      aal2: requirements.aal2,
+      fresh_aal2: requirements.fresh_aal2,
+    },
   };
 }
 

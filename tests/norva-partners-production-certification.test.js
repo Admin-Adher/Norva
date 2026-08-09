@@ -25,7 +25,7 @@ test('the restore runbook describes the exact post-eda071e hotfix contract', () 
 
   assert.match(restore, /20260809090000_partners_bootstrap_nonmember_boolean\.sql/);
   assert.match(restore, /`migrations_applied=1`/);
-  assert.match(restore, /`migration_routines_verified=162`/);
+  assert.match(restore, /`migration_routines_verified=164`/);
   assert.match(restore, /`migration_relations_verified=19`/);
 });
 

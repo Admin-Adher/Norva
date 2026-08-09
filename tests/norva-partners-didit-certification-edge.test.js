@@ -240,6 +240,44 @@ test('Didit certification RPC sanitizers expose no provider identifiers', () => 
   }
 });
 
+test('Didit certification preflight exposes only exact booleans and consistent readiness', () => {
+  const { sanitizeKycCertificationPreflightRpc } = bundled(
+    'supabase/functions/_shared/didit-partners.ts',
+  );
+  const requirements = {
+    privacy_approved: true,
+    coverage_open: true,
+    partners_membership_closed: true,
+    cash_payouts_closed: true,
+    tv_relay_closed: true,
+    revolut_api_closed: true,
+    aal2: true,
+    fresh_aal2: true,
+  };
+  const expected = {
+    schema_version: 1,
+    action: 'kyc_certification_preflight',
+    ready: true,
+    requirements,
+  };
+  assert.deepEqual(
+    plain(sanitizeKycCertificationPreflightRpc(expected)),
+    expected,
+  );
+  for (const invalid of [
+    { ...expected, ready: false },
+    { ...expected, requirements: { ...requirements, fresh_aal2: false } },
+    {
+      ...expected,
+      requirements: { ...requirements, aal2: false, fresh_aal2: true },
+    },
+    { ...expected, requirements: { ...requirements, operator_id: 'forbidden' } },
+    { ...expected, provider_session_id: 'forbidden' },
+  ]) {
+    assert.throws(() => sanitizeKycCertificationPreflightRpc(invalid));
+  }
+});
+
 test('certification vendor data is opaque and accepted by the hosted-session contract', () => {
   const shared = bundled('supabase/functions/_shared/didit-partners.ts');
   const values = {
@@ -379,8 +417,12 @@ test('Didit pending recovery sanitizes one exact active KYC session and rejects 
   }
 });
 
-test('certification start and recovery are POST-only with strict CORS and caller-scoped AAL RPCs', () => {
+test('certification preflight is GET-only while start and recovery remain POST-only', () => {
   const api = bundled('supabase/functions/_shared/partners-api.ts');
+  assert.deepEqual(
+    plain(api.allowedMethodsForRoute('/kyc/certification/preflight')),
+    ['GET'],
+  );
   assert.deepEqual(
     plain(api.allowedMethodsForRoute('/kyc/certification')),
     ['POST'],
@@ -396,6 +438,10 @@ test('certification start and recovery are POST-only with strict CORS and caller
   assert.equal(
     api.PARTNERS_RPC.kycCertificationCreateClaim,
     'partners_service_kyc_certification_create_claim',
+  );
+  assert.equal(
+    api.PARTNERS_RPC.kycCertificationPreflight,
+    'admin_partners_kyc_certification_preflight',
   );
   assert.throws(() => api.assertValidPreflight(
     'https://norva.tv',
@@ -420,6 +466,9 @@ test('certification start and recovery are POST-only with strict CORS and caller
   );
 
   const member = read('supabase/functions/norva-partners/index.ts');
+  const preflightStart = member.indexOf(
+    'route === "/kyc/certification/preflight"',
+  );
   const routeStart = member.indexOf('route === "/kyc/certification"');
   const routeEnd = member.indexOf('route === "/referral/claim"', routeStart);
   const route = member.slice(routeStart, routeEnd);
@@ -432,6 +481,15 @@ test('certification start and recovery are POST-only with strict CORS and caller
   const list = member.slice(listStart, recoveryStart);
   const recovery = member.slice(recoveryStart, claimStart);
   const claim = member.slice(claimStart, helperStart);
+  assert.ok(preflightStart >= 0 && routeStart > preflightStart);
+  assert.match(
+    member.slice(preflightStart, routeStart),
+    /PARTNERS_RPC\.kycCertificationPreflight/,
+  );
+  assert.match(
+    member.slice(preflightStart, routeStart),
+    /provider_configured:[\s\S]*certification_window_open:/,
+  );
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   assert.ok(

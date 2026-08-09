@@ -19,6 +19,7 @@ import {
   sanitizeDiditCreatedSession,
   sanitizeKycCertificationBindingMatchRpc,
   sanitizeKycCertificationCreateClaimRpc,
+  sanitizeKycCertificationPreflightRpc,
   sanitizeKycCertificationPrepareRpc,
   sanitizeKycCertificationSessionRecordRpc,
   sanitizeKycPrepareRpc,
@@ -544,6 +545,30 @@ Deno.serve(async (req) => {
         },
       };
       status = 201;
+    } else if (route === "/kyc/certification/preflight") {
+      assertNoQueryParameters(url);
+      const caller = createCallerClient(token);
+      const databasePreflight = sanitizeKycCertificationPreflightRpc(
+        await callRpcWithClient(
+          caller,
+          PARTNERS_RPC.kycCertificationPreflight,
+          {},
+          "query",
+        ),
+      );
+      const providerConfigured = DIDIT_CONFIG?.environment === "live";
+      const certificationWindowOpen = DIDIT_CERTIFICATION_ENABLED;
+      cleanData = {
+        schema_version: 1,
+        action: "kyc_certification_preflight",
+        ready: databasePreflight.ready && providerConfigured &&
+          certificationWindowOpen,
+        requirements: {
+          ...databasePreflight.requirements,
+          provider_configured: providerConfigured,
+          certification_window_open: certificationWindowOpen,
+        },
+      };
     } else if (route === "/kyc/certification") {
       assertNoQueryParameters(url);
       if (!DIDIT_CERTIFICATION_ENABLED) {

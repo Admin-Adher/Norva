@@ -37,6 +37,8 @@ export const PARTNERS_RPC = Object.freeze({
   kycHumanReviewRequest: "partners_service_kyc_human_review_request",
   kycPrepare: "partners_service_kyc_prepare_v2",
   kycSessionRecord: "partners_service_kyc_session_record_v3",
+  kycCertificationPreflight:
+    "admin_partners_kyc_certification_preflight",
   kycCertificationPrepare: "admin_partners_kyc_certification_prepare",
   kycCertificationResume: "admin_partners_kyc_certification_resume",
   kycCertificationCreateClaim:
@@ -465,6 +467,7 @@ export function allowedMethodsForRoute(
     route === "/bootstrap" ||
     route === "/dashboard" ||
     route === "/kyc/rights" ||
+    route === "/kyc/certification/preflight" ||
     route === "/credit/status"
   ) return ["GET"];
   if (

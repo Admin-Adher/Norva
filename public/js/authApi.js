@@ -423,7 +423,7 @@
      * GoTrue returns a fresh session whose JWT carries aal=aal2; setSession()
      * atomically replaces the browser token used by PostgREST and Edge calls.
      */
-    async function challengeAndVerifyMfa({ code, factorId } = {}) {
+    async function challengeAndVerifyMfa({ code, factorId, forceFresh = false } = {}) {
         const normalizedCode = String(code || '').trim();
         if (!/^\d{6}$/.test(normalizedCode)) {
             const error = new Error('Invalid authenticator code');
@@ -458,7 +458,9 @@
                 error.code = 'mfa_authentication_required';
                 throw error;
             }
-            if (decodeJwtClaims(token)?.aal === 'aal2') return lockedSession;
+            if (decodeJwtClaims(token)?.aal === 'aal2' && forceFresh !== true) {
+                return lockedSession;
+            }
 
             const challenge = await request(`/auth/v1/factors/${encodeURIComponent(factor.id)}/challenge`, {
                 method: 'POST',

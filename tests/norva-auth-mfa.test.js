@@ -216,3 +216,59 @@ test('NorvaAuth serializes the rotating MFA session inside the refresh lock', as
     'session:true',
   ]);
 });
+
+test('NorvaAuth can force a fresh AAL2 JWT for an exceptional audited action', async () => {
+  const existingAal2 = jwt({
+    sub: 'user-1', aal: 'aal2', iat: 1_786_278_000, exp: 4_102_444_800,
+  });
+  const freshAal2 = jwt({
+    sub: 'user-1', aal: 'aal2', iat: 1_786_278_600, exp: 4_102_444_800,
+  });
+  const calls = [];
+  const user = {
+    id: 'user-1',
+    factors: [{
+      id: 'factor-totp-1',
+      factor_type: 'totp',
+      status: 'verified',
+      friendly_name: 'Risque',
+    }],
+  };
+  const runtime = loadAuth(async (url, options = {}) => {
+    calls.push(url);
+    if (url.endsWith('/auth/v1/user')) return response(200, user);
+    if (url.endsWith('/challenge')) return response(200, { id: 'challenge-fresh' });
+    if (url.endsWith('/verify')) {
+      return response(200, {
+        access_token: freshAal2,
+        refresh_token: 'refresh-fresh-aal2',
+        expires_in: 3600,
+        token_type: 'bearer',
+        user,
+      });
+    }
+    return response(404, {});
+  });
+  runtime.auth.setSession({
+    access_token: existingAal2,
+    refresh_token: 'refresh-existing-aal2',
+    expires_at: 4_102_444_800,
+    user,
+  });
+
+  const unchanged = await runtime.auth.challengeAndVerifyMfa({
+    code: '123456',
+    factorId: 'factor-totp-1',
+  });
+  assert.equal(unchanged.access_token, existingAal2);
+  assert.equal(calls.some((url) => url.endsWith('/challenge')), false);
+
+  const refreshed = await runtime.auth.challengeAndVerifyMfa({
+    code: '123456',
+    factorId: 'factor-totp-1',
+    forceFresh: true,
+  });
+  assert.equal(refreshed.access_token, freshAal2);
+  assert.equal(calls.filter((url) => url.endsWith('/challenge')).length, 1);
+  assert.equal(calls.filter((url) => url.endsWith('/verify')).length, 1);
+});

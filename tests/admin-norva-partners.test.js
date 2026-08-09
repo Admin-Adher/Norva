@@ -3106,7 +3106,7 @@ test('Admin beneficiary proposal is bound to the sanitized payout request key', 
   assert.doesNotMatch(JSON.stringify(proposal), /account_id|currency/);
 });
 
-test('Admin Partners exposes pre-gate Didit certification only to Risk operators', () => {
+test('Admin Partners exposes guided Didit certification only to Risk operators', () => {
   const kyc = { innerHTML: '', removeAttribute() {} };
   const certification = { innerHTML: '', removeAttribute() {} };
   const AdminPage = loadAdminPage({
@@ -3147,7 +3147,8 @@ test('Admin Partners exposes pre-gate Didit certification only to Risk operators
     certification: null,
   });
   assert.match(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
-  assert.match(certification.innerHTML, /séparée des comptes, liens, commissions et paiements/);
+  assert.match(certification.innerHTML, /adhésion, le partage et les crédits Norva restent séparés/);
+  assert.match(certification.innerHTML, /tous les prérequis avant toute saisie/);
   assert.match(certification.innerHTML, /verification-privacy-notice/);
   assert.match(certification.innerHTML, /identity-verification/);
 });
@@ -3226,7 +3227,63 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
   assert.match(certification.innerHTML, /configuration fournisseur incohérente/);
 });
 
-test('Admin Partners starts Didit certification with AAL2, explicit consent and no provider token exposure', async () => {
+function validCertificationPreflight() {
+  return {
+    schema_version: 1,
+    action: 'kyc_certification_preflight',
+    ready: true,
+    requirements: {
+      privacy_approved: true,
+      coverage_open: true,
+      partners_membership_closed: true,
+      cash_payouts_closed: true,
+      tv_relay_closed: true,
+      revolut_api_closed: true,
+      aal2: true,
+      fresh_aal2: true,
+      provider_configured: true,
+      certification_window_open: true,
+    },
+  };
+}
+
+test('Admin Partners accepts only an exact boolean Didit preflight and identifies hard blockers', () => {
+  const AdminPage = loadAdminPage();
+  const page = new AdminPage({});
+  const data = validCertificationPreflight();
+  const envelope = {
+    version: '2026-07-29',
+    correlationId: 'prt_0123456789abcdef01234567',
+    data,
+  };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(page._partnersSanitizeKycCertificationPreflight(envelope))),
+    data,
+  );
+  assert.throws(() => page._partnersSanitizeKycCertificationPreflight({
+    ...envelope,
+    data: { ...data, ready: false },
+  }));
+  assert.throws(() => page._partnersSanitizeKycCertificationPreflight({
+    ...envelope,
+    data: {
+      ...data,
+      requirements: { ...data.requirements, operator_id: 'forbidden' },
+    },
+  }));
+
+  const blocked = validCertificationPreflight();
+  blocked.ready = false;
+  blocked.requirements.privacy_approved = false;
+  blocked.requirements.partners_membership_closed = false;
+  const rows = page._partnersKycCertificationRequirementRows(blocked, true);
+  assert.equal(rows.find((row) => row.key === 'privacy_approved').ready, false);
+  assert.equal(rows.find((row) => row.key === 'partners_membership_closed').ready, false);
+  assert.equal(rows.find((row) => row.key === 'factor_available').ready, true);
+  assert.doesNotMatch(JSON.stringify(rows), /operator_id|factorId|provider_session/);
+});
+
+test('Admin Partners starts Didit certification after one guided preflight without provider token exposure', async () => {
   const stored = new Map();
   let assigned = '';
   let observedRequest = null;
@@ -3264,13 +3321,15 @@ test('Admin Partners starts Didit certification with AAL2, explicit consent and 
   page._route = 'partners';
   page._partnersView = 'risk';
   page._partnersCapabilities = { support: false, risk: true, finance: false };
-  page._partnersEnsureAal2 = async () => true;
-  page._confirm = async () => true;
-  page._partnersTypedConfirmation = async (expected) => {
-    assert.equal(expected, 'CERTIFIER DIDIT');
-    return expected;
+  page._partnersFetchKycCertificationPreflight = async () => validCertificationPreflight();
+  page._partnersKycCertificationDialog = async ({ preflight, resuming }) => {
+    assert.equal(preflight.ready, true);
+    assert.equal(resuming, false);
+    return {
+      confirmation: 'CERTIFIER DIDIT',
+      justification: 'Certification live contrôlée du workflow Didit v1.',
+    };
   };
-  page._partnersJustification = async () => 'Certification live contrôlée du workflow Didit v1.';
   page._sbUrl = () => 'https://api.norva.tv';
   page._sbKey = () => 'public-anon-key';
   page._token = () => 'user-aal2-jwt';
@@ -3348,13 +3407,11 @@ test('Admin Partners resumes an unknown Didit result without persisting provider
   page._route = 'partners';
   page._partnersView = 'risk';
   page._partnersCapabilities = { support: false, risk: true, finance: false };
-  page._partnersEnsureAal2 = async () => true;
-  page._confirm = async () => true;
-  page._partnersTypedConfirmation = async () => {
-    throw new Error('resume must not repeat typed consent');
-  };
-  page._partnersJustification = async () => {
-    throw new Error('resume must not persist or repeat free-text justification');
+  page._partnersFetchKycCertificationPreflight = async () => validCertificationPreflight();
+  page._partnersKycCertificationDialog = async ({ preflight, resuming }) => {
+    assert.equal(preflight.ready, true);
+    assert.equal(resuming, true);
+    return { confirmation: '', justification: '' };
   };
   page._partnersRandomUuid = () => {
     throw new Error('resume must be derived by the server');
@@ -3498,10 +3555,13 @@ test('Admin Partners polls null certification state through the complete recover
   page._partnersView = 'risk';
   page._partnersPageGeneration = 1;
   page._partnersCapabilities = { support: false, risk: true, finance: false };
-  page._partnersEnsureAal2 = async () => true;
-  page._confirm = async () => true;
-  page._partnersTypedConfirmation = async () => 'CERTIFIER DIDIT';
-  page._partnersJustification = async () => 'Certification live contrôlée du workflow Didit v1.';
+  page._partnersFetchKycCertificationPreflight = async () => (
+    validCertificationPreflight()
+  );
+  page._partnersKycCertificationDialog = async () => ({
+    confirmation: 'CERTIFIER DIDIT',
+    justification: 'Certification live contrôlée du workflow Didit v1.',
+  });
   page._partnersRandomUuid = () => '11111111-1111-4111-8111-111111111111';
   page._sbUrl = () => 'https://api.norva.tv';
   page._sbKey = () => 'public-anon-key';
@@ -3568,12 +3628,13 @@ function configureCertificationActionPage(page) {
   page._route = 'partners';
   page._partnersView = 'risk';
   page._partnersCapabilities = { support: false, risk: true, finance: false };
-  page._partnersEnsureAal2 = async () => true;
-  page._confirm = async () => true;
-  page._partnersTypedConfirmation = async () => 'CERTIFIER DIDIT';
-  page._partnersJustification = async () => (
-    'Certification live contrôlée du workflow Didit v1.'
+  page._partnersFetchKycCertificationPreflight = async () => (
+    validCertificationPreflight()
   );
+  page._partnersKycCertificationDialog = async () => ({
+    confirmation: 'CERTIFIER DIDIT',
+    justification: 'Certification live contrôlée du workflow Didit v1.',
+  });
   page._partnersRandomUuid = () => '11111111-1111-4111-8111-111111111111';
   page._sbUrl = () => 'https://api.norva.tv';
   page._sbKey = () => 'public-anon-key';

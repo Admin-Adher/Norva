@@ -30,6 +30,7 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_require_didit_certification_observer(text)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_assert_didit_certification_pre_gate()","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.partners_require_didit_certification_operator(text)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.admin_partners_kyc_certification_preflight()","security_definer":true,"volatility":"s","access_role":"authenticated"},
   {"signature":"affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
   {"signature":"affiliate_private.admin_partners_kyc_certification_resume()","security_definer":true,"volatility":"v","access_role":"authenticated"},
   {"signature":"affiliate_private.admin_partners_kyc_certification_status()","security_definer":true,"volatility":"v","access_role":"authenticated"},
@@ -37,6 +38,7 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_kyc_certification_binding_match(text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_kyc_certification_session_record(text,text,text,integer,text,text,text,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_kyc_certification_webhook_apply(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text)","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"public.admin_partners_kyc_certification_preflight()","security_definer":false,"volatility":"s","access_role":"authenticated"},
   {"signature":"public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"public.admin_partners_kyc_certification_resume()","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"public.admin_partners_kyc_certification_status()","security_definer":false,"volatility":"v","access_role":"authenticated"},
@@ -189,7 +191,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  162::bigint,
+  164::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -212,7 +214,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  162::bigint,
+  164::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -229,7 +231,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 162
+    select count(*) = 164
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -251,7 +253,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 162
+    select count(*) = 164
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -275,7 +277,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 162
+    select count(*) = 164
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine

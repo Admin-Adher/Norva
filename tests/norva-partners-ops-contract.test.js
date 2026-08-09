@@ -703,8 +703,8 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
   );
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "162\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=162/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "164\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=164/);
   assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "19\|0"/);
   assert.match(rehearsal, /migration_relations_verified=19/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
@@ -756,15 +756,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.ok(routineCatalogMatch, 'the restore pgTAP must expose its exact routine catalogue');
   const routineCatalog = JSON.parse(routineCatalogMatch[1]);
-  assert.equal(routineCatalog.length, 162);
-  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 162);
+  assert.equal(routineCatalog.length, 164);
+  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 164);
   const routineAccessCounts = routineCatalog.reduce((counts, { access_role: accessRole }) => {
     counts[accessRole] = (counts[accessRole] || 0) + 1;
     return counts;
   }, {});
   assert.deepEqual(
     routineAccessCounts,
-    { owner: 80, authenticated: 28, service_role: 54 },
+    { owner: 80, authenticated: 30, service_role: 54 },
   );
   for (const relation of [
     'affiliate_private.affiliate_access_credit_catalog',

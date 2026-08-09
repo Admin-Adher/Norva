@@ -883,6 +883,28 @@ class AdminPage {
 #page-admin .crm-modal button{min-height:44px;border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
 #page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
+#page-admin .crm-modal button:disabled{opacity:.52;cursor:not-allowed;}
+#page-admin .partners-kyc-guide{max-height:min(860px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;padding-bottom:max(20px,env(safe-area-inset-bottom,0px));}
+#page-admin .partners-kyc-guide-head{display:grid;gap:6px;margin-bottom:16px;}
+#page-admin .partners-kyc-guide-head p{margin:0;}
+#page-admin .partners-kyc-guide-list{display:grid;gap:8px;margin:0 0 18px;padding:0;list-style:none;}
+#page-admin .partners-kyc-guide-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);}
+#page-admin .partners-kyc-guide-item strong{display:block;color:var(--adm-tx);font-size:13px;line-height:1.35;}
+#page-admin .partners-kyc-guide-item small{display:block;margin-top:3px;color:var(--adm-tx3);font-size:11px;line-height:1.4;}
+#page-admin .partners-kyc-guide-state{display:inline-flex;align-items:center;min-height:26px;padding:3px 9px;border:1px solid var(--adm-line);border-radius:999px;color:var(--adm-tx2);font-size:10px;font-weight:800;white-space:nowrap;}
+#page-admin .partners-kyc-guide-item.is-ready .partners-kyc-guide-state{border-color:rgba(52,211,153,.34);background:rgba(52,211,153,.08);color:var(--adm-green);}
+#page-admin .partners-kyc-guide-item.is-blocked .partners-kyc-guide-state{border-color:rgba(248,113,113,.38);background:rgba(248,113,113,.08);color:var(--adm-red);}
+#page-admin .partners-kyc-guide-form{display:grid;gap:14px;margin-top:4px;}
+#page-admin .partners-kyc-guide-field{display:grid;gap:7px;min-width:0;}
+#page-admin .partners-kyc-guide-field label,#page-admin .partners-kyc-guide-field legend{color:var(--adm-tx);font-size:12.5px;font-weight:700;}
+#page-admin .partners-kyc-guide-field small{color:var(--adm-tx3);font-size:11px;line-height:1.4;}
+#page-admin .partners-kyc-guide-field input,#page-admin .partners-kyc-guide-field select,#page-admin .partners-kyc-guide-field textarea{box-sizing:border-box;width:100%;min-height:44px;border:1px solid var(--adm-line);border-radius:9px;background:var(--adm-bg);color:var(--adm-tx);font:inherit;font-size:13px;padding:10px 12px;}
+#page-admin .partners-kyc-guide-field textarea{min-height:92px;resize:vertical;line-height:1.45;}
+#page-admin .partners-kyc-guide-consent{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start;padding:12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);color:var(--adm-tx2);font-size:12px;line-height:1.5;}
+#page-admin .partners-kyc-guide-consent input{width:20px;height:20px;margin:1px 0 0;accent-color:var(--adm-blue);}
+#page-admin .partners-kyc-guide-alert{margin:0 0 14px;padding:11px 12px;border:1px solid rgba(248,113,113,.38);border-radius:10px;background:rgba(248,113,113,.08);color:var(--adm-red);font-size:12px;line-height:1.5;}
+#page-admin .partners-kyc-guide-note{margin:0 0 14px;padding:11px 12px;border:1px solid rgba(91,124,250,.32);border-radius:10px;background:rgba(91,124,250,.08);color:var(--adm-tx2);font-size:12px;line-height:1.5;}
+#page-admin .partners-kyc-guide .mrow{position:sticky;bottom:calc(-1 * max(20px,env(safe-area-inset-bottom,0px)));margin:18px -22px calc(-1 * max(20px,env(safe-area-inset-bottom,0px)));padding:14px 22px max(14px,env(safe-area-inset-bottom,0px));border-top:1px solid var(--adm-line);background:var(--color-bg-secondary,#16161c);}
 @media(max-width:1180px){
   #page-admin .partners-control-grid{grid-template-columns:1fr;}
 }
@@ -937,6 +959,11 @@ class AdminPage {
   #page-admin .partners-risk-actions{justify-content:flex-start;}
   #page-admin .partners-pagination{flex-wrap:wrap;justify-content:space-between;}
   #page-admin .partners-pagination-status{width:100%;margin-right:0;}
+  #page-admin .crm-modal-back{align-items:flex-end;padding:12px 12px max(12px,env(safe-area-inset-bottom,0px));}
+  #page-admin .partners-kyc-guide{max-height:calc(100dvh - 24px);border-radius:16px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));}
+  #page-admin .partners-kyc-guide .mrow{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px;}
+  #page-admin .partners-kyc-guide-item{grid-template-columns:1fr;gap:8px;}
+  #page-admin .partners-kyc-guide-state{justify-self:start;}
 }
 @media(max-width:560px){
   #page-admin .partners-admin-toolbar{grid-template-columns:1fr;}
@@ -4665,7 +4692,7 @@ class AdminPage {
             <div class="partners-pane-intro"><div><h2>Risque et vérification</h2><p>KYC individuel, files de revue et décisions minimisées.</p></div></div>
             <div class="partners-ops-grid">
               <section id="partners-admin-kyc" class="partners-ops-card" aria-busy="true"><h2>KYC individuel</h2><p>Quota informatif et capacité réelle.</p><div class="ssub">Chargement…</div></section>
-              <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Certification pré-gate Didit</h2><p>Preuve opérateur séparée des comptes Partners.</p><div class="ssub">Chargement…</div></section>
+              <section id="partners-admin-kyc-certification" class="partners-ops-card" aria-busy="true"><h2>Validation finale Didit</h2><p>Contrôle ponctuel du parcours d’identité avant ouverture du KYC cash.</p><div class="ssub">Chargement…</div></section>
               <section id="partners-admin-risk" class="partners-ops-card" aria-busy="true"><h2>Risque</h2><p>Comptes et jobs nécessitant une décision autorisée.</p><div class="ssub">Chargement…</div></section>
             </div>
             <section id="partners-admin-kyc-human-reviews" class="partners-control-card" aria-busy="true">
@@ -5246,7 +5273,7 @@ class AdminPage {
             {
                 force,
                 targetId: 'partners-admin-kyc-certification',
-                title: 'Certification pré-gate Didit'
+                title: 'Validation finale Didit'
             }
         );
     }
@@ -5413,6 +5440,396 @@ class AdminPage {
         }
         try { return JSON.parse(text); }
         catch (_) { throw new Error('invalid_didit_certification_response'); }
+    }
+
+    _partnersSanitizeKycCertificationPreflight(envelope) {
+        const exactKeys = (value, expected) => value
+            && typeof value === 'object'
+            && !Array.isArray(value)
+            && Object.keys(value).sort().join('|') === expected.slice().sort().join('|');
+        const data = envelope?.data;
+        const requirements = data?.requirements;
+        const requirementKeys = [
+            'privacy_approved', 'coverage_open', 'partners_membership_closed',
+            'cash_payouts_closed', 'tv_relay_closed', 'revolut_api_closed',
+            'aal2', 'fresh_aal2', 'provider_configured',
+            'certification_window_open'
+        ];
+        if (!exactKeys(envelope, ['version', 'correlationId', 'data'])
+            || envelope.version !== '2026-07-29'
+            || !/^prt_[0-9a-f]{24}$/.test(String(envelope.correlationId || ''))
+            || !exactKeys(data, [
+                'schema_version', 'action', 'ready', 'requirements'
+            ])
+            || data.schema_version !== 1
+            || data.action !== 'kyc_certification_preflight'
+            || typeof data.ready !== 'boolean'
+            || !exactKeys(requirements, requirementKeys)
+            || requirementKeys.some((key) => typeof requirements[key] !== 'boolean')
+            || (requirements.fresh_aal2 && !requirements.aal2)
+            || data.ready !== requirementKeys.every((key) => requirements[key] === true)) {
+            throw new Error('invalid_didit_certification_preflight');
+        }
+        return data;
+    }
+
+    async _partnersFetchKycCertificationPreflight() {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
+        try {
+            const response = await fetch(
+                `${this._sbUrl()}/functions/v1/norva-partners/kyc/certification/preflight`,
+                {
+                    method: 'GET',
+                    headers: {
+                        apikey: this._sbKey(),
+                        Authorization: `Bearer ${this._token()}`
+                    },
+                    signal: controller.signal
+                }
+            );
+            const envelope = await this._partnersReadBoundedJsonResponse(
+                response,
+                controller.signal,
+                8_192
+            );
+            if (!response.ok) {
+                const allowed = new Set([
+                    'invalid_access_token', 'partners_action_not_allowed',
+                    'partners_temporarily_unavailable'
+                ]);
+                const code = allowed.has(String(envelope?.error?.code || ''))
+                    ? String(envelope.error.code)
+                    : 'partners_temporarily_unavailable';
+                const error = new Error(code);
+                error.code = code;
+                error.status = Number(response.status) || 0;
+                throw error;
+            }
+            return this._partnersSanitizeKycCertificationPreflight(envelope);
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                const timeoutError = new Error('didit_certification_preflight_timeout');
+                timeoutError.code = 'didit_certification_preflight_timeout';
+                throw timeoutError;
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    _partnersKycCertificationRequirementRows(preflight, factorAvailable) {
+        const requirements = preflight?.requirements || {};
+        return [
+            {
+                key: 'privacy_approved',
+                ready: requirements.privacy_approved === true,
+                label: 'Dossier Cash Privacy approuvé',
+                detail: requirements.privacy_approved
+                    ? 'AIPD, registre, notice et consentement sont enregistrés.'
+                    : 'Le dossier Cash Privacy doit être approuvé dans Configuration.'
+            },
+            {
+                key: 'coverage_open',
+                ready: requirements.coverage_open === true,
+                label: 'Certification de couverture encore ouverte',
+                detail: requirements.coverage_open
+                    ? 'La preuve Didit live peut encore être enregistrée.'
+                    : 'La couverture a déjà été clôturée ; aucune nouvelle preuve ne peut partir.'
+            },
+            {
+                key: 'partners_membership_closed',
+                ready: requirements.partners_membership_closed === true,
+                label: 'Adhésions Partners temporairement suspendues',
+                detail: requirements.partners_membership_closed
+                    ? 'Aucune adhésion ne peut intervenir pendant cette opération.'
+                    : 'Suspendez brièvement les adhésions avant la certification.'
+            },
+            {
+                key: 'cash_payouts_closed',
+                ready: requirements.cash_payouts_closed === true,
+                label: 'Virements live désactivés',
+                detail: requirements.cash_payouts_closed
+                    ? 'Aucun versement ne peut être déclenché pendant la certification.'
+                    : 'Fermez la fenêtre de versement avant de continuer.'
+            },
+            {
+                key: 'tv_relay_closed',
+                ready: requirements.tv_relay_closed === true,
+                label: 'Relais TV désactivé',
+                detail: requirements.tv_relay_closed
+                    ? 'Le parcours exceptionnel reste limité au Web Admin.'
+                    : 'Désactivez le relais TV pour isoler la certification.'
+            },
+            {
+                key: 'revolut_api_closed',
+                ready: requirements.revolut_api_closed === true,
+                label: 'API Revolut désactivée',
+                detail: requirements.revolut_api_closed
+                    ? 'Aucune automatisation bancaire ne peut intervenir.'
+                    : 'Désactivez l’API Revolut avant de continuer.'
+            },
+            {
+                key: 'provider_configured',
+                ready: requirements.provider_configured === true,
+                label: 'Configuration Didit live disponible',
+                detail: requirements.provider_configured
+                    ? 'Le workflow live et son callback sont chargés côté serveur.'
+                    : 'La configuration Didit live doit être complétée côté serveur.'
+            },
+            {
+                key: 'certification_window_open',
+                ready: requirements.certification_window_open === true,
+                label: 'Fenêtre de certification ouverte',
+                detail: requirements.certification_window_open
+                    ? 'Le coupe-circuit autorise uniquement cette certification.'
+                    : 'Ouvrez la fenêtre supervisée avant de saisir des données.'
+            },
+            {
+                key: 'factor_available',
+                ready: factorAvailable === true,
+                label: 'Application Authenticator disponible',
+                detail: factorAvailable
+                    ? 'Un facteur TOTP vérifié est associé à ce compte.'
+                    : 'Configurez un facteur TOTP vérifié sur le compte Admin.'
+            },
+            {
+                key: 'fresh_aal2',
+                ready: requirements.fresh_aal2 === true,
+                pending: requirements.fresh_aal2 !== true,
+                label: 'Session Authenticator récente',
+                detail: requirements.fresh_aal2
+                    ? 'La session a été renforcée il y a moins de dix minutes.'
+                    : 'Le code demandé ci-dessous renouvellera la session juste avant Didit.'
+            }
+        ];
+    }
+
+    async _partnersKycCertificationDialog({ preflight, resuming = false } = {}) {
+        const auth = window.NorvaAuth;
+        let factors = [];
+        let mfaFailure = '';
+        try {
+            const status = await auth?.getMfaStatus?.();
+            factors = Array.isArray(status?.factors)
+                ? status.factors.filter((factor) => factor?.type === 'totp'
+                    && typeof factor?.id === 'string' && factor.id.length > 0)
+                : [];
+        } catch (error) {
+            mfaFailure = this._partnersMfaFailureMessage(error);
+        }
+        const rows = this._partnersKycCertificationRequirementRows(
+            preflight,
+            factors.length > 0
+        );
+        const hardBlockers = rows.filter((row) => !row.ready && !row.pending);
+        const formAvailable = hardBlockers.length === 0 && factors.length > 0
+            && auth?.challengeAndVerifyMfa;
+        return new Promise((resolve) => {
+            const root = document.getElementById('page-admin') || document.body;
+            const shell = root.querySelector?.('.crm-shell');
+            const previousFocus = document.activeElement;
+            const uid = `partners-kyc-guide-${this._modalSeq = (this._modalSeq || 0) + 1}`;
+            const back = document.createElement('div');
+            back.className = 'crm-modal-back';
+            back.setAttribute('role', 'dialog');
+            back.setAttribute('aria-modal', 'true');
+            back.setAttribute('aria-labelledby', `${uid}-title`);
+            back.setAttribute('aria-describedby', `${uid}-intro`);
+            const rowMarkup = rows.map((row) => {
+                const state = row.ready ? 'Prêt' : (row.pending ? 'À valider' : 'À régler');
+                const klass = row.ready ? 'is-ready' : (row.pending ? 'is-pending' : 'is-blocked');
+                return `<li class="partners-kyc-guide-item ${klass}" data-kyc-requirement="${AdminPage.esc(row.key)}">
+                    <span><strong>${AdminPage.esc(row.label)}</strong><small>${AdminPage.esc(row.detail)}</small></span>
+                    <span class="partners-kyc-guide-state">${AdminPage.esc(state)}</span>
+                  </li>`;
+            }).join('');
+            const factorMarkup = factors.length > 1
+                ? `<div class="partners-kyc-guide-field">
+                    <label for="${uid}-factor">Application Authenticator</label>
+                    <select id="${uid}-factor">${factors.map((factor, index) => (
+                        `<option value="${index}">${AdminPage.esc(factor.label || `Authenticator ${index + 1}`)}</option>`
+                    )).join('')}</select>
+                    <small>Choisissez l’application qui affichera le code à six chiffres.</small>
+                  </div>`
+                : '';
+            const startFields = resuming ? '' : `
+                <label class="partners-kyc-guide-consent" for="${uid}-consent">
+                  <input id="${uid}-consent" type="checkbox" />
+                  <span>J’accepte d’utiliser ma propre pièce d’identité et ma biométrie dans le parcours hébergé Didit. Cette opération peut consommer un crédit, mais ne crée aucun partenaire et n’active aucun paiement.</span>
+                </label>
+                <div class="partners-kyc-guide-field">
+                  <label for="${uid}-confirmation">Confirmation de sécurité</label>
+                  <input id="${uid}-confirmation" type="text" autocomplete="off" maxlength="16" spellcheck="false" placeholder="CERTIFIER DIDIT" />
+                  <small>Saisissez exactement « CERTIFIER DIDIT ».</small>
+                </div>
+                <div class="partners-kyc-guide-field">
+                  <label for="${uid}-justification">Motif enregistré dans l’audit</label>
+                  <textarea id="${uid}-justification" maxlength="1000" rows="3">Certification live Didit supervisée avant ouverture du parcours KYC cash.</textarea>
+                  <small>Décrivez brièvement pourquoi cette preuve est réalisée aujourd’hui.</small>
+                </div>`;
+            const formMarkup = formAvailable ? `
+              <form class="partners-kyc-guide-form" novalidate>
+                ${factorMarkup}${startFields}
+                <div class="partners-kyc-guide-field">
+                  <label for="${uid}-totp">Code Authenticator à 6 chiffres</label>
+                  <input id="${uid}-totp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" />
+                  <small>Norva ne conserve jamais ce code.</small>
+                </div>
+              </form>` : '';
+            const lead = formAvailable
+                ? (resuming
+                    ? 'Tous les prérequis externes sont prêts. Validez Authenticator pour reprendre la session Didit existante.'
+                    : 'Tous les prérequis externes sont prêts. Consentement, confirmation, motif et Authenticator sont regroupés ici avant l’unique départ vers Didit.')
+                : 'La certification ne peut pas démarrer. Réglez d’abord chaque élément marqué « À régler » ; aucun champ sensible n’est affiché.';
+            back.innerHTML = `<section class="crm-modal is-wide partners-kyc-guide">
+                <div class="partners-kyc-guide-head">
+                  <h3 id="${uid}-title">${resuming ? 'Reprendre la vérification Didit' : 'Préparer la vérification Didit'}</h3>
+                  <p id="${uid}-intro">${AdminPage.esc(lead)}</p>
+                </div>
+                ${mfaFailure ? `<div class="partners-kyc-guide-alert">${AdminPage.esc(mfaFailure)}</div>` : ''}
+                <ul class="partners-kyc-guide-list" aria-label="Prérequis de sécurité">${rowMarkup}</ul>
+                ${formMarkup}
+                <div class="partners-kyc-guide-alert" role="alert" aria-live="assertive" hidden></div>
+                <div class="mrow">
+                  <button class="cancel" type="button">Fermer</button>
+                  ${formAvailable ? `<button class="ok primary" type="button" disabled>${resuming ? 'Vérifier et reprendre Didit' : 'Vérifier et ouvrir Didit'}</button>` : ''}
+                </div>
+              </section>`;
+            root.appendChild(back);
+            if (shell) shell.setAttribute('inert', '');
+            const modal = back.querySelector('.partners-kyc-guide');
+            const cancelButton = back.querySelector('.cancel');
+            const submitButton = back.querySelector('.ok');
+            const factorSelect = back.querySelector(`#${uid}-factor`);
+            const consent = back.querySelector(`#${uid}-consent`);
+            const confirmation = back.querySelector(`#${uid}-confirmation`);
+            const justification = back.querySelector(`#${uid}-justification`);
+            const totp = back.querySelector(`#${uid}-totp`);
+            const alert = back.querySelector('[role="alert"]');
+            let busy = false;
+            const focusables = () => Array.from(back.querySelectorAll(
+                'input,select,textarea,button'
+            )).filter((element) => !element.disabled && !element.hidden);
+            const finish = (value) => {
+                if (busy && value === null) return;
+                document.removeEventListener('keydown', onKey, true);
+                if (shell) shell.removeAttribute('inert');
+                if (totp) totp.value = '';
+                back.remove();
+                try { previousFocus?.focus?.({ preventScroll: true }); } catch (_) {}
+                resolve(value);
+            };
+            const valid = () => {
+                if (!formAvailable || !/^\d{6}$/.test(String(totp?.value || '').trim())) {
+                    return false;
+                }
+                if (resuming) return true;
+                const reason = String(justification?.value || '').trim();
+                return consent?.checked === true
+                    && String(confirmation?.value || '').trim() === 'CERTIFIER DIDIT'
+                    && reason.length >= 12 && reason.length <= 1000
+                    && !/[\u0000-\u001f\u007f]/.test(reason);
+            };
+            const update = () => {
+                if (submitButton) submitButton.disabled = busy || !valid();
+                if (alert && !busy) alert.hidden = true;
+            };
+            const onKey = (event) => {
+                if (event.key === 'Escape' || event.key === 'GoBack'
+                    || event.key === 'BrowserBack') {
+                    event.preventDefault();
+                    finish(null);
+                    return;
+                }
+                if (event.key === 'Tab') {
+                    const available = focusables();
+                    if (!available.length) return;
+                    const first = available[0];
+                    const last = available[available.length - 1];
+                    if (event.shiftKey && (document.activeElement === first
+                        || !back.contains(document.activeElement))) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && (document.activeElement === last
+                        || !back.contains(document.activeElement))) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                }
+            };
+            const showError = (message) => {
+                if (!alert) return;
+                alert.textContent = message;
+                alert.hidden = false;
+                modal?.scrollTo?.({ top: modal.scrollHeight, behavior: 'smooth' });
+            };
+            const submit = async () => {
+                if (busy || !valid()) return;
+                busy = true;
+                submitButton.disabled = true;
+                submitButton.setAttribute('aria-busy', 'true');
+                submitButton.textContent = 'Validation sécurisée…';
+                const factorIndex = factorSelect ? Number(factorSelect.value) : 0;
+                const factor = factors[factorIndex];
+                try {
+                    await auth.challengeAndVerifyMfa({
+                        code: String(totp.value).trim(),
+                        factorId: factor.id,
+                        forceFresh: true
+                    });
+                    const refreshed = await this._partnersFetchKycCertificationPreflight();
+                    if (!refreshed.ready) {
+                        const error = new Error('didit_certification_prerequisites_changed');
+                        error.code = 'didit_certification_prerequisites_changed';
+                        throw error;
+                    }
+                    finish({
+                        confirmation: resuming ? '' : 'CERTIFIER DIDIT',
+                        justification: resuming
+                            ? '' : String(justification.value || '').trim()
+                    });
+                } catch (error) {
+                    busy = false;
+                    if (totp) {
+                        totp.value = '';
+                        totp.focus();
+                    }
+                    submitButton.removeAttribute('aria-busy');
+                    submitButton.textContent = resuming
+                        ? 'Vérifier et reprendre Didit' : 'Vérifier et ouvrir Didit';
+                    showError(error?.code === 'didit_certification_prerequisites_changed'
+                        ? 'Un prérequis a changé pendant la validation. Fermez cette fenêtre, vérifiez la configuration puis recommencez.'
+                        : this._partnersMfaFailureMessage(error));
+                    update();
+                }
+            };
+            back.querySelectorAll('input,select,textarea').forEach((element) => {
+                element.addEventListener('input', update);
+                element.addEventListener('change', update);
+            });
+            back.querySelector('form')?.addEventListener('submit', (event) => {
+                event.preventDefault();
+                void submit();
+            });
+            submitButton?.addEventListener('click', () => { void submit(); });
+            cancelButton.addEventListener('click', () => finish(null));
+            back.addEventListener('mousedown', (event) => {
+                if (event.target === back) finish(null);
+            });
+            document.addEventListener('keydown', onKey, true);
+            update();
+            (formAvailable ? (consent || factorSelect || totp) : cancelButton)?.focus?.();
+        });
+    }
+
+    _partnersIsDeterministicKycCertificationError(error) {
+        return new Set([
+            'didit_certification_disabled', 'provider_not_configured',
+            'partners_action_not_allowed', 'invalid_access_token',
+            'invalid_request', 'idempotency_key_reused'
+        ]).has(String(error?.code || ''));
     }
 
     _partnersLoadFinanceView({ force = false } = {}) {
@@ -7611,7 +8028,7 @@ class AdminPage {
             this._partnersKycCertificationPollTimer = null;
             this._partnersOpsUnavailable(
                 'partners-admin-kyc-certification',
-                'Certification pré-gate Didit'
+                'Validation finale Didit'
             );
             this._partnersScheduleKycCertificationPoll(3_000);
             return;
@@ -7654,7 +8071,7 @@ class AdminPage {
             && ['reserved', 'pending'].includes(certification?.status)
             && !mutationActive;
         let action = canStart
-            ? '<button type="button" class="partners-action" data-partners-action="kyc-certification-start">Démarrer la certification</button>'
+            ? '<button type="button" class="partners-action" data-partners-action="kyc-certification-start">Préparer la certification</button>'
             : (canResume
                 ? '<button type="button" class="partners-action" data-partners-action="kyc-certification-resume">Reprendre sur Didit</button>'
                 : (active
@@ -7674,7 +8091,7 @@ class AdminPage {
               </div>`
             : `<div class="partners-control-item partners-kyc-certification">
                 <span><strong>Aucune certification enregistrée</strong>
-                  <small>Voie ponctuelle séparée des comptes, liens, commissions et paiements Partners.</small>
+                  <small>Cette validation concerne uniquement le futur parcours KYC cash. L’adhésion, le partage et les crédits Norva restent séparés.</small>
                 </span>${action}
               </div>`;
         const signature = JSON.stringify([
@@ -7696,8 +8113,8 @@ class AdminPage {
         const focusWasInside = el.contains?.(focused) === true;
         const focusedAction = focusWasInside
             ? String(focused?.dataset?.partnersAction || '') : '';
-        el.innerHTML = `<h2>Certification pré-gate Didit</h2>
-            <p>La décision signée reste consultable après fermeture du coupe-circuit. Une sandbox ne peut jamais valider la preuve live.</p>
+        el.innerHTML = `<h2>Validation finale Didit</h2>
+            <p>Norva affiche tous les prérequis avant toute saisie, puis regroupe le consentement, le motif et Authenticator dans une seule fenêtre. Une sandbox ne peut jamais valider la preuve live.</p>
             <aside class="partners-provider-disclosure" aria-label="Informations juridiques Didit">
               <strong>Avant d'utiliser votre identité réelle</strong>
               <span>Norva demande cette certification ponctuelle et Didit fournit le parcours hébergé. Consultez la <a href="/privacy.html#partners" target="_blank" rel="noopener">Privacy Norva</a>, la <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">notice de confidentialité Didit</a> et les <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">conditions Didit de vérification</a>.</span>
@@ -9461,10 +9878,18 @@ class AdminPage {
                 }
             }
         } catch (error) {
+            const diditMessages = {
+                didit_certification_result_uncertain: 'Résultat réseau incertain. Norva vérifie l’état avant toute nouvelle tentative.',
+                didit_certification_disabled: 'La fenêtre supervisée Didit est fermée. Aucun parcours d’identité n’a été lancé.',
+                provider_not_configured: 'La configuration Didit live n’est pas disponible. Aucun parcours d’identité n’a été lancé.',
+                partners_action_not_allowed: 'Un prérequis de sécurité n’est plus satisfait. Rouvrez la préparation Didit pour voir l’état exact.',
+                invalid_access_token: 'La session Admin a expiré. Reconnectez-vous avant de reprendre.',
+                didit_certification_preflight_timeout: 'Le contrôle des prérequis a expiré. Aucun champ sensible ni parcours Didit n’a été ouvert.',
+                invalid_didit_certification_preflight: 'La réponse de contrôle Didit est incohérente. L’opération reste fermée.'
+            };
             this._toast(
-                error?.code === 'didit_certification_result_uncertain'
-                    ? 'Résultat réseau incertain. Norva vérifie l’état avant toute nouvelle tentative.'
-                    : 'Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.',
+                diditMessages[String(error?.code || error?.message || '')]
+                    || 'Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif.',
                 'err'
             );
         } finally {
@@ -9484,38 +9909,29 @@ class AdminPage {
         const slug = /^[a-z0-9][a-z0-9._-]{2,63}$/;
         const isoCountry = /^[A-Z]{2}$/;
         const currencyCode = /^[A-Z]{3}$/;
+        const certificationAction = [
+            'kyc-certification-start', 'kyc-certification-resume'
+        ].includes(action);
         if (action === 'aal2-elevate') return this._partnersElevateAal2();
-        if (action !== 'revolut-incident-page' && !(await this._partnersEnsureAal2())) {
+        if (!certificationAction && action !== 'revolut-incident-page'
+            && !(await this._partnersEnsureAal2())) {
             return false;
         }
         if (['account-action', 'job-retry', 'commission-reverse', 'payout-create',
             'payout-approve', 'fiscal-review-public'].includes(action)
             && !this._partnersCanUseOperationalAction(action)) return false;
 
-        if (['kyc-certification-start', 'kyc-certification-resume'].includes(action)) {
+        if (certificationAction) {
             if (this._partnersCapabilities.risk !== true) return false;
             const resuming = action === 'kyc-certification-resume';
-            let confirmation = '';
-            let justification = '';
-            if (resuming) {
-                const confirmed = await this._confirm(
-                    'Reprendre la session Didit déjà réservée ? Aucun nouveau compte, crédit parallèle, flag ou paiement ne sera créé.',
-                    { okLabel: 'Reprendre sur Didit' }
-                );
-                if (!confirmed) return false;
-            } else {
-                const consented = await this._confirm(
-                    'Cette certification utilise votre propre pièce d’identité et votre biométrie chez Didit. Elle peut consommer un crédit, ne crée aucun compte partenaire et n’active aucune gate. Continuer ?',
-                    { okLabel: 'Continuer vers Didit' }
-                );
-                if (!consented) return false;
-                confirmation = await this._partnersTypedConfirmation('CERTIFIER DIDIT');
-                if (!confirmation) return false;
-                justification = await this._partnersJustification(
-                    'certification pré-gate du workflow Didit'
-                );
-                if (!justification) return false;
-            }
+            const preflight = await this._partnersFetchKycCertificationPreflight();
+            const guided = await this._partnersKycCertificationDialog({
+                preflight,
+                resuming
+            });
+            if (!guided) return false;
+            const confirmation = guided.confirmation;
+            const justification = guided.justification;
 
             // Prove that the same-tab callback marker can be written before
             // any provider-side effect. If private mode denies sessionStorage,
@@ -9592,7 +10008,23 @@ class AdminPage {
                     response,
                     controller.signal
                 );
-                if (!response.ok) throw new Error('didit_certification_failed');
+                if (!response.ok) {
+                    const allowed = new Set([
+                        'didit_certification_disabled', 'provider_not_configured',
+                        'partners_action_not_allowed', 'invalid_access_token',
+                        'invalid_request', 'idempotency_key_reused',
+                        'request_in_progress', 'rate_limited',
+                        'provider_temporarily_unavailable',
+                        'partners_temporarily_unavailable'
+                    ]);
+                    const code = allowed.has(String(envelope?.error?.code || ''))
+                        ? String(envelope.error.code)
+                        : 'partners_temporarily_unavailable';
+                    const error = new Error(code);
+                    error.code = code;
+                    error.status = Number(response.status) || 0;
+                    throw error;
+                }
                 const exactKeys = (value, expected) => value
                     && typeof value === 'object'
                     && !Array.isArray(value)
@@ -9650,8 +10082,11 @@ class AdminPage {
                 }
                 window.location.assign(hostedUrl.href);
                 return false;
-            } catch (_) {
+            } catch (error) {
                 this._partnersClearKycCertificationReturnState();
+                if (this._partnersIsDeterministicKycCertificationError(error)) {
+                    throw error;
+                }
                 throw this._partnersMarkKycCertificationUncertain();
             } finally {
                 clearTimeout(timeout);

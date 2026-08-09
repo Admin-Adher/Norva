@@ -848,7 +848,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "162|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "164|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -892,7 +892,7 @@ proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=162"
+proof_line "migration_routines_verified=164"
 proof_line "migration_relation_owner=supabase_admin"
 proof_line "migration_relations_verified=19"
 

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(72);
+select extensions.plan(76);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -97,6 +97,24 @@ select extensions.ok(
     'EXECUTE'
   ),
   'only authenticated callers can reach the user-JWT prepare shim'
+);
+select extensions.ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_partners_kyc_certification_preflight()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.admin_partners_kyc_certification_preflight()',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'public.admin_partners_kyc_certification_preflight()',
+    'EXECUTE'
+  ),
+  'only authenticated callers can reach the read-only certification preflight'
 );
 select extensions.ok(
   has_function_privilege(
@@ -589,6 +607,22 @@ begin
 end;
 $jwt$;
 set local role authenticated;
+select extensions.ok(
+  (
+    select
+      preflight ->> 'action' = 'kyc_certification_preflight'
+      and (preflight ->> 'ready')::boolean is false
+      and (preflight #>> '{requirements,privacy_approved}')::boolean
+      and (preflight #>> '{requirements,coverage_open}')::boolean
+      and not (preflight #>> '{requirements,aal2}')::boolean
+      and not (preflight #>> '{requirements,fresh_aal2}')::boolean
+      and jsonb_object_length(preflight -> 'requirements') = 8
+    from (
+      select public.admin_partners_kyc_certification_preflight() as preflight
+    ) observed
+  ),
+  'AAL1 Risk can read exact prerequisites without opening the certification'
+);
 select extensions.throws_ok(
   $$
     select public.admin_partners_kyc_certification_prepare(
@@ -631,6 +665,12 @@ begin
 end;
 $jwt$;
 set local role authenticated;
+select extensions.throws_ok(
+  $$select public.admin_partners_kyc_certification_preflight()$$,
+  '42501',
+  'Partners Risk capability is required',
+  'a normal account cannot observe the certification preflight'
+);
 select extensions.throws_ok(
   $$
     select public.admin_partners_kyc_certification_prepare(
@@ -733,6 +773,11 @@ begin
 end;
 $jwt$;
 set local role authenticated;
+select extensions.is(
+  public.admin_partners_kyc_certification_preflight() ->> 'ready',
+  'true',
+  'fresh AAL2 Risk sees the database certification prerequisites as ready'
+);
 insert into didit_certification_state (operator_key, response)
 select
   'risk1',

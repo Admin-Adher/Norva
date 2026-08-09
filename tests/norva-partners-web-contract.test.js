@@ -2497,7 +2497,7 @@ test('Partners route participates in bounded native continuity without storing p
     continuityWrites[0],
     /commission|payout|referral|verification|contract|eligibility|programme/i,
   );
-  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v10'/);
+  assert.match(serviceWorkerSource, /CACHE_VERSION\s*=\s*'norva-sw-v11'/);
   assert.match(cssSource, /\.main-content\s*\{\s*padding-bottom:\s*var\(--bottom-nav-h\)/);
   assert.match(
     cssSource,
@@ -2508,8 +2508,8 @@ test('Partners route participates in bounded native continuity without storing p
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
   assert.match(htmlSource, /PartnersPage\.js\?v=9/);
-  assert.match(htmlSource, /app\.js\?v=68/);
-  assert.match(appSource, /AdminPage\.js\?v=113/);
+  assert.match(htmlSource, /app\.js\?v=69/);
+  assert.match(appSource, /AdminPage\.js\?v=114/);
 });
 
 test('Didit return identifiers are scrubbed before analytics, referrers or auth redirects', () => {
