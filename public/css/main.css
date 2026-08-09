@@ -18360,6 +18360,134 @@ html:not(.tv-mode) .home-state-inline {
   text-align: right;
 }
 
+.partners-program-card > .partners-program-intro {
+  margin: calc(var(--space-xs) * -1) 0 var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.partners-program-facts--guided > .partners-program-fact {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, auto) 44px;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  min-height: 64px;
+  padding-block: var(--space-xs);
+}
+
+.partners-program-facts--guided dt {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.partners-program-facts--guided .partners-program-value {
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.partners-program-facts--guided .partners-program-help {
+  max-width: none;
+  color: var(--color-text-primary);
+  text-align: initial;
+}
+
+.partners-program-help details {
+  position: relative;
+}
+
+.partners-program-help details[open] {
+  z-index: 5;
+}
+
+.partners-program-help summary {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0;
+  place-items: center;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  list-style: none;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.partners-program-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.partners-program-help summary .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.partners-program-help summary:hover,
+.partners-program-help details[open] > summary {
+  color: var(--color-accent-hover);
+  background: var(--color-bg-primary);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+.partners-program-help summary:focus-visible {
+  color: var(--color-accent-hover);
+  border-color: var(--color-accent);
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.partners-program-help-popover {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  right: 0;
+  z-index: 6;
+  display: grid;
+  width: min(320px, calc(100vw - 64px));
+  box-sizing: border-box;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+}
+
+.partners-program-help-popover strong {
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.partners-program-help-popover p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.partners-discovery-copy .partners-disclosure {
+  font-size: 0.85rem;
+}
+
+.partners-discovery-copy .partners-disclosure strong {
+  color: var(--color-text-primary);
+}
+
 .partners-payout-summary {
   display: grid;
   gap: var(--space-xs);
@@ -19738,6 +19866,44 @@ html.tv-mode .partners-tv-shell .btn:focus {
 }
 
 @media (max-width: 420px) {
+  .partners-program-facts--guided > .partners-program-fact {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .partners-program-facts--guided .partners-program-value {
+    grid-column: 1;
+    grid-row: 2;
+    text-align: left;
+  }
+
+  .partners-program-facts--guided .partners-program-help {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .partners-program-facts--guided .partners-program-help:has(details[open]) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: 100%;
+  }
+
+  .partners-program-facts--guided .partners-program-help details[open] {
+    position: static;
+  }
+
+  .partners-program-facts--guided .partners-program-help details[open] > summary {
+    position: absolute;
+    top: var(--space-xs);
+    right: 0;
+  }
+
+  .partners-program-facts--guided .partners-program-help-popover {
+    position: static;
+    width: 100%;
+    margin-top: var(--space-xs);
+    box-shadow: none;
+  }
+
   .partners-metrics,
   .partners-skeleton-grid {
     grid-template-columns: 1fr;

@@ -2317,7 +2317,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=8"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=9"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -2350,7 +2350,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(pageSource, /'dashboard'/);
   assert.match(pageSource, /Each threshold is exact in its named settlement currency/);
   assert.match(pageSource, /Norva absorbs payout-transfer fees on supported routes/);
-  assert.match(pageSource, /without KYC through an exact server quote/);
+  assert.match(pageSource, /Available balance can fund Norva access without identity verification/);
   assert.match(cloudSource, /value\.USD === 1000/);
   assert.match(cloudSource, /data\.policy\.payout_currencies\.some/);
   assert.match(pageSource, /window\.NorvaCloud\.partners\.dashboard/);
@@ -2411,8 +2411,9 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
   assert.match(pageSource, /Attribution window:<\/strong> \$\{days\} days/);
   assert.match(
     pageSource,
-    /<dt>Attribution window<\/dt><dd>\$\{program\.attribution_window_days\} days/,
+    /label: 'Referral tracking window'[\s\S]{0,160}value: `\$\{attributionDays\} days`/,
   );
+  assert.match(pageSource, /aria-label="More information about \$\{this\.escape\(fact\.label\)\}"/);
   assert.doesNotMatch(pageSource, /verifies an individual identity, residence/i);
   assert.doesNotMatch(pageSource, /(?:error|err)\?*\.message/);
   assert.match(pageSource, /aria-live="\$\{politeness\}"/);
@@ -2502,11 +2503,11 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=98/);
+  assert.match(htmlSource, /main\.css\?v=99/);
   assert.match(htmlSource, /cloudApi\.js\?v=59/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=8/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=9/);
   assert.match(htmlSource, /app\.js\?v=68/);
   assert.match(appSource, /AdminPage\.js\?v=112/);
 });

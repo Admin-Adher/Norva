@@ -130,9 +130,40 @@ test('confirmed users see immediate no-KYC membership before any cash setup', ()
   page.renderMembershipBootstrap(bootstrapV2());
 
   assert.match(container.innerHTML, /Join and get my link/);
-  assert.match(container.innerHTML, /No KYC, tax profile or payout destination is requested/);
-  assert.match(container.innerHTML, /Convert to Norva access without KYC/);
+  assert.match(container.innerHTML, /No identity documents, tax details or payout destination are requested/);
+  assert.match(container.innerHTML, /Use available balance for Norva access without identity verification/);
+  assert.match(container.innerHTML, /How Norva Partners works/);
+  assert.match(container.innerHTML, /More information about Commission on eligible payments/);
+  assert.match(container.innerHTML, /Example: if the eligible amount after discounts and before tax is US\$5/);
+  assert.doesNotMatch(container.innerHTML, /partners-global-v1/);
   assert.doesNotMatch(container.innerHTML, /data-partners-start-kyc|data-partners-cash-kyc-form/);
+});
+
+test('membership education uses six accessible 44px explainers instead of unexplained KYC labels', () => {
+  const { page, container } = loadPage();
+  page.renderMembershipBootstrap(bootstrapV2());
+
+  assert.equal((container.innerHTML.match(/<details name="partners-program-help">/g) || []).length, 6);
+  assert.equal((container.innerHTML.match(/aria-label="More information about /g) || []).length, 6);
+  assert.match(container.innerHTML, /Referral tracking window/);
+  assert.match(container.innerHTML, /Balance validation/);
+  assert.match(container.innerHTML, /Start sharing/);
+  assert.match(container.innerHTML, /Use balance for Norva/);
+  assert.match(container.innerHTML, /Transfer balance to cash/);
+  assert.doesNotMatch(container.innerHTML, />No KYC</);
+  assert.doesNotMatch(container.innerHTML, />KYC required</);
+  assert.match(
+    cssSource,
+    /\.partners-program-help summary\s*\{[\s\S]{0,260}width:\s*44px;[\s\S]{0,120}height:\s*44px;/,
+  );
+  assert.match(
+    cssSource,
+    /\.partners-program-help:has\(details\[open\]\)\s*\{[\s\S]{0,140}grid-column:\s*1\s*\/\s*-1;/,
+  );
+  assert.match(
+    cssSource,
+    /\.partners-program-facts--guided \.partners-program-help-popover\s*\{[\s\S]{0,120}position:\s*static;/,
+  );
 });
 
 test('invite-only users see a neutral pilot state without a false KYC action', () => {

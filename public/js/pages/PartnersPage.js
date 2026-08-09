@@ -1597,31 +1597,25 @@ class PartnersPage {
                         <form class="partners-join-form" data-partners-membership-form novalidate>
                             <label class="partners-consent-check">
                                 <input type="checkbox" data-partners-terms-confirm>
-                                <span>I accept the <a href="/partners-terms.html?version=${encodeURIComponent(program.terms_version)}" target="_blank" rel="noopener">Norva Partners terms</a> (${this.escape(program.terms_version)}).</span>
+                                <span>I accept the <a href="/partners-terms.html" target="_blank" rel="noopener noreferrer">Norva Partners Terms</a>.</span>
                             </label>
                             <label class="partners-consent-check">
                                 <input type="checkbox" data-partners-disclosure-confirm>
-                                <span>I have read the programme disclosure (${this.escape(program.disclosure_version)}), including the ${program.maturation_days}-day validation period and refund reversals.</span>
+                                <span>I understand that commission normally stays pending for at least ${program.maturation_days} days and may be reversed after a refund or chargeback.</span>
                             </label>
                             <div class="partners-actions">
                                 <button class="btn btn-primary partners-primary-action" type="submit"
                                     data-partners-membership-join disabled>Join and get my link</button>
-                                <span class="partners-action-note">No KYC, tax profile or payout destination is requested at this step.</span>
+                                <span class="partners-action-note">No identity documents, tax details or payout destination are requested when you join.</span>
                             </div>
                             <div class="partners-form-status" data-partners-action-status role="status" aria-live="polite" aria-atomic="true"></div>
                         </form>
-                        <p class="partners-disclosure">Earnings are not guaranteed. Commission is ${rate} of eligible payments excluding tax after discounts. Refunds and chargebacks reverse the related commission. Any supported balance can fund Norva access without KYC through an exact server quote; cash transfers require identity, fiscal and payout checks.</p>
+                        <p class="partners-disclosure"><strong>Important:</strong> earnings are not guaranteed. Commission is ${rate} of eligible payments after discounts and before tax. Refunds and chargebacks reverse the related commission. Available balance can fund Norva access without identity verification; cash transfers require identity, tax and payout checks.</p>
                     </div>
                     <aside class="partners-program-card" aria-labelledby="partners-program-title">
-                        <h2 id="partners-program-title">Clear from day one</h2>
-                        <dl class="partners-program-facts">
-                            <div><dt>Recurring commission</dt><dd>${rate}</dd></div>
-                            <div><dt>Attribution window</dt><dd>${program.attribution_window_days} days</dd></div>
-                            <div><dt>Validation period</dt><dd>${program.maturation_days} days</dd></div>
-                            <div><dt>Join and share</dt><dd>No KYC</dd></div>
-                            <div><dt>Norva access</dt><dd>No KYC</dd></div>
-                            <div><dt>Cash transfer</dt><dd>KYC required</dd></div>
-                        </dl>
+                        <h2 id="partners-program-title">How Norva Partners works</h2>
+                        <p class="partners-program-intro">Open any info button for a plain-language example.</p>
+                        ${this.membershipProgramFacts(program, rate)}
                     </aside>
                 </section>
                 ${this.membershipSteps(program)}
@@ -1766,6 +1760,76 @@ class PartnersPage {
         this.container.querySelector('[data-partners-retry]')
             ?.addEventListener('click', () => this.reload());
         this.focusTitle();
+    }
+
+    membershipProgramFacts(program, rate) {
+        const attributionDays = Number.isSafeInteger(program?.attribution_window_days)
+            ? program.attribution_window_days
+            : 30;
+        const maturationDays = Number.isSafeInteger(program?.maturation_days)
+            ? program.maturation_days
+            : 45;
+        const infoIcon = window.Icons?.info || '';
+        const facts = [
+            {
+                id: 'commission',
+                label: 'Commission on eligible payments',
+                value: rate,
+                title: `How ${rate} is calculated`,
+                copy: `Example: if the eligible amount after discounts and before tax is US$5, your commission is US$1. Refunds or chargebacks reverse the related amount.`
+            },
+            {
+                id: 'attribution',
+                label: 'Referral tracking window',
+                value: `${attributionDays} days`,
+                title: `What the ${attributionDays}-day window means`,
+                copy: `A person normally needs to start their eligible subscription within ${attributionDays} days of using your link. Attribution still depends on eligibility and anti-fraud checks.`
+            },
+            {
+                id: 'validation',
+                label: 'Balance validation',
+                value: `${maturationDays} days`,
+                title: `Why commission waits at least ${maturationDays} days`,
+                copy: `Commission first appears as pending. It normally becomes available after at least ${maturationDays} days, once refund, chargeback and eligibility checks are complete.`
+            },
+            {
+                id: 'sharing',
+                label: 'Start sharing',
+                value: 'Immediately',
+                title: 'What you need to start',
+                copy: 'A confirmed Norva account and acceptance of the current terms are enough to create your personal link. No identity documents are requested.'
+            },
+            {
+                id: 'access',
+                label: 'Use balance for Norva',
+                value: 'No identity check',
+                title: 'Using balance for your Norva access',
+                copy: 'Available commission can be converted through an exact server quote into one or more months of Norva access. You review the amount before confirming; the conversion is final and cannot be paid out as cash.'
+            },
+            {
+                id: 'cash',
+                label: 'Transfer balance to cash',
+                value: 'Verification required',
+                title: 'Why cash requires verification',
+                copy: 'Before a cash transfer, Norva must verify your identity, country, tax details and payout destination. You can still share and use balance for Norva access without completing this step.'
+            }
+        ];
+        return `<dl class="partners-program-facts partners-program-facts--guided" aria-label="Norva Partners programme explained">
+            ${facts.map((fact) => `<div class="partners-program-fact">
+                <dt>${this.escape(fact.label)}</dt>
+                <dd class="partners-program-value">${this.escape(fact.value)}</dd>
+                <dd class="partners-program-help">
+                    <details name="partners-program-help">
+                        <summary aria-label="More information about ${this.escape(fact.label)}"
+                            aria-controls="partners-program-help-${this.escape(fact.id)}">${infoIcon}</summary>
+                        <div class="partners-program-help-popover" id="partners-program-help-${this.escape(fact.id)}" role="note">
+                            <strong>${this.escape(fact.title)}</strong>
+                            <p>${this.escape(fact.copy)}</p>
+                        </div>
+                    </details>
+                </dd>
+            </div>`).join('')}
+        </dl>`;
     }
 
     renderPending(data, { nextAction = null } = {}) {
@@ -4583,9 +4647,9 @@ class PartnersPage {
             : 'the published validation period';
         return `
             <section class="partners-steps" aria-label="How the flexible Norva Partners balance works">
-                <article><span>1</span><div><h2>Join and share now</h2><p>Your confirmed Norva account gets a personal opaque link without KYC.</p></div></article>
-                <article><span>2</span><div><h2>Watch balance mature</h2><p>Eligible commission stays pending for ${this.escape(maturation)}, then becomes available.</p></div></article>
-                <article><span>3</span><div><h2>Choose access or cash</h2><p>Convert to Norva access without KYC, or verify identity only when requesting cash.</p></div></article>
+                <article><span>1</span><div><h2>Join and share now</h2><p>Your confirmed Norva account gets a personal link immediately. No identity documents are needed.</p></div></article>
+                <article><span>2</span><div><h2>Watch balance mature</h2><p>Eligible commission normally stays pending for at least ${this.escape(maturation)}, then becomes available after checks.</p></div></article>
+                <article><span>3</span><div><h2>Choose access or cash</h2><p>Use available balance for Norva access without identity verification, or complete verification only when requesting cash.</p></div></article>
             </section>`;
     }
 
