@@ -2,8 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const cryptoNode = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -76,6 +78,7 @@ function withTestAccessToken(config) {
   return {
     ...config,
     initialAccessToken: 'oa_sandbox_access_token_test',
+    initialAccessTokenExpiresAt: Date.now() + 3_600_000,
   };
 }
 
@@ -192,10 +195,16 @@ test('Revolut Business API is inert by default and accepts only official hosts',
     sandbox.baseUrl,
     'https://sandbox-b2b.revolut.com/api/1.0',
   );
+  assert.equal(sandbox.sandboxSkipTransferFields, false);
+  const sandboxSmoke = readRevolutBusinessConfig(environment({
+    REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS: 'true',
+  }));
+  assert.equal(sandboxSmoke.sandboxSkipTransferFields, true);
   const production = readRevolutBusinessConfig(environment({
     REVOLUT_BUSINESS_ENVIRONMENT: 'production',
   }));
   assert.equal(production.baseUrl, 'https://b2b.revolut.com/api/1.0');
+  assert.equal(production.sandboxSkipTransferFields, false);
   assert.throws(
     () => readRevolutBusinessConfig(environment({
       REVOLUT_BUSINESS_ENVIRONMENT: undefined,
@@ -216,6 +225,21 @@ test('Revolut Business API is inert by default and accepts only official hosts',
       }),
     })),
     (error) => error?.code === 'revolut_business_fee_caps_invalid',
+  );
+  assert.throws(
+    () => readRevolutBusinessConfig(environment({
+      REVOLUT_BUSINESS_ENVIRONMENT: 'production',
+      REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS: 'true',
+    })),
+    (error) => error?.code ===
+      'revolut_business_sandbox_override_forbidden',
+  );
+  assert.throws(
+    () => readRevolutBusinessConfig(environment({
+      REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS: 'TRUE',
+    })),
+    (error) => error?.code ===
+      'revolut_business_sandbox_override_invalid',
   );
 });
 
@@ -351,6 +375,160 @@ test('Revolut Business transfer validates fields, quotes, then pays with immutab
   assert.equal(calls[1].body.reference, undefined);
   assert.equal(calls[1].body.charge_bearer, 'debtor');
   assert.match(calls[2].authorization, /^Bearer /);
+});
+
+test('sandbox smoke mode skips only unavailable transfer fields and keeps quote and canonical checks', async () => {
+  const {
+    readRevolutBusinessConfig,
+    RevolutBusinessClient,
+  } = await business();
+  const calls = [];
+  const client = new RevolutBusinessClient(
+    withTestAccessToken(readRevolutBusinessConfig(environment({
+      REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS: 'true',
+    }))),
+    async (url, init) => {
+      calls.push({
+        url,
+        method: init.method,
+        body: init.body ? JSON.parse(init.body) : null,
+      });
+      if (url.endsWith('/pay/indicative-quote')) {
+        return indicativeQuoteResponse();
+      }
+      if (url.endsWith('/pay')) {
+        return jsonResponse(200, {
+          id: 'transaction_0123456789',
+          state: 'created',
+        });
+      }
+      if (url.endsWith('/transaction/transaction_0123456789')) {
+        return jsonResponse(200, transferDetail({ state: 'created' }));
+      }
+      throw new Error(`unexpected path ${url}`);
+    },
+  );
+
+  const transaction = await client.createOrGetTransfer(payoutJob());
+  assert.equal(transaction.state, 'CREATED');
+  assert.deepEqual(calls.map((call) => call.url.split('/api/1.0')[1]), [
+    '/pay/indicative-quote',
+    '/pay',
+    '/transaction/transaction_0123456789',
+  ]);
+  assert.equal(calls[0].body.charge_bearer, undefined);
+  assert.equal(calls[1].body.reference, 'NORVA-A1B2C3D4E5F6');
+  assert.equal(calls[1].body.charge_bearer, undefined);
+});
+
+test('single-method Revolut counterparty can omit the payment method id', async () => {
+  const {
+    readRevolutBusinessConfig,
+    RevolutBusinessClient,
+  } = await business();
+  const calls = [];
+  const job = payoutJob({ beneficiary_payment_method_ref: null });
+  const client = new RevolutBusinessClient(
+    withTestAccessToken(readRevolutBusinessConfig(environment({
+      REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS: 'true',
+    }))),
+    async (url, init) => {
+      const body = init.body ? JSON.parse(init.body) : null;
+      calls.push({ url, body });
+      if (url.endsWith('/pay/indicative-quote')) {
+        return indicativeQuoteResponse();
+      }
+      if (url.endsWith('/pay')) {
+        return jsonResponse(200, {
+          id: 'transaction_0123456789',
+          state: 'created',
+        });
+      }
+      if (url.endsWith('/transaction/transaction_0123456789')) {
+        return jsonResponse(200, transferDetail({
+          state: 'created',
+          receiver: {
+            counterparty_id: job.beneficiary_token_ref,
+            account_id: '5c9e171c-7e23-4d6a-b768-aaaaaba535f3',
+          },
+        }));
+      }
+      throw new Error(`unexpected path ${url}`);
+    },
+  );
+
+  const transaction = await client.createOrGetTransfer(job);
+  assert.equal(transaction.state, 'CREATED');
+  assert.deepEqual(calls[0].body.receiver, {
+    counterparty_id: job.beneficiary_token_ref,
+  });
+  assert.deepEqual(calls[1].body.receiver, {
+    counterparty_id: job.beneficiary_token_ref,
+  });
+});
+
+test('sandbox simulations are explicit, canonical and impossible in production', async () => {
+  const {
+    readRevolutBusinessConfig,
+    RevolutBusinessClient,
+  } = await business();
+  const calls = [];
+  let simulated = false;
+  const sandboxClient = new RevolutBusinessClient(
+    withTestAccessToken(readRevolutBusinessConfig(environment())),
+    async (url, init) => {
+      calls.push({ url, method: init.method });
+      if (url.endsWith(
+        '/sandbox/transactions/transaction_0123456789/complete',
+      )) {
+        simulated = true;
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith('/transaction/transaction_0123456789')) {
+        return jsonResponse(200, transferDetail({
+          state: simulated ? 'completed' : 'pending',
+        }));
+      }
+      throw new Error(`unexpected path ${url}`);
+    },
+  );
+  const completed = await sandboxClient.simulateTransferState(
+    'transaction_0123456789',
+    'complete',
+    payoutJob(),
+  );
+  assert.equal(completed.state, 'COMPLETED');
+  assert.deepEqual(calls.map((call) => call.url.split('/api/1.0')[1]), [
+    '/sandbox/transactions/transaction_0123456789/complete',
+    '/transaction/transaction_0123456789',
+  ]);
+  await assert.rejects(
+    () => sandboxClient.simulateTransferState(
+      'transaction_0123456789',
+      'unknown',
+      payoutJob(),
+    ),
+    (error) => error?.code ===
+      'revolut_business_sandbox_simulation_invalid',
+  );
+
+  const productionClient = new RevolutBusinessClient(
+    withTestAccessToken(readRevolutBusinessConfig(environment({
+      REVOLUT_BUSINESS_ENVIRONMENT: 'production',
+    }))),
+    async () => {
+      throw new Error('production simulation must not make a request');
+    },
+  );
+  await assert.rejects(
+    () => productionClient.simulateTransferState(
+      'transaction_0123456789',
+      'complete',
+      payoutJob(),
+    ),
+    (error) => error?.code ===
+      'revolut_business_sandbox_simulation_forbidden',
+  );
 });
 
 test('expired credentials refresh through a short-lived RS256 assertion', async () => {
@@ -1144,6 +1322,12 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
   );
   const compose = read('ops/hetzner/docker-compose.supabase.yml');
   const envExample = read('ops/hetzner/.env.hetzner.example');
+  const sandboxSmoke = read(
+    'ops/partners/revolut-business-sandbox-smoke.mjs',
+  );
+  const sandboxBootstrap = read(
+    'ops/partners/revolut-business-sandbox-bootstrap.mjs',
+  );
   const parity = read('ops/hetzner/scripts/05-verify-parity.sh');
   const config = read('supabase/config.toml');
   assert.match(edge, /revolutApiEnvironmentEnabled/);
@@ -1213,6 +1397,43 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
   );
   assert.match(envExample, /^REVOLUT_BUSINESS_ENVIRONMENT=$/m);
   assert.match(
+    envExample,
+    /^REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS=false$/m,
+  );
+  assert.doesNotMatch(
+    compose,
+    /REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS/,
+  );
+  assert.match(
+    sandboxSmoke,
+    /REVOLUT_BUSINESS_ENVIRONMENT !== "sandbox"/,
+  );
+  assert.match(
+    sandboxSmoke,
+    /REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS !== "true"/,
+  );
+  assert.match(sandboxSmoke, /simulateTransferState/);
+  assert.doesNotMatch(sandboxSmoke, /console\.log\([^)]*(?:token|clientId|id)/i);
+  for (const protectedPath of [
+    'sandbox_bootstrap_authorization_code_must_be_outside_workspace',
+    'sandbox_bootstrap_token_stage_must_be_outside_workspace',
+    'sandbox_bootstrap_output_must_be_outside_workspace',
+  ]) {
+    assert.match(sandboxBootstrap, new RegExp(protectedPath));
+  }
+  assert.match(
+    sandboxBootstrap,
+    /fs\.rm\(authorizationCodeFile, \{ force: true \}\)/,
+  );
+  assert.match(
+    sandboxBootstrap,
+    /fs\.rm\(tokenStageFile, \{ force: true \}\)/,
+  );
+  assert.doesNotMatch(
+    sandboxBootstrap,
+    /console\.log\([^)]*(?:token|clientId|authorizationCode)/i,
+  );
+  assert.match(
     compose,
     /REVOLUT_BUSINESS_ENVIRONMENT: \$\{REVOLUT_BUSINESS_ENVIRONMENT:-\}/,
   );
@@ -1225,6 +1446,52 @@ test('Edge and ops contracts keep Revolut API off by default', () => {
   assert.match(
     config,
     /\[functions\.norva-partners-revolut-payout\]\nverify_jwt = false/,
+  );
+});
+
+test('sandbox bootstrap rejects a token staging path inside the workspace before any network call', (t) => {
+  const protectedDirectory = fs.mkdtempSync(path.join(
+    os.tmpdir(),
+    'norva-revolut-bootstrap-',
+  ));
+  t.after(() => fs.rmSync(protectedDirectory, {
+    recursive: true,
+    force: true,
+  }));
+  const portable = (value) => value.replace(/\\/g, '/');
+  const configPath = path.join(protectedDirectory, 'bootstrap.env');
+  fs.writeFileSync(configPath, [
+    'REVOLUT_BUSINESS_ENVIRONMENT=sandbox',
+    'REVOLUT_BUSINESS_CLIENT_ID=sandbox-client-id',
+    'REVOLUT_BUSINESS_ISSUER=norva.tv',
+    `REVOLUT_BUSINESS_PRIVATE_KEY_FILE=${portable(path.join(protectedDirectory, 'private.pem'))}`,
+    `REVOLUT_BUSINESS_AUTHORIZATION_CODE_FILE=${portable(path.join(protectedDirectory, 'authorization-code.txt'))}`,
+    `REVOLUT_BUSINESS_SANDBOX_TOKEN_FILE=${portable(path.join(root, '.forbidden-token-stage.env'))}`,
+    `REVOLUT_BUSINESS_SANDBOX_OUTPUT_FILE=${portable(path.join(protectedDirectory, 'runtime.env'))}`,
+    'REVOLUT_BUSINESS_SOURCE_CURRENCY=USD',
+    '',
+  ].join('\n'), 'utf8');
+
+  const result = spawnSync(process.execPath, [
+    path.join(root, 'ops/partners/revolut-business-sandbox-bootstrap.mjs'),
+    '--config',
+    configPath,
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+
+  assert.equal(result.status, 1);
+  assert.deepEqual(JSON.parse(result.stderr.trim()), {
+    ok: false,
+    error: 'sandbox_bootstrap_token_stage_must_be_outside_workspace',
+    phase: 'configuration',
+  });
+  assert.equal(result.stdout, '');
+  assert.equal(
+    fs.existsSync(path.join(root, '.forbidden-token-stage.env')),
+    false,
   );
 });
 

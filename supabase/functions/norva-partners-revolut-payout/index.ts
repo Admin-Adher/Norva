@@ -662,8 +662,12 @@ function parseBeneficiaryProposal(body: unknown) {
       "The beneficiary proposal is invalid.",
     );
   }
-  const uuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Revolut documents UUID identifiers, but its Sandbox can return historical
+  // UUID-shaped values without RFC version/variant nibbles. These are provider
+  // identifiers, not Norva-owned request UUIDs, so validate the exact UUID
+  // shape while keeping the surrounding proposal contract fail-closed.
+  const providerUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const requestKey = String(body.request_key ?? "").trim().toLowerCase();
   const beneficiaryTokenRef = String(
     body.beneficiary_token_ref ?? "",
@@ -681,10 +685,10 @@ function parseBeneficiaryProposal(body: unknown) {
   const compactMasked = displayMasked.replace(/[\s-]/g, "");
   if (
     !/^por_[0-9a-f]{24}$/.test(requestKey) ||
-    !uuid.test(beneficiaryTokenRef) ||
+    !providerUuid.test(beneficiaryTokenRef) ||
     (
       beneficiaryPaymentMethodRef !== null &&
-      !uuid.test(beneficiaryPaymentMethodRef)
+      !providerUuid.test(beneficiaryPaymentMethodRef)
     ) ||
     displayMasked.length < 4 ||
     displayMasked.length > 64 ||

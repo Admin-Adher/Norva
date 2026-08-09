@@ -153,6 +153,8 @@ NORVA_PARTNERS_REVOLUT_API_BATCH       # forcé à 1 (un seul lease financier)
 NORVA_PARTNERS_REVOLUT_API_MAX_BATCHES # 1..4, défaut 2
 NORVA_PARTNERS_REVOLUT_API_LEASE_SECONDS # 60..240, défaut 240
 REVOLUT_BUSINESS_ENVIRONMENT           # choix explicite : sandbox | production
+REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS
+                                       # smoke isolé uniquement ; jamais production/Edge
 REVOLUT_BUSINESS_CLIENT_ID
 REVOLUT_BUSINESS_ISSUER
 REVOLUT_BUSINESS_PRIVATE_KEY_PEM
@@ -517,15 +519,40 @@ automatiquement l'allocation : seule une preuve provider terminale et
 rapprochée peut déclencher la libération ou la contre-écriture append-only.
 
 Une future activation nécessite un change-control séparé et un upgrade
-explicite du plan Revolut. Le sandbox valide l'authentification, l'idempotence et
-les contrats que Revolut y expose, mais ne constitue pas une preuve de paiement
-de bout en bout : `/pay/fields` n'y est pas disponible et le client reste
-volontairement fail-closed. Avant la gate API, Finance réalise donc un
-micro-virement supervisé en production, vérifie `/pay/fields`, le quote, la
-transaction canonique puis son rapprochement exact. Activer un seul des deux
-verrous ne lance aucun job. Pour un rollback, passer d'abord le kill switch Edge
-à `false`, puis le flag DB à `false`, remettre les corridors en
-`revolut_manual` et traiter les jobs ambigus en revue manuelle.
+explicite du plan Revolut. Le sandbox valide l'authentification, l'idempotence,
+le quote, la création, les observations canoniques et les transitions simulées
+que Revolut y expose, mais ne constitue pas une preuve de paiement de bout en
+bout : `/pay/fields` n'y est pas disponible et aucun argent réel n'est déplacé.
+Le runner isolé `npm run partners:revolut:sandbox-smoke` peut contourner
+uniquement cette absence avec
+`REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS=true`. Le chargeur refuse cette
+valeur en production et Docker Compose ne la transmet pas aux fonctions Edge.
+Les identifiants proviennent exclusivement du compte Sandbox séparé et le
+runner ne publie que des empreintes tronquées.
+
+Préparer d'abord le bootstrap à partir de
+`ops/partners/revolut-business-sandbox-bootstrap.env.example`, dans un dossier
+ACL protégé hors Git. Le code OAuth à durée de vie courte reste dans un fichier
+séparé. `npm run partners:revolut:sandbox-bootstrap -- --config <fichier>`
+échange ce code, sélectionne un compte Sandbox déterministe, crée ou retrouve
+le bénéficiaire de test et produit atomiquement le fichier d'exécution protégé.
+Ce fichier peut contenir un access token éphémère afin que le smoke test
+s'exécute immédiatement sans second échange OAuth ; l'adaptateur de production
+continue d'exiger son refresh token et ce mécanisme n'est jamais injecté dans
+Docker Compose. Exécuter ensuite
+`npm run partners:revolut:sandbox-smoke -- --config <fichier généré>`, puis
+détruire ou archiver sous ACL les artefacts expirés. Ne jamais y copier les clés
+Merchant API ni les identifiants du compte Revolut Business réel. Les actions
+simulées autorisées sont `complete`, `revert`, `decline` et `fail` ; chaque
+action est suivie d'une lecture canonique de la transaction et doit aboutir à
+l'état attendu.
+
+Avant la gate API, Finance réalise donc encore un micro-virement supervisé en
+production, vérifie `/pay/fields`, le quote, la transaction canonique puis son
+rapprochement exact. Activer un seul des deux verrous ne lance aucun job. Pour
+un rollback, passer d'abord le kill switch Edge à `false`, puis le flag DB à
+`false`, remettre les corridors en `revolut_manual` et traiter les jobs ambigus
+en revue manuelle.
 
 Sous Basic, aucun job `pg_cron` et aucun script d'enregistrement ne cible
 `norva-partners-revolut-payout/cron/run`. Le contrôle de parité exige zéro job

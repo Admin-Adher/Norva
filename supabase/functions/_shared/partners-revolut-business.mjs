@@ -7,6 +7,12 @@
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Revolut documents provider identifiers as UUIDs, but its Sandbox can emit
+// historical UUID-shaped values whose version/variant nibbles are not RFC
+// constrained. Keep Norva-owned request UUIDs strict while accepting only the
+// exact hexadecimal UUID shape for provider-owned identifiers.
+const PROVIDER_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EXECUTION_KEY = /^rpx_[0-9a-f]{24}$/;
 const REFERENCE = /^NORVA-[A-F0-9]{12}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -15,6 +21,12 @@ const HASH = /^[0-9a-f]{64}$/;
 const API_BASES = new Set([
   "https://b2b.revolut.com/api/1.0",
   "https://sandbox-b2b.revolut.com/api/1.0",
+]);
+const SANDBOX_TRANSACTION_ACTIONS = new Set([
+  "complete",
+  "revert",
+  "decline",
+  "fail",
 ]);
 const TRANSACTION_STATES = new Map([
   ["created", "CREATED"],
@@ -69,6 +81,24 @@ export function readRevolutBusinessConfig(env = Deno.env) {
   );
   const rawAccounts = env.get("REVOLUT_BUSINESS_SOURCE_ACCOUNTS_JSON");
   const rawFeeCaps = env.get("REVOLUT_BUSINESS_MAX_FEE_MINOR_JSON");
+  const rawSandboxSkipTransferFields =
+    env.get("REVOLUT_BUSINESS_SANDBOX_SKIP_TRANSFER_FIELDS");
+  if (
+    rawSandboxSkipTransferFields !== undefined &&
+    rawSandboxSkipTransferFields !== "" &&
+    rawSandboxSkipTransferFields !== "false" &&
+    rawSandboxSkipTransferFields !== "true"
+  ) {
+    throw new RevolutBusinessContractError(
+      "revolut_business_sandbox_override_invalid",
+    );
+  }
+  const sandboxSkipTransferFields = rawSandboxSkipTransferFields === "true";
+  if (sandboxSkipTransferFields && environment !== "sandbox") {
+    throw new RevolutBusinessContractError(
+      "revolut_business_sandbox_override_forbidden",
+    );
+  }
   const timeoutMs = boundedInteger(
     env.get("REVOLUT_BUSINESS_TIMEOUT_MS"),
     1_000,
@@ -122,7 +152,7 @@ export function readRevolutBusinessConfig(env = Deno.env) {
     if (
       !CURRENCY.test(currency) ||
       typeof accountId !== "string" ||
-      !UUID.test(accountId)
+      !PROVIDER_UUID.test(accountId)
     ) {
       throw new RevolutBusinessContractError(
         "revolut_business_accounts_invalid",
@@ -159,6 +189,7 @@ export function readRevolutBusinessConfig(env = Deno.env) {
     privateKeyPem,
     sourceAccounts: Object.freeze(sourceAccounts),
     maxFeeMinor: Object.freeze(maxFeeMinor),
+    sandboxSkipTransferFields,
     timeoutMs,
   });
 }
@@ -196,9 +227,14 @@ export function normalizeRevolutPayoutJob(raw) {
       )
     ) ||
     typeof raw.beneficiary_token_ref !== "string" ||
-    !UUID.test(raw.beneficiary_token_ref) ||
-    typeof raw.beneficiary_payment_method_ref !== "string" ||
-    !UUID.test(raw.beneficiary_payment_method_ref) ||
+    !PROVIDER_UUID.test(raw.beneficiary_token_ref) ||
+    (
+      raw.beneficiary_payment_method_ref !== null &&
+      (
+        typeof raw.beneficiary_payment_method_ref !== "string" ||
+        !PROVIDER_UUID.test(raw.beneficiary_payment_method_ref)
+      )
+    ) ||
     !Number.isSafeInteger(raw.amount_minor) ||
     raw.amount_minor < 1 ||
     typeof raw.currency !== "string" ||
@@ -275,6 +311,9 @@ function parseUnsignedProviderAmountMinor(value, exponent, allowZero) {
 
 export class RevolutBusinessClient {
   constructor(config, fetchImpl = fetch) {
+    const hasInitialAccessToken = config?.initialAccessToken !== undefined;
+    const hasInitialAccessTokenExpiry =
+      config?.initialAccessTokenExpiresAt !== undefined;
     if (
       !isRecord(config) ||
       !API_BASES.has(config.baseUrl) ||
@@ -294,6 +333,21 @@ export class RevolutBusinessClient {
       !config.privateKeyPem ||
       !isRecord(config.sourceAccounts) ||
       !isRecord(config.maxFeeMinor) ||
+      typeof config.sandboxSkipTransferFields !== "boolean" ||
+      (
+        config.sandboxSkipTransferFields &&
+        config.environment !== "sandbox"
+      ) ||
+      hasInitialAccessToken !== hasInitialAccessTokenExpiry ||
+      (
+        hasInitialAccessToken &&
+        (
+          typeof config.initialAccessToken !== "string" ||
+          !cleanText(config.initialAccessToken, 4096) ||
+          !Number.isFinite(config.initialAccessTokenExpiresAt) ||
+          config.initialAccessTokenExpiresAt <= Date.now()
+        )
+      ) ||
       typeof fetchImpl !== "function"
     ) {
       throw new RevolutBusinessContractError(
@@ -304,7 +358,7 @@ export class RevolutBusinessClient {
     this.fetchImpl = fetchImpl;
     this.accessToken = config.initialAccessToken || null;
     this.accessTokenExpiresAt = config.initialAccessToken
-      ? Number.POSITIVE_INFINITY
+      ? config.initialAccessTokenExpiresAt
       : 0;
     this.refreshPromise = null;
   }
@@ -315,20 +369,29 @@ export class RevolutBusinessClient {
       return await this.getTransfer(job.providerTransactionId, rawJob);
     }
     const accountId = this.config.sourceAccounts[job.currency];
-    if (!accountId || !UUID.test(accountId)) {
+    if (!accountId || !PROVIDER_UUID.test(accountId)) {
       throw new RevolutBusinessContractError(
         "revolut_source_account_unavailable",
       );
     }
     const receiver = {
       counterparty_id: job.beneficiaryTokenRef,
-      account_id: job.beneficiaryPaymentMethodRef,
+      ...(job.beneficiaryPaymentMethodRef
+        ? { account_id: job.beneficiaryPaymentMethodRef }
+        : {}),
     };
-    const fields = await this.#request("/pay/fields", {
-      method: "POST",
-      body: { account_id: accountId, receiver },
-    });
-    const corridorFields = validateTransferFields(fields, job.reference);
+    // Revolut does not expose /pay/fields in its Business API sandbox. The
+    // explicit sandbox-only override lets a dedicated smoke test exercise
+    // OAuth, quote, idempotent payment, canonical observation and simulations.
+    // Production can never bypass live corridor-field discovery.
+    let corridorFields = Object.freeze({});
+    if (!this.config.sandboxSkipTransferFields) {
+      const fields = await this.#request("/pay/fields", {
+        method: "POST",
+        body: { account_id: accountId, receiver },
+      });
+      corridorFields = validateTransferFields(fields, job.reference);
+    }
 
     const amountText = formatMinorUnits(
       job.amountMinor,
@@ -415,7 +478,7 @@ export class RevolutBusinessClient {
     }
     const job = normalizeRevolutPayoutJob(rawJob);
     const sourceAccountId = this.config.sourceAccounts[job.currency];
-    if (!UUID.test(sourceAccountId)) {
+    if (!PROVIDER_UUID.test(sourceAccountId)) {
       throw new RevolutBusinessContractError(
         "revolut_source_account_unavailable",
       );
@@ -445,7 +508,7 @@ export class RevolutBusinessClient {
       );
     }
     const sourceAccountId = this.config.sourceAccounts[job.currency];
-    if (!UUID.test(sourceAccountId)) {
+    if (!PROVIDER_UUID.test(sourceAccountId)) {
       throw new RevolutBusinessContractError(
         "revolut_source_account_unavailable",
       );
@@ -478,6 +541,39 @@ export class RevolutBusinessClient {
       );
     }
     return await this.getTransfer(matching[0].id, rawJob);
+  }
+
+  async simulateTransferState(providerTransactionId, action, rawJob) {
+    if (this.config.environment !== "sandbox") {
+      throw new RevolutBusinessContractError(
+        "revolut_business_sandbox_simulation_forbidden",
+      );
+    }
+    if (
+      typeof providerTransactionId !== "string" ||
+      !TOKEN.test(providerTransactionId) ||
+      providerTransactionId.length > 128 ||
+      typeof action !== "string" ||
+      !SANDBOX_TRANSACTION_ACTIONS.has(action)
+    ) {
+      throw new RevolutBusinessContractError(
+        "revolut_business_sandbox_simulation_invalid",
+      );
+    }
+    const job = normalizeRevolutPayoutJob(rawJob);
+    if (
+      job.providerTransactionId !== null &&
+      job.providerTransactionId !== providerTransactionId
+    ) {
+      throw new RevolutBusinessContractError(
+        "revolut_business_sandbox_simulation_invalid",
+      );
+    }
+    await this.#request(
+      `/sandbox/transactions/${encodeURIComponent(providerTransactionId)}/${action}`,
+      { method: "POST", expect: "optional-record" },
+    );
+    return await this.getTransfer(providerTransactionId, rawJob);
   }
 
   async #request(
@@ -530,7 +626,12 @@ export class RevolutBusinessClient {
       if (
         (expect === "record" && !isRecord(payload)) ||
         (expect === "array" && !Array.isArray(payload)) ||
-        !["record", "array"].includes(expect)
+        (
+          expect === "optional-record" &&
+          payload !== null &&
+          !isRecord(payload)
+        ) ||
+        !["record", "array", "optional-record"].includes(expect)
       ) {
         throw new RevolutBusinessContractError(
           "revolut_business_response_invalid",
@@ -667,7 +768,7 @@ export function normalizeRevolutTransaction(
   const acknowledgement = normalizeRevolutPaymentResponse(raw);
   if (
     !isRecord(job) ||
-    !UUID.test(sourceAccountId) ||
+    !PROVIDER_UUID.test(sourceAccountId) ||
     typeof expectedTransactionId !== "string" ||
     acknowledgement.id !== expectedTransactionId ||
     raw.type !== "transfer" ||
@@ -725,7 +826,13 @@ export function normalizeRevolutTransaction(
   ].filter((value) => value !== undefined);
   if (
     exposedPaymentMethodIds.some((value) =>
-      value !== job.beneficiaryPaymentMethodRef
+      typeof value !== "string" || !PROVIDER_UUID.test(value)
+    ) ||
+    (
+      job.beneficiaryPaymentMethodRef !== null &&
+      exposedPaymentMethodIds.some((value) =>
+        value !== job.beneficiaryPaymentMethodRef
+      )
     )
   ) {
     throw new RevolutBusinessContractError(
