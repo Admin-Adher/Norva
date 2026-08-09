@@ -872,7 +872,7 @@ class AdminPage {
 #page-admin .crm-toast.err{border-left-color:#ff6b6b;}
 @keyframes crmtoast{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 @media(prefers-reduced-motion:reduce){#page-admin .crm-toast,#page-admin .crm-modal-back{animation:none;}}
-#page-admin .crm-modal-back{position:fixed;inset:0;z-index:70;background:#000b;display:flex;align-items:center;justify-content:center;padding:20px;animation:crmtoast .15s ease both;}
+#page-admin .crm-modal-back{position:fixed;inset:0;z-index:10050;background:#000b;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:max(20px,env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) max(20px,env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px));animation:crmtoast .15s ease both;}
 #page-admin .crm-modal{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 24px 70px #000b;}
 #page-admin .crm-modal.is-wide{max-width:720px;}
 #page-admin .crm-modal h3{margin:0 0 8px;font-size:16px;color:var(--color-text-primary,#fff);}
@@ -884,7 +884,7 @@ class AdminPage {
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
 #page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
 #page-admin .crm-modal button:disabled{opacity:.52;cursor:not-allowed;}
-#page-admin .partners-kyc-guide{max-height:min(860px,calc(100dvh - 40px));overflow:auto;overscroll-behavior:contain;padding-bottom:max(20px,env(safe-area-inset-bottom,0px));}
+#page-admin .partners-kyc-guide{max-height:min(860px,calc(100dvh - max(20px,env(safe-area-inset-top,0px)) - max(20px,env(safe-area-inset-bottom,0px))));overflow:auto;overscroll-behavior:contain;padding-bottom:max(20px,env(safe-area-inset-bottom,0px));}
 #page-admin .partners-kyc-guide-head{display:grid;gap:6px;margin-bottom:16px;}
 #page-admin .partners-kyc-guide-head p{margin:0;}
 #page-admin .partners-kyc-guide-list{display:grid;gap:8px;margin:0 0 18px;padding:0;list-style:none;}
@@ -959,8 +959,8 @@ class AdminPage {
   #page-admin .partners-risk-actions{justify-content:flex-start;}
   #page-admin .partners-pagination{flex-wrap:wrap;justify-content:space-between;}
   #page-admin .partners-pagination-status{width:100%;margin-right:0;}
-  #page-admin .crm-modal-back{align-items:flex-end;padding:12px 12px max(12px,env(safe-area-inset-bottom,0px));}
-  #page-admin .partners-kyc-guide{max-height:calc(100dvh - 24px);border-radius:16px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));}
+  #page-admin .crm-modal-back{align-items:flex-end;padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));}
+  #page-admin .partners-kyc-guide{max-height:calc(100dvh - max(12px,env(safe-area-inset-top,0px)) - max(12px,env(safe-area-inset-bottom,0px)));border-radius:16px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));}
   #page-admin .partners-kyc-guide .mrow{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px;}
   #page-admin .partners-kyc-guide-item{grid-template-columns:1fr;gap:8px;}
   #page-admin .partners-kyc-guide-state{justify-self:start;}
@@ -1366,13 +1366,41 @@ class AdminPage {
     }
     _confirm(message, opts) { const o = opts || {}; return this._modal({ message, danger: o.danger, okLabel: o.okLabel || 'Confirmer' }); }
     _prompt(message, def) { return this._modal({ message, prompt: true, def: def || '', okLabel: 'OK' }); }
+    _isolateModalBackground(overlay) {
+        const candidates = new Set();
+        let node = overlay;
+        while (node?.parentElement) {
+            const parent = node.parentElement;
+            Array.from(parent.children || []).forEach((sibling) => {
+                if (sibling !== node && !sibling.matches?.('script, style, link')) {
+                    candidates.add(sibling);
+                }
+            });
+            if (parent === document.body) break;
+            node = parent;
+        }
+        const snapshot = Array.from(candidates).map((element) => ({
+            element,
+            inert: element.hasAttribute('inert'),
+            ariaHidden: element.getAttribute('aria-hidden')
+        }));
+        snapshot.forEach(({ element }) => {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        });
+        return () => snapshot.forEach(({ element, inert, ariaHidden }) => {
+            if (!element?.isConnected) return;
+            if (!inert) element.removeAttribute('inert');
+            if (ariaHidden == null) element.removeAttribute('aria-hidden');
+            else element.setAttribute('aria-hidden', ariaHidden);
+        });
+    }
     // Accessible modal: focus-trapped (Tab cycles inside, background made inert), Escape/Enter/
     // backdrop, labelled by its title + described by its message. Returns a Promise —
     // false/null on cancel, true on confirm, or the trimmed input string on prompt.
     _modal(o) {
         return new Promise((resolve) => {
             const root = document.getElementById('page-admin') || document.body;
-            const shell = root.querySelector('.crm-shell');
             const prev = document.activeElement;
             const uid = 'crmmodal' + (this._modalSeq = (this._modalSeq || 0) + 1);
             const back = document.createElement('div');
@@ -1400,7 +1428,7 @@ class AdminPage {
             back.innerHTML = `<div class="crm-modal${o.wide ? ' is-wide' : ''}"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
                 <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
             root.appendChild(back);
-            if (shell) shell.setAttribute('inert', ''); // background can't be reached by pointer/tab/AT
+            const restoreBackground = this._isolateModalBackground(back);
             const input = back.querySelector('.crm-modal-input');
             const okBtn = back.querySelector('.ok');
             const cancelBtn = back.querySelector('.cancel');
@@ -1409,7 +1437,7 @@ class AdminPage {
             const focusables = () => Array.from(back.querySelectorAll('input,textarea,button')).filter(el => !el.disabled);
             const finish = (val) => {
                 document.removeEventListener('keydown', onKey, true);
-                if (shell) shell.removeAttribute('inert');
+                restoreBackground();
                 if (input) input.value = '';
                 back.remove();
                 if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } }
@@ -5628,7 +5656,6 @@ class AdminPage {
             && auth?.challengeAndVerifyMfa;
         return new Promise((resolve) => {
             const root = document.getElementById('page-admin') || document.body;
-            const shell = root.querySelector?.('.crm-shell');
             const previousFocus = document.activeElement;
             const uid = `partners-kyc-guide-${this._modalSeq = (this._modalSeq || 0) + 1}`;
             const back = document.createElement('div');
@@ -5698,7 +5725,7 @@ class AdminPage {
                 </div>
               </section>`;
             root.appendChild(back);
-            if (shell) shell.setAttribute('inert', '');
+            const restoreBackground = this._isolateModalBackground(back);
             const modal = back.querySelector('.partners-kyc-guide');
             const cancelButton = back.querySelector('.cancel');
             const submitButton = back.querySelector('.ok');
@@ -5715,7 +5742,7 @@ class AdminPage {
             const finish = (value) => {
                 if (busy && value === null) return;
                 document.removeEventListener('keydown', onKey, true);
-                if (shell) shell.removeAttribute('inert');
+                restoreBackground();
                 if (totp) totp.value = '';
                 back.remove();
                 try { previousFocus?.focus?.({ preventScroll: true }); } catch (_) {}

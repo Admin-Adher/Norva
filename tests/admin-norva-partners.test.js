@@ -1487,6 +1487,55 @@ test('Admin Partners exposes five persistent internal views in the required orde
   assert.match(source, /\['ArrowLeft', 'ArrowRight', 'Home', 'End'\]/);
 });
 
+test('Admin dialogs stay above global navigation and isolate every background layer', () => {
+  assert.match(source, /\.crm-modal-back\{[^}]*z-index:10050/);
+  for (const inset of ['top', 'right', 'bottom', 'left']) {
+    assert.match(source, new RegExp(`safe-area-inset-${inset}`));
+  }
+
+  const node = (parentElement = null) => ({
+    parentElement,
+    children: [],
+    isConnected: true,
+    attributes: new Map(),
+    matches() { return false; },
+    hasAttribute(name) { return this.attributes.has(name); },
+    getAttribute(name) { return this.attributes.get(name) ?? null; },
+    setAttribute(name, value) { this.attributes.set(name, String(value)); },
+    removeAttribute(name) { this.attributes.delete(name); },
+  });
+  const body = node();
+  const navbar = node(body);
+  const main = node(body);
+  const bottomNav = node(body);
+  const pageRoot = node(main);
+  const shell = node(pageRoot);
+  const overlay = node(pageRoot);
+  body.children = [navbar, main, bottomNav];
+  main.children = [pageRoot];
+  pageRoot.children = [shell, overlay];
+
+  const AdminPage = loadAdminPage({
+    body,
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  const restore = page._isolateModalBackground(overlay);
+  for (const background of [shell, navbar, bottomNav]) {
+    assert.equal(background.hasAttribute('inert'), true);
+    assert.equal(background.getAttribute('aria-hidden'), 'true');
+  }
+  assert.equal(overlay.hasAttribute('inert'), false);
+
+  restore();
+  for (const background of [shell, navbar, bottomNav]) {
+    assert.equal(background.hasAttribute('inert'), false);
+    assert.equal(background.getAttribute('aria-hidden'), null);
+  }
+});
+
 test('Admin Partners module coordinator rejects stale responses', async () => {
   const AdminPage = loadAdminPage();
   const page = new AdminPage({});
