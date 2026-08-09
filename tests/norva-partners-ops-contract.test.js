@@ -602,6 +602,25 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const restorePgTap = read(
     'supabase/tests/affiliate_restore_compatibility.sql',
   );
+  const restorePlan = Number(
+    restorePgTap.match(/select extensions\.plan\((\d+)\);/)?.[1],
+  );
+  const restoreRoutineCatalog = JSON.parse(
+    restorePgTap.match(
+      /set local norva\.partners_restore_expected_routines = '(\[[\s\S]*?\])';/,
+    )?.[1] || '[]',
+  );
+  const staticAssertions =
+    (restorePgTap.match(/^select extensions\.(?:is|ok)\(/gm) || []).length - 1;
+  const expandedAclAssertions = restoreRoutineCatalog.filter(
+    (routine) => routine.access_role !== 'owner',
+  ).length;
+  assert.equal(restoreRoutineCatalog.length, 164);
+  assert.equal(
+    restorePlan,
+    staticAssertions + expandedAclAssertions,
+    'the pgTAP plan must match fixed assertions plus one ACL assertion per exposed routine',
+  );
 
   assert.match(rehearsal, /if \[\[ "\$\{EUID\}" -ne 0 \]\]/);
   assert.match(rehearsal, /flock -n 9/);
@@ -782,7 +801,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(110\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(112\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(

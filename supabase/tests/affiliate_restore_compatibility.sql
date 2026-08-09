@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(110);
+select extensions.plan(112);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
 -- and ACL assertions for the audited d5d596b baseline plus the guided Didit
