@@ -59,6 +59,21 @@ test('France pilot currency alignment is atomic and auditable', () => {
   );
   assert.match(
     migration,
+    /partners_payouts_live[\s\S]*partners_tv_relay_enabled[\s\S]*partners_revolut_api_enabled[\s\S]*and flag\.enabled/,
+  );
+  assert.match(
+    migration,
+    /partners_enabled[\s\S]*partners_earnings_enabled[\s\S]*partners_credit_redemptions_enabled[\s\S]*partners_shadow_mode/,
+  );
+  assert.match(
+    migration,
+    /norva\.partners_control'[\s\S]*admin_partners_control'[\s\S]*enabled = false/,
+  );
+  assert.match(migration, /if v_disabled <> cardinality\(v_disabled_flag_keys\) then/);
+  assert.match(migration, /'feature_flag_disabled_for_policy_alignment'/);
+  assert.match(migration, /'requires_explicit_reactivation', true/);
+  assert.match(
+    migration,
     /set[\s\S]*satisfied = false[\s\S]*satisfied_at = null[\s\S]*where gate\.gate_key = any\(v_revoked_gate_keys\)/,
   );
   assert.match(migration, /if v_revoked <> cardinality\(v_revoked_gate_keys\) then/);

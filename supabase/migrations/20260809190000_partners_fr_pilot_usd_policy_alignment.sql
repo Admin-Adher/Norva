@@ -10,8 +10,11 @@ do $$
 declare
   v_program affiliate_private.affiliate_program_versions%rowtype;
   v_policy affiliate_private.affiliate_country_policies%rowtype;
+  v_disabled_flag_keys text[] := '{}'::text[];
   v_revoked_gate_keys text[] := '{}'::text[];
+  v_flag_key text;
   v_gate_key text;
+  v_disabled integer := 0;
   v_revoked integer := 0;
   v_updated integer := 0;
 begin
@@ -86,6 +89,96 @@ begin
       'active USD metadata and a positive USD threshold are required'
       using errcode = '55000';
   end if;
+
+  if exists (
+    select 1
+    from public.admin_feature_flags flag
+    where flag.key in (
+      'partners_payouts_live',
+      'partners_tv_relay_enabled',
+      'partners_revolut_api_enabled'
+    )
+      and flag.enabled
+  ) then
+    raise exception
+      'disable live cash, TV relay and Revolut API before France USD alignment'
+      using errcode = '55000';
+  end if;
+
+  -- The existing database contract correctly refuses to invalidate release
+  -- evidence while membership or an economic worker is live. Enter a bounded
+  -- maintenance state first. These flags remain off after the migration until
+  -- an operator registers the new manifest, renews the scoped approvals under
+  -- AAL2 and explicitly re-enables each capability.
+  perform 1
+  from public.admin_feature_flags flag
+  where flag.key in (
+    'partners_enabled',
+    'partners_earnings_enabled',
+    'partners_credit_redemptions_enabled',
+    'partners_shadow_mode'
+  )
+  order by flag.key
+  for update;
+
+  select coalesce(
+    array_agg(flag.key order by flag.key),
+    '{}'::text[]
+  )
+  into v_disabled_flag_keys
+  from public.admin_feature_flags flag
+  where flag.key in (
+    'partners_enabled',
+    'partners_earnings_enabled',
+    'partners_credit_redemptions_enabled',
+    'partners_shadow_mode'
+  )
+    and flag.enabled;
+
+  perform set_config(
+    'norva.partners_control',
+    'admin_partners_control',
+    true
+  );
+  update public.admin_feature_flags flag
+  set
+    enabled = false,
+    updated_at = now(),
+    updated_by = null
+  where flag.key = any(v_disabled_flag_keys)
+    and flag.enabled;
+
+  get diagnostics v_disabled = row_count;
+  if v_disabled <> cardinality(v_disabled_flag_keys) then
+    raise exception 'France P0 maintenance flag transition was not atomic'
+      using errcode = '55000';
+  end if;
+
+  foreach v_flag_key in array v_disabled_flag_keys loop
+    insert into affiliate_private.affiliate_events (
+      aggregate_type,
+      aggregate_key,
+      action,
+      actor_type,
+      actor_pseudonym,
+      justification,
+      before_state,
+      after_state
+    )
+    values (
+      'feature_flag',
+      v_flag_key,
+      'feature_flag_disabled_for_policy_alignment',
+      'system',
+      null,
+      'Maintenance contrôlée avant alignement USD et renouvellement des approbations France.',
+      jsonb_build_object('enabled', true),
+      jsonb_build_object(
+        'enabled', false,
+        'requires_explicit_reactivation', true
+      )
+    );
+  end loop;
 
   -- Approval packages are immutable and a scoped satisfied gate deliberately
   -- prevents edits to the policy it approved. Revoke only the currently bound

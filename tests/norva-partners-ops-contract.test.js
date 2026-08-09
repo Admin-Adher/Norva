@@ -740,6 +740,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /not policy\.individual_available/);
   assert.match(rehearsal, /account\.status <> 'closed'/);
   assert.match(rehearsal, /capture_fr_alignment_release_state/);
+  assert.match(rehearsal, /capture_fr_alignment_flag_state/);
   assert.match(
     rehearsal,
     /fr_scoped_release_gates_before=\$BASELINE_FR_SCOPED_GATES/,
@@ -754,7 +755,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /BASELINE_EVENTS \+ BASELINE_FR_SCOPED_GATES \+ 1/,
+    /BASELINE_EVENTS \+ BASELINE_FR_SCOPED_GATES[\s\\]*\+ BASELINE_FR_MAINTENANCE_FLAGS \+ 1/,
+  );
+  assert.match(
+    rehearsal,
+    /BASELINE_MANAGED_FLAG_ENABLED - BASELINE_FR_MAINTENANCE_FLAGS/,
+  );
+  assert.match(
+    rehearsal,
+    /BASELINE_FR_FLAG_EVENTS \+ BASELINE_FR_MAINTENANCE_FLAGS/,
   );
   assert.match(rehearsal, /EXPECTED_FINAL_PARTNER_EVENTS/);
   assert.match(

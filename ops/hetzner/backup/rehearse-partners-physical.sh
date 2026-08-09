@@ -502,6 +502,11 @@ capture_fr_alignment_release_state() {
     "with scoped_gate as (select distinct gate.gate_key from affiliate_private.affiliate_release_gates gate join affiliate_private.affiliate_release_gate_approval_bindings binding on binding.gate_key = gate.gate_key join affiliate_private.affiliate_approval_packages package on package.id = binding.approval_package_id join affiliate_private.affiliate_program_versions program on program.id = package.program_version_id cross join lateral jsonb_array_elements(package.jurisdiction_scope) scope(item) where gate.satisfied and program.version_key = 'individual-global-p0-v2' and program.status = 'active' and program.account_type = 'individual' and program.commission_rate_bps = 2000 and program.attribution_window_days = 30 and program.maturation_days = 45 and program.threshold_reference_currency = 'USD' and program.threshold_reference_minor = 1000 and program.payout_fee_policy = 'platform_absorbed' and scope.item ->> 'country_code' = 'FR' and nullif(scope.item ->> 'subdivision_code', '') is null) select (select count(*) from affiliate_private.affiliate_release_gates)::text || '|' || (select count(*) from affiliate_private.affiliate_release_gates where satisfied)::text || '|' || (select count(*) from affiliate_private.affiliate_release_gate_approval_bindings)::text || '|' || (select count(*) from scoped_gate)::text || '|' || (select count(*) from affiliate_private.affiliate_events where action = 'country_policy_currency_aligned' and aggregate_key = 'individual-global-p0-v2:FR:*')::text || '|' || (select count(*) from affiliate_private.affiliate_events where action = 'release_gate_revoked_for_policy_alignment' and before_state ->> 'country_code' = 'FR')::text;"
 }
 
+capture_fr_alignment_flag_state() {
+  clone_psql -At -v ON_ERROR_STOP=1 -c \
+    "select count(*)::text || '|' || count(*) filter (where flag.enabled)::text || '|' || count(*) filter (where flag.enabled and flag.key in ('partners_enabled','partners_earnings_enabled','partners_credit_redemptions_enabled','partners_shadow_mode'))::text || '|' || (select count(*) from affiliate_private.affiliate_events event where event.action = 'feature_flag_disabled_for_policy_alignment')::text from public.admin_feature_flags flag where flag.key = any(array['partners_enabled','partners_invite_only','partners_cash_pilot_allowlist_only','partners_earnings_enabled','partners_credit_redemptions_enabled','partners_shadow_mode','partners_payouts_live','partners_tv_relay_enabled','partners_revolut_api_enabled']::text[]);"
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -637,6 +642,23 @@ if (( BASELINE_FR_SCOPED_GATES > BASELINE_RELEASE_GATE_SATISFIED \
 fi
 proof_line "fr_scoped_release_gates_before=$BASELINE_FR_SCOPED_GATES"
 
+CURRENT_STEP="France maintenance-flag baseline capture"
+FR_FLAG_STATE_BEFORE="$(capture_fr_alignment_flag_state \
+  2> "$RAW_DIR/fr-flag-state-before.log")" || fail
+if [[ ! "$FR_FLAG_STATE_BEFORE" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
+  fail
+fi
+IFS='|' read -r \
+  BASELINE_MANAGED_FLAG_TOTAL \
+  BASELINE_MANAGED_FLAG_ENABLED \
+  BASELINE_FR_MAINTENANCE_FLAGS \
+  BASELINE_FR_FLAG_EVENTS \
+  <<< "$FR_FLAG_STATE_BEFORE"
+if (( BASELINE_FR_MAINTENANCE_FLAGS > BASELINE_MANAGED_FLAG_ENABLED )); then
+  fail
+fi
+proof_line "fr_maintenance_flags_before=$BASELINE_FR_MAINTENANCE_FLAGS"
+
 CURRENT_STEP="mode-specific Partners migration handling"
 PSQL_TIMEOUT_SECONDS="${PARTNERS_REHEARSAL_PSQL_TIMEOUT_SECONDS:-3600}"
 if [[ ! "$PSQL_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{2,5}$ ]]; then
@@ -718,6 +740,11 @@ FR_RELEASE_STATE_AFTER="$(capture_fr_alignment_release_state \
 if [[ ! "$FR_RELEASE_STATE_AFTER" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
   fail
 fi
+FR_FLAG_STATE_AFTER="$(capture_fr_alignment_flag_state \
+  2> "$RAW_DIR/fr-flag-state-after.log")" || fail
+if [[ ! "$FR_FLAG_STATE_AFTER" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
+  fail
+fi
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
   EXPECTED_RELEASE_GATE_SATISFIED=$((
     BASELINE_RELEASE_GATE_SATISFIED - BASELINE_FR_SCOPED_GATES
@@ -730,18 +757,32 @@ if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
     BASELINE_FR_REVOCATION_EVENTS + BASELINE_FR_SCOPED_GATES
   ))
   EXPECTED_FR_RELEASE_STATE="${BASELINE_RELEASE_GATE_TOTAL}|${EXPECTED_RELEASE_GATE_SATISFIED}|${EXPECTED_RELEASE_BINDINGS}|0|${EXPECTED_FR_ALIGNMENT_EVENTS}|${EXPECTED_FR_REVOCATION_EVENTS}"
+  EXPECTED_MANAGED_FLAG_ENABLED=$((
+    BASELINE_MANAGED_FLAG_ENABLED - BASELINE_FR_MAINTENANCE_FLAGS
+  ))
+  EXPECTED_FR_FLAG_EVENTS=$((
+    BASELINE_FR_FLAG_EVENTS + BASELINE_FR_MAINTENANCE_FLAGS
+  ))
+  EXPECTED_FR_FLAG_STATE="${BASELINE_MANAGED_FLAG_TOTAL}|${EXPECTED_MANAGED_FLAG_ENABLED}|0|${EXPECTED_FR_FLAG_EVENTS}"
   EXPECTED_FINAL_PARTNER_EVENTS=$((
-    BASELINE_EVENTS + BASELINE_FR_SCOPED_GATES + 1
+    BASELINE_EVENTS + BASELINE_FR_SCOPED_GATES \
+      + BASELINE_FR_MAINTENANCE_FLAGS + 1
   ))
 else
   EXPECTED_FR_RELEASE_STATE="$FR_RELEASE_STATE_BEFORE"
+  EXPECTED_FR_FLAG_STATE="$FR_FLAG_STATE_BEFORE"
   EXPECTED_FINAL_PARTNER_EVENTS="$BASELINE_EVENTS"
 fi
-readonly EXPECTED_FR_RELEASE_STATE EXPECTED_FINAL_PARTNER_EVENTS
+readonly EXPECTED_FR_RELEASE_STATE EXPECTED_FR_FLAG_STATE \
+  EXPECTED_FINAL_PARTNER_EVENTS
 if [[ "$FR_RELEASE_STATE_AFTER" != "$EXPECTED_FR_RELEASE_STATE" ]]; then
   fail
 fi
+if [[ "$FR_FLAG_STATE_AFTER" != "$EXPECTED_FR_FLAG_STATE" ]]; then
+  fail
+fi
 proof_line "fr_scoped_release_gates_revoked=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '%s' "$BASELINE_FR_SCOPED_GATES" || printf '0')"
+proof_line "fr_maintenance_flags_disabled=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '%s' "$BASELINE_FR_MAINTENANCE_FLAGS" || printf '0')"
 proof_line "fr_policy_alignment_events_added=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '1' || printf '0')"
 CURRENT_STEP="migration object ownership verification"
 ROUTINE_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
