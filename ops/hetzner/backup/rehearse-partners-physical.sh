@@ -497,6 +497,11 @@ capture_sensitive_partner_state() {
       "select (select count(*) from affiliate_private.affiliate_admin_capabilities)::text || '|' || (select count(*) from affiliate_private.affiliate_access_requests)::text || '|' || (select count(*) from public.cloud_branded_email_outbox where flow in ('partners_access_approved', 'partners_access_declined'))::text || '|' || encode(extensions.digest(coalesce((select string_agg(encode(extensions.digest(to_jsonb(capability_row)::text, 'sha256'), 'hex'), '' order by capability_row.user_id, capability_row.capability) from affiliate_private.affiliate_admin_capabilities capability_row), '') || '|' || coalesce((select string_agg(encode(extensions.digest(to_jsonb(request_row)::text, 'sha256'), 'hex'), '' order by request_row.id) from affiliate_private.affiliate_access_requests request_row), '') || '|' || coalesce((select string_agg(encode(extensions.digest(to_jsonb(outbox_row)::text, 'sha256'), 'hex'), '' order by outbox_row.id) from public.cloud_branded_email_outbox outbox_row where outbox_row.flow in ('partners_access_approved', 'partners_access_declined')), ''), 'sha256'), 'hex');"
 }
 
+capture_fr_alignment_release_state() {
+  clone_psql -At -v ON_ERROR_STOP=1 -c \
+    "with scoped_gate as (select distinct gate.gate_key from affiliate_private.affiliate_release_gates gate join affiliate_private.affiliate_release_gate_approval_bindings binding on binding.gate_key = gate.gate_key join affiliate_private.affiliate_approval_packages package on package.id = binding.approval_package_id join affiliate_private.affiliate_program_versions program on program.id = package.program_version_id cross join lateral jsonb_array_elements(package.jurisdiction_scope) scope(item) where gate.satisfied and program.version_key = 'individual-global-p0-v2' and program.status = 'active' and program.account_type = 'individual' and program.commission_rate_bps = 2000 and program.attribution_window_days = 30 and program.maturation_days = 45 and program.threshold_reference_currency = 'USD' and program.threshold_reference_minor = 1000 and program.payout_fee_policy = 'platform_absorbed' and scope.item ->> 'country_code' = 'FR' and nullif(scope.item ->> 'subdivision_code', '') is null) select (select count(*) from affiliate_private.affiliate_release_gates)::text || '|' || (select count(*) from affiliate_private.affiliate_release_gates where satisfied)::text || '|' || (select count(*) from affiliate_private.affiliate_release_gate_approval_bindings)::text || '|' || (select count(*) from scoped_gate)::text || '|' || (select count(*) from affiliate_private.affiliate_events where action = 'country_policy_currency_aligned' and aggregate_key = 'individual-global-p0-v2:FR:*')::text || '|' || (select count(*) from affiliate_private.affiliate_events where action = 'release_gate_revoked_for_policy_alignment' and before_state ->> 'country_code' = 'FR')::text;"
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -612,6 +617,26 @@ if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
 fi
 proof_line "migration_markers_before=$MIGRATION_MARKERS"
 
+CURRENT_STEP="France release-approval baseline capture"
+FR_RELEASE_STATE_BEFORE="$(capture_fr_alignment_release_state \
+  2> "$RAW_DIR/fr-release-state-before.log")" || fail
+if [[ ! "$FR_RELEASE_STATE_BEFORE" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
+  fail
+fi
+IFS='|' read -r \
+  BASELINE_RELEASE_GATE_TOTAL \
+  BASELINE_RELEASE_GATE_SATISFIED \
+  BASELINE_RELEASE_BINDINGS \
+  BASELINE_FR_SCOPED_GATES \
+  BASELINE_FR_ALIGNMENT_EVENTS \
+  BASELINE_FR_REVOCATION_EVENTS \
+  <<< "$FR_RELEASE_STATE_BEFORE"
+if (( BASELINE_FR_SCOPED_GATES > BASELINE_RELEASE_GATE_SATISFIED \
+    || BASELINE_FR_SCOPED_GATES > BASELINE_RELEASE_BINDINGS )); then
+  fail
+fi
+proof_line "fr_scoped_release_gates_before=$BASELINE_FR_SCOPED_GATES"
+
 CURRENT_STEP="mode-specific Partners migration handling"
 PSQL_TIMEOUT_SECONDS="${PARTNERS_REHEARSAL_PSQL_TIMEOUT_SECONDS:-3600}"
 if [[ ! "$PSQL_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{2,5}$ ]]; then
@@ -686,6 +711,38 @@ if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_C
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
+
+CURRENT_STEP="France release-approval postcondition"
+FR_RELEASE_STATE_AFTER="$(capture_fr_alignment_release_state \
+  2> "$RAW_DIR/fr-release-state-after.log")" || fail
+if [[ ! "$FR_RELEASE_STATE_AFTER" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
+  fail
+fi
+if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
+  EXPECTED_RELEASE_GATE_SATISFIED=$((
+    BASELINE_RELEASE_GATE_SATISFIED - BASELINE_FR_SCOPED_GATES
+  ))
+  EXPECTED_RELEASE_BINDINGS=$((
+    BASELINE_RELEASE_BINDINGS - BASELINE_FR_SCOPED_GATES
+  ))
+  EXPECTED_FR_ALIGNMENT_EVENTS=$((BASELINE_FR_ALIGNMENT_EVENTS + 1))
+  EXPECTED_FR_REVOCATION_EVENTS=$((
+    BASELINE_FR_REVOCATION_EVENTS + BASELINE_FR_SCOPED_GATES
+  ))
+  EXPECTED_FR_RELEASE_STATE="${BASELINE_RELEASE_GATE_TOTAL}|${EXPECTED_RELEASE_GATE_SATISFIED}|${EXPECTED_RELEASE_BINDINGS}|0|${EXPECTED_FR_ALIGNMENT_EVENTS}|${EXPECTED_FR_REVOCATION_EVENTS}"
+  EXPECTED_FINAL_PARTNER_EVENTS=$((
+    BASELINE_EVENTS + BASELINE_FR_SCOPED_GATES + 1
+  ))
+else
+  EXPECTED_FR_RELEASE_STATE="$FR_RELEASE_STATE_BEFORE"
+  EXPECTED_FINAL_PARTNER_EVENTS="$BASELINE_EVENTS"
+fi
+readonly EXPECTED_FR_RELEASE_STATE EXPECTED_FINAL_PARTNER_EVENTS
+if [[ "$FR_RELEASE_STATE_AFTER" != "$EXPECTED_FR_RELEASE_STATE" ]]; then
+  fail
+fi
+proof_line "fr_scoped_release_gates_revoked=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '%s' "$BASELINE_FR_SCOPED_GATES" || printf '0')"
+proof_line "fr_policy_alignment_events_added=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '1' || printf '0')"
 CURRENT_STEP="migration object ownership verification"
 ROUTINE_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
   2> "$RAW_DIR/routine-owner-postcondition.log" <<'SQL'
@@ -1026,7 +1083,8 @@ fi
 FINAL_COUNTS="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select (select count(*) from auth.users)::text || '|' || (select count(*) from affiliate_private.affiliate_accounts)::text || '|' || (select count(*) from affiliate_private.affiliate_events)::text || '|' || (select count(*) from cron.job)::text || '|' || (select count(*) from cron.job where active)::text || '|' || (select count(*) from pg_catalog.pg_stat_activity where backend_type ~* '(pg_cron|pg_net|cron scheduler)')::text;" \
   2> "$RAW_DIR/final-counts.log")" || fail
-if [[ "$FINAL_COUNTS" != "$BASELINE_COUNTS|$BASELINE_CRON_COUNTS|0" ]]; then
+EXPECTED_FINAL_COUNTS="${BASELINE_USERS}|${BASELINE_ACCOUNTS}|${EXPECTED_FINAL_PARTNER_EVENTS}|${BASELINE_CRON_COUNTS}|0"
+if [[ "$FINAL_COUNTS" != "$EXPECTED_FINAL_COUNTS" ]]; then
   fail
 fi
 FINAL_SENSITIVE_STATE="$(capture_sensitive_partner_state \
@@ -1036,6 +1094,7 @@ if [[ "$FINAL_SENSITIVE_STATE" != "$BASELINE_SENSITIVE_STATE" ]]; then
 fi
 proof_line "post_test_restore_verifier=passed"
 proof_line "test_transactions_rolled_back=true"
+proof_line "partner_event_delta_expected=$((EXPECTED_FINAL_PARTNER_EVENTS - BASELINE_EVENTS))"
 proof_line "cron_counts_unchanged=true"
 proof_line "sensitive_partner_state_unchanged_after_tests=true"
 

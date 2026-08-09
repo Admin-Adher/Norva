@@ -47,6 +47,25 @@ test('France pilot currency alignment fails closed once assigned', () => {
 test('France pilot currency alignment is atomic and auditable', () => {
   assert.match(
     migration,
+    /pg_advisory_xact_lock\([\s\S]*norva:partners:release-control/,
+  );
+  assert.match(
+    migration,
+    /affiliate_release_gate_approval_bindings[\s\S]*jsonb_array_elements\([\s\S]*package\.jurisdiction_scope/,
+  );
+  assert.match(
+    migration,
+    /scope\.item ->> 'country_code' = 'FR'[\s\S]*scope\.item ->> 'subdivision_code'/,
+  );
+  assert.match(
+    migration,
+    /set[\s\S]*satisfied = false[\s\S]*satisfied_at = null[\s\S]*where gate\.gate_key = any\(v_revoked_gate_keys\)/,
+  );
+  assert.match(migration, /if v_revoked <> cardinality\(v_revoked_gate_keys\) then/);
+  assert.match(migration, /'release_gate_revoked_for_policy_alignment'/);
+  assert.match(migration, /'requires_fresh_aal2_approval', true/);
+  assert.match(
+    migration,
     /set[\s\S]*payout_currencies = array\['USD'\]::text\[[\s\S]*get diagnostics v_updated = row_count/,
   );
   assert.match(migration, /if v_updated <> 1 then/);

@@ -739,6 +739,24 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(rehearsal, /not policy\.individual_available/);
   assert.match(rehearsal, /account\.status <> 'closed'/);
+  assert.match(rehearsal, /capture_fr_alignment_release_state/);
+  assert.match(
+    rehearsal,
+    /fr_scoped_release_gates_before=\$BASELINE_FR_SCOPED_GATES/,
+  );
+  assert.match(
+    rehearsal,
+    /BASELINE_RELEASE_GATE_SATISFIED - BASELINE_FR_SCOPED_GATES/,
+  );
+  assert.match(
+    rehearsal,
+    /BASELINE_RELEASE_BINDINGS - BASELINE_FR_SCOPED_GATES/,
+  );
+  assert.match(
+    rehearsal,
+    /BASELINE_EVENTS \+ BASELINE_FR_SCOPED_GATES \+ 1/,
+  );
+  assert.match(rehearsal, /EXPECTED_FINAL_PARTNER_EVENTS/);
   assert.match(
     rehearsal,
     /MIGRATIONS_APPLIED=0[\s\S]*MIGRATION_REPLAY_SKIPPED="true"[\s\S]*if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*--single-transaction[\s\S]*MIGRATIONS_APPLIED=1[\s\S]*MIGRATION_REPLAY_SKIPPED="false"[\s\S]*fi/,

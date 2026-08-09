@@ -10,8 +10,15 @@ do $$
 declare
   v_program affiliate_private.affiliate_program_versions%rowtype;
   v_policy affiliate_private.affiliate_country_policies%rowtype;
+  v_revoked_gate_keys text[] := '{}'::text[];
+  v_gate_key text;
+  v_revoked integer := 0;
   v_updated integer := 0;
 begin
+  perform pg_advisory_xact_lock(
+    hashtextextended('norva:partners:release-control', 0)
+  );
+
   select program.*
   into v_program
   from affiliate_private.affiliate_program_versions program
@@ -79,6 +86,82 @@ begin
       'active USD metadata and a positive USD threshold are required'
       using errcode = '55000';
   end if;
+
+  -- Approval packages are immutable and a scoped satisfied gate deliberately
+  -- prevents edits to the policy it approved. Revoke only the currently bound
+  -- France-scoped gates before changing the unopened policy. Their bindings
+  -- are cleared by the audited release-gate trigger and must later be replaced
+  -- by fresh AAL2 approvals against the new deployment manifest.
+  perform 1
+  from affiliate_private.affiliate_release_gates gate
+  order by gate.gate_key
+  for update;
+
+  select coalesce(
+    array_agg(scoped_gate.gate_key order by scoped_gate.gate_key),
+    '{}'::text[]
+  )
+  into v_revoked_gate_keys
+  from (
+    select distinct gate.gate_key
+    from affiliate_private.affiliate_release_gates gate
+    join affiliate_private.affiliate_release_gate_approval_bindings binding
+      on binding.gate_key = gate.gate_key
+    join affiliate_private.affiliate_approval_packages package
+      on package.id = binding.approval_package_id
+    cross join lateral jsonb_array_elements(
+      package.jurisdiction_scope
+    ) scope(item)
+    where gate.satisfied
+      and package.program_version_id = v_program.id
+      and scope.item ->> 'country_code' = 'FR'
+      and nullif(scope.item ->> 'subdivision_code', '') is null
+  ) scoped_gate;
+
+  update affiliate_private.affiliate_release_gates gate
+  set
+    satisfied = false,
+    satisfied_at = null,
+    updated_by_pseudonym = null,
+    updated_at = now()
+  where gate.gate_key = any(v_revoked_gate_keys)
+    and gate.satisfied;
+
+  get diagnostics v_revoked = row_count;
+  if v_revoked <> cardinality(v_revoked_gate_keys) then
+    raise exception 'France P0 scoped approval revocation was not atomic'
+      using errcode = '55000';
+  end if;
+
+  foreach v_gate_key in array v_revoked_gate_keys loop
+    insert into affiliate_private.affiliate_events (
+      aggregate_type,
+      aggregate_key,
+      action,
+      actor_type,
+      actor_pseudonym,
+      justification,
+      before_state,
+      after_state
+    )
+    values (
+      'release_gate',
+      v_gate_key,
+      'release_gate_revoked_for_policy_alignment',
+      'system',
+      null,
+      'Révocation contrôlée avant alignement USD de la politique France non ouverte.',
+      jsonb_build_object(
+        'satisfied', true,
+        'country_code', 'FR',
+        'subdivision_code', null
+      ),
+      jsonb_build_object(
+        'satisfied', false,
+        'requires_fresh_aal2_approval', true
+      )
+    );
+  end loop;
 
   update affiliate_private.affiliate_country_policies policy
   set
