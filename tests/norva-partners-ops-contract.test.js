@@ -1410,3 +1410,47 @@ test('USD reference and absorbed payout costs stay exact-money and fail-closed',
     /partners_payouts_live[^\n]*true|partners_revolut_api_enabled[^\n]*true/,
   );
 });
+
+test('production evidence capture cannot certify empty shadow traffic and sanitizes TV proof', () => {
+  const capture = read(
+    'ops/hetzner/scripts/capture-norva-partners-shadow-tv-evidence.sh',
+  );
+
+  assert.match(capture, /begin transaction read only;/);
+  assert.match(capture, /last_48h_runs_with_facts/);
+  assert.match(capture, /real_financial_fact_observed_in_shadow_window/);
+  assert.match(capture, /int\(shadow\.get\("last_48h_runs_with_facts", 0\)\) > 0/);
+  assert.match(capture, /"contains_personal_data": False/);
+  assert.match(capture, /"contains_secrets": False/);
+  assert.match(capture, /"secret_value_recorded": False/);
+  assert.match(capture, /NORVA_PARTNERS_TV_RELAY_HANDOFF_URL/);
+  assert.match(capture, /tests\/norva-partners-tv-contract\.test\.js/);
+  assert.match(capture, /PARTNERS_TV_TEST_PROOF_SHA256/);
+  assert.match(capture, /PARTNERS_TV_TEST_PROOF_URL/);
+  assert.match(capture, /PARTNERS_TV_TEST_PROOF_COMMIT_SHA/);
+  assert.match(capture, /github\\\.com\/Admin-Adher\/Norva\/actions\/runs/);
+  assert.doesNotMatch(capture, /consumed_by_user_id/);
+  assert.doesNotMatch(capture, /device_token_hash/);
+  assert.doesNotMatch(capture, /relay_token_hash/);
+});
+
+test('Google Play Orders credential installer is atomic, rolling and permission-tested', () => {
+  const installer = read(
+    'ops/hetzner/scripts/install-norva-google-play-orders-key.ps1',
+  );
+
+  assert.match(installer, /\[Parameter\(Mandatory = \$true\)\][\s\S]*\$CredentialPath/);
+  assert.match(installer, /ConvertFrom-Json/);
+  assert.match(installer, /La clé Google Play doit rester hors du dépôt Git/);
+  assert.match(installer, /type -ne 'service_account'/);
+  assert.match(installer, /GOOGLE_PLAY_SERVICE_ACCOUNT_JSON/);
+  assert.match(installer, /GOOGLE_PLAY_PACKAGE_NAME/);
+  assert.match(installer, /tv\.norva\.phone/);
+  assert.match(installer, /recreate_edge functions norva-edge-functions/);
+  assert.match(installer, /recreate_edge functions2 norva-edge-functions-2/);
+  assert.match(installer, /https:\/\/www\.googleapis\.com\/auth\/androidpublisher/);
+  assert.match(installer, /androidpublisher\/v3\/applications\/tv\.norva\.phone\/orders/);
+  assert.match(installer, /orderResponse\.status !== 404/);
+  assert.match(installer, /previous Edge environment was restored/);
+  assert.doesNotMatch(installer, /Read-Host[\s\S]{0,80}service account/i);
+});

@@ -750,6 +750,55 @@ variables Google absentes laissent l'enrichissement inactif et les faits
 est une mauvaise configuration visible à corriger, jamais un motif pour
 reconstruire la taxe depuis RevenueCat.
 
+La clé doit être créée comme compte de service distinct, puis invitée dans
+Google Play Console avec les droits nécessaires aux API de facturation. La
+procédure Google actuelle exige **Voir les données financières, les commandes
+et les réponses à l'enquête d'annulation** ainsi que **Gérer les commandes et
+les abonnements** ([configuration officielle de l'API](https://developers.google.com/android-publisher/getting_started),
+[permissions Play Console](https://support.google.com/googleplay/android-developer/answer/10019561)).
+Norva n'appelle pourtant que [`orders.get`](https://developers.google.com/android-publisher/api-ref/rest/v3/orders/get) ;
+aucune route de remboursement ou d'annulation n'est implémentée par le worker
+Partners.
+
+Ne jamais coller la clé dans un terminal, un ticket ou le dépôt. Après avoir
+téléchargé le JSON dans un dossier local protégé, l'installer depuis Windows :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  "C:\chemin\vers\Norva repo\ops\hetzner\scripts\install-norva-google-play-orders-key.ps1" `
+  -CredentialPath "C:\chemin\protege\norva-play-orders.json"
+```
+
+Le script valide le JSON localement et sur le serveur, sauvegarde puis remplace
+atomiquement `.env`, recrée les deux replicas Edge l'un après l'autre, vérifie
+leur parité, obtient un jeton OAuth Android Publisher et exige un `404` sur une
+commande factice bien formée. Un `401` ou `403` provoque un rollback complet :
+la clé ou les permissions Play Console ne sont alors pas prêtes.
+
+La preuve shadow/TV est capturée hors du checkout avec :
+
+```bash
+install -d -m 700 /home/adrien/norva-release-evidence/partners/<release_key>/runtime
+PARTNERS_EVIDENCE_OUTPUT_DIR=/home/adrien/norva-release-evidence/partners/<release_key>/runtime \
+PARTNERS_DEPLOYMENT_ID='<deployment-id-immuable>' \
+PARTNERS_EXPECTED_COMMIT_SHA='<sha-git-40-caracteres>' \
+PARTNERS_TV_TEST_PROOF_SHA256='<sha256-sortie-tests-tv>' \
+PARTNERS_TV_TEST_PROOF_URL='https://github.com/Admin-Adher/Norva/actions/runs/<run-id>' \
+PARTNERS_TV_TEST_PROOF_COMMIT_SHA='<sha-git-40-caracteres>' \
+  bash ops/hetzner/scripts/capture-norva-partners-shadow-tv-evidence.sh
+```
+
+Le rapport TV peut satisfaire `tv_relay_security_verified` lorsque les
+contrats passent et que la production reste fermée pendant la revue. Le rapport
+shadow refuse explicitement la gate tant qu'aucun fait financier réel n'a été
+comparé : des milliers de passages à vide sans écart ne constituent pas une
+certification économique.
+
+Si Node.js est présent sur l'hôte, le script rejoue lui-même les tests. Sur
+l'hôte Hetzner minimal, il exige à la place le hash, l'URL du run GitHub Actions
+protégé et le SHA exact qu'il a testé ; une URL générique ou un autre commit est
+refusé.
+
 ## 3. Ordre de déploiement
 
 La baseline de production certifiée est le commit `eda071e`, avec déploiement,
