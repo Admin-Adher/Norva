@@ -200,14 +200,15 @@ son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
 le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
 restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
 isolé, et leurs nombres total et actif sont contrôlés avant et après la
-répétition. Pour cette release, en `predeploy`, les 32 marqueurs de la baseline
-auditée `d5d596b` doivent tous être présents et le marqueur du preflight guidé
-Didit doit être absent. Une seule migration est rejouée dans une
+répétition. Pour cette release, en `predeploy`, les 33 marqueurs de la baseline
+auditée `991c944` doivent tous être présents et la politique France P0 doit être
+fermée, non attribuée et libellée en EUR. Une seule migration est rejouée dans une
 transaction unique :
 
-1. `20260809125731_partners_didit_guided_preflight.sql`.
+1. `20260809190000_partners_fr_pilot_usd_policy_alignment.sql`.
 
-En `postdeploy`, les 33 marqueurs doivent tous être présents : aucune migration
+En `postdeploy`, les 34 marqueurs doivent tous être présents et la politique
+France P0 doit rester fermée, non attribuée et libellée en USD : aucune migration
 n'est rejouée, puis le vérificateur et le pgTAP sont exécutés sur l'état déjà
 migré. Un état partiel est refusé dans les deux modes.
 Le conteneur et le répertoire temporaire sont toujours supprimés par le trap de
@@ -221,15 +222,15 @@ ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
 de production.
 
 La preuve `predeploy` du candidat actuel doit contenir
-`baseline_contract=d5d596b`, `baseline_markers_verified=32`,
+`baseline_contract=991c944`, `baseline_markers_verified=33`,
 `rehearsal_mode=predeploy`, `migrations_applied=1`,
-`migrations_atomic=true`, `migration_replay_skipped=false`, les 32 marqueurs
-de baseline à `1` puis le marqueur preflight à `0` avant, et 33 marqueurs `1`
+`migrations_atomic=true`, `migration_replay_skipped=false`, les 33 marqueurs
+de baseline à `1` puis le marqueur d'alignement à `0` avant, et 34 marqueurs `1`
 après. Elle doit
 également contenir `migration_routines_verified=164` et
 `migration_relations_verified=19`. La preuve `postdeploy` doit contenir
-`baseline_contract=d5d596b`, `rehearsal_mode=postdeploy`,
-`migrations_applied=0`, `migration_replay_skipped=true`, et 33 marqueurs `1`
+`baseline_contract=991c944`, `rehearsal_mode=postdeploy`,
+`migrations_applied=0`, `migration_replay_skipped=true`, et 34 marqueurs `1`
 avant comme après, avec les mêmes 164 routines et 19 relations vérifiées.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)

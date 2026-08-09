@@ -20,10 +20,10 @@ test('Partners production certification keeps all twelve controls explicit', () 
   assert.doesNotMatch(certification, /avis professionnel (?:obtenu|validé)/i);
 });
 
-test('the restore runbook describes the exact post-d5d596b preflight contract', () => {
+test('the restore runbook describes the exact post-991c944 preflight contract', () => {
   const restore = read('ops/hetzner/backup/RESTORE.md');
 
-  assert.match(restore, /20260809125731_partners_didit_guided_preflight\.sql/);
+  assert.match(restore, /20260809190000_partners_fr_pilot_usd_policy_alignment\.sql/);
   assert.match(restore, /`migrations_applied=1`/);
   assert.match(restore, /`migration_routines_verified=164`/);
   assert.match(restore, /`migration_relations_verified=19`/);
