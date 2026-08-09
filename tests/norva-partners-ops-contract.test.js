@@ -691,6 +691,14 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE="1"/);
   assert.match(
     rehearsal,
+    /\('affiliate_private\.admin_partners_kyc_certification_preflight\(\)'\)/,
+  );
+  assert.match(
+    rehearsal,
+    /\('public\.admin_partners_kyc_certification_preflight\(\)'\)/,
+  );
+  assert.match(
+    rehearsal,
     /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}"/,
   );
   assert.match(
@@ -710,6 +718,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
   assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "164\|0"/);
   assert.match(rehearsal, /migration_routines_verified=164/);
+  const ownershipCatalog = rehearsal.match(
+    /ROUTINE_OWNER_CHECK=[\s\S]*?<<'SQL'[\s\S]*?with expected\(signature\) as \(\s*values(?<values>[\s\S]*?)\r?\n\)\r?\nselect count\(\*\)::text/,
+  );
+  assert.ok(ownershipCatalog?.groups?.values);
+  assert.equal(
+    (ownershipCatalog.groups.values.match(/^\s+\('[^']+'\),?$/gm) || []).length,
+    164,
+    'the ownership catalogue cardinality must match the enforced routine total',
+  );
   assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "19\|0"/);
   assert.match(rehearsal, /migration_relations_verified=19/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
