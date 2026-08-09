@@ -366,6 +366,7 @@ begin
     'public.partners_service_dashboard(uuid,integer,text,text)',
     'public.partners_service_referral_claim(uuid,text,text)',
     'public.partners_service_kyc_binding_recover(integer)',
+    'public.admin_partners_kyc_certification_preflight()',
     'public.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
     'public.admin_partners_kyc_certification_resume()',
     'public.admin_partners_kyc_certification_status()',
@@ -556,7 +557,9 @@ begin
       ('affiliate_private.partners_require_control_access(text,text,boolean)', true, 's', 'owner'),
       ('public.admin_partners_control(text,text,boolean,text,uuid,text,text,timestamptz)', true, 'v', 'authenticated'),
       ('affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)', true, 'v', 'owner'),
-      ('affiliate_private.admin_partners_program_activate(text,text,text)', true, 'v', 'authenticated')
+      ('affiliate_private.admin_partners_program_activate(text,text,text)', true, 'v', 'authenticated'),
+      ('affiliate_private.admin_partners_kyc_certification_preflight()', true, 's', 'authenticated'),
+      ('public.admin_partners_kyc_certification_preflight()', false, 's', 'authenticated')
     ) expected(signature, security_definer, volatility, access_role)
   loop
     if to_regprocedure(v_expected.signature) is null then
@@ -900,6 +903,26 @@ begin
   then
     raise exception
       'restored deterministic Didit certification key lost immutable reservation identity';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure
+  );
+  if position(
+      'partners_require_didit_certification_observer' in lower(v_definition)
+    ) = 0
+    or position('privacy_approved' in lower(v_definition)) = 0
+    or position(
+      'individual_verification_coverage_confirmed' in lower(v_definition)
+    ) = 0
+    or position('partners_enabled' in lower(v_definition)) = 0
+    or position('partners_payouts_live' in lower(v_definition)) = 0
+    or position('partners_tv_relay_enabled' in lower(v_definition)) = 0
+    or position('partners_revolut_api_enabled' in lower(v_definition)) = 0
+    or position('interval ''10 minutes''' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit certification preflight lost its fail-closed readiness contract';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
@@ -1316,6 +1339,7 @@ begin
             'affiliate_private.admin_partners_program_activate(text,text,text)',
             'affiliate_private.admin_partners_country_policy_create(text,text,text,integer,text[],timestamp with time zone,text)',
             'affiliate_private.admin_partners_kyc_attempt_policy_set(text,text,text,integer,integer,integer,text,text)',
+            'affiliate_private.admin_partners_kyc_certification_preflight()',
             'affiliate_private.admin_partners_kyc_certification_prepare(text,text,boolean,text,text,text)',
             'affiliate_private.admin_partners_kyc_certification_resume()',
             'affiliate_private.admin_partners_kyc_certification_status()',

@@ -377,6 +377,18 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     verifier,
     /partners_require_didit_certification_observer/,
   );
+  assert.match(
+    verifier,
+    /public\.admin_partners_kyc_certification_preflight\(\)/,
+  );
+  assert.match(
+    verifier,
+    /affiliate_private\.admin_partners_kyc_certification_preflight\(\)/,
+  );
+  assert.match(
+    verifier,
+    /Didit certification preflight lost its fail-closed readiness contract/,
+  );
   assert.match(parity, /affiliate_private\.\$t/);
   assert.match(parity, /partners private tables/);
   assert.match(parity, /p\.proname like '%partners%'/);
@@ -424,7 +436,7 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   const frictionlessRoutineCatalog = frictionlessRoutineCatalogMatch[1];
   assert.equal(
     (frictionlessRoutineCatalog.match(/^\s*\('/gm) || []).length,
-    43,
+    45,
     'the production verifier must cover every routine touched by the finalization lot',
   );
   for (const relation of [

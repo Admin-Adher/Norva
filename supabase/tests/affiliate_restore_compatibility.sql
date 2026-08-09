@@ -5,8 +5,8 @@ create extension if not exists pgtap with schema extensions;
 select extensions.plan(110);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
--- and ACL assertions for the audited eda071e baseline plus the bootstrap
--- boolean hotfix without creating any object in the restored database.
+-- and ACL assertions for the audited d5d596b baseline plus the guided Didit
+-- certification preflight without creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_actor_is_live_admin(text)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_has_capability(text)","security_definer":true,"volatility":"s","access_role":"owner"},
