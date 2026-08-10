@@ -653,6 +653,7 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   const webhook = read(
     'supabase/functions/norva-partners-kyc-webhook/index.ts',
   );
+  const shared = read('supabase/functions/_shared/didit-partners.ts');
   const memberCall = webhook.indexOf(
     '"partners_service_kyc_webhook_apply_and_enqueue_purge"',
   );
@@ -675,9 +676,29 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
     /error\.code === "P0006"[\s\S]*webhook_resource_unknown/,
   );
   assert.match(webhook, /sanitizeKycCertificationWebhookRpc\(data\)/);
+  assert.match(
+    webhook,
+    /hydrateDiditDataUpdatedDecision\([\s\S]*decision_authority_\$\{error\.code\}[\s\S]*Retry-After": "30"/,
+  );
+  assert.match(
+    shared,
+    /DIDIT_SESSION_DECISION_URL_PREFIX[\s\S]*\/decision\/[\s\S]*method: "GET"[\s\S]*"x-api-key": config\.apiKey[\s\S]*redirect: "error"[\s\S]*AbortSignal\.timeout\(8_000\)/,
+  );
+  assert.match(
+    shared,
+    /readBoundedDiditResponseBody\([\s\S]*DIDIT_WEBHOOK_MAX_BYTES/,
+  );
+  assert.match(
+    shared,
+    /norva:didit:data-authority:v1[\s\S]*signed_event_hash=[\s\S]*authority_hash=/,
+  );
   assert.doesNotMatch(
     webhook,
     /console\[[^\]]+\]\([^)]*(?:rawBody|event|session|decision|document|payload)/s,
+  );
+  assert.doesNotMatch(
+    shared,
+    /console\[[^\]]+\]\([^)]*(?:full_name|document_number|front_image|back_image|date_of_birth)/s,
   );
 });
 

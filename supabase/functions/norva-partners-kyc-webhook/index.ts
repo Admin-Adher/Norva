@@ -2,7 +2,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   DIDIT_WEBHOOK_MAX_BYTES,
   DiditContractError,
+  DiditDecisionAuthorityError,
   DiditPayloadTooLargeError,
+  hydrateDiditDataUpdatedDecision,
   loadDiditConfig,
   readDiditWebhookBody,
   sanitizeKycCertificationWebhookRpc,
@@ -100,6 +102,28 @@ Deno.serve(async (req) => {
       if (error instanceof DiditContractError) {
         log("warn", correlationId, "rejected");
         return problem(401, "webhook_unauthorized", correlationId);
+      }
+      throw error;
+    }
+
+    try {
+      event = await hydrateDiditDataUpdatedDecision(
+        event,
+        DIDIT_CONFIG,
+      );
+    } catch (error) {
+      if (error instanceof DiditDecisionAuthorityError) {
+        log(
+          "warn",
+          correlationId,
+          `decision_authority_${error.code}`,
+        );
+        // A signed reviewer event remains retryable until the authoritative
+        // full decision can be reduced safely. Never acknowledge and discard
+        // a partial terminal result.
+        return problem(503, "temporarily_unavailable", correlationId, {
+          "Retry-After": "30",
+        });
       }
       throw error;
     }

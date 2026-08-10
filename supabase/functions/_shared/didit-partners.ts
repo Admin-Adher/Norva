@@ -10,6 +10,8 @@ export const DIDIT_LIST_SESSIONS_URL =
   "https://verification.didit.me/v3/sessions/";
 export const DIDIT_SESSION_DELETE_URL_PREFIX =
   "https://verification.didit.me/v3/session/";
+export const DIDIT_SESSION_DECISION_URL_PREFIX =
+  "https://verification.didit.me/v3/session/";
 export const DIDIT_PARTNERS_CALLBACK_URL =
   "https://norva.tv/partners-kyc-return";
 export const DIDIT_PARTNERS_WORKFLOW_VERSION = 1;
@@ -283,6 +285,22 @@ export class DiditPurgeRequestError extends Error {
     this.status = status;
     this.retryable = retryable;
     this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class DiditDecisionAuthorityError extends Error {
+  readonly code:
+    | "provider_timeout"
+    | "provider_network"
+    | "provider_rate_limited"
+    | "provider_server_error"
+    | "provider_rejected"
+    | "provider_contract";
+
+  constructor(code: DiditDecisionAuthorityError["code"]) {
+    super("Didit decision authority request failed");
+    this.name = "DiditDecisionAuthorityError";
+    this.code = code;
   }
 }
 
@@ -611,14 +629,14 @@ export function sanitizeKycCertificationPreflightRpc(
     typeof aal2 !== "boolean" ||
     typeof freshAal2 !== "boolean" ||
     root.ready !== (
-      privacyApproved === true &&
-      coverageOpen === true &&
-      partnersMembershipClosed === true &&
-      cashPayoutsClosed === true &&
-      tvRelayClosed === true &&
-      revolutApiClosed === true &&
-      freshAal2 === true
-    ) ||
+        privacyApproved === true &&
+        coverageOpen === true &&
+        partnersMembershipClosed === true &&
+        cashPayoutsClosed === true &&
+        tvRelayClosed === true &&
+        revolutApiClosed === true &&
+        freshAal2 === true
+      ) ||
     (freshAal2 === true && aal2 !== true)
   ) {
     throw new DiditContractError();
@@ -1471,6 +1489,241 @@ export async function verifyAndNormalizeDiditWebhook(
     providerConfigFingerprint,
     providerStatus,
     eventCreatedAt: new Date(createdAt * 1_000).toISOString(),
+    documentAge,
+    documentCountryIso3,
+    idCheckApproved,
+    livenessApproved,
+    faceMatchApproved,
+    payloadHash,
+  };
+}
+
+/**
+ * Didit's signed data.updated envelope may contain only the feature changed by
+ * the reviewer. Use that authenticated event solely as the trigger, then read
+ * the complete current decision from Didit's server API. The PII-rich provider
+ * response stays in memory and is reduced immediately to Norva's existing
+ * policy fields; it must never be logged, returned or persisted verbatim.
+ */
+export async function hydrateDiditDataUpdatedDecision(
+  event: DiditWebhookResult,
+  config: DiditConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DiditWebhookResult> {
+  if (event.webhookType !== "data.updated") return event;
+
+  const sessionId = uuid(event.providerSessionId);
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `${DIDIT_SESSION_DECISION_URL_PREFIX}${sessionId}/decision/`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "x-api-key": config.apiKey,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch (error) {
+    const timedOut = error instanceof DOMException &&
+      error.name === "TimeoutError";
+    throw new DiditDecisionAuthorityError(
+      timedOut ? "provider_timeout" : "provider_network",
+    );
+  }
+
+  if (response.status !== 200) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // The status is authoritative; provider response details stay opaque.
+    }
+    if (response.status === 429) {
+      throw new DiditDecisionAuthorityError("provider_rate_limited");
+    }
+    if (
+      response.status === 408 ||
+      response.status === 425 ||
+      response.status >= 500
+    ) {
+      throw new DiditDecisionAuthorityError("provider_server_error");
+    }
+    throw new DiditDecisionAuthorityError("provider_rejected");
+  }
+
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // The content-type verdict remains authoritative.
+    }
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+  const body = await readBoundedDiditResponseBody(
+    response,
+    DIDIT_WEBHOOK_MAX_BYTES,
+  );
+  if (body === null) {
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+  try {
+    return await normalizeDiditDecisionAuthority(raw, event, config);
+  } catch (error) {
+    if (error instanceof DiditDecisionAuthorityError) throw error;
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+}
+
+async function normalizeDiditDecisionAuthority(
+  value: unknown,
+  event: DiditWebhookResult,
+  config: DiditConfig,
+): Promise<DiditWebhookResult> {
+  if (!isRecord(value)) {
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+  const sessionId = uuid(value.session_id);
+  const workflowId = uuid(value.workflow_id);
+  const environment = value.environment;
+  const sessionKind = value.session_kind;
+  if (
+    sessionId !== event.providerSessionId ||
+    workflowId !== event.providerWorkflowId ||
+    workflowId !== config.workflowId ||
+    environment !== event.providerEnvironment ||
+    environment !== config.environment ||
+    (sessionKind !== undefined && sessionKind !== null &&
+      sessionKind !== "user") ||
+    hasDiditBusinessMarker(value) ||
+    (value.application_id !== undefined &&
+      uuid(value.application_id) !== config.applicationId) ||
+    (value.workflow_version !== undefined &&
+      positiveInteger(value.workflow_version) !==
+        event.providerWorkflowVersion) ||
+    (value.callback !== undefined &&
+      (
+        typeof value.callback !== "string" ||
+        parseCallbackUrl(value.callback) !== config.callbackUrl
+      )) ||
+    (value.vendor_data !== undefined &&
+      (
+        typeof value.vendor_data !== "string" ||
+        !DIDIT_VENDOR_DATA_PATTERN.test(value.vendor_data)
+      ))
+  ) {
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+
+  let providerStatus = normalizeDiditStatus(value.status);
+  let documentAge: number | null = null;
+  let documentCountryIso3: string | null = null;
+  let idCheckApproved = false;
+  let livenessApproved = false;
+  let faceMatchApproved = false;
+
+  if (providerStatus === "approved" || providerStatus === "in_review") {
+    const idObservation = observedNodeResult(
+      value.id_verifications,
+      config.idVerificationNodeId,
+    );
+    const livenessObservation = observedNodeResult(
+      value.liveness_checks,
+      config.livenessNodeId,
+    );
+    const faceObservation = observedNodeResult(
+      value.face_matches,
+      config.faceMatchNodeId,
+    );
+    if (
+      idObservation.bindingId !== config.idVerificationNodeId ||
+      livenessObservation.bindingId !== config.livenessNodeId ||
+      faceObservation.bindingId !== config.faceMatchNodeId ||
+      !idObservation.result ||
+      !livenessObservation.result ||
+      !faceObservation.result
+    ) {
+      throw new DiditDecisionAuthorityError("provider_contract");
+    }
+    idCheckApproved = idObservation.result.status === "Approved";
+    livenessApproved = livenessObservation.result.status === "Approved";
+    faceMatchApproved = faceObservation.result.status === "Approved";
+    if (
+      providerStatus === "approved" &&
+      (
+        idObservation.result.status === "In Review" ||
+        livenessObservation.result.status === "In Review" ||
+        faceObservation.result.status === "In Review"
+      )
+    ) {
+      providerStatus = "in_review";
+    }
+    if (idCheckApproved) {
+      documentAge = age(idObservation.result.age);
+      documentCountryIso3 = iso3(idObservation.result.issuing_state);
+    }
+    if (
+      providerStatus === "approved" &&
+      (
+        !idCheckApproved ||
+        !livenessApproved ||
+        !faceMatchApproved ||
+        documentAge === null ||
+        documentCountryIso3 === null
+      )
+    ) {
+      throw new DiditDecisionAuthorityError("provider_contract");
+    }
+  }
+  if (providerStatus !== event.providerStatus) {
+    // A signed event cannot authorize a different later provider state.
+    throw new DiditDecisionAuthorityError("provider_contract");
+  }
+
+  const providerConfigFingerprint = await diditBindingFingerprint({
+    environment: event.providerEnvironment,
+    applicationId: config.applicationId,
+    workflowId: event.providerWorkflowId,
+    workflowVersion: event.providerWorkflowVersion,
+    callbackUrl: config.callbackUrl,
+    idVerificationNodeId: config.idVerificationNodeId,
+    livenessNodeId: config.livenessNodeId,
+    faceMatchNodeId: config.faceMatchNodeId,
+    sessionExpirationSeconds: config.sessionExpirationSeconds,
+  });
+  const authorityHash = await sha256Hex(JSON.stringify(sortJsonValue({
+    schema_version: 1,
+    session_id: event.providerSessionId,
+    workflow_id: event.providerWorkflowId,
+    workflow_version: event.providerWorkflowVersion,
+    environment: event.providerEnvironment,
+    status: providerStatus,
+    document_age: documentAge,
+    document_country_iso3: documentCountryIso3,
+    id_check_approved: idCheckApproved,
+    liveness_approved: livenessApproved,
+    face_match_approved: faceMatchApproved,
+  })));
+  const payloadHash = await sha256Hex([
+    "norva:didit:data-authority:v1",
+    `signed_event_hash=${event.payloadHash}`,
+    `authority_hash=${authorityHash}`,
+  ].join("\n"));
+
+  return {
+    ...event,
+    providerConfigFingerprint,
+    providerStatus,
     documentAge,
     documentCountryIso3,
     idCheckApproved,

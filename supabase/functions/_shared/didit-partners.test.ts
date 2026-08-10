@@ -1,9 +1,12 @@
 import {
   classifyDiditCreateError,
   DIDIT_PARTNERS_CALLBACK_URL,
+  DIDIT_SESSION_DECISION_URL_PREFIX,
   type DiditConfig,
   diditConfigFingerprint,
+  DiditDecisionAuthorityError,
   DiditSessionNotResumableError,
+  hydrateDiditDataUpdatedDecision,
   inspectDiditSessionList,
   parseKycSessionInput,
   purgeDiditSession,
@@ -698,6 +701,170 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     rejected = true;
   }
   assert(rejected, "the envelope-only signature must never authorize KYC data");
+});
+
+Deno.test("Didit signed reviewer updates hydrate the complete decision without retaining identity data", async () => {
+  const now = 1_774_970_000;
+  const payload = {
+    event_id: "42345678-1234-4234-8234-123456789abc",
+    webhook_type: "data.updated",
+    timestamp: now,
+    created_at: now - 2,
+    application_id: baseConfig.applicationId,
+    environment: baseConfig.environment,
+    session_kind: "user",
+    sandbox_scenario: null,
+    session_id: "99999999-8888-4777-8666-555555555555",
+    status: "Approved",
+    workflow_id: baseConfig.workflowId,
+    workflow_version: 1,
+  };
+  const raw = new TextEncoder().encode(JSON.stringify(payload));
+  const headers = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(payload)),
+    ),
+  });
+  const signedEvent = await verifyAndNormalizeDiditWebhook(
+    raw,
+    headers,
+    baseConfig,
+    now,
+  );
+  assert(
+    !signedEvent.idCheckApproved && !signedEvent.faceMatchApproved,
+    "a partial signed reviewer envelope must not invent missing checks",
+  );
+
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const hydrated = await hydrateDiditDataUpdatedDecision(
+    signedEvent,
+    baseConfig,
+    ((url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            session_id: payload.session_id,
+            session_kind: "user",
+            status: "Approved",
+            environment: baseConfig.environment,
+            workflow_id: baseConfig.workflowId,
+            workflow_version: 1,
+            vendor_data: "kyr_0123456789abcdef01234567",
+            callback: baseConfig.callbackUrl,
+            id_verifications: [{
+              node_id: baseConfig.idVerificationNodeId,
+              status: "Approved",
+              age: 28,
+              issuing_state: "ESP",
+              full_name: "Identity data must never escape",
+              document_number: "PRIVATE",
+            }],
+            liveness_checks: [{
+              node_id: baseConfig.livenessNodeId,
+              status: "Approved",
+            }],
+            face_matches: [{
+              node_id: baseConfig.faceMatchNodeId,
+              status: "Approved",
+            }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+          },
+        ),
+      );
+    }) as typeof fetch,
+  );
+
+  assert(calls.length === 1, "review hydration must perform one bounded read");
+  assert(
+    calls[0].url ===
+      `${DIDIT_SESSION_DECISION_URL_PREFIX}${payload.session_id}/decision/`,
+    "review hydration must use the canonical decision endpoint",
+  );
+  assert(
+    calls[0].init?.method === "GET" &&
+      calls[0].init?.redirect === "error" &&
+      calls[0].init?.signal instanceof AbortSignal &&
+      new Headers(calls[0].init?.headers).get("x-api-key") ===
+        baseConfig.apiKey,
+    "the authority read must be authenticated, bounded and redirect-safe",
+  );
+  assert(
+    hydrated.providerStatus === "approved" &&
+      hydrated.idCheckApproved &&
+      hydrated.livenessApproved &&
+      hydrated.faceMatchApproved &&
+      hydrated.documentAge === 28 &&
+      hydrated.documentCountryIso3 === "ESP",
+    "the complete decision must reduce to the terminal policy fields",
+  );
+  assert(
+    hydrated.providerConfigFingerprint ===
+      await diditConfigFingerprint(baseConfig, 1),
+    "the authority decision must restore the exact configured binding",
+  );
+  assert(
+    hydrated.payloadHash !== signedEvent.payloadHash,
+    "the durable event hash must bind both signed trigger and authority result",
+  );
+  assert(
+    !JSON.stringify(hydrated).includes("Identity data") &&
+      !JSON.stringify(hydrated).includes("PRIVATE"),
+    "provider identity data must remain outside the normalized result",
+  );
+});
+
+Deno.test("Didit reviewer decision hydration fails closed on provider drift", async () => {
+  const event = {
+    webhookType: "data.updated" as const,
+    providerEventId: "42345678-1234-4234-8234-123456789abc",
+    providerSessionId: "99999999-8888-4777-8666-555555555555",
+    providerWorkflowId: baseConfig.workflowId,
+    providerWorkflowVersion: 1,
+    providerEnvironment: baseConfig.environment,
+    providerConfigFingerprint: await diditConfigFingerprint(baseConfig, 1),
+    providerStatus: "approved" as const,
+    eventCreatedAt: "2026-04-01T00:00:00.000Z",
+    documentAge: null,
+    documentCountryIso3: null,
+    idCheckApproved: false,
+    livenessApproved: false,
+    faceMatchApproved: false,
+    payloadHash: "a".repeat(64),
+  };
+  let rejected = false;
+  try {
+    await hydrateDiditDataUpdatedDecision(
+      event,
+      baseConfig,
+      (() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              session_id: "88888888-8888-4777-8666-555555555555",
+              session_kind: "user",
+              status: "Approved",
+              environment: baseConfig.environment,
+              workflow_id: baseConfig.workflowId,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        )) as typeof fetch,
+    );
+  } catch (error) {
+    rejected = error instanceof DiditDecisionAuthorityError &&
+      error.code === "provider_contract";
+  }
+  assert(rejected, "a cross-session authority response must fail closed");
 });
 
 Deno.test("Didit console probe accepts the signed current v3 test envelope", async () => {
