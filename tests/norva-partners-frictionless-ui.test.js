@@ -280,6 +280,60 @@ test('active dashboard prioritises available, pending and Norva conversion', () 
   assert.doesNotMatch(content.innerHTML, /data-partners-cash-kyc-form/);
 });
 
+test('empty authoritative ledger uses honest first-earning states', () => {
+  const { page } = loadPage();
+  const metrics = control();
+  const content = control();
+  metrics.removeAttribute = () => {};
+  content.removeAttribute = () => {};
+  page.container.querySelector = (selector) => ({
+    '[data-partners-dashboard-metrics]': metrics,
+    '[data-partners-dashboard-content]': content,
+  })[selector] || null;
+  page.bindDashboardActions = () => {};
+  page.bindCreditActions = () => {};
+  page.scheduleDashboardRefresh = () => {};
+  const bootstrap = bootstrapV2({ membership: true });
+
+  page.renderMembershipDashboardData(bootstrap, {
+    schema_version: 2,
+    ...bootstrap,
+    balances: [],
+    next_maturation_at: null,
+    credit_readiness: {
+      ready: false,
+      reason: 'credits_disabled',
+      catalog: null,
+    },
+    cash_readiness: {
+      ready: false,
+      reason: 'cash_pilot_not_allowed',
+    },
+    history: { status: 'all', items: [], next_cursor: null },
+  });
+
+  assert.match(metrics.innerHTML, /No balance yet/);
+  assert.match(metrics.innerHTML, /Nothing in validation/);
+  assert.match(metrics.innerHTML, /No conversions yet/);
+  assert.match(metrics.innerHTML, /Your balance will appear after the first eligible payment\./);
+  assert.doesNotMatch(metrics.innerHTML, /Unavailable/);
+});
+
+test('active member does not promise earnings while the economic flag is paused', () => {
+  const { page, container } = loadPage();
+  const bootstrap = bootstrapV2({ membership: true });
+  bootstrap.flags.partners_earnings_enabled = false;
+  page.bindCommonActions = () => {};
+  page.focusTitle = () => {};
+  page.loadDashboard = () => {};
+
+  page.renderMembershipActive(bootstrap);
+
+  assert.match(container.innerHTML, /Link active · Earnings paused/);
+  assert.match(container.innerHTML, /new commissions are temporarily paused/i);
+  assert.doesNotMatch(container.innerHTML, /Ready to share/);
+});
+
 test('access-credit labels preserve the canonical Plus and Family prices', () => {
   const { page } = loadPage();
   assert.equal(page.creditPlanLabel('plus'), 'Norva Plus');

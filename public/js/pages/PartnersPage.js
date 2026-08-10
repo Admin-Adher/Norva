@@ -1714,14 +1714,24 @@ class PartnersPage {
         const availableBalanceNote = cashPilotLimited
             ? 'Convert to Norva · cash pilot limited'
             : 'Convert or request cash';
+        const earningsEnabled = data.flags?.partners_earnings_enabled === true;
+        const membershipBadge = earningsEnabled
+            ? 'Ready to share'
+            : 'Link active · Earnings paused';
+        const membershipBadgeClass = earningsEnabled
+            ? 'partners-status-success'
+            : 'partners-status-warning';
+        const membershipSummary = earningsEnabled
+            ? `Share immediately, follow the ${data.program.maturation_days}-day validation period and choose how to use your available balance.`
+            : 'Your referral link remains active, but new commissions are temporarily paused. Existing balances and history remain protected.';
         this.container.innerHTML = `
             <main class="partners-shell" aria-labelledby="partners-title">
                 ${this.header('Norva Partners')}
                 <section class="partners-dashboard-heading">
                     <div>
-                        <span class="partners-status-pill partners-status-success">Ready to share</span>
+                        <span class="partners-status-pill ${membershipBadgeClass}">${membershipBadge}</span>
                         <h1 id="partners-title" tabindex="-1">Your Partners balance</h1>
-                        <p>Share immediately, follow the ${data.program.maturation_days}-day validation period and choose how to use your available balance.</p>
+                        <p>${membershipSummary}</p>
                     </div>
                     <div class="partners-dashboard-actions">
                         <button class="btn btn-secondary" type="button" data-partners-cash-button>${cashActionLabel}</button>
@@ -3007,6 +3017,7 @@ class PartnersPage {
             dashboard.cash_readiness
         );
         const balances = Array.isArray(dashboard.balances) ? dashboard.balances : [];
+        const hasBalanceRows = balances.length > 0;
         const available = this.formatCurrencyBalances(balances, 'available_minor');
         const pending = this.formatCurrencyBalances(balances, 'pending_minor');
         const redeemed = this.formatCurrencyBalances(balances, 'redeemed_minor');
@@ -3018,7 +3029,9 @@ class PartnersPage {
             this.metric(
                 'Available to use',
                 available,
-                cashPilotLimited
+                !hasBalanceRows
+                    ? 'Your balance will appear after the first eligible payment.'
+                    : cashPilotLimited
                     ? 'Convert to Norva · cash pilot limited'
                     : 'Convert to Norva or request cash'
             ),
@@ -3815,7 +3828,13 @@ class PartnersPage {
     }
 
     formatCurrencyBalances(currencies, field) {
-        if (!Array.isArray(currencies) || currencies.length === 0) return 'Unavailable';
+        if (!Array.isArray(currencies) || currencies.length === 0) {
+            return ({
+                available_minor: 'No balance yet',
+                pending_minor: 'Nothing in validation',
+                redeemed_minor: 'No conversions yet'
+            })[field] || 'No balance yet';
+        }
         return currencies
             .map((balance) => this.formatMinor(balance?.[field], balance?.currency))
             .join(' · ');
