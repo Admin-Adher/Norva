@@ -1543,6 +1543,7 @@ export async function verifyDiditConsoleTestWebhook(
   }
   if (
     config.environment === "sandbox" &&
+    raw.sandbox_scenario !== undefined &&
     raw.sandbox_scenario !== null &&
     typeof raw.sandbox_scenario !== "string"
   ) {
