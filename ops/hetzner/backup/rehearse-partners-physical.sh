@@ -3,8 +3,8 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either add the fail-closed Didit manual-review continuation
-# after the audited 5347483 database baseline atomically (`predeploy`), or prove
+# PostgreSQL clone, either add the bounded signed Didit terminal-review grace
+# after the audited 2226583 database baseline atomically (`predeploy`), or prove
 # that it is already present without replaying it (`postdeploy`), then run the
 # verifier and restore-compatible pgTAP.
 #
@@ -95,8 +95,8 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly BASELINE_CONTRACT="5347483"
-readonly TARGET_MIGRATION="supabase/migrations/20260810201500_partners_didit_review_recovery.sql"
+readonly BASELINE_CONTRACT="2226583"
+readonly TARGET_MIGRATION="supabase/migrations/20260810230928_partners_didit_signed_review_grace.sql"
 readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly OWNER_RISK_MARKER_COMPLETE="1"
@@ -110,6 +110,8 @@ readonly DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE="1"
 readonly DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1|0"
 readonly DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE="1"
 readonly DIDIT_REVIEW_RECOVERY_MARKER_PENDING="0"
+readonly DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE="1"
+readonly DIDIT_SIGNED_REVIEW_GRACE_MARKER_PENDING="0"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -270,7 +272,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=39"
+proof_line "baseline_markers_verified=40"
 proof_line "target_migration_sha256=$(sha256sum "$CANDIDATE_DIR/$TARGET_MIGRATION" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
@@ -520,6 +522,11 @@ capture_didit_review_recovery_marker() {
     "select (exists (select 1 from pg_catalog.pg_proc procedure_row join pg_catalog.pg_namespace namespace_row on namespace_row.oid = procedure_row.pronamespace where namespace_row.nspname = 'affiliate_private' and procedure_row.proname = 'partners_service_kyc_certification_webhook_apply_and_enqueue_pu' and procedure_row.prokind = 'f' and procedure_row.pronargs = 15 and procedure_row.prosecdef and procedure_row.proconfig = array['search_path=\"\"']::text[]) and position('data.updated:%' in lower(pg_get_functiondef('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_pu(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('v_session.status <> ''in_review''' in lower(pg_get_functiondef('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_pu(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('p_event_created_at <= v_session.last_event_created_at' in lower(pg_get_functiondef('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_pu(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('didit certification review update is not admissible' in lower(pg_get_functiondef('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_pu(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0)::int::text;"
 }
 
+capture_didit_signed_review_grace_marker() {
+  clone_psql -At -v ON_ERROR_STOP=1 -c \
+    "select (exists (select 1 from information_schema.columns column_row where column_row.table_schema = 'affiliate_private' and column_row.table_name = 'affiliate_didit_certification_events' and column_row.column_name = 'provider_delivered_at' and column_row.data_type = 'timestamp with time zone' and column_row.is_nullable = 'YES') and exists (select 1 from pg_catalog.pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_didit_certification_events'::regclass and constraint_row.conname = 'affiliate_didit_certification_events_delivery' and constraint_row.contype = 'c' and constraint_row.convalidated) and exists (select 1 from pg_catalog.pg_proc procedure_row join pg_catalog.pg_namespace namespace_row on namespace_row.oid = procedure_row.pronamespace where namespace_row.nspname = 'affiliate_private' and procedure_row.proname = 'partners_didit_cert_review_apply_purge' and procedure_row.prokind = 'f' and procedure_row.pronargs = 16 and procedure_row.prosecdef and procedure_row.proconfig = array['search_path=\"\"']::text[]) and exists (select 1 from pg_catalog.pg_proc procedure_row join pg_catalog.pg_namespace namespace_row on namespace_row.oid = procedure_row.pronamespace where namespace_row.nspname = 'public' and procedure_row.proname = 'partners_service_didit_cert_review_apply_purge' and procedure_row.prokind = 'f' and procedure_row.pronargs = 16 and not procedure_row.prosecdef) and position('interval ''24 hours''' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('p_provider_delivered_at < statement_timestamp() - interval ''10 minutes''' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('p_event_created_at < v_session.last_event_created_at' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and not has_function_privilege('anon', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE') and not has_function_privilege('authenticated', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE') and has_function_privilege('service_role', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE'))::int::text;"
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -632,13 +639,17 @@ DIDIT_REVIEW_RECOVERY_MARKER="$(
   capture_didit_review_recovery_marker \
     2> "$RAW_DIR/didit-review-recovery-precondition.log"
 )" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}"
+DIDIT_SIGNED_REVIEW_GRACE_MARKER="$(
+  capture_didit_signed_review_grace_marker \
+    2> "$RAW_DIR/didit-signed-review-grace-precondition.log"
+)" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # The audited 5347483 database already contains the bounded certification
-  # RPC alias. Only the strict manual-review continuation is pending replay.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_PENDING}"
+  # The audited 2226583 database already contains the strict certification
+  # reducer. Only the signed terminal-review grace remains pending replay.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_PENDING}"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -763,8 +774,12 @@ DIDIT_REVIEW_RECOVERY_MARKER="$(
   capture_didit_review_recovery_marker \
     2> "$RAW_DIR/didit-review-recovery-postcondition.log"
 )" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}" ]]; then
+DIDIT_SIGNED_REVIEW_GRACE_MARKER="$(
+  capture_didit_signed_review_grace_marker \
+    2> "$RAW_DIR/didit-signed-review-grace-postcondition.log"
+)" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -890,6 +905,8 @@ with expected(signature) as (
     ('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('affiliate_private.partners_service_didit_purge_claim(integer,integer)'),
     ('affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)'),
     ('affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)'),
@@ -973,7 +990,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "164|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "166|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -1017,7 +1034,7 @@ proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=164"
+proof_line "migration_routines_verified=166"
 proof_line "migration_relation_owner=supabase_admin"
 proof_line "migration_relations_verified=19"
 

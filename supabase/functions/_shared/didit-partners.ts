@@ -128,6 +128,7 @@ export type DiditWebhookResult = {
   providerConfigFingerprint: string;
   providerStatus: DiditStatus;
   eventCreatedAt: string;
+  providerDeliveredAt: string;
   documentAge: number | null;
   documentCountryIso3: string | null;
   idCheckApproved: boolean;
@@ -1489,6 +1490,11 @@ export async function verifyAndNormalizeDiditWebhook(
     providerConfigFingerprint,
     providerStatus,
     eventCreatedAt: new Date(createdAt * 1_000).toISOString(),
+    // `created_at` identifies Didit's durable event/session state and can stay
+    // unchanged when a reviewer edits a decision. The authenticated transport
+    // timestamp is separately required by the narrow certification recovery
+    // path so a historical event can never be replayed as a fresh approval.
+    providerDeliveredAt: new Date(timestamp * 1_000).toISOString(),
     documentAge,
     documentCountryIso3,
     idCheckApproved,

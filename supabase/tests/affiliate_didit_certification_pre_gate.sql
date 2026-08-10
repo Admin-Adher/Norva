@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(89);
+select extensions.plan(91);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -1645,18 +1645,65 @@ select extensions.throws_ok(
 );
 reset role;
 
-update didit_certification_state
-set event_created_at = transaction_timestamp()
-where operator_key = 'risk2-review';
+set local role service_role;
+select extensions.throws_ok(
+  $$
+    select public.partners_service_didit_cert_review_apply_purge(
+      'data.updated:42345678-1234-4234-8234-123456789abc',
+      'didit-certification-session-risk2-review',
+      'didit-workflow-certification',
+      1,
+      'approved',
+      (
+        select event_created_at
+        from didit_certification_state
+        where operator_key = 'risk2-review'
+      ),
+      clock_timestamp() - interval '11 minutes',
+      30,
+      'FRA',
+      true,
+      true,
+      true,
+      repeat('8', 64),
+      'live',
+      repeat('f', 64),
+      current_setting('norva.partners_test_purge_envelope')
+    )
+  $$,
+  '22023',
+  'invalid Didit certification review delivery',
+  'a stale transport timestamp cannot revive a historical reviewer decision'
+);
+reset role;
+
+-- Reproduce the real provider sequence: the immutable event creation time is
+-- unchanged, the local two-hour session has just expired, and only the signed
+-- delivery timestamp is fresh. The dedicated RPC accepts that exact terminal
+-- review without weakening the ordinary webhook reducer.
+update affiliate_private.affiliate_didit_certification_sessions session
+set expires_at = greatest(
+  session.created_at + interval '1 microsecond',
+  clock_timestamp() - interval '1 microsecond'
+)
+where session.provider_session_hash = encode(
+  extensions.digest(
+    'norva:didit:session:v1:didit-certification-session-risk2-review',
+    'sha256'
+  ),
+  'hex'
+);
+
 set local role service_role;
 update didit_certification_state state
-set response = public.partners_service_kyc_certification_webhook_apply_purge(
+set response = public.partners_service_didit_cert_review_apply_purge(
   'data.updated:32345678-1234-4234-8234-123456789abc',
   'didit-certification-session-risk2-review',
   'didit-workflow-certification',
   1,
   'approved',
   state.event_created_at,
+  clock_timestamp(),
   30,
   'FRA',
   true,
@@ -1675,7 +1722,7 @@ select extensions.is(
     where operator_key = 'risk2-review'
   ),
   'kyc_certification_result_applied',
-  'a newer complete signed review decision is applied'
+  'a fresh signed delivery applies the stable terminal reviewer decision'
 );
 select extensions.ok(
   (
@@ -1752,7 +1799,7 @@ select extensions.ok(
 
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply_purge(
+  public.partners_service_didit_cert_review_apply_purge(
     'data.updated:32345678-1234-4234-8234-123456789abc',
     'didit-certification-session-risk2-review',
     'didit-workflow-certification',
@@ -1763,6 +1810,7 @@ select extensions.is(
       from didit_certification_state
       where operator_key = 'risk2-review'
     ),
+    clock_timestamp(),
     30,
     'FRA',
     true,
@@ -1777,6 +1825,34 @@ select extensions.is(
   'the complete signed review decision remains idempotent'
 );
 reset role;
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_didit_certification_sessions session
+    join affiliate_private.affiliate_didit_certification_events event
+      on event.certification_session_id = session.id
+    where session.provider_session_hash = encode(
+        extensions.digest(
+          'norva:didit:session:v1:didit-certification-session-risk2-review',
+          'sha256'
+        ),
+        'hex'
+      )
+      and event.provider_event_hash = encode(
+        extensions.digest(
+          'norva:didit:event:v1:data.updated:32345678-1234-4234-8234-123456789abc',
+          'sha256'
+        ),
+        'hex'
+      )
+      and event.provider_delivered_at is not null
+      and event.provider_delivered_at >= event.created_at - interval '5 minutes'
+      and event.provider_status = 'approved'
+      and event.processing_outcome = 'applied'
+  ),
+  'the append-only terminal evidence retains the authenticated delivery time'
+);
 
 -- A complete sandbox approval proves transport and workflow wiring only. It
 -- must never become an authoritative verification, even with every check true.

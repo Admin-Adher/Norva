@@ -2,11 +2,11 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(112);
+select extensions.plan(115);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
--- and ACL assertions for the audited d5d596b baseline plus the guided Didit
--- certification preflight without creating any object in the restored database.
+-- and ACL assertions for the current Partners baseline plus the bounded signed
+-- Didit terminal-review recovery without creating any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_actor_is_live_admin(text)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_has_capability(text)","security_definer":true,"volatility":"s","access_role":"owner"},
@@ -99,6 +99,8 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_didit_purge_claim(integer,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
@@ -191,7 +193,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  164::bigint,
+  166::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -214,7 +216,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  164::bigint,
+  166::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -231,7 +233,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 164
+    select count(*) = 166
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -253,7 +255,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 164
+    select count(*) = 166
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -277,7 +279,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 164
+    select count(*) = 166
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -893,6 +895,41 @@ select extensions.ok(
       and session.provider_purge_status = 'not_required'
   ),
   'durable provider deletion state remains private, guarded and terminal-session complete'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'affiliate_private'
+      and column_row.table_name = 'affiliate_didit_certification_events'
+      and column_row.column_name = 'provider_delivered_at'
+      and column_row.data_type = 'timestamp with time zone'
+      and column_row.is_nullable = 'YES'
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_didit_certification_events'::regclass
+      and constraint_row.conname =
+        'affiliate_didit_certification_events_delivery'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and position(
+        'provider_delivered_at'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+      and position(
+        'provider_event_created_at'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+      and position(
+        '00:05:00'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+  ),
+  'signed Didit terminal-review delivery time is nullable, bounded and constrained'
 );
 
 select extensions.ok(

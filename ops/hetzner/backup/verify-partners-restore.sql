@@ -218,6 +218,39 @@ begin
     end if;
   end loop;
 
+  if not exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'affiliate_private'
+      and column_row.table_name = 'affiliate_didit_certification_events'
+      and column_row.column_name = 'provider_delivered_at'
+      and column_row.data_type = 'timestamp with time zone'
+      and column_row.is_nullable = 'YES'
+  ) or not exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+      'affiliate_private.affiliate_didit_certification_events'::regclass
+      and constraint_row.conname =
+        'affiliate_didit_certification_events_delivery'
+      and constraint_row.contype = 'c'
+      and constraint_row.convalidated
+      and position(
+        'provider_delivered_at'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+      and position(
+        'provider_event_created_at'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+      and position(
+        '00:05:00'
+        in pg_catalog.pg_get_constraintdef(constraint_row.oid)
+      ) > 0
+  ) then
+    raise exception 'restore omitted bounded Didit delivery-time evidence';
+  end if;
+
   select string_agg(
     expected.schema_name || '.' || expected.relation_name,
     ', ' order by expected.schema_name, expected.relation_name
@@ -379,6 +412,7 @@ begin
     'public.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)',
     'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamp with time zone,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'public.partners_service_didit_purge_claim(integer,integer)',
     'public.partners_service_didit_purge_complete(bigint,uuid,text)',
     'public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',
@@ -454,6 +488,7 @@ begin
        or v_signature like 'public.%revenuecat_entitlement_transfer%'
        or v_signature like 'public.partners_service_kyc_%'
        or v_signature like 'public.partners_service_didit_purge_%'
+       or v_signature like 'public.partners_service_didit_cert_%'
        or v_signature like
          'public.partners_worker_revolut_dispute_won_%'
        or v_signature like
@@ -559,7 +594,9 @@ begin
       ('affiliate_private.admin_partners_program_activate_pre_aal2_20260802(text,text,text)', true, 'v', 'owner'),
       ('affiliate_private.admin_partners_program_activate(text,text,text)', true, 'v', 'authenticated'),
       ('affiliate_private.admin_partners_kyc_certification_preflight()', true, 's', 'authenticated'),
-      ('public.admin_partners_kyc_certification_preflight()', false, 's', 'authenticated')
+      ('public.admin_partners_kyc_certification_preflight()', false, 's', 'authenticated'),
+      ('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', true, 'v', 'service_role'),
+      ('public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', false, 'v', 'service_role')
     ) expected(signature, security_definer, volatility, access_role)
   loop
     if to_regprocedure(v_expected.signature) is null then

@@ -508,6 +508,10 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     verifiedV2.webhookType === "status.updated",
     "the normalized lifecycle event type remains explicit",
   );
+  assert(
+    verifiedV2.providerDeliveredAt === new Date(now * 1_000).toISOString(),
+    "the signed delivery timestamp remains distinct from event creation",
+  );
   assert(verifiedV2.documentAge === 28, "V2 authenticates the full decision");
   assert(
     !JSON.stringify(verifiedV2).includes("José"),
@@ -831,6 +835,7 @@ Deno.test("Didit reviewer decision hydration fails closed on provider drift", as
     providerConfigFingerprint: await diditConfigFingerprint(baseConfig, 1),
     providerStatus: "approved" as const,
     eventCreatedAt: "2026-04-01T00:00:00.000Z",
+    providerDeliveredAt: "2026-04-01T00:00:02.000Z",
     documentAge: null,
     documentCountryIso3: null,
     idCheckApproved: false,

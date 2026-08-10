@@ -511,6 +511,7 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
     providerConfigFingerprint: expectedFingerprint,
     providerStatus: 'approved',
     eventCreatedAt: new Date((timestamp - 6) * 1000).toISOString(),
+    providerDeliveredAt: new Date(timestamp * 1000).toISOString(),
     documentAge: 28,
     documentCountryIso3: 'ESP',
     idCheckApproved: true,
@@ -544,6 +545,16 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
     retryResult.payloadHash,
     result.payloadHash,
     'a retry with Didit refreshed dispatch timestamp/signature keeps the semantic event hash',
+  );
+  assert.equal(
+    retryResult.providerDeliveredAt,
+    new Date(retryTimestamp * 1000).toISOString(),
+    'the authenticated dispatch timestamp remains explicit and fresh per delivery',
+  );
+  assert.equal(
+    retryResult.eventCreatedAt,
+    result.eventCreatedAt,
+    'Didit retries retain the durable event creation timestamp',
   );
 
   const changedDecisionPayload = {

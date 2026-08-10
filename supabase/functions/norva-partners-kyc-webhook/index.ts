@@ -161,11 +161,24 @@ Deno.serve(async (req) => {
       p_provider_config_fingerprint: event.providerConfigFingerprint,
       p_provider_session_envelope: providerSessionEnvelope,
     };
+    const certificationTerminalReview = certificationReviewUpdate && [
+      "approved",
+      "declined",
+      "abandoned",
+      "expired",
+      "kyc_expired",
+    ].includes(event.providerStatus);
+    const certificationReviewArgs = {
+      ...rpcArgs,
+      p_provider_delivered_at: event.providerDeliveredAt,
+    };
     let certification = certificationReviewUpdate;
     let { data, error } = certificationReviewUpdate
       ? await admin.rpc(
-        "partners_service_kyc_certification_webhook_apply_purge",
-        rpcArgs,
+        certificationTerminalReview
+          ? "partners_service_didit_cert_review_apply_purge"
+          : "partners_service_kyc_certification_webhook_apply_purge",
+        certificationTerminalReview ? certificationReviewArgs : rpcArgs,
       )
       : await admin.rpc(
         "partners_service_kyc_webhook_apply_and_enqueue_purge",
