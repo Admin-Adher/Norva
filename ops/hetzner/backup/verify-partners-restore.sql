@@ -756,6 +756,24 @@ begin
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_pu(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure
+  );
+  if position('data.updated:%' in lower(v_definition)) = 0
+    or position('v_session.status <> ''in_review''' in lower(v_definition)) = 0
+    or position(
+      'p_event_created_at <= v_session.last_event_created_at'
+      in lower(v_definition)
+    ) = 0
+    or position(
+      'didit certification review update is not admissible'
+      in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Didit certification wrapper lost its fail-closed manual-review continuation';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
     'affiliate_private.guard_didit_certification_session_transition()'::regprocedure
   );
   if position(
