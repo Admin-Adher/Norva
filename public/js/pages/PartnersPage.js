@@ -8,6 +8,9 @@
  */
 class PartnersPage {
     static BIOMETRIC_CONSENT_VERSION = 'partners-biometric-consent-v1';
+    static KYC_RETURN_TRACKING_TTL_MS = 15 * 60 * 1000;
+    static KYC_PENDING_REFRESH_MS = 10 * 1000;
+    static DASHBOARD_REFRESH_MS = 60 * 1000;
 
     constructor(app) {
         this.app = app;
@@ -58,6 +61,7 @@ class PartnersPage {
         this._kycRightsAbort = null;
         this._kycRightsToken = 0;
         this._kycRightsData = null;
+        this._kycReturnPendingUntil = 0;
     }
 
     canUseUserPartners() {
@@ -321,6 +325,12 @@ class PartnersPage {
         this._accessRequestToken += 1;
         this._earlyAccessContext = null;
         const returnedFromKyc = this.app?.consumePartnersKycReturnNotice?.() === true;
+        if (returnedFromKyc) {
+            this._kycReturnPendingUntil = Date.now()
+                + PartnersPage.KYC_RETURN_TRACKING_TTL_MS;
+        } else if (this._kycReturnPendingUntil <= Date.now()) {
+            this._kycReturnPendingUntil = 0;
+        }
         this.ensureSessionContext();
         const jurisdiction = this.normalizeJurisdiction(
             options.countryCode ?? this._jurisdiction.countryCode,
@@ -392,8 +402,8 @@ class PartnersPage {
             }
             if (returnedFromKyc) {
                 window.NorvaModal?.toast?.(
-                    'Identity check submitted. Norva is confirming the signed provider result.',
-                    'success'
+                    'Back in Norva. Checking for the signed identity result; this page will update automatically.',
+                    'info'
                 );
             }
         } catch (error) {
@@ -1718,6 +1728,9 @@ class PartnersPage {
                         <button class="btn btn-secondary" type="button" data-partners-dashboard-retry>Refresh</button>
                     </div>
                 </section>
+                <div class="partners-kyc-progress-host" data-partners-kyc-progress-host>
+                    ${this.cashKycProgressMarkup(data.membership, data.cash_readiness)}
+                </div>
                 <section class="partners-metrics" aria-label="Partner balance" data-partners-dashboard-metrics aria-busy="true">
                     ${this.metric('Available to use', 'Loading', availableBalanceNote)}
                     ${this.metric('In validation', 'Loading', `${data.program.maturation_days}-day validation window`)}
@@ -1740,6 +1753,81 @@ class PartnersPage {
             }, event.currentTarget));
         this.focusTitle();
         this.loadDashboard(data, { reset: true });
+    }
+
+    hasRecentKycReturn() {
+        return Number.isSafeInteger(this._kycReturnPendingUntil)
+            && this._kycReturnPendingUntil > Date.now();
+    }
+
+    cashKycProgressModel(membership, cashReadiness) {
+        const status = String(membership?.verification_status || 'not_started');
+        const recentlyReturned = this.hasRecentKycReturn();
+        if (status === 'not_started' && !recentlyReturned) return null;
+        if (status === 'verified') {
+            return {
+                tone: 'success',
+                badgeClass: 'partners-status-success',
+                badge: 'Identity verified',
+                title: 'Your cash-transfer identity check is complete.',
+                copy: cashReadiness?.ready
+                    ? 'Cash setup is ready. Continue only when you choose to request a transfer.'
+                    : 'You can continue with the remaining tax and payout checks when you choose. Sharing, earnings and Norva-access conversions stay available.'
+            };
+        }
+        if (status === 'failed') {
+            return {
+                tone: 'attention',
+                badgeClass: 'partners-status-warning',
+                badge: 'Action required',
+                title: 'The identity check could not be confirmed.',
+                copy: 'Your balance is unchanged. Open “Receive a cash transfer” to review the safe retry path; never send identity documents to Support.'
+            };
+        }
+        if (status === 'expired') {
+            return {
+                tone: 'attention',
+                badgeClass: 'partners-status-warning',
+                badge: 'Session expired',
+                title: 'A fresh identity check is required for cash.',
+                copy: 'Your membership and balance remain active. Start a new hosted session only when you are ready to request a cash transfer.'
+            };
+        }
+        return {
+            tone: 'pending',
+            badgeClass: 'partners-status-warning',
+            badge: status === 'pending' ? 'Under review' : 'Confirmation pending',
+            title: status === 'pending'
+                ? 'Didit is reviewing your submission.'
+                : 'Norva is checking for a signed identity result.',
+            copy: status === 'pending'
+                ? 'Norva received the signed in-review state and refreshes it automatically. You can leave this page, keep sharing and use balance for Norva access in the meantime.'
+                : 'No provider result has been recorded yet. Norva refreshes this status automatically without trusting the return link. You can leave this page, keep sharing and use balance for Norva access in the meantime.'
+        };
+    }
+
+    cashKycProgressMarkup(membership, cashReadiness) {
+        const model = this.cashKycProgressModel(membership, cashReadiness);
+        if (!model) return '';
+        return `<section class="partners-kyc-progress is-${this.escape(model.tone)}"
+                data-partners-kyc-progress role="status" aria-live="polite" aria-atomic="true">
+            <div>
+                <span class="partners-eyebrow">Optional cash transfer</span>
+                <h2>${this.escape(model.title)}</h2>
+                <p>${this.escape(model.copy)}</p>
+            </div>
+            <span class="partners-status-pill ${this.escape(model.badgeClass)}">${this.escape(model.badge)}</span>
+        </section>`;
+    }
+
+    updateCashKycProgress(membership, cashReadiness) {
+        const host = this.container?.querySelector('[data-partners-kyc-progress-host]');
+        if (!host) return;
+        const status = String(membership?.verification_status || 'not_started');
+        if (['verified', 'failed', 'expired'].includes(status)) {
+            this._kycReturnPendingUntil = 0;
+        }
+        host.innerHTML = this.cashKycProgressMarkup(membership, cashReadiness);
     }
 
     renderDiscovery(data) {
@@ -2914,6 +3002,10 @@ class PartnersPage {
         const content = this.container?.querySelector('[data-partners-dashboard-content]');
         if (!metrics || !content) return;
         this._membershipDashboard = dashboard;
+        this.updateCashKycProgress(
+            dashboard.membership,
+            dashboard.cash_readiness
+        );
         const balances = Array.isArray(dashboard.balances) ? dashboard.balances : [];
         const available = this.formatCurrencyBalances(balances, 'available_minor');
         const pending = this.formatCurrencyBalances(balances, 'pending_minor');
@@ -3189,6 +3281,14 @@ class PartnersPage {
         this._dashboardRefreshTimer = 0;
         if (!this._visible
             || bootstrap.schema_version !== 2) return;
+        const verificationStatus = String(
+            dashboard.membership?.verification_status || 'not_started'
+        );
+        const trackingKyc = this.hasRecentKycReturn()
+            && ['pending', 'not_started'].includes(verificationStatus);
+        const refreshDelay = trackingKyc
+            ? PartnersPage.KYC_PENDING_REFRESH_MS
+            : PartnersPage.DASHBOARD_REFRESH_MS;
         this._dashboardRefreshTimer = setTimeout(() => {
             this._dashboardRefreshTimer = 0;
             if (!this._visible) return;
@@ -3204,7 +3304,7 @@ class PartnersPage {
                 reset: true,
                 successMessage: 'Balance refreshed automatically.'
             });
-        }, 60000);
+        }, refreshDelay);
     }
 
     openCreditQuoteDialog(quote, bootstrap, opener) {

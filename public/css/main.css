@@ -19076,6 +19076,50 @@ html:not(.tv-mode) .home-state-inline {
   gap: var(--space-sm);
 }
 
+.partners-kyc-progress-host:empty {
+  display: none;
+}
+
+.partners-kyc-progress {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-lg);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.partners-kyc-progress.is-pending {
+  border-color: var(--color-warning);
+}
+
+.partners-kyc-progress.is-success {
+  border-color: var(--color-success);
+}
+
+.partners-kyc-progress.is-attention {
+  border-color: var(--color-error);
+}
+
+.partners-kyc-progress h2 {
+  margin: var(--space-xs) 0;
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
+}
+
+.partners-kyc-progress p,
+.partners-kyc-progress .partners-eyebrow {
+  margin: 0;
+}
+
+.partners-kyc-progress .partners-status-pill {
+  flex: 0 0 auto;
+}
+
 .partners-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -19749,9 +19793,14 @@ html.tv-mode .partners-tv-shell .btn:focus {
   }
 
   .partners-dashboard-heading,
+  .partners-kyc-progress,
   .partners-referral-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .partners-kyc-progress .partners-status-pill {
+    align-self: flex-start;
   }
 
   .partners-dashboard-actions,

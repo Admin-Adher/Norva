@@ -111,6 +111,8 @@ class App {
                 && statuses.length === 1
                 && NORVA_PARTNERS_KYC_SESSION_PATTERN.test(sessions[0])
                 && NORVA_PARTNERS_KYC_RETURN_STATUSES.has(statuses[0]);
+            const sanitizedBoundaryReturn = !hasSensitiveDiditParams
+                && url.hash === '#partners/kyc-return';
 
             // Didit adds its opaque session id and status to the return URL.
             // They are useful only to confirm that the hosted flow returned;
@@ -138,19 +140,24 @@ class App {
             } catch (_) { /* private mode may deny sessionStorage */ }
 
             // The public callback deliberately strips every provider query
-            // parameter before redirecting to #partners. The same-tab,
-            // timestamp-only marker is therefore the sole safe way to restore
-            // the Admin context without carrying a provider identifier.
+            // parameter before redirecting through a static hash-only marker.
+            // The marker carries no decision or provider identifier. A same-tab,
+            // timestamp-only marker remains the sole safe way to distinguish an
+            // Admin certification return from an ordinary member KYC return.
             const sanitizedCertificationReturn = !hasSensitiveDiditParams
                 && certificationReturn
-                && url.hash === '#partners';
-            if (!hasSensitiveDiditParams && !sanitizedCertificationReturn) {
+                && (sanitizedBoundaryReturn || url.hash === '#partners');
+            if (!hasSensitiveDiditParams
+                && !sanitizedBoundaryReturn
+                && !sanitizedCertificationReturn) {
                 return null;
             }
 
             url.searchParams.delete('verificationSessionId');
             url.searchParams.delete('status');
-            if (validProviderReturn || sanitizedCertificationReturn) {
+            if (validProviderReturn
+                || sanitizedBoundaryReturn
+                || sanitizedCertificationReturn) {
                 url.hash = certificationReturn ? '#admin/partners' : '#partners';
             }
             window.history.replaceState(
@@ -158,7 +165,9 @@ class App {
                 '',
                 `${url.pathname}${url.search}${url.hash}`
             );
-            if (!validProviderReturn && !sanitizedCertificationReturn) return null;
+            if (!validProviderReturn
+                && !sanitizedBoundaryReturn
+                && !sanitizedCertificationReturn) return null;
             if (certificationReturn) {
                 try {
                     sessionStorage.removeItem(

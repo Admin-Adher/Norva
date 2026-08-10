@@ -1147,7 +1147,11 @@ export function diditCreateBody(
     workflow_id: config.workflowId,
     vendor_data: vendorData,
     callback: config.callbackUrl,
-    callback_method: "completer",
+    // A verification can start on Web and finish on a phone after a QR hand-off.
+    // Redirect both sides so the authenticated initiator is never stranded on
+    // Didit's terminal / in-review screen while the completing phone receives
+    // the same privacy-preserving Norva return boundary.
+    callback_method: "both",
     language,
   };
 }

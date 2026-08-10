@@ -290,7 +290,7 @@ test('Didit return boundary drops provider query before app history or referrer'
   assert.equal(response.status, 303);
   assert.equal(
     response.headers.get('Location'),
-    '/app.html#partners',
+    '/app.html#partners/kyc-return',
   );
   assert.equal(
     response.headers.get('Cache-Control'),
@@ -320,7 +320,7 @@ test('Didit return boundary drops provider query before app history or referrer'
     ),
   });
   assert.equal(head.status, 303);
-  assert.equal(head.headers.get('Location'), '/app.html#partners');
+  assert.equal(head.headers.get('Location'), '/app.html#partners/kyc-return');
 
   const android = await callback.onRequest({
     request: new Request(
@@ -329,7 +329,10 @@ test('Didit return boundary drops provider query before app history or referrer'
     ),
   });
   assert.equal(android.status, 303);
-  assert.equal(android.headers.get('Location'), '/app.html?mobile=1#partners');
+  assert.equal(
+    android.headers.get('Location'),
+    '/app.html?mobile=1#partners/kyc-return',
+  );
 
   const rejected = await callback.onRequest({
     request: new Request(
@@ -386,6 +389,11 @@ test('Didit session creation sends no identity, contact, document or biometric d
     'vendor_data',
     'workflow_id',
   ]);
+  assert.equal(
+    body.callback_method,
+    'both',
+    'the initiator and the completing device must both return to Norva',
+  );
   assert.equal(
     Object.hasOwn(body, 'session_expiration_time'),
     false,

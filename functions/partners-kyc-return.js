@@ -1,5 +1,8 @@
-const WEB_RETURN_LOCATION = "/app.html#partners";
-const ANDROID_RETURN_LOCATION = "/app.html?mobile=1#partners";
+// The hash-only marker contains no provider identifier or decision. The SPA
+// removes it synchronously before analytics/auth work, then reloads the
+// authoritative Partners status from Norva's authenticated API.
+const WEB_RETURN_LOCATION = "/app.html#partners/kyc-return";
+const ANDROID_RETURN_LOCATION = "/app.html?mobile=1#partners/kyc-return";
 
 function returnLocation(request) {
   const userAgent = request.headers.get("User-Agent") || "";

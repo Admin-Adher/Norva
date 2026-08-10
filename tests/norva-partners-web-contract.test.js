@@ -2317,7 +2317,7 @@ test('Partners is a secondary discoverable route whose operational actions stay 
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
   assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=9"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=10"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -2503,12 +2503,12 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=99/);
+  assert.match(htmlSource, /main\.css\?v=100/);
   assert.match(htmlSource, /cloudApi\.js\?v=59/);
   assert.match(htmlSource, /standalone\.js\?v=10/);
   assert.match(htmlSource, /Settings\.js\?v=47/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=9/);
-  assert.match(htmlSource, /app\.js\?v=69/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=10/);
+  assert.match(htmlSource, /app\.js\?v=70/);
   assert.match(appSource, /AdminPage\.js\?v=[0-9a-f]{10}/);
 });
 
@@ -2529,7 +2529,11 @@ test('Didit return identifiers are scrubbed before analytics, referrers or auth 
     appSource,
     /sanitizedCertificationReturn[\s\S]{0,900}url\.hash = certificationReturn \? '#admin\/partners' : '#partners'[\s\S]{0,260}history\.replaceState/,
   );
+  assert.match(appSource, /sanitizedBoundaryReturn[\s\S]{0,160}#partners\/kyc-return/);
   assert.match(pageSource, /consumePartnersKycReturnNotice/);
+  assert.match(pageSource, /Back in Norva\. Checking for the signed identity result/);
+  assert.match(pageSource, /cashKycProgressMarkup/);
+  assert.match(pageSource, /dashboard\.membership[\s\S]{0,120}dashboard\.cash_readiness/);
   assert.match(appSource, /NORVA_PARTNERS_KYC_CERTIFICATION_RETURN_TTL_MS/);
   assert.match(appSource, /url\.hash === '#partners'/);
   assert.match(appSource, /consumePartnersKycCertificationReturnNotice/);

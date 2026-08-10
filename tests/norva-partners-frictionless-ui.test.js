@@ -91,7 +91,7 @@ function loadPage({ partners = {} } = {}) {
   return { page, container, window, document };
 }
 
-function bootstrapV2({ membership = false } = {}) {
+function bootstrapV2({ membership = false, verificationStatus = 'not_started' } = {}) {
   return {
     schema_version: 2,
     flags: {
@@ -106,7 +106,7 @@ function bootstrapV2({ membership = false } = {}) {
       exists: membership,
       status: membership ? 'active' : 'not_joined',
       joined_at: membership ? '2026-08-04T12:00:00Z' : null,
-      verification_status: membership ? 'not_started' : null,
+      verification_status: membership ? verificationStatus : null,
     },
     program: {
       commission_rate_bps: 2000,
@@ -404,6 +404,52 @@ test('cash KYC is opened only for the cash-transfer choice', async () => {
   assert.equal(countryDialogs, 1);
   assert.equal(payoutLoads, 2);
   assert.equal(payoutDialogs, 1);
+});
+
+test('cash KYC return shows an authoritative progress card and faster pending refresh', () => {
+  const { page, container } = loadPage();
+  page.loadDashboard = () => {};
+  page._kycReturnPendingUntil = Date.now() + 60_000;
+
+  page.renderMembershipActive(bootstrapV2({
+    membership: true,
+    verificationStatus: 'pending',
+  }));
+
+  assert.match(container.innerHTML, /data-partners-kyc-progress/);
+  assert.match(container.innerHTML, /Under review/);
+  assert.match(container.innerHTML, /Didit is reviewing your submission/);
+  assert.match(container.innerHTML, /refreshes it automatically/);
+  assert.match(container.innerHTML, /keep sharing and use balance for Norva access/);
+
+  const waitingForWebhook = page.cashKycProgressModel(
+    { verification_status: 'not_started' },
+    { ready: false, reason: 'kyc_required' },
+  );
+  assert.equal(waitingForWebhook.badge, 'Confirmation pending');
+  assert.match(waitingForWebhook.title, /checking for a signed identity result/);
+  assert.match(waitingForWebhook.copy, /No provider result has been recorded yet/);
+  assert.match(waitingForWebhook.copy, /without trusting the return link/);
+
+  page._kycReturnPendingUntil = 0;
+  assert.equal(
+    page.cashKycProgressModel(
+      { verification_status: 'not_started' },
+      { ready: false, reason: 'kyc_required' },
+    ),
+    null,
+  );
+  const verified = page.cashKycProgressModel(
+    { verification_status: 'verified' },
+    { ready: false, reason: 'fiscal_profile_required' },
+  );
+  assert.equal(verified.badge, 'Identity verified');
+  assert.match(verified.copy, /remaining tax and payout checks/);
+
+  assert.match(pageSource, /KYC_PENDING_REFRESH_MS\s*=\s*10\s*\*\s*1000/);
+  assert.match(pageSource, /DASHBOARD_REFRESH_MS\s*=\s*60\s*\*\s*1000/);
+  assert.match(pageSource, /setTimeout\([\s\S]{0,700}refreshDelay\)/);
+  assert.match(cssSource, /\.partners-kyc-progress\s*\{[\s\S]{0,500}var\(--color-bg-secondary\)/);
 });
 
 test('cash payout country is explicit, idempotent and never inferred from device data', () => {
