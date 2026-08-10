@@ -2509,7 +2509,7 @@ test('Partners route participates in bounded native continuity without storing p
   assert.match(htmlSource, /Settings\.js\?v=47/);
   assert.match(htmlSource, /PartnersPage\.js\?v=9/);
   assert.match(htmlSource, /app\.js\?v=69/);
-  assert.match(appSource, /AdminPage\.js\?v=114/);
+  assert.match(appSource, /AdminPage\.js\?v=[0-9a-f]{10}/);
 });
 
 test('Didit return identifiers are scrubbed before analytics, referrers or auth redirects', () => {
