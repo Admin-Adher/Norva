@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(76);
+select extensions.plan(77);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -115,6 +115,21 @@ select extensions.ok(
     'EXECUTE'
   ),
   'only authenticated callers can reach the read-only certification preflight'
+);
+select extensions.ok(
+  position(
+    'partners_release_gate_approval_is_current'
+    in lower(pg_catalog.pg_get_functiondef(
+      'affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure
+    ))
+  ) > 0
+  and position(
+    'and gate.satisfied'
+    in lower(pg_catalog.pg_get_functiondef(
+      'affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure
+    ))
+  ) = 0,
+  'guided preflight uses current approval evidence instead of raw gate booleans'
 );
 select extensions.ok(
   has_function_privilege(

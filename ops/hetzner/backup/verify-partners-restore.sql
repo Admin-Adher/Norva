@@ -911,6 +911,10 @@ begin
   if position(
       'partners_require_didit_certification_observer' in lower(v_definition)
     ) = 0
+    or position(
+      'partners_release_gate_approval_is_current' in lower(v_definition)
+    ) = 0
+    or position('and gate.satisfied' in lower(v_definition)) > 0
     or position('privacy_approved' in lower(v_definition)) = 0
     or position(
       'individual_verification_coverage_confirmed' in lower(v_definition)
@@ -922,7 +926,7 @@ begin
     or position('interval ''10 minutes''' in lower(v_definition)) = 0
   then
     raise exception
-      'restored Didit certification preflight lost its fail-closed readiness contract';
+      'restored Didit certification preflight lost current approval evidence or its fail-closed readiness contract';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(

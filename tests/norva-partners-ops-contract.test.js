@@ -387,7 +387,7 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   );
   assert.match(
     verifier,
-    /Didit certification preflight lost its fail-closed readiness contract/,
+    /Didit certification preflight lost current approval evidence or its fail-closed readiness contract/,
   );
   assert.match(parity, /affiliate_private\.\$t/);
   assert.match(parity, /partners private tables/);
@@ -684,17 +684,17 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260809190000_partners_fr_pilot_usd_policy_alignment\.sql/,
+    /20260810080836_partners_didit_preflight_registry_truth\.sql/,
   );
-  assert.match(rehearsal, /BASELINE_CONTRACT="991c944"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="f0e3212"/);
   assert.match(
     rehearsal,
-    /HOTFIX_MIGRATION="supabase\/migrations\/20260809190000_partners_fr_pilot_usd_policy_alignment\.sql"/,
+    /HOTFIX_MIGRATION="supabase\/migrations\/20260810080836_partners_didit_preflight_registry_truth\.sql"/,
   );
   assert.equal(
     (rehearsal.match(/readonly HOTFIX_MIGRATION=/g) || []).length,
     1,
-    'the post-991c944 preflight lot contains exactly one migration',
+    'the post-f0e3212 preflight lot contains exactly one migration',
   );
   assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
   assert.match(rehearsal, /-f "\/candidate\/\$HOTFIX_MIGRATION"/);
@@ -709,7 +709,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=33/);
+  assert.match(rehearsal, /baseline_markers_verified=36/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -723,6 +723,10 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE="1"/);
   assert.match(
     rehearsal,
+    /DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE="1"/,
+  );
+  assert.match(
+    rehearsal,
     /\('affiliate_private\.admin_partners_kyc_certification_preflight\(\)'\)/,
   );
   assert.match(
@@ -731,7 +735,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|0"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
@@ -745,26 +749,12 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     rehearsal,
     /fr_scoped_release_gates_before=\$BASELINE_FR_SCOPED_GATES/,
   );
-  assert.match(
-    rehearsal,
-    /BASELINE_RELEASE_GATE_SATISFIED - BASELINE_FR_SCOPED_GATES/,
-  );
-  assert.match(
-    rehearsal,
-    /BASELINE_RELEASE_BINDINGS - BASELINE_FR_SCOPED_GATES/,
-  );
-  assert.match(
-    rehearsal,
-    /BASELINE_EVENTS \+ BASELINE_FR_SCOPED_GATES[\s\\]*\+ BASELINE_FR_MAINTENANCE_FLAGS \+ 1/,
-  );
-  assert.match(
-    rehearsal,
-    /BASELINE_MANAGED_FLAG_ENABLED - BASELINE_FR_MAINTENANCE_FLAGS/,
-  );
-  assert.match(
-    rehearsal,
-    /BASELINE_FR_FLAG_EVENTS \+ BASELINE_FR_MAINTENANCE_FLAGS/,
-  );
+  assert.match(rehearsal, /EXPECTED_FR_RELEASE_STATE="\$FR_RELEASE_STATE_BEFORE"/);
+  assert.match(rehearsal, /EXPECTED_FR_FLAG_STATE="\$FR_FLAG_STATE_BEFORE"/);
+  assert.match(rehearsal, /EXPECTED_FINAL_PARTNER_EVENTS="\$BASELINE_EVENTS"/);
+  assert.match(rehearsal, /fr_scoped_release_gates_revoked=0/);
+  assert.match(rehearsal, /fr_maintenance_flags_disabled=0/);
+  assert.match(rehearsal, /fr_policy_alignment_events_added=0/);
   assert.match(rehearsal, /EXPECTED_FINAL_PARTNER_EVENTS/);
   assert.match(
     rehearsal,
@@ -898,7 +888,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(restoreGuide, /predeploy/);
   assert.match(restoreGuide, /postdeploy/);
-  assert.match(restoreGuide, /baseline_contract=991c944/);
+  assert.match(restoreGuide, /baseline_contract=f0e3212/);
   assert.match(restoreGuide, /migrations_applied=1/);
   assert.match(restoreGuide, /migrations_applied=0/);
   assert.match(restoreGuide, /NORVA_SKIP_BASE_RETENTION=true/);

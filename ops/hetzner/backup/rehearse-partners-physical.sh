@@ -3,11 +3,11 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either align the unopened France P0 payout policy from EUR
-# to the authoritative USD contract after the audited 991c944 production
-# baseline atomically (`predeploy`), or prove that the alignment is already
-# present without replaying it (`postdeploy`), then run the verifier and
-# restore-compatible pgTAP.
+# PostgreSQL clone, either align the guided Didit preflight with the immutable
+# approval registry after the audited f0e3212 production baseline atomically
+# (`predeploy`), or prove that the alignment is already present without
+# replaying it (`postdeploy`), then run the verifier and restore-compatible
+# pgTAP.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
 # root-owned. The live container is inspected and receives one read-only SHOW
@@ -96,8 +96,8 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly BASELINE_CONTRACT="991c944"
-readonly HOTFIX_MIGRATION="supabase/migrations/20260809190000_partners_fr_pilot_usd_policy_alignment.sql"
+readonly BASELINE_CONTRACT="f0e3212"
+readonly HOTFIX_MIGRATION="supabase/migrations/20260810080836_partners_didit_preflight_registry_truth.sql"
 readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly OWNER_RISK_MARKER_COMPLETE="1"
@@ -107,6 +107,7 @@ readonly OWNER_REVIEW_VALIDITY_MARKER_COMPLETE="1"
 readonly BOOTSTRAP_BOOLEAN_MARKER_COMPLETE="1"
 readonly DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE="1"
 readonly FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE="1"
+readonly DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE="1"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -267,7 +268,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=33"
+proof_line "baseline_markers_verified=36"
 proof_line "hotfix_migration_sha256=$(sha256sum "$CANDIDATE_DIR/$HOTFIX_MIGRATION" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
@@ -608,13 +609,16 @@ DIDIT_GUIDED_PREFLIGHT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 FR_PILOT_USD_ALIGNMENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select case when policy.payout_currencies = array['EUR']::text[] and not policy.individual_available and not exists (select 1 from affiliate_private.affiliate_accounts account where account.country_policy_id = policy.id and account.status <> 'closed') then 0 when policy.payout_currencies = array['USD']::text[] and not policy.individual_available and not exists (select 1 from affiliate_private.affiliate_accounts account where account.country_policy_id = policy.id and account.status <> 'closed') then 1 else 2 end::text from affiliate_private.affiliate_country_policies policy join affiliate_private.affiliate_program_versions program on program.id = policy.program_version_id where program.version_key = 'individual-global-p0-v2' and program.status = 'active' and program.account_type = 'individual' and program.commission_rate_bps = 2000 and program.attribution_window_days = 30 and program.maturation_days = 45 and program.threshold_reference_currency = 'USD' and program.threshold_reference_minor = 1000 and program.payout_fee_policy = 'platform_absorbed' and policy.country_code = 'FR' and policy.subdivision_code is null;" \
   2> "$RAW_DIR/fr-pilot-usd-alignment-precondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}"
+DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (position('partners_release_gate_approval_is_current' in lower(pg_get_functiondef('affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure))) > 0 and position('and gate.satisfied' in lower(pg_get_functiondef('affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure))) = 0)::int::text;" \
+  2> "$RAW_DIR/didit-preflight-registry-truth-precondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # The first 33 markers are the exact audited 991c944 baseline. The France
-  # policy must still be closed, unassigned and EUR-denominated before replay.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|0"
+  # The audited f0e3212 database already contains the closed France/USD
+  # alignment. Only the preflight truth marker may be absent before replay.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|0"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
@@ -728,8 +732,11 @@ DIDIT_GUIDED_PREFLIGHT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
 FR_PILOT_USD_ALIGNMENT_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
   "select case when policy.payout_currencies = array['EUR']::text[] and not policy.individual_available and not exists (select 1 from affiliate_private.affiliate_accounts account where account.country_policy_id = policy.id and account.status <> 'closed') then 0 when policy.payout_currencies = array['USD']::text[] and not policy.individual_available and not exists (select 1 from affiliate_private.affiliate_accounts account where account.country_policy_id = policy.id and account.status <> 'closed') then 1 else 2 end::text from affiliate_private.affiliate_country_policies policy join affiliate_private.affiliate_program_versions program on program.id = policy.program_version_id where program.version_key = 'individual-global-p0-v2' and program.status = 'active' and program.account_type = 'individual' and program.commission_rate_bps = 2000 and program.attribution_window_days = 30 and program.maturation_days = 45 and program.threshold_reference_currency = 'USD' and program.threshold_reference_minor = 1000 and program.payout_fee_policy = 'platform_absorbed' and policy.country_code = 'FR' and policy.subdivision_code is null;" \
   2> "$RAW_DIR/fr-pilot-usd-alignment-postcondition.log")" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}" ]]; then
+DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
+  "select (position('partners_release_gate_approval_is_current' in lower(pg_get_functiondef('affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure))) > 0 and position('and gate.satisfied' in lower(pg_get_functiondef('affiliate_private.admin_partners_kyc_certification_preflight()'::regprocedure))) = 0)::int::text;" \
+  2> "$RAW_DIR/didit-preflight-registry-truth-postcondition.log")" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -745,34 +752,9 @@ FR_FLAG_STATE_AFTER="$(capture_fr_alignment_flag_state \
 if [[ ! "$FR_FLAG_STATE_AFTER" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]]; then
   fail
 fi
-if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  EXPECTED_RELEASE_GATE_SATISFIED=$((
-    BASELINE_RELEASE_GATE_SATISFIED - BASELINE_FR_SCOPED_GATES
-  ))
-  EXPECTED_RELEASE_BINDINGS=$((
-    BASELINE_RELEASE_BINDINGS - BASELINE_FR_SCOPED_GATES
-  ))
-  EXPECTED_FR_ALIGNMENT_EVENTS=$((BASELINE_FR_ALIGNMENT_EVENTS + 1))
-  EXPECTED_FR_REVOCATION_EVENTS=$((
-    BASELINE_FR_REVOCATION_EVENTS + BASELINE_FR_SCOPED_GATES
-  ))
-  EXPECTED_FR_RELEASE_STATE="${BASELINE_RELEASE_GATE_TOTAL}|${EXPECTED_RELEASE_GATE_SATISFIED}|${EXPECTED_RELEASE_BINDINGS}|0|${EXPECTED_FR_ALIGNMENT_EVENTS}|${EXPECTED_FR_REVOCATION_EVENTS}"
-  EXPECTED_MANAGED_FLAG_ENABLED=$((
-    BASELINE_MANAGED_FLAG_ENABLED - BASELINE_FR_MAINTENANCE_FLAGS
-  ))
-  EXPECTED_FR_FLAG_EVENTS=$((
-    BASELINE_FR_FLAG_EVENTS + BASELINE_FR_MAINTENANCE_FLAGS
-  ))
-  EXPECTED_FR_FLAG_STATE="${BASELINE_MANAGED_FLAG_TOTAL}|${EXPECTED_MANAGED_FLAG_ENABLED}|0|${EXPECTED_FR_FLAG_EVENTS}"
-  EXPECTED_FINAL_PARTNER_EVENTS=$((
-    BASELINE_EVENTS + BASELINE_FR_SCOPED_GATES \
-      + BASELINE_FR_MAINTENANCE_FLAGS + 1
-  ))
-else
-  EXPECTED_FR_RELEASE_STATE="$FR_RELEASE_STATE_BEFORE"
-  EXPECTED_FR_FLAG_STATE="$FR_FLAG_STATE_BEFORE"
-  EXPECTED_FINAL_PARTNER_EVENTS="$BASELINE_EVENTS"
-fi
+EXPECTED_FR_RELEASE_STATE="$FR_RELEASE_STATE_BEFORE"
+EXPECTED_FR_FLAG_STATE="$FR_FLAG_STATE_BEFORE"
+EXPECTED_FINAL_PARTNER_EVENTS="$BASELINE_EVENTS"
 readonly EXPECTED_FR_RELEASE_STATE EXPECTED_FR_FLAG_STATE \
   EXPECTED_FINAL_PARTNER_EVENTS
 if [[ "$FR_RELEASE_STATE_AFTER" != "$EXPECTED_FR_RELEASE_STATE" ]]; then
@@ -781,9 +763,9 @@ fi
 if [[ "$FR_FLAG_STATE_AFTER" != "$EXPECTED_FR_FLAG_STATE" ]]; then
   fail
 fi
-proof_line "fr_scoped_release_gates_revoked=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '%s' "$BASELINE_FR_SCOPED_GATES" || printf '0')"
-proof_line "fr_maintenance_flags_disabled=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '%s' "$BASELINE_FR_MAINTENANCE_FLAGS" || printf '0')"
-proof_line "fr_policy_alignment_events_added=$([[ "$REHEARSAL_MODE" == "predeploy" ]] && printf '1' || printf '0')"
+proof_line "fr_scoped_release_gates_revoked=0"
+proof_line "fr_maintenance_flags_disabled=0"
+proof_line "fr_policy_alignment_events_added=0"
 CURRENT_STEP="migration object ownership verification"
 ROUTINE_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
   2> "$RAW_DIR/routine-owner-postcondition.log" <<'SQL'

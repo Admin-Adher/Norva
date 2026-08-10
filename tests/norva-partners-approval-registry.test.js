@@ -19,6 +19,9 @@ const deploymentManifestEventContract = read(
 const ownerRiskMigration = read(
   'supabase/migrations/20260805124714_partners_owner_legal_tax_risk_acceptance.sql',
 );
+const diditPreflightRegistryTruth = read(
+  'supabase/migrations/20260810080836_partners_didit_preflight_registry_truth.sql',
+);
 const preactivation = read(
   'ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sql',
 );
@@ -291,6 +294,24 @@ test('gate truth is dynamically bound to current exact evidence', () => {
     migration,
     /admin_partners_revolut_payout_status_approval_registry\(\)[\s\S]*partners_release_gate_approval_is_current\([\s\S]*'revolut_api_adapter_verified'/i,
   );
+});
+
+test('guided Didit preflight and protected write consume identical approval truth', () => {
+  const privatePreflight = diditPreflightRegistryTruth.match(
+    /create or replace function\s+affiliate_private\.admin_partners_kyc_certification_preflight\(\)[\s\S]*?end;\n\$\$;/i,
+  )?.[0] || '';
+
+  assert.ok(privatePreflight);
+  assert.match(
+    privatePreflight,
+    /partners_release_gate_approval_is_current\(\s*'privacy_approved',\s*'preproduction'\s*\)/i,
+  );
+  assert.match(
+    privatePreflight,
+    /not affiliate_private\.partners_release_gate_approval_is_current\(\s*'individual_verification_coverage_confirmed'\s*\)/i,
+  );
+  assert.doesNotMatch(privatePreflight, /from affiliate_private\.affiliate_release_gates/i);
+  assert.doesNotMatch(privatePreflight, /and gate\.satisfied/i);
 });
 
 test('the fifty-member privacy boundary is transactionally enforced', () => {
