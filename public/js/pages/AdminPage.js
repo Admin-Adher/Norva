@@ -884,7 +884,7 @@ class AdminPage {
 #page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
 #page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
 #page-admin .crm-modal button:disabled{opacity:.52;cursor:not-allowed;}
-#page-admin .partners-kyc-guide{max-height:min(860px,calc(100dvh - max(20px,env(safe-area-inset-top,0px)) - max(20px,env(safe-area-inset-bottom,0px))));overflow:auto;overscroll-behavior:contain;padding-bottom:max(20px,env(safe-area-inset-bottom,0px));}
+#page-admin .partners-kyc-guide{max-height:min(860px,100%,calc(100dvh - max(20px,env(safe-area-inset-top,0px)) - max(20px,env(safe-area-inset-bottom,0px))));min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:max(20px,env(safe-area-inset-bottom,0px));}
 #page-admin .partners-kyc-guide-head{display:grid;gap:6px;margin-bottom:16px;}
 #page-admin .partners-kyc-guide-head p{margin:0;}
 #page-admin .partners-kyc-guide-list{display:grid;gap:8px;margin:0 0 18px;padding:0;list-style:none;}
@@ -960,7 +960,7 @@ class AdminPage {
   #page-admin .partners-pagination{flex-wrap:wrap;justify-content:space-between;}
   #page-admin .partners-pagination-status{width:100%;margin-right:0;}
   #page-admin .crm-modal-back{align-items:flex-end;padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));}
-  #page-admin .partners-kyc-guide{max-height:calc(100dvh - max(12px,env(safe-area-inset-top,0px)) - max(12px,env(safe-area-inset-bottom,0px)));border-radius:16px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));}
+  #page-admin .partners-kyc-guide{max-height:min(100%,calc(100dvh - max(12px,env(safe-area-inset-top,0px)) - max(12px,env(safe-area-inset-bottom,0px))));min-height:0;border-radius:16px;padding:18px 16px max(18px,env(safe-area-inset-bottom,0px));}
   #page-admin .partners-kyc-guide .mrow{margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px;}
   #page-admin .partners-kyc-guide-item{grid-template-columns:1fr;gap:8px;}
   #page-admin .partners-kyc-guide-state{justify-self:start;}
@@ -5712,7 +5712,7 @@ class AdminPage {
                 : 'La certification ne peut pas démarrer. Réglez d’abord chaque élément marqué « À régler » ; aucun champ sensible n’est affiché.';
             back.innerHTML = `<section class="crm-modal is-wide partners-kyc-guide">
                 <div class="partners-kyc-guide-head">
-                  <h3 id="${uid}-title">${resuming ? 'Reprendre la vérification Didit' : 'Préparer la vérification Didit'}</h3>
+                  <h3 id="${uid}-title" tabindex="-1">${resuming ? 'Reprendre la vérification Didit' : 'Préparer la vérification Didit'}</h3>
                   <p id="${uid}-intro">${AdminPage.esc(lead)}</p>
                 </div>
                 ${mfaFailure ? `<div class="partners-kyc-guide-alert">${AdminPage.esc(mfaFailure)}</div>` : ''}
@@ -5727,6 +5727,7 @@ class AdminPage {
             root.appendChild(back);
             const restoreBackground = this._isolateModalBackground(back);
             const modal = back.querySelector('.partners-kyc-guide');
+            const title = back.querySelector(`#${uid}-title`);
             const cancelButton = back.querySelector('.cancel');
             const submitButton = back.querySelector('.ok');
             const factorSelect = back.querySelector(`#${uid}-factor`);
@@ -5775,7 +5776,8 @@ class AdminPage {
                     if (!available.length) return;
                     const first = available[0];
                     const last = available[available.length - 1];
-                    if (event.shiftKey && (document.activeElement === first
+                    if (event.shiftKey && (document.activeElement === title
+                        || document.activeElement === first
                         || !back.contains(document.activeElement))) {
                         event.preventDefault();
                         last.focus();
@@ -5847,7 +5849,12 @@ class AdminPage {
             });
             document.addEventListener('keydown', onKey, true);
             update();
-            (formAvailable ? (consent || factorSelect || totp) : cancelButton)?.focus?.();
+            modal?.scrollTo?.({ top: 0, behavior: 'auto' });
+            try {
+                title?.focus?.({ preventScroll: true });
+            } catch (_) {
+                title?.focus?.();
+            }
         });
     }
 

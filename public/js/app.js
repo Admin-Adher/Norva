@@ -3578,10 +3578,10 @@ class App {
             this._adminPageLoading = new Promise((resolve, reject) => {
                 if (window.AdminPage) { resolve(); return; }
                 const s = document.createElement('script');
-                // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
-                // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
-                // immutable for a year. Forgetting to bump = users keep the old admin code.
-                s.src = '/js/pages/AdminPage.js?v=114';
+                // AdminPage.js is lazy-loaded (not an HTML <script>), so hash:assets cannot
+                // rewrite it. Keep this value equal to the first 10 characters of the
+                // file's canonical-LF SHA-256; the contract test fails if they drift apart.
+                s.src = '/js/pages/AdminPage.js?v=27763ea1ee';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

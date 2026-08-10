@@ -5,12 +5,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { webcrypto } = require('node:crypto');
+const { createHash, webcrypto } = require('node:crypto');
 const { TextDecoder, TextEncoder } = require('node:util');
 
 const root = path.join(__dirname, '..');
 const source = fs.readFileSync(
   path.join(root, 'public/js/pages/AdminPage.js'),
+  'utf8',
+);
+const appSource = fs.readFileSync(
+  path.join(root, 'public/js/app.js'),
   'utf8',
 );
 
@@ -1534,6 +1538,33 @@ test('Admin dialogs stay above global navigation and isolate every background la
     assert.equal(background.hasAttribute('inert'), false);
     assert.equal(background.getAttribute('aria-hidden'), null);
   }
+});
+
+test('Admin guided Didit dialog opens at its title without scrolling past the prerequisites', () => {
+  assert.match(source, /<h3 id="\$\{uid\}-title" tabindex="-1">/);
+  assert.match(source, /const title = back\.querySelector\(`#\$\{uid\}-title`\);/);
+  assert.match(source, /modal\?\.scrollTo\?\.\(\{ top: 0, behavior: 'auto' \}\);/);
+  assert.match(source, /title\?\.focus\?\.\(\{ preventScroll: true \}\);/);
+  assert.match(source, /event\.shiftKey && \(document\.activeElement === title/);
+  assert.doesNotMatch(
+    source,
+    /\(formAvailable \? \(consent \|\| factorSelect \|\| totp\) : cancelButton\)\?\.focus/,
+  );
+});
+
+test('Admin lazy-loader cache key tracks the exact AdminPage contents', () => {
+  const version = appSource.match(
+    /s\.src = '\/js\/pages\/AdminPage\.js\?v=([0-9a-f]{10})';/,
+  )?.[1];
+  assert.ok(version, 'AdminPage must use a ten-character content hash cache key');
+  assert.equal(
+    version,
+    createHash('sha256')
+      .update(source.replace(/\r\n/g, '\n'))
+      .digest('hex')
+      .slice(0, 10),
+    'changing AdminPage must also invalidate its immutable lazy-load URL',
+  );
 });
 
 test('Admin Partners module coordinator rejects stale responses', async () => {

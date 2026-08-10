@@ -33,3 +33,20 @@ test('Admin Partners avoids crushed labels at compact desktop widths', () => {
     '#page-admin .partners-control-head > .partners-state,#page-admin .partners-action-row > .partners-state,#page-admin .partners-risk-actions .partners-state{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.35;text-align:left;}',
   ));
 });
+
+test('Admin Partners bounds the guided Didit dialog inside its real responsive pane', () => {
+  assert.ok(admin.includes(
+    '#page-admin .partners-kyc-guide{max-height:min(860px,100%,calc(100dvh',
+  ));
+  assert.ok(admin.includes(
+    '#page-admin .partners-kyc-guide{max-height:min(100%,calc(100dvh',
+  ));
+  assert.match(
+    admin,
+    /#page-admin \.partners-kyc-guide\{[^}]*min-height:0;[^}]*overflow-y:auto;/,
+  );
+  assert.match(
+    admin,
+    /@media\(max-width:700px\)[\s\S]*#page-admin \.partners-kyc-guide\{[^}]*min-height:0;/,
+  );
+});
