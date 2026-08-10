@@ -117,6 +117,7 @@ export type DiditCreateErrorKind =
   | "other";
 
 export type DiditWebhookResult = {
+  webhookType: "status.updated" | "data.updated";
   providerEventId: string;
   providerSessionId: string;
   providerWorkflowId: string;
@@ -1351,8 +1352,9 @@ export async function verifyAndNormalizeDiditWebhook(
     nowEpochSeconds,
   );
 
+  const webhookType = raw.webhook_type;
   if (
-    raw.webhook_type !== "status.updated" ||
+    (webhookType !== "status.updated" && webhookType !== "data.updated") ||
     raw.timestamp !== timestamp ||
     uuid(raw.application_id) !== config.applicationId ||
     raw.environment !== config.environment ||
@@ -1368,7 +1370,7 @@ export async function verifyAndNormalizeDiditWebhook(
     throw new DiditContractError();
   }
 
-  const providerStatus = normalizeDiditStatus(raw.status);
+  let providerStatus = normalizeDiditStatus(raw.status);
   const providerEventId = uuid(raw.event_id);
   const providerSessionId = uuid(raw.session_id);
   const providerWorkflowId = uuid(raw.workflow_id);
@@ -1422,6 +1424,17 @@ export async function verifyAndNormalizeDiditWebhook(
     idCheckApproved = idObservation.result?.status === "Approved";
     livenessApproved = livenessObservation.result?.status === "Approved";
     faceMatchApproved = faceObservation.result?.status === "Approved";
+    // Didit can keep the aggregate session status at Approved while a required
+    // feature is explicitly In Review. That is not terminal approval and must
+    // not trigger privacy purge: retain the provider session until a signed
+    // reviewer update resolves every required feature.
+    if (
+      idObservation.result?.status === "In Review" ||
+      livenessObservation.result?.status === "In Review" ||
+      faceObservation.result?.status === "In Review"
+    ) {
+      providerStatus = "in_review";
+    }
     if (idCheckApproved) {
       try {
         documentAge = age(idObservation.result?.age);
@@ -1449,6 +1462,7 @@ export async function verifyAndNormalizeDiditWebhook(
   });
 
   return {
+    webhookType,
     providerEventId,
     providerSessionId,
     providerWorkflowId,

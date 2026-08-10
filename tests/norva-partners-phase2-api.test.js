@@ -502,6 +502,7 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
   ));
   const expectedFingerprint = await diditConfigFingerprint(config, 1);
   assert.deepEqual(result, {
+    webhookType: 'status.updated',
     providerEventId: eventId,
     providerSessionId: sessionId,
     providerWorkflowId: workflowId,
@@ -763,7 +764,20 @@ test('Didit webhook rejects foreign bindings and preserves node drift for SQL qu
     session_kind: 'business',
     business_session_id: sessionId,
   }));
-  await assert.rejects(() => signed({ ...base, webhook_type: 'data.updated' }));
+  const reviewUpdate = plain(await signed({
+    ...base,
+    event_id: '22345678-1234-4234-8234-123456789abc',
+    webhook_type: 'data.updated',
+  }));
+  assert.equal(
+    reviewUpdate.webhookType,
+    'data.updated',
+    'a fully signed reviewer update remains explicitly classified',
+  );
+  await assert.rejects(() => signed({
+    ...base,
+    webhook_type: 'user.data.updated',
+  }));
   await assert.rejects(() => signed({
     ...base,
     application_id: sessionId,

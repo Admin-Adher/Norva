@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(77);
+select extensions.plan(89);
 
 set local norva.partners_test_purge_envelope =
   'v1.v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -1449,6 +1449,332 @@ select extensions.throws_ok(
   'P0004',
   'Didit certification is not resumable',
   'a terminal approved certification cannot expose a resumable key'
+);
+reset role;
+
+-- Didit can emit an aggregate approval while face matching remains explicitly
+-- in manual review, then emit a signed data.updated event after the reviewer
+-- closes that check. Norva must keep the provider session alive, bind the
+-- continuation to that exact review, and purge only after a terminal decision.
+set local role authenticated;
+insert into didit_certification_state (operator_key, response)
+select
+  'risk2-review',
+  public.admin_partners_kyc_certification_prepare(
+    'certification.risk2.review.0001',
+    'partners-didit-certification-v1',
+    true,
+    'fr',
+    'CERTIFIER DIDIT',
+    'Exercise a signed face-match review completion without manual promotion.'
+  );
+select extensions.is(
+  (
+    select response #>> '{certification,status}'
+    from didit_certification_state
+    where operator_key = 'risk2-review'
+  ),
+  'reserved',
+  'Risk can reserve an isolated manual-review continuation run'
+);
+reset role;
+
+set local role service_role;
+do $claim$
+begin
+  perform public.partners_service_kyc_certification_create_claim(
+    (
+      select response #>> '{certification,key}'
+      from didit_certification_state
+      where operator_key = 'risk2-review'
+    )
+  );
+end;
+$claim$;
+select extensions.is(
+  public.partners_service_kyc_certification_session_record(
+    (
+      select response #>> '{certification,key}'
+      from didit_certification_state
+      where operator_key = 'risk2-review'
+    ),
+    'didit-certification-session-risk2-review',
+    'didit-workflow-certification',
+    1,
+    'not_started',
+    'live',
+    repeat('f', 64),
+    604800
+  ) ->> 'action',
+  'kyc_certification_session_recorded',
+  'the manual-review continuation session is bound to the live workflow'
+);
+reset role;
+
+update didit_certification_state
+set event_created_at = transaction_timestamp() - interval '2 seconds'
+where operator_key = 'risk2-review';
+set local role service_role;
+update didit_certification_state state
+set response = public.partners_service_kyc_certification_webhook_apply_purge(
+  'didit-certification-event-risk2-review-incomplete',
+  'didit-certification-session-risk2-review',
+  'didit-workflow-certification',
+  1,
+  'in_review',
+  state.event_created_at,
+  30,
+  'FRA',
+  true,
+  true,
+  false,
+  repeat('6', 64),
+  'live',
+  repeat('f', 64),
+  current_setting('norva.partners_test_purge_envelope')
+)
+where state.operator_key = 'risk2-review';
+select extensions.is(
+  (
+    select response ->> 'action'
+    from didit_certification_state
+    where operator_key = 'risk2-review'
+  ),
+  'kyc_certification_result_applied',
+  'an aggregate approval with face match still in review remains non-terminal'
+);
+reset role;
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_didit_certification_sessions session
+    join affiliate_private.affiliate_didit_certification_events event
+      on event.certification_session_id = session.id
+    where session.provider_session_hash = encode(
+        extensions.digest(
+          'norva:didit:session:v1:didit-certification-session-risk2-review',
+          'sha256'
+        ),
+        'hex'
+      )
+      and session.status = 'in_review'
+      and session.provider_status = 'in_review'
+      and session.quarantine_reason is null
+      and not session.verified
+      and event.provider_status = 'in_review'
+      and event.processing_outcome = 'applied'
+      and event.bounded_reason is null
+      and event.id_check_approved
+      and event.liveness_approved
+      and not event.face_match_approved
+      and event.age_over_minimum
+      and event.jurisdiction_result_present
+      and not event.verified
+  ),
+  'the signed review observation is retained as non-terminal evidence'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from affiliate_private.affiliate_didit_purge_outbox outbox
+    where outbox.provider_session_hash = encode(
+        extensions.digest(
+          'norva:didit:session:v1:didit-certification-session-risk2-review',
+          'sha256'
+        ),
+        'hex'
+      )
+  ),
+  'manual review does not enqueue or purge the provider session'
+);
+
+set local role service_role;
+select extensions.throws_ok(
+  $$select public.partners_service_kyc_certification_webhook_apply_purge(
+    'data.updated:not-a-valid-event-id',
+    'didit-certification-session-risk2-review',
+    'didit-workflow-certification',
+    1,
+    'approved',
+    transaction_timestamp(),
+    30,
+    'FRA',
+    true,
+    true,
+    true,
+    repeat('7', 64),
+    'live',
+    repeat('f', 64),
+    current_setting('norva.partners_test_purge_envelope')
+  )$$,
+  '22023',
+  'invalid Didit certification review event identifier',
+  'a malformed review event namespace fails closed'
+);
+reset role;
+
+set local role service_role;
+select extensions.throws_ok(
+  $$
+    select public.partners_service_kyc_certification_webhook_apply_purge(
+      'data.updated:22345678-1234-4234-8234-123456789abc',
+      'didit-certification-session-risk2-review',
+      'didit-workflow-certification',
+      1,
+      'approved',
+      (
+        select event_created_at
+        from didit_certification_state
+        where operator_key = 'risk2-review'
+      ),
+      30,
+      'FRA',
+      true,
+      true,
+      true,
+      repeat('7', 64),
+      'live',
+      repeat('f', 64),
+      current_setting('norva.partners_test_purge_envelope')
+    )
+  $$,
+  'P0006',
+  'Didit certification review update is not admissible',
+  'a non-newer signed review decision cannot advance the session'
+);
+reset role;
+
+update didit_certification_state
+set event_created_at = transaction_timestamp()
+where operator_key = 'risk2-review';
+set local role service_role;
+update didit_certification_state state
+set response = public.partners_service_kyc_certification_webhook_apply_purge(
+  'data.updated:32345678-1234-4234-8234-123456789abc',
+  'didit-certification-session-risk2-review',
+  'didit-workflow-certification',
+  1,
+  'approved',
+  state.event_created_at,
+  30,
+  'FRA',
+  true,
+  true,
+  true,
+  repeat('8', 64),
+  'live',
+  repeat('f', 64),
+  current_setting('norva.partners_test_purge_envelope')
+)
+where state.operator_key = 'risk2-review';
+select extensions.is(
+  (
+    select response ->> 'action'
+    from didit_certification_state
+    where operator_key = 'risk2-review'
+  ),
+  'kyc_certification_result_applied',
+  'a newer complete signed review decision is applied'
+);
+select extensions.ok(
+  (
+    select
+      response #>> '{certification,status}' = 'approved'
+      and response #>> '{certification,verified}' = 'true'
+      and response ->> 'purge_status' = 'purge_pending'
+    from didit_certification_state
+    where operator_key = 'risk2-review'
+  ),
+  'the completed review is verified and requires a provider purge proof'
+);
+reset role;
+
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_didit_certification_sessions session
+    where session.provider_session_hash = encode(
+        extensions.digest(
+          'norva:didit:session:v1:didit-certification-session-risk2-review',
+          'sha256'
+        ),
+        'hex'
+      )
+      and session.status = 'approved'
+      and session.provider_status = 'approved'
+      and session.verified
+      and session.face_match_approved
+      and session.quarantine_reason is null
+      and session.quarantined_at is null
+      and session.provider_purge_status = 'purge_pending'
+      and session.provider_purged_at is null
+      and (
+        select count(*)
+        from affiliate_private.affiliate_didit_certification_events event
+        where event.certification_session_id = session.id
+      ) = 2
+      and exists (
+        select 1
+        from affiliate_private.affiliate_didit_certification_events event
+        where event.certification_session_id = session.id
+          and event.processing_outcome = 'applied'
+          and event.provider_status = 'approved'
+          and event.face_match_approved
+          and event.verified
+      )
+  ),
+  'review completion records a second append-only event without quarantine'
+);
+select extensions.ok(
+  exists (
+    select 1
+    from affiliate_private.affiliate_didit_purge_outbox outbox
+    where outbox.provider_session_hash = encode(
+        extensions.digest(
+          'norva:didit:session:v1:didit-certification-session-risk2-review',
+          'sha256'
+        ),
+        'hex'
+      )
+      and outbox.status = 'pending'
+      and outbox.provider_session_envelope is not null
+      and outbox.attempt_count = 0
+      and outbox.lease_token is null
+      and outbox.lease_expires_at is null
+      and outbox.last_error_code is null
+      and outbox.last_http_status is null
+      and outbox.purged_at is null
+      and outbox.dead_lettered_at is null
+  ),
+  'the terminal review decision creates one pending provider purge record'
+);
+
+set local role service_role;
+select extensions.is(
+  public.partners_service_kyc_certification_webhook_apply_purge(
+    'data.updated:32345678-1234-4234-8234-123456789abc',
+    'didit-certification-session-risk2-review',
+    'didit-workflow-certification',
+    1,
+    'approved',
+    (
+      select event_created_at
+      from didit_certification_state
+      where operator_key = 'risk2-review'
+    ),
+    30,
+    'FRA',
+    true,
+    true,
+    true,
+    repeat('8', 64),
+    'live',
+    repeat('f', 64),
+    current_setting('norva.partners_test_purge_envelope')
+  ) ->> 'replayed',
+  'true',
+  'the complete signed review decision remains idempotent'
 );
 reset role;
 

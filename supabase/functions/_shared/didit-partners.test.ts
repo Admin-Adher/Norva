@@ -501,6 +501,10 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
     baseConfig,
     now,
   );
+  assert(
+    verifiedV2.webhookType === "status.updated",
+    "the normalized lifecycle event type remains explicit",
+  );
   assert(verifiedV2.documentAge === 28, "V2 authenticates the full decision");
   assert(
     !JSON.stringify(verifiedV2).includes("José"),
@@ -520,6 +524,66 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
   assert(
     verifiedRaw.payloadHash === verifiedV2.payloadHash,
     "both full-body signature variants must normalize identically",
+  );
+
+  const reviewPayload = {
+    ...payload,
+    event_id: "22345678-1234-4234-8234-123456789abc",
+    webhook_type: "data.updated",
+  };
+  const reviewRaw = new TextEncoder().encode(JSON.stringify(reviewPayload));
+  const reviewHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(reviewPayload)),
+    ),
+  });
+  const verifiedReview = await verifyAndNormalizeDiditWebhook(
+    reviewRaw,
+    reviewHeaders,
+    baseConfig,
+    now,
+  );
+  assert(
+    verifiedReview.webhookType === "data.updated" &&
+      verifiedReview.faceMatchApproved,
+    "a fully signed reviewer correction is normalized without identity data",
+  );
+
+  const pendingReviewPayload = {
+    ...payload,
+    event_id: "32345678-1234-4234-8234-123456789abc",
+    decision: {
+      ...payload.decision,
+      face_matches: [{
+        node_id: baseConfig.faceMatchNodeId,
+        status: "In Review",
+      }],
+    },
+  };
+  const pendingReviewRaw = new TextEncoder().encode(
+    JSON.stringify(pendingReviewPayload),
+  );
+  const pendingReviewHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(pendingReviewPayload)),
+    ),
+  });
+  const verifiedPendingReview = await verifyAndNormalizeDiditWebhook(
+    pendingReviewRaw,
+    pendingReviewHeaders,
+    baseConfig,
+    now,
+  );
+  assert(
+    verifiedPendingReview.providerStatus === "in_review" &&
+      verifiedPendingReview.idCheckApproved &&
+      verifiedPendingReview.livenessApproved &&
+      !verifiedPendingReview.faceMatchApproved,
+    "an aggregate approval with an explicitly reviewed feature remains non-terminal",
   );
 
   for (
@@ -557,6 +621,7 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
       { ...payload, workflow_type: "kyb" },
       { ...payload, vendor_business_id: "business-marker" },
       { ...payload, company_name: "Business marker" },
+      { ...payload, webhook_type: "user.data.updated" },
       { ...payload, sandbox_scenario: { unexpected: true } },
       { ...payload, workflow_version: 2 },
     ]

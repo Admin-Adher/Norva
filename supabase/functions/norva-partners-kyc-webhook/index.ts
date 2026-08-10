@@ -112,8 +112,16 @@ Deno.serve(async (req) => {
       providerSessionHash,
       DIDIT_PURGE_KEYRING,
     );
+    // Didit emits data.updated when a reviewer changes a feature result while
+    // its aggregate session status may still read Approved. Namespace that
+    // signed event before hashing so SQL can admit it only as the continuation
+    // of the exact certification already under review; ordinary member KYC
+    // never receives this event class.
+    const certificationReviewUpdate = event.webhookType === "data.updated";
     const rpcArgs = {
-      p_provider_event_id: event.providerEventId,
+      p_provider_event_id: certificationReviewUpdate
+        ? `data.updated:${event.providerEventId}`
+        : event.providerEventId,
       p_provider_session_id: event.providerSessionId,
       p_provider_workflow_id: event.providerWorkflowId,
       p_provider_workflow_version: event.providerWorkflowVersion,
@@ -129,20 +137,33 @@ Deno.serve(async (req) => {
       p_provider_config_fingerprint: event.providerConfigFingerprint,
       p_provider_session_envelope: providerSessionEnvelope,
     };
-    let { data, error } = await admin.rpc(
-      "partners_service_kyc_webhook_apply_and_enqueue_purge",
-      rpcArgs,
-    );
-    let certification = false;
+    let certification = certificationReviewUpdate;
+    let { data, error } = certificationReviewUpdate
+      ? await admin.rpc(
+        "partners_service_kyc_certification_webhook_apply_purge",
+        rpcArgs,
+      )
+      : await admin.rpc(
+        "partners_service_kyc_webhook_apply_and_enqueue_purge",
+        rpcArgs,
+      );
     // The member reducer owns the primary namespace. Only its explicit
     // unknown-resource signal may fall through to the tightly scoped
     // certification reducer; conflicts and every other error remain terminal.
-    if (error?.code === "P0006") {
+    if (!certificationReviewUpdate && error?.code === "P0006") {
       certification = true;
       ({ data, error } = await admin.rpc(
         "partners_service_kyc_certification_webhook_apply_purge",
         rpcArgs,
       ));
+    }
+    if (certificationReviewUpdate && error?.code === "P0006") {
+      log("info", correlationId, "certification_review_update_ignored");
+      return json(
+        200,
+        { received: true, ignored: true },
+        correlationId,
+      );
     }
     if (error) {
       if (error.code === "P0003") {
