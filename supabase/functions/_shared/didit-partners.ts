@@ -1486,18 +1486,34 @@ export async function verifyDiditConsoleTestWebhook(
     config,
     nowEpochSeconds,
   );
+  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
   if (
     headers.get("X-Didit-Test-Webhook") !== "true" ||
     raw.webhook_type !== "status.updated" ||
     raw.timestamp !== timestamp ||
-    uuid(raw.event_id) === "" ||
-    uuid(raw.application_id) !== config.applicationId ||
-    raw.environment !== config.environment ||
     uuid(raw.workflow_id) !== config.workflowId ||
-    positiveInteger(raw.workflow_version) !== DIDIT_PARTNERS_WORKFLOW_VERSION ||
+    metadata.test_webhook !== true ||
     (raw.session_kind !== undefined && raw.session_kind !== null &&
       raw.session_kind !== "user") ||
     hasDiditBusinessMarker(raw)
+  ) {
+    return false;
+  }
+  // Didit's current Console probe is intentionally synthetic and omits the
+  // production-only event/application/environment/version fields. The
+  // destination-specific HMAC, exact workflow, signed test marker and fresh
+  // timestamp remain mandatory. If the Console includes any optional binding,
+  // it must still match the deployed configuration exactly.
+  if (
+    (raw.event_id !== undefined && raw.event_id !== null &&
+      uuid(raw.event_id) === "") ||
+    (raw.application_id !== undefined && raw.application_id !== null &&
+      uuid(raw.application_id) !== config.applicationId) ||
+    (raw.environment !== undefined && raw.environment !== null &&
+      raw.environment !== config.environment) ||
+    (raw.workflow_version !== undefined && raw.workflow_version !== null &&
+      positiveInteger(raw.workflow_version) !==
+        DIDIT_PARTNERS_WORKFLOW_VERSION)
   ) {
     return false;
   }
@@ -1506,6 +1522,7 @@ export async function verifyDiditConsoleTestWebhook(
   epochSeconds(raw.created_at);
   if (
     config.environment === "live" &&
+    raw.sandbox_scenario !== undefined &&
     raw.sandbox_scenario !== null
   ) {
     return false;

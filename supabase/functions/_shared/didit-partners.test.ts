@@ -635,22 +635,17 @@ Deno.test("Didit webhook prefers canonical V2, falls back to raw, and rejects en
   assert(rejected, "the envelope-only signature must never authorize KYC data");
 });
 
-Deno.test("Didit console probe accepts only the signed, fully bound v3 test envelope", async () => {
+Deno.test("Didit console probe accepts the signed current v3 test envelope", async () => {
   const now = 1_785_661_809;
   const payload = {
-    event_id: "12345678-1234-4234-8234-123456789abc",
     session_id: "99999999-8888-4777-8666-555555555555",
     status: "Approved",
     vendor_data: "test-vendor-data-123",
     webhook_type: "status.updated",
     timestamp: now,
     created_at: now,
-    application_id: baseConfig.applicationId,
-    environment: baseConfig.environment,
-    sandbox_scenario: null,
     workflow_id: baseConfig.workflowId,
-    workflow_version: 1,
-    metadata: {},
+    metadata: { test_webhook: true },
     decision: { status: "Approved" },
   };
   const raw = new TextEncoder().encode(JSON.stringify(payload, null, 2));
@@ -667,8 +662,37 @@ Deno.test("Didit console probe accepts only the signed, fully bound v3 test enve
     "the current authenticated console payload must be acknowledged",
   );
 
-  const foreignApplication = {
+  const fullyBoundPayload = {
     ...payload,
+    event_id: "12345678-1234-4234-8234-123456789abc",
+    application_id: baseConfig.applicationId,
+    environment: baseConfig.environment,
+    sandbox_scenario: null,
+    workflow_version: 1,
+  };
+  const fullyBoundRaw = new TextEncoder().encode(
+    JSON.stringify(fullyBoundPayload),
+  );
+  const fullyBoundHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Didit-Test-Webhook": "true",
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(fullyBoundPayload)),
+    ),
+  });
+  assert(
+    await verifyDiditConsoleTestWebhook(
+      fullyBoundRaw,
+      fullyBoundHeaders,
+      baseConfig,
+      now,
+    ),
+    "optional exact bindings must remain accepted",
+  );
+
+  const foreignApplication = {
+    ...fullyBoundPayload,
     application_id: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
   };
   const productionRaw = new TextEncoder().encode(
@@ -692,7 +716,7 @@ Deno.test("Didit console probe accepts only the signed, fully bound v3 test enve
     "a foreign application must never be acknowledged as a console probe",
   );
 
-  const foreignEnvironment = { ...payload, environment: "live" };
+  const foreignEnvironment = { ...fullyBoundPayload, environment: "live" };
   const foreignEnvironmentRaw = new TextEncoder().encode(
     JSON.stringify(foreignEnvironment),
   );
@@ -712,6 +736,28 @@ Deno.test("Didit console probe accepts only the signed, fully bound v3 test enve
       now,
     )),
     "a cross-environment probe must fail closed",
+  );
+
+  const unsignedMarkerPayload = { ...payload, metadata: {} };
+  const unsignedMarkerRaw = new TextEncoder().encode(
+    JSON.stringify(unsignedMarkerPayload),
+  );
+  const unsignedMarkerHeaders = new Headers({
+    "X-Timestamp": String(now),
+    "X-Didit-Test-Webhook": "true",
+    "X-Signature-V2": await hmacSha256Hex(
+      baseConfig.webhookSecret,
+      JSON.stringify(sortJson(unsignedMarkerPayload)),
+    ),
+  });
+  assert(
+    !(await verifyDiditConsoleTestWebhook(
+      unsignedMarkerRaw,
+      unsignedMarkerHeaders,
+      baseConfig,
+      now,
+    )),
+    "a probe without the signed metadata marker must fail closed",
   );
 
   const tampered = new Headers(headers);

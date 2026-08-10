@@ -630,7 +630,7 @@ test('Didit V2 and raw-body HMAC authenticate the full decision and store only n
   ), undefined, 'a signed environment mismatch must fail before persistence');
 });
 
-test('Didit console probe requires a full-body signature and the exact v3 binding', async () => {
+test('Didit console probe requires a full-body signature and the exact workflow binding', async () => {
   const {
     loadDiditConfig,
     verifyDiditConsoleTestWebhook,
@@ -639,19 +639,14 @@ test('Didit console probe requires a full-body signature and the exact v3 bindin
   const config = loadDiditConfig((name) => liveValues[name]);
   const timestamp = 1785661809;
   const payload = {
-    event_id: eventId,
     session_id: sessionId,
     status: 'Approved',
     vendor_data: 'test-vendor-data-123',
     webhook_type: 'status.updated',
     timestamp,
     created_at: timestamp,
-    application_id: applicationId,
-    environment: 'live',
-    sandbox_scenario: null,
     workflow_id: workflowId,
-    workflow_version: 1,
-    metadata: {},
+    metadata: { test_webhook: true },
     decision: { status: 'Approved' },
   };
   async function headersFor(body) {
@@ -671,8 +666,23 @@ test('Didit console probe requires a full-body signature and the exact v3 bindin
     timestamp,
   ), true);
 
-  const foreignApplication = {
+  const fullyBoundPayload = {
     ...payload,
+    event_id: eventId,
+    application_id: applicationId,
+    environment: 'live',
+    sandbox_scenario: null,
+    workflow_version: 1,
+  };
+  assert.equal(await verifyDiditConsoleTestWebhook(
+    new Uint8Array(Buffer.from(JSON.stringify(fullyBoundPayload))),
+    await headersFor(fullyBoundPayload),
+    config,
+    timestamp,
+  ), true, 'optional exact bindings remain accepted');
+
+  const foreignApplication = {
+    ...fullyBoundPayload,
     application_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
   };
   assert.equal(await verifyDiditConsoleTestWebhook(
@@ -682,13 +692,21 @@ test('Didit console probe requires a full-body signature and the exact v3 bindin
     timestamp,
   ), false, 'a foreign application must fail closed');
 
-  const foreignEnvironment = { ...payload, environment: 'sandbox' };
+  const foreignEnvironment = { ...fullyBoundPayload, environment: 'sandbox' };
   assert.equal(await verifyDiditConsoleTestWebhook(
     new Uint8Array(Buffer.from(JSON.stringify(foreignEnvironment))),
     await headersFor(foreignEnvironment),
     config,
     timestamp,
   ), false, 'a foreign environment must fail closed');
+
+  const unsignedMarkerPayload = { ...payload, metadata: {} };
+  assert.equal(await verifyDiditConsoleTestWebhook(
+    new Uint8Array(Buffer.from(JSON.stringify(unsignedMarkerPayload))),
+    await headersFor(unsignedMarkerPayload),
+    config,
+    timestamp,
+  ), false, 'the signed test marker is mandatory');
 
   const tampered = await headersFor(payload);
   tampered.set('X-Signature-V2', '0'.repeat(64));
@@ -1144,8 +1162,8 @@ test('Didit Edge and SQL boundaries require immutable environment bindings', () 
   );
   assert.match(
     read('supabase/functions/_shared/didit-partners.ts'),
-    /X-Didit-Test-Webhook[\s\S]*uuid\(raw\.application_id\) !== config\.applicationId[\s\S]*raw\.environment !== config\.environment[\s\S]*uuid\(raw\.workflow_id\) !== config\.workflowId/,
-    'only a signed console marker with the exact v3 binding may bypass SQL',
+    /X-Didit-Test-Webhook[\s\S]*uuid\(raw\.workflow_id\) !== config\.workflowId[\s\S]*metadata\.test_webhook !== true[\s\S]*raw\.application_id !== undefined[\s\S]*raw\.environment !== undefined/,
+    'only a signed console marker with the exact workflow and any supplied bindings may bypass SQL',
   );
   assert.doesNotMatch(
     webhook,
