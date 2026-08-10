@@ -658,7 +658,7 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   );
   const fallback = webhook.indexOf('error?.code === "P0006"', memberCall);
   const certificationCall = webhook.indexOf(
-    '"partners_service_kyc_certification_webhook_apply_and_enqueue_purge"',
+    '"partners_service_kyc_certification_webhook_apply_purge"',
     fallback,
   );
   const errorHandling = webhook.indexOf('if (error) {', certificationCall);
@@ -668,7 +668,7 @@ test('webhook falls back to certification only on member P0006 and stays sanitiz
   );
   assert.doesNotMatch(
     webhook.slice(memberCall, fallback),
-    /kyc_certification_webhook_apply_and_enqueue_purge/,
+    /kyc_certification_webhook_apply_purge/,
   );
   assert.match(
     webhook.slice(errorHandling, errorHandling + 700),
@@ -693,6 +693,10 @@ test('terminal Didit evidence atomically enters the durable deletion outbox', ()
     /partners_service_kyc_webhook_apply_and_enqueue_purge/,
   );
   assert.match(
+    webhook,
+    /partners_service_kyc_certification_webhook_apply_purge/,
+  );
+  assert.doesNotMatch(
     webhook,
     /partners_service_kyc_certification_webhook_apply_and_enqueue_purge/,
   );

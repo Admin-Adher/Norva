@@ -378,7 +378,7 @@ begin
     'public.partners_service_kyc_prepare_v2(uuid,text,text,text,boolean,text)',
     'public.partners_service_kyc_session_record_v3(uuid,text,text,text,integer,text,timestamp with time zone,text,text,text,integer,text)',
     'public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
-    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamp with time zone,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'public.partners_service_didit_purge_claim(integer,integer)',
     'public.partners_service_didit_purge_complete(bigint,uuid,text)',
     'public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',

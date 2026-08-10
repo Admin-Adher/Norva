@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
     if (error?.code === "P0006") {
       certification = true;
       ({ data, error } = await admin.rpc(
-        "partners_service_kyc_certification_webhook_apply_and_enqueue_purge",
+        "partners_service_kyc_certification_webhook_apply_purge",
         rpcArgs,
       ));
     }

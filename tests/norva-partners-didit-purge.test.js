@@ -30,6 +30,21 @@ test('terminal Didit results enqueue encrypted deletion atomically', () => {
     migration,
     /partners_service_kyc_certification_webhook_apply_and_enqueue_purge/,
   );
+  const aliasMigration = read(
+    'supabase/migrations/20260810150039_partners_didit_certification_rpc_alias.sql',
+  );
+  assert.match(
+    aliasMigration,
+    /rename to partners_service_kyc_certification_webhook_apply_purge/,
+  );
+  assert.match(
+    webhook,
+    /partners_service_kyc_certification_webhook_apply_purge/,
+  );
+  assert.doesNotMatch(
+    webhook,
+    /partners_service_kyc_certification_webhook_apply_and_enqueue_purge/,
+  );
   assert.match(migration, /provider_purge_status = 'purge_pending'/);
   assert.match(migration, /provider_session_envelope = null/);
   assert.match(

@@ -234,15 +234,28 @@ select extensions.ok(
   )
   and has_function_privilege(
     'service_role',
-    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'EXECUTE'
   )
   and not has_function_privilege(
     'authenticated',
-    'public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
+    'public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)',
     'EXECUTE'
+  )
+  and octet_length(
+    'partners_service_kyc_certification_webhook_apply_purge'
+  ) <= current_setting('max_identifier_length')::integer
+  and exists (
+    select 1
+    from pg_catalog.pg_proc procedure_row
+    join pg_catalog.pg_namespace namespace_row
+      on namespace_row.oid = procedure_row.pronamespace
+    where namespace_row.nspname = 'public'
+      and procedure_row.proname =
+        'partners_service_kyc_certification_webhook_apply_purge'
+      and not procedure_row.prosecdef
   ),
-  'only service_role can apply an atomic certification webhook with purge'
+  'only service_role can call the bounded SECURITY INVOKER certification webhook RPC'
 );
 select extensions.ok(
   (
@@ -887,7 +900,7 @@ reset role;
 set local role service_role;
 select extensions.throws_ok(
   $$
-    select public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+    select public.partners_service_kyc_certification_webhook_apply_purge(
       'cross-purpose-event-0001',
       'cross-purpose-session-0001',
       'didit-workflow-certification',
@@ -1175,7 +1188,7 @@ set event_created_at = clock_timestamp()
 where operator_key = 'risk1';
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+  public.partners_service_kyc_certification_webhook_apply_purge(
     'didit-certification-event-risk1',
     'didit-certification-session-risk1',
     'didit-workflow-certification',
@@ -1200,7 +1213,7 @@ select extensions.is(
   'a config-fingerprint mismatch is quarantined instead of promoted'
 );
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+  public.partners_service_kyc_certification_webhook_apply_purge(
     'didit-certification-event-risk1',
     'didit-certification-session-risk1',
     'didit-workflow-certification',
@@ -1320,7 +1333,7 @@ where operator_key = 'risk2';
 
 set local role service_role;
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+  public.partners_service_kyc_certification_webhook_apply_purge(
     'didit-certification-event-risk2',
     'didit-certification-session-risk2',
     'didit-workflow-certification',
@@ -1345,7 +1358,7 @@ select extensions.is(
   'an exact live approved decision is applied to certification only'
 );
 select extensions.is(
-  public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+  public.partners_service_kyc_certification_webhook_apply_purge(
     'didit-certification-event-risk2',
     'didit-certification-session-risk2',
     'didit-workflow-certification',
@@ -1501,7 +1514,7 @@ set event_created_at = clock_timestamp()
 where operator_key = 'risk2-sandbox';
 set local role service_role;
 update didit_certification_state state
-set response = public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+set response = public.partners_service_kyc_certification_webhook_apply_purge(
   'didit-certification-event-risk2-sandbox',
   'didit-certification-session-risk2-sandbox',
   'didit-workflow-certification',
@@ -1642,7 +1655,7 @@ select extensions.ok(
 
 set local role service_role;
 update didit_certification_state state
-set response = public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+set response = public.partners_service_kyc_certification_webhook_apply_purge(
   'didit-certification-event-risk2-late',
   'didit-certification-session-risk2-late',
   'didit-workflow-certification',

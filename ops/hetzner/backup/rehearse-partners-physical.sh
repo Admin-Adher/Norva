@@ -861,7 +861,7 @@ with expected(signature) as (
     ('affiliate_private.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('affiliate_private.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('public.partners_service_kyc_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
-    ('public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
+    ('public.partners_service_kyc_certification_webhook_apply_purge(text,text,text,integer,text,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'),
     ('affiliate_private.partners_service_didit_purge_claim(integer,integer)'),
     ('affiliate_private.partners_service_didit_purge_complete(bigint,uuid,text)'),
     ('affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)'),

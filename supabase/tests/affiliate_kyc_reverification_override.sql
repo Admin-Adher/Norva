@@ -398,7 +398,7 @@ begin
     repeat('d', 64),
     604800
   );
-  perform public.partners_service_kyc_certification_webhook_apply_and_enqueue_purge(
+  perform public.partners_service_kyc_certification_webhook_apply_purge(
     'didit-certification-event-kyc-reverification',
     'didit-certification-session-kyc-reverification',
     'didit-workflow-certification',
