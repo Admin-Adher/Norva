@@ -1546,6 +1546,9 @@ test('Admin guided Didit dialog opens at its title without scrolling past the pr
   assert.match(source, /modal\?\.scrollTo\?\.\(\{ top: 0, behavior: 'auto' \}\);/);
   assert.match(source, /title\?\.focus\?\.\(\{ preventScroll: true \}\);/);
   assert.match(source, /event\.shiftKey && \(document\.activeElement === title/);
+  assert.match(source, /class="partners-open-configuration"/);
+  assert.match(source, /navigateToConfiguration: true/);
+  assert.match(source, /this\._partnersSelectView\('configuration'/);
   assert.doesNotMatch(
     source,
     /\(formAvailable \? \(consent \|\| factorSelect \|\| totp\) : cancelButton\)\?\.focus/,
@@ -3358,6 +3361,14 @@ test('Admin Partners accepts only an exact boolean Didit preflight and identifie
   blocked.requirements.partners_membership_closed = false;
   const rows = page._partnersKycCertificationRequirementRows(blocked, true);
   assert.equal(rows.find((row) => row.key === 'privacy_approved').ready, false);
+  assert.match(
+    rows.find((row) => row.key === 'privacy_approved').detail,
+    /manifeste preproduction/,
+  );
+  assert.match(
+    rows.find((row) => row.key === 'privacy_approved').detail,
+    /renouvelez la gate/,
+  );
   assert.equal(rows.find((row) => row.key === 'partners_membership_closed').ready, false);
   assert.equal(rows.find((row) => row.key === 'factor_available').ready, true);
   assert.doesNotMatch(JSON.stringify(rows), /operator_id|factorId|provider_session/);
@@ -3994,6 +4005,63 @@ test('Admin Partners renders approval registry schema v2 and immutable provenanc
   assert.match(configuration.innerHTML, /data-partners-action="release-manifest"/);
 });
 
+test('Admin Partners can renew a production gate into preproduction without disabling it first', () => {
+  const configuration = { innerHTML: '', removeAttribute() {} };
+  const AdminPage = loadAdminPage({
+    getElementById(id) { return id === 'partners-admin-configuration' ? configuration : null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  });
+  const page = new AdminPage({});
+  page._partnersCapabilities = { support: false, risk: true, finance: false };
+  page._partnersCanManageRelease = true;
+  page._renderPartnersConfiguration({
+    schema_version: 2,
+    programs: [{
+      version_key: 'individual-global-p0-v2',
+      status: 'active',
+      attribution_window_days: 30,
+      maturation_days: 45,
+      terms_version: 'partners-terms-v1',
+    }],
+    policies: [],
+    configuration_counts: {
+      active_country_mappings: 0,
+      active_currencies: 0,
+      active_payout_providers: 0,
+      active_allowlist_entries: 0,
+    },
+    release_flags: [],
+    release_gates: [{
+      key: 'privacy_approved',
+      satisfied: true,
+      preproduction_satisfied: false,
+      recorded_satisfied: true,
+      approval_status: 'current',
+      approval_provenance: {
+        package_version: 4,
+        deployment_environment: 'production',
+        source_commit_sha: 'a'.repeat(40),
+        expires_at: '2099-01-01T00:00:00.000Z',
+      },
+    }],
+    deployment_manifests: [{
+      deployment_environment: 'production',
+      manifest_version: 4,
+      manifest_sha256: 'b'.repeat(64),
+      source_commit_sha: 'a'.repeat(40),
+      deployment_key: 'hetzner-production-a',
+      deployment_evidence_sha256: 'c'.repeat(64),
+      document_keys: ['deployment_proof', 'privacy_notice'],
+      registered_at: '2026-08-04T00:00:00.000Z',
+    }],
+  });
+  assert.match(configuration.innerHTML, /data-partners-action="release-gate-approve"/);
+  assert.match(configuration.innerHTML, /Renouveler avec preuves/);
+  assert.match(configuration.innerHTML, /data-partners-action="release-gate"/);
+  assert.match(configuration.innerHTML, />Désactiver<\/button>/);
+});
+
 test('Admin Partners approves a gate through the immutable package RPC', async () => {
   const AdminPage = loadAdminPage();
   const page = new AdminPage({});
@@ -4054,7 +4122,7 @@ test('Admin Partners approves a gate through the immutable package RPC', async (
   };
   const result = await page._runPartnersAdminAction({
     dataset: {
-      partnersAction: 'release-gate',
+      partnersAction: 'release-gate-approve',
       partnersKey: 'privacy_approved',
       partnersEnabled: 'true',
     },

@@ -5556,7 +5556,7 @@ class AdminPage {
                 label: 'Dossier Cash Privacy approuvé',
                 detail: requirements.privacy_approved
                     ? 'AIPD, registre, notice et consentement sont enregistrés.'
-                    : 'Le dossier Cash Privacy doit être approuvé dans Configuration.'
+                    : 'Dans Configuration, enregistrez un manifeste preproduction puis renouvelez la gate AIPD Privacy du virement cash pour cet environnement.'
             },
             {
                 key: 'coverage_open',
@@ -5710,6 +5710,9 @@ class AdminPage {
                     ? 'Tous les prérequis externes sont prêts. Validez Authenticator pour reprendre la session Didit existante.'
                     : 'Tous les prérequis externes sont prêts. Consentement, confirmation, motif et Authenticator sont regroupés ici avant l’unique départ vers Didit.')
                 : 'La certification ne peut pas démarrer. Réglez d’abord chaque élément marqué « À régler » ; aucun champ sensible n’est affiché.';
+            const canOpenConfiguration = hardBlockers.some((row) => (
+                row.key === 'privacy_approved'
+            ));
             back.innerHTML = `<section class="crm-modal is-wide partners-kyc-guide">
                 <div class="partners-kyc-guide-head">
                   <h3 id="${uid}-title" tabindex="-1">${resuming ? 'Reprendre la vérification Didit' : 'Préparer la vérification Didit'}</h3>
@@ -5721,6 +5724,7 @@ class AdminPage {
                 <div class="partners-kyc-guide-alert" role="alert" aria-live="assertive" hidden></div>
                 <div class="mrow">
                   <button class="cancel" type="button">Fermer</button>
+                  ${canOpenConfiguration ? '<button class="partners-open-configuration" type="button">Ouvrir Configuration</button>' : ''}
                   ${formAvailable ? `<button class="ok primary" type="button" disabled>${resuming ? 'Vérifier et reprendre Didit' : 'Vérifier et ouvrir Didit'}</button>` : ''}
                 </div>
               </section>`;
@@ -5729,6 +5733,7 @@ class AdminPage {
             const modal = back.querySelector('.partners-kyc-guide');
             const title = back.querySelector(`#${uid}-title`);
             const cancelButton = back.querySelector('.cancel');
+            const configurationButton = back.querySelector('.partners-open-configuration');
             const submitButton = back.querySelector('.ok');
             const factorSelect = back.querySelector(`#${uid}-factor`);
             const consent = back.querySelector(`#${uid}-consent`);
@@ -5844,6 +5849,9 @@ class AdminPage {
             });
             submitButton?.addEventListener('click', () => { void submit(); });
             cancelButton.addEventListener('click', () => finish(null));
+            configurationButton?.addEventListener('click', () => finish({
+                navigateToConfiguration: true
+            }));
             back.addEventListener('mousedown', (event) => {
                 if (event.target === back) finish(null);
             });
@@ -7891,14 +7899,37 @@ class AdminPage {
         ].filter((row) => /^[a-z0-9_]+$/.test(String(row.key || ''))).map((row) => {
             const kind = row.action === 'release-flag' ? 'flag' : 'gate';
             const targetEnabled = !row.enabled;
-            const control = this._partnersCanUseReleaseControl(kind, row.key, targetEnabled)
-                ? `<button type="button" class="partners-action${row.enabled ? ' is-danger' : ' is-success'}"
-                    data-partners-action="${row.action}"
+            let control = '';
+            if (kind === 'gate') {
+                const approve = this._partnersCanUseReleaseControl(
+                    kind,
+                    row.key,
+                    true
+                ) ? `<button type="button" class="partners-action is-success"
+                    data-partners-action="release-gate-approve"
                     data-partners-key="${AdminPage.esc(row.key)}"
-                    data-partners-enabled="${targetEnabled ? 'true' : 'false'}">${row.enabled
-                        ? 'Désactiver'
-                        : (kind === 'gate' ? 'Approuver avec preuves' : 'Activer')}</button>`
-                : `<span class="partners-state${row.enabled ? ' is-on' : ''}">${row.enabled ? 'Actif' : 'Inactif'} · lecture seule</span>`;
+                    data-partners-enabled="true">${row.enabled
+                        ? 'Renouveler avec preuves'
+                        : 'Approuver avec preuves'}</button>` : '';
+                const disable = row.enabled && this._partnersCanUseReleaseControl(
+                    kind,
+                    row.key,
+                    false
+                ) ? `<button type="button" class="partners-action is-danger"
+                    data-partners-action="release-gate"
+                    data-partners-key="${AdminPage.esc(row.key)}"
+                    data-partners-enabled="false">Désactiver</button>` : '';
+                control = approve || disable
+                    ? `<div class="partners-risk-actions">${approve}${disable}</div>`
+                    : `<span class="partners-state${row.enabled ? ' is-on' : ''}">${row.enabled ? 'Actif' : 'Inactif'} · lecture seule</span>`;
+            } else {
+                control = this._partnersCanUseReleaseControl(kind, row.key, targetEnabled)
+                    ? `<button type="button" class="partners-action${row.enabled ? ' is-danger' : ' is-success'}"
+                        data-partners-action="${row.action}"
+                        data-partners-key="${AdminPage.esc(row.key)}"
+                        data-partners-enabled="${targetEnabled ? 'true' : 'false'}">${row.enabled ? 'Désactiver' : 'Activer'}</button>`
+                    : `<span class="partners-state${row.enabled ? ' is-on' : ''}">${row.enabled ? 'Actif' : 'Inactif'} · lecture seule</span>`;
+            }
             const approvalLabel = row.approvalStatus === 'current_preproduction'
                 ? 'courante en préproduction uniquement · aucune autorité live'
                 : row.approvalStatus;
@@ -9964,6 +9995,13 @@ class AdminPage {
                 resuming
             });
             if (!guided) return false;
+            if (guided.navigateToConfiguration === true) {
+                this._partnersSelectView('configuration', {
+                    focusTab: true,
+                    restoreScroll: false
+                });
+                return false;
+            }
             const confirmation = guided.confirmation;
             const justification = guided.justification;
 
@@ -11396,12 +11434,14 @@ class AdminPage {
                 : `Manifeste ${environment} #${AdminPage.n(Number(result.deployment.manifest_version) || 0)} enregistré.`;
         }
 
-        if (action === 'release-flag' || action === 'release-gate') {
+        if (action === 'release-flag' || action === 'release-gate'
+            || action === 'release-gate-approve') {
             const key = String(button.dataset.partnersKey || '');
             if (!/^[a-z0-9_]+$/.test(key)) return false;
             const kind = action === 'release-flag' ? 'flag' : 'gate';
             if (!this._partnersCanUseReleaseControl(kind, key, enabled)) return false;
-            if (action === 'release-gate' && enabled) {
+            if (action === 'release-gate-approve'
+                || (action === 'release-gate' && enabled)) {
                 const configuration = this._partnersConfiguration;
                 const manifests = Array.isArray(configuration?.deployment_manifests)
                     ? configuration.deployment_manifests : [];
