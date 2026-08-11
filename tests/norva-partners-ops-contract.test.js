@@ -729,6 +729,19 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /capture_didit_orphan_purge_recovery_marker/);
   assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_PENDING="0"/);
+  assert.match(rehearsal, /capture_referral_visibility_marker\(\)/);
+  assert.match(
+    rehearsal,
+    /to_regprocedure\([\s\S]*partners_service_referral_visibility\(uuid,integer,text\)[\s\S]*\)::oid as private_oid/,
+  );
+  assert.match(
+    rehearsal,
+    /when routine_ids\.private_oid is null[\s\S]*then false[\s\S]*pg_get_functiondef\(routine_ids\.private_oid\)/,
+  );
+  assert.doesNotMatch(
+    rehearsal,
+    /pg_get_functiondef\('affiliate_private\.partners_service_referral_visibility\(uuid,integer,text\)'::regprocedure\)/,
+  );
   assert.match(rehearsal, /partners_service_referral_visibility/);
   assert.match(rehearsal, /masked_email/);
   assert.match(rehearsal, /partners_service_didit_purge_orphans/);

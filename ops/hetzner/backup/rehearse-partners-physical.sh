@@ -718,6 +718,45 @@ from routine_ids;
 SQL
 }
 
+capture_referral_visibility_marker() {
+  clone_psql -At -v ON_ERROR_STOP=1 <<'SQL'
+with routine_ids as (
+  select
+    to_regprocedure(
+      'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+    )::oid as private_oid,
+    to_regprocedure(
+      'public.partners_service_referral_visibility(uuid,integer,text)'
+    )::oid as public_oid,
+    to_regprocedure(
+      'public.partners_service_dashboard_v2(uuid,integer,text,text)'
+    )::oid as dashboard_oid
+)
+select (
+  case
+    when routine_ids.private_oid is null
+      or routine_ids.public_oid is null
+      or routine_ids.dashboard_oid is null
+    then false
+    else
+      position(
+        'next_cursor'
+        in lower(pg_get_functiondef(routine_ids.private_oid))
+      ) > 0
+      and position(
+        'masked_email'
+        in lower(pg_get_functiondef(routine_ids.private_oid))
+      ) > 0
+      and position(
+        'partners_service_referral_visibility'
+        in lower(pg_get_functiondef(routine_ids.dashboard_oid))
+      ) > 0
+  end
+)::int::text
+from routine_ids;
+SQL
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -838,9 +877,10 @@ DIDIT_ORPHAN_PURGE_RECOVERY_MARKER="$(
   capture_didit_orphan_purge_recovery_marker \
     2> "$RAW_DIR/didit-orphan-purge-recovery-precondition.log"
 )" || fail
-REFERRAL_VISIBILITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select case when to_regprocedure('affiliate_private.partners_service_referral_visibility(uuid,integer,text)') is not null and to_regprocedure('public.partners_service_referral_visibility(uuid,integer,text)') is not null and position('next_cursor' in lower(pg_get_functiondef('affiliate_private.partners_service_referral_visibility(uuid,integer,text)'::regprocedure))) > 0 and position('masked_email' in lower(pg_get_functiondef('affiliate_private.partners_service_referral_visibility(uuid,integer,text)'::regprocedure))) > 0 and position('partners_service_referral_visibility' in lower(pg_get_functiondef('public.partners_service_dashboard_v2(uuid,integer,text,text)'::regprocedure))) > 0 then '1' else '0' end;" \
-  2> "$RAW_DIR/referral-visibility-precondition.log")" || fail
+REFERRAL_VISIBILITY_MARKER="$(
+  capture_referral_visibility_marker \
+    2> "$RAW_DIR/referral-visibility-precondition.log"
+)" || fail
 MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
   # The audited 3f09095 database already contains Didit's bounded orphan-purge
@@ -980,9 +1020,10 @@ DIDIT_ORPHAN_PURGE_RECOVERY_MARKER="$(
   capture_didit_orphan_purge_recovery_marker \
     2> "$RAW_DIR/didit-orphan-purge-recovery-postcondition.log"
 )" || fail
-REFERRAL_VISIBILITY_MARKER="$(clone_psql -At -v ON_ERROR_STOP=1 -c \
-  "select case when to_regprocedure('affiliate_private.partners_service_referral_visibility(uuid,integer,text)') is not null and to_regprocedure('public.partners_service_referral_visibility(uuid,integer,text)') is not null and position('next_cursor' in lower(pg_get_functiondef('affiliate_private.partners_service_referral_visibility(uuid,integer,text)'::regprocedure))) > 0 and position('masked_email' in lower(pg_get_functiondef('affiliate_private.partners_service_referral_visibility(uuid,integer,text)'::regprocedure))) > 0 and position('partners_service_referral_visibility' in lower(pg_get_functiondef('public.partners_service_dashboard_v2(uuid,integer,text,text)'::regprocedure))) > 0 then '1' else '0' end;" \
-  2> "$RAW_DIR/referral-visibility-postcondition.log")" || fail
+REFERRAL_VISIBILITY_MARKER="$(
+  capture_referral_visibility_marker \
+    2> "$RAW_DIR/referral-visibility-postcondition.log"
+)" || fail
 MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}"
 if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}" ]]; then
   fail
