@@ -166,6 +166,11 @@ test('historical Didit purge orphans are recovered without exposing provider dat
     recoveryMigration,
     /from public, anon, authenticated, service_role;[\s\S]*to service_role;/,
   );
+  assert.doesNotMatch(recoveryMigration, /owner to supabase_admin/);
+  assert.match(
+    recoveryMigration,
+    /procedure_row\.proowner = current_user::regrole/,
+  );
   assert.match(sharedWorker, /DIDIT_LIST_MAX_PAGES = 4/);
   assert.match(sharedWorker, /DIDIT_LIST_PAGE_SIZE = 25/);
   assert.match(sharedWorker, /DIDIT_LIST_TIMEOUT_MS = 8_000/);

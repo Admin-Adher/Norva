@@ -277,20 +277,10 @@ as $$
     worker.last_outcome;
 $$;
 
-alter function affiliate_private.partners_service_didit_purge_orphans(
-  text, integer
-) owner to supabase_admin;
-alter function public.partners_service_didit_purge_orphans(
-  text, integer
-) owner to supabase_admin;
-alter function affiliate_private.partners_service_didit_purge_recover(
-  text, text, text
-) owner to supabase_admin;
-alter function public.partners_service_didit_purge_recover(
-  text, text, text
-) owner to supabase_admin;
-alter function affiliate_private.partners_service_didit_purge_status()
-  owner to supabase_admin;
+-- Keep the migration executor as owner. The disposable Supabase database runs
+-- migrations as its isolated PostgreSQL role, while the Hetzner rehearsal and
+-- production deployment run them as supabase_admin. An explicit cross-role
+-- OWNER change would require unnecessary SET ROLE authority in CI.
 
 revoke all on function
   affiliate_private.partners_service_didit_purge_orphans(text, integer),
@@ -357,7 +347,7 @@ begin
       v_status::oid
     )
       and procedure_row.prosecdef
-      and procedure_row.proowner = 'supabase_admin'::regrole
+      and procedure_row.proowner = current_user::regrole
       and procedure_row.proconfig = array['search_path=""']::text[]
   ) <> 3 or exists (
     select 1
