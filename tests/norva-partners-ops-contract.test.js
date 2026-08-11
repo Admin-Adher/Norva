@@ -733,7 +733,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1\|0"/,
+    /DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1\|1"/,
   );
   assert.match(
     rehearsal,
