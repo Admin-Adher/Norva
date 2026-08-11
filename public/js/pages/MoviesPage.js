@@ -257,12 +257,13 @@ class MoviesPage {
     }
 
     persistFilters() {
-        const selectedCategories = [...(this.categoryMulti?.getSelected() || [])];
-        const filters = {
+        const filters = window.CatalogFilterState.create({
+            kind: 'movies',
             source: this.sourceSelect?.value || '',
             sort: this.sortSelect?.value || 'default',
-            genre: this.genreSelect?.value ||
-                (!this._genreFilterHydrated ? this.savedFilters?.genre || '' : ''),
+            liveGenre: this.genreSelect?.value || '',
+            pendingGenre: this.savedFilters?.genre || '',
+            genreHydrated: this._genreFilterHydrated,
             year: this.yearSelect?.value || '',
             rating: this.ratingSelect?.value || '',
             watched: this.watchedSelect?.value || '',
@@ -273,10 +274,10 @@ class MoviesPage {
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
             favoritesOnly: this.showFavoritesOnly,
-            categories: (!this._categoriesRestored && this.savedFilters?.categories?.length)
-                ? [...new Set([...this.savedFilters.categories, ...selectedCategories])]
-                : selectedCategories
-        };
+            selectedCategories: [...(this.categoryMulti?.getSelected() || [])],
+            pendingCategories: this.savedFilters?.categories || [],
+            categoriesRestored: this._categoriesRestored
+        });
         // Async facet/category refreshes consult savedFilters. Keep that snapshot
         // in lockstep with the controls so Clear never resurrects an old value.
         this.savedFilters = filters;
@@ -347,27 +348,18 @@ class MoviesPage {
     // bucket grids). Empty keys are omitted. Also the bucket views' re-render
     // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
-        const params = {};
-        const source = this.selectedCloudSourceId();
-        if (source) params.source = source;
-        if (this.audioSelect?.value) params.audio = this.audioSelect.value;
-        if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
-        if (this.yearSelect?.value) params.year = this.yearSelect.value;
-        if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (this.addedSelect?.value) params.addedDays = this.addedSelect.value;
         const sort = this.sortSelect?.value || '';
-        if (sort && sort !== 'default') params.sort = sort;
-        if (sort === 'lang-match') {
-            params.sort = 'lang-match';
-            const prefs = this.getPreferences();
-            if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
-            if (prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none') {
-                params.prefSubs = prefs.preferredSubtitleLanguage;
-            }
-        }
-        const search = (this.searchInput?.value || '').trim();
-        if (search) params.q = search;
-        return params;
+        return window.CatalogQueryParams.build({
+            source: this.selectedCloudSourceId(),
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
+            year: this.yearSelect?.value || '',
+            rating: this.ratingSelect?.value || '',
+            added: this.addedSelect?.value || '',
+            sort,
+            search: this.searchInput?.value || '',
+            preferences: sort === 'lang-match' ? this.getPreferences() : null
+        });
     }
 
     selectedCloudSourceId() {
@@ -706,16 +698,25 @@ class MoviesPage {
     }
 
     hasActiveFilters() {
-        return Boolean(
-            (this.sortSelect?.value && this.sortSelect.value !== 'default') ||
-            this.genreSelect?.value ||
-            (!this._genreFilterHydrated && this.savedFilters?.genre) ||
-            this.yearSelect?.value || this.ratingSelect?.value ||
-            this.watchedSelect?.value || this.addedSelect?.value || this.durationSelect?.value ||
-            this.audioSelect?.value || this.subtitleSelect?.value ||
-            this.searchInput?.value || this.showFavoritesOnly ||
-            (this.categoryMulti?.getSelected().size > 0)
-        );
+        return window.CatalogFilterState.hasActive(window.CatalogFilterState.create({
+            kind: 'movies',
+            sort: this.sortSelect?.value || 'default',
+            liveGenre: this.genreSelect?.value || '',
+            pendingGenre: this.savedFilters?.genre || '',
+            genreHydrated: this._genreFilterHydrated,
+            year: this.yearSelect?.value || '',
+            rating: this.ratingSelect?.value || '',
+            watched: this.watchedSelect?.value || '',
+            added: this.addedSelect?.value || '',
+            duration: this.durationSelect?.value || '',
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
+            search: this.searchInput?.value || '',
+            favoritesOnly: this.showFavoritesOnly,
+            selectedCategories: [...(this.categoryMulti?.getSelected() || [])],
+            pendingCategories: this.savedFilters?.categories || [],
+            categoriesRestored: this._categoriesRestored
+        }));
     }
 
     // Active-filter chips: mirror what's currently narrowing the grid as removable
@@ -1957,12 +1958,41 @@ class MoviesPage {
         return position;
     }
 
+    historySourceId(history) {
+        return history?.source_id
+            ?? history?.sourceId
+            ?? history?.data?.sourceId
+            ?? history?.data?.source_id
+            ?? null;
+    }
+
+    historyTitleId(history) {
+        return history?.title_id
+            ?? history?.titleId
+            ?? history?.data?.titleId
+            ?? history?.data?.title_id
+            ?? null;
+    }
+
     renderContinueWatching() {
         if (!this.continueRow || !this.continueList) return;
-        const inProgress = (this.historyItems || [])
-            .filter(h => h.item_type === 'movie' && h.duration > 0 &&
-                this.getResumeOffset(h.progress, h.duration) > 0)
-            .slice(0, 12);
+        const seenTitleIds = new Set();
+        const inProgress = [];
+        for (const h of (this.historyItems || [])) {
+            if (h.item_type !== 'movie' || !(h.duration > 0) ||
+                this.getResumeOffset(h.progress, h.duration) <= 0) continue;
+            // titleId is the only cross-provider identity stable enough to merge.
+            // Legacy rows deliberately remain separate until a future playback saves
+            // that metadata; names, posters and provider-local ids are not identities.
+            const titleId = this.historyTitleId(h);
+            if (titleId != null && titleId !== '') {
+                const key = String(titleId);
+                if (seenTitleIds.has(key)) continue;
+                seenTitleIds.add(key);
+            }
+            inProgress.push(h);
+            if (inProgress.length >= 12) break;
+        }
 
         if (inProgress.length === 0) {
             this.continueRow.classList.add('hidden');
@@ -1973,7 +2003,7 @@ class MoviesPage {
             const ratio = Math.round((h.progress / h.duration) * 100);
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
-                 data-source-id="${h.source_id || h.data?.sourceId || ''}">
+                 data-source-id="${MediaUtils.escapeHtml(this.historySourceId(h) ?? '')}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
@@ -1984,16 +2014,25 @@ class MoviesPage {
         }).join('');
 
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
-            if (this._isTvMode()) {
-                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
-                card.tabIndex = 0;
-                card.setAttribute('role', 'button');
-                card.setAttribute('aria-label', `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`);
-            }
-            card.addEventListener('click', () => {
-                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
+            const historyForCard = () => inProgress.find(x =>
+                String(x.item_id) === card.dataset.itemId &&
+                String(this.historySourceId(x) ?? '') === card.dataset.sourceId);
+            const h = historyForCard();
+            const activate = () => {
+                const h = historyForCard();
                 if (h) this.resumeFromHistory(h);
-            });
+            };
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`);
+            if (!this._isTvMode()) {
+                card.addEventListener('keydown', event => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    activate();
+                });
+            }
+            card.addEventListener('click', activate);
         });
 
         this.continueRow.classList.remove('hidden');
@@ -2011,16 +2050,22 @@ class MoviesPage {
     }
 
     async resumeFromHistory(h) {
-        const sourceId = h.source_id || h.data?.sourceId;
+        const sourceId = this.historySourceId(h);
         if (!sourceId) return;
-        const movie = this.movies.find(m =>
-            String(m.stream_id) === String(h.item_id) && m.sourceId === parseInt(sourceId))
-            || {
+        const found = this.movies.find(m =>
+            String(m.stream_id) === String(h.item_id) && String(m.sourceId) === String(sourceId));
+        const historyTitleId = this.historyTitleId(h);
+        const movie = found
+            ? (historyTitleId && !found.titleId && !found.title_id
+                ? { ...found, titleId: historyTitleId, title_id: historyTitleId }
+                : found)
+            : {
                 stream_id: h.item_id,
                 sourceId: parseInt(sourceId),
                 name: h.data?.title,
                 stream_icon: h.data?.poster,
-                container_extension: h.data?.containerExtension || 'mp4'
+                container_extension: h.data?.containerExtension || 'mp4',
+                ...(historyTitleId ? { titleId: historyTitleId, title_id: historyTitleId } : {})
             };
         await this.playMovie(movie, {
             resumeTime: this.getResumeOffset(h.progress, h.duration),
@@ -2085,7 +2130,26 @@ class MoviesPage {
     }
 
     getMovieDisplayTitle(movie = this.currentMovie) {
-        return this.cleanMovieTitle(movie?.tmdb?.title || movie?.title || movie?.name || '') || 'Movie';
+        // Rail responses project the user's localized title at the top level while
+        // tmdb can intentionally retain the catalogue default language.
+        const hasCatalogTitle = Boolean(movie?.titleId || movie?.title_id || movie?.data?.titleId);
+        const title = hasCatalogTitle
+            ? (movie?.title || movie?.tmdb?.title || movie?.name || '')
+            : (movie?.tmdb?.title || movie?.title || movie?.name || '');
+        return this.cleanMovieTitle(title) || 'Movie';
+    }
+
+    getMovieOverview(movie = this.currentMovie) {
+        const hasCatalogTitle = Boolean(movie?.titleId || movie?.title_id || movie?.data?.titleId);
+        const localized = movie?.overview
+            || movie?.description
+            || movie?.plot
+            || movie?.data?.overview
+            || movie?.data?.description;
+        return (hasCatalogTitle ? localized : movie?.tmdb?.overview)
+            || movie?.tmdb?.overview
+            || localized
+            || 'No summary available yet.';
     }
 
     cleanMovieTitle(value) {
@@ -2792,7 +2856,7 @@ class MoviesPage {
         if (titleEl) titleEl.textContent = this.getMovieDisplayTitle(displayMovie);
 
         const plotEl = document.getElementById('movie-detail-plot');
-        if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.overview || displayMovie.description || displayMovie.plot || 'No summary available yet.';
+        if (plotEl) plotEl.textContent = this.getMovieOverview(displayMovie);
 
         const version = MediaUtils.parseVersionInfo(movie.name);
         const rating = this.getMovieRatingText(displayMovie);

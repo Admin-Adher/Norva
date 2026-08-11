@@ -16,6 +16,18 @@
     if (!isTv) return;
 
     document.documentElement.classList.add('tv-mode');
+    const tvNavigationAdapter = window.NorvaNavigation?.getAdapter?.('tv') || null;
+
+    function railNavLinks() {
+        return tvNavigationAdapter?.railLinks?.()
+            || [...document.querySelectorAll('.navbar .nav-link')];
+    }
+
+    function activeRailLink() {
+        return tvNavigationAdapter?.activeLink?.()
+            || railNavLinks().find((link) => link.classList.contains('active'))
+            || null;
+    }
 
     const INTERACTIVE_SELECTOR = [
         'a[href]', 'button', 'input', 'select', 'textarea',
@@ -954,9 +966,9 @@
     }
 
     function activeNavbarTarget() {
-        const active = document.querySelector('.navbar .nav-link.active');
+        const active = activeRailLink();
         if (active && isRendered(active)) return active;
-        return [...document.querySelectorAll('.navbar .nav-link')].find(isRendered) || null;
+        return railNavLinks().find(isRendered) || null;
     }
 
     // Settings is a fixed tab strip above a separately scrolling panel. Treating
@@ -1386,10 +1398,10 @@
             // for the rail instead of becoming an empty caret move.
             if (!e.repeat && isCatalogSearch && e.key === 'ArrowLeft' &&
                 (focused.selectionStart ?? 0) === 0 && (focused.selectionEnd ?? 0) === 0) {
-                const active = document.querySelector('.navbar .nav-link.active');
+                const active = activeRailLink();
                 const railTarget = (active && isVisible(active))
                     ? active
-                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                    : railNavLinks().find(isVisible);
                 if (railTarget) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1439,10 +1451,10 @@
                             .find(isVisible);
                     }
                 } else if (!target) {
-                    const activeNav = document.querySelector('.navbar .nav-link.active');
+                    const activeNav = activeRailLink();
                     target = (activeNav && isVisible(activeNav))
                         ? activeNav
-                        : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                        : railNavLinks().find(isVisible);
                 }
                 if (target) focusElement(target);
                 return;
@@ -1737,10 +1749,10 @@
             const sameRow = leftCard && leftCard.matches?.(CATALOG_TILE_SELECTOR) &&
                 hasMeaningfulVerticalOverlap(focused, leftCard, 0.5);
             if (!sameRow) {
-                const active = document.querySelector('.navbar .nav-link.active');
+                const active = activeRailLink();
                 const rail = (active && isVisible(active))
                     ? active
-                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                    : railNavLinks().find(isVisible);
                 if (rail) { focusElement(rail); return; }
             }
         }
@@ -1768,10 +1780,10 @@
                 // (app.js) can hide the current section's tab (display:none) while it stays .active,
                 // and a truthy-but-hidden active link would shadow the visible fallback via `||`,
                 // making the menu unreachable. Gate on visibility so the fallback still runs.
-                const active = document.querySelector('.navbar .nav-link.active');
+                const active = activeRailLink();
                 const railTarget = (active && isVisible(active))
                     ? active
-                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                    : railNavLinks().find(isVisible);
                 if (railTarget && isVisible(railTarget)) {
                     focusElement(railTarget);
                     return;
@@ -2171,7 +2183,8 @@
         // Not on the home page → navigate home instead of exiting
         const activePageId = document.querySelector('.page.active')?.id;
         if (activePageId && activePageId !== 'page-home') {
-            document.querySelector('.nav-link[data-page="home"]')?.click();
+            (tvNavigationAdapter?.homeLink?.()
+                || document.querySelector('.nav-link[data-page="home"]'))?.click();
             return 'nav';
         }
         return 'exit';

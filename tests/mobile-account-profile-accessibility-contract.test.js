@@ -21,7 +21,9 @@ const sourceManager = read('public/js/components/SourceManager.js');
 const mainCss = read('public/css/main.css');
 
 test('every sign-out entry uses the same cancel-first accessible confirmation', () => {
-  assert.match(app, /logoutLink\.addEventListener\('click',[\s\S]{0,180}await this\.signOut\(\)/);
+  const navigationModel = read('public/js/navigation/NavigationModel.js');
+  assert.match(navigationModel, /key:\s*'logout',[\s\S]{0,180}ariaLabel:\s*'Log out'[\s\S]{0,180}gate:\s*'authenticated'/);
+  assert.match(app, /intent\.target === 'logout'[\s\S]{0,100}void this\.signOut\(\)/);
   assert.match(app, /window\.NorvaModal\.confirm\(/);
   assert.match(app, /title:\s*'Log out of Norva\?'/);
   assert.match(app, /confirmLabel:\s*'Log out'/);

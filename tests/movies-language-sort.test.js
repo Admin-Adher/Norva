@@ -9,9 +9,11 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 test('Movies language bucket forwards explicit sort filters to the server', () => {
   const src = read('public/js/pages/MoviesPage.js');
+  const queryCore = read('public/js/utils/CatalogQueryParams.js');
   assert.match(src, /const sort = this\.sortSelect\?\.value \|\| '';/);
-  assert.match(src, /if \(sort && sort !== 'default'\) params\.sort = sort;/);
-  assert.match(src, /if \(this\.addedSelect\?\.value\) params\.addedDays = this\.addedSelect\.value;/);
+  assert.match(src, /window\.CatalogQueryParams\.build\(/);
+  assert.match(queryCore, /if \(sort && sort !== 'default'\) params\.sort = sort;/);
+  assert.match(queryCore, /if \(input\.added\) params\.addedDays = input\.added;/);
   assert.match(src, /const langKey = this\.currentBucketViewKey\(\);/);
   assert.match(src, /this\.activeBucketLangKey = this\.currentBucketViewKey\(\);/);
 });
@@ -32,6 +34,9 @@ test('Newest + French forwards category OR and provider scope to genre-items', a
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(read('public/js/utils/CatalogQueryParams.js'), sandbox, {
+    filename: 'CatalogQueryParams.js'
+  });
   vm.runInContext(src, sandbox, { filename: 'MoviesPage.js' });
 
   const page = Object.create(sandbox.window.MoviesPage.prototype);

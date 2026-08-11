@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=100">
+  <link rel="stylesheet" href="/css/main.css?v=101">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -139,46 +139,12 @@
   </div>
   <div id="app">
     <!-- Navigation -->
-    <nav class="navbar">
+    <nav class="navbar" aria-label="Primary navigation">
       <div class="navbar-brand" id="navbar-brand-home" role="button" tabindex="0" aria-label="Go to Home">
         <span class="logo"><img src="/img/norva-app-icon.png" alt="Norva"></span>
         <span class="brand-text">Norva</span>
       </div>
-      <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
-      <div class="navbar-menu" id="navbar-menu">
-        <a href="#" class="nav-link active" data-page="home" aria-label="Home" aria-current="page">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-home.svg?v=sharp-core-1" alt=""></span>
-          <span>Home</span>
-        </a>
-        <a href="#" class="nav-link catalog-nav-hidden" data-page="live" aria-label="Live TV" hidden aria-hidden="true" tabindex="-1">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt=""></span>
-          <span>Live TV</span>
-        </a>
-        <a href="#" class="nav-link catalog-nav-hidden" data-page="movies" aria-label="Movies" hidden aria-hidden="true" tabindex="-1">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt=""></span>
-          <span>Movies</span>
-        </a>
-        <a href="#" class="nav-link catalog-nav-hidden" data-page="series" aria-label="Series" hidden aria-hidden="true" tabindex="-1">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-series.svg?v=sharp-core-1" alt=""></span>
-          <span>Series</span>
-        </a>
-        <a href="#" class="nav-link" id="nav-downloads" data-action="downloads" aria-label="Downloads" hidden aria-hidden="true" tabindex="-1" style="display:none">
-          <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg></span>
-          <span>Downloads</span>
-        </a>
-        <a href="#" class="nav-link" id="nav-admin" data-page="admin" aria-label="Admin" hidden aria-hidden="true" tabindex="-1" style="display:none">
-          <span class="nav-icon">⚙️</span>
-          <span>Admin</span>
-        </a>
-        <a href="#" class="nav-link" data-page="settings" aria-label="Settings">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt=""></span>
-          <span>Settings</span>
-        </a>
-      </div>
+      <div class="navbar-menu" id="navbar-menu" data-navigation-root="primary"></div>
       <!-- Global catalogue search (movies + series). Top-right on phones, where
            the profile avatar used to sit (the Profile tab now lives at the bottom). -->
       <button class="nav-search-btn" id="nav-search" type="button" aria-label="Search">
@@ -205,40 +171,8 @@
       </button>
     </nav>
 
-    <!-- Mobile bottom tab bar (phones only). Reuses .nav-link + data-page so the
-         existing navigateTo handler, active-state sync, and catalog gating all
-         apply with no extra JS. Replaces the top hamburger on phones; hidden on
-         desktop/tablet. -->
-    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary">
-      <a href="#" class="nav-link active" data-page="home" aria-label="Home" aria-current="page">
-        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-home.svg?v=sharp-core-1" alt=""></span>
-        <span>Home</span>
-      </a>
-      <a href="#" class="nav-link catalog-nav-hidden" data-page="live" aria-label="Live TV" hidden aria-hidden="true" tabindex="-1">
-        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt=""></span>
-        <span>Live TV</span>
-      </a>
-      <a href="#" class="nav-link catalog-nav-hidden" data-page="movies" aria-label="Movies" hidden aria-hidden="true" tabindex="-1">
-        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt=""></span>
-        <span>Movies</span>
-      </a>
-      <a href="#" class="nav-link catalog-nav-hidden" data-page="series" aria-label="Series" hidden aria-hidden="true" tabindex="-1">
-        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-series.svg?v=sharp-core-1" alt=""></span>
-        <span>Series</span>
-      </a>
-      <a href="#" class="nav-link" id="nav-search-bottom" data-action="search" aria-label="Search">
-        <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
-        <span>Search</span>
-      </a>
-      <a href="#" class="nav-link" id="nav-downloads-bottom" data-action="downloads" aria-label="Downloads" hidden aria-hidden="true" tabindex="-1" style="display:none">
-        <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg></span>
-        <span>Downloads</span>
-      </a>
-      <a href="#" class="nav-link" id="nav-account" data-action="account" aria-label="Account and settings">
-        <span class="nav-icon"><img id="nav-account-img" class="nav-account-avatar" src="/img/avatars/placeholder.svg" alt=""></span>
-        <span>Profile</span>
-      </a>
-    </nav>
+    <!-- The phone adapter projects the shared navigation model into this rail. -->
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary" data-navigation-root="phone"></nav>
 
     <!-- Background catalog-enrichment progress (driven by app.js startEnrichmentProgressPoll). -->
     <div id="enrichment-bar" class="enrichment-bar" hidden>
@@ -545,16 +479,27 @@
             </button>
           </div>
         </div>
-        <div class="filter-bar" id="movies-filter-bar">
-          <select id="movies-sort" class="source-select filter-select" title="Sort by">
-            <option value="default">Sort: Default</option>
-            <option value="added">Recently Added</option>
-            <option value="rating">Top Rated</option>
-            <option value="year">Newest</option>
-            <option value="year-asc">Oldest</option>
-            <option value="name">A → Z</option>
-            <option value="lang-match">Best language match</option>
-          </select>
+        <div class="catalog-filter-disclosure" data-catalog-filter-disclosure="movies">
+          <div class="catalog-filter-disclosure-toolbar">
+            <button id="movies-catalog-filter-toggle" class="btn btn-sm btn-ghost catalog-filter-disclosure-toggle"
+              type="button" aria-controls="movies-filter-bar" aria-expanded="false">
+              <span id="movies-catalog-filter-label">More filters</span>
+              <span id="movies-catalog-filter-badge" class="catalog-filter-disclosure-badge hidden"
+                aria-hidden="true"></span>
+            </button>
+            <span class="catalog-filter-disclosure-hint">Year, rating, languages and watch status</span>
+            <select id="movies-sort" class="source-select filter-select" title="Sort by">
+              <option value="default">Sort: Default</option>
+              <option value="added">Recently Added</option>
+              <option value="rating">Top Rated</option>
+              <option value="year">Newest</option>
+              <option value="year-asc">Oldest</option>
+              <option value="name">A → Z</option>
+              <option value="lang-match">Best language match</option>
+            </select>
+            <span id="movies-count" class="filter-count"></span>
+          </div>
+          <div class="filter-bar catalog-filter-panel is-collapsed" id="movies-filter-bar">
           <select id="movies-genre" class="source-select filter-select hidden" title="Genre">
             <option value="">All Genres</option>
           </select>
@@ -603,9 +548,9 @@
           <button id="movies-group-toggle" class="btn btn-sm btn-ghost filter-toggle active"
             title="Group versions of the same movie into a single card">Group versions</button>
           <button id="movies-random" class="btn btn-sm btn-ghost filter-toggle" title="Play a random movie">Random</button>
-          <span id="movies-count" class="filter-count"></span>
           <button id="movies-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
             Reset</button>
+          </div>
         </div>
         <div id="movies-active-filters" class="active-filters hidden" aria-label="Active filters"></div>
         <div id="movies-continue" class="continue-row hidden">
@@ -715,16 +660,27 @@
             </button>
           </div>
         </div>
-        <div class="filter-bar" id="series-filter-bar">
-          <select id="series-sort" class="source-select filter-select" title="Sort by">
-            <option value="default">Sort: Default</option>
-            <option value="added">Recently Added</option>
-            <option value="rating">Top Rated</option>
-            <option value="year">Newest</option>
-            <option value="year-asc">Oldest</option>
-            <option value="name">A → Z</option>
-            <option value="lang-match">Best language match</option>
-          </select>
+        <div class="catalog-filter-disclosure" data-catalog-filter-disclosure="series">
+          <div class="catalog-filter-disclosure-toolbar">
+            <button id="series-catalog-filter-toggle" class="btn btn-sm btn-ghost catalog-filter-disclosure-toggle"
+              type="button" aria-controls="series-filter-bar" aria-expanded="false">
+              <span id="series-catalog-filter-label">More filters</span>
+              <span id="series-catalog-filter-badge" class="catalog-filter-disclosure-badge hidden"
+                aria-hidden="true"></span>
+            </button>
+            <span class="catalog-filter-disclosure-hint">Year, rating, languages and watch status</span>
+            <select id="series-sort" class="source-select filter-select" title="Sort by">
+              <option value="default">Sort: Default</option>
+              <option value="added">Recently Added</option>
+              <option value="rating">Top Rated</option>
+              <option value="year">Newest</option>
+              <option value="year-asc">Oldest</option>
+              <option value="name">A → Z</option>
+              <option value="lang-match">Best language match</option>
+            </select>
+            <span id="series-count" class="filter-count"></span>
+          </div>
+          <div class="filter-bar catalog-filter-panel is-collapsed" id="series-filter-bar">
           <select id="series-genre" class="source-select filter-select hidden" title="Genre">
             <option value="">All Genres</option>
           </select>
@@ -771,9 +727,9 @@
           <button id="series-group-toggle" class="btn btn-sm btn-ghost filter-toggle active"
             title="Group versions of the same series into a single card">Group versions</button>
           <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series">Random</button>
-          <span id="series-count" class="filter-count"></span>
           <button id="series-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
             Reset</button>
+          </div>
         </div>
         <div id="series-active-filters" class="active-filters hidden" aria-label="Active filters"></div>
         <div id="series-continue" class="continue-row hidden">
@@ -2068,12 +2024,17 @@
   <script defer src="/js/api.js?v=76"></script>
   <script defer src="/js/utils/catalogCache.js?v=1"></script>
   <script defer src="/js/utils/mediaUtils.js?v=16"></script>
+  <script defer src="/js/utils/CatalogFilterState.js?v=1"></script>
+  <script defer src="/js/utils/CatalogQueryParams.js?v=1"></script>
   <script defer src="/js/utils/hoverPreview.js?v=1"></script>
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=7"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=30"></script>
-  <script defer src="/js/utils/standalone.js?v=10"></script>
+  <script defer src="/js/navigation/NavigationModel.js?v=1"></script>
+  <script defer src="/js/navigation/NavigationAdapters.js?v=1"></script>
+  <script defer src="/js/navigation/navigationBootstrap.js?v=1"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=31"></script>
+  <script defer src="/js/utils/standalone.js?v=11"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=8"></script>
@@ -2084,23 +2045,23 @@
   <script defer src="/js/components/TitleRatingControl.js?v=2"></script>
   <script defer src="/js/components/VideoPlayer.js?v=41"></script>
   <script defer src="/js/components/ChannelList.js?v=49"></script>
-  <script defer src="/js/components/SourceManager.js?v=39"></script>
+  <script defer src="/js/components/SourceManager.js?v=40"></script>
   <script defer src="/js/components/EpgGuide.js?v=13"></script>
   <script defer src="/js/components/LiveGuideFusion.js?v=29"></script>
-  <script defer src="/js/pages/HomePage.js?v=55"></script>
+  <script defer src="/js/pages/HomePage.js?v=56"></script>
   <script defer src="/js/pages/LivePage.js?v=9"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
-  <script defer src="/js/pages/MoviesPage.js?v=55"></script>
-  <script defer src="/js/pages/SeriesPage.js?v=53"></script>
-  <script defer src="/js/pages/Settings.js?v=47"></script>
+  <script defer src="/js/pages/MoviesPage.js?v=56"></script>
+  <script defer src="/js/pages/SeriesPage.js?v=54"></script>
+  <script defer src="/js/pages/Settings.js?v=48"></script>
   <script defer src="/js/pages/PartnersPage.js?v=10"></script>
-  <script defer src="/js/pages/WatchPage.js?v=126"></script>
+  <script defer src="/js/pages/WatchPage.js?v=127"></script>
   <script defer src="/js/profiles.js?v=13"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=17"></script>
-  <script defer src="/js/app.js?v=70"></script>
+  <script defer src="/js/app.js?v=71"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

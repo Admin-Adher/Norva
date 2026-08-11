@@ -592,7 +592,14 @@ class SettingsPage {
         if (!container || !window.NorvaSourceHealth) return;
 
         try {
-            const summary = await window.NorvaSourceHealth.loadSummary();
+            // App owns the canonical source-health refresh: it stores the summary,
+            // applies catalogue availability and notifies every navigation adapter.
+            // Render that exact object here instead of issuing a second independent
+            // /sources request. Keep the direct loader only for standalone harnesses
+            // or older shells that do not expose the App seam yet.
+            const summary = typeof this.app?.refreshSourceHealth === 'function'
+                ? await this.app.refreshSourceHealth()
+                : await window.NorvaSourceHealth.loadSummary();
             this.lastSourceHealthSummary = summary;
             container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: false });
         } catch (err) {

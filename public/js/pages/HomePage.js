@@ -22,8 +22,7 @@ class HomePage {
         this.contentPreferenceKey = '';
         this._freshRailsPending = false;
         this.setupRefreshTimer = null;
-        this.setupRecoveryToken = null;
-        this.setupRecoverySourceId = null;
+        this.setupRecoverySession = null;
         this.setupRecoveryCooldowns = new Map();
         document.addEventListener('norva:source-health-changed', () => {
             this.lastLoadedAt = 0;
@@ -615,9 +614,10 @@ class HomePage {
         if (summary.state === 'syncing') {
             const manager = this.app?.sourceManager || window.app?.sourceManager;
             const source = this.syncingSourceFromSummary(summary);
-            const counts = (manager && manager.catalogCountsFromSource) ? manager.catalogCountsFromSource(source || {}) : {};
-            const progress = (manager && manager.syncProgressFromSource) ? manager.syncProgressFromSource(source || {}) : {};
-            const fmt = (n) => (manager && manager.formatCatalogCount) ? manager.formatCatalogCount(n) : String(Number(n) || 0);
+            const preparation = manager?.catalogPreparationView?.(source || {});
+            const counts = preparation?.counts || {};
+            const progress = preparation?.progress || {};
+            const fmt = (n) => preparation?.formatCount?.(n) || String(Number(n) || 0);
             const percent = Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0)));
             const ready = [];
             if (Number(counts.movies) > 0) ready.push(`${fmt(counts.movies)} movies`);
@@ -715,12 +715,8 @@ class HomePage {
             clearTimeout(this.setupRefreshTimer);
             this.setupRefreshTimer = null;
         }
-        const manager = this.app?.sourceManager || window.app?.sourceManager;
-        if (this.setupRecoveryToken && manager?.catalogPreparationToken === this.setupRecoveryToken) {
-            manager.catalogPreparationToken = null;
-        }
-        this.setupRecoveryToken = null;
-        this.setupRecoverySourceId = null;
+        this.setupRecoverySession?.cancel?.();
+        this.setupRecoverySession = null;
         document.getElementById('page-home')?.classList.remove('home-setup-active', 'home-setup-connect-active');
         document.getElementById('home-service-health')?.classList.remove('setup-suppressed');
         document.getElementById('home-hero')?.classList.remove('hidden');
@@ -863,10 +859,9 @@ class HomePage {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         const source = this.syncingSourceFromSummary(summary);
         const type = source?.type || source?.source_type || source?.sourceType || 'xtream';
-        const sourceView = manager?.sourceWithStatus ? manager.sourceWithStatus(source || {}) : (source || {});
-        const progressHtml = manager?.renderCatalogPreparation
-            ? manager.renderCatalogPreparation(sourceView, type)
-            : this.renderSetupSyncFallback(summary);
+        const preparation = manager?.catalogPreparationView?.(source || {}, type);
+        const sourceView = preparation?.source || source || {};
+        const progressHtml = preparation?.render?.() || this.renderSetupSyncFallback(summary);
 
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-sync-embedded" data-setup-state="syncing">
@@ -918,20 +913,19 @@ class HomePage {
             const api = window.API || (typeof API !== 'undefined' ? API : null);
             const panel = container.querySelector('.norva-setup-sync-panel');
             if (!panel || !panel.isConnected || !sourceId || tick >= 7 ||
-                !manager?.patchCatalogPreparation || !api?.sources?.getById) {
+                !manager?.catalogPreparationView || !api?.sources?.getById) {
                 fullRefresh();
                 return;
             }
             try {
                 const latest = await api.sources.getById(sourceId);
-                const view = manager.sourceWithStatus ? manager.sourceWithStatus(latest || {}) : (latest || {});
-                const { phase } = manager.sourceSyncState(view);
-                if (phase === 'ready' || phase === 'error') {
+                const preparation = manager.catalogPreparationView(latest || {}, type);
+                if (preparation.phase === 'ready' || preparation.phase === 'error') {
                     fullRefresh();
                     return;
                 }
-                if (!manager.patchCatalogPreparation(panel, view, type)) {
-                    panel.innerHTML = manager.renderCatalogPreparation(view, type);
+                if (!preparation.patch(panel)) {
+                    panel.innerHTML = preparation.render();
                 }
                 this.scheduleSetupSyncRefresh(container, sourceId, type, tick + 1);
             } catch (_) {
@@ -942,40 +936,34 @@ class HomePage {
 
     maybeRecoverSetupCatalogFinalization(sourceView = {}, type = 'xtream') {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
-        if (!manager?.shouldRecoverCatalogFinalization || !manager?.recoverCatalogFinalization) return;
-        const api = window.API || (typeof API !== 'undefined' ? API : null);
-        if (!api?.sources?.finalize || !api?.sources?.getById) return;
-
-        const sourceId = sourceView.cloudId || sourceView.cloud_id || sourceView.id || sourceView.source_id;
-        if (!sourceId || !this.shouldRecoverSetupCatalogFinalization(sourceView, manager)) return;
+        if (!manager?.catalogPreparationView || !manager?.startCatalogPreparationRecovery) return;
+        const sourceId = manager.catalogPreparationView(sourceView, type).sourceId;
+        if (!sourceId) return;
 
         const sourceKey = String(sourceId);
         const retryAt = Number(this.setupRecoveryCooldowns.get(sourceKey) || 0);
         if (retryAt && Date.now() < retryAt) return;
-        if (this.setupRecoveryToken && this.setupRecoverySourceId === sourceKey) return;
+        if (this.setupRecoverySession?.sourceId === sourceKey && this.setupRecoverySession.isActive?.()) return;
 
-        const token = Symbol('home-catalog-recovery');
-        this.setupRecoveryToken = token;
-        this.setupRecoverySourceId = sourceKey;
-        manager.catalogPreparationToken = token;
-
+        let session = null;
         const render = (latestSource) => {
-            if (this.setupRecoveryToken !== token || this.app?.currentPage !== 'home') return;
-            const latestView = manager.sourceWithStatus
-                ? manager.sourceWithStatus(latestSource || sourceView)
-                : (latestSource || sourceView);
+            if (this.setupRecoverySession !== session || !session?.isActive?.() || this.app?.currentPage !== 'home') return;
+            const preparation = manager.catalogPreparationView(latestSource || sourceView, type);
             const panel = document.querySelector('.norva-setup-sync-panel');
-            if (panel && manager.renderCatalogPreparation) {
+            if (panel) {
                 // Patch-first : garder l'élément barre vivant pour que sa transition anime.
-                if (!(manager.patchCatalogPreparation && manager.patchCatalogPreparation(panel, latestView, type))) {
-                    panel.innerHTML = manager.renderCatalogPreparation(latestView, type);
+                if (!preparation.patch(panel)) {
+                    panel.innerHTML = preparation.render();
                 }
             }
         };
 
-        manager.recoverCatalogFinalization(sourceId, token, render)
+        session = manager.startCatalogPreparationRecovery(sourceView, { onProgress: render });
+        if (!session) return;
+        this.setupRecoverySession = session;
+        session.promise
             .then(() => {
-                if (this.setupRecoveryToken !== token) return;
+                if (this.setupRecoverySession !== session) return;
                 this.setupRecoveryCooldowns.delete(sourceKey);
                 this.lastLoadedAt = 0;
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
@@ -988,54 +976,8 @@ class HomePage {
                 console.warn('[HomePage] Catalog finalization recovery failed:', err);
             })
             .finally(() => {
-                if (manager.catalogPreparationToken === token) manager.catalogPreparationToken = null;
-                if (this.setupRecoveryToken === token) {
-                    this.setupRecoveryToken = null;
-                    this.setupRecoverySourceId = null;
-                }
+                if (this.setupRecoverySession === session) this.setupRecoverySession = null;
             });
-    }
-
-    shouldRecoverSetupCatalogFinalization(sourceView = {}, manager = null) {
-        if (manager?.shouldRecoverCatalogFinalization?.(sourceView)) return true;
-
-        const progress = manager?.syncProgressFromSource?.(sourceView)
-            || sourceView.syncProgress
-            || sourceView.sync_progress
-            || sourceView.configHint?.syncProgress
-            || sourceView.config_hint?.syncProgress
-            || {};
-        const steps = progress.steps && typeof progress.steps === 'object' ? progress.steps : {};
-        const counts = progress.counts && typeof progress.counts === 'object' ? progress.counts : {};
-        const status = String(progress.status || sourceView.syncStatus || sourceView.sync_status || '').toLowerCase();
-        const stage = String(progress.stage || '').toLowerCase();
-        const importStatus = String(steps.import?.status || '').toLowerCase();
-        const finalizeStatus = String(steps.finalize?.status || '').toLowerCase();
-        const total = Number(counts.total || counts.items || manager?.catalogCountsFromSource?.(sourceView)?.total || 0) || 0;
-
-        const finalizingStages = new Set([
-            'materializing',
-            'building_live_channels',
-            'building_live_variants',
-            'building_titles',
-            'finalizing'
-        ]);
-        const finalizing = finalizingStages.has(stage) || ['running', 'in_progress', 'pending'].includes(finalizeStatus);
-
-        // STALLED only: the client-driven finalize loop exists to rescue a server driver
-        // that stopped making progress — the SourceManager rule (its own path requires
-        // >60s without a progress update). Without this condition, this fallback launched
-        // a parallel finalize loop for EVERY healthy account in the normal finalize stage,
-        // racing the server's background driver (home audit 2026-07-04).
-        const updatedAtRaw = progress.updatedAt || progress.updated_at || progress.at || null;
-        const updatedAtMs = updatedAtRaw ? new Date(updatedAtRaw).getTime() : 0;
-        const stale = !updatedAtMs || (Date.now() - updatedAtMs > 60_000);
-
-        return status === 'syncing'
-            && importStatus === 'done'
-            && total > 0
-            && finalizing
-            && stale;
     }
 
     syncingSourceFromSummary(summary = {}) {

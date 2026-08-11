@@ -45,6 +45,12 @@ function loadPage(relativePath, className) {
             })
         }
     };
+    vm.runInNewContext(read('public/js/utils/CatalogFilterState.js'), context, {
+        filename: 'public/js/utils/CatalogFilterState.js'
+    });
+    vm.runInNewContext(read('public/js/utils/CatalogQueryParams.js'), context, {
+        filename: 'public/js/utils/CatalogQueryParams.js'
+    });
     vm.runInNewContext(read(relativePath), context, { filename: relativePath });
     return { Page: context.window[className], saves, context, favoriteButton };
 }

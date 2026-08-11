@@ -264,14 +264,6 @@
                 + '.player-quality-menu:not(.hidden), .player-overflow-menu:not(.hidden)');
             if (menu) { menu.classList.add('hidden'); return 'handled'; }
 
-            // The mobile navigation menu.
-            const navMenu = document.getElementById('navbar-menu');
-            if (navMenu && navMenu.classList.contains('active')) {
-                navMenu.classList.remove('active');
-                document.getElementById('mobile-menu-toggle')?.classList.remove('active');
-                return 'handled';
-            }
-
             // The Live TV channel drawer (sidebar + its dimmed backdrop overlay).
             const sidebar = document.getElementById('channel-sidebar');
             if (sidebar && sidebar.classList.contains('active')) {

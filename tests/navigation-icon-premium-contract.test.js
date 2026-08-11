@@ -10,6 +10,9 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 const html = read('public/app.html');
 const app = read('public/js/app.js');
+const navigationModelSource = read('public/js/navigation/NavigationModel.js');
+const navigationAdaptersSource = read('public/js/navigation/NavigationAdapters.js');
+const { createDefaultNavigationModel } = require('../public/js/navigation/NavigationModel.js');
 const iconsJs = read('public/js/icons.js');
 const css = read('public/css/main.css');
 const navIconCss = css.slice(css.indexOf('/* Icons */'), css.indexOf('/* Animation Utilities */'));
@@ -50,6 +53,9 @@ test('navigation icons use an explicit sharp core and one restrained non-TV aura
 });
 
 test('icon-only navigation links keep an accessible name and current-page state', () => {
+  const model = createDefaultNavigationModel();
+  const webShell = model.renderProjection('web') + model.renderProjection('phone');
+  const tvShell = model.renderProjection('tv') + model.renderProjection('phone');
   const expectedCounts = new Map([
     ['home', 2],
     ['live', 2],
@@ -68,41 +74,52 @@ test('icon-only navigation links keep an accessible name and current-page state'
   };
 
   for (const [page, count] of expectedCounts) {
-    const matches = html.match(
+    const matches = webShell.match(
       new RegExp(`<a[^>]*data-page="${page}"[^>]*aria-label="${labels[page]}"`, 'g')
     ) || [];
-    assert.equal(matches.length, count, `${page} has an explicit name in every navigation set`);
+    assert.equal(matches.length, count, `${page} has an explicit name in the web/phone shell`);
   }
 
   assert.equal(
-    (html.match(/data-page="home"[^>]*aria-current="page"/g) || []).length,
+    (webShell.match(/data-page="home"[^>]*aria-current="page"/g) || []).length,
     2,
     'both pre-boot Home links truthfully expose the initial route'
   );
   assert.equal(
-    (html.match(/data-action="downloads"[^>]*aria-label="Downloads"/g) || []).length,
+    (webShell.match(/data-action="downloads"[^>]*aria-label="Downloads"/g) || []).length,
     2,
     'Downloads remains named when its label is visually hidden'
   );
+  assert.equal(
+    (tvShell.match(/data-page="home"[^>]*aria-current="page"/g) || []).length,
+    2,
+    'the TV rail and hidden phone projection agree on the initial route'
+  );
 
-  assert.match(app, /logoutLink\.setAttribute\('aria-label', 'Log out'\)/);
-  assert.match(app, /const isCurrent = Boolean\(link\.dataset\.page\)/);
-  assert.match(app, /link\.setAttribute\('aria-current', 'page'\)/);
-  assert.match(app, /link\.removeAttribute\('aria-current'\)/);
+  assert.match(navigationModelSource, /ariaLabel:\s*'Log out'/);
+  assert.match(navigationAdaptersSource, /link\.dataset\.navKind === 'route'/);
+  assert.match(navigationAdaptersSource, /link\.setAttribute\('aria-current', 'page'\)/);
+  assert.match(navigationAdaptersSource, /link\.removeAttribute\('aria-current'\)/);
+  assert.match(app, /this\.navigation\?\.syncCurrent\(pageName\)/);
 });
 
 test('revised SVG URLs bypass existing image and service-worker caches', () => {
+  const model = createDefaultNavigationModel();
+  const renderedNavigation = model.projectionNames()
+    .map((projection) => model.renderProjection(projection))
+    .join('\n');
   for (const name of ['home', 'live-tv', 'movies', 'series', 'settings']) {
     assert.match(
-      html,
+      renderedNavigation,
       new RegExp(`/img/icons/norva-${name}\\.svg\\?v=sharp-core-1`),
       `${name} has a revised cache key`
     );
   }
-  assert.match(app, /norva-logout\.svg\?v=sharp-core-1/);
-  assert.match(app, /norva-settings\.svg\?v=sharp-core-1/);
+  assert.match(renderedNavigation, /norva-logout\.svg\?v=sharp-core-1/);
   assert.match(iconsJs, /norva-\$\{name\}\.svg\?v=sharp-core-1/);
-  assert.match(html, /\/css\/main\.css\?v=100/);
+  assert.match(html, /\/css\/main\.css\?v=101/);
   assert.match(html, /\/js\/icons\.js\?v=3/);
-  assert.match(html, /\/js\/app\.js\?v=70/);
+  assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=1/);
+  assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=1/);
+  assert.match(html, /\/js\/app\.js\?v=71/);
 });

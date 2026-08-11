@@ -965,8 +965,10 @@ test('Android TV live-data audit assets are opt-in and debug-only', () => {
 });
 
 test('Android TV app shell cache-busts the repaired navigation script', () => {
-  assert.match(read('public/app.html'), /tvNavigation\.js\?v=30/);
-  assert.match(read('public/support.html'), /tvNavigation\.js\?v=30/);
+  assert.match(read('public/app.html'), /tvNavigation\.js\?v=31/);
+  assert.match(read('public/support.html'), /tvNavigation\.js\?v=31/);
+  assert.match(read('public/app.html'), /NavigationModel\.js\?v=1/);
+  assert.match(read('public/app.html'), /NavigationAdapters\.js\?v=1/);
   assert.match(read('public/app.html'), /GenreRails\.js\?v=8/);
 });
 

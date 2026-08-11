@@ -433,7 +433,16 @@ public class MainActivity extends Activity {
         String assetPath;
         String mimeType;
         String path = uri.getPath();
-        if ("/js/utils/tvNavigation.js".equals(path)) {
+        if ("/js/navigation/NavigationModel.js".equals(path)) {
+            assetPath = "www/js/navigation/NavigationModel.js";
+            mimeType = "application/javascript";
+        } else if ("/js/navigation/NavigationAdapters.js".equals(path)) {
+            assetPath = "www/js/navigation/NavigationAdapters.js";
+            mimeType = "application/javascript";
+        } else if ("/js/navigation/navigationBootstrap.js".equals(path)) {
+            assetPath = "www/js/navigation/navigationBootstrap.js";
+            mimeType = "application/javascript";
+        } else if ("/js/utils/tvNavigation.js".equals(path)) {
             assetPath = "www/js/utils/tvNavigation.js";
             mimeType = "application/javascript";
         } else if ("/js/utils/GenreRails.js".equals(path)) {

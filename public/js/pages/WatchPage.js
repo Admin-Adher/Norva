@@ -10276,6 +10276,11 @@ class WatchPage {
                 ...(options.force ? { force: true } : {})
             };
             if (sendMeta) {
+                const titleId = this.content.titleId
+                    || this.content.title_id
+                    || this.content.data?.titleId
+                    || this.content.data?.title_id
+                    || null;
                 payload.data = {
                     title: this.content.title || 'Unknown Title',
                     subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
@@ -10284,6 +10289,9 @@ class WatchPage {
                     containerExtension: this.containerExtension,
                     durationHint: duration,
                     playbackPreferences: this.getPlaybackPreferences(),
+                    // Optional, non-destructive stable identity. Legacy rows remain
+                    // valid without it; JSON merge keeps it on delta heartbeats.
+                    ...(titleId ? { titleId } : {}),
                     // Series-specific fields for next episode functionality
                     seriesId: this.content.seriesId || null,
                     currentSeason: this.currentSeason || null,

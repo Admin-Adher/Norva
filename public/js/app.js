@@ -49,6 +49,7 @@ class App {
         if (document.body && /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '')) {
             document.body.classList.add('norva-phone-apk');
         }
+        this.navigation = window.NorvaNavigation || null;
         this.currentPage = 'home';
         this.pages = {};
         this.currentUser = null;
@@ -78,7 +79,6 @@ class App {
         this.pages.admin = null;
         this.entitlement = null;
         this.sourceHealthSummary = null;
-        this.catalogPages = new Set(['live', 'movies', 'series']);
         for (const page of ['movies', 'series']) {
             const top = Number(this._nativeContinuity?.gridScroll?.[page]) || 0;
             if (top > 0 && this.pages[page]) this.pages[page]._savedScrollTop = top;
@@ -324,7 +324,9 @@ class App {
             if (!parsed || Date.now() - Number(parsed.updatedAt || 0) > NORVA_NATIVE_CONTINUITY_TTL_MS) {
                 return null;
             }
-            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings', 'partners']);
+            const allowed = new Set(
+                this.navigation?.model?.continuityPageNames?.() || ['home']
+            );
             const page = allowed.has(parsed.page) ? parsed.page : 'home';
             const boundedScrollMap = (value) => Object.fromEntries(
                 Object.entries(value && typeof value === 'object' ? value : {})
@@ -348,7 +350,9 @@ class App {
     persistNativeContinuity() {
         if (!this.isNativePhoneShell()) return;
         try {
-            const allowed = new Set(['home', 'live', 'movies', 'series', 'settings', 'partners']);
+            const allowed = new Set(
+                this.navigation?.model?.continuityPageNames?.() || ['home']
+            );
             const page = allowed.has(this.currentPage) ? this.currentPage : 'home';
             const currentPage = this.getPageScrollElement(page);
             this._pageScroll = this._pageScroll || {};
@@ -470,14 +474,9 @@ class App {
         const main = document.querySelector('.main-content');
         if (!main) return 0;
 
-        const labels = {
-            home: ['Opening Home', 'Bringing back your picks and progress.'],
-            live: ['Preparing Live TV', 'Loading channels and guide information.'],
-            movies: ['Opening Movies', 'Restoring your catalogue and filters.'],
-            series: ['Opening Series', 'Restoring your catalogue and filters.'],
-            settings: ['Opening Settings', 'Loading this screen without moving your place.'],
-        };
-        const [title, detail] = labels[pageName] || ['Opening Norva', 'Preparing this screen.'];
+        const transition = this.navigation?.model?.transitionFor?.(pageName);
+        const title = transition?.title || 'Opening Norva';
+        const detail = transition?.detail || 'Preparing this screen.';
         let stage = document.getElementById('tv-route-stage');
         if (!stage) {
             stage = document.createElement('div');
@@ -612,33 +611,6 @@ class App {
         this.startEnrichmentProgressPoll();
         if (this.currentUser && !this.currentUser.device) this.registerPushToken(); // native FCM token (Android wrapper only; no-op in browser)
 
-        // Mobile menu toggle
-        const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
-        const navbarMenu = document.getElementById('navbar-menu');
-
-        if (mobileMenuToggle && navbarMenu) {
-            mobileMenuToggle.addEventListener('click', () => {
-                mobileMenuToggle.classList.toggle('active');
-                navbarMenu.classList.toggle('active');
-            });
-
-            // Close menu when a nav link is clicked
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.addEventListener('click', () => {
-                    mobileMenuToggle.classList.remove('active');
-                    navbarMenu.classList.remove('active');
-                });
-            });
-
-            // Close menu when clicking outside
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.navbar')) {
-                    mobileMenuToggle.classList.remove('active');
-                    navbarMenu.classList.remove('active');
-                }
-            });
-        }
-
         // Channel drawer toggle (mobile)
         const channelToggleBtn = document.getElementById('channel-toggle-btn');
         const channelSidebar = document.getElementById('channel-sidebar');
@@ -703,33 +675,9 @@ class App {
         syncLiveNavigationState();
         window.addEventListener('resize', syncLiveNavigationState);
 
-        // Navigation handling
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', (e) => {
-                if (link.dataset.external === 'true') return;
-                // Downloads opens the NATIVE offline screen (not an SPA page) so
-                // it works with no connectivity. Phone/tablet app only.
-                if (link.dataset.action === 'search') {
-                    e.preventDefault();
-                    this.openSearch();
-                    return;
-                }
-                if (link.dataset.action === 'account') {
-                    e.preventDefault();
-                    this.openAccountSheet();
-                    return;
-                }
-                if (link.dataset.action === 'downloads') {
-                    e.preventDefault();
-                    document.getElementById('mobile-menu-toggle')?.classList.remove('active');
-                    document.getElementById('navbar-menu')?.classList.remove('active');
-                    try { window.NorvaTVCloud?.openDownloads?.(); } catch (_) { /* no bridge */ }
-                    return;
-                }
-                e.preventDefault();
-                this.navigateTo(link.dataset.page);
-            });
-        });
+        // Navigation policy and projection stay in the shared model. App owns
+        // only the route/action effects that need page controllers or bridges.
+        this.navigation?.bind((intent) => this.handleNavigationIntent(intent));
 
         // Global search (movies + series) from the top bar.
         document.getElementById('nav-search')?.addEventListener('click', () => this.openSearch());
@@ -758,8 +706,6 @@ class App {
         const navbarBrandHome = document.getElementById('navbar-brand-home');
         const goHomeFromBrand = (event) => {
             event.preventDefault();
-            mobileMenuToggle?.classList.remove('active');
-            navbarMenu?.classList.remove('active');
             this.navigateTo('home');
         };
         navbarBrandHome?.addEventListener('click', goHomeFromBrand);
@@ -793,6 +739,7 @@ class App {
             }
         });
 
+        this.initDesktopCatalogFilters();
         this.initMobileCatalogControls();
 
         // Toggle groups button
@@ -902,6 +849,32 @@ class App {
         setTimeout(() => { this.maybeAutoRefreshSources().catch(() => {}); }, 4000);
 
         console.log('Norva initialized');
+    }
+
+    handleNavigationIntent(intent) {
+        if (!intent) return false;
+        if (intent.kind === 'route') {
+            this.navigateTo(intent.target);
+            return true;
+        }
+        if (intent.kind !== 'action') return false;
+        if (intent.target === 'search') {
+            this.openSearch();
+            return true;
+        }
+        if (intent.target === 'account') {
+            this.openAccountSheet();
+            return true;
+        }
+        if (intent.target === 'downloads') {
+            try { window.NorvaTVCloud?.openDownloads?.(); } catch (_) { /* no bridge */ }
+            return true;
+        }
+        if (intent.target === 'logout') {
+            void this.signOut();
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -1376,7 +1349,7 @@ class App {
     }
 
     isCatalogPage(pageName) {
-        return this.catalogPages.has(pageName);
+        return Boolean(this.navigation?.model?.isCatalogPage?.(pageName));
     }
 
     isCatalogReady(summary = this.sourceHealthSummary) {
@@ -1413,18 +1386,11 @@ class App {
         // visibility until a real summary (ready / syncing / not_configured) arrives.
         if (summary && (summary.state === 'unknown' || summary.error)) return;
         const ready = this.isCatalogReady(summary);
-        let anyShown = false;
-        document.querySelectorAll('.nav-link[data-page="live"], .nav-link[data-page="movies"], .nav-link[data-page="series"]').forEach(link => {
-            // Reveal each catalog tab individually as soon as its category has at least
-            // one item — Movies/Live TV/Series appear progressively during onboarding
-            // instead of all-or-nothing once the whole catalogue is ready.
-            const show = ready || this.catalogCategoryAvailable(link.getAttribute('data-page'), summary);
-            if (show) anyShown = true;
-            link.classList.toggle('catalog-nav-hidden', !show);
-            link.hidden = !show;
-            link.setAttribute('aria-hidden', show ? 'false' : 'true');
-            link.tabIndex = show ? 0 : -1;
-        });
+        // Reveal each catalog destination individually as soon as its category
+        // has content. Every adapter receives the same gate decision.
+        const anyShown = this.navigation?.setCatalogAvailability((pageName) => (
+            ready || this.catalogCategoryAvailable(pageName, summary)
+        )) || false;
         document.body.classList.toggle('catalog-locked', !ready && !anyShown);
     }
 
@@ -1597,12 +1563,7 @@ class App {
                 // see the link, and even if they did, every admin RPC rejects them.
                 this.checkIsAdmin().then((ok) => {
                     if (!ok) return;
-                    document.querySelectorAll('[data-page="admin"]').forEach((l) => {
-                        l.hidden = false;
-                        l.removeAttribute('aria-hidden');
-                        l.style.display = '';
-                        l.tabIndex = 0;
-                    });
+                    this.navigation?.setVisible('admin', true);
                 }).catch(() => {});
                 return;
             } catch (err) {
@@ -1661,10 +1622,7 @@ class App {
 
             // Hide settings for viewers
             if (this.currentUser.role === 'viewer') {
-                const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
-                if (settingsLink) {
-                    settingsLink.style.display = 'none';
-                }
+                this.navigation?.setVisible('settings', false);
             }
 
             // Add logout button to navbar
@@ -1965,25 +1923,63 @@ class App {
     }
 
     addLogoutButton() {
-        const navbar = document.querySelector('.navbar-menu');
-        if (!navbar || document.getElementById('logout-btn')) return;
+        this.navigation?.setVisible('logout', true);
+    }
 
-        const logoutLink = document.createElement('a');
-        logoutLink.href = '#';
-        logoutLink.className = 'nav-link';
-        logoutLink.id = 'logout-btn';
-        logoutLink.setAttribute('aria-label', 'Log out');
-        logoutLink.innerHTML = `
-            <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""></span>
-            <span>Log out</span>
-        `;
+    initDesktopCatalogFilters() {
+        ['movies', 'series'].forEach((key) => {
+            const button = document.getElementById(`${key}-catalog-filter-toggle`);
+            const label = document.getElementById(`${key}-catalog-filter-label`);
+            const badge = document.getElementById(`${key}-catalog-filter-badge`);
+            const panel = document.getElementById(`${key}-filter-bar`);
+            const activeFilters = document.getElementById(`${key}-active-filters`);
+            if (!button || !label || !badge || !panel || !activeFilters) return;
 
-        logoutLink.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await this.signOut();
+            const isTv = () => document.documentElement.classList.contains('tv-mode')
+                || navigator.userAgent.includes('NorvaTV-AndroidTV')
+                || new URLSearchParams(location.search).has('tv');
+            const isDesktopWeb = () => !isTv() && !window.matchMedia('(max-width: 1024px)').matches;
+            let activeCount = 0;
+
+            const syncAccessibleLabel = (expanded) => {
+                const action = expanded ? 'Hide' : 'Show';
+                const suffix = activeCount ? `, ${activeCount} active` : '';
+                label.textContent = expanded ? 'Hide filters' : 'More filters';
+                button.setAttribute('aria-label', `${action} ${key} filters${suffix}`);
+            };
+            const setExpanded = (expanded) => {
+                button.setAttribute('aria-expanded', String(expanded));
+                panel.classList.toggle('is-collapsed', !expanded);
+                syncAccessibleLabel(expanded);
+            };
+            const updateBadge = () => {
+                activeCount = activeFilters.querySelectorAll('.filter-chip:not(.filter-chip-clear)').length;
+                badge.textContent = activeCount ? String(activeCount) : '';
+                badge.classList.toggle('hidden', activeCount === 0);
+                syncAccessibleLabel(button.getAttribute('aria-expanded') === 'true');
+            };
+
+            button.addEventListener('click', () => {
+                if (!isDesktopWeb()) return;
+                setExpanded(button.getAttribute('aria-expanded') !== 'true');
+            });
+            panel.addEventListener('keydown', (event) => {
+                if (event.key !== 'Escape' || !isDesktopWeb()) return;
+                if (button.getAttribute('aria-expanded') !== 'true') return;
+                event.preventDefault();
+                setExpanded(false);
+                button.focus({ preventScroll: true });
+            });
+
+            new MutationObserver(updateBadge).observe(activeFilters, {
+                attributes: true,
+                childList: true,
+                subtree: true,
+                attributeFilter: ['class']
+            });
+            setExpanded(false);
+            updateBadge();
         });
-
-        navbar.appendChild(logoutLink);
     }
 
     initMobileCatalogControls() {
@@ -2392,51 +2388,11 @@ class App {
         return { section, body };
     }
 
-    /**
-     * Show the "Downloads" entry only inside the phone/tablet APK AND only once
-     * the user actually has a download (queued, downloading or saved). It appears
-     * with the first download and disappears when the list is emptied, so it never
-     * permanently occupies a slot in the already 5-item mobile bottom bar. Applies
-     * to both the phone bottom tab bar and the tablet hamburger entry.
-     */
+    /** Show the model-owned Downloads action only inside the phone/tablet APK. */
     refreshDownloadsNav() {
-        const links = [
-            document.getElementById('nav-downloads'),
-            document.getElementById('nav-downloads-bottom'),
-        ].filter(Boolean);
-        if (!links.length) return;
-        // Phone/tablet APK only, and only with ≥1 download. Gate on the APK's UA
-        // marker so it can never leak onto the web or the Android TV app, where
-        // the native downloads screen doesn't exist.
-        // Always visible in the APK (Netflix keeps its Downloads tab even at
-        // zero state — the native screen owns the empty-state guidance).
+        // The native screen owns both the empty state and downloaded content.
         const isApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
-        const show = isApk;
-        for (const link of links) {
-            link.hidden = !show;
-            // .nav-link forces display:flex with no [hidden] override, so toggle
-            // display too — otherwise the entry shows where it shouldn't.
-            link.style.display = show ? '' : 'none';
-            link.setAttribute('aria-hidden', show ? 'false' : 'true');
-            link.tabIndex = show ? 0 : -1;
-        }
-    }
-
-    /**
-     * How many real downloads the native app holds — queued, downloading or done
-     * (a finished offline title still counts, so the entry stays reachable). Read
-     * synchronously from the native getDownloads() bridge; absent bridge → 0.
-     */
-    downloadsCount() {
-        const bridge = window.NorvaTVCloud || window.NodeCastNative;
-        if (!bridge || typeof bridge.getDownloads !== 'function') return 0;
-        try {
-            const list = JSON.parse(bridge.getDownloads() || '[]');
-            if (!Array.isArray(list)) return 0;
-            return list.filter((d) => d && ['queued', 'downloading', 'done'].includes(d.state)).length;
-        } catch (_) {
-            return 0;
-        }
+        this.navigation?.setVisible('downloads', isApk);
     }
 
     // ---- Account sheet (mobile Profile tab) -------------------------------
@@ -3459,17 +3415,8 @@ class App {
         const prevPageEl = this.getPageScrollElement(this.currentPage);
         if (prevPageEl) this._pageScroll[this.currentPage] = prevPageEl.scrollTop || 0;
 
-        // Update nav
-        document.querySelectorAll('.nav-link').forEach(link => {
-            const isCurrent = Boolean(link.dataset.page)
-                && link.dataset.page === pageName;
-            link.classList.toggle('active', isCurrent);
-            if (isCurrent) {
-                link.setAttribute('aria-current', 'page');
-            } else {
-                link.removeAttribute('aria-current');
-            }
-        });
+        // Update every platform projection through the navigation interface.
+        this.navigation?.syncCurrent(pageName);
 
         // Update pages
         document.querySelectorAll('.page').forEach(page => {
@@ -3591,7 +3538,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=2d1e2127a3';
+                s.src = '/js/pages/AdminPage.js?v=fdb483c748';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

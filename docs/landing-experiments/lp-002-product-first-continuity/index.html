@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080B12">
+  <title>Norva — LP-002 Product-first continuity</title>
+  <meta name="description" content="LP-002: a standalone product-first landing page experiment for Norva.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="norva-experiment" content="LP-002-product-first-continuity">
+  <link rel="icon" type="image/png" href="../../../public/favicon.png">
+  <style>
+    @font-face {
+      font-family: Inter;
+      src: url("../../../public/fonts/inter-latin.woff2") format("woff2");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: Outfit;
+      src: url("../../../public/fonts/outfit-latin.woff2") format("woff2");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: dark;
+      --color-bg-primary: #080B12;
+      --color-bg-secondary: #12121A;
+      --color-bg-tertiary: #1A1A25;
+      --color-surface-raised: #202231;
+      --color-accent: #3B82F6;
+      --color-accent-strong: #1D4ED8;
+      --color-accent-soft: #93C5FD;
+      --color-violet: #8B5CF6;
+      --color-text-primary: #F8FAFC;
+      --color-text-secondary: #CBD5E1;
+      --color-text-muted: #94A3B8;
+      --color-line: rgba(248, 250, 252, .13);
+      --color-line-strong: rgba(147, 197, 253, .34);
+      --color-shadow: rgba(0, 0, 0, .62);
+      --color-signal-haze: rgba(59, 130, 246, .24);
+      --color-violet-haze: rgba(139, 92, 246, .22);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 16px;
+      --space-4: 24px;
+      --space-5: 32px;
+      --space-6: 48px;
+      --space-7: 64px;
+      --space-8: 96px;
+      --max-width: 1320px;
+      --header-height: 76px;
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      background: var(--color-bg-primary);
+      scroll-behavior: smooth;
+      scroll-padding-top: calc(var(--header-height) + var(--space-3));
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: hidden;
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body.menu-open { overflow: hidden; }
+    img { display: block; max-width: 100%; height: auto; }
+    figure { margin: 0; }
+    a { color: inherit; text-decoration: none; }
+    button, a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; }
+
+    :focus-visible {
+      outline: 3px solid var(--color-accent-soft);
+      outline-offset: 4px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 1000;
+      left: var(--space-3);
+      top: var(--space-3);
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      background: var(--color-text-primary);
+      color: var(--color-bg-primary);
+      font-weight: 800;
+      transform: translateY(-160%);
+      transition: transform 180ms ease;
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell {
+      width: min(calc(100% - 48px), var(--max-width));
+      margin-inline: auto;
+    }
+
+    .display { font-family: Outfit, Inter, sans-serif; }
+
+    .site-header {
+      position: fixed;
+      z-index: 100;
+      inset: 0 0 auto;
+      min-height: var(--header-height);
+      border-bottom: 1px solid var(--color-line);
+      background: rgba(8, 11, 18, .82);
+      backdrop-filter: blur(18px) saturate(135%);
+    }
+
+    .nav {
+      min-height: var(--header-height);
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: var(--space-5);
+    }
+
+    .brand {
+      min-height: 48px;
+      width: max-content;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-family: Outfit, Inter, sans-serif;
+      font-size: 20px;
+      font-weight: 750;
+      letter-spacing: -.035em;
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 0 24px var(--color-signal-haze);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: clamp(20px, 2.5vw, 40px);
+    }
+
+    .nav-links a,
+    .nav-sign-in {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      color: var(--color-text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 180ms ease;
+    }
+
+    .mobile-nav-cta { display: none !important; }
+
+    .nav-links a:hover,
+    .nav-sign-in:hover { color: var(--color-text-primary); }
+
+    .nav-actions {
+      justify-self: end;
+      display: flex;
+      align-items: center;
+      gap: var(--space-4);
+    }
+
+    .button {
+      min-height: 50px;
+      padding: 0 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: -.01em;
+      cursor: pointer;
+      transition: transform 180ms var(--ease-out), background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .button:hover { transform: translateY(-2px); }
+
+    .button-primary {
+      background: var(--color-accent);
+      color: var(--color-text-primary);
+      box-shadow: 0 14px 38px rgba(29, 78, 216, .32);
+    }
+
+    .button-primary:hover {
+      background: var(--color-accent-strong);
+      box-shadow: 0 18px 46px rgba(29, 78, 216, .44);
+    }
+
+    .button-secondary {
+      border-color: var(--color-line-strong);
+      background: rgba(248, 250, 252, .04);
+      color: var(--color-text-primary);
+    }
+
+    .button-secondary:hover {
+      border-color: var(--color-accent-soft);
+      background: rgba(147, 197, 253, .08);
+    }
+
+    .button-arrow {
+      width: 18px;
+      height: 18px;
+      transition: transform 180ms var(--ease-out);
+    }
+
+    .button:hover .button-arrow { transform: translateX(3px); }
+
+    .menu-toggle {
+      min-width: 48px;
+      min-height: 48px;
+      padding: 0;
+      display: none;
+      place-items: center;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-secondary);
+      color: var(--color-text-primary);
+      cursor: pointer;
+    }
+
+    .menu-toggle svg { width: 24px; height: 24px; }
+
+    .hero {
+      position: relative;
+      min-height: 940px;
+      padding: calc(var(--header-height) + 88px) 0 var(--space-8);
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .hero::before {
+      position: absolute;
+      content: "";
+      width: min(920px, 74vw);
+      aspect-ratio: 1;
+      right: -20vw;
+      top: -260px;
+      z-index: -3;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--color-signal-haze), transparent 64%);
+      filter: blur(12px);
+    }
+
+    .hero::after {
+      position: absolute;
+      content: "";
+      inset: auto 0 0;
+      z-index: -3;
+      height: 280px;
+      background: linear-gradient(to bottom, transparent, rgba(18, 18, 26, .78));
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      min-height: 760px;
+      display: grid;
+      grid-template-columns: minmax(420px, .82fr) minmax(580px, 1.18fr);
+      align-items: center;
+      gap: clamp(48px, 6vw, 104px);
+    }
+
+    .hero-copy { position: relative; z-index: 3; }
+
+    .signal-status {
+      width: max-content;
+      min-height: 32px;
+      margin: 0 0 var(--space-4);
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border-left: 2px solid var(--color-accent);
+      background: rgba(59, 130, 246, .08);
+      color: var(--color-accent-soft);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .signal-status::before {
+      width: 8px;
+      height: 8px;
+      content: "";
+      border-radius: 50%;
+      background: var(--color-accent-soft);
+      box-shadow: 0 0 0 6px rgba(147, 197, 253, .1), 0 0 20px var(--color-accent);
+    }
+
+    .hero h1 {
+      max-width: 720px;
+      margin: 0;
+      font-size: clamp(62px, 6.8vw, 104px);
+      line-height: .88;
+      letter-spacing: -.065em;
+      text-wrap: balance;
+    }
+
+    .hero h1 span {
+      display: inline-block;
+      color: var(--color-accent-soft);
+    }
+
+    .hero-lede {
+      max-width: 630px;
+      margin: var(--space-5) 0 0;
+      color: var(--color-text-secondary);
+      font-size: clamp(17px, 1.45vw, 20px);
+      line-height: 1.65;
+    }
+
+    .hero-lede strong { color: var(--color-text-primary); font-weight: 700; }
+
+    .hero-actions {
+      margin-top: var(--space-5);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .trial-note {
+      max-width: 610px;
+      margin: var(--space-3) 0 0;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .product-stage {
+      position: relative;
+      min-height: 650px;
+      display: grid;
+      align-items: center;
+      isolation: isolate;
+    }
+
+    .product-stage::before {
+      position: absolute;
+      content: "";
+      width: 82%;
+      aspect-ratio: 1;
+      left: 10%;
+      top: 6%;
+      z-index: -2;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(59, 130, 246, .2), rgba(139, 92, 246, .09) 44%, transparent 70%);
+      filter: blur(12px);
+    }
+
+    .signal-track {
+      position: absolute;
+      z-index: -1;
+      inset: 8% -22% 14% -12%;
+      border: 1px solid rgba(147, 197, 253, .22);
+      border-radius: 50%;
+      transform: rotate(-10deg);
+    }
+
+    .signal-track::before {
+      position: absolute;
+      content: "";
+      width: 42%;
+      height: 3px;
+      left: 9%;
+      top: 9%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, transparent, var(--color-accent-soft), transparent);
+      box-shadow: 0 0 24px var(--color-accent);
+      animation: signal-sweep 4.8s var(--ease-out) infinite;
+    }
+
+    .tv-frame {
+      position: relative;
+      width: 100%;
+      padding: 10px;
+      overflow: hidden;
+      border: 1px solid rgba(248, 250, 252, .2);
+      border-radius: var(--radius-lg);
+      background: rgba(8, 11, 18, .92);
+      box-shadow: 0 44px 100px var(--color-shadow), 0 0 70px rgba(59, 130, 246, .12);
+      transform: perspective(1600px) rotateY(-4deg) rotateX(1deg);
+      transform-origin: center right;
+    }
+
+    .tv-frame img {
+      width: 100%;
+      aspect-ratio: 1280 / 767;
+      object-fit: cover;
+      border-radius: var(--radius-md);
+    }
+
+    .tv-frame figcaption {
+      position: absolute;
+      left: 24px;
+      bottom: 20px;
+      min-height: 34px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(248, 250, 252, .16);
+      border-radius: var(--radius-sm);
+      background: rgba(8, 11, 18, .84);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      backdrop-filter: blur(12px);
+    }
+
+    .tv-frame figcaption::before {
+      width: 7px;
+      height: 7px;
+      content: "";
+      border-radius: 50%;
+      background: var(--color-accent);
+      box-shadow: 0 0 12px var(--color-accent);
+    }
+
+    .stage-phone {
+      position: absolute;
+      width: clamp(140px, 22vw, 210px);
+      right: -3%;
+      bottom: 1%;
+      z-index: 3;
+      filter: drop-shadow(0 28px 42px rgba(0, 0, 0, .76));
+    }
+
+    .stage-web {
+      position: absolute;
+      width: 48%;
+      left: -9%;
+      bottom: -2%;
+      z-index: 2;
+      padding: 6px;
+      overflow: hidden;
+      border: 1px solid rgba(248, 250, 252, .18);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-primary);
+      box-shadow: 0 26px 62px rgba(0, 0, 0, .66);
+      transform: rotate(-2deg);
+    }
+
+    .stage-web img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      object-position: top;
+      border-radius: var(--radius-sm);
+    }
+
+    .sync-toast {
+      position: absolute;
+      right: 13%;
+      top: 4%;
+      z-index: 4;
+      min-height: 54px;
+      padding: 8px 14px;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      column-gap: 10px;
+      align-items: center;
+      border: 1px solid var(--color-line-strong);
+      border-radius: var(--radius-md);
+      background: rgba(8, 11, 18, .88);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, .42);
+      backdrop-filter: blur(14px);
+    }
+
+    .sync-toast svg { width: 28px; height: 28px; grid-row: 1 / 3; color: var(--color-accent-soft); }
+    .sync-toast strong { font-size: 13px; line-height: 1.2; }
+    .sync-toast span { color: var(--color-text-muted); font-size: 11px; line-height: 1.2; }
+
+    .availability {
+      position: relative;
+      border-block: 1px solid var(--color-line);
+      background: var(--color-bg-secondary);
+    }
+
+    .availability-inner {
+      min-height: 112px;
+      display: grid;
+      grid-template-columns: minmax(260px, 1.35fr) repeat(5, minmax(90px, .65fr));
+      align-items: center;
+      gap: var(--space-4);
+    }
+
+    .availability-message {
+      margin: 0;
+      color: var(--color-text-primary);
+      font-family: Outfit, Inter, sans-serif;
+      font-size: 20px;
+      font-weight: 650;
+      line-height: 1.25;
+      letter-spacing: -.025em;
+    }
+
+    .platform {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .platform::before {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 auto;
+      content: "";
+      border-radius: 50%;
+      background: var(--color-accent);
+      box-shadow: 0 0 13px var(--color-accent);
+    }
+
+    .handoff {
+      position: relative;
+      min-height: 920px;
+      padding: var(--space-8) 0;
+      overflow: hidden;
+      background: var(--color-accent-strong);
+      color: var(--color-text-primary);
+      isolation: isolate;
+    }
+
+    .handoff::before {
+      position: absolute;
+      content: "";
+      width: 760px;
+      height: 760px;
+      right: -220px;
+      bottom: -360px;
+      z-index: -2;
+      border: 1px solid rgba(248, 250, 252, .25);
+      border-radius: 50%;
+      box-shadow: 0 0 0 84px rgba(248, 250, 252, .04), 0 0 0 168px rgba(248, 250, 252, .025);
+    }
+
+    .handoff-grid {
+      min-height: 720px;
+      display: grid;
+      grid-template-columns: .8fr 1.2fr;
+      align-items: center;
+      gap: clamp(48px, 7vw, 112px);
+    }
+
+    .handoff-copy { position: relative; z-index: 2; }
+
+    .section-index {
+      display: block;
+      margin-bottom: var(--space-4);
+      color: rgba(248, 250, 252, .74);
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .handoff h2,
+    .features h2,
+    .steps h2,
+    .pricing h2,
+    .faq h2,
+    .final-cta h2 {
+      margin: 0;
+      font-size: clamp(48px, 6vw, 86px);
+      line-height: .96;
+      letter-spacing: -.055em;
+      text-wrap: balance;
+    }
+
+    .handoff-copy > p {
+      max-width: 600px;
+      margin: var(--space-5) 0 0;
+      color: rgba(248, 250, 252, .9);
+      font-size: 19px;
+      line-height: 1.7;
+    }
+
+    .handoff-proof {
+      position: relative;
+      min-height: 620px;
+      display: grid;
+      place-items: center;
+    }
+
+    .handoff-tv {
+      width: 100%;
+      filter: drop-shadow(0 42px 72px rgba(3, 13, 42, .52));
+    }
+
+    .handoff-phone {
+      position: absolute;
+      width: 22%;
+      left: -4%;
+      bottom: 2%;
+      filter: drop-shadow(0 28px 42px rgba(3, 13, 42, .58));
+    }
+
+    .handoff-chip {
+      position: absolute;
+      right: 4%;
+      bottom: 8%;
+      min-height: 64px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid rgba(248, 250, 252, .32);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-primary);
+      box-shadow: 0 24px 54px rgba(3, 13, 42, .42);
+      color: var(--color-text-primary);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .handoff-chip span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--color-accent-soft);
+      box-shadow: 0 0 16px var(--color-accent-soft);
+    }
+
+    .features {
+      padding: 136px 0 120px;
+      background: var(--color-bg-primary);
+    }
+
+    .section-head {
+      max-width: 1000px;
+      margin-bottom: 88px;
+    }
+
+    .section-head p {
+      max-width: 680px;
+      margin: var(--space-4) 0 0;
+      color: var(--color-text-secondary);
+      font-size: 18px;
+    }
+
+    .feature-story {
+      min-height: 520px;
+      padding-block: 72px;
+      display: grid;
+      grid-template-columns: .82fr 1.18fr;
+      align-items: center;
+      gap: clamp(48px, 8vw, 124px);
+      border-top: 1px solid var(--color-line);
+    }
+
+    .feature-story:last-child { border-bottom: 1px solid var(--color-line); }
+
+    .feature-story.reverse { grid-template-columns: 1.18fr .82fr; }
+    .feature-story.reverse .feature-copy { order: 2; }
+
+    .feature-number {
+      display: block;
+      margin-bottom: var(--space-4);
+      color: var(--color-accent-soft);
+      font-family: Outfit, Inter, sans-serif;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .feature-copy h3 {
+      margin: 0;
+      font-size: clamp(38px, 4.3vw, 66px);
+      line-height: .98;
+      letter-spacing: -.05em;
+    }
+
+    .feature-copy p {
+      max-width: 540px;
+      margin: var(--space-4) 0 0;
+      color: var(--color-text-secondary);
+      font-size: 18px;
+      line-height: 1.7;
+    }
+
+    .feature-proof {
+      position: relative;
+      min-height: 390px;
+      overflow: hidden;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-lg);
+      background: var(--color-bg-secondary);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .32);
+    }
+
+    .subtitle-proof img {
+      width: 100%;
+      height: 390px;
+      object-fit: cover;
+      object-position: center 14%;
+      opacity: .72;
+    }
+
+    .subtitle-proof::after {
+      position: absolute;
+      content: "";
+      inset: 0;
+      background: linear-gradient(to top, rgba(8, 11, 18, .98), transparent 70%);
+    }
+
+    .subtitle-lines {
+      position: absolute;
+      z-index: 2;
+      left: 50%;
+      bottom: 34px;
+      width: min(86%, 600px);
+      transform: translateX(-50%);
+      text-align: center;
+    }
+
+    .subtitle-lines p {
+      width: max-content;
+      max-width: 100%;
+      margin: 6px auto 0;
+      padding: 4px 10px;
+      border-radius: 3px;
+      background: rgba(8, 11, 18, .9);
+      color: var(--color-text-primary);
+      font-size: clamp(14px, 1.6vw, 19px);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .language-switch {
+      position: absolute;
+      z-index: 3;
+      right: 18px;
+      top: 18px;
+      min-height: 42px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--color-line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(8, 11, 18, .86);
+      color: var(--color-text-primary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .language-switch span { color: var(--color-accent-soft); }
+
+    .route-proof {
+      padding: clamp(30px, 5vw, 58px);
+      display: grid;
+      align-content: center;
+      gap: 26px;
+      background:
+        radial-gradient(circle at 84% 18%, var(--color-violet-haze), transparent 32%),
+        var(--color-bg-secondary);
+    }
+
+    .route-row {
+      position: relative;
+      min-height: 62px;
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .route-row::before {
+      position: absolute;
+      content: "";
+      height: 2px;
+      left: 54px;
+      right: 104px;
+      top: 50%;
+      background: var(--color-line);
+    }
+
+    .route-dot {
+      position: relative;
+      z-index: 2;
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--color-line);
+      border-radius: 50%;
+      background: var(--color-bg-primary);
+      color: var(--color-text-muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .route-row strong {
+      position: relative;
+      z-index: 2;
+      width: max-content;
+      padding-right: 12px;
+      background: var(--color-bg-secondary);
+      color: var(--color-text-secondary);
+      font-size: 14px;
+    }
+
+    .route-state {
+      position: relative;
+      z-index: 2;
+      min-width: 90px;
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg-primary);
+      color: var(--color-text-muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .route-row.is-active::before {
+      background: linear-gradient(90deg, var(--color-accent), var(--color-accent-soft));
+      box-shadow: 0 0 14px var(--color-accent);
+    }
+
+    .route-row.is-active .route-dot {
+      border-color: var(--color-accent-soft);
+      color: var(--color-text-primary);
+      box-shadow: 0 0 22px var(--color-signal-haze);
+    }
+
+    .route-row.is-active .route-state {
+      border-color: var(--color-accent-soft);
+      background: var(--color-accent);
+      color: var(--color-text-primary);
+    }
+
+    .steps {
+      padding: 120px 0;
+      background: var(--color-bg-secondary);
+    }
+
+    .steps-head {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: var(--space-6);
+      align-items: end;
+    }
+
+    .steps-head p {
+      margin: 0;
+      color: var(--color-text-secondary);
+      font-size: 18px;
+    }
+
+    .step-list {
+      position: relative;
+      margin: 80px 0 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-6);
+      list-style: none;
+    }
+
+    .step-list::before {
+      position: absolute;
+      content: "";
+      height: 1px;
+      left: 12px;
+      right: 12px;
+      top: 19px;
+      background: linear-gradient(90deg, var(--color-accent), var(--color-violet));
+    }
+
+    .step-list li { position: relative; padding-top: 68px; }
+
+    .step-list li::before {
+      position: absolute;
+      content: attr(data-step);
+      width: 40px;
+      height: 40px;
+      left: 0;
+      top: 0;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--color-accent-soft);
+      border-radius: 50%;
+      background: var(--color-bg-secondary);
+      color: var(--color-text-primary);
+      font-size: 13px;
+      font-weight: 900;
+      box-shadow: 0 0 24px var(--color-signal-haze);
+    }
+
+    .step-list h3 {
+      margin: 0;
+      font-family: Outfit, Inter, sans-serif;
+      font-size: 26px;
+      line-height: 1.1;
+      letter-spacing: -.035em;
+    }
+
+    .step-list p {
+      max-width: 330px;
+      margin: var(--space-3) 0 0;
+      color: var(--color-text-muted);
+      font-size: 15px;
+    }
+
+    .pricing {
+      padding: 136px 0;
+      background: var(--color-bg-primary);
+    }
+
+    .pricing-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: var(--space-6);
+      align-items: end;
+    }
+
+    .pricing-head-copy p {
+      max-width: 650px;
+      margin: var(--space-4) 0 0;
+      color: var(--color-text-secondary);
+      font-size: 18px;
+    }
+
+    .billing-toggle {
+      min-height: 52px;
+      padding: 4px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-secondary);
+    }
+
+    .billing-toggle button {
+      min-width: 120px;
+      min-height: 44px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-text-muted);
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .billing-toggle button[aria-pressed="true"] {
+      background: var(--color-accent);
+      color: var(--color-text-primary);
+    }
+
+    .plan-table {
+      margin-top: 72px;
+      overflow: hidden;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-lg);
+      background: var(--color-bg-secondary);
+    }
+
+    .plan-row {
+      min-height: 210px;
+      padding: clamp(28px, 4vw, 52px);
+      display: grid;
+      grid-template-columns: 1fr .62fr .72fr;
+      align-items: center;
+      gap: var(--space-5);
+    }
+
+    .plan-row + .plan-row { border-top: 1px solid var(--color-line); }
+
+    .plan-row.featured {
+      background:
+        linear-gradient(90deg, rgba(59, 130, 246, .13), transparent 58%),
+        var(--color-bg-secondary);
+      box-shadow: inset 4px 0 0 var(--color-accent);
+    }
+
+    .plan-name-wrap { display: grid; gap: 8px; }
+
+    .plan-name-wrap small {
+      color: var(--color-accent-soft);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .plan-name {
+      margin: 0;
+      font-family: Outfit, Inter, sans-serif;
+      font-size: clamp(30px, 3vw, 44px);
+      line-height: 1;
+      letter-spacing: -.045em;
+    }
+
+    .plan-name-wrap p {
+      margin: 0;
+      color: var(--color-text-muted);
+      font-size: 15px;
+    }
+
+    .plan-price { display: flex; align-items: end; gap: 6px; }
+    .plan-price .currency { margin-bottom: 8px; color: var(--color-text-secondary); font-weight: 800; }
+    .plan-price .amount { font-family: Outfit, Inter, sans-serif; font-size: clamp(46px, 5vw, 72px); font-weight: 750; line-height: .8; letter-spacing: -.055em; }
+    .plan-price .period { margin-bottom: 5px; color: var(--color-text-muted); font-size: 13px; font-weight: 700; }
+
+    .plan-action { justify-self: end; text-align: right; }
+    .plan-action .button { width: 100%; min-width: 210px; }
+    .plan-action small { display: block; margin-top: 10px; color: var(--color-text-muted); font-size: 13px; }
+
+    .shared-features {
+      padding: 28px clamp(28px, 4vw, 52px);
+      display: grid;
+      grid-template-columns: auto repeat(4, 1fr);
+      gap: var(--space-4);
+      align-items: center;
+      border-top: 1px solid var(--color-line);
+      background: rgba(248, 250, 252, .025);
+    }
+
+    .shared-features strong { font-size: 14px; }
+
+    .shared-features span {
+      position: relative;
+      padding-left: 20px;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+    }
+
+    .shared-features span::before {
+      position: absolute;
+      content: "";
+      width: 8px;
+      height: 8px;
+      left: 0;
+      top: .52em;
+      border-radius: 50%;
+      background: var(--color-accent);
+      box-shadow: 0 0 10px var(--color-accent);
+    }
+
+    .pricing-note {
+      max-width: 980px;
+      margin: var(--space-4) auto 0;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .sr-status {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      border: 0;
+      white-space: nowrap;
+    }
+
+    .faq {
+      padding: 120px 0;
+      background: var(--color-bg-secondary);
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: .75fr 1.25fr;
+      gap: clamp(48px, 8vw, 128px);
+      align-items: start;
+    }
+
+    .faq h2 { font-size: clamp(44px, 5vw, 72px); }
+
+    .faq-intro p {
+      max-width: 420px;
+      margin: var(--space-4) 0 0;
+      color: var(--color-text-secondary);
+      font-size: 17px;
+    }
+
+    .faq-list { border-top: 1px solid var(--color-line); }
+
+    .faq-item { border-bottom: 1px solid var(--color-line); }
+    .faq-item h3 { margin: 0; }
+
+    .faq-question {
+      width: 100%;
+      min-height: 80px;
+      padding: 18px 0;
+      display: grid;
+      grid-template-columns: 1fr 44px;
+      align-items: center;
+      gap: var(--space-4);
+      border: 0;
+      background: transparent;
+      color: var(--color-text-primary);
+      font-family: Outfit, Inter, sans-serif;
+      font-size: 21px;
+      font-weight: 650;
+      line-height: 1.25;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .faq-icon {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--color-line);
+      border-radius: 50%;
+      color: var(--color-accent-soft);
+      font-family: Inter, sans-serif;
+      font-size: 24px;
+      font-weight: 400;
+      transition: transform 180ms var(--ease-out), background 180ms ease;
+    }
+
+    .faq-question[aria-expanded="true"] .faq-icon {
+      transform: rotate(45deg);
+      background: rgba(59, 130, 246, .12);
+    }
+
+    .faq-answer {
+      max-width: 700px;
+      padding: 0 68px 26px 0;
+      color: var(--color-text-secondary);
+      font-size: 16px;
+    }
+
+    .faq-answer p { margin: 0; }
+
+    .final-cta {
+      position: relative;
+      padding: 150px 0;
+      overflow: hidden;
+      background: var(--color-bg-primary);
+      text-align: center;
+      isolation: isolate;
+    }
+
+    .final-cta::before {
+      position: absolute;
+      content: "";
+      width: 900px;
+      height: 900px;
+      left: 50%;
+      top: 48%;
+      z-index: -1;
+      border: 1px solid var(--color-line-strong);
+      border-radius: 50%;
+      box-shadow: 0 0 0 100px rgba(59, 130, 246, .035), 0 0 0 200px rgba(139, 92, 246, .02);
+      transform: translate(-50%, -50%);
+    }
+
+    .final-cta h2 { max-width: 980px; margin-inline: auto; }
+
+    .final-cta p {
+      max-width: 640px;
+      margin: var(--space-4) auto 0;
+      color: var(--color-text-secondary);
+      font-size: 19px;
+    }
+
+    .final-cta .button { margin-top: var(--space-5); }
+
+    .site-footer {
+      border-top: 1px solid var(--color-line);
+      background: var(--color-bg-secondary);
+    }
+
+    .footer-main {
+      min-height: 210px;
+      padding-block: var(--space-6);
+      display: grid;
+      grid-template-columns: 1.4fr repeat(3, .6fr);
+      gap: var(--space-6);
+    }
+
+    .footer-brand p {
+      max-width: 420px;
+      margin: var(--space-3) 0 0;
+      color: var(--color-text-muted);
+      font-size: 14px;
+    }
+
+    .footer-col strong {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--color-text-primary);
+      font-size: 14px;
+    }
+
+    .footer-col a {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      color: var(--color-text-muted);
+      font-size: 14px;
+    }
+
+    .footer-col a:hover { color: var(--color-text-primary); }
+
+    .footer-bottom {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      border-top: 1px solid var(--color-line);
+      color: var(--color-text-muted);
+      font-size: 13px;
+    }
+
+    @keyframes signal-sweep {
+      0%, 10% { transform: translateX(-10%) scaleX(.1); opacity: 0; }
+      32% { opacity: 1; }
+      72% { transform: translateX(165%) scaleX(1); opacity: .9; }
+      100% { transform: translateX(210%) scaleX(.1); opacity: 0; }
+    }
+
+    @media (max-width: 1120px) {
+      .nav { grid-template-columns: 1fr auto; }
+      .nav-links { display: none; }
+      .menu-toggle { display: grid; }
+      .nav-actions .nav-sign-in, .nav-actions .button { display: none; }
+
+      .nav-links.is-open {
+        position: fixed;
+        inset: var(--header-height) 0 auto;
+        padding: 20px 24px 28px;
+        display: grid;
+        gap: 4px;
+        border-bottom: 1px solid var(--color-line);
+        background: var(--color-bg-primary);
+        box-shadow: 0 28px 70px rgba(0, 0, 0, .48);
+      }
+
+      .nav-links.is-open a { min-height: 52px; font-size: 17px; }
+      .nav-links.is-open .mobile-nav-cta {
+        margin-top: 12px;
+        display: flex !important;
+        justify-content: center;
+        border-radius: var(--radius-md);
+        background: var(--color-accent);
+        color: var(--color-text-primary);
+      }
+
+      .hero-grid {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+
+      .hero-copy { max-width: 820px; }
+      .product-stage { width: min(880px, 100%); margin-inline: auto; }
+      .availability-inner { grid-template-columns: 1fr repeat(3, 1fr); padding-block: 24px; }
+      .availability-message { grid-column: 1 / -1; }
+
+      .handoff-grid { grid-template-columns: 1fr; }
+      .handoff-copy { max-width: 900px; }
+      .handoff-proof { width: min(900px, 100%); margin-inline: auto; }
+
+      .feature-story,
+      .feature-story.reverse { grid-template-columns: 1fr; }
+      .feature-story.reverse .feature-copy { order: 0; }
+      .feature-copy { max-width: 760px; }
+
+      .shared-features { grid-template-columns: repeat(2, 1fr); }
+      .shared-features strong { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 820px) {
+      :root { --header-height: 68px; }
+      .shell { width: min(calc(100% - 32px), var(--max-width)); }
+      .nav { min-height: var(--header-height); }
+      .brand { font-size: 18px; }
+      .brand img { width: 32px; height: 32px; }
+
+      .hero {
+        min-height: 0;
+        padding: calc(var(--header-height) + 56px) 0 80px;
+      }
+
+      .hero-grid { min-height: 0; }
+      .hero h1 { max-width: 700px; font-size: clamp(52px, 13.5vw, 78px); }
+      .hero-lede { font-size: 17px; }
+      .hero-actions { display: grid; }
+      .hero-actions .button { width: min(100%, 420px); }
+      .trial-note { font-size: 13px; }
+      .product-stage { min-height: 520px; margin-top: 20px; }
+      .stage-web { left: 0; }
+      .stage-phone { right: 0; width: 24%; }
+      .sync-toast { right: 4%; }
+
+      .availability-inner { grid-template-columns: repeat(2, 1fr); }
+      .availability-message { font-size: 19px; }
+      .platform:last-child { grid-column: 1 / -1; }
+
+      .handoff { min-height: 0; padding: 96px 0 64px; }
+      .handoff-grid { min-height: 0; }
+      .handoff h2,
+      .features h2,
+      .steps h2,
+      .pricing h2,
+      .final-cta h2 { font-size: clamp(44px, 12vw, 68px); }
+      .handoff-proof { min-height: 480px; }
+
+      .features { padding: 96px 0 80px; }
+      .section-head { margin-bottom: 48px; }
+      .feature-story { min-height: 0; padding-block: 56px; gap: 36px; }
+      .feature-proof { min-height: 340px; }
+      .subtitle-proof img { height: 340px; }
+
+      .steps { padding: 88px 0; }
+      .steps-head { grid-template-columns: 1fr; }
+      .step-list { margin-top: 56px; grid-template-columns: 1fr; gap: 32px; }
+      .step-list::before { width: 1px; height: calc(100% - 52px); left: 19px; right: auto; top: 18px; }
+      .step-list li { min-height: 116px; padding: 0 0 0 68px; }
+      .step-list li::before { top: 0; }
+
+      .pricing { padding: 96px 0; }
+      .pricing-head { grid-template-columns: 1fr; }
+      .billing-toggle { width: 100%; }
+      .billing-toggle button { min-width: 0; }
+      .plan-table { margin-top: 48px; }
+      .plan-row { grid-template-columns: 1fr 1fr; }
+      .plan-action { grid-column: 1 / -1; justify-self: stretch; text-align: left; }
+      .plan-action .button { min-width: 0; }
+
+      .faq { padding: 88px 0; }
+      .faq-grid { grid-template-columns: 1fr; }
+
+      .final-cta { padding: 112px 0; }
+      .footer-main { grid-template-columns: 1fr 1fr; }
+      .footer-brand { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 520px) {
+      .signal-status { font-size: 11px; }
+      .hero h1 { font-size: clamp(50px, 15vw, 64px); }
+      .hero-lede { line-height: 1.58; }
+      .hero-actions .button { width: 100%; }
+
+      .product-stage { min-height: 390px; margin-top: 32px; }
+      .tv-frame { padding: 5px; border-radius: var(--radius-md); transform: none; }
+      .tv-frame figcaption { display: none; }
+      .stage-web { width: 46%; bottom: 2%; }
+      .stage-phone { width: 24%; bottom: 0; }
+      .sync-toast { top: 1%; right: 1%; transform: scale(.9); transform-origin: right top; }
+      .signal-track { inset: 7% -30% 11% -25%; }
+
+      .availability-inner { gap: 8px 18px; }
+      .platform { font-size: 13px; }
+
+      .handoff-copy > p,
+      .section-head p,
+      .feature-copy p,
+      .steps-head p,
+      .pricing-head-copy p,
+      .final-cta p { font-size: 17px; }
+      .handoff-proof { min-height: 340px; }
+      .handoff-phone { width: 23%; left: -1%; }
+      .handoff-chip { right: 0; bottom: 4%; min-height: 52px; padding: 8px 12px; font-size: 12px; }
+
+      .feature-copy h3 { font-size: clamp(38px, 11vw, 54px); }
+      .feature-proof { min-height: 300px; }
+      .subtitle-proof img { height: 300px; }
+      .route-proof { padding: 24px 18px; }
+      .route-row { grid-template-columns: 40px 1fr auto; gap: 10px; }
+      .route-row::before { left: 49px; right: 74px; }
+      .route-dot { width: 40px; height: 40px; }
+      .route-state { min-width: 70px; font-size: 11px; }
+      .route-row strong { font-size: 12px; }
+
+      .plan-row { grid-template-columns: 1fr; }
+      .plan-price { margin-top: 10px; }
+      .plan-action { grid-column: auto; }
+      .shared-features { grid-template-columns: 1fr; }
+      .shared-features strong { grid-column: auto; }
+      .pricing-note { text-align: left; }
+
+      .faq-question { min-height: 72px; font-size: 19px; }
+      .faq-answer { padding-right: 0; }
+
+      .footer-main { grid-template-columns: 1fr; }
+      .footer-brand { grid-column: auto; }
+      .footer-bottom { padding-block: 20px; align-items: flex-start; flex-direction: column; justify-content: center; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <nav class="nav shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Norva home">
+        <img src="../../../public/img/norva-app-icon-96.webp" width="34" height="34" alt="">
+        <span>Norva</span>
+      </a>
+
+      <div class="nav-links" id="primary-links">
+        <a href="#experience">Experience</a>
+        <a href="#difference">Why Norva</a>
+        <a href="#steps">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a class="mobile-nav-cta" href="#pricing">Start free for 7 days</a>
+      </div>
+
+      <div class="nav-actions">
+        <a class="nav-sign-in" href="#pricing">Sign in</a>
+        <a class="button button-primary" href="#pricing">Start free for 7 days</a>
+        <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="primary-links">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-grid shell">
+        <div class="hero-copy">
+          <p class="signal-status">Your playback context is live</p>
+          <h1 class="display" id="hero-title">One catalog.<br><span>Every screen.</span><br>Right where you left it.</h1>
+          <p class="hero-lede">
+            Connect a compatible source once. <strong>Norva keeps profiles, favorites, progress, AI subtitles and resilient playback in sync</strong> across web, mobile and Android TV.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#pricing">
+              Start free for 7 days
+              <svg class="button-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5" /></svg>
+            </a>
+            <a class="button button-secondary" href="#experience">See how the handoff works</a>
+          </div>
+          <p class="trial-note">7 days free. Payment method required. US$4.99/month or US$41.99/year. Reminder before renewal. Cancel anytime. No content included.</p>
+        </div>
+
+        <div class="product-stage" aria-label="Norva running on TV, web and Android mobile">
+          <div class="signal-track" aria-hidden="true"></div>
+          <figure class="tv-frame">
+            <img src="../../../public/img/landing/red-noir/mock-tv-home.webp" width="1280" height="767" alt="Norva home interface on Android TV">
+            <figcaption>Android TV · Ready to play</figcaption>
+          </figure>
+          <figure class="stage-web" aria-hidden="true">
+            <img src="../../../public/img/landing/red-noir/web-home-current.webp" width="1422" height="800" alt="">
+          </figure>
+          <img class="stage-phone" src="../../../public/img/landing/red-noir/mock-phone-detail-clean.webp" width="520" height="1066" alt="Norva title view on Android mobile">
+          <div class="sync-toast" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7h-5V2M4 17h5v5M18.4 16a7 7 0 0 1-11.7 1M5.6 8a7 7 0 0 1 11.7-1" /></svg>
+            <strong>Progress synced</strong>
+            <span>Phone → living room</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="availability" aria-label="Norva availability">
+      <div class="availability-inner shell">
+        <p class="availability-message">One account, already waiting on the screens you use.</p>
+        <div class="platform">Web</div>
+        <div class="platform">Android mobile</div>
+        <div class="platform">Tablet</div>
+        <div class="platform">Android TV</div>
+        <div class="platform">Google Cast</div>
+      </div>
+    </section>
+
+    <section class="handoff" id="experience" aria-labelledby="handoff-title">
+      <div class="handoff-grid shell">
+        <div class="handoff-copy">
+          <span class="section-index">01 — The handoff</span>
+          <h2 class="display" id="handoff-title">Pause is not an ending.</h2>
+          <p>Your profile carries the moment with it. Leave the phone on the table, open Norva on the biggest screen in the room, and continue from the same frame.</p>
+        </div>
+        <div class="handoff-proof" aria-label="Continue Watching synchronized from phone to Android TV">
+          <img class="handoff-tv" src="../../../public/img/landing/red-noir/mock-tv-progress.webp" width="1280" height="767" alt="Continue Watching row on Norva Android TV">
+          <img class="handoff-phone" src="../../../public/img/landing/red-noir/mock-phone-movies.webp" width="520" height="1066" alt="The matching Continue Watching row on Norva mobile">
+          <div class="handoff-chip"><span></span>29 minutes left · synced now</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="difference" aria-labelledby="features-title">
+      <div class="shell">
+        <header class="section-head">
+          <span class="section-index">02 — What stays out of your way</span>
+          <h2 class="display" id="features-title">Less troubleshooting.<br>More watching.</h2>
+          <p>The strongest Norva features appear only when they are useful, then disappear behind the experience.</p>
+        </header>
+
+        <article class="feature-story">
+          <div class="feature-copy">
+            <span class="feature-number">01 / 02</span>
+            <h3 class="display">Subtitles that catch up with the story.</h3>
+            <p>When an authorized source has no subtitle track, Norva can generate captions from the audio and translate them into your preferred language.</p>
+          </div>
+          <div class="feature-proof subtitle-proof">
+            <img src="../../../public/img/landing/red-noir/web-home-current.webp" width="1422" height="800" alt="Norva playback interface with generated subtitles">
+            <div class="language-switch" aria-hidden="true"><span>Generated</span> English → Français</div>
+            <div class="subtitle-lines" aria-hidden="true">
+              <p>Every screen remembers where the story paused.</p>
+              <p>Chaque écran reprend exactement au bon moment.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature-story reverse">
+          <div class="feature-copy">
+            <span class="feature-number">02 / 02</span>
+            <h3 class="display">Playback that refuses the first dead end.</h3>
+            <p>If a route stalls, Norva can try another available path and keep the interface calm—without exposing provider errors or technical noise.</p>
+          </div>
+          <div class="feature-proof route-proof" aria-label="Norva testing available playback routes">
+            <div class="route-row">
+              <span class="route-dot">A</span>
+              <strong>Primary route</strong>
+              <span class="route-state">Stalled</span>
+            </div>
+            <div class="route-row">
+              <span class="route-dot">B</span>
+              <strong>Fallback route</strong>
+              <span class="route-state">Checking</span>
+            </div>
+            <div class="route-row is-active">
+              <span class="route-dot">C</span>
+              <strong>Available route</strong>
+              <span class="route-state">Playing</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="steps" id="steps" aria-labelledby="steps-title">
+      <div class="shell">
+        <header class="steps-head">
+          <h2 class="display" id="steps-title">From source to sofa in three moves.</h2>
+          <p>No mystery funnel. Create your space, connect a compatible source you are authorized to use, then open the same catalog wherever Norva is installed.</p>
+        </header>
+        <ol class="step-list">
+          <li data-step="01">
+            <h3>Create your Norva space</h3>
+            <p>Start the 7-day trial and choose the number of profiles your home needs.</p>
+          </li>
+          <li data-step="02">
+            <h3>Connect your source</h3>
+            <p>Add a compatible media source you legitimately access. Norva supplies the experience, not the content.</p>
+          </li>
+          <li data-step="03">
+            <h3>Continue on any screen</h3>
+            <p>Profiles, favorites, preferences and playback progress stay attached to you.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="pricing" id="pricing" aria-labelledby="pricing-title">
+      <div class="shell">
+        <header class="pricing-head">
+          <div class="pricing-head-copy">
+            <span class="section-index">03 — Choose profiles, not features</span>
+            <h2 class="display" id="pricing-title">Everything included.<br>Pick your space.</h2>
+            <p>Both plans unlock the complete Norva experience. The only decision is how many personal profiles live at home.</p>
+          </div>
+          <div class="billing-toggle" role="group" aria-label="Billing period">
+            <button type="button" data-period="monthly" aria-pressed="false">Monthly</button>
+            <button type="button" data-period="annual" aria-pressed="true">Annual · Save 30%</button>
+          </div>
+        </header>
+
+        <p class="sr-status" role="status" aria-live="polite"></p>
+
+        <div class="plan-table">
+          <article class="plan-row" data-plan="plus">
+            <div class="plan-name-wrap">
+              <h3 class="plan-name">Norva</h3>
+              <p>2 personal profiles</p>
+            </div>
+            <div class="plan-price" aria-label="US$41.99 per year">
+              <span class="currency">US$</span><span class="amount">41.99</span><span class="period">/yr</span>
+            </div>
+            <div class="plan-action">
+              <a class="button button-secondary" href="#final">Start free for 7 days</a>
+              <small>About US$3.50/month, billed yearly</small>
+            </div>
+          </article>
+
+          <article class="plan-row featured" data-plan="family">
+            <div class="plan-name-wrap">
+              <small>For shared homes</small>
+              <h3 class="plan-name">Norva Family</h3>
+              <p>5 personal profiles</p>
+            </div>
+            <div class="plan-price" aria-label="US$74.99 per year">
+              <span class="currency">US$</span><span class="amount">74.99</span><span class="period">/yr</span>
+            </div>
+            <div class="plan-action">
+              <a class="button button-primary" href="#final">Start free for 7 days</a>
+              <small>About US$6.25/month, billed yearly</small>
+            </div>
+          </article>
+
+          <div class="shared-features" aria-label="Features included with every plan">
+            <strong>Included in both</strong>
+            <span>Every Norva feature</span>
+            <span>Web, mobile and TV sync</span>
+            <span>Offline where supported</span>
+            <span>Cancel anytime</span>
+          </div>
+        </div>
+
+        <p class="pricing-note">Payment method required. Trial converts to the selected plan unless canceled. Norva sends a reminder before renewal. Taxes may apply. No content or TV subscription is included.</p>
+      </div>
+    </section>
+
+    <section class="faq" id="faq" aria-labelledby="faq-title">
+      <div class="faq-grid shell">
+        <div class="faq-intro">
+          <h2 class="display" id="faq-title">Clear before you commit.</h2>
+          <p>The short version: Norva is the player and synchronized experience. Your compatible source remains yours.</p>
+        </div>
+        <div class="faq-list">
+          <article class="faq-item">
+            <h3><button class="faq-question" type="button" aria-expanded="false" aria-controls="answer-included">What does a subscription include?<span class="faq-icon" aria-hidden="true">+</span></button></h3>
+            <div class="faq-answer" id="answer-included" hidden><p>Norva’s interface, organization, playback, synchronization, AI subtitle and supported offline features. Media access comes from a compatible source you are authorized to use.</p></div>
+          </article>
+          <article class="faq-item">
+            <h3><button class="faq-question" type="button" aria-expanded="false" aria-controls="answer-devices">Where can I use Norva?<span class="faq-icon" aria-hidden="true">+</span></button></h3>
+            <div class="faq-answer" id="answer-devices" hidden><p>On the web, Android phones and tablets, Android TV, with supported Google Cast handoff.</p></div>
+          </article>
+          <article class="faq-item">
+            <h3><button class="faq-question" type="button" aria-expanded="false" aria-controls="answer-source">What do I need to start?<span class="faq-icon" aria-hidden="true">+</span></button></h3>
+            <div class="faq-answer" id="answer-source" hidden><p>A Norva account, a supported screen and a compatible media source you legitimately access.</p></div>
+          </article>
+          <article class="faq-item">
+            <h3><button class="faq-question" type="button" aria-expanded="false" aria-controls="answer-trial">How does the free trial work?<span class="faq-icon" aria-hidden="true">+</span></button></h3>
+            <div class="faq-answer" id="answer-trial" hidden><p>A payment method is required. The selected plan begins after seven days unless you cancel, and Norva sends a reminder before renewal.</p></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" id="final" aria-labelledby="final-title">
+      <div class="shell">
+        <h2 class="display" id="final-title">The next screen already knows where you stopped.</h2>
+        <p>Start with two profiles, connect your compatible source, and let the experience follow you home.</p>
+        <a class="button button-primary" href="#pricing">Start free for 7 days</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-main shell">
+      <div class="footer-brand">
+        <a class="brand" href="#top" aria-label="Norva home">
+          <img src="../../../public/img/norva-app-icon-96.webp" width="34" height="34" alt="">
+          <span>Norva</span>
+        </a>
+        <p>The media player that keeps your personal experience synchronized across supported screens.</p>
+      </div>
+      <nav class="footer-col" aria-label="Product">
+        <strong>Product</strong>
+        <a href="#experience">Experience</a>
+        <a href="#difference">Why Norva</a>
+        <a href="#pricing">Pricing</a>
+      </nav>
+      <nav class="footer-col" aria-label="Resources">
+        <strong>Resources</strong>
+        <a href="#faq">FAQ</a>
+        <a href="../../../public/support.html">Support</a>
+        <a href="../../../public/blog/">Blog</a>
+      </nav>
+      <nav class="footer-col" aria-label="Legal">
+        <strong>Legal</strong>
+        <a href="../../../public/terms.html">Terms</a>
+        <a href="../../../public/privacy.html">Privacy</a>
+        <a href="../../../public/mentions-legales.html">Legal notice</a>
+      </nav>
+    </div>
+    <div class="footer-bottom shell">
+      <span>© 2026 Norva. All rights reserved.</span>
+      <span>Norva is a media player. No content or TV subscription is included.</span>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const menuButton = document.querySelector('.menu-toggle');
+      const navLinks = document.querySelector('.nav-links');
+
+      const closeMenu = () => {
+        navLinks.classList.remove('is-open');
+        document.body.classList.remove('menu-open');
+        menuButton.setAttribute('aria-expanded', 'false');
+        menuButton.setAttribute('aria-label', 'Open navigation');
+      };
+
+      menuButton.addEventListener('click', () => {
+        const open = menuButton.getAttribute('aria-expanded') !== 'true';
+        navLinks.classList.toggle('is-open', open);
+        document.body.classList.toggle('menu-open', open);
+        menuButton.setAttribute('aria-expanded', String(open));
+        menuButton.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+      });
+
+      navLinks.querySelectorAll('a').forEach(link => link.addEventListener('click', closeMenu));
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && menuButton.getAttribute('aria-expanded') === 'true') {
+          closeMenu();
+          menuButton.focus();
+        }
+      });
+
+      const prices = {
+        monthly: {
+          plus: { amount: '4.99', period: '/mo', note: 'Billed monthly after the trial' },
+          family: { amount: '8.99', period: '/mo', note: 'Billed monthly after the trial' }
+        },
+        annual: {
+          plus: { amount: '41.99', period: '/yr', note: 'About US$3.50/month, billed yearly' },
+          family: { amount: '74.99', period: '/yr', note: 'About US$6.25/month, billed yearly' }
+        }
+      };
+
+      const pricingStatus = document.querySelector('.sr-status');
+      document.querySelectorAll('[data-period]').forEach(button => {
+        button.addEventListener('click', () => {
+          const period = button.dataset.period;
+          document.querySelectorAll('[data-period]').forEach(option => {
+            option.setAttribute('aria-pressed', String(option === button));
+          });
+
+          document.querySelectorAll('[data-plan]').forEach(row => {
+            const value = prices[period][row.dataset.plan];
+            row.querySelector('.amount').textContent = value.amount;
+            row.querySelector('.period').textContent = value.period;
+            row.querySelector('.plan-action small').textContent = value.note;
+            row.querySelector('.plan-price').setAttribute('aria-label', `US$${value.amount} ${period === 'annual' ? 'per year' : 'per month'}`);
+          });
+
+          pricingStatus.textContent = `${period === 'annual' ? 'Annual' : 'Monthly'} billing selected.`;
+        });
+      });
+
+      document.querySelectorAll('.faq-question').forEach(question => {
+        question.addEventListener('click', () => {
+          const expanded = question.getAttribute('aria-expanded') === 'true';
+          const answer = document.getElementById(question.getAttribute('aria-controls'));
+          question.setAttribute('aria-expanded', String(!expanded));
+          answer.hidden = expanded;
+        });
+      });
+
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 1120) closeMenu();
+      });
+    })();
+  </script>
+</body>
+</html>

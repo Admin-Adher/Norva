@@ -10,12 +10,35 @@
  * Internal routing is state-based (this._route): 'cockpit' | 'clients' | 'client:<uuid>' |
  * 'providers' | 'moteur' | 'systeme'. Each page fetches its own (server-cached) RPC on navigation.
  */
+class AdminNavigationFacade {
+    constructor(page) {
+        this.page = page;
+    }
+
+    // First incremental migration: Cockpit owns a facade entry while every other
+    // route keeps using the existing AdminPage dispatcher unchanged.
+    handles(route) {
+        return route === 'cockpit';
+    }
+
+    navigate(route) {
+        return this.page._navigateImpl(route, this);
+    }
+
+    render(route) {
+        if (!this.handles(route)) return false;
+        this.page._pageCockpit();
+        return true;
+    }
+}
+
 class AdminPage {
     constructor(app) {
         this.app = app;
         this.built = false;
         this._isAdmin = null; // cached tri-state (null = unknown)
         this._route = 'cockpit';
+        this._adminNavigation = new AdminNavigationFacade(this);
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
         this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '', country: '', total: 0 };
         this._allTags = [];
@@ -691,6 +714,13 @@ class AdminPage {
 #page-admin .kpi-state.ok{background:rgba(52,211,153,.16);color:#6ee7bf;}
 #page-admin .kpi-state.warn{background:rgba(251,191,36,.18);color:#fcd34d;}
 #page-admin .kpi-state.crit{background:rgba(248,113,113,.2);color:#fca5a5;}
+#page-admin .kpi-exception-action{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:44px;margin-top:14px;padding:9px 12px;border:1px solid var(--adm-line);border-radius:10px;background:var(--adm-card2);color:var(--adm-tx);font:inherit;font-size:12px;font-weight:650;text-align:left;cursor:pointer;}
+#page-admin .kpi-exception-action:hover{border-color:var(--adm-blue);background:rgba(91,124,250,.1);}
+#page-admin .kpi-exception-action:focus-visible{outline:2px solid var(--adm-blue);outline-offset:2px;}
+#page-admin .kpi-priority-empty{grid-column:1/-1;display:flex;align-items:center;gap:13px;min-height:76px;padding:14px 16px;border:1px solid rgba(52,211,153,.2);border-radius:12px;background:rgba(52,211,153,.06);color:var(--adm-tx);}
+#page-admin .kpi-priority-empty .kpi-empty-ic{display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:0 0 auto;border-radius:10px;background:rgba(52,211,153,.13);color:var(--adm-green);font-weight:800;}
+#page-admin .kpi-priority-empty strong{display:block;font-size:13px;}
+#page-admin .kpi-priority-empty span:last-child{display:block;margin-top:3px;color:var(--adm-tx2);font-size:11px;}
 /* Alerts grouped by family */
 #page-admin .alert-fam{margin-bottom:15px;}
 #page-admin .alert-fam:last-child{margin-bottom:0;}
@@ -1478,6 +1508,13 @@ class AdminPage {
     }
 
     _navigate(route) {
+        // Keep the historical entry point intact for callers, deep links and tests.
+        // Object.create-based consumers may bypass the constructor, hence the lazy fallback.
+        const navigation = this._adminNavigation || (this._adminNavigation = new AdminNavigationFacade(this));
+        return navigation.navigate(route);
+    }
+
+    _navigateImpl(route, navigation) {
         const from = this._route;
         if (from === 'partners' && route !== 'partners') {
             clearTimeout(this._partnersSearchDebounce);
@@ -1510,7 +1547,7 @@ class AdminPage {
         this._setActiveNav(route);
         const main = document.querySelector('#page-admin .crm-main');
         if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); } // reset scroll + move focus into content (a11y)
-        if (route === 'cockpit') this._pageCockpit();
+        if (navigation && navigation.render(route)) { /* Cockpit is the first facade-owned route. */ }
         else if (route === 'finance' || route.startsWith('finance/')) {
             const finSub = route.split('/')[1] || '';
             if (finSub === 'promos') {
@@ -13246,24 +13283,30 @@ class AdminPage {
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         const group = (title, cards) => `<div class="kpi-group"><div class="kpi-gtitle">${title}</div><div class="admin-cards">${cards.join('')}</div></div>`;
         const money = AdminPage.money;
-        // Non-colour-only state chip for the priority health cards.
-        const stateChip = (bad, crit) => `<span class="kpi-state ${bad ? (crit ? 'crit' : 'warn') : 'ok'}">${bad ? (crit ? 'Critique' : 'À traiter') : 'OK'}</span>`;
-        // Priority card: like card() but can carry a state chip after the label.
-        const pcard = (v, l, cls, key, icon, chip) => {
-            const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '';
-            return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}${chip || ''}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
-        };
-        const pastDueBad = Number(o.billing_past_due) > 0, srcErrBad = Number(o.sources_error) > 0, cronBad = Number(o.cron_fails_24h) > 0;
+        // Priority is exception-only. Baseline KPIs remain in their canonical groups below.
+        const stateChip = (crit) => `<span class="kpi-state ${crit ? 'crit' : 'warn'}">${crit ? 'Critique' : 'À traiter'}</span>`;
+        const exceptionCard = (v, label, route, icon, crit, action) =>
+            `<div class="kpi kpi-exception alert">
+                <div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div>
+                <div class="l">${label}${stateChip(crit)}</div>
+                <button type="button" class="kpi-exception-action" data-route="${route}" aria-label="${action} — ${label}">
+                    <span>${action}</span><span aria-hidden="true">→</span>
+                </button>
+            </div>`;
+        const pastDueBad = Number(o.billing_past_due) > 0;
+        const srcErrBad = Number(o.sources_error) > 0;
+        // Keep priority exceptions aligned with the recovery-aware executive summary.
+        const cronIssueCount = o.cron_ko !== undefined ? Number(o.cron_ko) : Number(o.cron_fails_24h);
+        const priorityExceptions = [];
+        if (pastDueBad) priorityExceptions.push(exceptionCard(n(o.billing_past_due), 'Paiements à régulariser', 'finance/paiements', '🛡️', true, 'Ouvrir les paiements'));
+        if (srcErrBad) priorityExceptions.push(exceptionCard(n(o.sources_error), 'Sources à réparer', 'providers', '⚠️', false, 'Ouvrir les providers'));
+        if (cronIssueCount > 0) priorityExceptions.push(exceptionCard(n(cronIssueCount), 'Crons à relancer', 'systeme', '⏱️', false, 'Ouvrir le système'));
+        const priorityContent = priorityExceptions.length
+            ? priorityExceptions.join('')
+            : `<div class="kpi-priority-empty" role="status"><span class="kpi-empty-ic" aria-hidden="true">✓</span><div><strong>Aucune exception actionnable</strong><span>Les KPI détaillés restent disponibles ci-dessous.</span></div></div>`;
         el.innerHTML = [
-            // ── Signaux prioritaires — the 6 decision-critical KPIs, given visual dominance ──
-            `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🚦 Signaux prioritaires</div><div class="admin-cards">${[
-                pcard(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲', ''),
-                pcard(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : '', 'active_paying', '👤', ''),
-                pcard(n(o.billing_past_due), 'Échecs paiement', pastDueBad ? 'alert' : 'ok', 'past_due', '🛡️', stateChip(pastDueBad, true)),
-                pcard(n(o.billing_conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📈', ''),
-                pcard(n(o.sources_error), 'Sources en erreur', srcErrBad ? 'alert' : 'ok', 'sources_error', '⚠️', stateChip(srcErrBad, false)),
-                pcard(n(o.cron_fails_24h), 'Échecs cron 24 h', cronBad ? 'alert' : 'ok', 'cron_fails_24h', '⏱️', stateChip(cronBad, false))
-            ].join('')}</div></div>`,
+            // ── Signaux prioritaires: exceptions with a direct next action, never KPI copies. ──
+            `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🚦 Signaux prioritaires · exceptions actionnables</div><div class="admin-cards">${priorityContent}</div></div>`,
             group('💶 Revenus', [
                 card(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲'),
                 card(n(o.billing_trialing), 'En essai', '', 'trialing', '⏳'),

@@ -256,12 +256,13 @@ class SeriesPage {
     }
 
     persistFilters() {
-        const selectedCategories = [...(this.categoryMulti?.getSelected() || [])];
-        const filters = {
+        const filters = window.CatalogFilterState.create({
+            kind: 'series',
             source: this.sourceSelect?.value || '',
             sort: this.sortSelect?.value || 'default',
-            genre: this.genreSelect?.value ||
-                (!this._genreFilterHydrated ? this.savedFilters?.genre || '' : ''),
+            liveGenre: this.genreSelect?.value || '',
+            pendingGenre: this.savedFilters?.genre || '',
+            genreHydrated: this._genreFilterHydrated,
             year: this.yearSelect?.value || '',
             rating: this.ratingSelect?.value || '',
             watched: this.watchedSelect?.value || '',
@@ -272,10 +273,10 @@ class SeriesPage {
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
             favoritesOnly: this.showFavoritesOnly,
-            categories: (!this._categoriesRestored && this.savedFilters?.categories?.length)
-                ? [...new Set([...this.savedFilters.categories, ...selectedCategories])]
-                : selectedCategories
-        };
+            selectedCategories: [...(this.categoryMulti?.getSelected() || [])],
+            pendingCategories: this.savedFilters?.categories || [],
+            categoriesRestored: this._categoriesRestored
+        });
         this.savedFilters = filters;
         MediaUtils.saveFilters('series', filters);
     }
@@ -351,27 +352,18 @@ class SeriesPage {
     // bucket grids). Empty keys are omitted. Also the bucket views' re-render
     // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
-        const params = {};
-        const source = this.selectedCloudSourceId();
-        if (source) params.source = source;
-        if (this.audioSelect?.value) params.audio = this.audioSelect.value;
-        if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
-        if (this.yearSelect?.value) params.year = this.yearSelect.value;
-        if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (this.addedSelect?.value) params.addedDays = this.addedSelect.value;
         const sort = this.sortSelect?.value || '';
-        if (sort && sort !== 'default') params.sort = sort;
-        if (sort === 'lang-match') {
-            params.sort = 'lang-match';
-            const prefs = this.getPreferences();
-            if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
-            if (prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none') {
-                params.prefSubs = prefs.preferredSubtitleLanguage;
-            }
-        }
-        const search = (this.searchInput?.value || '').trim();
-        if (search) params.q = search;
-        return params;
+        return window.CatalogQueryParams.build({
+            source: this.selectedCloudSourceId(),
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
+            year: this.yearSelect?.value || '',
+            rating: this.ratingSelect?.value || '',
+            added: this.addedSelect?.value || '',
+            sort,
+            search: this.searchInput?.value || '',
+            preferences: sort === 'lang-match' ? this.getPreferences() : null
+        });
     }
 
     // genre-items is a catalog edge route and accepts the cloud source UUID in
@@ -746,16 +738,25 @@ class SeriesPage {
     }
 
     hasActiveFilters() {
-        return Boolean(
-            (this.sortSelect?.value && this.sortSelect.value !== 'default') ||
-            this.genreSelect?.value ||
-            (!this._genreFilterHydrated && this.savedFilters?.genre) ||
-            this.yearSelect?.value || this.ratingSelect?.value ||
-            this.watchedSelect?.value || this.addedSelect?.value || this.statusSelect?.value ||
-            this.audioSelect?.value || this.subtitleSelect?.value ||
-            this.searchInput?.value || this.showFavoritesOnly ||
-            (this.categoryMulti?.getSelected().size > 0)
-        );
+        return window.CatalogFilterState.hasActive(window.CatalogFilterState.create({
+            kind: 'series',
+            sort: this.sortSelect?.value || 'default',
+            liveGenre: this.genreSelect?.value || '',
+            pendingGenre: this.savedFilters?.genre || '',
+            genreHydrated: this._genreFilterHydrated,
+            year: this.yearSelect?.value || '',
+            rating: this.ratingSelect?.value || '',
+            watched: this.watchedSelect?.value || '',
+            added: this.addedSelect?.value || '',
+            status: this.statusSelect?.value || '',
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
+            search: this.searchInput?.value || '',
+            favoritesOnly: this.showFavoritesOnly,
+            selectedCategories: [...(this.categoryMulti?.getSelected() || [])],
+            pendingCategories: this.savedFilters?.categories || [],
+            categoriesRestored: this._categoriesRestored
+        }));
     }
 
     // Active-filter chips: a removable summary of what's narrowing the grid, mirroring
@@ -1929,6 +1930,14 @@ class SeriesPage {
             ?? null;
     }
 
+    historyTitleId(history) {
+        return history?.title_id
+            ?? history?.titleId
+            ?? history?.data?.titleId
+            ?? history?.data?.title_id
+            ?? null;
+    }
+
     historyEpisodeProgressKey(history) {
         return this.episodeProgressKey(
             this.historySourceId(history),
@@ -1973,18 +1982,18 @@ class SeriesPage {
 
     renderContinueWatching() {
         if (!this.continueRow || !this.continueList) return;
-        // Keep only the most recent episode per series
-        const seen = new Set();
+        // Keep only the most recent row for a stable catalogue title. Legacy rows
+        // have no safe cross-provider identity and therefore remain separate.
+        const seenTitleIds = new Set();
         const inProgress = [];
         for (const h of (this.historyItems || [])) {
             if (h.item_type !== 'episode' || !this.isEpisodeInProgress(h)) continue;
-            const key = this.seriesProgressKey(
-                this.historySourceId(h),
-                this.historySeriesId(h)
-            );
-            if (!key) continue;
-            if (seen.has(key)) continue;
-            seen.add(key);
+            const titleId = this.historyTitleId(h);
+            if (titleId != null && titleId !== '') {
+                const key = String(titleId);
+                if (seenTitleIds.has(key)) continue;
+                seenTitleIds.add(key);
+            }
             inProgress.push(h);
             if (inProgress.length >= 12) break;
         }
@@ -2010,17 +2019,24 @@ class SeriesPage {
         }).join('');
 
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
-            if (this._isTvMode()) {
-                card.tabIndex = 0;
-                card.setAttribute('role', 'button');
-                const title = card.querySelector('.continue-card-title')?.textContent || 'series';
-                card.setAttribute('aria-label', `Resume ${title}`);
-            }
-            card.addEventListener('click', () => {
-                const h = inProgress.find(x =>
-                    this.historyEpisodeProgressKey(x) === card.dataset.historyKey);
+            const historyForCard = () => inProgress.find(x =>
+                this.historyEpisodeProgressKey(x) === card.dataset.historyKey);
+            const activate = () => {
+                const h = historyForCard();
                 if (h) this.resumeEpisodeFromHistory(h);
-            });
+            };
+            const title = card.querySelector('.continue-card-title')?.textContent || 'series';
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', `Resume ${title}`);
+            if (!this._isTvMode()) {
+                card.addEventListener('keydown', event => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    activate();
+                });
+            }
+            card.addEventListener('click', activate);
         });
 
         this.continueRow.classList.remove('hidden');
@@ -2057,6 +2073,7 @@ class SeriesPage {
             poster: MediaUtils.safeImageUrl(h.data?.poster),
             sourceId,
             seriesId,
+            ...(this.historyTitleId(h) ? { titleId: this.historyTitleId(h) } : {}),
             currentSeason: h.data?.currentSeason,
             currentEpisode: h.data?.currentEpisode,
             containerExtension: h.data?.containerExtension || 'mp4',
@@ -2376,8 +2393,7 @@ class SeriesPage {
         const display = group.representative || selected;
         const title = this.getSeriesDisplayTitle(display);
         const art = this.getSeriesBackdrop(display) || this.getSeriesPoster(display);
-        const plot = display?.tmdb?.overview || display?.overview || display?.description ||
-            display?.plot || 'No summary available yet.';
+        const plot = this.getSeriesOverview(display);
         const rating = this.getSeriesRatingText(display);
         const version = MediaUtils.parseVersionInfo(selected?.name || '');
         const meta = [
@@ -2652,7 +2668,24 @@ class SeriesPage {
     //  version switcher — the grid badge now deep-links into the fiche instead.)
 
     getSeriesDisplayTitle(series = this.currentSeries) {
-        return series?.tmdb?.title || series?.tmdb?.name || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
+        // Rail responses project the user's localized title at the top level while
+        // tmdb can intentionally retain the catalogue default language.
+        const hasCatalogTitle = Boolean(series?.titleId || series?.title_id || series?.data?.titleId);
+        if (hasCatalogTitle && series?.title) return series.title;
+        return series?.tmdb?.title || series?.tmdb?.name || series?.title || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
+    }
+
+    getSeriesOverview(series = this.currentSeries) {
+        const hasCatalogTitle = Boolean(series?.titleId || series?.title_id || series?.data?.titleId);
+        const localized = series?.overview
+            || series?.description
+            || series?.plot
+            || series?.data?.overview
+            || series?.data?.description;
+        return (hasCatalogTitle ? localized : series?.tmdb?.overview)
+            || series?.tmdb?.overview
+            || localized
+            || 'No summary available yet.';
     }
 
     getSeriesRatingText(series = this.currentSeries) {
@@ -2807,12 +2840,14 @@ class SeriesPage {
             const ep = this.findEpisodeById(eid) || {};
             const duration = MediaUtils.parseDurationToSeconds(ep.duration)
                 || Number(ep.info?.duration_secs) || 1800;
+            const titleId = series.titleId || series.title_id || null;
             const data = {
                 title: this.getSeriesDisplayTitle(series),
                 subtitle: `S${seasonNum} E${episodeNum}`,
                 poster: this.getSeriesPoster(series),
                 sourceId,
                 seriesId: rawSeriesId,
+                ...(titleId ? { titleId } : {}),
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
             };
@@ -3428,7 +3463,7 @@ class SeriesPage {
                 seriesPosterEl.src = poster;
             }
             document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
-            document.getElementById('series-plot').textContent = series.tmdb?.overview || series.overview || series.description || series.plot || 'No summary available yet.';
+            document.getElementById('series-plot').textContent = this.getSeriesOverview(series);
             this.renderMoreLikeThis(series);
             this.renderFicheExtras(series);
         }

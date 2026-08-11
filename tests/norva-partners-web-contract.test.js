@@ -2481,9 +2481,14 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
 });
 
 test('Partners route participates in bounded native continuity without storing programme data', () => {
+  const { createDefaultNavigationModel } = require('../public/js/navigation/NavigationModel.js');
+  const navigationModel = createDefaultNavigationModel();
+  assert.deepEqual(navigationModel.continuityPageNames(), [
+    'home', 'live', 'movies', 'series', 'settings', 'partners',
+  ]);
   assert.match(
     appSource,
-    /const allowed = new Set\(\['home', 'live', 'movies', 'series', 'settings', 'partners'\]\)/,
+    /this\.navigation\?\.model\?\.continuityPageNames\?\.\(\)/,
   );
   assert.match(pageSource, /getScrollElement\(\)[\s\S]{0,120}\.partners-shell/);
   assert.match(appSource, /const currentPage = this\.getPageScrollElement\(page\)/);
@@ -2503,12 +2508,12 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=100/);
+  assert.match(htmlSource, /main\.css\?v=101/);
   assert.match(htmlSource, /cloudApi\.js\?v=59/);
-  assert.match(htmlSource, /standalone\.js\?v=10/);
-  assert.match(htmlSource, /Settings\.js\?v=47/);
+  assert.match(htmlSource, /standalone\.js\?v=11/);
+  assert.match(htmlSource, /Settings\.js\?v=48/);
   assert.match(htmlSource, /PartnersPage\.js\?v=10/);
-  assert.match(htmlSource, /app\.js\?v=70/);
+  assert.match(htmlSource, /app\.js\?v=71/);
   assert.match(appSource, /AdminPage\.js\?v=[0-9a-f]{10}/);
 });
 

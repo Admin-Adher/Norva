@@ -993,6 +993,64 @@ class SourceManager {
         return true;
     }
 
+    // Public preparation facade shared by Home and the Settings modal. It keeps
+    // source/status normalization, progress classification, rendering and the
+    // patch-first update rule local to SourceManager without introducing another
+    // state machine. Consumers receive one immutable snapshot for a source tick.
+    catalogPreparationView(source = {}, type = 'xtream') {
+        const sourceView = this.sourceWithStatus(source || {});
+        const { phase, counts, progress } = this.sourceSyncState(sourceView);
+        const rawSourceId = sourceView.id || sourceView.cloudId || sourceView.cloud_id || sourceView.source_id || null;
+        return {
+            source: sourceView,
+            sourceId: rawSourceId === null || rawSourceId === undefined ? null : String(rawSourceId),
+            type,
+            phase,
+            counts,
+            progress,
+            render: () => this.renderCatalogPreparation(sourceView, type),
+            patch: (root) => this.patchCatalogPreparation(root, sourceView, type),
+            formatCount: (value, fallback) => this.formatCatalogCount(value, fallback)
+        };
+    }
+
+    // Start a bounded recovery session without leaking catalogPreparationToken to
+    // Home. The existing recovery implementation remains the single owner of the
+    // finalize loop; this facade only owns cancellation and token lifetime.
+    startCatalogPreparationRecovery(source = {}, { onProgress = () => {} } = {}) {
+        const api = window.API || (typeof API !== 'undefined' ? API : null);
+        const sourceView = this.sourceWithStatus(source || {});
+        const rawSourceId = sourceView.id || sourceView.cloudId || sourceView.cloud_id || sourceView.source_id || null;
+        if (rawSourceId === null || rawSourceId === undefined || !api?.sources?.finalize || !api?.sources?.getById) {
+            return null;
+        }
+        if (!this.shouldRecoverCatalogFinalization(sourceView)) return null;
+
+        const sourceId = String(rawSourceId);
+        const token = Symbol('catalog-preparation-recovery');
+        let active = true;
+        this.catalogPreparationToken = token;
+
+        const session = {
+            sourceId,
+            isActive: () => active && this.catalogPreparationToken === token,
+            cancel: () => {
+                if (!active) return;
+                active = false;
+                if (this.catalogPreparationToken === token) this.catalogPreparationToken = null;
+            },
+            promise: null
+        };
+        const render = (latestSource) => {
+            if (!session.isActive()) return;
+            onProgress(this.sourceWithStatus(latestSource || sourceView));
+        };
+        session.promise = Promise.resolve()
+            .then(() => this.recoverCatalogFinalization(sourceId, token, render))
+            .finally(() => session.cancel());
+        return session;
+    }
+
     // Largeur : la transition CSS anime le remplissage vers la cible. Label % :
     // compté en douceur vers la cible sur la même durée — le chiffre avance
     // pourcent par pourcent au lieu de sauter de palier en palier.

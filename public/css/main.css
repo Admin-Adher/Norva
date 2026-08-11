@@ -361,40 +361,6 @@ h4 {
    restore it so JS can toggle visibility. */
 .nav-profile[hidden] { display: none; }
 
-/* Mobile Menu Toggle Button */
-.mobile-menu-toggle {
-  display: none;
-  flex-direction: column;
-  justify-content: space-around;
-  width: 28px;
-  height: 28px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  z-index: 110;
-}
-
-.mobile-menu-toggle span {
-  width: 100%;
-  height: 2px;
-  background: var(--color-text-primary);
-  border-radius: 2px;
-  transition: all 0.3s ease;
-}
-
-.mobile-menu-toggle.active span:nth-child(1) {
-  transform: rotate(45deg) translate(7px, 7px);
-}
-
-.mobile-menu-toggle.active span:nth-child(2) {
-  opacity: 0;
-}
-
-.mobile-menu-toggle.active span:nth-child(3) {
-  transform: rotate(-45deg) translate(7px, -7px);
-}
-
 .nav-link {
   display: flex;
   align-items: center;
@@ -5528,7 +5494,7 @@ kbd {
     font-size: 13px;
   }
 
-  /* Navigation - Compact with hamburger menu */
+  /* Navigation - compact phone header */
   .navbar {
     padding: 0 var(--space-sm);
     padding-top: var(--safe-area-inset-top);
@@ -5543,54 +5509,6 @@ kbd {
 
   .brand-text {
     font-size: 1.1rem;
-  }
-
-  /* Show mobile menu toggle */
-  .mobile-menu-toggle {
-    display: flex;
-  }
-
-  /* Mobile dropdown menu */
-  .navbar-menu {
-    position: fixed;
-    top: 52px;
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--glass-border);
-    padding: 0;
-    gap: 0;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease, padding 0.3s ease;
-    z-index: 100;
-    visibility: hidden;
-  }
-
-  .navbar-menu.active {
-    max-height: 400px;
-    padding: var(--space-sm) 0;
-    box-shadow: var(--shadow-lg);
-    visibility: visible;
-  }
-
-  .nav-link {
-    padding: var(--space-md) var(--space-lg);
-    width: 100%;
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: var(--space-md);
-    border-radius: 0;
-  }
-
-  .nav-link span:not(.nav-icon) {
-    display: inline !important;
-  }
-
-  .nav-icon {
-    font-size: 1.3rem;
   }
 
   /* Hide "TV" from brand on very small screens */
@@ -6549,6 +6467,7 @@ kbd {
 }
 
 #page-movies.movie-detail-open .movies-header,
+#page-movies.movie-detail-open .catalog-filter-disclosure,
 #page-movies.movie-detail-open #movies-filter-bar,
 #page-movies.movie-detail-open #movies-continue,
 #page-movies.movie-detail-open #movies-grid {
@@ -7478,6 +7397,7 @@ kbd {
 }
 
 #page-series.series-detail-open .series-header,
+#page-series.series-detail-open .catalog-filter-disclosure,
 #page-series.series-detail-open #series-filter-bar,
 #page-series.series-detail-open #series-continue {
   display: none;
@@ -10606,6 +10526,107 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: var(--color-bg-secondary);
 }
 
+.catalog-filter-disclosure {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.catalog-filter-disclosure-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  min-height: 52px;
+  padding: var(--space-xs) var(--space-md);
+}
+
+.catalog-filter-disclosure-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 44px;
+  padding-inline: 14px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  white-space: nowrap;
+}
+
+.catalog-filter-disclosure-toggle:hover,
+.catalog-filter-disclosure-toggle:focus-visible,
+.catalog-filter-disclosure-toggle[aria-expanded="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-text-bright);
+  background: var(--color-accent-dim);
+}
+
+.catalog-filter-disclosure-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding-inline: 6px;
+  border-radius: var(--radius-full);
+  color: var(--color-text-bright);
+  background: var(--color-accent-action);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.catalog-filter-disclosure-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-filter-disclosure-toolbar > .filter-select {
+  flex: 0 1 180px;
+  min-width: 140px;
+  height: 40px;
+}
+
+.catalog-filter-disclosure-toolbar > .filter-count {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+}
+
+.catalog-filter-panel {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 0;
+}
+
+@media (min-width: 1025px) {
+  html:not(.tv-mode) .catalog-filter-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 12px var(--space-md);
+  }
+
+  html:not(.tv-mode) .catalog-filter-panel.is-collapsed {
+    display: none;
+  }
+
+  html:not(.tv-mode) .catalog-filter-panel > * {
+    min-width: 0;
+    max-width: none;
+  }
+
+  html:not(.tv-mode) .catalog-filter-panel .filter-toggle,
+  html:not(.tv-mode) .catalog-filter-panel .filter-reset {
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+
 .filter-select {
   max-width: 170px;
   font-size: 0.85rem;
@@ -11113,6 +11134,15 @@ html.tv-mode .multi-select-item:focus {
 /* Compact touch controls for dense catalog pages on phones and tablets. */
 @media (max-width: 1024px) {
 
+  .catalog-filter-disclosure {
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .catalog-filter-disclosure-toolbar {
+    display: none;
+  }
+
   body.catalog-filter-open {
     overflow: hidden;
   }
@@ -11563,6 +11593,21 @@ html.tv-mode #page-series .filter-bar {
   border-radius: 0;
   background: var(--color-bg-secondary);
   box-shadow: none;
+}
+html.tv-mode .catalog-filter-disclosure-toggle,
+html.tv-mode .catalog-filter-disclosure-hint {
+  display: none;
+}
+html.tv-mode #page-movies:not(.tv-movies-layout-ready) .catalog-filter-disclosure-toolbar,
+html.tv-mode #page-series:not(.tv-series-layout-ready) .catalog-filter-disclosure-toolbar {
+  display: flex;
+  padding: var(--space-sm) var(--space-md) 0;
+  border-bottom: 0;
+  background: var(--color-bg-secondary);
+}
+html.tv-mode #page-movies.tv-movies-layout-ready .catalog-filter-disclosure-toolbar,
+html.tv-mode #page-series.tv-series-layout-ready .catalog-filter-disclosure-toolbar {
+  display: none;
 }
 html.tv-mode .mobile-filter-button,
 html.tv-mode .mobile-filter-backdrop,
@@ -12537,7 +12582,6 @@ mark.search-highlight {
   width: 264px;
   background: rgba(8, 9, 13, 0.98);
 }
-.tv-mode .mobile-menu-toggle { display: none; }
 
 /* When the rail expands (focus enters it), SLIDE the content right to clear the
    264px drawer instead of letting the drawer overlay it — otherwise the expanded
@@ -13502,9 +13546,7 @@ html.tv-mode #page-live .search-clear {
      pads itself with in edge-to-edge webviews. */
   :root { --bottom-nav-h: calc(57px + env(safe-area-inset-bottom, 0px)); }
 
-  /* Retire the top hamburger + dropdown — page nav now lives at the bottom.
-     The top bar shrinks to logo (left) + profile avatar (right). */
-  .mobile-menu-toggle { display: none !important; }
+  /* Page navigation lives at the bottom; the top bar keeps utilities only. */
   .navbar-menu { display: none !important; }
 
   .bottom-nav {
