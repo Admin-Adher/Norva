@@ -25,18 +25,13 @@ const DIDIT_LIST_MAX_PAGES = 4;
 const DIDIT_LIST_MAX_BYTES = 512 * 1_024;
 const DIDIT_LIST_TIMEOUT_MS = 8_000;
 
-const DIDIT_STATUS_FILTER: Readonly<Record<DiditStatus, string>> = {
-  not_started: "Not Started",
-  in_progress: "In Progress",
-  approved: "Approved",
-  declined: "Declined",
-  in_review: "In Review",
-  expired: "Expired",
-  abandoned: "Abandoned",
-  kyc_expired: "KYC Expired",
-  resubmitted: "Resubmitted",
-  awaiting_user: "Awaiting User",
-};
+const TERMINAL_DIDIT_PURGE_STATUSES: ReadonlySet<DiditStatus> = new Set([
+  "approved",
+  "declined",
+  "expired",
+  "abandoned",
+  "kyc_expired",
+]);
 
 export type DiditPurgeClaim = {
   outboxId: number;
@@ -62,6 +57,11 @@ export type DiditPurgeOrphanRecoveryResult = {
   recoveries: DiditPurgeRecovery[];
   pending: number;
   errorCount: number;
+};
+
+type DiditPurgeRecoveryCandidate = {
+  providerSessionId: string;
+  providerStatus: DiditStatus;
 };
 
 export type DiditPurgeWorkerOutcome =
@@ -163,9 +163,12 @@ export function sanitizeDiditPurgeOrphans(raw: unknown): DiditPurgeOrphan[] {
 
 /**
  * Recovers only provider identifiers whose one-way hash exactly matches a
- * terminal Norva source. Didit's list response is PII-rich, so every response
- * is byte-bounded and immediately reduced to session id/kind/status in memory.
- * No response body, provider field or hash is logged or returned to clients.
+ * terminal Norva source and whose current provider status is terminal. The
+ * stored provider status is intentionally not used as a list filter because a
+ * manual review can make that historical value stale. Didit's list response is
+ * PII-rich, so every response is byte-bounded and immediately reduced to
+ * session id/kind/status in memory. No response body, provider field or hash is
+ * logged or returned to clients.
  */
 export async function recoverDiditPurgeOrphans(
   orphans: readonly DiditPurgeOrphan[],
@@ -179,57 +182,52 @@ export async function recoverDiditPurgeOrphans(
 
   const recoveries: DiditPurgeRecovery[] = [];
   let errorCount = 0;
-  let remainingPageBudget = DIDIT_LIST_MAX_PAGES;
-  const byStatus = new Map<DiditStatus, DiditPurgeOrphan[]>();
+  const unresolved = new Map<string, DiditPurgeOrphan>();
   for (const orphan of orphans) {
     if (orphan.providerEnvironment !== config.environment) {
       errorCount += 1;
       continue;
     }
-    const group = byStatus.get(orphan.providerStatus) ?? [];
-    group.push(orphan);
-    byStatus.set(orphan.providerStatus, group);
+    unresolved.set(orphan.providerSessionHash, orphan);
   }
 
-  for (const [providerStatus, group] of byStatus) {
-    const unresolved = new Map(
-      group.map((orphan) => [orphan.providerSessionHash, orphan]),
-    );
-    try {
-      for (
-        let page = 0;
-        remainingPageBudget > 0 && unresolved.size > 0;
-        page += 1
-      ) {
-        remainingPageBudget -= 1;
-        const candidates = await fetchDiditPurgeRecoveryPage(
-          config,
-          providerStatus,
-          page * DIDIT_LIST_PAGE_SIZE,
-          fetchImpl,
+  try {
+    for (
+      let page = 0;
+      page < DIDIT_LIST_MAX_PAGES && unresolved.size > 0;
+      page += 1
+    ) {
+      const candidates = await fetchDiditPurgeRecoveryPage(
+        config,
+        page * DIDIT_LIST_PAGE_SIZE,
+        fetchImpl,
+      );
+      for (const candidate of candidates) {
+        const providerSessionHash = await diditProviderSessionHash(
+          candidate.providerSessionId,
         );
-        for (const providerSessionId of candidates) {
-          const providerSessionHash = await diditProviderSessionHash(
-            providerSessionId,
-          );
-          const orphan = unresolved.get(providerSessionHash);
-          if (!orphan) continue;
-          recoveries.push({
-            providerSessionId,
-            providerSessionEnvelope: await encryptDiditPurgeEnvelope(
-              providerSessionId,
-              orphan.providerSessionHash,
-              keyring,
-            ),
-            providerEnvironment: orphan.providerEnvironment,
-          });
-          unresolved.delete(providerSessionHash);
+        const orphan = unresolved.get(providerSessionHash);
+        if (
+          !orphan ||
+          !TERMINAL_DIDIT_PURGE_STATUSES.has(candidate.providerStatus)
+        ) {
+          continue;
         }
-        if (candidates.length < DIDIT_LIST_PAGE_SIZE) break;
+        recoveries.push({
+          providerSessionId: candidate.providerSessionId,
+          providerSessionEnvelope: await encryptDiditPurgeEnvelope(
+            candidate.providerSessionId,
+            orphan.providerSessionHash,
+            keyring,
+          ),
+          providerEnvironment: orphan.providerEnvironment,
+        });
+        unresolved.delete(providerSessionHash);
       }
-    } catch {
-      errorCount += unresolved.size;
+      if (candidates.length < DIDIT_LIST_PAGE_SIZE) break;
     }
+  } catch {
+    errorCount += unresolved.size;
   }
 
   return {
@@ -289,14 +287,12 @@ function failure(
 
 async function fetchDiditPurgeRecoveryPage(
   config: DiditConfig,
-  providerStatus: DiditStatus,
   offset: number,
   fetchImpl: typeof fetch,
-): Promise<string[]> {
+): Promise<DiditPurgeRecoveryCandidate[]> {
   const url = new URL(DIDIT_LIST_SESSIONS_URL);
   url.searchParams.set("session_kind", "user");
   url.searchParams.set("workflow_id", config.workflowId);
-  url.searchParams.set("status", DIDIT_STATUS_FILTER[providerStatus]);
   url.searchParams.set("limit", String(DIDIT_LIST_PAGE_SIZE));
   url.searchParams.set("offset", String(offset));
 
@@ -346,7 +342,7 @@ async function fetchDiditPurgeRecoveryPage(
     throw new Error("Didit purge orphan discovery failed");
   }
 
-  const reduced: string[] = [];
+  const reduced: DiditPurgeRecoveryCandidate[] = [];
   for (const result of raw.results) {
     if (
       !isRecord(result) || result.session_kind !== "user" ||
@@ -368,10 +364,10 @@ async function fetchDiditPurgeRecoveryPage(
     } catch {
       throw new Error("Didit purge orphan discovery failed");
     }
-    if (observedStatus !== providerStatus) {
-      throw new Error("Didit purge orphan discovery failed");
-    }
-    reduced.push(result.session_id.toLowerCase());
+    reduced.push({
+      providerSessionId: result.session_id.toLowerCase(),
+      providerStatus: observedStatus,
+    });
   }
   return reduced;
 }

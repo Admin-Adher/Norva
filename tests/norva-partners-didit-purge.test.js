@@ -178,6 +178,17 @@ test('historical Didit purge orphans are recovered without exposing provider dat
   assert.match(sharedWorker, /redirect: "error"/);
   assert.match(sharedWorker, /session_kind", "user"/);
   assert.match(sharedWorker, /workflow_id", config\.workflowId/);
+  assert.doesNotMatch(
+    sharedWorker,
+    /searchParams\.set\("status"/,
+    'historical provider status must not hide a reviewed terminal session',
+  );
+  assert.match(sharedWorker, /TERMINAL_DIDIT_PURGE_STATUSES/);
+  assert.match(
+    sharedWorker,
+    /diditProviderSessionHash\([\s\S]*TERMINAL_DIDIT_PURGE_STATUSES\.has/,
+    'recovery requires both an exact one-way hash and current terminal status',
+  );
   assert.match(sharedWorker, /encryptDiditPurgeEnvelope/);
   assert.match(worker, /partners_service_didit_purge_orphans/);
   assert.match(worker, /partners_service_didit_purge_recover/);

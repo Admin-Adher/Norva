@@ -144,7 +144,7 @@ Deno.test("Didit purge orphan parser is exact, status-aware and bounded", async 
   assert(rejected, "orphan recovery must remain bounded to five rows");
 });
 
-Deno.test("Didit orphan recovery reduces PII-rich list rows before staging", async () => {
+Deno.test("Didit orphan recovery uses current terminal provider truth and reduces PII-rich rows", async () => {
   const sessionId = "11111111-2222-4333-8444-555555555555";
   const sessionHash = await diditProviderSessionHash(sessionId);
   const keyring = key();
@@ -161,7 +161,7 @@ Deno.test("Didit orphan recovery reduces PII-rich list rows before staging", asy
             session_id: sessionId,
             session_kind: "user",
             workflow_id: config.workflowId,
-            status: "Not Started",
+            status: "Approved",
             vendor_data: "must-not-survive",
             contact_details: { email: "pii@example.invalid" },
             full_name: "Sensitive Person",
@@ -180,6 +180,9 @@ Deno.test("Didit orphan recovery reduces PII-rich list rows before staging", asy
     [{
       providerSessionHash: sessionHash,
       providerEnvironment: "live",
+      // The local source can legitimately be stale after a manual provider
+      // review. Recovery must use the current provider status after an exact
+      // one-way hash match, not this historical value as a list filter.
       providerStatus: "not_started",
     }],
     config,
@@ -218,10 +221,7 @@ Deno.test("Didit orphan recovery reduces PII-rich list rows before staging", asy
     requested.searchParams.get("workflow_id") === config.workflowId,
     "workflow must be bound",
   );
-  assert(
-    requested.searchParams.get("status") === "Not Started",
-    "provider status must be bound",
-  );
+  assert(!requested.searchParams.has("status"), "stale status is not a filter");
   assert(requested.searchParams.get("limit") === "25", "page must be bounded");
   assert(requested.searchParams.get("offset") === "0", "first page offset");
   assert(requests[0].init?.redirect === "error", "redirects must fail closed");
@@ -273,7 +273,7 @@ Deno.test("Didit orphan recovery never follows provider pagination beyond four p
   assert(result.errorCount === 0, "bounded absence is not provider corruption");
 });
 
-Deno.test("Didit orphan recovery shares one four-page budget across statuses", async () => {
+Deno.test("Didit orphan recovery shares one four-page budget across all orphans", async () => {
   let calls = 0;
   const fetcher = ((input: string | URL | Request, _init?: RequestInit) => {
     calls += 1;
@@ -282,6 +282,7 @@ Deno.test("Didit orphan recovery shares one four-page budget across statuses", a
         ? input.toString()
         : input.url,
     );
+    assert(!requested.searchParams.has("status"), "status stays unfiltered");
     const results = Array.from({ length: 25 }, (_, index) => ({
       session_id: `00000000-0000-4000-8000-${
         String(
@@ -289,7 +290,7 @@ Deno.test("Didit orphan recovery shares one four-page budget across statuses", a
         ).padStart(12, "0")
       }`,
       session_kind: "user",
-      status: requested.searchParams.get("status"),
+      status: "Approved",
     }));
     return Promise.resolve(
       new Response(JSON.stringify({ results }), {
@@ -320,6 +321,76 @@ Deno.test("Didit orphan recovery shares one four-page budget across statuses", a
   assert(
     result.recoveries.length === 0 && result.pending === 2,
     "unmatched sources remain pending for the next bounded cycle",
+  );
+});
+
+Deno.test("Didit orphan recovery leaves an exact non-terminal match pending", async () => {
+  const sessionId = "11111111-2222-4333-8444-555555555555";
+  const sessionHash = await diditProviderSessionHash(sessionId);
+  const result = await recoverDiditPurgeOrphans(
+    [{
+      providerSessionHash: sessionHash,
+      providerEnvironment: "live",
+      providerStatus: "not_started",
+    }],
+    config,
+    key(),
+    (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            results: [{
+              session_id: sessionId,
+              session_kind: "user",
+              workflow_id: config.workflowId,
+              status: "In Review",
+            }],
+          }),
+          { status: 200 },
+        ),
+      )) as typeof fetch,
+  );
+
+  assert(result.recoveries.length === 0, "active review must not be purged");
+  assert(result.pending === 1, "non-terminal exact match remains pending");
+  assert(
+    result.errorCount === 0,
+    "valid non-terminal status is not corruption",
+  );
+});
+
+Deno.test("Didit orphan recovery fails closed on an unknown provider status", async () => {
+  const sessionId = "11111111-2222-4333-8444-555555555555";
+  const sessionHash = await diditProviderSessionHash(sessionId);
+  const result = await recoverDiditPurgeOrphans(
+    [{
+      providerSessionHash: sessionHash,
+      providerEnvironment: "live",
+      providerStatus: "not_started",
+    }],
+    config,
+    key(),
+    (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            results: [{
+              session_id: sessionId,
+              session_kind: "user",
+              workflow_id: config.workflowId,
+              status: "Unexpected Future State",
+            }],
+          }),
+          { status: 200 },
+        ),
+      )) as typeof fetch,
+  );
+
+  assert(result.recoveries.length === 0, "unknown state must not be recovered");
+  assert(result.pending === 1, "unknown state remains pending");
+  assert(
+    result.errorCount === 1,
+    "unknown state must surface as provider error",
   );
 });
 
