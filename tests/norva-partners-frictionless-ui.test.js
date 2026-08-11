@@ -319,6 +319,46 @@ test('empty authoritative ledger uses honest first-earning states', () => {
   assert.doesNotMatch(metrics.innerHTML, /Unavailable/);
 });
 
+test('rolling deployment keeps the verified dashboard while referrals are unavailable', () => {
+  const { page } = loadPage();
+  const metrics = control();
+  const content = control();
+  metrics.removeAttribute = () => {};
+  content.removeAttribute = () => {};
+  page.container.querySelector = (selector) => ({
+    '[data-partners-dashboard-metrics]': metrics,
+    '[data-partners-dashboard-content]': content,
+  })[selector] || null;
+  page.bindDashboardActions = () => {};
+  page.bindCreditActions = () => {};
+  page.scheduleDashboardRefresh = () => {};
+  const bootstrap = bootstrapV2({ membership: true });
+
+  page.renderMembershipDashboardData(bootstrap, {
+    schema_version: 2,
+    ...bootstrap,
+    balances: [],
+    next_maturation_at: null,
+    credit_readiness: {
+      ready: false,
+      reason: 'credits_disabled',
+      catalog: null,
+    },
+    cash_readiness: {
+      ready: false,
+      reason: 'cash_pilot_not_allowed',
+    },
+    referrals: null,
+    history: { status: 'all', items: [], next_cursor: null },
+  });
+
+  assert.match(metrics.innerHTML, /No balance yet/);
+  assert.match(content.innerHTML, /Referral tracking is temporarily unavailable/);
+  assert.match(content.innerHTML, /Referral total temporarily unavailable/);
+  assert.match(content.innerHTML, /No referral count or identity hint was inferred/);
+  assert.doesNotMatch(content.innerHTML, /No referrals yet/);
+});
+
 test('member dashboard shows pseudonymised referred accounts and their progress', () => {
   const { page } = loadPage();
   const metrics = control();

@@ -702,6 +702,25 @@ test('bootstrap and dashboard v2 stay exact across Edge and Web validators', asy
   assert.ok(Object.isFrozen(webDashboard.data));
   assert.equal(requests.length, 2);
 
+  const rollingDeployDashboard = clone(dashboard);
+  delete rollingDeployDashboard.referrals;
+  const rollingDeployClient = loadCloudApi(() => envelope(rollingDeployDashboard));
+  const compatibleDashboard = await rollingDeployClient.cloud.partners.dashboard();
+  assert.equal(compatibleDashboard.data.referrals, null);
+  assert.deepEqual(
+    clone(compatibleDashboard.data.balances),
+    rollingDeployDashboard.balances,
+  );
+  const unsafeRollingDeployDashboard = clone(rollingDeployDashboard);
+  unsafeRollingDeployDashboard.untrusted = true;
+  const unsafeRollingDeployClient = loadCloudApi(
+    () => envelope(unsafeRollingDeployDashboard),
+  );
+  await assert.rejects(
+    () => unsafeRollingDeployClient.cloud.partners.dashboard(),
+    (error) => error?.code === 'partners_contract_invalid',
+  );
+
   const firstReferralPage = {
     total: 2,
     items: [clone(dashboard.referrals.items[0])],

@@ -2270,6 +2270,28 @@
 
     function validatePartnersDashboard(payload, expectedStatus) {
         if (payload?.data?.schema_version === 2) {
+            const legacyKeys = [
+                'schema_version',
+                'membership',
+                'link',
+                'program',
+                'flags',
+                'balances',
+                'next_maturation_at',
+                'credit_readiness',
+                'cash_readiness',
+                'overlay',
+                'provider',
+                'history'
+            ];
+            if (hasExactKeys(payload.data, legacyKeys)) {
+                const compatiblePayload = cloneJson(payload);
+                compatiblePayload.data.referrals = null;
+                return validatePartnersDashboardV2(
+                    compatiblePayload,
+                    expectedStatus
+                );
+            }
             return validatePartnersDashboardV2(payload, expectedStatus);
         }
         return validatePartnersDashboardV1(payload, expectedStatus);
@@ -2649,12 +2671,14 @@
         validatePartnersAccessProvider(data.provider, invalid);
         validatePartnersAccessOverlay(data.overlay, invalid, data.provider);
 
-        const referrals = validatePartnersReferralVisibilityValue(
-            data.referrals,
-            20,
-            null,
-            invalid
-        );
+        const referrals = data.referrals === null
+            ? null
+            : validatePartnersReferralVisibilityValue(
+                data.referrals,
+                20,
+                null,
+                invalid
+            );
 
         const history = data.history;
         if (!hasExactKeys(history, ['status', 'items', 'next_cursor'])
@@ -2716,9 +2740,11 @@
                 || history.items.length !== 0
                 || history.next_cursor !== null
                 || data.balances.length !== 0
-                || referrals.total !== 0
-                || referrals.items.length !== 0
-                || referrals.next_cursor !== null)) invalid();
+                || (referrals !== null && (
+                    referrals.total !== 0
+                    || referrals.items.length !== 0
+                    || referrals.next_cursor !== null
+                )))) invalid();
         return deepFreeze(cloneJson(payload));
     }
 

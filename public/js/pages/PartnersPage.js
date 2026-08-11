@@ -53,6 +53,7 @@ class PartnersPage {
         this._referralCursor = null;
         this._referralItems = [];
         this._referralTotal = 0;
+        this._referralsAvailable = true;
         this._referralLoadState = 'idle';
         this._referralError = '';
         this._membershipDashboard = null;
@@ -176,6 +177,7 @@ class PartnersPage {
         this._referralCursor = null;
         this._referralItems = [];
         this._referralTotal = 0;
+        this._referralsAvailable = true;
         this._referralLoadState = 'idle';
         this._referralError = '';
     }
@@ -3033,6 +3035,15 @@ class PartnersPage {
     }
 
     syncReferralState(page) {
+        this._referralsAvailable = page !== null;
+        if (!this._referralsAvailable) {
+            this._referralItems = [];
+            this._referralTotal = 0;
+            this._referralCursor = null;
+            this._referralLoadState = 'unavailable';
+            this._referralError = '';
+            return;
+        }
         const incoming = page && typeof page === 'object'
             ? page
             : { total: 0, items: [], next_cursor: null };
@@ -3065,6 +3076,12 @@ class PartnersPage {
     }
 
     referralRowsMarkup(program) {
+        if (!this._referralsAvailable) {
+            return `<div class="partners-empty-state partners-referrals-empty" role="status">
+                <strong>Referral tracking is temporarily unavailable</strong>
+                <span>Your personal link and verified balance remain available. The referral list will appear automatically after the secure server update.</span>
+              </div>`;
+        }
         if (!this._referralItems.length) {
             return `<div class="partners-empty-state partners-referrals-empty">
                 <strong>No referrals yet</strong>
@@ -3102,6 +3119,9 @@ class PartnersPage {
     }
 
     referralControlsMarkup() {
+        if (!this._referralsAvailable) {
+            return '<p class="partners-referrals-footnote">No referral count or identity hint was inferred from an incomplete server response.</p>';
+        }
         if (!this._referralTotal) {
             return '<p class="partners-referrals-footnote">A recognition hint appears only when Norva can safely mask the address. Full contact details and payment references are never shown.</p>';
         }
@@ -3134,6 +3154,15 @@ class PartnersPage {
     }
 
     referralsCardMarkup(program) {
+        const countLabel = this._referralsAvailable
+            ? `${this._referralTotal} referred account${this._referralTotal === 1 ? '' : 's'}`
+            : 'Referral total temporarily unavailable';
+        const countValue = this._referralsAvailable
+            ? this.escape(String(this._referralTotal))
+            : '&mdash;';
+        const countCaption = this._referralsAvailable
+            ? (this._referralTotal === 1 ? 'referral' : 'referrals')
+            : 'updating';
         return `<section class="partners-history-card partners-referrals-card"
             aria-labelledby="partners-referrals-title" data-partners-referrals>
             <div class="partners-referrals-heading">
@@ -3143,9 +3172,9 @@ class PartnersPage {
                     <p>Follow every attributed account from sign-up to an eligible commission. A partially hidden e-mail helps you recognise someone you already know; the full address and account identifiers stay private.</p>
                 </div>
                 <strong class="partners-referrals-count" data-partners-referrals-count
-                    aria-label="${this.escape(String(this._referralTotal))} referred account${this._referralTotal === 1 ? '' : 's'}">
-                    ${this.escape(String(this._referralTotal))}
-                    <span>${this._referralTotal === 1 ? 'referral' : 'referrals'}</span>
+                    aria-label="${this.escape(countLabel)}">
+                    ${countValue}
+                    <span>${countCaption}</span>
                 </strong>
             </div>
             <div data-partners-referrals-body
@@ -3179,7 +3208,7 @@ class PartnersPage {
     }
 
     async loadMoreReferrals(program) {
-        if (!this._visible || !this._referralCursor
+        if (!this._visible || !this._referralsAvailable || !this._referralCursor
             || this._referralLoadState === 'loading') return;
         const api = window.NorvaCloud?.partners?.referrals;
         if (typeof api !== 'function') {
