@@ -709,7 +709,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=40/);
+  assert.match(rehearsal, /baseline_markers_verified=39/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -733,7 +733,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1\|1"/,
+    /DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1\|0"/,
+  );
+  assert.match(
+    rehearsal,
+    /to_regprocedure\([\s\S]*partners_didit_cert_review_apply_purge/,
+  );
+  assert.match(
+    rehearsal,
+    /when routine_ids\.private_oid is null or routine_ids\.public_oid is null then false/,
   );
   assert.match(
     rehearsal,

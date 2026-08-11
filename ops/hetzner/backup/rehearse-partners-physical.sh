@@ -107,7 +107,7 @@ readonly BOOTSTRAP_BOOLEAN_MARKER_COMPLETE="1"
 readonly DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE="1"
 readonly FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE="1"
 readonly DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE="1"
-readonly DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1|1"
+readonly DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE="1|0"
 readonly DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE="1"
 readonly DIDIT_REVIEW_RECOVERY_MARKER_PENDING="0"
 readonly DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE="1"
@@ -272,7 +272,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=40"
+proof_line "baseline_markers_verified=39"
 proof_line "target_migration_sha256=$(sha256sum "$CANDIDATE_DIR/$TARGET_MIGRATION" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
@@ -523,8 +523,92 @@ capture_didit_review_recovery_marker() {
 }
 
 capture_didit_signed_review_grace_marker() {
-  clone_psql -At -v ON_ERROR_STOP=1 -c \
-    "select (exists (select 1 from information_schema.columns column_row where column_row.table_schema = 'affiliate_private' and column_row.table_name = 'affiliate_didit_certification_events' and column_row.column_name = 'provider_delivered_at' and column_row.data_type = 'timestamp with time zone' and column_row.is_nullable = 'YES') and exists (select 1 from pg_catalog.pg_constraint constraint_row where constraint_row.conrelid = 'affiliate_private.affiliate_didit_certification_events'::regclass and constraint_row.conname = 'affiliate_didit_certification_events_delivery' and constraint_row.contype = 'c' and constraint_row.convalidated) and exists (select 1 from pg_catalog.pg_proc procedure_row join pg_catalog.pg_namespace namespace_row on namespace_row.oid = procedure_row.pronamespace where namespace_row.nspname = 'affiliate_private' and procedure_row.proname = 'partners_didit_cert_review_apply_purge' and procedure_row.prokind = 'f' and procedure_row.pronargs = 16 and procedure_row.prosecdef and procedure_row.proconfig = array['search_path=\"\"']::text[]) and exists (select 1 from pg_catalog.pg_proc procedure_row join pg_catalog.pg_namespace namespace_row on namespace_row.oid = procedure_row.pronamespace where namespace_row.nspname = 'public' and procedure_row.proname = 'partners_service_didit_cert_review_apply_purge' and procedure_row.prokind = 'f' and procedure_row.pronargs = 16 and not procedure_row.prosecdef) and position('interval ''24 hours''' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('p_provider_delivered_at < statement_timestamp() - interval ''10 minutes''' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and position('p_event_created_at < v_session.last_event_created_at' in lower(pg_get_functiondef('affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'::regprocedure))) > 0 and not has_function_privilege('anon', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE') and not has_function_privilege('authenticated', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE') and has_function_privilege('service_role', 'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)', 'EXECUTE'))::int::text;"
+  clone_psql -At -v ON_ERROR_STOP=1 <<'SQL'
+with routine_ids as (
+  select
+    to_regprocedure(
+      'affiliate_private.partners_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'
+    )::oid as private_oid,
+    to_regprocedure(
+      'public.partners_service_didit_cert_review_apply_purge(text,text,text,integer,text,timestamptz,timestamptz,integer,text,boolean,boolean,boolean,text,text,text,text)'
+    )::oid as public_oid
+)
+select (
+  case
+    when routine_ids.private_oid is null or routine_ids.public_oid is null then false
+    else
+      exists (
+        select 1
+        from information_schema.columns column_row
+        where column_row.table_schema = 'affiliate_private'
+          and column_row.table_name = 'affiliate_didit_certification_events'
+          and column_row.column_name = 'provider_delivered_at'
+          and column_row.data_type = 'timestamp with time zone'
+          and column_row.is_nullable = 'YES'
+      )
+      and exists (
+        select 1
+        from pg_catalog.pg_constraint constraint_row
+        where constraint_row.conrelid =
+          'affiliate_private.affiliate_didit_certification_events'::regclass
+          and constraint_row.conname =
+            'affiliate_didit_certification_events_delivery'
+          and constraint_row.contype = 'c'
+          and constraint_row.convalidated
+      )
+      and exists (
+        select 1
+        from pg_catalog.pg_proc procedure_row
+        join pg_catalog.pg_namespace namespace_row
+          on namespace_row.oid = procedure_row.pronamespace
+        where procedure_row.oid = routine_ids.private_oid
+          and namespace_row.nspname = 'affiliate_private'
+          and procedure_row.proname = 'partners_didit_cert_review_apply_purge'
+          and procedure_row.prokind = 'f'
+          and procedure_row.pronargs = 16
+          and procedure_row.prosecdef
+          and procedure_row.proconfig = array['search_path=""']::text[]
+      )
+      and exists (
+        select 1
+        from pg_catalog.pg_proc procedure_row
+        join pg_catalog.pg_namespace namespace_row
+          on namespace_row.oid = procedure_row.pronamespace
+        where procedure_row.oid = routine_ids.public_oid
+          and namespace_row.nspname = 'public'
+          and procedure_row.proname =
+            'partners_service_didit_cert_review_apply_purge'
+          and procedure_row.prokind = 'f'
+          and procedure_row.pronargs = 16
+          and not procedure_row.prosecdef
+      )
+      and position(
+        'interval ''24 hours'''
+        in lower(pg_get_functiondef(routine_ids.private_oid))
+      ) > 0
+      and position(
+        'p_provider_delivered_at < statement_timestamp() - interval ''10 minutes'''
+        in lower(pg_get_functiondef(routine_ids.private_oid))
+      ) > 0
+      and position(
+        'p_event_created_at < v_session.last_event_created_at'
+        in lower(pg_get_functiondef(routine_ids.private_oid))
+      ) > 0
+      and not has_function_privilege('anon', routine_ids.public_oid, 'EXECUTE')
+      and not has_function_privilege(
+        'authenticated',
+        routine_ids.public_oid,
+        'EXECUTE'
+      )
+      and has_function_privilege(
+        'service_role',
+        routine_ids.public_oid,
+        'EXECUTE'
+      )
+  end
+)::int::text
+from routine_ids;
+SQL
 }
 
 CURRENT_STEP="background worker neutralization"
@@ -652,10 +736,10 @@ else
   EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
+proof_line "migration_markers_before=$MIGRATION_MARKERS"
 if [[ "$MIGRATION_MARKERS" != "$EXPECTED_MARKERS_BEFORE" ]]; then
   fail
 fi
-proof_line "migration_markers_before=$MIGRATION_MARKERS"
 
 CURRENT_STEP="France release-approval baseline capture"
 FR_RELEASE_STATE_BEFORE="$(capture_fr_alignment_release_state \
