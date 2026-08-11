@@ -1,11 +1,17 @@
 import {
+  DIDIT_LIST_SESSIONS_URL,
   type DiditConfig,
   DiditPurgeRequestError,
+  type DiditStatus,
+  normalizeDiditStatus,
   purgeDiditSession,
+  readBoundedDiditResponseBody,
 } from "./didit-partners.ts";
 import {
   decryptDiditPurgeEnvelope,
+  diditProviderSessionHash,
   type DiditPurgeKeyring,
+  encryptDiditPurgeEnvelope,
 } from "./didit-purge-envelope.ts";
 
 const UUID_PATTERN =
@@ -13,6 +19,24 @@ const UUID_PATTERN =
 const SESSION_HASH_PATTERN = /^[0-9a-f]{64}$/;
 const ENVELOPE_PATTERN =
   /^v1\.[a-z0-9][a-z0-9_-]{0,15}\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,384}$/;
+const ORPHAN_RECOVERY_LIMIT = 5;
+const DIDIT_LIST_PAGE_SIZE = 25;
+const DIDIT_LIST_MAX_PAGES = 4;
+const DIDIT_LIST_MAX_BYTES = 512 * 1_024;
+const DIDIT_LIST_TIMEOUT_MS = 8_000;
+
+const DIDIT_STATUS_FILTER: Readonly<Record<DiditStatus, string>> = {
+  not_started: "Not Started",
+  in_progress: "In Progress",
+  approved: "Approved",
+  declined: "Declined",
+  in_review: "In Review",
+  expired: "Expired",
+  abandoned: "Abandoned",
+  kyc_expired: "KYC Expired",
+  resubmitted: "Resubmitted",
+  awaiting_user: "Awaiting User",
+};
 
 export type DiditPurgeClaim = {
   outboxId: number;
@@ -20,6 +44,24 @@ export type DiditPurgeClaim = {
   providerSessionHash: string;
   providerSessionEnvelope: string;
   providerEnvironment: "live" | "sandbox";
+};
+
+export type DiditPurgeOrphan = {
+  providerSessionHash: string;
+  providerEnvironment: "live" | "sandbox";
+  providerStatus: DiditStatus;
+};
+
+export type DiditPurgeRecovery = {
+  providerSessionId: string;
+  providerSessionEnvelope: string;
+  providerEnvironment: "live" | "sandbox";
+};
+
+export type DiditPurgeOrphanRecoveryResult = {
+  recoveries: DiditPurgeRecovery[];
+  pending: number;
+  errorCount: number;
 };
 
 export type DiditPurgeWorkerOutcome =
@@ -81,6 +123,122 @@ export function sanitizeDiditPurgeClaims(raw: unknown): DiditPurgeClaim[] {
   });
 }
 
+export function sanitizeDiditPurgeOrphans(raw: unknown): DiditPurgeOrphan[] {
+  if (!Array.isArray(raw) || raw.length > ORPHAN_RECOVERY_LIMIT) {
+    throw new Error("Invalid Didit purge orphan contract");
+  }
+  return raw.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new Error("Invalid Didit purge orphan contract");
+    }
+    const keys = Object.keys(entry).sort();
+    const expected = [
+      "provider_environment",
+      "provider_session_hash",
+      "provider_status",
+    ].sort();
+    if (
+      keys.length !== expected.length ||
+      keys.some((key, index) => key !== expected[index]) ||
+      typeof entry.provider_session_hash !== "string" ||
+      !SESSION_HASH_PATTERN.test(entry.provider_session_hash) ||
+      (entry.provider_environment !== "live" &&
+        entry.provider_environment !== "sandbox")
+    ) {
+      throw new Error("Invalid Didit purge orphan contract");
+    }
+    let providerStatus: DiditStatus;
+    try {
+      providerStatus = normalizeDiditStatus(entry.provider_status);
+    } catch {
+      throw new Error("Invalid Didit purge orphan contract");
+    }
+    return {
+      providerSessionHash: entry.provider_session_hash,
+      providerEnvironment: entry.provider_environment,
+      providerStatus,
+    };
+  });
+}
+
+/**
+ * Recovers only provider identifiers whose one-way hash exactly matches a
+ * terminal Norva source. Didit's list response is PII-rich, so every response
+ * is byte-bounded and immediately reduced to session id/kind/status in memory.
+ * No response body, provider field or hash is logged or returned to clients.
+ */
+export async function recoverDiditPurgeOrphans(
+  orphans: readonly DiditPurgeOrphan[],
+  config: DiditConfig,
+  keyring: DiditPurgeKeyring,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DiditPurgeOrphanRecoveryResult> {
+  if (orphans.length > ORPHAN_RECOVERY_LIMIT) {
+    throw new Error("Invalid Didit purge orphan contract");
+  }
+
+  const recoveries: DiditPurgeRecovery[] = [];
+  let errorCount = 0;
+  let remainingPageBudget = DIDIT_LIST_MAX_PAGES;
+  const byStatus = new Map<DiditStatus, DiditPurgeOrphan[]>();
+  for (const orphan of orphans) {
+    if (orphan.providerEnvironment !== config.environment) {
+      errorCount += 1;
+      continue;
+    }
+    const group = byStatus.get(orphan.providerStatus) ?? [];
+    group.push(orphan);
+    byStatus.set(orphan.providerStatus, group);
+  }
+
+  for (const [providerStatus, group] of byStatus) {
+    const unresolved = new Map(
+      group.map((orphan) => [orphan.providerSessionHash, orphan]),
+    );
+    try {
+      for (
+        let page = 0;
+        remainingPageBudget > 0 && unresolved.size > 0;
+        page += 1
+      ) {
+        remainingPageBudget -= 1;
+        const candidates = await fetchDiditPurgeRecoveryPage(
+          config,
+          providerStatus,
+          page * DIDIT_LIST_PAGE_SIZE,
+          fetchImpl,
+        );
+        for (const providerSessionId of candidates) {
+          const providerSessionHash = await diditProviderSessionHash(
+            providerSessionId,
+          );
+          const orphan = unresolved.get(providerSessionHash);
+          if (!orphan) continue;
+          recoveries.push({
+            providerSessionId,
+            providerSessionEnvelope: await encryptDiditPurgeEnvelope(
+              providerSessionId,
+              orphan.providerSessionHash,
+              keyring,
+            ),
+            providerEnvironment: orphan.providerEnvironment,
+          });
+          unresolved.delete(providerSessionHash);
+        }
+        if (candidates.length < DIDIT_LIST_PAGE_SIZE) break;
+      }
+    } catch {
+      errorCount += unresolved.size;
+    }
+  }
+
+  return {
+    recoveries,
+    pending: orphans.length - recoveries.length,
+    errorCount,
+  };
+}
+
 export async function executeDiditPurgeClaim(
   claim: DiditPurgeClaim,
   config: DiditConfig,
@@ -127,6 +285,95 @@ function failure(
   retryAfterSeconds: number | null,
 ): Extract<DiditPurgeWorkerOutcome, { kind: "failed" }> {
   return { kind: "failed", code, status, retryable, retryAfterSeconds };
+}
+
+async function fetchDiditPurgeRecoveryPage(
+  config: DiditConfig,
+  providerStatus: DiditStatus,
+  offset: number,
+  fetchImpl: typeof fetch,
+): Promise<string[]> {
+  const url = new URL(DIDIT_LIST_SESSIONS_URL);
+  url.searchParams.set("session_kind", "user");
+  url.searchParams.set("workflow_id", config.workflowId);
+  url.searchParams.set("status", DIDIT_STATUS_FILTER[providerStatus]);
+  url.searchParams.set("limit", String(DIDIT_LIST_PAGE_SIZE));
+  url.searchParams.set("offset", String(offset));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DIDIT_LIST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetchImpl(url.toString(), {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "x-api-key": config.apiKey,
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) {
+    try {
+      await response.body?.cancel("didit_list_rejected");
+    } catch {
+      // The fail-closed status is authoritative.
+    }
+    throw new Error("Didit purge orphan discovery failed");
+  }
+
+  const boundedBody = await readBoundedDiditResponseBody(
+    response,
+    DIDIT_LIST_MAX_BYTES,
+  );
+  if (boundedBody === null) {
+    throw new Error("Didit purge orphan discovery failed");
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(boundedBody);
+  } catch {
+    throw new Error("Didit purge orphan discovery failed");
+  }
+  if (
+    !isRecord(raw) || !Array.isArray(raw.results) ||
+    raw.results.length > DIDIT_LIST_PAGE_SIZE
+  ) {
+    throw new Error("Didit purge orphan discovery failed");
+  }
+
+  const reduced: string[] = [];
+  for (const result of raw.results) {
+    if (
+      !isRecord(result) || result.session_kind !== "user" ||
+      typeof result.session_id !== "string" ||
+      !UUID_PATTERN.test(result.session_id)
+    ) {
+      throw new Error("Didit purge orphan discovery failed");
+    }
+    if (
+      result.workflow_id !== undefined &&
+      (typeof result.workflow_id !== "string" ||
+        result.workflow_id.toLowerCase() !== config.workflowId)
+    ) {
+      throw new Error("Didit purge orphan discovery failed");
+    }
+    let observedStatus: DiditStatus;
+    try {
+      observedStatus = normalizeDiditStatus(result.status);
+    } catch {
+      throw new Error("Didit purge orphan discovery failed");
+    }
+    if (observedStatus !== providerStatus) {
+      throw new Error("Didit purge orphan discovery failed");
+    }
+    reduced.push(result.session_id.toLowerCase());
+  }
+  return reduced;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

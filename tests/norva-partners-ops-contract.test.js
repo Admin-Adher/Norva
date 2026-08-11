@@ -615,7 +615,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const expandedAclAssertions = restoreRoutineCatalog.filter(
     (routine) => routine.access_role !== 'owner',
   ).length;
-  assert.equal(restoreRoutineCatalog.length, 166);
+  assert.equal(restoreRoutineCatalog.length, 170);
   assert.equal(
     restorePlan,
     staticAssertions + expandedAclAssertions,
@@ -684,17 +684,17 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260810230928_partners_didit_signed_review_grace\.sql/,
+    /20260811074511_partners_didit_orphan_purge_recovery\.sql/,
   );
-  assert.match(rehearsal, /BASELINE_CONTRACT="2226583"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="7bca637"/);
   assert.match(
     rehearsal,
-    /TARGET_MIGRATION="supabase\/migrations\/20260810230928_partners_didit_signed_review_grace\.sql"/,
+    /TARGET_MIGRATION="supabase\/migrations\/20260811074511_partners_didit_orphan_purge_recovery\.sql"/,
   );
   assert.equal(
     (rehearsal.match(/readonly TARGET_MIGRATION=/g) || []).length,
     1,
-    'the post-2226583 signed Didit review lot contains exactly one migration',
+    'the post-7bca637 Didit orphan-purge lot contains exactly one migration',
   );
   assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
   assert.match(rehearsal, /-f "\/candidate\/\$TARGET_MIGRATION"/);
@@ -704,12 +704,12 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.equal(
     (rehearsal.match(/-f "\/candidate\/\$TARGET_MIGRATION"/g) || []).length,
     1,
-    'predeploy replays exactly the one signed review-grace migration',
+    'predeploy replays exactly the one orphan-purge recovery migration',
   );
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=39/);
+  assert.match(rehearsal, /baseline_markers_verified=40/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -724,6 +724,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /DIDIT_SIGNED_REVIEW_GRACE_MARKER_PENDING="0"/);
   assert.match(rehearsal, /capture_didit_signed_review_grace_marker/);
+  assert.match(rehearsal, /DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE="1"/);
+  assert.match(rehearsal, /DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_PENDING="0"/);
+  assert.match(rehearsal, /capture_didit_orphan_purge_recovery_marker/);
+  assert.match(rehearsal, /partners_service_didit_purge_orphans/);
+  assert.match(rehearsal, /partners_service_didit_purge_recover/);
   assert.match(rehearsal, /provider_delivered_at/);
   assert.match(rehearsal, /partners_service_didit_cert_review_apply_purge/);
   assert.match(rehearsal, /FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE="1"/);
@@ -769,7 +774,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_PENDING\}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE\}\|\$\{DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_PENDING\}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE\}\|\$\{DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
@@ -805,15 +810,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
   );
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "166\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=166/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "170\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=170/);
   const ownershipCatalog = rehearsal.match(
     /ROUTINE_OWNER_CHECK=[\s\S]*?<<'SQL'[\s\S]*?with expected\(signature\) as \(\s*values(?<values>[\s\S]*?)\r?\n\)\r?\nselect count\(\*\)::text/,
   );
   assert.ok(ownershipCatalog?.groups?.values);
   assert.equal(
     (ownershipCatalog.groups.values.match(/^\s+\('[^']+'\),?$/gm) || []).length,
-    166,
+    170,
     'the ownership catalogue cardinality must match the enforced routine total',
   );
   assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "19\|0"/);
@@ -859,7 +864,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(115\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(119\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(
@@ -867,15 +872,15 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.ok(routineCatalogMatch, 'the restore pgTAP must expose its exact routine catalogue');
   const routineCatalog = JSON.parse(routineCatalogMatch[1]);
-  assert.equal(routineCatalog.length, 166);
-  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 166);
+  assert.equal(routineCatalog.length, 170);
+  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 170);
   const routineAccessCounts = routineCatalog.reduce((counts, { access_role: accessRole }) => {
     counts[accessRole] = (counts[accessRole] || 0) + 1;
     return counts;
   }, {});
   assert.deepEqual(
     routineAccessCounts,
-    { owner: 80, authenticated: 30, service_role: 56 },
+    { owner: 80, authenticated: 30, service_role: 60 },
   );
   for (const relation of [
     'affiliate_private.affiliate_access_credit_catalog',

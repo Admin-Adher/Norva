@@ -418,6 +418,8 @@ begin
     'public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',
     'public.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)',
     'public.partners_service_didit_purge_status()',
+    'public.partners_service_didit_purge_orphans(text,integer)',
+    'public.partners_service_didit_purge_recover(text,text,text)',
     'public.partners_service_kyc_rights_get(uuid)',
     'public.partners_service_biometric_consent_withdraw(uuid,text)',
     'public.partners_service_kyc_human_review_request(uuid,text,text)',
@@ -727,6 +729,8 @@ begin
     'affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)',
     'affiliate_private.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)',
     'affiliate_private.partners_service_didit_purge_status()',
+    'affiliate_private.partners_service_didit_purge_orphans(text,integer)',
+    'affiliate_private.partners_service_didit_purge_recover(text,text,text)',
     'affiliate_private.partners_service_kyc_rights_get(uuid)',
     'affiliate_private.partners_service_biometric_consent_withdraw(uuid,text)',
     'affiliate_private.partners_service_kyc_human_review_request(uuid,text,text)',
@@ -1201,6 +1205,41 @@ begin
   then
     raise exception
       'restored Didit purge completion lost idempotent proof or data minimization';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_didit_purge_orphans(text,integer)'::regprocedure
+  );
+  if position('p_limit not between 1 and 5' in lower(v_definition)) = 0
+    or position('provider_purge_status = ''purge_pending''' in lower(v_definition)) = 0
+    or position('affiliate_didit_session_registry' in lower(v_definition)) = 0
+    or position('affiliate_didit_purge_outbox' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit purge orphan discovery lost its bounded exact-binding contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_didit_purge_recover(text,text,text)'::regprocedure
+  );
+  if position('partners_didit_purge_enqueue' in lower(v_definition)) = 0
+    or position('p_provider_session_envelope' in lower(v_definition)) = 0
+    or position('p_provider_environment' in lower(v_definition)) = 0
+  then
+    raise exception
+      'restored Didit purge orphan recovery bypasses the authoritative enqueue contract';
+  end if;
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'affiliate_private.partners_service_didit_purge_status()'::regprocedure
+  );
+  if position('programme_certification' in lower(v_definition)) > 0
+    or position(
+      '''certification''::text as session_purpose' in lower(v_definition)
+    ) = 0
+  then
+    raise exception
+      'restored Didit purge status uses a non-canonical certification purpose';
   end if;
 
   v_definition := pg_catalog.pg_get_functiondef(

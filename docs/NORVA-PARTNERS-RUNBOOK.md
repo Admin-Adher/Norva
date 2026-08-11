@@ -726,6 +726,16 @@ d'authentification/configuration ou douze échecs passent en dead-letter. Une
 dead-letter bloque la certification et l'activation : elle n'est jamais
 transformée en succès par un opérateur.
 
+Pour une ancienne source terminale `purge_pending` dépourvue d'outbox, le même
+worker peut réparer uniquement la liaison manquante. Chaque cycle lit au plus
+cinq hashes Norva et quatre pages Didit de 25 sessions au total, filtre le
+workflow, le statut et `session_kind=user`, puis compare les hashes uniquement
+en mémoire Edge. Une correspondance exacte est immédiatement enveloppée en
+AES-256-GCM et repasse par l'enqueue autoritaire avant le `DELETE`; l'identifiant
+brut, la réponse Didit et les données d'identité ne sont ni journalisés ni
+persistés. Une absence, une ambiguïté ou une erreur laisse la source en attente
+pour le prochain cycle et ne fabrique jamais une preuve de suppression.
+
 Après déploiement sain des deux replicas et vérification du keyring, exécuter
 une fois `/norva-partners-didit-purge-worker/cron/run`, contrôler un heartbeat
 frais, puis enregistrer uniquement :

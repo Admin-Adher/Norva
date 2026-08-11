@@ -3,7 +3,9 @@ import { loadDiditConfig } from "../_shared/didit-partners.ts";
 import { loadDiditPurgeKeyring } from "../_shared/didit-purge-envelope.ts";
 import {
   executeDiditPurgeClaim,
+  recoverDiditPurgeOrphans,
   sanitizeDiditPurgeClaims,
+  sanitizeDiditPurgeOrphans,
 } from "../_shared/didit-purge-worker.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -36,6 +38,9 @@ type Counts = {
   purged: number;
   retry: number;
   dead_letter: number;
+  orphan_recovered: number;
+  orphan_pending: number;
+  orphan_recovery_error: number;
   orphaned_source_dead_letter: number;
   database_error: number;
 };
@@ -96,6 +101,9 @@ Deno.serve(async (request) => {
     purged: 0,
     retry: 0,
     dead_letter: 0,
+    orphan_recovered: 0,
+    orphan_pending: 0,
+    orphan_recovery_error: 0,
     orphaned_source_dead_letter: 0,
     database_error: 0,
   };
@@ -104,6 +112,49 @@ Deno.serve(async (request) => {
   }
 
   try {
+    const { data: orphanData, error: orphanError } = await db.rpc(
+      "partners_service_didit_purge_orphans",
+      {
+        p_provider_environment: DIDIT_CONFIG.environment,
+        p_limit: 5,
+      },
+    );
+    if (orphanError) {
+      counts.database_error += 1;
+    } else {
+      const orphans = sanitizeDiditPurgeOrphans(orphanData ?? []);
+      const recovery = await recoverDiditPurgeOrphans(
+        orphans,
+        DIDIT_CONFIG,
+        PURGE_KEYRING,
+      );
+      counts.orphan_pending = recovery.pending;
+      counts.orphan_recovery_error = recovery.errorCount;
+      for (const recovered of recovery.recoveries) {
+        const { data: recoverData, error: recoverError } = await db.rpc(
+          "partners_service_didit_purge_recover",
+          {
+            p_provider_session_id: recovered.providerSessionId,
+            p_provider_session_envelope: recovered.providerSessionEnvelope,
+            p_provider_environment: recovered.providerEnvironment,
+          },
+        );
+        const purgeStatus = recoverError
+          ? null
+          : rpcText(recoverData, "purge_status");
+        if (
+          purgeStatus !== "purge_pending" && purgeStatus !== "purged" &&
+          purgeStatus !== "purge_dead_letter"
+        ) {
+          counts.database_error += recoverError ? 1 : 0;
+          counts.orphan_recovery_error += 1;
+          counts.orphan_pending += 1;
+        } else {
+          counts.orphan_recovered += 1;
+        }
+      }
+    }
+
     for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
       const { data, error } = await db.rpc(
         "partners_service_didit_purge_claim",
@@ -164,10 +215,16 @@ Deno.serve(async (request) => {
     const orphanedSourceDeadLetter = statusError
       ? null
       : rpcNonNegativeInteger(statusData, "orphaned_source_dead_letter");
-    if (orphanedSourceDeadLetter === null) {
+    const orphanedSourcePending = statusError
+      ? null
+      : rpcNonNegativeInteger(statusData, "orphaned_source_pending");
+    if (
+      orphanedSourceDeadLetter === null || orphanedSourcePending === null
+    ) {
       counts.database_error += 1;
     } else {
       counts.orphaned_source_dead_letter = orphanedSourceDeadLetter;
+      counts.orphan_pending = orphanedSourcePending;
       if (orphanedSourceDeadLetter > 0) {
         console.error("[norva-partners-didit-purge] orphaned dead letters", {
           correlationId,
@@ -177,6 +234,7 @@ Deno.serve(async (request) => {
     }
 
     const finalOutcome = counts.database_error > 0 || counts.dead_letter > 0 ||
+        counts.orphan_pending > 0 || counts.orphan_recovery_error > 0 ||
         counts.orphaned_source_dead_letter > 0
       ? "partial"
       : "ok";
@@ -194,6 +252,9 @@ Deno.serve(async (request) => {
         purged: counts.purged,
         retry: counts.retry,
         deadLetter: counts.dead_letter,
+        orphanRecovered: counts.orphan_recovered,
+        orphanPending: counts.orphan_pending,
+        orphanRecoveryError: counts.orphan_recovery_error,
         orphanedSourceDeadLetter: counts.orphaned_source_dead_letter,
       },
       correlationId,
@@ -228,6 +289,16 @@ function rpcNonNegativeInteger(raw: unknown, key: string): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function rpcText(raw: unknown, key: string): string | null {
+  const candidate = Array.isArray(raw) ? raw[0] : raw;
+  if (
+    typeof candidate !== "object" || candidate === null ||
+    Array.isArray(candidate)
+  ) return null;
+  const value = (candidate as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : null;
 }
 
 function boundedInt(

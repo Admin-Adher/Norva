@@ -2,11 +2,12 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(115);
+select extensions.plan(119);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
--- and ACL assertions for the current Partners baseline plus the bounded signed
--- Didit terminal-review recovery without creating any object in the restored database.
+-- and ACL assertions for the current Partners baseline, bounded signed Didit
+-- terminal-review recovery and bounded orphan-purge recovery without creating
+-- any object in the restored database.
 set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_actor_is_live_admin(text)","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_has_capability(text)","security_definer":true,"volatility":"s","access_role":"owner"},
@@ -106,11 +107,15 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_didit_purge_status()","security_definer":true,"volatility":"s","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_didit_purge_orphans(text,integer)","security_definer":true,"volatility":"s","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_didit_purge_recover(text,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_didit_purge_claim(integer,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_didit_purge_complete(bigint,uuid,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_didit_purge_fail(bigint,uuid,text,integer,boolean,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_didit_purge_heartbeat(text,integer,integer,integer,integer)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_didit_purge_status()","security_definer":false,"volatility":"s","access_role":"service_role"},
+  {"signature":"public.partners_service_didit_purge_orphans(text,integer)","security_definer":false,"volatility":"s","access_role":"service_role"},
+  {"signature":"public.partners_service_didit_purge_recover(text,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_didit_purge_coverage_ready()","security_definer":true,"volatility":"s","access_role":"owner"},
   {"signature":"affiliate_private.partners_service_kyc_prepare_v2_pre_withdrawal_20260804(uuid,text,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"affiliate_private.partners_service_kyc_session_record_v3_pre_withdrawal_20260804(uuid,text,text,text,integer,text,timestamptz,text,text,text,integer,text)","security_definer":true,"volatility":"v","access_role":"owner"},
@@ -193,7 +198,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  166::bigint,
+  170::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -216,7 +221,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  166::bigint,
+  170::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -233,7 +238,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 166
+    select count(*) = 170
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -255,7 +260,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 166
+    select count(*) = 170
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -279,7 +284,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 166
+    select count(*) = 170
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine

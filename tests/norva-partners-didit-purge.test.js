@@ -133,6 +133,57 @@ test('Didit deletion is bounded, idempotent, observable and fail closed', () => 
   assert.match(cron, /norva-partners-didit-purge-worker\/cron\/run/);
 });
 
+test('historical Didit purge orphans are recovered without exposing provider data', () => {
+  const recoveryMigration = read(
+    'supabase/migrations/20260811074511_partners_didit_orphan_purge_recovery.sql',
+  );
+  const sharedWorker = read(
+    'supabase/functions/_shared/didit-purge-worker.ts',
+  );
+  const worker = read(
+    'supabase/functions/norva-partners-didit-purge-worker/index.ts',
+  );
+
+  assert.match(
+    recoveryMigration,
+    /partners_service_didit_purge_orphans\(text, integer\)/,
+  );
+  assert.match(
+    recoveryMigration,
+    /partners_service_didit_purge_recover\(text, text, text\)/,
+  );
+  assert.match(recoveryMigration, /p_limit not between 1 and 5/);
+  assert.match(recoveryMigration, /'certification'::text as session_purpose/);
+  assert.doesNotMatch(
+    recoveryMigration,
+    /'programme_certification'::text as session_purpose/,
+  );
+  assert.match(
+    recoveryMigration,
+    /partners_didit_purge_enqueue\([\s\S]*p_provider_session_id,[\s\S]*p_provider_session_envelope/,
+  );
+  assert.match(
+    recoveryMigration,
+    /from public, anon, authenticated, service_role;[\s\S]*to service_role;/,
+  );
+  assert.match(sharedWorker, /DIDIT_LIST_MAX_PAGES = 4/);
+  assert.match(sharedWorker, /DIDIT_LIST_PAGE_SIZE = 25/);
+  assert.match(sharedWorker, /DIDIT_LIST_TIMEOUT_MS = 8_000/);
+  assert.match(sharedWorker, /readBoundedDiditResponseBody/);
+  assert.match(sharedWorker, /redirect: "error"/);
+  assert.match(sharedWorker, /session_kind", "user"/);
+  assert.match(sharedWorker, /workflow_id", config\.workflowId/);
+  assert.match(sharedWorker, /encryptDiditPurgeEnvelope/);
+  assert.match(worker, /partners_service_didit_purge_orphans/);
+  assert.match(worker, /partners_service_didit_purge_recover/);
+  assert.match(worker, /orphan_pending/);
+  assert.match(worker, /orphan_recovery_error/);
+  assert.doesNotMatch(
+    worker,
+    /console\.(?:log|info|error|warn)\([^)]*(?:providerSessionId|providerSessionHash|providerSessionEnvelope)/,
+  );
+});
+
 test('final enforcement retires all reducers that can omit the purge envelope', () => {
   const enforcement = read(
     'supabase/migrations/20260804170000_partners_biometric_consent_enforcement.sql',
