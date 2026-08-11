@@ -51,7 +51,11 @@ const DISCOVER_TYPES: { type: "live" | "movie" | "series"; action: string }[] = 
   { type: "movie", action: "get_vod_streams" },
   { type: "series", action: "get_series" },
 ];
-const DISCOVER_CONCURRENCY = 14;
+// The media gateway deliberately allows only one metadata operation per provider
+// account. Keep the per-source walk serial so Norva never creates its own
+// `background_busy` storm and mistakes rejected categories for empty ones.
+const DISCOVER_CONCURRENCY = 1;
+const GATEWAY_BUSY_RETRY_DELAYS_MS = [250, 750, 1500];
 // Work budget per isolate. Kept well under the runtime's background wall-clock so
 // the self-invoke (which spawns the next isolate) always lands before recycle.
 const SYNC_DRIVE_BUDGET_MS = 90_000;
@@ -477,12 +481,10 @@ export async function detectXtreamChange(
   const password = stringOr(config.password, "");
   if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
   const fetchCatalog = (action: string, params?: Record<string, string>) =>
-    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 }).catch(() => []);
-  const [liveCats, vodCats, seriesCats] = await Promise.all([
-    fetchCatalog("get_live_categories"),
-    fetchCatalog("get_vod_categories"),
-    fetchCatalog("get_series_categories"),
-  ]);
+    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 });
+  const liveCats = await fetchCatalog("get_live_categories");
+  const vodCats = await fetchCatalog("get_vod_categories");
+  const seriesCats = await fetchCatalog("get_series_categories");
   const maps: Record<string, Map<string, string>> = {
     live: categoryMap(liveCats),
     movie: categoryMap(vodCats),
@@ -600,15 +602,18 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     // A provider error here used to be silently swallowed to [] — which let a rate-limited /
     // expired account look like a legitimately-empty catalogue and decimate it. Count the failures
     // so the Layer 3 prune can refuse to run on an unhealthy discovery (cursor.fetchErrors).
-    const fetchCatalog = (action: string, params?: Record<string, string>) =>
-      fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 })
-        .catch(() => { cursor.fetchErrors = (Number(cursor.fetchErrors) || 0) + 1; return []; });
+    const fetchCatalog = async (action: string, params?: Record<string, string>) => {
+      try {
+        return await fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 });
+      } catch (error) {
+        cursor.fetchErrors = (Number(cursor.fetchErrors) || 0) + 1;
+        throw error;
+      }
+    };
 
-    const [liveCats, vodCats, seriesCats] = await Promise.all([
-      fetchCatalog("get_live_categories"),
-      fetchCatalog("get_vod_categories"),
-      fetchCatalog("get_series_categories"),
-    ]);
+    const liveCats = await fetchCatalog("get_live_categories");
+    const vodCats = await fetchCatalog("get_vod_categories");
+    const seriesCats = await fetchCatalog("get_series_categories");
     const nameMaps: Record<string, Map<string, string>> = {
       live: categoryMap(liveCats),
       movie: categoryMap(vodCats),
@@ -1173,18 +1178,35 @@ async function fetchProviderMetadata(
 ): Promise<any> {
   const timeoutMs = args.timeoutMs ?? 25000;
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
-    try {
-      return await requestGatewayMetadata(runtimeConfig, args, Math.max(timeoutMs + 10000, 45000));
-    } catch (error) {
-      const status = error instanceof HttpError ? error.status : 502;
-      if (![404, 405, 502, 503, 504].includes(status)) throw error;
-      console.warn("[xtream-sync] gateway metadata unavailable, falling back to direct", args.action, status);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await requestGatewayMetadata(runtimeConfig, args, Math.max(timeoutMs + 10000, 45000));
+      } catch (error) {
+        if (isGatewayBackgroundBusy(error)) {
+          if (attempt < GATEWAY_BUSY_RETRY_DELAYS_MS.length) {
+            await new Promise((resolve) => setTimeout(resolve, GATEWAY_BUSY_RETRY_DELAYS_MS[attempt]));
+            continue;
+          }
+          throw new HttpError(503, "Media gateway is busy; retry catalog sync", { code: "background_busy" });
+        }
+        const status = error instanceof HttpError ? error.status : 502;
+        if (![404, 405, 502, 503, 504].includes(status)) throw error;
+        console.warn("[xtream-sync] gateway metadata unavailable, falling back to direct", args.action, status);
+        break;
+      }
     }
   }
   return fetchJson(
     xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
     timeoutMs,
   );
+}
+
+function isGatewayBackgroundBusy(error: unknown) {
+  if (!(error instanceof HttpError) || error.status !== 429) return false;
+  const details = recordOrEmpty(error.details);
+  const nested = recordOrEmpty(details.details);
+  return stringOr(details.code ?? nested.code, "") === "background_busy";
 }
 
 async function requestGatewayMetadata(

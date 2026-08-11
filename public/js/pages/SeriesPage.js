@@ -306,7 +306,7 @@ class SeriesPage {
         // Manage Content's genres.
         if (this.isCloudPagedMode()) {
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
-            if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+            if (buckets.length) { this.openGenreBucket(buckets); return; }
             // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
             // no genre selected → a catalogue-wide grid filtered server-side by each
             // title's available version languages.
@@ -479,14 +479,19 @@ class SeriesPage {
     // Open a genre bucket from the filter dropdown, reusing the rail "See all"
     // grid (paged, server-side). No-op if that bucket is already showing.
     openGenreBucket(bucket) {
-        if (!bucket) return;
+        const buckets = [...new Set((Array.isArray(bucket) ? bucket : String(bucket || '').split(','))
+            .map(value => String(value || '').trim())
+            .filter(Boolean))];
+        if (!buckets.length) return;
         // Re-open (re-render) when the same genre is active but the language params
         // changed, so toggling an audio/subtitle filter refreshes the grid.
         const langKey = this.currentBucketViewKey();
-        if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
+        const bucketParam = buckets.join(',');
+        if (this.activeBucket === bucketParam && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
-        const label = (T && T.label) ? T.label(bucket) : bucket;
-        this.openBucket({ id: `genre-${bucket}`, title: label, curation: { bucket } });
+        const labels = buckets.map(value => (T && T.label) ? T.label(value) : value);
+        const label = labels.length === 1 ? labels[0] : labels.join(' + ');
+        this.openBucket({ id: `genre-${bucketParam}`, title: label, curation: { bucket: bucketParam } });
     }
 
     // Netflix-style default: with no active filter/search, the cloud Series page
@@ -496,7 +501,7 @@ class SeriesPage {
         // TV follows the supplied flat-grid mockup. Web/mobile retain the curated
         // genre rails exactly as before.
         return !this._isTvMode() && this.isCloudPagedMode() &&
-            !!window.GenreRails && !this.hasActiveFilters();
+            !!window.GenreRails && !this.sourceSelect?.value && !this.hasActiveFilters();
     }
 
     async renderGenreRails() {
@@ -917,7 +922,7 @@ class SeriesPage {
             if (selectedBuckets.length) {
                 if (!this.categories.length) await this.loadCategories();
                 this.activeBucket = null;
-                this.openGenreBucket(selectedBuckets[0]);
+                this.openGenreBucket(selectedBuckets);
                 return;
             }
             if (this.isLanguageFilterActive()) {
@@ -1169,11 +1174,23 @@ class SeriesPage {
             // Mirror Manage Content: list the clean, curated genre buckets (with
             // counts) instead of raw provider category names. Picking a genre
             // opens that genre's full grid (see onFiltersChanged).
-            const payload = await API.media.genreSummary({ type: 'series' });
+            const source = this.selectedCloudSourceId();
+            const payload = await API.media.genreSummary({ type: 'series', ...(source ? { source } : {}) });
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
+            const hiddenBuckets = new Set([
+                ...(Array.isArray(payload?.hidden) ? payload.hidden.map(String) : []),
+                ...genres.filter(g => g.hidden).map(g => String(g.bucket))
+            ]);
+            if (Array.isArray(this.savedFilters?.categories)) {
+                const visibleSaved = this.savedFilters.categories.filter(bucket => !hiddenBuckets.has(String(bucket)));
+                if (visibleSaved.length !== this.savedFilters.categories.length) {
+                    this.savedFilters.categories = visibleSaved;
+                    MediaUtils.saveFilters('series', this.savedFilters);
+                }
+            }
             this.categories = genres;
             const options = genres
-                .filter(g => Number(g.count) > 0)
+                .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
                 .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);

@@ -530,6 +530,10 @@ const CloudAdapter = (() => {
         const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
             items,
+            // `items` contains every provider variant for the logical titles in
+            // this page. Preserve the server title count so consumers advance
+            // their cursor by titles rather than accidentally skipping variants.
+            films: payload.films ?? items.length,
             count: payload.count ?? null,
             limit: payload.limit ?? normalizedLimit,
             offset: payload.offset ?? normalizedOffset,

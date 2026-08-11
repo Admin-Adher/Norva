@@ -38,6 +38,10 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const HOME_RAIL_VARIANT_LIMIT = 10;
+// UUID lists are encoded into PostgREST query strings. Keeping these batches
+// small prevents genre rails with many selected titles from exceeding proxy URL
+// limits before their variants can be materialized.
+const TITLE_VARIANT_QUERY_CHUNK = 50;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -1433,8 +1437,10 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   // Batch-fetch the FULL rows only for the chosen ids (metadata detoast bounded).
   const selectedIds = [...new Set([...byBucket.values()].flat())];
   const fullById = new Map<string, JsonRecord>();
-  if (selectedIds.length) {
-    const { data } = await db.from("cloud_titles").select("*").eq("user_id", userId).in("id", selectedIds);
+  for (let index = 0; index < selectedIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
+    const chunk = selectedIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
+    const { data, error } = await db.from("cloud_titles").select("*").eq("user_id", userId).in("id", chunk);
+    if (error) throwDb(error, "Unable to list genre rail titles");
     for (const row of (data ?? []) as JsonRecord[]) fullById.set(String(row.id), row);
   }
   const selectedRows = selectedIds.map((id) => fullById.get(id)).filter((r): r is JsonRecord => !!r);
@@ -2780,8 +2786,8 @@ async function listVariantsByTitleIds(
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
   const health = userId ? await sourceHealthFor(userId) : { disabled: new Set<string>(), errored: new Set<string>() };
-  for (let index = 0; index < titleIds.length; index += 200) {
-    const chunk = titleIds.slice(index, index + 200);
+  for (let index = 0; index < titleIds.length; index += TITLE_VARIANT_QUERY_CHUNK) {
+    const chunk = titleIds.slice(index, index + TITLE_VARIANT_QUERY_CHUNK);
     let query = db
       .from("cloud_title_variants")
       .select("id,user_id,title_id,source_id,media_item_id,item_type,external_id,raw_title,label,language,quality,resolution,container_extension,poster_url,playback_hint,codec_profile,compatibility_tier,playback_cost_score,last_observed_ttff_ms,metadata,created_at")
