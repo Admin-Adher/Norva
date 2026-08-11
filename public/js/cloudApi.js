@@ -1079,6 +1079,15 @@
     const PARTNERS_CREDIT_REDEMPTION_KEY_PATTERN = /^crd_[0-9a-f]{24}$/;
     const PARTNERS_ACCESS_GRANT_KEY_PATTERN = /^cag_[0-9a-f]{24}$/;
     const PARTNERS_CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+    const PARTNERS_REFERRAL_CURSOR_PATTERN = /^referral_[0-9]{20}$/;
+    const PARTNERS_REFERRAL_VISIBILITY_STATUSES = new Set([
+        'signed_up',
+        'payment_recorded',
+        'commission_pending',
+        'commission_validated',
+        'held',
+        'reversed'
+    ]);
     const PARTNERS_TV_RELAY_TOKEN_PATTERN = /^v1\.[A-Za-z0-9_-]{43}\.[0-9a-f]{64}$/;
     const PARTNERS_PUBLIC_ERROR_CODES = new Set([
         'authentication_required',
@@ -2429,6 +2438,88 @@
         return deepFreeze(cloneJson(payload));
     }
 
+    function validatePartnersReferralVisibilityValue(value, limit, cursor, invalid) {
+        if (!hasExactKeys(value, ['total', 'items', 'next_cursor'])
+            || !Number.isSafeInteger(value.total)
+            || value.total < 0
+            || !Array.isArray(value.items)
+            || value.items.length > limit
+            || value.total < value.items.length
+            || (value.next_cursor !== null
+                && !isBoundedString(value.next_cursor, {
+                    pattern: PARTNERS_REFERRAL_CURSOR_PATTERN,
+                    max: 29
+                }))) invalid();
+        const keys = new Set();
+        const numbers = new Set();
+        let previousNumber = Number.MAX_SAFE_INTEGER;
+        const cursorFor = (labelNumber) => `referral_${String(labelNumber).padStart(20, '0')}`;
+        for (const referral of value.items) {
+            if (!hasExactKeys(referral, [
+                'key',
+                'label_number',
+                'masked_email',
+                'status',
+                'attributed_at',
+                'first_eligible_payment_at',
+                'next_maturation_at'
+            ])
+                || !/^ref_[0-9a-f]{24}$/.test(referral.key)
+                || !Number.isSafeInteger(referral.label_number)
+                || referral.label_number < 1
+                || referral.label_number >= previousNumber
+                || !isMaskedReferralEmail(referral.masked_email)
+                || !PARTNERS_REFERRAL_VISIBILITY_STATUSES.has(referral.status)
+                || !isIsoTimestamp(referral.attributed_at)
+                || !isIsoTimestamp(referral.first_eligible_payment_at, true)
+                || !isIsoTimestamp(referral.next_maturation_at, true)
+                || keys.has(referral.key)
+                || numbers.has(referral.label_number)
+                || (cursor !== null
+                    && cursorFor(referral.label_number) >= cursor)) invalid();
+            keys.add(referral.key);
+            numbers.add(referral.label_number);
+            previousNumber = referral.label_number;
+        }
+        const last = value.items[value.items.length - 1];
+        if ((value.next_cursor !== null && value.next_cursor === cursor)
+            || (value.next_cursor !== null
+                && (value.items.length !== limit
+                    || !last
+                    || value.next_cursor !== cursorFor(last.label_number)))
+            || (value.items.length === 0 && value.next_cursor !== null)
+            || (cursor === null
+                && (value.next_cursor !== null) !== (value.total > value.items.length))) invalid();
+        return value;
+    }
+
+    function isMaskedReferralEmail(value) {
+        if (value === null) return true;
+        if (typeof value !== 'string'
+            || value.length > 254
+            || value !== value.toLowerCase()) return false;
+        const addressParts = value.split('@');
+        if (addressParts.length !== 2) return false;
+        const [localPart, domain] = addressParts;
+        const domainParts = domain.split('.');
+        if (domainParts.length !== 2) return false;
+        const [domainStem, topLevelDomain] = domainParts;
+        return localPart.includes('••')
+            && domainStem.includes('••')
+            && /^[a-z0-9.!#$%&*+/=?^_{}|~•-]+$/.test(localPart)
+            && /^[a-z0-9•-]+$/.test(domainStem)
+            && /^[a-z0-9-]{2,63}$/.test(topLevelDomain);
+    }
+
+    function validatePartnersReferralVisibility(payload, limit, cursor) {
+        const invalid = () => { throw partnersContractError(); };
+        if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
+            || payload.version !== PARTNERS_CONTRACT_VERSION
+            || !isBoundedString(payload.correlationId, { max: 128 })) invalid();
+        validatePartnersReferralVisibilityValue(payload.data, limit, cursor, invalid);
+        return deepFreeze(cloneJson(payload));
+    }
+
     function validatePartnersDashboardV2(payload, expectedStatus) {
         const invalid = () => { throw partnersContractError(); };
         if (!hasExactKeys(payload, ['version', 'correlationId', 'data'])
@@ -2446,6 +2537,7 @@
                 'cash_readiness',
                 'overlay',
                 'provider',
+                'referrals',
                 'history'
             ])
             || payload.data.schema_version !== 2
@@ -2557,6 +2649,13 @@
         validatePartnersAccessProvider(data.provider, invalid);
         validatePartnersAccessOverlay(data.overlay, invalid, data.provider);
 
+        const referrals = validatePartnersReferralVisibilityValue(
+            data.referrals,
+            20,
+            null,
+            invalid
+        );
+
         const history = data.history;
         if (!hasExactKeys(history, ['status', 'items', 'next_cursor'])
             || history.status !== expectedStatus
@@ -2616,7 +2715,10 @@
             && (data.link !== null
                 || history.items.length !== 0
                 || history.next_cursor !== null
-                || data.balances.length !== 0)) invalid();
+                || data.balances.length !== 0
+                || referrals.total !== 0
+                || referrals.items.length !== 0
+                || referrals.next_cursor !== null)) invalid();
         return deepFreeze(cloneJson(payload));
     }
 
@@ -3748,6 +3850,36 @@
         return validatePartnersDashboard(payload, safeStatus);
     }
 
+    async function partnersReferrals({ limit = 20, cursor, signal } = {}) {
+        partnersRequireUserSession();
+        const safeLimit = Number(limit);
+        const safeCursor = cursor == null || cursor === '' ? null : String(cursor);
+        if (!Number.isSafeInteger(safeLimit)
+            || safeLimit < 1
+            || safeLimit > 50
+            || (safeCursor !== null
+                && !PARTNERS_REFERRAL_CURSOR_PATTERN.test(safeCursor))) {
+            throw partnersClientError('partners_referrals_query_invalid');
+        }
+        let payload;
+        try {
+            payload = await requestToBase(
+                partnersBase(),
+                'GET',
+                `/referrals${query({
+                    limit: safeLimit,
+                    cursor: safeCursor || undefined
+                })}`,
+                null,
+                { signal, skipProfile: true }
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throw normalizePartnersRequestError(error);
+        }
+        return validatePartnersReferralVisibility(payload, safeLimit, safeCursor);
+    }
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get edgeUrl() { return edgeBase(); },
@@ -3811,6 +3943,7 @@
             payoutOnboarding: partnersPayoutOnboarding,
             requestPayoutOnboarding: partnersRequestPayoutOnboarding,
             dashboard: partnersDashboard,
+            referrals: partnersReferrals,
             consumeTvRelay: partnersConsumeTvRelay,
             device: Object.freeze({
                 availability: partnersDeviceAvailability,

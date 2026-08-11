@@ -781,6 +781,29 @@
             }
         }
 
+        async function capturePendingPartnerReferral() {
+            const claim = window.NorvaCloud?.partners?.claimReferral;
+            if (typeof claim !== 'function') return null;
+            try {
+                // The opaque referral token remains in its same-origin HttpOnly
+                // cookie. This page only asks the server to consume it for the
+                // authenticated account and never reads or persists that token.
+                return await claim();
+            } catch (_) {
+                // Referral attribution is fail-closed and must never block sign-in.
+                // The HttpOnly cookie remains available for the app retry path.
+                return null;
+            }
+        }
+
+        async function capturePostAuthAttribution(context) {
+            const [signupAttribution, partnerReferral] = await Promise.all([
+                capturePendingSignupAttribution(context),
+                capturePendingPartnerReferral()
+            ]);
+            return { signupAttribution, partnerReferral };
+        }
+
         const authTabs = [...document.querySelectorAll('#tabs [role="tab"]')];
         authTabs.forEach(button => {
             button.addEventListener('click', () => showForm(button.dataset.tab));
@@ -973,7 +996,7 @@
                 setStatus('info', 'Signing in…');
                 await NorvaAuth.signInWithIdToken({ provider: 'google', token: idToken });
                 await ensureProfile();
-                await capturePendingSignupAttribution();
+                await capturePostAuthAttribution();
                 setStatus('success', 'Signed in. Opening Norva…');
                 location.replace(returnTo);
             } catch (e) {
@@ -1003,6 +1026,7 @@
                     return;
                 }
                 await ensureProfile();
+                await capturePostAuthAttribution();
                 setStatus('success', 'Signed in. Opening Norva...');
                 location.replace(returnTo);
             });
@@ -1031,7 +1055,7 @@
 
                 if (NorvaAuth.getSession()) {
                     await ensureProfile(displayName);
-                    await capturePendingSignupAttribution(attribution);
+                    await capturePostAuthAttribution(attribution);
                     setStatus('success', 'Account created. Opening Norva...');
                     location.replace(returnTo);
                     return;
@@ -1113,7 +1137,7 @@
                         : 'unknown';
                 const confirmationContext = storedSignupAttribution()
                     || await buildSignupAttribution(confirmationMethod, false);
-                await capturePendingSignupAttribution(confirmationContext);
+                await capturePostAuthAttribution(confirmationContext);
                 location.replace(returnTo);
                 return;
             }
@@ -1167,7 +1191,7 @@
                     return;
                 }
                 await ensureProfile();
-                await capturePendingSignupAttribution();
+                await capturePostAuthAttribution();
                 // If the account now carries both a Google and an email identity,
                 // Google was just linked onto a pre-existing account — reassure the
                 // user rather than showing a generic "Signed in".
@@ -1193,7 +1217,7 @@
                 const cached = NorvaAuth.getSession && NorvaAuth.getSession();
                 if (!err?.definitive && cached?.user?.id && cached?.refresh_token) {
                     if (params.get('manage') === '1') { showManage(cached.user); return; }
-                    await capturePendingSignupAttribution();
+                    await capturePostAuthAttribution();
                     setStatus('success', 'Signed in. Opening Norva...');
                     location.replace(returnTo);
                     return;
@@ -1204,7 +1228,7 @@
                 // "Sign-in settings" entry) get an account-management view instead of
                 // being bounced straight back — otherwise that button looks like a no-op.
                 if (params.get('manage') === '1') { showManage(user); return; }
-                await capturePendingSignupAttribution();
+                await capturePostAuthAttribution();
                 location.replace(returnTo);
                 return;
             }

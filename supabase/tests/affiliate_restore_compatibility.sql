@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(119);
+select extensions.plan(121);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
 -- and ACL assertions for the current Partners baseline, bounded signed Didit
@@ -155,6 +155,8 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_access_credit_redeem(uuid,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_bootstrap_v2(uuid)","security_definer":true,"volatility":"s","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_dashboard_v2(uuid,integer,text,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
+  {"signature":"affiliate_private.partners_service_referral_visibility(uuid,integer,text)","security_definer":true,"volatility":"s","access_role":"service_role"},
+  {"signature":"public.partners_service_referral_visibility(uuid,integer,text)","security_definer":false,"volatility":"s","access_role":"service_role"},
   {"signature":"public.partners_service_bootstrap_v2(uuid)","security_definer":false,"volatility":"s","access_role":"service_role"},
   {"signature":"public.partners_service_dashboard_v2(uuid,integer,text,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
   {"signature":"public.partners_service_join_v2(uuid,boolean,boolean,text)","security_definer":false,"volatility":"v","access_role":"service_role"},
@@ -198,7 +200,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  170::bigint,
+  172::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -221,7 +223,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  170::bigint,
+  172::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -238,7 +240,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 170
+    select count(*) = 172
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -260,7 +262,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 170
+    select count(*) = 172
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -284,7 +286,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 170
+    select count(*) = 172
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine

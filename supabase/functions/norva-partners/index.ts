@@ -48,6 +48,7 @@ import {
   parseBearerToken,
   parseBootstrapQuery,
   parseDashboardQuery,
+  parseReferralVisibilityQuery,
   parseEmptyMutationInput,
   parseFiscalProfileInput,
   parseIdempotencyKey,
@@ -80,6 +81,7 @@ import {
   sanitizePayoutOnboardingGet,
   sanitizePayoutOnboardingMutation,
   sanitizePayoutCountryMutationData,
+  sanitizeReferralVisibilityData,
 } from "../_shared/partners-api.ts";
 import { sanitizePayoutProfileGet } from "../_shared/partners-payout.ts";
 import {
@@ -829,6 +831,21 @@ Deno.serve(async (req) => {
           },
           "mutation",
         ),
+      );
+    } else if (route === "/referrals") {
+      const query = parseReferralVisibilityQuery(url);
+      cleanData = sanitizeReferralVisibilityData(
+        await callRpc(
+          PARTNERS_RPC.referralVisibility,
+          {
+            p_user_id: userId,
+            p_limit: query.referralLimit,
+            p_cursor: query.referralCursor,
+          },
+          "query",
+          8_000,
+        ),
+        query,
       );
     } else {
       const query = parseDashboardQuery(url);

@@ -6,13 +6,13 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
-test('physical rehearsal preserves signed review grace while adding bounded orphan purge recovery', () => {
+test('physical rehearsal preserves the complete Didit contract while adding referral visibility', () => {
   const rehearsal = read('ops/hetzner/backup/rehearse-partners-physical.sh');
 
-  assert.match(rehearsal, /readonly BASELINE_CONTRACT="7bca637"/);
+  assert.match(rehearsal, /readonly BASELINE_CONTRACT="3f09095"/);
   assert.match(
     rehearsal,
-    /readonly TARGET_MIGRATION="supabase\/migrations\/20260811074511_partners_didit_orphan_purge_recovery\.sql"/,
+    /readonly TARGET_MIGRATION="supabase\/migrations\/20260811130059_partners_referral_visibility\.sql"/,
   );
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_PENDING="0"/);
@@ -23,6 +23,9 @@ test('physical rehearsal preserves signed review grace while adding bounded orph
   assert.match(rehearsal, /DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_PENDING="0"/);
   assert.match(rehearsal, /capture_didit_orphan_purge_recovery_marker\(\)/);
+  assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_COMPLETE="1"/);
+  assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_PENDING="0"/);
+  assert.match(rehearsal, /partners_service_referral_visibility/);
   assert.match(rehearsal, /partners_service_didit_purge_orphans/);
   assert.match(rehearsal, /partners_service_didit_purge_recover/);
   assert.match(rehearsal, /provider_delivered_at/);

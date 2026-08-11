@@ -571,6 +571,8 @@ begin
       ('affiliate_private.partners_service_access_credit_redeem(uuid,text,text)', true, 'v', 'service_role'),
       ('affiliate_private.partners_service_bootstrap_v2(uuid)', true, 's', 'service_role'),
       ('affiliate_private.partners_service_dashboard_v2(uuid,integer,text,text)', true, 'v', 'service_role'),
+      ('affiliate_private.partners_service_referral_visibility(uuid,integer,text)', true, 's', 'service_role'),
+      ('public.partners_service_referral_visibility(uuid,integer,text)', false, 's', 'service_role'),
       ('public.partners_service_bootstrap_v2(uuid)', false, 's', 'service_role'),
       ('public.partners_service_dashboard_v2(uuid,integer,text,text)', false, 'v', 'service_role'),
       ('public.partners_service_join_v2(uuid,boolean,boolean,text)', false, 'v', 'service_role'),
@@ -633,6 +635,82 @@ begin
         v_expected.signature;
     end if;
   end loop;
+
+  if position(
+      'partners_service_referral_visibility'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'public.partners_service_dashboard_v2(uuid,integer,text,text)'
+      )))
+    ) = 0
+    or position(
+      '''referrals'''
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'public.partners_service_dashboard_v2(uuid,integer,text,text)'
+      )))
+    ) = 0
+  then
+    raise exception
+      'restored Partners dashboard omitted the referral visibility projection';
+  end if;
+
+  if position(
+      'p_limit > 50'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      'limit p_limit + 1'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      '''next_cursor'''
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      'extensions.digest'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      'auth.users'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      'referred_user.email'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      '''masked_email'''
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      'repeat(''•'', 4)'
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) = 0
+    or position(
+      '''referred_user_id'''
+      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+        'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+      )))
+    ) > 0
+  then
+    raise exception
+      'restored Partners referral projection lost its masked-email privacy boundary';
+  end if;
 
   if has_function_privilege(
       'service_role',

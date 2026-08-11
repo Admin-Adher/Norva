@@ -22,8 +22,11 @@ déployée ni autorisée par la fonction actuelle.
   parrainage ne sont jamais des identités utilisateur.
 - La fonction utilise la `service_role` uniquement après authentification, pour
   appeler une RPC service-only. Les tables privées ne sont pas exposées.
-- Les réponses et logs n'exposent ni JWT, e-mail, UUID utilisateur/compte, code
-  affilié, claim, référence KYC, document, IBAN, payload provider ou erreur SQL.
+- Les logs n'exposent ni JWT, e-mail, UUID utilisateur/compte, code affilié,
+  claim, référence KYC, document, IBAN, payload provider ou erreur SQL. Les
+  réponses n'exposent jamais d'adresse e-mail complète ; la seule donnée
+  dérivée autorisée est le champ `masked_email` strictement masqué de la
+  liste privée des affiliations.
 
 `verify_jwt=false` dans `supabase/config.toml` ne rend pas l'API anonyme. Cette
 configuration permet au handler de traiter `OPTIONS` et d'appliquer lui-même la
@@ -83,7 +86,7 @@ Le preflight accepte seulement :
 - headers `authorization`, `apikey`, `content-type`, `idempotency-key`,
   `x-client-info` ;
 - route existante parmi `/bootstrap`, `/access-request`, `/applications`,
-  `/activate`, `/activation/reconcile`, `/links`, `/dashboard`, `/kyc/sessions`,
+  `/activate`, `/activation/reconcile`, `/links`, `/dashboard`, `/referrals`, `/kyc/sessions`,
   `/kyc/certification`, `/kyc/certification/resume`, `/referral/claim`,
   `/fiscal-profile`, `/payout-onboarding`, `/payout-profile` et
   `/tv-relays/consume` ;
@@ -507,6 +510,28 @@ pseudonymisés `commission_pending|commission_available|commission_held|
 commission_paid|commission_reversed`, jamais un montant, un identifiant ledger
 ou un payload provider.
 
+### `GET /referrals`
+
+Retourne la liste pseudonymisee des comptes attribues au partenaire, par pages
+stables et sans limiter le produit aux seuls comptes les plus recents :
+
+```http
+GET /functions/v1/norva-partners/referrals?limit=20&cursor=<opaque>
+```
+
+`limit` est compris entre 1 et 50 ; il s'agit uniquement de la taille d'une
+page. Le client peut charger toutes les pages jusqu'a `next_cursor=null` et
+affiche en permanence la progression `items affiches / total`. Le curseur
+`referral_{20 chiffres}` est opaque pour le client et exclusif, ce qui evite
+les doublons entre deux pages. Chaque item contient uniquement une cle opaque,
+un numero d'affichage stable pour ce partenaire, un statut public borne, des
+dates utiles au suivi et `masked_email`. Cette derniere valeur est soit `null`,
+soit un indice de reconnaissance strictement masque produit cote serveur (par
+exemple `he••••54@ca••••ey.com`). L'adresse complete ne quitte jamais le
+perimetre Auth prive. Aucun UUID utilisateur, identifiant de paiement, montant,
+payload provider ou adresse e-mail complete n'est retourne. Le client ne propose
+ni copie de l'indice ni annuaire de contacts.
+
 ### `POST /kyc/sessions`
 
 Réserve atomiquement une tentative KYC individuelle puis crée une session
@@ -872,7 +897,7 @@ preuve d'éligibilité ni un début de KYB.
 
 ## 7. Idempotence
 
-`GET /bootstrap`, `GET /access-request`, `GET /dashboard`,
+`GET /bootstrap`, `GET /access-request`, `GET /dashboard`, `GET /referrals`,
 `GET /payout-profile` et `GET /availability` ne créent aucun effet et
 n'utilisent pas de clé d'idempotence.
 

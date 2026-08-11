@@ -166,6 +166,34 @@ test('all account creation paths carry platform, journey and coarse location', (
   assert.match(authApi, /\.\.\.context,[\s\S]*display_name/);
 });
 
+test('authenticated handoff consumes the HttpOnly partner claim before redirect', () => {
+  const referralCapture = section(
+    account,
+    'async function capturePendingPartnerReferral()',
+    'async function capturePostAuthAttribution(context)',
+  );
+  const combinedCapture = section(
+    account,
+    'async function capturePostAuthAttribution(context)',
+    'const authTabs =',
+  );
+  assert.match(referralCapture, /NorvaCloud\?\.partners\?\.claimReferral/);
+  assert.match(referralCapture, /return await claim\(\)/);
+  assert.doesNotMatch(
+    referralCapture,
+    /document\.cookie|localStorage|sessionStorage|claimToken|referralToken/,
+  );
+  assert.match(
+    combinedCapture,
+    /Promise\.all\(\[[\s\S]*capturePendingSignupAttribution\(context\)[\s\S]*capturePendingPartnerReferral\(\)/,
+  );
+  assert.ok(
+    (account.match(/await capturePostAuthAttribution\(/g) || []).length >= 7,
+    'every successful account handoff should attempt same-origin referral consumption',
+  );
+  assert.doesNotMatch(account, /NorvaCloud\.partners\.claimReferral\([^)]*(?:token|cookie)/i);
+});
+
 test('email verification preserves a bounded pairing or subscription journey', () => {
   const redirect = section(account, 'function authEmailRedirectUrl()', 'async function loadSignupGeoContext()');
   assert.match(redirect, /new URL\('\/account\.html', location\.origin\)/);
@@ -201,7 +229,7 @@ test('Admin CRM clearly distinguishes payment country from signup acquisition', 
 });
 
 test('privacy notice documents first-party signup context and no raw IP retention', () => {
-  assert.match(privacy, /Last updated: 9 August 2026/);
+  assert.match(privacy, /Last updated: 11 August 2026/);
   assert.match(privacy, /Sign-up context/);
   assert.match(privacy, /approximate country\/region\/city supplied by Cloudflare/);
   assert.match(privacy, /does not retain the raw IP address in this record/);

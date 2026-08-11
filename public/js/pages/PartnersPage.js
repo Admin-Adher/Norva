@@ -48,6 +48,13 @@ class PartnersPage {
         this._dashboardFilter = 'all';
         this._dashboardCursor = null;
         this._dashboardPages = [];
+        this._referralAbort = null;
+        this._referralRequestGeneration = 0;
+        this._referralCursor = null;
+        this._referralItems = [];
+        this._referralTotal = 0;
+        this._referralLoadState = 'idle';
+        this._referralError = '';
         this._membershipDashboard = null;
         this._nativeShareRequests = new Map();
         this._nativeShareListenerBound = false;
@@ -156,9 +163,21 @@ class PartnersPage {
             this._bootstrapPromise = null;
             this._visibilityPromise = null;
             this._jurisdiction = { countryCode: '', subdivisionCode: '' };
+            this.resetReferralState();
         }
         this._sessionIdentityKey = sessionKey;
         return sessionKey;
+    }
+
+    resetReferralState() {
+        this._referralAbort?.abort();
+        this._referralAbort = null;
+        this._referralRequestGeneration += 1;
+        this._referralCursor = null;
+        this._referralItems = [];
+        this._referralTotal = 0;
+        this._referralLoadState = 'idle';
+        this._referralError = '';
     }
 
     normalizeJurisdiction(countryCode, subdivisionCode) {
@@ -450,6 +469,9 @@ class PartnersPage {
         this._dashboardRefreshTimer = 0;
         this._dashboardAbort?.abort();
         this._dashboardAbort = null;
+        this._referralAbort?.abort();
+        this._referralAbort = null;
+        this._referralRequestGeneration += 1;
         this._payoutAbort?.abort();
         this._payoutAbort = null;
         this._accessRequestAbort?.abort();
@@ -2799,6 +2821,9 @@ class PartnersPage {
             });
             if (!this._visible || controller.signal.aborted || this._dashboardAbort !== controller) return;
             const page = envelope.data;
+            if (!append && page.schema_version === 2) {
+                this.syncReferralState(page.referrals);
+            }
             if (append && this._dashboardPages.length) {
                 this._dashboardPages.push(page);
             } else {
@@ -3007,11 +3032,233 @@ class PartnersPage {
         this.bindDashboardActions(bootstrap, dashboard);
     }
 
+    syncReferralState(page) {
+        const incoming = page && typeof page === 'object'
+            ? page
+            : { total: 0, items: [], next_cursor: null };
+        const nextItems = Array.isArray(incoming.items) ? incoming.items : [];
+        const nextTotal = Number.isSafeInteger(incoming.total) ? incoming.total : 0;
+        if (nextTotal === 0) {
+            this._referralItems = [];
+            this._referralTotal = 0;
+            this._referralCursor = null;
+            this._referralLoadState = 'idle';
+            this._referralError = '';
+            return;
+        }
+
+        const hadExpandedList = this._referralItems.length > nextItems.length;
+        const previousCursor = this._referralCursor;
+        const incomingKeys = new Set(nextItems.map((item) => item.key));
+        const retained = hadExpandedList
+            ? this._referralItems.filter((item) => !incomingKeys.has(item.key))
+            : [];
+        this._referralItems = [...nextItems, ...retained]
+            .sort((left, right) => right.label_number - left.label_number)
+            .slice(0, nextTotal);
+        this._referralTotal = nextTotal;
+        this._referralCursor = this._referralItems.length >= nextTotal
+            ? null
+            : (hadExpandedList ? previousCursor : incoming.next_cursor);
+        this._referralLoadState = 'idle';
+        this._referralError = '';
+    }
+
+    referralRowsMarkup(program) {
+        if (!this._referralItems.length) {
+            return `<div class="partners-empty-state partners-referrals-empty">
+                <strong>No referrals yet</strong>
+                <span>Accounts created through your link will appear here after attribution is securely confirmed.</span>
+              </div>`;
+        }
+        return `<ol class="partners-referrals-list">${this._referralItems.map((referral) => {
+            const status = this.referralStatusMeta(
+                referral,
+                program.maturation_days
+            );
+            const recognitionHint = referral.masked_email
+                ? `<span class="partners-referral-email">
+                    <span class="partners-referral-email-label">Masked e-mail</span>
+                    <span class="partners-referral-email-value">${this.escape(referral.masked_email)}</span>
+                  </span>`
+                : `<span class="partners-referral-email partners-referral-email-unavailable">
+                    Recognition hint unavailable
+                  </span>`;
+            return `<li>
+                <div class="partners-referral-identity">
+                    <span class="partners-referral-number" aria-hidden="true">#${this.escape(String(referral.label_number))}</span>
+                    <div>
+                        <strong>Referral #${this.escape(String(referral.label_number))}</strong>
+                        ${recognitionHint}
+                        <span>Joined ${this.escape(this.formatDateTime(referral.attributed_at))}</span>
+                    </div>
+                </div>
+                <div class="partners-referral-progress">
+                    <span class="partners-status-pill ${this.escape(status.tone)}">${this.escape(status.label)}</span>
+                    <span>${this.escape(status.detail)}</span>
+                </div>
+            </li>`;
+        }).join('')}</ol>`;
+    }
+
+    referralControlsMarkup() {
+        if (!this._referralTotal) {
+            return '<p class="partners-referrals-footnote">A recognition hint appears only when Norva can safely mask the address. Full contact details and payment references are never shown.</p>';
+        }
+        const shown = this._referralItems.length;
+        const remaining = Math.max(0, this._referralTotal - shown);
+        const progress = `${shown} of ${this._referralTotal} referral${this._referralTotal === 1 ? '' : 's'} shown.`;
+        if (this._referralLoadState === 'error') {
+            return `<div class="partners-referrals-load-error" role="alert">
+                <span>${this.escape(this._referralError || 'The next referrals could not be loaded.')}</span>
+                <button class="btn btn-secondary" type="button" data-partners-referrals-more>Try again</button>
+              </div>
+              <p class="partners-referrals-footnote">${this.escape(progress)} Already displayed referrals remain available.</p>`;
+        }
+        if (this._referralCursor) {
+            const nextCount = Math.min(20, remaining);
+            const loading = this._referralLoadState === 'loading';
+            return `<div class="partners-referrals-load-row">
+                <p class="partners-referrals-footnote" data-partners-referrals-status
+                    role="status" aria-live="polite">${this.escape(loading
+                        ? `Loading more referrals. ${progress}`
+                        : `${progress} Load the rest when you need it.`)}</p>
+                <button class="btn btn-secondary partners-referrals-more" type="button"
+                    data-partners-referrals-more ${loading ? 'disabled aria-busy="true"' : ''}>${loading
+                        ? 'Loading referrals…'
+                        : `Show ${nextCount} more`}</button>
+              </div>`;
+        }
+        return `<p class="partners-referrals-footnote" data-partners-referrals-status
+            role="status" aria-live="polite">All ${this.escape(String(this._referralTotal))} referral${this._referralTotal === 1 ? ' is' : 's are'} shown. Masked e-mails are recognition hints only; Norva does not provide full addresses or a contact directory.</p>`;
+    }
+
+    referralsCardMarkup(program) {
+        return `<section class="partners-history-card partners-referrals-card"
+            aria-labelledby="partners-referrals-title" data-partners-referrals>
+            <div class="partners-referrals-heading">
+                <div>
+                    <span class="partners-eyebrow">People who joined through your link</span>
+                    <h2 id="partners-referrals-title" tabindex="-1">Your referrals</h2>
+                    <p>Follow every attributed account from sign-up to an eligible commission. A partially hidden e-mail helps you recognise someone you already know; the full address and account identifiers stay private.</p>
+                </div>
+                <strong class="partners-referrals-count" data-partners-referrals-count
+                    aria-label="${this.escape(String(this._referralTotal))} referred account${this._referralTotal === 1 ? '' : 's'}">
+                    ${this.escape(String(this._referralTotal))}
+                    <span>${this._referralTotal === 1 ? 'referral' : 'referrals'}</span>
+                </strong>
+            </div>
+            <div data-partners-referrals-body
+                ${this._referralLoadState === 'loading' ? 'aria-busy="true"' : ''}>
+                ${this.referralRowsMarkup(program)}
+                ${this.referralControlsMarkup()}
+            </div>
+        </section>`;
+    }
+
+    updateReferralModule(program) {
+        const body = this.container?.querySelector('[data-partners-referrals-body]');
+        if (!body) return;
+        body.innerHTML = `${this.referralRowsMarkup(program)}${this.referralControlsMarkup()}`;
+        if (this._referralLoadState === 'loading') body.setAttribute('aria-busy', 'true');
+        else body.removeAttribute('aria-busy');
+        const count = this.container?.querySelector('[data-partners-referrals-count]');
+        if (count) {
+            count.setAttribute(
+                'aria-label',
+                `${this._referralTotal} referred account${this._referralTotal === 1 ? '' : 's'}`
+            );
+            count.innerHTML = `${this.escape(String(this._referralTotal))}<span>${this._referralTotal === 1 ? 'referral' : 'referrals'}</span>`;
+        }
+        this.bindReferralActions(program);
+    }
+
+    bindReferralActions(program) {
+        this.container?.querySelector('[data-partners-referrals-more]')
+            ?.addEventListener('click', () => this.loadMoreReferrals(program));
+    }
+
+    async loadMoreReferrals(program) {
+        if (!this._visible || !this._referralCursor
+            || this._referralLoadState === 'loading') return;
+        const api = window.NorvaCloud?.partners?.referrals;
+        if (typeof api !== 'function') {
+            this._referralLoadState = 'error';
+            this._referralError = 'More referrals are temporarily unavailable. Try again.';
+            this.updateReferralModule(program);
+            return;
+        }
+        const scroller = this.getScrollElement();
+        const scrollTop = scroller?.scrollTop || 0;
+        const cursor = this._referralCursor;
+        const requestGeneration = ++this._referralRequestGeneration;
+        this._referralAbort?.abort();
+        const controller = new AbortController();
+        this._referralAbort = controller;
+        this._referralLoadState = 'loading';
+        this._referralError = '';
+        this.updateReferralModule(program);
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            if (this._visible && this._referralAbort === controller) {
+                timedOut = true;
+                controller.abort();
+            }
+        }, this._dashboardTimeoutMs);
+        try {
+            const envelope = await api({ limit: 20, cursor, signal: controller.signal });
+            if (!this._visible || controller.signal.aborted
+                || requestGeneration !== this._referralRequestGeneration
+                || this._referralAbort !== controller) return;
+            const page = envelope.data;
+            const keys = new Set(this._referralItems.map((item) => item.key));
+            const numbers = new Set(this._referralItems.map((item) => item.label_number));
+            const lastItem = this._referralItems[this._referralItems.length - 1];
+            const lastNumber = lastItem?.label_number ?? Number.MAX_SAFE_INTEGER;
+            if (page.total < this._referralItems.length
+                || page.items.some((item, index) => (
+                    keys.has(item.key)
+                    || numbers.has(item.label_number)
+                    || item.label_number >= (index === 0
+                        ? lastNumber
+                        : page.items[index - 1].label_number)
+                ))) throw new Error('partners_referrals_page_conflict');
+            this._referralItems = [...this._referralItems, ...page.items];
+            this._referralTotal = page.total;
+            this._referralCursor = page.next_cursor;
+            this._referralLoadState = 'idle';
+            this._referralError = '';
+            this.updateReferralModule(program);
+            requestAnimationFrame(() => {
+                const focus = this.container?.querySelector('[data-partners-referrals-more]')
+                    || this.container?.querySelector('[data-partners-referrals-status]');
+                if (!focus?.hasAttribute?.('tabindex') && !focus?.matches?.('button')) {
+                    focus?.setAttribute?.('tabindex', '-1');
+                }
+                try { focus?.focus({ preventScroll: true }); } catch (_) { focus?.focus?.(); }
+                if (scroller) scroller.scrollTop = scrollTop;
+            });
+        } catch (error) {
+            if (!this._visible || requestGeneration !== this._referralRequestGeneration
+                || this._referralAbort !== controller) return;
+            if ((error?.name === 'AbortError' || controller.signal.aborted) && !timedOut) return;
+            this._referralLoadState = 'error';
+            this._referralError = timedOut
+                ? 'Loading the next referrals took too long. Try again.'
+                : 'The next referrals could not be loaded. Try again.';
+            this.updateReferralModule(program);
+        } finally {
+            clearTimeout(timeout);
+            if (this._referralAbort === controller) this._referralAbort = null;
+        }
+    }
+
     renderMembershipDashboardData(bootstrap, dashboard) {
         const metrics = this.container?.querySelector('[data-partners-dashboard-metrics]');
         const content = this.container?.querySelector('[data-partners-dashboard-content]');
         if (!metrics || !content) return;
         this._membershipDashboard = dashboard;
+        this.syncReferralState(dashboard.referrals);
         this.updateCashKycProgress(
             dashboard.membership,
             dashboard.cash_readiness
@@ -3114,6 +3361,8 @@ class PartnersPage {
             <p class="partners-action-note">No KYC is required. ${catalog ? `Each credited ${this.escape(planLabel)} month is ${catalog.unit_duration_days} days and references ${this.escape(this.formatMinor(catalog.reference_unit_amount_minor, catalog.reference_currency))}. ` : ''}A non-USD balance is debited only through the dated, immutable rate shown in the server quote. An active paid subscription stays in control; converted access waits safely and resumes afterward.</p>
         </aside>`;
 
+        const referralsCard = this.referralsCardMarkup(dashboard.program);
+
         const filters = [
             ['all', 'All'],
             ['pending', 'Pending'],
@@ -3146,8 +3395,9 @@ class PartnersPage {
                 <span>${this.escape(this.formatCurrencyBalances(
                     balances.filter((entry) => entry.recovery_due_minor > 0),
                     'recovery_due_minor'
-                ))} will be offset by future eligible commission after a refund or chargeback.</span>
+                 ))} will be offset by future eligible commission after a refund or chargeback.</span>
             </aside>` : ''}
+            ${referralsCard}
             <section class="partners-history-card" aria-labelledby="partners-history-title">
                 <div class="partners-history-heading">
                     <div><h2 id="partners-history-title" tabindex="-1">Balance history</h2>
@@ -3162,6 +3412,7 @@ class PartnersPage {
         metrics.removeAttribute('aria-busy');
         content.removeAttribute('aria-busy');
         this.bindDashboardActions(bootstrap, dashboard);
+        this.bindReferralActions(dashboard.program);
         this.bindCreditActions(bootstrap, dashboard);
         this.scheduleDashboardRefresh(bootstrap, dashboard);
     }
@@ -3900,6 +4151,54 @@ class PartnersPage {
             manual_reversal: 'Balance correction',
             payout_return: 'Cash transfer returned'
         })[type] || 'Partner event';
+    }
+
+    referralStatusMeta(referral, maturationDays) {
+        const status = referral?.status;
+        if (status === 'payment_recorded') {
+            return {
+                label: 'Eligible payment recorded',
+                detail: referral.first_eligible_payment_at
+                    ? `Recorded ${this.formatDateTime(referral.first_eligible_payment_at)}. Commission processing updates automatically.`
+                    : 'Commission processing updates automatically.',
+                tone: 'partners-status-info'
+            };
+        }
+        if (status === 'commission_pending') {
+            return {
+                label: 'In validation',
+                detail: referral.next_maturation_at
+                    ? `Expected review date: ${this.formatDateTime(referral.next_maturation_at)}.`
+                    : `The ${Number(maturationDays) || 45}-day validation period is in progress.`,
+                tone: 'partners-status-warning'
+            };
+        }
+        if (status === 'commission_validated') {
+            return {
+                label: 'Commission validated',
+                detail: 'At least one eligible commission completed validation.',
+                tone: 'partners-status-success'
+            };
+        }
+        if (status === 'held') {
+            return {
+                label: 'Under review',
+                detail: 'This referral is temporarily held while Norva completes its checks.',
+                tone: 'partners-status-warning'
+            };
+        }
+        if (status === 'reversed') {
+            return {
+                label: 'Reversed',
+                detail: 'The related eligible payment or commission was reversed.',
+                tone: 'partners-status-danger'
+            };
+        }
+        return {
+            label: 'Account created',
+            detail: 'Waiting for the first eligible Norva payment.',
+            tone: 'partners-status-info'
+        };
     }
 
     formatDateTime(value) {

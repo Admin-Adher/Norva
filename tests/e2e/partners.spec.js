@@ -350,6 +350,27 @@ async function mountPartners(page, initialState) {
           queued_grants: 0,
           remaining_seconds: 0,
         },
+        referrals: {
+          total: 2,
+          next_cursor: null,
+          items: [{
+            key: `ref_${'a'.repeat(24)}`,
+            label_number: 2,
+            masked_email: 'he••••54@ca••••ey.com',
+            status: 'commission_pending',
+            attributed_at: '2026-08-10T12:00:00Z',
+            first_eligible_payment_at: '2026-08-10T12:10:00Z',
+            next_maturation_at: '2026-09-24T12:10:00Z',
+          }, {
+            key: `ref_${'b'.repeat(24)}`,
+            label_number: 1,
+            masked_email: null,
+            status: 'signed_up',
+            attributed_at: '2026-08-09T12:00:00Z',
+            first_eligible_payment_at: null,
+            next_maturation_at: null,
+          }],
+        },
         history: { status, items: [], next_cursor: null },
       },
     });
@@ -880,6 +901,17 @@ test('public membership stays fully usable when the supervised cash pilot is una
   );
   await expect(page.getByRole('heading', { name: 'Convert to Norva Plus' }))
     .toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your referrals', exact: true }))
+    .toBeVisible();
+  const referralList = page.locator('[data-partners-referrals]');
+  await expect(referralList.getByText('Referral #2')).toBeVisible();
+  await expect(referralList.getByText('he••••54@ca••••ey.com')).toBeVisible();
+  await expect(referralList.getByText('Masked e-mail', { exact: true })).toBeVisible();
+  await expect(referralList.getByText('In validation', { exact: true })).toBeVisible();
+  await expect(referralList.getByText('Referral #1')).toBeVisible();
+  await expect(referralList.getByText('Recognition hint unavailable')).toBeVisible();
+  await expect(referralList.getByText('Account created', { exact: true })).toBeVisible();
+  await expect(page.getByText('hefex15454@careney.com')).toHaveCount(0);
 
   const cash = page.locator('[data-partners-cash-button]');
   await expect(cash).toHaveText('Cash transfer pilot');

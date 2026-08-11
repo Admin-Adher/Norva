@@ -28,6 +28,10 @@ const releaseMigrationSource = read(
 const bootstrapBooleanMigrationSource = read(
   'supabase/migrations/20260809090000_partners_bootstrap_nonmember_boolean.sql',
 );
+const referralVisibilityMigrationSource = read(
+  'supabase/migrations/20260811130059_partners_referral_visibility.sql',
+);
+const privacySource = read('public/privacy.html');
 
 function helpers() {
   const compiled = esbuild.transformSync(helperSource, {
@@ -347,6 +351,27 @@ function validDashboardV2() {
       fail_open_until: null,
       last_verified_at: null,
     },
+    referrals: {
+      total: 2,
+      items: [{
+        key: `ref_${'a'.repeat(24)}`,
+        label_number: 2,
+        masked_email: 'he••••54@ca••••ey.com',
+        status: 'commission_pending',
+        attributed_at: '2026-08-04T11:00:00Z',
+        first_eligible_payment_at: '2026-08-04T12:00:00Z',
+        next_maturation_at: '2026-09-18T12:00:00Z',
+      }, {
+        key: `ref_${'b'.repeat(24)}`,
+        label_number: 1,
+        masked_email: null,
+        status: 'signed_up',
+        attributed_at: '2026-08-04T10:00:00Z',
+        first_eligible_payment_at: null,
+        next_maturation_at: null,
+      }],
+      next_cursor: null,
+    },
     history: {
       status: 'all',
       items: [{
@@ -650,6 +675,19 @@ test('bootstrap and dashboard v2 stay exact across Edge and Web validators', asy
   const implicitFxDrift = clone(nonUsdDashboard);
   implicitFxDrift.credit_readiness = clone(dashboard.credit_readiness);
   assert.throws(() => sanitizeDashboardData(implicitFxDrift, dashboardQuery));
+  const referralPiiDrift = clone(dashboard);
+  referralPiiDrift.referrals.items[0].email = 'private@example.test';
+  assert.throws(() => sanitizeDashboardData(referralPiiDrift, dashboardQuery));
+  const duplicateReferral = clone(dashboard);
+  duplicateReferral.referrals.items[1].key = duplicateReferral.referrals.items[0].key;
+  assert.throws(() => sanitizeDashboardData(duplicateReferral, dashboardQuery));
+  const inconsistentReferralTotal = clone(dashboard);
+  inconsistentReferralTotal.referrals.next_cursor =
+    'referral_00000000000000000001';
+  assert.throws(() => sanitizeDashboardData(
+    inconsistentReferralTotal,
+    dashboardQuery,
+  ));
 
   const { cloud, requests } = loadCloudApi((url) => {
     if (url.includes('/bootstrap')) return envelope(bootstrap);
@@ -663,6 +701,38 @@ test('bootstrap and dashboard v2 stay exact across Edge and Web validators', asy
   assert.ok(Object.isFrozen(webBootstrap.data));
   assert.ok(Object.isFrozen(webDashboard.data));
   assert.equal(requests.length, 2);
+
+  const firstReferralPage = {
+    total: 2,
+    items: [clone(dashboard.referrals.items[0])],
+    next_cursor: 'referral_00000000000000000002',
+  };
+  const finalReferralPage = {
+    total: 2,
+    items: [clone(dashboard.referrals.items[1])],
+    next_cursor: null,
+  };
+  const referralClient = loadCloudApi((url) => (
+    url.includes('cursor=referral_00000000000000000002')
+      ? envelope(finalReferralPage)
+      : envelope(firstReferralPage)
+  ));
+  const referralPageOne = await referralClient.cloud.partners.referrals({ limit: 1 });
+  const referralPageTwo = await referralClient.cloud.partners.referrals({
+    limit: 1,
+    cursor: referralPageOne.data.next_cursor,
+  });
+  assert.deepEqual(clone(referralPageOne.data), firstReferralPage);
+  assert.deepEqual(clone(referralPageTwo.data), finalReferralPage);
+  assert.match(referralClient.requests[0].url, /\/referrals\?limit=1$/);
+  assert.match(
+    referralClient.requests[1].url,
+    /\/referrals\?limit=1&cursor=referral_00000000000000000002$/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(referralPageOne),
+    /hefex15454@careney\.com|user_id|payment_reference|provider_payload/i,
+  );
 
   const cashPilotClient = loadCloudApi((url) => url.includes('/bootstrap')
     ? envelope(cashPilotBootstrap)
@@ -848,6 +918,49 @@ test('membership is public while the cash pilot remains independently allowliste
   assert.match(
     bootstrapBooleanMigrationSource,
     /'ready',\s*coalesce\([\s\S]*?v_account\.member_status = 'active'[\s\S]*?and v_credits_enabled,[\s\S]*?false[\s\S]*?\)/,
+  );
+});
+
+test('referral visibility uses a server-masked recognition hint and remains service-role only', () => {
+  const helperStart = referralVisibilityMigrationSource.indexOf(
+    'affiliate_private.partners_service_referral_visibility(',
+  );
+  const helperEnd = referralVisibilityMigrationSource.indexOf(
+    'alter function affiliate_private.partners_service_referral_visibility(',
+    helperStart,
+  );
+  const helper = referralVisibilityMigrationSource.slice(helperStart, helperEnd);
+  assert.ok(helperStart > 0 && helperEnd > helperStart);
+  assert.match(helper, /stable\s+security definer\s+set search_path = ''/);
+  assert.match(helper, /p_limit > 50/);
+  assert.match(helper, /limit p_limit \+ 1/);
+  assert.match(helper, /\^referral_\[0-9\]\{20\}\$/);
+  assert.match(helper, /'ref_' \|\| left\([\s\S]*?extensions\.digest/);
+  assert.match(helper, /'label_number'/);
+  assert.match(helper, /left join auth\.users referred_user/);
+  assert.match(helper, /'masked_email', projected\.masked_email/);
+  assert.match(helper, /repeat\('•', 4\)/);
+  assert.match(helper, /'next_cursor'/);
+  assert.doesNotMatch(helper, /'referred_user_id'|'payment_identifier'/i);
+  assert.match(
+    privacySource,
+    /partially hidden email recognition hint[\s\S]*full address is never displayed[\s\S]*not stored as a separate contact record/i,
+  );
+  assert.match(
+    referralVisibilityMigrationSource,
+    /revoke all on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    referralVisibilityMigrationSource,
+    /grant execute on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?to service_role/,
+  );
+  assert.match(
+    referralVisibilityMigrationSource,
+    /create or replace function public\.partners_service_referral_visibility\([\s\S]*?security invoker[\s\S]*?p_limit,[\s\S]*?p_cursor/,
+  );
+  assert.match(
+    referralVisibilityMigrationSource,
+    /public\.partners_service_dashboard_v2\([\s\S]*?'referrals',[\s\S]*?partners_service_referral_visibility\([\s\S]*?p_user_id,[\s\S]*?20,[\s\S]*?null/,
   );
 });
 

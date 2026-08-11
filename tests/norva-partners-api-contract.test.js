@@ -221,6 +221,7 @@ test('member mutation inputs, idempotency keys and dashboard filters are strictl
     parseAcceptTermsInput,
     parseApplicationInput,
     parseDashboardQuery,
+    parseReferralVisibilityQuery,
     parseEmptyMutationInput,
     parseIdempotencyKey,
   } = helpers();
@@ -297,8 +298,32 @@ test('member mutation inputs, idempotency keys and dashboard filters are strictl
     assert.throws(() => parseDashboardQuery(new URL(url)), url);
   }
 
+  assert.deepEqual(
+    plain(parseReferralVisibilityQuery(new URL(
+      'https://example.test/referrals?limit=50&cursor=referral_00000000000000000051',
+    ))),
+    {
+      referralLimit: 50,
+      referralCursor: 'referral_00000000000000000051',
+    },
+  );
+  assert.deepEqual(
+    plain(parseReferralVisibilityQuery(new URL('https://example.test/referrals'))),
+    { referralLimit: 20, referralCursor: null },
+  );
+  for (const url of [
+    'https://example.test/referrals?limit=0',
+    'https://example.test/referrals?limit=51',
+    'https://example.test/referrals?cursor=referral_51',
+    'https://example.test/referrals?cursor=referral_00000000000000000051&cursor=referral_00000000000000000031',
+    'https://example.test/referrals?userId=forbidden',
+  ]) {
+    assert.throws(() => parseReferralVisibilityQuery(new URL(url)), url);
+  }
+
   assert.deepEqual(plain(allowedMethodsForRoute('/bootstrap')), ['GET']);
   assert.deepEqual(plain(allowedMethodsForRoute('/dashboard')), ['GET']);
+  assert.deepEqual(plain(allowedMethodsForRoute('/referrals')), ['GET']);
   assert.deepEqual(plain(allowedMethodsForRoute('/applications')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/activate')), ['POST']);
   assert.deepEqual(plain(allowedMethodsForRoute('/activation/reconcile')), ['POST']);
@@ -314,6 +339,79 @@ test('member mutation inputs, idempotency keys and dashboard filters are strictl
   assert.throws(() => assertNoQueryParameters(
     new URL('https://example.test/applications?userId=forbidden'),
   ));
+});
+
+test('referral pagination exposes the full list through an opaque strict cursor', () => {
+  const { sanitizeReferralVisibilityData } = helpers();
+  const firstPageQuery = { referralLimit: 2, referralCursor: null };
+  const firstPage = {
+    total: 3,
+    items: [{
+      key: `ref_${'a'.repeat(24)}`,
+      label_number: 3,
+      masked_email: 'he••••54@ca••••ey.com',
+      status: 'commission_pending',
+      attributed_at: '2026-08-11T08:00:00Z',
+      first_eligible_payment_at: '2026-08-11T08:30:00Z',
+      next_maturation_at: '2026-09-25T08:30:00Z',
+    }, {
+      key: `ref_${'b'.repeat(24)}`,
+      label_number: 2,
+      masked_email: null,
+      status: 'signed_up',
+      attributed_at: '2026-08-10T08:00:00Z',
+      first_eligible_payment_at: null,
+      next_maturation_at: null,
+    }],
+    next_cursor: 'referral_00000000000000000002',
+  };
+  assert.deepEqual(
+    plain(sanitizeReferralVisibilityData(firstPage, firstPageQuery)),
+    firstPage,
+  );
+
+  const finalPage = {
+    total: 3,
+    items: [{
+      key: `ref_${'c'.repeat(24)}`,
+      label_number: 1,
+      masked_email: 'fr••••nd@sa••••le.test',
+      status: 'payment_recorded',
+      attributed_at: '2026-08-09T08:00:00Z',
+      first_eligible_payment_at: '2026-08-09T08:30:00Z',
+      next_maturation_at: null,
+    }],
+    next_cursor: null,
+  };
+  assert.deepEqual(
+    plain(sanitizeReferralVisibilityData(finalPage, {
+      referralLimit: 2,
+      referralCursor: firstPage.next_cursor,
+    })),
+    finalPage,
+  );
+
+  const withUnexpectedIdentity = structuredClone(firstPage);
+  withUnexpectedIdentity.items[0].email = 'hidden@example.test';
+  assert.throws(() => sanitizeReferralVisibilityData(
+    withUnexpectedIdentity,
+    firstPageQuery,
+  ));
+  const withUnmaskedEmail = structuredClone(firstPage);
+  withUnmaskedEmail.items[0].masked_email = 'hidden@example.test';
+  assert.throws(() => sanitizeReferralVisibilityData(
+    withUnmaskedEmail,
+    firstPageQuery,
+  ));
+  const duplicate = structuredClone(firstPage);
+  duplicate.items[1].key = duplicate.items[0].key;
+  assert.throws(() => sanitizeReferralVisibilityData(duplicate, firstPageQuery));
+  const wrongOrder = structuredClone(firstPage);
+  wrongOrder.items.reverse();
+  assert.throws(() => sanitizeReferralVisibilityData(wrongOrder, firstPageQuery));
+  const cursorDrift = structuredClone(firstPage);
+  cursorDrift.next_cursor = 'referral_00000000000000000003';
+  assert.throws(() => sanitizeReferralVisibilityData(cursorDrift, firstPageQuery));
 });
 
 test('fiscal self-attestation and manual payout onboarding expose no user-controlled verification or bank data', () => {
@@ -1103,6 +1201,7 @@ test('Edge routes derive identity only from verified JWT and scope every RPC exp
     'partners_service_accept_terms',
     'partners_service_rotate_link',
     'partners_service_dashboard',
+    'partners_service_referral_visibility',
     'partners_service_fiscal_profile_get',
     'partners_service_fiscal_profile_self_attest',
     'partners_service_payout_onboarding_get',
@@ -1121,6 +1220,8 @@ test('Edge routes derive identity only from verified JWT and scope every RPC exp
   assert.match(edgeSource, /p_account_type: input\.accountType/);
   assert.match(edgeSource, /p_idempotency_key: idempotencyKey/);
   assert.match(edgeSource, /p_history_limit: query\.historyLimit/);
+  assert.match(edgeSource, /p_limit: query\.referralLimit/);
+  assert.match(edgeSource, /p_cursor: query\.referralCursor/);
   assert.doesNotMatch(edgeSource, /searchParams\.get\(["']user(?:Id|_id)["']\)/);
   assert.doesNotMatch(edgeSource, /body\.(?:userId|user_id)|input\.(?:userId|user_id)/);
   assert.doesNotMatch(edgeSource, /cloud_devices|device_token|service_role.*Authorization/i);
@@ -1170,6 +1271,7 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
     '/activation/reconcile',
     '/links',
     '/dashboard',
+    '/referrals',
     '/kyc/sessions',
     '/referral/claim',
     '/payout-profile',
@@ -1190,6 +1292,8 @@ test('Edge exposes only the bounded member routes and the versioned envelope', (
   assert.match(edgeSource, /sanitizeLinkMutationData/);
   assert.match(edgeSource, /sanitizePayoutCountryMutationData/);
   assert.match(edgeSource, /sanitizeDashboardData\(data, query\)/);
+  assert.match(edgeSource, /sanitizeReferralVisibilityData\(/);
+  assert.match(edgeSource, /parseReferralVisibilityQuery\(url\)/);
   assert.match(edgeSource, /parseIdempotencyKey/);
   assert.match(edgeSource, /new TextEncoder\(\)\.encode\(text\)\.byteLength > 4_096/);
   assert.doesNotMatch(edgeSource, /req\.json\(|req\.formData\(/);
@@ -1226,6 +1330,9 @@ test('contract clearly separates implemented user, referral and TV boundaries', 
   assert.match(contractSource, /`POST \/activation\/reconcile`/);
   assert.match(contractSource, /`POST \/links`/);
   assert.match(contractSource, /`GET \/dashboard`/);
+  assert.match(contractSource, /`GET \/referrals`/);
+  assert.match(contractSource, /taille d'une\s+page/);
+  assert.match(contractSource, /next_cursor=null/);
   assert.match(contractSource, /business_accounts_not_supported/);
   assert.match(contractSource, /business_waitlist/);
   assert.match(contractSource, /kyc_billing_unavailable/);

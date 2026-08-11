@@ -32,6 +32,7 @@ export const PARTNERS_RPC = Object.freeze({
   rotateLink: "partners_service_rotate_link",
   dashboard: "partners_service_dashboard",
   dashboardV2: "partners_service_dashboard_v2",
+  referralVisibility: "partners_service_referral_visibility",
   kycRightsGet: "partners_service_kyc_rights_get",
   biometricConsentWithdraw: "partners_service_biometric_consent_withdraw",
   kycHumanReviewRequest: "partners_service_kyc_human_review_request",
@@ -165,6 +166,11 @@ export type DashboardQuery = {
   historyStatus: string;
 };
 
+export type ReferralVisibilityQuery = {
+  referralLimit: number;
+  referralCursor: string | null;
+};
+
 export type KycHumanReviewInput = {
   reason:
     | "identity_result_contested"
@@ -276,6 +282,14 @@ const DASHBOARD_V2_HISTORY_TYPES = new Set([
   "manual_reversal",
   "payout_return",
 ]);
+const REFERRAL_VISIBILITY_STATUSES = new Set([
+  "signed_up",
+  "payment_recorded",
+  "commission_pending",
+  "commission_validated",
+  "held",
+  "reversed",
+]);
 const REPORTING_REASONS = new Set([
   "available",
   "no_financial_activity",
@@ -360,6 +374,7 @@ const VERSION_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 const DASHBOARD_CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+const REFERRAL_CURSOR_PATTERN = /^referral_[0-9]{20}$/;
 const PUBLIC_LINK_CODE_PATTERN = /^[A-Za-z0-9_-]{32}$/;
 const ACCESS_CREDIT_QUOTE_KEY_PATTERN = /^crq_[0-9a-f]{24}$/;
 const ACCESS_CREDIT_REDEMPTION_KEY_PATTERN = /^crd_[0-9a-f]{24}$/;
@@ -466,6 +481,7 @@ export function allowedMethodsForRoute(
   if (
     route === "/bootstrap" ||
     route === "/dashboard" ||
+    route === "/referrals" ||
     route === "/kyc/rights" ||
     route === "/kyc/certification/preflight" ||
     route === "/credit/status"
@@ -768,6 +784,35 @@ export function parseDashboardQuery(url: URL): DashboardQuery {
   if (!DASHBOARD_HISTORY_STATUSES.has(historyStatus)) throw invalidQuery();
 
   return { historyLimit, historyCursor, historyStatus };
+}
+
+export function parseReferralVisibilityQuery(
+  url: URL,
+): ReferralVisibilityQuery {
+  const allowed = new Set(["limit", "cursor"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key) || url.searchParams.getAll(key).length !== 1) {
+      throw invalidQuery();
+    }
+  }
+
+  const rawLimit = url.searchParams.get("limit");
+  const referralLimit = rawLimit === null ? 20 : Number(rawLimit);
+  if (
+    (rawLimit !== null && !/^(?:[1-9]|[1-4][0-9]|50)$/.test(rawLimit)) ||
+    !Number.isSafeInteger(referralLimit) ||
+    referralLimit < 1 ||
+    referralLimit > 50
+  ) throw invalidQuery();
+
+  const rawCursor = url.searchParams.get("cursor");
+  const referralCursor = rawCursor === null ? null : requestPatternString(
+    rawCursor,
+    REFERRAL_CURSOR_PATTERN,
+    29,
+    invalidQuery,
+  );
+  return { referralLimit, referralCursor };
 }
 
 export function parseBearerToken(header: string | null): string {
@@ -2449,6 +2494,92 @@ function sanitizeDashboardV1Data(
   };
 }
 
+export function sanitizeReferralVisibilityData(
+  raw: unknown,
+  query: ReferralVisibilityQuery,
+): Record<string, unknown> {
+  const root = exactRecord(raw, ["total", "items", "next_cursor"]);
+  const total = integerBetween(root.total, 0, Number.MAX_SAFE_INTEGER);
+  if (!Array.isArray(root.items) || root.items.length > query.referralLimit) {
+    throw new BootstrapContractError();
+  }
+  const items = root.items.map((value) => {
+    const item = exactRecord(value, [
+      "key",
+      "label_number",
+      "masked_email",
+      "status",
+      "attributed_at",
+      "first_eligible_payment_at",
+      "next_maturation_at",
+    ]);
+    return {
+      key: contractPatternString(item.key, /^ref_[0-9a-f]{24}$/, 28),
+      label_number: integerBetween(
+        item.label_number,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      masked_email: maskedReferralEmail(item.masked_email),
+      status: enumString(item.status, REFERRAL_VISIBILITY_STATUSES),
+      attributed_at: isoTimestamp(item.attributed_at, false),
+      first_eligible_payment_at: isoTimestamp(
+        item.first_eligible_payment_at,
+        true,
+      ),
+      next_maturation_at: isoTimestamp(item.next_maturation_at, true),
+    };
+  });
+  const keys = items.map((item) => item.key);
+  const numbers = items.map((item) => item.label_number);
+  const cursorFor = (labelNumber: number): string =>
+    `referral_${String(labelNumber).padStart(20, "0")}`;
+  const nextCursor = root.next_cursor === null
+    ? null
+    : contractPatternString(root.next_cursor, REFERRAL_CURSOR_PATTERN, 29);
+  if (
+    new Set(keys).size !== keys.length ||
+    new Set(numbers).size !== numbers.length ||
+    total < items.length ||
+    numbers.some((number, index) => index > 0 && numbers[index - 1] <= number) ||
+    (query.referralCursor !== null && numbers.some((number) =>
+      cursorFor(number) >= query.referralCursor!
+    )) ||
+    (nextCursor !== null && nextCursor === query.referralCursor) ||
+    (nextCursor !== null &&
+      (items.length !== query.referralLimit ||
+        nextCursor !== cursorFor(items[items.length - 1].label_number))) ||
+    (items.length === 0 && nextCursor !== null) ||
+    (query.referralCursor === null &&
+      (nextCursor !== null) !== (total > items.length))
+  ) throw new BootstrapContractError();
+
+  return { total, items, next_cursor: nextCursor };
+}
+
+function maskedReferralEmail(value: unknown): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length > 254 ||
+    value !== value.toLowerCase()
+  ) throw new BootstrapContractError();
+  const addressParts = value.split("@");
+  if (addressParts.length !== 2) throw new BootstrapContractError();
+  const [localPart, domain] = addressParts;
+  const domainParts = domain.split(".");
+  if (domainParts.length !== 2) throw new BootstrapContractError();
+  const [domainStem, topLevelDomain] = domainParts;
+  if (
+    !localPart.includes("••") ||
+    !domainStem.includes("••") ||
+    !/^[a-z0-9.!#$%&*+/=?^_{}|~•-]+$/.test(localPart) ||
+    !/^[a-z0-9•-]+$/.test(domainStem) ||
+    !/^[a-z0-9-]{2,63}$/.test(topLevelDomain)
+  ) throw new BootstrapContractError();
+  return value;
+}
+
 function sanitizeDashboardV2Data(
   raw: unknown,
   query: DashboardQuery,
@@ -2465,6 +2596,7 @@ function sanitizeDashboardV2Data(
     "cash_readiness",
     "overlay",
     "provider",
+    "referrals",
     "history",
   ]);
   if (root.schema_version !== 2 || query.historyStatus === "held") {
@@ -2493,6 +2625,17 @@ function sanitizeDashboardV2Data(
   ) throw new BootstrapContractError();
   const provider = sanitizeAccessProvider(root.provider);
   const overlay = sanitizeAccessGrantOverlay(root.overlay, provider);
+
+  const referralVisibility = sanitizeReferralVisibilityData(root.referrals, {
+    referralLimit: 20,
+    referralCursor: null,
+  }) as {
+    total: number;
+    items: Array<Record<string, unknown>>;
+    next_cursor: string | null;
+  };
+  const referralTotal = referralVisibility.total;
+  const referralItems = referralVisibility.items;
 
   const credit = exactRecord(root.credit_readiness, [
     "ready",
@@ -2599,7 +2742,8 @@ function sanitizeDashboardV2Data(
     (expectedCreditReason !== null && catalog !== null) ||
     (!membership.exists &&
       (link !== null || historyItems.length !== 0 || nextCursor !== null ||
-        balances.length !== 0))
+        balances.length !== 0 || referralTotal !== 0 ||
+        referralItems.length !== 0 || referralVisibility.next_cursor !== null))
   ) throw new BootstrapContractError();
 
   return {
@@ -2614,6 +2758,11 @@ function sanitizeDashboardV2Data(
     cash_readiness: cashReadiness,
     overlay,
     provider,
+    referrals: {
+      total: referralTotal,
+      items: referralItems,
+      next_cursor: referralVisibility.next_cursor,
+    },
     history: {
       status: query.historyStatus,
       items: historyItems,

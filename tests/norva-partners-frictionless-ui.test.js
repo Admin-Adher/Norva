@@ -319,6 +319,170 @@ test('empty authoritative ledger uses honest first-earning states', () => {
   assert.doesNotMatch(metrics.innerHTML, /Unavailable/);
 });
 
+test('member dashboard shows pseudonymised referred accounts and their progress', () => {
+  const { page } = loadPage();
+  const metrics = control();
+  const content = control();
+  metrics.removeAttribute = () => {};
+  content.removeAttribute = () => {};
+  page.container.querySelector = (selector) => ({
+    '[data-partners-dashboard-metrics]': metrics,
+    '[data-partners-dashboard-content]': content,
+  })[selector] || null;
+  page.bindDashboardActions = () => {};
+  page.bindCreditActions = () => {};
+  page.scheduleDashboardRefresh = () => {};
+  const bootstrap = bootstrapV2({ membership: true });
+
+  page.renderMembershipDashboardData(bootstrap, {
+    schema_version: 2,
+    ...bootstrap,
+    balances: [],
+    next_maturation_at: null,
+    credit_readiness: {
+      ready: false,
+      reason: 'credits_disabled',
+      catalog: null,
+    },
+    cash_readiness: {
+      ready: false,
+      reason: 'cash_pilot_not_allowed',
+    },
+    referrals: {
+      total: 3,
+      next_cursor: 'referral_00000000000000000002',
+      items: [{
+        key: `ref_${'a'.repeat(24)}`,
+        label_number: 3,
+        masked_email: 'he••••54@ca••••ey.com',
+        status: 'commission_pending',
+        attributed_at: '2026-08-11T10:00:00Z',
+        first_eligible_payment_at: '2026-08-11T10:05:00Z',
+        next_maturation_at: '2026-09-25T10:05:00Z',
+      }, {
+        key: `ref_${'b'.repeat(24)}`,
+        label_number: 2,
+        masked_email: null,
+        status: 'signed_up',
+        attributed_at: '2026-08-10T10:00:00Z',
+        first_eligible_payment_at: null,
+        next_maturation_at: null,
+      }],
+    },
+    history: { status: 'all', items: [], next_cursor: null },
+  });
+
+  assert.match(content.innerHTML, /Your referrals/);
+  assert.match(content.innerHTML, /3\s*<span>referrals/);
+  assert.match(content.innerHTML, /Referral #3/);
+  assert.match(content.innerHTML, /Masked e-mail/);
+  assert.match(content.innerHTML, /he••••54@ca••••ey\.com/);
+  assert.match(content.innerHTML, /In validation/);
+  assert.match(content.innerHTML, /Referral #2/);
+  assert.match(content.innerHTML, /Recognition hint unavailable/);
+  assert.match(content.innerHTML, /Account created/);
+  assert.match(content.innerHTML, /2 of 3 referrals shown/);
+  assert.match(content.innerHTML, /Show 1 more/);
+  assert.match(content.innerHTML, /the full address and account identifiers stay private/);
+  assert.match(content.innerHTML, /does not provide full addresses or a contact directory|Show 1 more/);
+  assert.doesNotMatch(content.innerHTML, /50 most recent|most recent referrals/i);
+  assert.doesNotMatch(content.innerHTML, /hefex15454@careney\.com|private@example|[0-9a-f]{8}-[0-9a-f-]{27}|ref_[0-9a-f]{24}/i);
+});
+
+test('member can progressively load the complete pseudonymised referral list', async () => {
+  let request = null;
+  const { page } = loadPage({
+    partners: {
+      referrals: async (input) => {
+        request = input;
+        return {
+          data: {
+            total: 3,
+            items: [{
+              key: `ref_${'c'.repeat(24)}`,
+              label_number: 1,
+              masked_email: 'fr••••nd@sa••••le.test',
+              status: 'payment_recorded',
+              attributed_at: '2026-08-09T10:00:00Z',
+              first_eligible_payment_at: '2026-08-09T10:05:00Z',
+              next_maturation_at: null,
+            }],
+            next_cursor: null,
+          },
+        };
+      },
+    },
+  });
+  page._referralItems = [{
+    key: `ref_${'a'.repeat(24)}`,
+    label_number: 3,
+    masked_email: 'he••••54@ca••••ey.com',
+    status: 'commission_pending',
+    attributed_at: '2026-08-11T10:00:00Z',
+    first_eligible_payment_at: '2026-08-11T10:05:00Z',
+    next_maturation_at: '2026-09-25T10:05:00Z',
+  }, {
+    key: `ref_${'b'.repeat(24)}`,
+    label_number: 2,
+    masked_email: null,
+    status: 'signed_up',
+    attributed_at: '2026-08-10T10:00:00Z',
+    first_eligible_payment_at: null,
+    next_maturation_at: null,
+  }];
+  page._referralTotal = 3;
+  page._referralCursor = 'referral_00000000000000000002';
+  const states = [];
+  page.updateReferralModule = () => states.push(page._referralLoadState);
+
+  await page.loadMoreReferrals({ maturation_days: 45 });
+
+  assert.equal(request.limit, 20);
+  assert.equal(request.cursor, 'referral_00000000000000000002');
+  assert.ok(request.signal instanceof AbortSignal);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      page._referralItems.map((item) => item.label_number),
+    )),
+    [3, 2, 1],
+  );
+  assert.equal(page._referralCursor, null);
+  assert.equal(page._referralTotal, 3);
+  assert.deepEqual(states, ['loading', 'idle']);
+  assert.match(page.referralControlsMarkup(), /All 3 referrals are shown/);
+  assert.doesNotMatch(JSON.stringify(page._referralItems), /hefex15454@careney\.com|user_id|payment_reference/i);
+});
+
+test('referral pagination keeps loaded rows and offers an inline retry', async () => {
+  const { page } = loadPage({
+    partners: {
+      referrals: async () => { throw new Error('network'); },
+    },
+  });
+  page._referralItems = [{
+    key: `ref_${'a'.repeat(24)}`,
+    label_number: 2,
+    masked_email: null,
+    status: 'signed_up',
+    attributed_at: '2026-08-11T10:00:00Z',
+    first_eligible_payment_at: null,
+    next_maturation_at: null,
+  }];
+  page._referralTotal = 2;
+  page._referralCursor = 'referral_00000000000000000002';
+  page.updateReferralModule = () => {};
+
+  await page.loadMoreReferrals({ maturation_days: 45 });
+
+  assert.equal(page._referralItems.length, 1);
+  assert.equal(page._referralLoadState, 'error');
+  assert.match(page.referralControlsMarkup(), /role="alert"/);
+  assert.match(page.referralControlsMarkup(), /Try again/);
+  assert.match(page.referralControlsMarkup(), /Already displayed referrals remain available/);
+  assert.match(cssSource, /\.partners-referrals-more,[\s\S]{0,120}min-height:\s*44px/);
+  assert.match(cssSource, /\.partners-referrals-load-row,[\s\S]{0,180}flex-direction:\s*column/);
+});
+
 test('active member does not promise earnings while the economic flag is paused', () => {
   const { page, container } = loadPage();
   const bootstrap = bootstrapV2({ membership: true });
