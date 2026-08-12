@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(122);
+select extensions.plan(129);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
 -- and ACL assertions for the current Partners baseline, bounded signed Didit
@@ -174,6 +174,18 @@ set local norva.partners_restore_expected_routines = '[
   {"signature":"affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.guard_financial_canary_run_mutation()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.partners_financial_canary_authorization_current(text,uuid,text,text)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.partners_financial_canary_lineage_current(uuid,boolean)","security_definer":true,"volatility":"s","access_role":"owner"},
+  {"signature":"affiliate_private.guard_financial_canary_cycle_exclusivity()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.guard_financial_canary_cycle_approval()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.guard_financial_canary_manual_batch()","security_definer":true,"volatility":"v","access_role":"owner"},
+  {"signature":"affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)","security_definer":true,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_financial_canary_cycle_approve(text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
+  {"signature":"public.admin_partners_financial_canary_cycle_abort(text,text,text)","security_definer":false,"volatility":"v","access_role":"authenticated"},
   {"signature":"affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"owner"},
   {"signature":"public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)","security_definer":true,"volatility":"v","access_role":"service_role"},
   {"signature":"affiliate_private.is_managed_partners_flag(text)","security_definer":false,"volatility":"i","access_role":"owner"},
@@ -200,7 +212,7 @@ select extensions.is(
     from expected
     where to_regprocedure(expected.signature) is not null
   ),
-  172::bigint,
+  184::bigint,
   'the restored candidate exposes every baseline and frictionless routine'
 );
 
@@ -223,7 +235,7 @@ select extensions.is(
       on routine.oid = to_regprocedure(expected.signature)
     where pg_catalog.pg_get_userbyid(routine.proowner) = current_user
   ),
-  172::bigint,
+  184::bigint,
   'every migrated routine retains the controlled migration executor owner'
 );
 
@@ -240,7 +252,13 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 172
+    select count(*) = 184
+      and count(*) filter (
+        where expected.access_role = 'owner'
+      ) = 86
+      and count(*) filter (
+        where expected.access_role = 'authenticated'
+      ) = 36
       and bool_and(routine.prosecdef = expected.security_definer)
     from expected
     join pg_catalog.pg_proc routine
@@ -262,7 +280,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 172
+    select count(*) = 184
       and bool_and(
         'search_path=""' = any(coalesce(routine.proconfig, '{}'::text[]))
       )
@@ -286,7 +304,7 @@ select extensions.ok(
         access_role text
       )
     )
-    select count(*) = 172
+    select count(*) = 184
       and bool_and(routine.provolatile = expected.volatility::"char")
     from expected
     join pg_catalog.pg_proc routine
@@ -396,7 +414,7 @@ select extensions.ok(
       )
       where access_role = 'owner'
     )
-    select count(*) = 80
+    select count(*) = 86
       and bool_and(
         not pg_catalog.has_function_privilege(
           'anon',
@@ -593,6 +611,111 @@ select extensions.ok(
       ), 0) <> entry.amount_minor
   ),
   'restored commission entries remain fully balanced regardless of row count'
+);
+
+select extensions.ok(
+  (
+    with target as (
+      select to_regclass(
+        'affiliate_private.affiliate_financial_canary_runs'
+      ) as oid
+    )
+    select target.oid is not null
+      and coalesce((
+        select relation.relrowsecurity
+          and pg_catalog.pg_get_userbyid(relation.relowner) = current_user
+        from pg_catalog.pg_class relation
+        where relation.oid = target.oid
+      ), false)
+      and coalesce(not pg_catalog.has_table_privilege(
+        'anon', target.oid,
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ), false)
+      and coalesce(not pg_catalog.has_table_privilege(
+        'authenticated', target.oid,
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ), false)
+      and coalesce(not pg_catalog.has_table_privilege(
+        'service_role', target.oid,
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ), false)
+      and (
+        select count(*) = 5
+          and bool_and(constraint_row.contype = 'c')
+          and bool_and(constraint_row.convalidated)
+        from pg_catalog.pg_constraint constraint_row
+        where constraint_row.conrelid = target.oid
+          and constraint_row.conname = any(array[
+            'affiliate_financial_canary_runs_key',
+            'affiliate_financial_canary_runs_hashes',
+            'affiliate_financial_canary_runs_scope',
+            'affiliate_financial_canary_runs_actors',
+            'affiliate_financial_canary_runs_state'
+          ]::text[])
+      )
+      and (
+        select count(*) = 7
+          and bool_and(constraint_row.convalidated)
+        from pg_catalog.pg_constraint constraint_row
+        where constraint_row.conrelid = target.oid
+          and constraint_row.contype = 'u'
+      )
+    from target
+  )
+  and (
+    with expected(
+      trigger_name,
+      relation_name,
+      routine_name,
+      trigger_type
+    ) as (
+      values
+        (
+          'affiliate_financial_canary_runs_guard',
+          'affiliate_financial_canary_runs',
+          'guard_financial_canary_run_mutation',
+          31::smallint
+        ),
+        (
+          'affiliate_payout_cycles_00_financial_canary_exclusivity_guard',
+          'affiliate_payout_cycles',
+          'guard_financial_canary_cycle_exclusivity',
+          23::smallint
+        ),
+        (
+          'affiliate_payout_cycles_financial_canary_approval_guard',
+          'affiliate_payout_cycles',
+          'guard_financial_canary_cycle_approval',
+          19::smallint
+        ),
+        (
+          'affiliate_revolut_manual_batches_financial_canary_guard',
+          'affiliate_revolut_manual_batches',
+          'guard_financial_canary_manual_batch',
+          7::smallint
+        )
+    )
+    select count(*) = 4
+      and bool_and(trigger_row.tgenabled = 'O')
+      and bool_and(not trigger_row.tgisinternal)
+      and bool_and(trigger_row.tgtype = expected.trigger_type)
+      and bool_and(routine_namespace.nspname = 'affiliate_private')
+      and bool_and(routine.proname = expected.routine_name)
+    from expected
+    join pg_catalog.pg_namespace relation_namespace
+      on relation_namespace.nspname = 'affiliate_private'
+    join pg_catalog.pg_class relation
+      on relation.relnamespace = relation_namespace.oid
+      and relation.relname = expected.relation_name
+    join pg_catalog.pg_trigger trigger_row
+      on trigger_row.tgrelid = relation.oid
+      and trigger_row.tgname = expected.trigger_name
+    join pg_catalog.pg_proc routine
+      on routine.oid = trigger_row.tgfoid
+    join pg_catalog.pg_namespace routine_namespace
+      on routine_namespace.oid = routine.pronamespace
+  ),
+  'financial canary authorization remains private, one-shot and guarded across payout mutations'
 );
 
 select extensions.ok(

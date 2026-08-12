@@ -20,13 +20,16 @@ test('Partners production certification keeps all twelve controls explicit', () 
   assert.doesNotMatch(certification, /avis professionnel (?:obtenu|validé)/i);
 });
 
-test('the restore runbook describes the exact post-f0e3212 preflight contract', () => {
+test('the restore runbook describes the exact post-9961726 financial-canary contract', () => {
   const restore = read('ops/hetzner/backup/RESTORE.md');
 
-  assert.match(restore, /20260810080836_partners_didit_preflight_registry_truth\.sql/);
+  assert.match(restore, /20260812122425_partners_financial_canary_atomic_cycle\.sql/);
+  assert.match(restore, /`baseline_contract=9961726`/);
+  assert.match(restore, /`baseline_markers_verified=47`/);
   assert.match(restore, /`migrations_applied=1`/);
-  assert.match(restore, /`migration_routines_verified=164`/);
-  assert.match(restore, /`migration_relations_verified=19`/);
+  assert.match(restore, /`migration_routines_verified=184`/);
+  assert.match(restore, /`migration_relations_verified=20`/);
+  assert.match(restore, /129 assertions pgTAP/);
 });
 
 test('the app cache-busts the finalized Partners API and page contracts', () => {

@@ -1512,7 +1512,7 @@ test('standalone binds every recovered stream to the exact native recovery token
   assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
   assert.match(
     liveFlow,
-    /activeStreamId:[^\r\n]*\r?\n\s*sessionId:\s*freshLiveSessionId,\r?\n\s*recoveryToken\b/,
+    /activeStreamId:[^\r\n]*\r?\n[ \t]*sessionId:[ \t]*freshLiveSessionId,\r?\n[ \t]*recoveryToken\b/,
   );
 });
 

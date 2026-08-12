@@ -436,8 +436,8 @@ test('restore procedures explicitly verify the Partners private schema', () => {
   const frictionlessRoutineCatalog = frictionlessRoutineCatalogMatch[1];
   assert.equal(
     (frictionlessRoutineCatalog.match(/^\s*\('/gm) || []).length,
-    49,
-    'the production verifier must cover every routine touched by the finalization lot',
+    52,
+    'the production verifier must cover the finalization lot and the public financial-canary wrappers',
   );
   for (const relation of [
     'affiliate_private.affiliate_access_credit_catalog',
@@ -508,6 +508,36 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     verifier,
     /v_signature = any \(array\[[\s\S]*public\.admin_partners_revolut_beneficiary_binding_authorize\(uuid,text,text,text,text,integer,text,text\)[\s\S]*retired split\/manual Revolut routine remains callable/,
     'restore verification must keep the legacy account-UUID beneficiary authorizer closed',
+  );
+  const restoredPublicRoutineCatalogStart = verifier.indexOf(
+    'foreach v_signature in array array[',
+  );
+  const restoredPublicRoutineCatalogEnd = verifier.indexOf(
+    ']\n  loop',
+    restoredPublicRoutineCatalogStart,
+  );
+  const restoredPublicRoutineCatalog = verifier.slice(
+    restoredPublicRoutineCatalogStart,
+    restoredPublicRoutineCatalogEnd,
+  );
+  for (const signature of [
+    'public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)',
+    'public.admin_partners_financial_canary_cycle_approve(text,text,text)',
+    'public.admin_partners_financial_canary_cycle_abort(text,text,text)',
+  ]) {
+    assert.ok(
+      restoredPublicRoutineCatalog.includes(`'${signature}'`),
+      `${signature} must remain in the exact restored public-routine catalogue`,
+    );
+    assert.ok(
+      verifier.includes(`('${signature}', false, 'v', 'authenticated')`),
+      `${signature} must remain SECURITY INVOKER and authenticated-only`,
+    );
+  }
+  assert.match(
+    verifier,
+    /v_signature like 'public\.admin_partners_financial_canary_cycle_%'/,
+    'public financial-canary wrappers must use the authenticated-only Finance ACL branch',
   );
   const privateExecuteError = verifier.indexOf(
     'unexpected private Partners EXECUTE privilege',
@@ -618,7 +648,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   const expandedAclAssertions = restoreRoutineCatalog.filter(
     (routine) => routine.access_role !== 'owner',
   ).length;
-  assert.equal(restoreRoutineCatalog.length, 172);
+  assert.equal(restoreRoutineCatalog.length, 184);
   assert.equal(
     restorePlan,
     staticAssertions + expandedAclAssertions,
@@ -687,17 +717,17 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260812082001_partners_referral_visible_numbering\.sql/,
+    /20260812122425_partners_financial_canary_atomic_cycle\.sql/,
   );
-  assert.match(rehearsal, /BASELINE_CONTRACT="d120672"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="9961726"/);
   assert.match(
     rehearsal,
-    /TARGET_MIGRATION="supabase\/migrations\/20260812082001_partners_referral_visible_numbering\.sql"/,
+    /TARGET_MIGRATION="supabase\/migrations\/20260812122425_partners_financial_canary_atomic_cycle\.sql"/,
   );
   assert.equal(
     (rehearsal.match(/readonly TARGET_MIGRATION=/g) || []).length,
     1,
-    'the post-d120672 visible-numbering lot contains exactly one migration',
+    'the post-9961726 financial-canary lot contains exactly one migration',
   );
   assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
   assert.match(rehearsal, /-f "\/candidate\/\$TARGET_MIGRATION"/);
@@ -707,12 +737,12 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.equal(
     (rehearsal.match(/-f "\/candidate\/\$TARGET_MIGRATION"/g) || []).length,
     1,
-    'predeploy replays exactly the one referral-visibility migration',
+    'predeploy replays exactly the one financial-canary migration',
   );
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=43/);
+  assert.match(rehearsal, /baseline_markers_verified=47/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -826,11 +856,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE\}\|\$\{FINANCIAL_CANARY_MARKER_PENDING\}\|\$\{NATIVE_HEARTBEAT_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
-    /else[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE\}"/,
+    /else[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE\}\|\$\{FINANCIAL_CANARY_MARKER_COMPLETE\}\|\$\{NATIVE_HEARTBEAT_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
@@ -866,19 +896,24 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
     /migration_replay_skipped=\$MIGRATION_REPLAY_SKIPPED/,
   );
   assert.match(rehearsal, /rehearsal_mode=\$REHEARSAL_MODE/);
-  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "172\|0"/);
-  assert.match(rehearsal, /migration_routines_verified=172/);
+  assert.match(rehearsal, /"\$ROUTINE_OWNER_CHECK" != "184\|0"/);
+  assert.match(rehearsal, /migration_routines_verified=184/);
   const ownershipCatalog = rehearsal.match(
     /ROUTINE_OWNER_CHECK=[\s\S]*?<<'SQL'[\s\S]*?with expected\(signature\) as \(\s*values(?<values>[\s\S]*?)\r?\n\)\r?\nselect count\(\*\)::text/,
   );
   assert.ok(ownershipCatalog?.groups?.values);
   assert.equal(
     (ownershipCatalog.groups.values.match(/^\s+\('[^']+'\),?$/gm) || []).length,
-    172,
+    184,
     'the ownership catalogue cardinality must match the enforced routine total',
   );
-  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "19\|0"/);
-  assert.match(rehearsal, /migration_relations_verified=19/);
+  assert.match(rehearsal, /"\$RELATION_OWNER_CHECK" != "20\|0"/);
+  assert.match(rehearsal, /migration_relations_verified=20/);
+  assert.match(rehearsal, /financial_canary_routine_acl_verified=12/);
+  assert.match(rehearsal, /financial_canary_table_empty=true/);
+  assert.match(rehearsal, /FINANCIAL_CANARY_ACL_CHECK/);
+  assert.match(rehearsal, /FINANCIAL_CANARY_TABLE_CHECK/);
+  assert.match(rehearsal, /has_table_privilege\([\s\S]*cloud_playback_sessions/);
   assert.match(rehearsal, /verify-partners-restore\.sql/);
   assert.match(rehearsal, /affiliate_restore_compatibility\.sql/);
   assert.match(workflow, /affiliate_restore_compatibility\.sql/);
@@ -920,7 +955,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(122\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(129\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(
@@ -928,21 +963,22 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.ok(routineCatalogMatch, 'the restore pgTAP must expose its exact routine catalogue');
   const routineCatalog = JSON.parse(routineCatalogMatch[1]);
-  assert.equal(routineCatalog.length, 172);
-  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 172);
+  assert.equal(routineCatalog.length, 184);
+  assert.equal(new Set(routineCatalog.map(({ signature }) => signature)).size, 184);
   const routineAccessCounts = routineCatalog.reduce((counts, { access_role: accessRole }) => {
     counts[accessRole] = (counts[accessRole] || 0) + 1;
     return counts;
   }, {});
   assert.deepEqual(
     routineAccessCounts,
-    { owner: 80, authenticated: 30, service_role: 62 },
+    { owner: 86, authenticated: 36, service_role: 62 },
   );
   for (const relation of [
     'affiliate_private.affiliate_access_credit_catalog',
     'affiliate_private.affiliate_access_credit_quotes',
     'affiliate_private.affiliate_access_credit_redemptions',
     'affiliate_private.affiliate_web_tax_policies',
+    'affiliate_private.affiliate_financial_canary_runs',
     'public.cloud_access_grants',
   ]) {
     assert.match(restorePgTap, new RegExp(relation.replaceAll('.', '\\.')));
@@ -983,7 +1019,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(restoreGuide, /predeploy/);
   assert.match(restoreGuide, /postdeploy/);
-  assert.match(restoreGuide, /baseline_contract=f0e3212/);
+  assert.match(restoreGuide, /baseline_contract=9961726/);
+  assert.match(restoreGuide, /baseline_markers_verified=47/);
+  assert.match(restoreGuide, /migration_routines_verified=184/);
+  assert.match(restoreGuide, /migration_relations_verified=20/);
+  assert.match(restoreGuide, /129 assertions pgTAP/);
   assert.match(restoreGuide, /migrations_applied=1/);
   assert.match(restoreGuide, /migrations_applied=0/);
   assert.match(restoreGuide, /NORVA_SKIP_BASE_RETENTION=true/);
@@ -1568,11 +1608,19 @@ test('Google Play Orders credential installer is atomic, rolling and permission-
   assert.match(installer, /recreate_edge functions norva-edge-functions/);
   assert.match(installer, /recreate_edge functions2 norva-edge-functions-2/);
   assert.match(installer, /command -v python3/);
+  assert.match(installer, /Python package "cryptography" is required/);
   assert.match(installer, /from cryptography\.hazmat\.primitives import hashes, serialization/);
   assert.match(installer, /https:\/\/www\.googleapis\.com\/auth\/androidpublisher/);
-  assert.match(installer, /androidpublisher\/v3\/"[\s\S]*applications\/tv\.norva\.phone\/orders/);
+  assert.match(installer, /https:\/\/androidpublisher\.googleapis\.com\/androidpublisher\/v3\//);
+  assert.match(installer, /applications\/tv\.norva\.phone\/orders\/\{order_id\}/);
   assert.match(installer, /serialization\.load_pem_private_key/);
+  assert.match(installer, /order_status in \(401, 403\)/);
   assert.match(installer, /order_status != 404/);
+  assert.match(installer, /permission smoke was inconclusive/);
+  assert.match(
+    installer,
+    /verify_google_play_orders_permission\s+cp -p -- "\$env_file" "\$backup"\s+chmod 600 "\$backup"\s+mv -- "\$work\/env" "\$env_file"\s+env_changed=true\s+cd "\$compose_dir"\s+recreate_edge functions norva-edge-functions/,
+  );
   assert.doesNotMatch(installer, /node - "\$work\/service-account\.json"/);
   assert.match(installer, /previous Edge environment was restored and verified/);
   assert.match(installer, /rollback is incomplete/);

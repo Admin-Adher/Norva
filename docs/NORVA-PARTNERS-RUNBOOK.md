@@ -1085,8 +1085,10 @@ session live non superseded, son état `verified`, le webhook signé corresponda
 et la purge provider terminée.
 
 Conserver `partners_payouts_live=false` et `partners_shadow_mode=true` pendant
-le paiement et J+45. Après un préflight intégralement `PASS`, ouvrir la fenêtre
-de lot uniquement via les RPC dédiées Admin/AAL2
+le paiement et J+45. Après un préflight intégralement `PASS`, passer
+temporairement `partners_shadow_mode=false` puis
+`partners_payouts_live=true` avant toute création de cycle. Ouvrir ensuite la
+fenêtre de lot uniquement via les RPC dédiées Admin/AAL2
 `admin_partners_financial_canary_cycle_create` puis, avec un second opérateur,
 `admin_partners_financial_canary_cycle_approve`. Elles relisent les trois
 secrets, consomment une seule fois le couple autorisation/transaction, créent un
@@ -1094,9 +1096,8 @@ cycle live à un item et prouvent de nouveau la lignée avant/après allocation.
 L'approbation prépare obligatoirement le lot manuel exact dans la même
 transaction : si cette préparation échoue, l'approbation, l'allocation et le lot
 sont tous annulés et le cycle reste en brouillon. Il n'existe donc aucun état
-validé durable sans lot. Passer temporairement le shadow à `false`, activer les
-payouts, effectuer le virement dans Revolut Basic, importer le relevé et
-rapprocher la référence Norva. Revenir immédiatement à
+validé durable sans lot. Effectuer le virement dans Revolut Basic, importer le
+relevé et rapprocher la référence Norva. Revenir immédiatement à
 `partners_payouts_live=false` et `partners_shadow_mode=true`, puis révoquer les
 trois entrées Vault. Tout échec ferme la fenêtre sans modifier l'adhésion, les
 gains déjà comptabilisés ni la conversion en abonnement.

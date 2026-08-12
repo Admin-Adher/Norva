@@ -128,10 +128,10 @@ test('checker and batch time revalidate the live subject and payout destination'
     assert.match(lineage, contract);
   }
   assert.doesNotMatch(lineage, /kyc_session\.expires_at/);
-  assert.equal(
+  assert.ok(
     (migration.match(/partners_financial_canary_lineage_current\(/g) || [])
       .length >= 4,
-    true,
+    'the canary contract must revalidate authoritative lineage at every money-moving boundary',
   );
 });
 

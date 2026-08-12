@@ -69,16 +69,14 @@ command -v python3 >/dev/null 2>&1 || {
   printf 'python3 is required for Google Play credential validation.\n' >&2
   exit 1
 }
-python3 - <<'PY'
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-PY
+if ! python3 -c 'from cryptography.hazmat.primitives import hashes, serialization; from cryptography.hazmat.primitives.asymmetric import padding' >/dev/null 2>&1; then
+  printf 'Python package "cryptography" is required for the Google Play Orders permission smoke. Install it before retrying; the Edge environment was not changed.\n' >&2
+  exit 1
+fi
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
 
 backup="$backup_dir/hetzner.env.pre-google-play-$(date -u +%Y%m%dT%H%M%SZ)"
-cp -p -- "$env_file" "$backup"
-chmod 600 "$backup"
 work="$(mktemp -d /home/adrien/norva-deploy-backups/google-play-key.XXXXXX)"
 chmod 700 "$work"
 env_changed=false
@@ -101,6 +99,106 @@ recreate_edge() {
   docker compose --env-file "$env_file" -f "$compose_file" \
     up -d --no-deps --force-recreate "$service" >/dev/null
   wait_healthy "$container"
+}
+
+verify_google_play_orders_permission() {
+  python3 - "$work/service-account.json" <<'PY'
+import base64
+import json
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+
+
+def base64url(value):
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+credential = json.loads(open(__import__("sys").argv[1], encoding="utf-8").read())
+now = int(time.time())
+header = base64url(json.dumps(
+    {"alg": "RS256", "typ": "JWT"}, separators=(",", ":")
+).encode("utf-8"))
+claims = base64url(json.dumps({
+    "iss": credential["client_email"],
+    "scope": "https://www.googleapis.com/auth/androidpublisher",
+    "aud": "https://oauth2.googleapis.com/token",
+    "iat": now,
+    "exp": now + 600,
+}, separators=(",", ":")).encode("utf-8"))
+signing_input = f"{header}.{claims}".encode("ascii")
+private_key = serialization.load_pem_private_key(
+    credential["private_key"].encode("utf-8"), password=None
+)
+signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+assertion = f"{signing_input.decode('ascii')}.{base64url(signature)}"
+token_body = urllib.parse.urlencode({
+    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    "assertion": assertion,
+}).encode("ascii")
+token_request = urllib.request.Request(
+    "https://oauth2.googleapis.com/token",
+    data=token_body,
+    headers={"content-type": "application/x-www-form-urlencoded"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(token_request, timeout=15) as response:
+        token_status = response.status
+        token_text = response.read(65537)
+except urllib.error.HTTPError as error:
+    token_status = error.code
+    token_text = error.read(65537)
+except (urllib.error.URLError, TimeoutError):
+    raise SystemExit(
+        "Google OAuth smoke was inconclusive (network or provider error); "
+        "the Edge environment was not changed"
+    )
+if len(token_text) > 65536:
+    raise SystemExit("oversized Google OAuth response")
+try:
+    token = json.loads(token_text)
+except Exception:
+    token = None
+access_token = token.get("access_token") if isinstance(token, dict) else None
+if token_status != 200 or not isinstance(access_token, str) or len(access_token) < 32:
+    raise SystemExit(f"Google OAuth smoke failed (HTTP {token_status}); the Edge environment was not changed")
+print("GOOGLE_PLAY_OAUTH_OK")
+
+order_id = urllib.parse.quote("GPA.0000-0000-0000-00000", safe="")
+order_request = urllib.request.Request(
+    "https://androidpublisher.googleapis.com/androidpublisher/v3/"
+    f"applications/tv.norva.phone/orders/{order_id}",
+    headers={"authorization": f"Bearer {access_token}"},
+)
+try:
+    with urllib.request.urlopen(order_request, timeout=15) as response:
+        order_status = response.status
+        response.read(1)
+except urllib.error.HTTPError as error:
+    order_status = error.code
+    error.read(1)
+except (urllib.error.URLError, TimeoutError):
+    raise SystemExit(
+        "Google Play Orders permission smoke was inconclusive "
+        "(network or provider error); the Edge environment was not changed"
+    )
+if order_status in (401, 403):
+    raise SystemExit(
+        f"Google Play Orders permission denied (HTTP {order_status}); "
+        "the Edge environment was not changed"
+    )
+if order_status != 404:
+    raise SystemExit(
+        f"Google Play Orders permission smoke was inconclusive (HTTP {order_status}); "
+        "the Edge environment was not changed"
+    )
+print("GOOGLE_PLAY_ORDERS_PERMISSION_OK")
+PY
 }
 
 cleanup_and_rollback() {
@@ -213,6 +311,10 @@ output_path.write_text("\n".join(result) + "\n", encoding="utf-8", newline="\n")
 os.chmod(output_path, 0o600)
 PY
 
+verify_google_play_orders_permission
+
+cp -p -- "$env_file" "$backup"
+chmod 600 "$backup"
 mv -- "$work/env" "$env_file"
 env_changed=true
 cd "$compose_dir"
@@ -234,88 +336,6 @@ for name in ("norva-edge-functions", "norva-edge-functions-2"):
     if env.get("GOOGLE_PLAY_PACKAGE_NAME") != "tv.norva.phone":
         raise SystemExit(f"Google Play package parity failed for {name}")
 print("GOOGLE_PLAY_EDGE_PARITY_OK")
-PY
-
-python3 - "$work/service-account.json" <<'PY'
-import base64
-import json
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-
-
-def base64url(value):
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-credential = json.loads(open(__import__("sys").argv[1], encoding="utf-8").read())
-now = int(time.time())
-header = base64url(json.dumps(
-    {"alg": "RS256", "typ": "JWT"}, separators=(",", ":")
-).encode("utf-8"))
-claims = base64url(json.dumps({
-    "iss": credential["client_email"],
-    "scope": "https://www.googleapis.com/auth/androidpublisher",
-    "aud": "https://oauth2.googleapis.com/token",
-    "iat": now,
-    "exp": now + 600,
-}, separators=(",", ":")).encode("utf-8"))
-signing_input = f"{header}.{claims}".encode("ascii")
-private_key = serialization.load_pem_private_key(
-    credential["private_key"].encode("utf-8"), password=None
-)
-signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-assertion = f"{signing_input.decode('ascii')}.{base64url(signature)}"
-token_body = urllib.parse.urlencode({
-    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    "assertion": assertion,
-}).encode("ascii")
-token_request = urllib.request.Request(
-    "https://oauth2.googleapis.com/token",
-    data=token_body,
-    headers={"content-type": "application/x-www-form-urlencoded"},
-    method="POST",
-)
-try:
-    with urllib.request.urlopen(token_request, timeout=15) as response:
-        token_status = response.status
-        token_text = response.read(65537)
-except urllib.error.HTTPError as error:
-    token_status = error.code
-    token_text = error.read(65537)
-if len(token_text) > 65536:
-    raise SystemExit("oversized Google OAuth response")
-try:
-    token = json.loads(token_text)
-except Exception:
-    token = None
-access_token = token.get("access_token") if isinstance(token, dict) else None
-if token_status != 200 or not isinstance(access_token, str) or len(access_token) < 32:
-    raise SystemExit(f"Google OAuth smoke failed (HTTP {token_status})")
-print("GOOGLE_PLAY_OAUTH_OK")
-
-order_id = urllib.parse.quote("GPA.0000-0000-0000-00000", safe="")
-order_request = urllib.request.Request(
-    "https://androidpublisher.googleapis.com/androidpublisher/v3/"
-    f"applications/tv.norva.phone/orders/{order_id}",
-    headers={"authorization": f"Bearer {access_token}"},
-)
-try:
-    with urllib.request.urlopen(order_request, timeout=15) as response:
-        order_status = response.status
-        response.read(1)
-except urllib.error.HTTPError as error:
-    order_status = error.code
-    error.read(1)
-if order_status != 404:
-    raise SystemExit(
-        f"Google Play Orders permission smoke failed (HTTP {order_status})"
-    )
-print("GOOGLE_PLAY_ORDERS_PERMISSION_OK")
 PY
 
 echo 'GOOGLE_PLAY_ORDERS_CONFIGURATION_OK'
