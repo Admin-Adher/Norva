@@ -79,6 +79,57 @@ test('source health reports an API outage as unknown instead of not configured',
   assert.deepEqual(Array.from(summary.sources), []);
 });
 
+test('catalog policy never treats discovery counts as browsable rows', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'syncing',
+    syncProgress: {
+      status: 'syncing',
+      counts: { live: 400, movies: 2500, series: 900, total: 3800 },
+    },
+  }]);
+
+  const availability = health.catalogAvailability(summary);
+  assert.equal(availability.gate, true);
+  assert.equal(availability.browsable, false);
+  assert.equal(health.isCatalogCategoryAvailable(summary, 'movies'), false);
+});
+
+test('catalog policy unlocks every consumer from the authoritative usable flag', () => {
+  const health = sourceHealthHarness();
+  const source = {
+    id: 'source-1',
+    sync_status: 'syncing',
+    syncProgress: { status: 'syncing', usable: true, counts: { total: 100 } },
+  };
+  const summary = health.summarize([source]);
+  const sourcePolicy = health.catalogSourcePolicy(source);
+  const availability = health.catalogAvailability(summary);
+
+  assert.equal(sourcePolicy.phase, 'ready');
+  assert.equal(sourcePolicy.backgrounding, true);
+  assert.equal(availability.gate, false);
+  assert.equal(availability.categories.live, true);
+  assert.equal(availability.categories.movies, true);
+  assert.equal(availability.categories.series, true);
+});
+
+test('catalog policy keeps a hard login failure actionable even with an older catalog', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-1',
+    sync_status: 'failed',
+    sync_error: '401 invalid username',
+    configHint: { lastSync: { syncedAt: '2026-08-10T08:00:00.000Z', total: 42 } },
+  }]);
+
+  const availability = health.catalogAvailability(summary);
+  assert.equal(summary.state, 'auth_failed');
+  assert.equal(availability.gate, true);
+  assert.equal(availability.browsable, false);
+});
+
 test('Settings renders the exact summary returned by the App refresh seam', async () => {
   const container = { innerHTML: '' };
   const sharedSummary = { state: 'ready', sources: [{ source: { id: 'source-1' } }] };
@@ -188,6 +239,40 @@ test('SourceManager exposes one preparation view instead of leaking rendering in
   assert.equal('html' in view, false, 'progress markup must stay lazy on patch-only ticks');
   assert.match(view.render(), /Living room/);
   assert.equal(typeof view.patch, 'function');
+});
+
+test('SourceManager shares one connection parser for Home and Settings', () => {
+  const { manager } = sourceManagerHarness();
+  const playlist = manager.buildSourceConnection({
+    type: 'auto',
+    url: 'https://provider.example/list.m3u?token=abc',
+  });
+  const xtream = manager.buildSourceConnection({
+    type: 'auto',
+    url: 'https://provider.example/get.php?username=alex&password=secret&type=m3u_plus',
+  });
+
+  assert.equal(playlist.type, 'm3u');
+  assert.equal(playlist.url, 'https://provider.example/list.m3u?token=abc');
+  assert.equal(xtream.type, 'xtream');
+  assert.equal(xtream.url, 'https://provider.example');
+  assert.equal(xtream.username, 'alex');
+  assert.equal(xtream.password, 'secret');
+});
+
+test('terminal provider errors render a truthful recovery state', () => {
+  const { manager } = sourceManagerHarness();
+  const html = manager.catalogPreparationView({
+    id: 'source-1',
+    name: 'Family TV',
+    sync_status: 'unreachable',
+    syncProgress: { status: 'unreachable', counts: {} },
+  }).render();
+
+  assert.match(html, /Provider unavailable/);
+  assert.match(html, /Needs attention/);
+  assert.doesNotMatch(html, /Scanning/);
+  assert.doesNotMatch(html, /Repair Login/);
 });
 
 test('SourceManager recovery sessions own and release their cancellation token', async () => {

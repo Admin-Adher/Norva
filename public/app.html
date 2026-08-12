@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=102">
+  <link rel="stylesheet" href="/css/main.css?v=103">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -975,7 +975,7 @@
           <!-- Sources Tab -->
           <div id="tab-sources" class="tab-content">
             <div class="tc-intro">
-              <div class="tc-intro-icon">📡</div>
+              <img class="tc-intro-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
                 <p class="tc-intro-title">Connect your TV service</p>
                 <p class="tc-intro-text">Add the service you subscribed to. Providers usually give you either a login
@@ -1067,7 +1067,7 @@
           <!-- Player Tab -->
           <div id="tab-player" class="tab-content">
             <div class="tc-intro">
-              <div class="tc-intro-icon">🎬</div>
+              <img class="tc-intro-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
                 <p class="tc-intro-title">Playback &amp; recommendations</p>
                 <p class="tc-intro-text">Set how Norva plays and what it suggests first. The defaults work well —
@@ -1331,7 +1331,7 @@
           <div id="tab-transcode" class="tab-content">
             <!-- Plain-language intro: reassure that defaults are fine. -->
             <div class="tc-intro">
-              <div class="tc-intro-icon">⚙️</div>
+              <img class="tc-intro-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
                 <p class="tc-intro-title">Playback &amp; quality</p>
                 <p class="tc-intro-text">Norva is set up to play smoothly on its own — you usually don't need to
@@ -2029,7 +2029,7 @@
   <script defer src="/js/utils/hoverPreview.js?v=1"></script>
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
-  <script defer src="/js/utils/sourceHealth.js?v=7"></script>
+  <script defer src="/js/utils/sourceHealth.js?v=8"></script>
   <script defer src="/js/navigation/NavigationModel.js?v=1"></script>
   <script defer src="/js/navigation/NavigationAdapters.js?v=1"></script>
   <script defer src="/js/navigation/navigationBootstrap.js?v=1"></script>
@@ -2045,10 +2045,10 @@
   <script defer src="/js/components/TitleRatingControl.js?v=2"></script>
   <script defer src="/js/components/VideoPlayer.js?v=41"></script>
   <script defer src="/js/components/ChannelList.js?v=49"></script>
-  <script defer src="/js/components/SourceManager.js?v=40"></script>
+  <script defer src="/js/components/SourceManager.js?v=41"></script>
   <script defer src="/js/components/EpgGuide.js?v=13"></script>
   <script defer src="/js/components/LiveGuideFusion.js?v=29"></script>
-  <script defer src="/js/pages/HomePage.js?v=56"></script>
+  <script defer src="/js/pages/HomePage.js?v=57"></script>
   <script defer src="/js/pages/LivePage.js?v=9"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=56"></script>
@@ -2061,7 +2061,7 @@
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=17"></script>
-  <script defer src="/js/app.js?v=71"></script>
+  <script defer src="/js/app.js?v=72"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

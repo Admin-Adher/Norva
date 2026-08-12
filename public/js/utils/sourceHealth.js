@@ -66,6 +66,25 @@
         return string(value).toLowerCase();
     }
 
+    const SYNCING_STATES = new Set([
+        'syncing',
+        'pending',
+        'checking',
+        'connecting',
+        'discovering',
+        'discovered',
+        'importing',
+        'materializing',
+        'building_titles',
+        'building_live_channels',
+        'building_live_variants',
+        'finalizing'
+    ]);
+    const READY_STATES = new Set(['ready', 'success', 'synced', 'complete', 'completed']);
+    const FAILURE_STATES = new Set(['error', 'failed', 'auth_failed', 'expired', 'unreachable', 'revoked', 'disabled']);
+    const EXPLICIT_ATTENTION_STATES = new Set(['auth_failed', 'expired', 'unreachable']);
+    const CATALOG_CATEGORIES = ['live', 'movies', 'series'];
+
     function sourceId(source = {}) {
         source = source || {};
         return string(source.id || source.source_id || source.sourceId || source.cloudId || source.cloud_id);
@@ -156,27 +175,34 @@
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = source.last_sync || source.lastSync || source.last_synced_at || status.last_sync || status.lastSyncedAt;
         const enabled = source.enabled !== false && source.revoked !== true;
-        const syncingStates = new Set([
-            'syncing',
-            'pending',
-            'checking',
-            'connecting',
-            'discovering',
-            'discovered',
-            'importing',
-            'materializing',
-            'building_titles',
-            'building_live_channels',
-            'building_live_variants',
-            'finalizing'
-        ]);
-        const readyStates = new Set(['ready', 'success', 'synced', 'complete', 'completed']);
 
         let state = 'degraded';
         let refreshing = false;
         if (!enabled) {
             state = 'degraded';
-        } else if (syncingStates.has(rawStatus) || syncingStates.has(progressStatus)) {
+        } else if (EXPLICIT_ATTENTION_STATES.has(rawStatus) || EXPLICIT_ATTENTION_STATES.has(progressStatus)) {
+            const explicitState = EXPLICIT_ATTENTION_STATES.has(progressStatus) ? progressStatus : rawStatus;
+            if (explicitState === 'unreachable' && hasCompletedCatalog(source, status)) {
+                state = 'ready';
+                refreshing = true;
+            } else {
+                state = explicitState;
+            }
+        } else if (FAILURE_STATES.has(rawStatus) || FAILURE_STATES.has(progressStatus) || error) {
+            const errorState = classifyError(error, `${rawStatus} ${progressStatus}`);
+            // A background re-sync that hits a TRANSIENT provider error (timeout,
+            // unreachable, vague degraded) must not downgrade an already-built
+            // catalog: the last import is still fully browsable. Keep it
+            // ready+refreshing and let the watchdog retry silently. Only a hard
+            // auth/expiry verdict (the user must act) still surfaces. Initial
+            // imports (no completed catalog yet) surface every error as before.
+            if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
+                state = 'ready';
+                refreshing = true;
+            } else {
+                state = errorState;
+            }
+        } else if (SYNCING_STATES.has(rawStatus) || SYNCING_STATES.has(progressStatus)) {
             // A background re-sync of an already-built catalog keeps the catalog
             // usable, so classify it ready (flagged `refreshing`) instead of
             // syncing — otherwise the routine auto-refresh re-triggers the
@@ -194,21 +220,7 @@
             } else {
                 state = 'syncing';
             }
-        } else if (error) {
-            const errorState = classifyError(error, rawStatus);
-            // A background re-sync that hits a TRANSIENT provider error (timeout,
-            // unreachable, vague degraded) must not downgrade an already-built
-            // catalog: the last import is still fully browsable. Keep it
-            // ready+refreshing and let the watchdog retry silently. Only a hard
-            // auth/expiry verdict (the user must act) still surfaces. Initial
-            // imports (no completed catalog yet) surface every error as before.
-            if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
-                state = 'ready';
-                refreshing = true;
-            } else {
-                state = errorState;
-            }
-        } else if (readyStates.has(rawStatus) || readyStates.has(progressStatus) || lastSync) {
+        } else if (READY_STATES.has(rawStatus) || READY_STATES.has(progressStatus) || lastSync) {
             state = 'ready';
         } else if (rawStatus === 'idle' || rawStatus === 'new') {
             state = 'syncing';
@@ -227,8 +239,95 @@
             severity: meta.severity,
             needsAttention: meta.severity >= 3,
             isBlocking: meta.severity >= 4,
-            lastSync
+            lastSync,
+            progress
         };
+    }
+
+    function sourceFromItem(item = {}) {
+        return (item && item.source) || item || {};
+    }
+
+    /**
+     * One conservative policy for every onboarding consumer.
+     * Discovery counts are deliberately ignored: the server can publish them
+     * before rows are materialized, so they are not proof that a category is
+     * browsable. Only a completed catalog or the authoritative `usable` flag
+     * unlocks navigation while an import is still running.
+     */
+    function catalogSourcePolicy(source = {}, statuses = []) {
+        const status = statusFor(source, statuses);
+        const progress = progressFor(source, status);
+        const classification = classifySource(source, statuses);
+        const rawStatus = lower(source.sync_status || source.syncStatus || status.status || status.sync_status || '');
+        const progressStatus = lower(progress.status || progress.stage || '');
+        const running = SYNCING_STATES.has(rawStatus) || SYNCING_STATES.has(progressStatus);
+        const browsable = classification.state === 'ready' || progress.usable === true;
+        const phase = classification.state === 'ready'
+            ? 'ready'
+            : classification.state === 'syncing'
+                ? 'syncing'
+                : 'error';
+
+        return {
+            phase,
+            state: classification.state,
+            browsable,
+            backgrounding: browsable && (running || classification.refreshing === true),
+            classification,
+            progress
+        };
+    }
+
+    function catalogAvailability(summary = {}) {
+        const state = summary?.state || 'not_configured';
+        if (state === 'unknown' || summary?.error) {
+            return {
+                state,
+                gate: false,
+                catalogReady: false,
+                browsable: false,
+                backgrounding: false,
+                categories: Object.fromEntries(CATALOG_CATEGORIES.map(category => [category, false]))
+            };
+        }
+
+        const candidates = [...(summary?.sources || []), ...(summary?.issues || [])];
+        const seen = new Set();
+        const policies = [];
+        candidates.forEach(item => {
+            const source = sourceFromItem(item);
+            const key = sourceId(source) || source;
+            if (seen.has(key)) return;
+            seen.add(key);
+            const policy = catalogSourcePolicy(source);
+            if (item?.source && item?.state) {
+                const itemProgress = item.progress && typeof item.progress === 'object' ? item.progress : policy.progress;
+                policy.state = item.state;
+                policy.phase = item.state === 'ready' ? 'ready' : item.state === 'syncing' ? 'syncing' : 'error';
+                policy.browsable = item.state === 'ready' || itemProgress?.usable === true;
+                policy.backgrounding = policy.browsable && (item.refreshing === true || item.state === 'syncing');
+                policy.progress = itemProgress;
+            }
+            policies.push(policy);
+        });
+
+        const catalogReady = state === 'ready' || Boolean(summary?.ready?.length);
+        const browsable = catalogReady || policies.some(policy => policy.browsable);
+        const categories = Object.fromEntries(CATALOG_CATEGORIES.map(category => [category, browsable]));
+        return {
+            state,
+            gate: !browsable,
+            catalogReady,
+            browsable,
+            backgrounding: policies.some(policy => policy.backgrounding),
+            categories
+        };
+    }
+
+    function isCatalogCategoryAvailable(summary = {}, category = '') {
+        if (!CATALOG_CATEGORIES.includes(category)) return false;
+        return catalogAvailability(summary).categories[category] === true;
     }
 
     function safeShortError(error) {
@@ -427,6 +526,9 @@
     window.NorvaSourceHealth = {
         STATE_META,
         classifySource,
+        catalogSourcePolicy,
+        catalogAvailability,
+        isCatalogCategoryAvailable,
         summarize: summaryFrom,
         loadSummary,
         cardHtml,

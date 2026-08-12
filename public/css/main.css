@@ -34,6 +34,7 @@
   --color-text-primary: #F8FAFC;
   --color-text-secondary: #94A3B8;
   --color-text-muted: #71717a;
+  --color-error-text: #FECACA;
 
   /* Compatibility aliases — some mobile-nav and focus rules reference these
      legacy names. Point them at the canonical tokens so the active bottom tab
@@ -2273,6 +2274,7 @@ video::cue {
 
 .norva-setup-actions .btn {
   min-width: 180px;
+  min-height: 44px;
 }
 
 .norva-setup-steps {
@@ -2309,7 +2311,7 @@ video::cue {
 }
 
 .norva-setup-step span:not(.norva-setup-step-index) {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 0.92rem;
 }
 
@@ -2418,9 +2420,25 @@ video::cue {
 
 .setup-form-hint {
   margin: 7px 0 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 0.86rem;
   line-height: 1.35;
+}
+
+.setup-field-error {
+  margin: 7px 0 0;
+  color: var(--color-error-text);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.setup-field-error.hidden {
+  display: none;
+}
+
+.setup-form-input[aria-invalid="true"] {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.28);
 }
 
 .setup-manual-login {
@@ -2490,8 +2508,8 @@ video::cue {
   top: 50%;
   right: 12px;
   transform: translateY(-50%);
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2524,7 +2542,7 @@ video::cue {
   padding: 12px 14px;
   border: 1px solid rgba(239, 68, 68, 0.46);
   border-radius: var(--radius-md);
-  color: #fecaca;
+  color: var(--color-error-text);
   background: rgba(127, 29, 29, 0.24);
 }
 
@@ -2586,8 +2604,14 @@ video::cue {
 }
 
 .norva-setup-lock {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   opacity: 0.7;
+}
+
+.norva-setup-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
 }
 
 .norva-setup-lock .icon {
@@ -2875,16 +2899,36 @@ video::cue {
 .norva-setup-sync-panel .source-sync-milestone small,
 .norva-setup-sync-panel .source-sync-found-note,
 .norva-setup-sync-panel .source-sync-notify-note {
+  color: var(--color-text-secondary);
   font-size: clamp(0.78rem, 0.92vw, 0.9rem);
   line-height: 1.28;
 }
 
 .norva-setup-sync-panel .source-sync-notify-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
   margin: 0;
   padding: 10px 12px;
   border: 1px solid rgba(96, 165, 250, 0.18);
   border-radius: var(--radius-md);
   background: rgba(37, 99, 235, 0.1);
+}
+
+.source-sync-note-icon {
+  display: inline-grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  color: var(--color-accent-hover);
+}
+
+.source-sync-note-icon .icon,
+.source-sync-note-icon svg,
+.source-sync-note-icon img {
+  width: 18px;
+  height: 18px;
 }
 
 /* Source Sections */
@@ -3553,7 +3597,7 @@ video::cue {
 
 .source-sync-error .source-sync-pill {
   border-color: rgba(239, 68, 68, 0.45);
-  color: #fecaca;
+  color: var(--color-error-text);
   background: rgba(127, 29, 29, 0.28);
 }
 
@@ -3574,7 +3618,7 @@ video::cue {
 .source-sync-card span,
 .source-sync-card small {
   display: block;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 .source-sync-card strong {
@@ -3708,16 +3752,24 @@ video::cue {
 .source-sync-copy small {
   display: block;
   margin-top: 2px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   line-height: 1.35;
 }
 
-.source-sync-error {
+.source-sync-error-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
   padding: var(--space-md);
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: var(--radius-md);
-  color: #fecaca;
+  color: var(--color-error-text);
   background: rgba(127, 29, 29, 0.22);
+}
+
+.source-sync-error-message strong,
+.source-sync-error-message span {
+  display: block;
 }
 
 @keyframes sourceSyncProgress {
@@ -3938,7 +3990,13 @@ video::cue {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }
-.tc-intro-icon { font-size: 22px; line-height: 1.4; flex: none; }
+.tc-intro-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  object-fit: contain;
+  opacity: 0.9;
+}
 .tc-intro-title { margin: 0 0 4px; font-weight: 700; font-size: 1rem; color: var(--color-text-primary); }
 .tc-intro-text { margin: 0; font-size: 0.86rem; line-height: 1.55; color: var(--color-text-secondary); }
 
@@ -4176,8 +4234,14 @@ kbd {
 }
 
 .modal-close {
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   background: none;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   font-size: 1.5rem;
   cursor: pointer;
@@ -5986,8 +6050,9 @@ kbd {
 
 @media (min-width: 641px) {
   #page-home.home-setup-active {
-    overflow: hidden;
     overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   #page-home.home-setup-connect-active .norva-setup-connect {
@@ -9810,8 +9875,9 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 #page-home.home-setup-active {
-  overflow: hidden;
   overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 #page-home.home-setup-active .dashboard-content {
@@ -16964,10 +17030,23 @@ html.tv-mode :is(.movie-card, .series-card, .dashboard-card, .channel-tile):focu
 }
 
 @media (max-width: 900px), (max-height: 620px) {
+  #page-home.home-setup-active .dashboard-content,
+  #page-home.home-setup-active #home-rails,
+  #page-home.home-setup-active .norva-setup-gate {
+    height: auto;
+  }
+
+  #page-home.home-setup-connect-active .norva-setup-connect {
+    height: auto;
+    min-height: calc(100dvh - var(--topbar-h) - var(--bottom-nav-h));
+    padding-bottom: max(32px, calc(16px + var(--safe-area-inset-bottom)));
+  }
+
   #page-home.home-setup-active .norva-setup-sync-embedded {
     height: auto;
-    min-height: calc(100dvh - 92px);
+    min-height: calc(100dvh - var(--topbar-h) - var(--bottom-nav-h));
     align-content: start;
+    padding-bottom: max(32px, calc(16px + var(--safe-area-inset-bottom)));
   }
 
   #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
@@ -19075,6 +19154,10 @@ html:not(.tv-mode) .home-state-inline {
 .partners-country-dialog-footer {
   padding-top: var(--space-sm);
   border-top: 1px solid var(--color-border);
+}
+
+.modal-footer .btn {
+  min-height: 44px;
 }
 
 .partners-country-code-action {

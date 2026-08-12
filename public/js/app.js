@@ -1253,7 +1253,8 @@ class App {
             this.applyCatalogAvailability(summary);
             this.startImportWatcher(); // self-stops when nothing is importing
 
-            if (redirectIfBlocked && this.isCatalogPage(this.currentPage) && !this.isCatalogReady()) {
+            if (redirectIfBlocked && summary?.state !== 'unknown' && !summary?.error &&
+                this.isCatalogPage(this.currentPage) && !this.catalogCategoryAvailable(this.currentPage, summary)) {
                 this.navigateTo('home', true);
             }
 
@@ -1293,7 +1294,7 @@ class App {
                     if (SYNCING.has(status)) anySyncing = true;
                     // Toast only on a real syncing -> ready transition (skip the baseline pass).
                     if (was && was !== status && status === 'ready' && SYNCING.has(was)) {
-                        try { this.sourceManager?.toast?.(`🎉 ${s.name || s.display_name || 'Your catalog'} is ready to watch!`); } catch (_) { /* noop */ }
+                        try { this.sourceManager?.toast?.(`${s.name || s.display_name || 'Your catalog'} is ready to watch!`, 'success'); } catch (_) { /* noop */ }
                         // The Home page listens to this to bust its cache — without it, a user
                         // staring at "Preparing your Home" kept the placeholder (or day-old
                         // rails) until a manual reload even after the import finished.
@@ -1354,29 +1355,26 @@ class App {
 
     isCatalogReady(summary = this.sourceHealthSummary) {
         if (!summary) return false;
+        const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
+        if (policy) return policy.catalogReady === true;
         return summary.state === 'ready' || Boolean(summary.ready?.length);
     }
 
     guardCatalogPage(pageName) {
         if (!this.isCatalogPage(pageName)) return pageName;
-        // Allow a catalog page during sync once its own category has content.
+        // The shared policy only unlocks catalog routes after the server has marked
+        // the initial materialized catalog usable; discovery counts alone are unsafe.
         return (this.isCatalogReady() || this.catalogCategoryAvailable(pageName)) ? pageName : 'home';
     }
 
-    // True once a syncing (or ready) source has at least one item of this category.
-    // The page name ('live' | 'movies' | 'series') maps directly to the progress
-    // counts keys, which fill progressively during discovery (movies/live first,
-    // series once reached) — so each tab can be revealed as soon as it has content.
+    // Shared category decision. Today the server's `usable` threshold unlocks the
+    // three catalog destinations together; this adapter keeps callers category-aware
+    // without duplicating progress or count heuristics.
     catalogCategoryAvailable(category, summary = this.sourceHealthSummary) {
+        const sharedDecision = window.NorvaSourceHealth?.isCatalogCategoryAvailable?.(summary, category);
+        if (typeof sharedDecision === 'boolean') return sharedDecision;
         if (this.isCatalogReady(summary)) return true;
-        const sources = [...(summary?.issues || []), ...(summary?.sources || [])];
-        return sources.some(item => {
-            const src = (item && item.source) || item || {};
-            const cfg = src.configHint || src.config_hint || {};
-            const prog = src.syncProgress || src.sync_progress || cfg.syncProgress || cfg.sync_progress || {};
-            const counts = (prog && prog.counts) || {};
-            return Number(counts[category]) > 0;
-        });
+        return false;
     }
 
     applyCatalogAvailability(summary = this.sourceHealthSummary) {
@@ -1386,8 +1384,7 @@ class App {
         // visibility until a real summary (ready / syncing / not_configured) arrives.
         if (summary && (summary.state === 'unknown' || summary.error)) return;
         const ready = this.isCatalogReady(summary);
-        // Reveal each catalog destination individually as soon as its category
-        // has content. Every adapter receives the same gate decision.
+        // Every navigation adapter receives the same shared gate decision.
         const anyShown = this.navigation?.setCatalogAvailability((pageName) => (
             ready || this.catalogCategoryAvailable(pageName, summary)
         )) || false;

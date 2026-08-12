@@ -681,33 +681,27 @@ class HomePage {
 
     shouldShowSetupGate(summary = null) {
         if (!summary) return true;
+        const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
+        if (policy) return policy.gate === true;
         if (summary.state === 'ready') return false;
         // API outage (state 'unknown'): we could not LIST the sources — that is not the same
         // as having none. Never take over Home with the onboarding gate for a blip; the
         // service-health banner carries the "can't reach" message over cached rails.
         if (summary.state === 'unknown') return false;
         if ((summary.ready || []).length) return false;
-        // Non-blocking onboarding: once a syncing source has finished its IMPORT, the
-        // Movies/Series grids and Live channels are browsable, so don't take over Home
-        // with the full-screen gate — render whatever is ready (with a "preparing"
-        // notice) and let the rest finalize in the background. The full gate stays only
-        // while the initial import is still discovering (nothing to browse yet).
+        // Non-blocking onboarding uses the shared authoritative `usable` policy.
+        // Discovery counts and intermediate stage names are not enough: the server can
+        // publish them before rows are materialized. Once the shared policy says the
+        // catalog is browsable, keep the remaining long-tail import in the background.
         if (summary.state === 'syncing' && this.syncImportBrowsable(summary)) return false;
         return true;
     }
 
-    // True once at least one syncing source has imported its catalogue (import step
-    // done, or already in a finalize stage) — i.e. there is content to browse.
+    // Compatibility seam for existing callers; the shared policy owns the decision.
     syncImportBrowsable(summary = {}) {
-        const finalizing = new Set(['materializing', 'building_live_channels', 'building_live_variants', 'building_titles', 'finalizing']);
-        return [...(summary.issues || []), ...(summary.sources || [])].some(item => {
-            const src = (item && item.source) || item || {};
-            const cfg = src.configHint || src.config_hint || {};
-            const prog = src.syncProgress || src.sync_progress || cfg.syncProgress || cfg.sync_progress || {};
-            const steps = (prog && prog.steps) || {};
-            const stage = String((prog && prog.stage) || '').toLowerCase();
-            return String((steps.import && steps.import.status) || '').toLowerCase() === 'done' || finalizing.has(stage);
-        });
+        const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
+        if (policy) return policy.browsable === true;
+        return false;
     }
 
     clearSetupGate() {
@@ -825,10 +819,10 @@ class HomePage {
                         ${showSecondary ? `<button class="btn btn-secondary" id="norva-setup-refresh">${this.escapeHtml(secondaryLabel)}</button>` : ''}
                     </div>
                 </div>
-                <div class="norva-setup-steps" aria-label="Norva setup progress">
-                    ${steps.map(step => `
-                        <div class="norva-setup-step ${step.state}">
-                            <span class="norva-setup-step-index">${this.escapeHtml(step.index)}</span>
+                <div class="norva-setup-steps" role="list" aria-label="Norva setup progress">
+                    ${steps.map((step, index) => `
+                        <div class="norva-setup-step ${step.state}" role="listitem" ${['active', 'attention'].includes(step.state) ? 'aria-current="step"' : ''} aria-label="${this.escapeAttr(`Step ${index + 1}: ${step.title}. ${this.setupStepStatusLabel(step.state)}.`)}">
+                            <span class="norva-setup-step-index" aria-hidden="true">${this.escapeHtml(step.index)}</span>
                             <div>
                                 <strong>${this.escapeHtml(step.title)}</strong>
                                 <span>${this.escapeHtml(step.hint)}</span>
@@ -991,10 +985,10 @@ class HomePage {
     renderSetupSyncFallback(summary = {}) {
         const steps = this.setupSteps(summary.state || 'syncing');
         return `
-            <div class="norva-setup-steps">
-                ${steps.map(step => `
-                    <div class="norva-setup-step ${step.state}">
-                        <span class="norva-setup-step-index">${this.escapeHtml(step.index)}</span>
+            <div class="norva-setup-steps" role="list" aria-label="Norva setup progress">
+                ${steps.map((step, index) => `
+                    <div class="norva-setup-step ${step.state}" role="listitem" ${['active', 'attention'].includes(step.state) ? 'aria-current="step"' : ''} aria-label="${this.escapeAttr(`Step ${index + 1}: ${step.title}. ${this.setupStepStatusLabel(step.state)}.`)}">
+                        <span class="norva-setup-step-index" aria-hidden="true">${this.escapeHtml(step.index)}</span>
                         <div>
                             <strong>${this.escapeHtml(step.title)}</strong>
                             <span>${this.escapeHtml(step.hint)}</span>
@@ -1010,16 +1004,18 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
-                    <div class="norva-setup-kicker">Account created ✓ · One step to watch</div>
+                    <div class="norva-setup-kicker">Account created · One step to watch</div>
                     <h1>Connect your TV service to start watching</h1>
                     <p>Paste the complete link from the TV service you already use — Norva reads it and builds your catalog automatically. No card needed to connect; you only add your own authorized source.</p>
-                    <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off">
+                    <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off" novalidate>
                         <div class="form-group">
                             <label for="home-source-url">Provider URL or complete Xtream link</label>
-                            <input type="text" id="home-source-url" class="form-input setup-form-input"
+                            <input type="url" id="home-source-url" class="form-input setup-form-input"
                                    placeholder="https://provider.com/get.php?username=...&password=..."
-                                   inputmode="url" autocomplete="off">
+                                   inputmode="url" autocomplete="url" required
+                                   aria-describedby="home-source-url-hint home-source-url-error">
                             <p class="setup-form-hint" id="home-source-url-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>
+                            <p class="setup-field-error hidden" id="home-source-url-error"></p>
                         </div>
                         <div class="form-group setup-service-name-group">
                             <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
@@ -1031,24 +1027,28 @@ class HomePage {
                             <div class="setup-manual-grid">
                                 <div class="form-group">
                                     <label for="home-source-username">Username</label>
-                                    <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="off">
+                                    <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="username" aria-describedby="home-source-username-error">
+                                    <p class="setup-field-error hidden" id="home-source-username-error"></p>
                                 </div>
                                 <div class="form-group">
                                     <label for="home-source-password">Password</label>
                                     <div class="setup-password-field">
-                                        <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="off">
-                                        <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password">${Icons.hide}</button>
+                                        <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="current-password" aria-describedby="home-source-password-error">
+                                        <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
                                     </div>
+                                    <p class="setup-field-error hidden" id="home-source-password-error"></p>
                                 </div>
                             </div>
                         </details>
-                        <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert"></div>
+                        <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
                         <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect TV Service</button>
                     </form>
                 </div>
                 <aside class="norva-setup-progress-panel" aria-label="Norva setup progress">
                     <div class="norva-setup-progress-kicker">Progress panel</div>
-                    ${steps.map((step, index) => this.renderSetupProgressStep(step, index)).join('')}
+                    <div class="norva-setup-progress-list" role="list">
+                        ${steps.map((step, index) => this.renderSetupProgressStep(step, index)).join('')}
+                    </div>
                 </aside>
             </section>
         `;
@@ -1057,10 +1057,10 @@ class HomePage {
 
     renderSetupProgressStep(step, index) {
         const stepMark = step.state === 'complete' ? Icons.check : String(index + 1);
-        const lock = step.state === 'pending' ? `<span class="norva-setup-lock" aria-label="Locked">${Icons.circle}</span>` : '';
+        const lock = step.state === 'pending' ? `<span class="norva-setup-lock" aria-hidden="true">${Icons.circle}</span>` : '';
         return `
-            <div class="norva-setup-step norva-setup-progress-step ${this.escapeAttr(step.state)}">
-                <span class="norva-setup-step-index">${stepMark}</span>
+            <div class="norva-setup-step norva-setup-progress-step ${this.escapeAttr(step.state)}" role="listitem" ${['active', 'attention'].includes(step.state) ? 'aria-current="step"' : ''} aria-label="${this.escapeAttr(`Step ${index + 1}: ${step.title}. ${this.setupStepStatusLabel(step.state)}.`)}">
+                <span class="norva-setup-step-index" aria-hidden="true">${stepMark}</span>
                 <div>
                     <strong>${this.escapeHtml(index + 1)}. ${this.escapeHtml(step.title)}</strong>
                     <span>${this.escapeHtml(step.hint)}</span>
@@ -1068,6 +1068,15 @@ class HomePage {
                 ${lock}
             </div>
         `;
+    }
+
+    setupStepStatusLabel(state) {
+        return ({
+            active: 'Current step',
+            complete: 'Completed',
+            attention: 'Needs attention',
+            pending: 'Locked until the previous step is complete'
+        })[state] || 'Pending';
     }
 
     bindSetupConnectionForm(container) {
@@ -1084,10 +1093,60 @@ class HomePage {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
         if (!form || !urlInput || !usernameInput || !passwordInput || !submit) return;
 
+        const fieldErrors = new Map([
+            [urlInput, container.querySelector('#home-source-url-error')],
+            [usernameInput, container.querySelector('#home-source-username-error')],
+            [passwordInput, container.querySelector('#home-source-password-error')]
+        ]);
+        const clearSummaryError = () => {
+            if (!error) return;
+            error.classList.add('hidden');
+            error.textContent = '';
+        };
+        const clearFieldError = (input) => {
+            input?.removeAttribute('aria-invalid');
+            const message = fieldErrors.get(input);
+            if (message) {
+                message.textContent = '';
+                message.classList.add('hidden');
+            }
+        };
+        const clearErrors = () => {
+            clearSummaryError();
+            fieldErrors.forEach((_message, input) => clearFieldError(input));
+        };
+        const setFieldError = (input, message) => {
+            if (!input) return;
+            input.setAttribute('aria-invalid', 'true');
+            const target = fieldErrors.get(input);
+            if (target) {
+                target.textContent = message;
+                target.classList.remove('hidden');
+            }
+        };
+        const showSummaryError = (message, { focus = false } = {}) => {
+            if (!error) return;
+            error.textContent = message;
+            error.classList.remove('hidden');
+            if (focus) {
+                try { error.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            }
+        };
+        const setSubmitting = (busy, label = 'Connect TV Service') => {
+            submit.disabled = busy;
+            submit.textContent = label;
+            if (busy) submit.setAttribute('aria-busy', 'true');
+            else submit.removeAttribute('aria-busy');
+        };
+
         const applyParsedLink = (force = false) => {
             const parsed = manager?.parseXtreamLink?.(urlInput.value);
             if (!parsed) {
-                if (hint) hint.textContent = 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
+                if (hint) {
+                    hint.textContent = manager?.looksLikePlaylistLink?.(urlInput.value)
+                        ? 'Playlist link detected. Norva will connect it without asking for a separate login.'
+                        : 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
+                }
                 return;
             }
             if (parsed.serverUrl) urlInput.value = parsed.serverUrl;
@@ -1102,6 +1161,9 @@ class HomePage {
                     ? 'Login detected from the link. You can review it before connecting.'
                     : 'Server detected. Add the username and password if they were provided separately.';
             }
+            clearFieldError(urlInput);
+            if (usernameInput.value.trim()) clearFieldError(usernameInput);
+            if (passwordInput.value.trim()) clearFieldError(passwordInput);
         };
 
         urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
@@ -1112,90 +1174,83 @@ class HomePage {
             const visible = passwordInput.type === 'text';
             passwordInput.type = visible ? 'password' : 'text';
             passwordToggle.setAttribute('aria-label', visible ? 'Show password' : 'Hide password');
+            passwordToggle.setAttribute('aria-pressed', String(!visible));
+        });
+
+        fieldErrors.forEach((_message, input) => {
+            input.addEventListener('input', () => {
+                clearFieldError(input);
+                clearSummaryError();
+            });
         });
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            if (error) {
-                error.classList.add('hidden');
-                error.textContent = '';
-            }
+            clearErrors();
 
             let payload;
             try {
                 payload = this.readSetupConnectionForm(container);
-            } catch (err) {
-                if (error) {
-                    const hasAddress = Boolean(
-                        container.querySelector('#home-source-url')?.value.trim()
-                    );
-                    error.textContent = hasAddress
-                        ? 'Username and password are required.'
-                        : 'Provider URL is required.';
-                    error.classList.remove('hidden');
+            } catch (_) {
+                const hasAddress = Boolean(urlInput.value.trim());
+                const playlist = manager?.looksLikePlaylistLink?.(urlInput.value) === true;
+                let firstInvalid = null;
+                if (!hasAddress) {
+                    setFieldError(urlInput, 'Enter the provider URL or complete link.');
+                    firstInvalid = urlInput;
+                    showSummaryError('Enter the provider URL or complete link to continue.');
+                } else if (!playlist) {
+                    if (advancedLogin) advancedLogin.open = true;
+                    if (!usernameInput.value.trim()) {
+                        setFieldError(usernameInput, 'Enter the username supplied by your provider.');
+                        firstInvalid = usernameInput;
+                    }
+                    if (!passwordInput.value.trim()) {
+                        setFieldError(passwordInput, 'Enter the password supplied by your provider.');
+                        firstInvalid = firstInvalid || passwordInput;
+                    }
+                    showSummaryError('Complete the missing provider login fields, then try again.');
+                } else {
+                    setFieldError(urlInput, 'Check that this playlist link is complete.');
+                    firstInvalid = urlInput;
+                    showSummaryError('Check the playlist link, then try again.');
                 }
-                advancedLogin.open = true;
+                try { firstInvalid?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
                 return;
             }
 
-            submit.disabled = true;
-            submit.textContent = 'Connecting...';
+            setSubmitting(true, 'Connecting…');
             try {
-                await window.API.sources.create({ type: 'xtream', ...payload });
+                if (manager?.confirmLargePlaylistIfNeeded && !await manager.confirmLargePlaylistIfNeeded(payload)) {
+                    setSubmitting(false);
+                    try { submit.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                    return;
+                }
+                await window.API.sources.create(payload);
                 await this.app?.sourceManager?.loadSources?.();
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
-                submit.textContent = 'Preparing catalog...';
+                submit.textContent = 'Preparing catalog…';
                 this.lastLoadedAt = 0;
                 await this.app?.refreshSourceHealth?.();
                 await this.loadDashboardData();
-            } catch (err) {
-                console.error('[Dashboard] TV service connection failed:', err);
-                if (error) {
-                    error.textContent = 'Unable to connect this TV service. Check the details and try again.';
-                    error.classList.remove('hidden');
-                }
-                submit.disabled = false;
-                submit.textContent = 'Connect TV Service';
+            } catch (_) {
+                console.error('[Dashboard] TV service connection failed.');
+                showSummaryError('Norva could not connect this TV service. Check the address and login, then try again.', { focus: true });
+                setSubmitting(false);
             }
         });
     }
 
     readSetupConnectionForm(container) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
-        const rawUrl = container.querySelector('#home-source-url')?.value.trim() || '';
-        let url = rawUrl;
-        let name = container.querySelector('#home-source-name')?.value.trim() || '';
-        let username = container.querySelector('#home-source-username')?.value.trim() || '';
-        let password = container.querySelector('#home-source-password')?.value.trim() || '';
-        const parsed = manager?.parseXtreamLink?.(rawUrl);
-
-        if (parsed) {
-            url = parsed.serverUrl || rawUrl;
-            username = username || parsed.username || '';
-            password = password || parsed.password || '';
-        }
-
-        if (!url) throw new Error('Provider URL is required.');
-
-        // A playlist link (.m3u/.m3u8, or an M3U-style get.php export) carries no
-        // Xtream credentials — accept it as an M3U source instead of demanding a
-        // username/password the user simply doesn't have.
-        const looksLikePlaylist = /\.m3u8?(\?|#|$)/i.test(rawUrl) || /[?&]type=m3u/i.test(rawUrl);
-        if (!username && !password && looksLikePlaylist) {
-            if (!name) {
-                const hostName = parsed?.host || manager?.hostFromUrl?.(rawUrl) || 'Playlist';
-                name = hostName ? hostName.replace(/^www\./i, '') : 'Playlist';
-            }
-            return { type: 'm3u', name, url: rawUrl };
-        }
-
-        if (!username || !password) throw new Error('Username and password are required.');
-
-        if (!name) {
-            const hostName = parsed?.host || manager?.hostFromUrl?.(url) || 'TV service';
-            name = hostName ? hostName.replace(/^www\./i, '') : 'TV service';
-        }
-        return { type: 'xtream', name, url, username, password };
+        if (!manager?.buildSourceConnection) throw new Error('TV service connection is unavailable.');
+        return manager.buildSourceConnection({
+            type: 'auto',
+            name: container.querySelector('#home-source-name')?.value || '',
+            url: container.querySelector('#home-source-url')?.value || '',
+            username: container.querySelector('#home-source-username')?.value || '',
+            password: container.querySelector('#home-source-password')?.value || ''
+        });
     }
 
     isPairedScreen() {

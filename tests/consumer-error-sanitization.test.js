@@ -21,7 +21,8 @@ test('source setup never renders provider diagnostics or synchronization payload
   assert.doesNotMatch(sourceManager, /NorvaModal\.toast\([^;\n]*result\.(?:error|message)/);
   assert.doesNotMatch(home, /error\.textContent\s*=\s*(?:err|error)\?*\.message/);
   assert.match(sourceManager, /sourceFormErrorMessage\(error\)/);
-  assert.match(sourceManager, /Norva could not finish importing this service\. Try again\./);
+  assert.match(sourceManager, /The provider refused the saved username or password\./);
+  assert.match(sourceManager, /Norva cannot reach the provider right now\./);
 });
 
 test('account errors are classified and sign-out is cancel-first', () => {

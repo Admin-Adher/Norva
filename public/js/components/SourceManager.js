@@ -78,7 +78,7 @@ class SourceManager {
                         </svg>
                     </div>
                     <p class="warning-message" style="font-size: 1rem; margin: var(--space-md) 0; color: var(--color-text-primary);">${message}</p>
-                    ${details ? `<p class="warning-details" style="font-size: 0.875rem; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: var(--space-md); border-radius: var(--radius-md); text-align: left;">${details}</p>` : ''}
+                    ${details ? `<p class="warning-details" style="font-size: 0.875rem; color: var(--color-text-secondary); background: var(--color-bg-tertiary); padding: var(--space-md); border-radius: var(--radius-md); text-align: left;">${details}</p>` : ''}
                 </div>
             `;
 
@@ -585,13 +585,19 @@ class SourceManager {
             return null;
         }
 
+        const queryUsername = url.searchParams.get('username') || url.searchParams.get('user') || '';
+        const queryPassword = url.searchParams.get('password') || url.searchParams.get('pass') || '';
+        if (this.looksLikePlaylistLink(value) && !queryUsername && !queryPassword) {
+            return null;
+        }
+
         const knownEndpoints = new Set(['get.php', 'player_api.php', 'xmltv.php', 'panel_api.php']);
         const pathParts = url.pathname.split('/').filter(Boolean);
         const lowerParts = pathParts.map(part => part.toLowerCase());
         const endpointIndex = lowerParts.findIndex(part => knownEndpoints.has(part));
         const streamIndex = lowerParts.findIndex(part => ['live', 'movie', 'series'].includes(part));
-        let username = url.searchParams.get('username') || url.searchParams.get('user') || '';
-        let password = url.searchParams.get('password') || url.searchParams.get('pass') || '';
+        let username = queryUsername;
+        let password = queryPassword;
         let baseParts = pathParts;
 
         if (endpointIndex >= 0) {
@@ -616,28 +622,39 @@ class SourceManager {
         };
     }
 
-    readSourceForm(type, { existing = false } = {}) {
-        let name = document.getElementById('source-name')?.value.trim() || '';
-        let url = document.getElementById('source-url')?.value.trim() || '';
-        let username = document.getElementById('source-username')?.value.trim() || null;
-        let password = document.getElementById('source-password')?.value.trim() || null;
+    looksLikePlaylistLink(raw) {
+        const value = String(raw || '').trim();
+        if (!value) return false;
+        return /\.m3u8?(?:[?#]|$)/i.test(value) ||
+            /[?&](?:type|output|format)=m3u(?:_plus)?(?:&|$)/i.test(value);
+    }
 
-        if (type === 'xtream') {
-            const parsed = this.parseXtreamLink(url);
-            if (parsed) {
-                url = parsed.serverUrl || url;
-                username = username || parsed.username || null;
-                password = password || parsed.password || null;
-            }
+    buildSourceConnection(input = {}) {
+        const existing = input.existing === true;
+        const requestedType = String(input.type || 'xtream').toLowerCase();
+        const rawUrl = String(input.url || '').trim();
+        let name = String(input.name || '').trim();
+        let url = rawUrl;
+        let username = String(input.username || '').trim() || null;
+        let password = String(input.password || '').trim() || null;
+        const parsed = ['auto', 'xtream'].includes(requestedType) ? this.parseXtreamLink(rawUrl) : null;
+
+        if (parsed) {
+            url = parsed.serverUrl || rawUrl;
+            username = username || parsed.username || null;
+            password = password || parsed.password || null;
         }
+
+        const type = requestedType === 'auto'
+            ? (this.looksLikePlaylistLink(rawUrl) && !username && !password ? 'm3u' : 'xtream')
+            : requestedType;
 
         if (!url && !(existing && type === 'xtream' && !password)) {
             throw new Error('Provider URL is required.');
         }
 
         if (!name) {
-            const parsed = type === 'xtream' ? this.parseXtreamLink(url) : null;
-            const hostName = parsed?.host || this.hostFromUrl(url);
+            const hostName = parsed?.host || this.hostFromUrl(rawUrl || url);
             const fallbackName = type === 'm3u' ? 'Playlist' : type === 'epg' ? 'TV guide' : 'TV service';
             name = hostName ? hostName.replace(/^www\./i, '') : fallbackName;
         }
@@ -648,7 +665,36 @@ class SourceManager {
                 : 'Provider URL, username and password are required.');
         }
 
-        return { name, url, username, password };
+        return { type, name, url: type === 'm3u' ? rawUrl : url, username, password };
+    }
+
+    async confirmLargePlaylistIfNeeded(connection = {}) {
+        if (connection.type !== 'm3u') return true;
+        try {
+            const estimate = await API.sources.estimateByUrl(connection.url, connection.type);
+            if (!estimate?.needsWarning) return true;
+            return this.showWarningModal({
+                title: 'Large playlist',
+                message: `This playlist contains <strong>${Number(estimate.count || 0).toLocaleString()}</strong> channels.`,
+                details: 'Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.',
+                proceedText: 'Proceed anyway',
+                cancelText: 'Cancel'
+            });
+        } catch (_) {
+            console.warn('[SourceManager] Playlist size could not be checked.');
+            return true;
+        }
+    }
+
+    readSourceForm(type, { existing = false } = {}) {
+        return this.buildSourceConnection({
+            type,
+            existing,
+            name: document.getElementById('source-name')?.value || '',
+            url: document.getElementById('source-url')?.value || '',
+            username: document.getElementById('source-username')?.value || '',
+            password: document.getElementById('source-password')?.value || ''
+        });
     }
 
     sourceFormErrorMessage(error) {
@@ -754,20 +800,82 @@ class SourceManager {
         const progress = this.syncProgressFromSource(source);
         const progressStatus = String(progress.status || progress.stage || '').toLowerCase();
         const counts = this.catalogCountsFromSource(source);
+        const sharedPolicy = window.NorvaSourceHealth?.catalogSourcePolicy?.(source);
+        if (sharedPolicy) {
+            return {
+                phase: sharedPolicy.phase,
+                counts,
+                progress,
+                backgrounding: sharedPolicy.backgrounding === true,
+                attentionState: sharedPolicy.state
+            };
+        }
+
         const failedStates = new Set(['error', 'failed', 'auth_failed', 'expired', 'unreachable', 'revoked']);
         const readyStates = new Set(['ready', 'success', 'complete', 'completed']);
         const syncingStates = new Set(['syncing', 'checking', 'pending', 'connecting', 'discovering', 'discovered', 'importing', 'materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
 
-        if (failedStates.has(status) || failedStates.has(progressStatus)) return { phase: 'error', counts, progress };
-        if (readyStates.has(status) || readyStates.has(progressStatus)) return { phase: 'ready', counts, progress };
+        if (failedStates.has(status) || failedStates.has(progressStatus)) {
+            const explicit = ['auth_failed', 'expired', 'unreachable', 'revoked'];
+            const attentionState = explicit.includes(progressStatus)
+                ? progressStatus
+                : explicit.includes(status)
+                    ? status
+                    : 'degraded';
+            return { phase: 'error', counts, progress, attentionState };
+        }
+        if (readyStates.has(status) || readyStates.has(progressStatus)) return { phase: 'ready', counts, progress, attentionState: 'ready' };
         // Usable threshold reached (Live + first block of movies/series): the catalogue is
         // navigable now and the rest is a background top-up. Treat as ready for the modal /
         // onboarding gate, but flag `backgrounding` so Settings can show a quiet
         // "still adding the rest of your library" note while the long-tail finishes.
-        if (progress.usable === true && !readyStates.has(status)) return { phase: 'ready', counts, progress, backgrounding: true };
-        if (syncingStates.has(status) || syncingStates.has(progressStatus)) return { phase: 'syncing', counts, progress };
-        if (counts.total > 0) return { phase: 'ready', counts, progress };
-        return { phase: 'syncing', counts, progress };
+        if (progress.usable === true && !readyStates.has(status)) return { phase: 'ready', counts, progress, backgrounding: true, attentionState: 'ready' };
+        if (syncingStates.has(status) || syncingStates.has(progressStatus)) return { phase: 'syncing', counts, progress, attentionState: 'syncing' };
+        return { phase: 'syncing', counts, progress, attentionState: 'syncing' };
+    }
+
+    catalogErrorDetails(source = {}, attentionState = '') {
+        const state = source.revoked === true
+            ? 'revoked'
+            : String(attentionState || this.sourceSyncState(source).attentionState || 'degraded').toLowerCase();
+        const details = {
+            auth_failed: {
+                phaseLabel: 'Login required',
+                title: 'Update your provider login',
+                message: 'The provider refused the saved username or password. Update the login, then Norva can resume the import.',
+                actionLabel: 'Update login',
+                action: 'edit'
+            },
+            expired: {
+                phaseLabel: 'Provider access expired',
+                title: 'Review your provider access',
+                message: 'The provider reports an inactive or expired account. Renew it with the provider, then check the service again.',
+                actionLabel: 'Review service',
+                action: 'edit'
+            },
+            unreachable: {
+                phaseLabel: 'Provider unavailable',
+                title: 'Your provider is temporarily unavailable',
+                message: 'Norva cannot reach the provider right now. Your details were not changed; wait a moment and check again.',
+                actionLabel: 'Check again',
+                action: 'retry'
+            },
+            revoked: {
+                phaseLabel: 'Service disconnected',
+                title: 'This TV service is disconnected',
+                message: 'Open TV Service settings to review or reconnect this source.',
+                actionLabel: 'Open settings',
+                action: 'settings'
+            },
+            degraded: {
+                phaseLabel: 'Needs attention',
+                title: 'TV service needs attention',
+                message: 'Norva could not finish this import. Check the service again; if it still fails, review its settings.',
+                actionLabel: 'Check again',
+                action: 'retry'
+            }
+        };
+        return details[state] || details.degraded;
     }
 
     shouldRecoverCatalogFinalization(source = {}, options = {}) {
@@ -800,7 +908,7 @@ class SourceManager {
         return value > 0 ? value.toLocaleString() : fallback;
     }
 
-    catalogMilestones(progress = {}, counts = {}) {
+    catalogMilestones(progress = {}, counts = {}, options = {}) {
         const steps = progress.steps && typeof progress.steps === 'object' ? progress.steps : {};
         const step = (key, label, count, detail) => {
             const entry = steps[key] && typeof steps[key] === 'object' ? steps[key] : {};
@@ -812,7 +920,7 @@ class SourceManager {
                 detail
             };
         };
-        return [
+        const milestones = [
             step('connect', 'Connecting to TV service', 0, 'Secure login check'),
             step('channels', 'Channels found', counts.live, 'Live TV catalog'),
             step('movies', 'Movies found', counts.movies, 'Films catalog'),
@@ -821,6 +929,13 @@ class SourceManager {
             step('import', 'Import catalog', counts.total, 'Saving items to Norva Cloud'),
             step('finalize', 'Finalize Norva', 0, 'Preparing Home, Live TV and details')
         ];
+        if (options.phase === 'error' && !milestones.some(item => item.status === 'error')) {
+            const running = milestones.find(item => ['running', 'in_progress'].includes(item.status));
+            const connectionFailure = ['auth_failed', 'expired', 'unreachable', 'revoked'].includes(options.attentionState);
+            const failed = running || milestones.find(item => item.key === (connectionFailure ? 'connect' : 'import'));
+            if (failed) failed.status = 'error';
+        }
+        return milestones;
     }
 
     renderCatalogMilestone(step) {
@@ -860,7 +975,7 @@ class SourceManager {
     // copy dédiée, le chiffre figé à 99 se lit comme un plantage.
     catalogSyncingCopy(progress = {}, percent = 0, phase = 'syncing', source = {}) {
         if (phase === 'ready') return 'Your catalog is ready.';
-        if (phase === 'error') return 'Norva could not finish importing this service. Try again.';
+        if (phase === 'error') return this.catalogErrorDetails(source).message;
         const stage = String(progress.stage || '').toLowerCase();
         if (stage === 'finalizing' || percent >= 99) {
             return 'Finishing touches — Norva is unlocking your catalog now.';
@@ -869,22 +984,25 @@ class SourceManager {
     }
 
     renderCatalogPreparation(source = {}, type = 'xtream') {
-        const { phase, counts, progress } = this.sourceSyncState(source);
+        const { phase, counts, progress, attentionState } = this.sourceSyncState(source);
         const sourceName = source.name || 'TV service';
         const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
         const determinate = percent > 0 || phase === 'ready';
+        const errorDetails = this.catalogErrorDetails(source, attentionState);
         const statusText = {
             syncing: this.catalogSyncingCopy(progress, percent, 'syncing', source),
             ready: 'Your catalog is ready.',
-            error: 'Norva could not finish importing this service. Try again.'
+            error: errorDetails.message
         };
-        const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+        const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? errorDetails.phaseLabel : 'Importing';
         const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
         const progressAnnouncement = `${sourceName}. ${phaseLabel}. ${statusText[phase] || statusText.syncing}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
-        const milestones = this.catalogMilestones(progress, counts).map(step => this.renderCatalogMilestone(step)).join('');
+        const milestones = this.catalogMilestones(progress, counts, { phase, attentionState }).map(step => this.renderCatalogMilestone(step)).join('');
+        const countFallback = phase === 'error' ? '—' : phase === 'ready' ? '0' : 'Scanning';
+        const noteIcon = window.Icons?.info || '';
 
         return `
-      <div class="source-sync-step source-sync-${this.escapeHtml(phase)}" data-phase="${this.escapeHtml(phase)}">
+      <div class="source-sync-step source-sync-${this.escapeHtml(phase)}" data-phase="${this.escapeHtml(phase)}" data-attention-state="${this.escapeHtml(attentionState || '')}">
         <p class="source-sync-announcement" role="${phase === 'error' ? 'alert' : 'status'}" aria-live="${phase === 'error' ? 'assertive' : 'polite'}" aria-atomic="true" data-progress-bucket="${progressBucket}">${this.escapeHtml(progressAnnouncement)}</p>
         <div class="source-sync-hero">
           <span class="source-sync-pill">${this.escapeHtml(phaseLabel)}</span>
@@ -894,22 +1012,22 @@ class SourceManager {
         <div class="source-sync-grid">
           <div class="source-sync-card">
             <span>Live TV</span>
-            <strong>${this.escapeHtml(this.formatCatalogCount(counts.live))}</strong>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.live, countFallback))}</strong>
             <small>channels found</small>
           </div>
           <div class="source-sync-card">
             <span>Movies</span>
-            <strong>${this.escapeHtml(this.formatCatalogCount(counts.movies))}</strong>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.movies, countFallback))}</strong>
             <small>films found</small>
           </div>
           <div class="source-sync-card">
             <span>Series</span>
-            <strong>${this.escapeHtml(this.formatCatalogCount(counts.series))}</strong>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.series, countFallback))}</strong>
             <small>series found</small>
           </div>
           <div class="source-sync-card">
             <span>Categories</span>
-            <strong>${this.escapeHtml(this.formatCatalogCount(counts.categories))}</strong>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.categories, countFallback))}</strong>
             <small>groups found</small>
           </div>
         </div>
@@ -926,10 +1044,10 @@ class SourceManager {
           ${milestones}
         </ol>
         ${phase === 'syncing' ? `
-          <p class="hint source-sync-notify-note">📨 <strong>You can close the app</strong> — we'll email you the moment your catalog is ready, on every device. The mobile app will notify you too. Norva keeps preparing it in the background.</p>
+          <p class="hint source-sync-notify-note"><span class="source-sync-note-icon" aria-hidden="true">${noteIcon}</span><span><strong>You can close the app</strong> — we'll email you the moment your catalog is ready, on every device. The mobile app will notify you too. Norva keeps preparing it in the background.</span></p>
         ` : ''}
         ${phase === 'error' ? `
-          <div class="source-sync-error">${this.escapeHtml(statusText.error)}</div>
+          <div class="source-sync-error-message"><strong>${this.escapeHtml(errorDetails.title)}</strong><span>${this.escapeHtml(statusText.error)}</span></div>
         ` : ''}
         ${counts.syncedAt && phase === 'ready' ? `
           <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString())}</p>
@@ -947,8 +1065,9 @@ class SourceManager {
     patchCatalogPreparation(root, source = {}, type = 'xtream') {
         const step = root && root.querySelector ? root.querySelector('.source-sync-step') : null;
         if (!step) return false;
-        const { phase, counts, progress } = this.sourceSyncState(source);
+        const { phase, counts, progress, attentionState } = this.sourceSyncState(source);
         if ((step.dataset.phase || '') !== phase) return false;
+        if ((step.dataset.attentionState || '') !== String(attentionState || '')) return false;
 
         const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
         this.animateCatalogBar(step, percent, phase === 'ready');
@@ -964,7 +1083,7 @@ class SourceManager {
         // Timeline des milestones (non animée — remplacement direct suffisant).
         const timeline = step.querySelector('.source-sync-timeline');
         if (timeline) {
-            timeline.innerHTML = this.catalogMilestones(progress, counts).map(s => this.renderCatalogMilestone(s)).join('');
+            timeline.innerHTML = this.catalogMilestones(progress, counts, { phase, attentionState }).map(s => this.renderCatalogMilestone(s)).join('');
         }
 
         // Copy du héros (bascule « Finishing touches » quand finalizing/99 %).
@@ -985,7 +1104,7 @@ class SourceManager {
             const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
             if (copyChanged || Number(announcement.dataset.progressBucket) !== progressBucket) {
                 const sourceName = source.name || 'TV service';
-                const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+                const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? this.catalogErrorDetails(source, attentionState).phaseLabel : 'Importing';
                 announcement.dataset.progressBucket = String(progressBucket);
                 announcement.textContent = `${sourceName}. ${phaseLabel}. ${copy}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
             }
@@ -1180,15 +1299,26 @@ class SourceManager {
         const sourceId = initialSource.id || initialSource.cloudId || initialSource.cloud_id;
         const token = Symbol('catalog-preparation');
         this.catalogPreparationToken = token;
+        let closing = false;
+        let current = initialSource;
+        const modalHygieneAvailable = Boolean(window.NorvaModal?.installHygiene);
         const previouslyFocused = document.activeElement;
 
         const closeToSettings = async () => {
+            if (closing) return;
+            closing = true;
             if (this.catalogPreparationToken === token) this.catalogPreparationToken = null;
             modal.classList.remove('active');
-            // Restore focus to whatever opened the dialog (keyboard / SR users).
-            try { previouslyFocused && previouslyFocused.focus && previouslyFocused.focus({ preventScroll: true }); } catch (_) { /* noop */ }
-            await this.loadSources();
-            this.notifySourceHealthChanged();
+            if (!modalHygieneAvailable) {
+                try { previouslyFocused?.focus?.({ preventScroll: true }); } catch (_) { /* noop */ }
+            }
+            try {
+                await this.loadSources();
+            } catch (_) {
+                console.warn('[SourceManager] Sources could not be refreshed after closing catalog progress.');
+            } finally {
+                this.notifySourceHealthChanged();
+            }
         };
 
         const startWatching = async () => {
@@ -1196,14 +1326,57 @@ class SourceManager {
             window.location.hash = '#home';
         };
 
+        const openSourceSettings = async () => {
+            await closeToSettings();
+            window.app?.navigateTo?.('settings');
+            setTimeout(() => window.app?.pages?.settings?.switchTab?.('sources'), 0);
+        };
+
+        const openSourceEditor = async () => {
+            await closeToSettings();
+            setTimeout(() => this.showEditModal(sourceId, type), 0);
+        };
+
+        const retrySource = async () => {
+            if (!sourceId || !API.sources?.getById) {
+                await openSourceSettings();
+                return;
+            }
+            const retry = document.getElementById('catalog-error-action');
+            if (retry) {
+                retry.disabled = true;
+                retry.setAttribute('aria-busy', 'true');
+                retry.textContent = 'Checking…';
+            }
+            try {
+                const latest = await API.sources.getById(sourceId) || current;
+                await closeToSettings();
+                setTimeout(() => this.showCatalogPreparation(latest, type), 0);
+            } catch (_) {
+                const retryMessage = 'Norva still cannot reach this service. Wait a moment or review it in TV Service settings.';
+                const message = body.querySelector('.source-sync-error-message span');
+                if (message) message.textContent = retryMessage;
+                const announcement = body.querySelector('.source-sync-announcement');
+                if (announcement) announcement.textContent = retryMessage;
+                if (retry) {
+                    retry.disabled = false;
+                    retry.removeAttribute('aria-busy');
+                    retry.textContent = 'Check again';
+                    retry.focus({ preventScroll: true });
+                }
+            }
+        };
+
         let lastFooterKind = null;
         const render = (source) => {
-            const { phase } = this.sourceSyncState(source);
-            title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? 'TV service needs attention' : 'Preparing your catalog';
+            current = source || current;
+            const { phase, attentionState } = this.sourceSyncState(current);
+            const errorDetails = this.catalogErrorDetails(current, attentionState);
+            title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? errorDetails.title : 'Preparing your catalog';
             // Patch en place sur un tick de même phase (la barre garde son élément →
             // la transition CSS anime) ; rebuild complet uniquement sur transition.
-            if (!this.patchCatalogPreparation(body, source, type)) {
-                body.innerHTML = this.renderCatalogPreparation(source, type);
+            if (!this.patchCatalogPreparation(body, current, type)) {
+                body.innerHTML = this.renderCatalogPreparation(current, type);
             }
 
             // Only rebuild the footer (and its focusable buttons) when the actionable
@@ -1213,7 +1386,7 @@ class SourceManager {
             // polls now leave the footer — and its focus — untouched, updating only the
             // progress bar above. On a real transition we rebuild and, if focus was in
             // the footer, hand it to the new primary button so the remote isn't stranded.
-            const footerKind = phase === 'ready' ? 'ready' : phase === 'error' ? 'error' : 'progress';
+            const footerKind = phase === 'ready' ? 'ready' : phase === 'error' ? `error:${errorDetails.action}` : 'progress';
             if (footerKind === lastFooterKind) return;
             const restoreFocus = footer.contains(document.activeElement);
             lastFooterKind = footerKind;
@@ -1233,11 +1406,16 @@ class SourceManager {
             } else if (phase === 'error') {
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-background">Close</button>
-          <button class="btn btn-primary" id="catalog-edit">Repair Login</button>
+          <button class="btn btn-primary" id="catalog-error-action">${this.escapeHtml(errorDetails.actionLabel)}</button>
         `;
                 document.getElementById('catalog-background').onclick = closeToSettings;
-                document.getElementById('catalog-edit').onclick = () => this.showEditModal(sourceId, type);
-                focusIfNeeded('catalog-edit');
+                const action = document.getElementById('catalog-error-action');
+                action.onclick = errorDetails.action === 'edit'
+                    ? openSourceEditor
+                    : errorDetails.action === 'settings'
+                        ? openSourceSettings
+                        : retrySource;
+                focusIfNeeded('catalog-error-action');
             } else {
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-background">Run in Background</button>
@@ -1247,15 +1425,21 @@ class SourceManager {
             }
         };
 
-        modal.querySelector('.modal-close').onclick = closeToSettings;
+        const closeButton = modal.querySelector('.modal-close');
+        closeButton.onclick = closeToSettings;
         modal.classList.add('active');
         render(initialSource);
-        // Move focus into the dialog so keyboard / screen-reader users land inside it.
-        try { (modal.querySelector('.modal-close') || modal).focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        if (modalHygieneAvailable) {
+            NorvaModal.installHygiene(modal, {
+                onClose: closeToSettings,
+                initialFocus: closeButton
+            });
+        } else {
+            try { (closeButton || modal).focus({ preventScroll: true }); } catch (_) { /* noop */ }
+        }
 
         if (!sourceId) return;
 
-        let current = initialSource;
         let recoveryStarted = false;
         let attempt = 0;
         // Poll until a terminal state OR the modal is closed/backgrounded (the token
@@ -1310,27 +1494,7 @@ class SourceManager {
         const { name, url, username, password } = form;
 
         try {
-            // Check M3U size before creating (large playlist warning)
-            if (type === 'm3u') {
-                try {
-                    const estimate = await API.sources.estimateByUrl(url, type);
-                    if (estimate.needsWarning) {
-                        const proceed = await this.showWarningModal({
-                            title: '⚠️ Large Playlist Warning',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
-                            details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
-                            proceedText: 'Proceed Anyway',
-                            cancelText: 'Cancel'
-                        });
-                        if (!proceed) {
-                            return; // Don't create the source
-                        }
-                    }
-                } catch (err) {
-                    console.warn('[SourceManager] Could not estimate M3U size:', err.message);
-                    // Continue with creation anyway
-                }
-            }
+            if (!await this.confirmLargePlaylistIfNeeded(form)) return;
 
             const createdSource = await API.sources.create({ type, name, url, username, password });
             await this.loadSources();
@@ -1487,7 +1651,7 @@ class SourceManager {
                     const estimate = await API.sources.estimate(id);
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
-                            title: '⚠️ Large Playlist Warning',
+                            title: 'Large playlist',
                             message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
                             details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
                             proceedText: 'Proceed Anyway',
