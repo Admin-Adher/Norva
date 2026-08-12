@@ -695,18 +695,18 @@ begin
         'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
       )))
     ) = 0
-    or position(
-      'and attribution.referred_user_id is not null'
-      in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+    or regexp_count(
+      lower(pg_catalog.pg_get_functiondef(to_regprocedure(
         'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
-      )))
-    ) = 0
+      ))),
+      'and attribution\.referred_user_id is not null'
+    ) <> 3
     or position(
       'where numbered.referred_user_id is not null'
       in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
         'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
       )))
-    ) = 0
+    ) > 0
     or position(
       'repeat(''•'', 4)'
       in lower(pg_catalog.pg_get_functiondef(to_regprocedure(

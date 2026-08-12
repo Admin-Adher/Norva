@@ -684,17 +684,17 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260812002500_partners_referral_visibility_deleted_accounts\.sql/,
+    /20260812082001_partners_referral_visible_numbering\.sql/,
   );
-  assert.match(rehearsal, /BASELINE_CONTRACT="26b3ffc"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="d120672"/);
   assert.match(
     rehearsal,
-    /TARGET_MIGRATION="supabase\/migrations\/20260812002500_partners_referral_visibility_deleted_accounts\.sql"/,
+    /TARGET_MIGRATION="supabase\/migrations\/20260812082001_partners_referral_visible_numbering\.sql"/,
   );
   assert.equal(
     (rehearsal.match(/readonly TARGET_MIGRATION=/g) || []).length,
     1,
-    'the post-26b3ffc deleted-account visibility lot contains exactly one migration',
+    'the post-d120672 visible-numbering lot contains exactly one migration',
   );
   assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
   assert.match(rehearsal, /-f "\/candidate\/\$TARGET_MIGRATION"/);
@@ -709,7 +709,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=42/);
+  assert.match(rehearsal, /baseline_markers_verified=43/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -744,11 +744,23 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
+    /REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE="1"/,
+  );
+  assert.match(
+    rehearsal,
+    /REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING="0"/,
+  );
+  assert.match(
+    rehearsal,
+    /capture_referral_visible_numbering_marker\(\)/,
+  );
+  assert.match(
+    rehearsal,
     /and attribution\.referred_user_id is not null/,
   );
   assert.match(
     rehearsal,
-    /where numbered\.referred_user_id is not null/,
+    /regexp_count\([\s\S]*and attribution\\\.referred_user_id is not null[\s\S]*\) = 3/,
   );
   assert.match(
     rehearsal,
@@ -811,11 +823,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_PENDING\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING\}"/,
   );
   assert.match(
     rehearsal,
-    /else[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}"/,
+    /else[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
@@ -905,7 +917,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 
   const normalizedRestorePgTap = restorePgTap.trim();
   assert.match(normalizedRestorePgTap, /^begin;/);
-  assert.match(normalizedRestorePgTap, /select extensions\.plan\(121\);/);
+  assert.match(normalizedRestorePgTap, /select extensions\.plan\(122\);/);
   assert.match(normalizedRestorePgTap, /select \* from extensions\.finish\(\);/);
   assert.match(normalizedRestorePgTap, /rollback;$/);
   const routineCatalogMatch = restorePgTap.match(

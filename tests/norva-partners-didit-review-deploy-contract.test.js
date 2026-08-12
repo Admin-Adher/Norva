@@ -6,13 +6,13 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
-test('physical rehearsal preserves the complete Didit contract while filtering deleted referrals', () => {
+test('physical rehearsal preserves the complete Didit contract while numbering visible referrals', () => {
   const rehearsal = read('ops/hetzner/backup/rehearse-partners-physical.sh');
 
-  assert.match(rehearsal, /readonly BASELINE_CONTRACT="26b3ffc"/);
+  assert.match(rehearsal, /readonly BASELINE_CONTRACT="d120672"/);
   assert.match(
     rehearsal,
-    /readonly TARGET_MIGRATION="supabase\/migrations\/20260812002500_partners_referral_visibility_deleted_accounts\.sql"/,
+    /readonly TARGET_MIGRATION="supabase\/migrations\/20260812082001_partners_referral_visible_numbering\.sql"/,
   );
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_PENDING="0"/);
@@ -33,6 +33,9 @@ test('physical rehearsal preserves the complete Didit contract while filtering d
     rehearsal,
     /REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_PENDING="0"/,
   );
+  assert.match(rehearsal, /REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE="1"/);
+  assert.match(rehearsal, /REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING="0"/);
+  assert.match(rehearsal, /capture_referral_visible_numbering_marker\(\)/);
   assert.match(rehearsal, /partners_service_referral_visibility/);
   assert.match(rehearsal, /partners_service_didit_purge_orphans/);
   assert.match(rehearsal, /partners_service_didit_purge_recover/);

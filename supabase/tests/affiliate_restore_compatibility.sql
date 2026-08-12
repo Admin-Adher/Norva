@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(121);
+select extensions.plan(122);
 
 -- One immutable catalogue keeps existence, ownership, security, volatility
 -- and ACL assertions for the current Partners baseline, bounded signed Didit
@@ -293,6 +293,22 @@ select extensions.ok(
       on routine.oid = to_regprocedure(expected.signature)
   ),
   'restored authorization reads and mutations retain their reviewed volatility'
+);
+
+select extensions.ok(
+  regexp_count(
+    lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+    ))),
+    'and attribution\.referred_user_id is not null'
+  ) = 3
+  and position(
+    'where numbered.referred_user_id is not null'
+    in lower(pg_catalog.pg_get_functiondef(to_regprocedure(
+      'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
+    )))
+  ) = 0,
+  'restored referral labels are contiguous across visible accounts only'
 );
 
 select extensions.ok(

@@ -679,14 +679,14 @@ select extensions.is(
 );
 
 -- Account deletion keeps the immutable attribution under a deterministic
--- pseudonym. It must disappear from the member-facing directory without
--- renumbering the still-visible referrals.
+-- pseudonym. It must disappear from the member-facing directory, whose labels
+-- are recomputed over visible rows so the member never sees sequence gaps.
 set local session_replication_role = replica;
 update affiliate_private.affiliate_attributions
 set
   referred_user_id = null,
   referred_user_pseudonym = repeat('9', 64)
-where id = '46000000-0000-4000-8000-000000000003';
+where id = '46000000-0000-4000-8000-000000000002';
 set local session_replication_role = origin;
 
 select extensions.is(
@@ -713,7 +713,7 @@ select extensions.is(
     ) with ordinality visible(item, ordinal)
   ),
   '[2,1]'::jsonb,
-  'deletion leaves a stable display-number gap instead of renumbering referrals'
+  'visible referrals are renumbered contiguously after a middle account deletion'
 );
 
 select * from extensions.finish();

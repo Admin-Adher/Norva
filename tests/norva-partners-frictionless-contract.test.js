@@ -34,6 +34,9 @@ const referralVisibilityMigrationSource = read(
 const deletedReferralVisibilityMigrationSource = read(
   'supabase/migrations/20260812002500_partners_referral_visibility_deleted_accounts.sql',
 );
+const visibleReferralNumberingMigrationSource = read(
+  'supabase/migrations/20260812082001_partners_referral_visible_numbering.sql',
+);
 const privacySource = read('public/privacy.html');
 
 function helpers() {
@@ -1005,6 +1008,33 @@ test('deleted referral accounts remain in audit but disappear from member visibi
   );
   assert.match(
     deletedReferralVisibilityMigrationSource,
+    /grant execute on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?to service_role/,
+  );
+});
+
+test('member-facing referral labels are contiguous after account deletion', () => {
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /where attribution\.referrer_account_id = v_account_id\\n\s+and attribution\.referred_user_id is not null\\n\s+\),/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /v_occurrences <> 2[\s\S]*?referral numbering source contract drifted/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /regexp_count\([\s\S]*?and attribution\\\.referred_user_id is not null[\s\S]*?\) <> 3/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /position\([\s\S]*?where numbered\.referred_user_id is not null[\s\S]*?\) > 0/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /revoke all on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
     /grant execute on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?to service_role/,
   );
 });
