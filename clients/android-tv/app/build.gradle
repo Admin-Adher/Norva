@@ -16,8 +16,8 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 25
-        versionName "3.8.12-hybrid"
+        versionCode 26
+        versionName "3.8.13-hybrid"
     }
 
     buildFeatures {
