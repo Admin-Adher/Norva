@@ -272,10 +272,9 @@ begin
 end;
 $$;
 
-alter function affiliate_private.partners_service_referral_visibility(
-  uuid, integer, text
-)
-  owner to supabase_admin;
+-- Preserve the creator role as owner. A cross-role OWNER change would require
+-- unnecessary SET ROLE authority in disposable databases without strengthening
+-- the service-role-only execution boundary.
 revoke all on function
   affiliate_private.partners_service_referral_visibility(uuid, integer, text)
   from public, anon, authenticated, service_role;
@@ -301,9 +300,6 @@ as $$
   );
 $$;
 
-alter function public.partners_service_referral_visibility(
-  uuid, integer, text
-) owner to supabase_admin;
 revoke all on function public.partners_service_referral_visibility(
   uuid, integer, text
 ) from public, anon, authenticated, service_role;
@@ -338,9 +334,6 @@ as $$
   );
 $$;
 
-alter function public.partners_service_dashboard_v2(
-  uuid, integer, text, text
-) owner to supabase_admin;
 revoke all on function public.partners_service_dashboard_v2(
   uuid, integer, text, text
 ) from public, anon, authenticated, service_role;

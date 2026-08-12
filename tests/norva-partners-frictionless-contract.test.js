@@ -951,7 +951,7 @@ test('referral visibility uses a server-masked recognition hint and remains serv
     'affiliate_private.partners_service_referral_visibility(',
   );
   const helperEnd = referralVisibilityMigrationSource.indexOf(
-    'alter function affiliate_private.partners_service_referral_visibility(',
+    'revoke all on function\n  affiliate_private.partners_service_referral_visibility(',
     helperStart,
   );
   const helper = referralVisibilityMigrationSource.slice(helperStart, helperEnd);
@@ -1036,6 +1036,30 @@ test('member-facing referral labels are contiguous after account deletion', () =
   assert.match(
     visibleReferralNumberingMigrationSource,
     /grant execute on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?to service_role/,
+  );
+});
+
+test('referral visibility migrations preserve their creator or pre-existing owner', () => {
+  const migrations = [
+    referralVisibilityMigrationSource,
+    deletedReferralVisibilityMigrationSource,
+    visibleReferralNumberingMigrationSource,
+  ];
+
+  for (const migration of migrations) {
+    assert.doesNotMatch(
+      migration,
+      /owner to supabase_admin/i,
+      'blank-database replays must not require cross-role SET ROLE authority',
+    );
+  }
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /select proowner[\s\S]*?into v_original_owner[\s\S]*?execute v_rewritten;[\s\S]*?proowner from pg_proc where oid = v_oid\)[\s\S]*?<> v_original_owner/,
+  );
+  assert.match(
+    visibleReferralNumberingMigrationSource,
+    /select proowner[\s\S]*?into v_original_owner[\s\S]*?execute v_rewritten;[\s\S]*?proowner from pg_proc where oid = v_oid\)[\s\S]*?<> v_original_owner/,
   );
 });
 
