@@ -31,6 +31,9 @@ const bootstrapBooleanMigrationSource = read(
 const referralVisibilityMigrationSource = read(
   'supabase/migrations/20260811130059_partners_referral_visibility.sql',
 );
+const deletedReferralVisibilityMigrationSource = read(
+  'supabase/migrations/20260812002500_partners_referral_visibility_deleted_accounts.sql',
+);
 const privacySource = read('public/privacy.html');
 
 function helpers() {
@@ -980,6 +983,29 @@ test('referral visibility uses a server-masked recognition hint and remains serv
   assert.match(
     referralVisibilityMigrationSource,
     /public\.partners_service_dashboard_v2\([\s\S]*?'referrals',[\s\S]*?partners_service_referral_visibility\([\s\S]*?p_user_id,[\s\S]*?20,[\s\S]*?null/,
+  );
+});
+
+test('deleted referral accounts remain in audit but disappear from member visibility', () => {
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /and attribution\.referred_user_id is not null/,
+  );
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /select\\n\s+attribution\.referred_user_id,\\n\s+row_number\(\) over/,
+  );
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /where numbered\.referred_user_id is not null[\s\S]*?numbered\.referral_number < v_cursor_number/,
+  );
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /revoke all on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?from public, anon, authenticated, service_role/,
+  );
+  assert.match(
+    deletedReferralVisibilityMigrationSource,
+    /grant execute on function\s+affiliate_private\.partners_service_referral_visibility\(uuid, integer, text\)[\s\S]*?to service_role/,
   );
 });
 

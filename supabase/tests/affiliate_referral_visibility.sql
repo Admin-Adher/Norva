@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(29);
+select extensions.plan(31);
 
 select extensions.ok(
   to_regprocedure(
@@ -676,6 +676,44 @@ select extensions.is(
   ),
   3,
   'following every continuation yields the complete referral list exactly once'
+);
+
+-- Account deletion keeps the immutable attribution under a deterministic
+-- pseudonym. It must disappear from the member-facing directory without
+-- renumbering the still-visible referrals.
+set local session_replication_role = replica;
+update affiliate_private.affiliate_attributions
+set
+  referred_user_id = null,
+  referred_user_pseudonym = repeat('9', 64)
+where id = '46000000-0000-4000-8000-000000000003';
+set local session_replication_role = origin;
+
+select extensions.is(
+  (
+    affiliate_private.partners_service_referral_visibility(
+      '41000000-0000-4000-8000-000000000001',
+      20,
+      null
+    ) ->> 'total'
+  )::integer,
+  2,
+  'a pseudonymised deleted account is not counted in the public directory'
+);
+
+select extensions.is(
+  (
+    select jsonb_agg((item ->> 'label_number')::integer order by ordinal)
+    from jsonb_array_elements(
+      affiliate_private.partners_service_referral_visibility(
+        '41000000-0000-4000-8000-000000000001',
+        20,
+        null
+      ) -> 'items'
+    ) with ordinality visible(item, ordinal)
+  ),
+  '[2,1]'::jsonb,
+  'deletion leaves a stable display-number gap instead of renumbering referrals'
 );
 
 select * from extensions.finish();

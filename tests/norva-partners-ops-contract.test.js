@@ -684,17 +684,17 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /ROUTINE_OWNER_CHECK/);
   assert.match(
     rehearsal,
-    /20260811130059_partners_referral_visibility\.sql/,
+    /20260812002500_partners_referral_visibility_deleted_accounts\.sql/,
   );
-  assert.match(rehearsal, /BASELINE_CONTRACT="3f09095"/);
+  assert.match(rehearsal, /BASELINE_CONTRACT="26b3ffc"/);
   assert.match(
     rehearsal,
-    /TARGET_MIGRATION="supabase\/migrations\/20260811130059_partners_referral_visibility\.sql"/,
+    /TARGET_MIGRATION="supabase\/migrations\/20260812002500_partners_referral_visibility_deleted_accounts\.sql"/,
   );
   assert.equal(
     (rehearsal.match(/readonly TARGET_MIGRATION=/g) || []).length,
     1,
-    'the post-3f09095 referral-visibility lot contains exactly one migration',
+    'the post-26b3ffc deleted-account visibility lot contains exactly one migration',
   );
   assert.doesNotMatch(rehearsal, /readonly MIGRATION_[A-Z]+=/);
   assert.match(rehearsal, /-f "\/candidate\/\$TARGET_MIGRATION"/);
@@ -709,7 +709,7 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /migration_failure_stage=\$MIGRATION_FAILURE_STAGE/);
   assert.match(rehearsal, /migration_failure_stage=unknown/);
   assert.match(rehearsal, /baseline_contract=\$BASELINE_CONTRACT/);
-  assert.match(rehearsal, /baseline_markers_verified=41/);
+  assert.match(rehearsal, /baseline_markers_verified=42/);
   assert.match(rehearsal, /migration_markers_before=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /migration_markers_after=\$MIGRATION_MARKERS/);
   assert.match(rehearsal, /BASELINE_CORE_MARKERS="1(?:\|1){21}"/);
@@ -730,6 +730,26 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /REFERRAL_VISIBILITY_MARKER_PENDING="0"/);
   assert.match(rehearsal, /capture_referral_visibility_marker\(\)/);
+  assert.match(
+    rehearsal,
+    /REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE="1"/,
+  );
+  assert.match(
+    rehearsal,
+    /REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_PENDING="0"/,
+  );
+  assert.match(
+    rehearsal,
+    /capture_referral_visibility_deleted_account_marker\(\)/,
+  );
+  assert.match(
+    rehearsal,
+    /and attribution\.referred_user_id is not null/,
+  );
+  assert.match(
+    rehearsal,
+    /where numbered\.referred_user_id is not null/,
+  );
   assert.match(
     rehearsal,
     /to_regprocedure\([\s\S]*partners_service_referral_visibility\(uuid,integer,text\)[\s\S]*\)::oid as private_oid/,
@@ -791,7 +811,11 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
   );
   assert.match(
     rehearsal,
-    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE\}\|\$\{DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_MARKER_PENDING\}"[\s\S]*else[\s\S]*EXPECTED_MARKERS_BEFORE="\$\{BASELINE_CORE_MARKERS\}\|\$\{FRICTIONLESS_MARKERS_COMPLETE\}\|\$\{OWNER_RISK_MARKER_COMPLETE\}\|\$\{MULTICURRENCY_MARKERS_COMPLETE\}\|\$\{WEB_TAX_MARKERS_COMPLETE\}\|\$\{OWNER_REVIEW_VALIDITY_MARKER_COMPLETE\}\|\$\{BOOTSTRAP_BOOLEAN_MARKER_COMPLETE\}\|\$\{DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE\}\|\$\{FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE\}\|\$\{DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE\}\|\$\{DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE\}\|\$\{DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE\}\|\$\{DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE\}\|\$\{DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}"/,
+    /if \[\[ "\$REHEARSAL_MODE" == "predeploy" \]\]; then[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_PENDING\}"/,
+  );
+  assert.match(
+    rehearsal,
+    /else[\s\S]*EXPECTED_MARKERS_BEFORE="[^\n]*\$\{REFERRAL_VISIBILITY_MARKER_COMPLETE\}\|\$\{REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE\}"/,
   );
   assert.match(
     rehearsal,
