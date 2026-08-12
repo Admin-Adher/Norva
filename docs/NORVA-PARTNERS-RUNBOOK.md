@@ -1022,6 +1022,127 @@ la couche cash. L'état sûr attendu est :
   RevenueCat TRANSFER sains et frais, avec exactement un cron Partners et un
   cron RevenueCat TRANSFER.
 
+#### Canari financier supervisé : un compte, jamais `pilot_ready`
+
+Le mode par défaut reste `pilot` et conserve strictement la cohorte de 20 à 50
+comptes ci-dessus. L'exception `financial_canary` sert uniquement à rejouer un
+cycle financier réel, borné et supervisé sur un seul compte en production. Elle
+ne satisfait jamais `pilot_ready`, ne remplace aucun des deux cycles du pilote,
+ne raccourcit pas J+45 et ne permet ni donnée synthétique ni API Revolut
+Business.
+
+L'identité exacte n'est jamais passée par variable d'environnement, argument
+`psql`, journal ou fichier Git. Un opérateur habilité la lie hors bande dans
+Supabase Vault avec exactement trois noms fixes :
+
+- `norva_partners_financial_canary_subject_pseudonym_v1`, contenant uniquement
+  le pseudonyme serveur de 64 caractères hexadécimaux du compte autorisé ;
+- `norva_partners_financial_canary_authorization_sha256_v1`, contenant le SHA-256
+  de l'autorisation privée du canari ;
+- `norva_partners_financial_canary_transaction_hash_v1`, contenant uniquement
+  le SHA-256 de la transaction de production autorisée (`capture` ou
+  `renewal`), jamais un identifiant fournisseur brut.
+
+Le pseudonyme reste une donnée personnelle pseudonymisée : sa valeur, le hash
+d'autorisation et le hash de transaction ne doivent apparaître ni dans Git, ni
+dans une commande, ni dans une preuve publique. L'autorisation privée fixe le
+compte, le corridor, la devise,
+le plafond exact d'un seul seuil de virement, le commit candidat, l'expiration
+et les rôles maker/checker. Les
+packages AAL2 courants de `legal_and_tax_approved`, `privacy_approved`,
+`country_policy_approved` et `manual_payout_workflow_verified` doivent tous
+porter le même hash sous `document_hashes.financial_canary_authorization`.
+
+Exécuter le contrôle seulement en production, après un paiement éligible et sa
+maturation réelle :
+
+```bash
+export NORVA_PARTNERS_PREACTIVATION_MODE='financial_canary'
+export NORVA_PARTNERS_DEPLOYMENT_ENVIRONMENT='production'
+bash ops/hetzner/scripts/check-norva-partners-pilot-preactivation.sh
+```
+
+En plus des invariants du pilote, le SQL `READ ONLY` exige exactement un compte
+allowlisté et confirmé dans le pays explicite, les trois liaisons Vault exactes,
+KYC
+Didit/âge/capacité/contrat actuels, attestation fiscale vérifiée, onboarding
+`revolut_manual` terminé, profil et binding bénéficiaire actifs sans révocation,
+ainsi qu'un solde mûri dans la devise sélectionnée au moins égal au seuil et
+sans recovery due. Pour éviter qu'un solde supérieur au montant autorisé soit
+versé intégralement par la création de cycle, le canari exige exactement un
+seul item et un solde disponible strictement égal au seuil actif (USD 10 pour
+le corridor FR/USD actuel). Il exige aussi une lignée unique et exacte du hash
+de transaction Vault : fait production complet `capture|renewal`, attribution
+au compte, accrual au montant du seuil, maturation réellement arrivée à J+45,
+release et écritures équilibrées, sans remboursement, chargeback, reversal ni
+autre écriture disponible. Tout autre compte, profil actif supplémentaire,
+transaction dupliquée ou montant supérieur bloque le préflight.
+
+`affiliate_kyc_sessions.expires_at` n'est volontairement pas utilisé comme
+expiration d'identité : ce champ borne uniquement le lien de vérification
+hébergé et expire avant J+45. L'actualité KYC est prouvée par la dernière
+session live non superseded, son état `verified`, le webhook signé correspondant
+et la purge provider terminée.
+
+Conserver `partners_payouts_live=false` et `partners_shadow_mode=true` pendant
+le paiement et J+45. Après un préflight intégralement `PASS`, ouvrir la fenêtre
+de lot uniquement via les RPC dédiées Admin/AAL2
+`admin_partners_financial_canary_cycle_create` puis, avec un second opérateur,
+`admin_partners_financial_canary_cycle_approve`. Elles relisent les trois
+secrets, consomment une seule fois le couple autorisation/transaction, créent un
+cycle live à un item et prouvent de nouveau la lignée avant/après allocation.
+L'approbation prépare obligatoirement le lot manuel exact dans la même
+transaction : si cette préparation échoue, l'approbation, l'allocation et le lot
+sont tous annulés et le cycle reste en brouillon. Il n'existe donc aucun état
+validé durable sans lot. Passer temporairement le shadow à `false`, activer les
+payouts, effectuer le virement dans Revolut Basic, importer le relevé et
+rapprocher la référence Norva. Revenir immédiatement à
+`partners_payouts_live=false` et `partners_shadow_mode=true`, puis révoquer les
+trois entrées Vault. Tout échec ferme la fenêtre sans modifier l'adhésion, les
+gains déjà comptabilisés ni la conversion en abonnement.
+
+À la fermeture, recopier uniquement les preuves sanitisées dans un journal
+privé dérivé de
+`ops/partners/financial-canary-evidence.example.json`. Le même
+`lineage_binding_sha256` opaque doit relier l'autorisation, le fait de paiement,
+l'accrual et sa release ; il ne doit pas être un UUID, un identifiant de compte
+ou un pseudonyme réutilisable. Le journal exige des preuves distinctes pour le
+préflight, le lot, maker, checker, l'export, le virement manuel, l'import du
+relevé, le rapprochement et la fermeture sûre.
+
+```bash
+node scripts/validate-partners-financial-canary-evidence.js \
+  <journal-prive>/partners-financial-canary.json \
+  --require-verified \
+  --expected-outcome-path=cash_manual_payout \
+  --expected-commit-sha=<commit-du-deploiement-outcome>
+```
+
+La commande échoue si le paiement n'est pas un fait production complet, si le
+montant de commission ne correspond pas à 20 %, si J+45 n'est pas réellement
+écoulé, si la release ne correspond pas à l'accrual, si maker et checker se
+confondent, si le relevé ou le rapprochement manque, ou si les flags/Vault ne
+sont pas revenus à l'état sûr. La sortie garde toujours `pilot_ready=false` et
+`generalization_ready=false`. Pour une conversion en accès Norva, utiliser un
+second journal réel avec
+`--expected-outcome-path=subscription_conversion`; ce chemin interdit toute
+ouverture de la fenêtre cash.
+
+Si une étape échoue avant la fin, utiliser `status=failed_closed`, consigner la
+phase et un code non sensible, puis fournir la preuve de fermeture et de
+révocation. Ne jamais promouvoir un brouillon ni transformer une simulation en
+preuve `verified`.
+
+Si l'échec intervient avant l'approbation, un opérateur Finance sous AAL2 peut
+fermer uniquement le brouillon non alloué via
+`admin_partners_financial_canary_cycle_abort`, avec la confirmation exacte
+`ABORT_FINANCIAL_CANARY:<cycle_key>` et une justification auditée. Cette action
+place le cycle en `cancelled` et conserve l'item `pending` comme snapshot ; elle
+ne crée aucune écriture de libération. Une fois le lot préparé par
+l'approbation atomique, ce RPC refuse toute action : utiliser exclusivement le
+workflow maker-checker existant de cancellation du lot manuel, ou la
+réconciliation normale si une soumission existe.
+
 Le brouillon historique ne doit pas être édité ni réinterprété. Si son objet
 `payout_thresholds` ne contient pas la devise sélectionnée et son seuil exact,
 créer via l'Admin/AAL2 une nouvelle version, puis l'activer par la RPC auditée.

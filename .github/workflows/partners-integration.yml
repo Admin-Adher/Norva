@@ -192,6 +192,11 @@ jobs:
           node scripts/validate-partners-release-evidence.js
           ops/partners/pilot-release.example.json
 
+      - name: Validate the separate fail-closed financial canary template
+        run: >-
+          node scripts/validate-partners-financial-canary-evidence.js
+          ops/partners/financial-canary-evidence.example.json
+
       - name: Validate the fail-closed approval evidence template
         run: >-
           node scripts/validate-partners-approval-evidence.js

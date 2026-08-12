@@ -15,9 +15,72 @@ des preuves conservées ailleurs. Ne jamais y inscrire
 nom, e-mail, UUID utilisateur, code public de parrainage, document KYC,
 identifiant de paiement, token ou payload fournisseur.
 
-Le format courant est `schema_version=6`. Les anciens journaux à preuves texte,
+### Artefact `financial_canary` séparé
+
+Le canari financier mono-compte n'est jamais consigné dans le journal de
+release ci-dessus. Il possède son propre contrat v1 :
+
+- schéma documentaire :
+  `ops/partners/financial-canary-evidence.schema.json` ;
+- brouillon fail-closed :
+  `ops/partners/financial-canary-evidence.example.json` ;
+- validateur autoritatif :
+  `scripts/validate-partners-financial-canary-evidence.js`.
+
+Ses seuls statuts sont `draft`, `verified` et `failed_closed`. Il n'accepte ni
+`pilot_ready` ni `generalization_ready`, conserve
+`scope.pilot_ready_eligible=false` et
+`scope.generalization_ready_eligible=false`, et sa sortie publie toujours ces
+deux états de préparation à `false`. Le validateur de release refuse
+réciproquement ce format. Un canari réussi prouve donc un trajet financier
+borné ; il ne remplace
+ni la cohorte de 20 à 50 comptes, ni deux cycles supervisés, ni 45 jours
+d'observation du pilote.
+
+L'artefact ne contient aucun identifiant de personne, compte, paiement,
+bénéficiaire ou fournisseur. Les liaisons sont des empreintes opaques propres à
+ce canari et les preuves externes utilisent uniquement des références HTTPS
+immuables `{run_id, sha256, url, verified_at}`. Les références doivent toutes
+être distinctes. E-mail, UUID, IBAN, payload, token, secret, identifiant
+provider et valeur Vault sont refusés récursivement.
+
+Le chemin `cash_manual_payout` exige la lignée exacte paiement production,
+attribution, accrual à 20 %, maturation réelle J+45 et release, puis un lot à
+un item, maker/checker AAL2 distincts, export, virement `revolut_manual`, import
+du relevé et rapprochement confirmé. Le chemin `subscription_conversion`
+exige à la place quote, débit du ledger, redemption et grant d'accès visible,
+sans ouvrir la fenêtre payout. Un artefact ne peut prouver qu'un seul chemin ;
+certifier les deux nécessite deux canaris réels et distincts, sans rendre pour
+autant le pilote prêt.
+
+Après succès ou échec, la fermeture doit prouver le retour au shadow, les
+payouts et API Revolut désactivés, aucun lot/incident ouvert, aucune credential
+Business API et la révocation des deux entrées Vault. Sans cette preuve, les
+statuts `verified` et `failed_closed` sont tous deux refusés.
+
+Valider un brouillon sans l'utiliser comme gate :
+
+```bash
+node scripts/validate-partners-financial-canary-evidence.js \
+  ops/partners/financial-canary-evidence.example.json
+```
+
+Valider une preuve privée terminée, liée au commit déployé pour l'issue :
+
+```bash
+node scripts/validate-partners-financial-canary-evidence.js \
+  <journal-prive>/partners-financial-canary.json \
+  --require-verified \
+  --expected-outcome-path=cash_manual_payout \
+  --expected-commit-sha=<sha-git-40-caracteres>
+```
+
+Il n'existe volontairement aucune option `--require-pilot-ready` sur cette
+commande.
+
+Le format courant est `schema_version=8`. Les anciens journaux à preuves texte,
 liés à un contrat provider obsolète ou portant encore une preuve « sandbox »
-pour le rail manuel sont volontairement refusés : repartir du template v6 et
+pour le rail manuel sont volontairement refusés : repartir du template v8 et
 rattacher les artefacts réels, sans convertir automatiquement des chaînes
 historiques non vérifiables.
 Le schéma est fermé récursivement : toute clé inconnue est refusée, y compris

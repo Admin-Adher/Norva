@@ -86,6 +86,170 @@ test('the selected pilot corridor has exact programme, jurisdiction and payout i
   assert.doesNotMatch(sql, /\b(?:France|FRA|FR|EUR)\b/);
 });
 
+test('operator readiness excludes deleted, banned and unconfirmed admins', () => {
+  const start = sql.indexOf('operator_stats as (');
+  const end = sql.indexOf('checks(check_name, passed, detail) as (', start);
+  assert.notEqual(start, -1, 'operator_stats CTE must remain present');
+  assert.notEqual(end, -1, 'checks CTE must follow operator_stats');
+  const operatorStats = sql.slice(start, end);
+  assert.equal(
+    (operatorStats.match(/user_row\.deleted_at is null/g) || []).length,
+    2,
+  );
+  assert.equal(
+    (operatorStats.match(/user_row\.banned_until < clock_timestamp\(\)/g) || [])
+      .length,
+    2,
+  );
+  assert.equal(
+    (operatorStats.match(/user_row\.email_confirmed_at is not null/g) || [])
+      .length,
+    2,
+  );
+});
+
+test('pilot and canary allowlists fail closed for non-live users', () => {
+  const allowlistStart = sql.indexOf('allowlist_stats as (');
+  const allowlistEnd = sql.indexOf('canary_subject_secret as (', allowlistStart);
+  const boundStart = sql.indexOf('canary_bound_accounts as (');
+  const boundEnd = sql.indexOf('canary_ready_accounts as (', boundStart);
+  assert.notEqual(allowlistStart, -1);
+  assert.notEqual(allowlistEnd, -1);
+  assert.notEqual(boundStart, -1);
+  assert.notEqual(boundEnd, -1);
+
+  for (const section of [
+    sql.slice(allowlistStart, allowlistEnd),
+    sql.slice(boundStart, boundEnd),
+  ]) {
+    assert.match(section, /user_row\.deleted_at is null/);
+    assert.match(section, /user_row\.banned_until is null/);
+    assert.match(section, /user_row\.banned_until < clock_timestamp\(\)/);
+    assert.match(section, /user_row\.email_confirmed_at is not null/);
+  }
+});
+
+test('financial canary is explicit, production-only and never weakens the 20-50 pilot', () => {
+  assert.match(
+    shell,
+    /NORVA_PARTNERS_PREACTIVATION_MODE:-pilot/,
+  );
+  assert.match(shell, /pilot_or_financial_canary_required/);
+  assert.match(shell, /production_environment_required/);
+  assert.match(shell, /-v preactivation_mode=/);
+  assert.match(sql, /mode_key in \('pilot', 'financial_canary'\)/);
+  assert.match(sql, /mode\.mode_key <> 'pilot'[\s\S]*active_count between 20 and 50/);
+  assert.match(
+    sql,
+    /mode\.mode_key <> 'financial_canary'[\s\S]*stats\.active_count = 1[\s\S]*stats\.pilot_country_count = 1[\s\S]*stats\.confirmed_pilot_country_count = 1/,
+  );
+  assert.match(shell, /does not satisfy pilot_ready or the 20-50 pilot cohort/);
+  assert.doesNotMatch(
+    shell,
+    /NORVA_PARTNERS_(?:FINANCIAL_CANARY|CANARY)_(?:USER|EMAIL|ACCOUNT|SUBJECT)/,
+  );
+});
+
+test('financial canary identity, authorization and transaction stay in fixed Vault entries', () => {
+  assert.match(
+    sql,
+    /norva_partners_financial_canary_subject_pseudonym_v1/,
+  );
+  assert.match(
+    sql,
+    /norva_partners_financial_canary_authorization_sha256_v1/,
+  );
+  assert.match(
+    sql,
+    /norva_partners_financial_canary_transaction_hash_v1/,
+  );
+  assert.match(sql, /account\.user_pseudonym = secret\.subject_pseudonym/);
+  assert.match(sql, /fact\.transaction_hash = secret\.transaction_hash/);
+  assert.match(sql, /package\.document_hashes ->> 'financial_canary_authorization'/);
+  for (const gate of [
+    'legal_and_tax_approved',
+    'privacy_approved',
+    'country_policy_approved',
+    'manual_payout_workflow_verified',
+  ]) {
+    assert.ok(sql.includes(`('${gate}'`), `${gate} must authorize the canary`);
+  }
+  assert.match(sql, /stats\.binding_count = 4/);
+  assert.match(sql, /stats\.matching_count = 4/);
+  assert.doesNotMatch(sql, /format\([^)]*subject_pseudonym/is);
+  assert.doesNotMatch(sql, /format\([^)]*authorization_sha256/is);
+  assert.doesNotMatch(sql, /format\([^)]*transaction_hash/is);
+});
+
+test('financial canary requires an exact manual-payout-ready account and matured balance', () => {
+  for (const contract of [
+    /account\.verification_status = 'verified'/,
+    /account\.verification_provider = 'didit'/,
+    /session\.provider_session_hash = account\.verification_reference/,
+    /session\.provider_environment = 'live'/,
+    /session\.provider_config_fingerprint <> repeat\('0', 64\)/,
+    /event\.processing_outcome = 'verified'/,
+    /event\.provider_event_at = session\.verified_at/,
+    /session\.provider_purge_status = 'purged'/,
+    /newer_session\.provider_environment = 'live'/,
+    /newer_session\.status <> 'superseded'/,
+    /newer_session\.created_at > session\.created_at/,
+    /account\.member_status = 'active'/,
+    /account\.member_program_version_id = account\.program_version_id/,
+    /program\.terms_version = account\.member_terms_version_accepted/,
+    /program\.disclosure_version =\s*account\.member_disclosure_version_accepted/,
+    /account\.age_verified/,
+    /account\.capacity_verified/,
+    /account\.contract_status = 'accepted'/,
+    /fiscal\.status = 'verified'/,
+    /fiscal\.declaration_version = 'partners-tax-self-certification-v1'/,
+    /request\.execution_adapter = 'revolut_manual'/,
+    /request\.status = 'completed'/,
+    /profile\.provider = 'revolut'/,
+    /profile\.status = 'active'/,
+    /binding\.status = 'active'/,
+    /binding\.destination_masked = profile\.display_masked/,
+    /affiliate_revolut_beneficiary_revocations/,
+    /partners_cash_readiness\(account\.id\)/,
+    /partners_payout_balance_authoritative\(/,
+    /partners_account_balances\(account\.id\)/,
+    /balance\.available_minor = :pilot_threshold_minor::bigint/,
+    /balance\.recovery_due_minor = 0/,
+    /canary_cycle_candidates as/,
+    /stats\.item_count = 1/,
+    /stats\.exact_canary_item_count = 1/,
+  ]) {
+    assert.match(sql, contract);
+  }
+  assert.doesNotMatch(sql, /session\.expires_at/);
+  assert.match(sql, /stats\.balance_row_count = 1/);
+  assert.match(sql, /stats\.eligible_balance_count = 1/);
+});
+
+test('financial canary preflight binds the exact production fact through J+45 release', () => {
+  for (const contract of [
+    /canary_lineage_candidates as/,
+    /fact\.transaction_hash = secret\.transaction_hash/,
+    /fact\.environment = 'production'/,
+    /fact\.facts_status = 'complete'/,
+    /fact\.event_type in \('capture', 'renewal'\)/,
+    /attribution\.referrer_account_id = account\.id/,
+    /commission_job\.status = 'succeeded'/,
+    /accrual\.matures_at = fact\.occurred_at \+ interval '45 days'/,
+    /maturation_job\.available_at <= clock_timestamp\(\)/,
+    /release\.related_entry_id = accrual\.id/,
+    /partners_commission_minor\([\s\S]*\) = :pilot_threshold_minor::bigint/,
+    /platform_commission_expense/,
+    /partner_commission_pending/,
+    /partner_commission_available/,
+    /child_fact\.event_type in \('refund', 'chargeback'\)/,
+    /reversal\.entry_kind in \('reversal', 'manual_reversal'\)/,
+    /stats\.exact_lineage_count = 1/,
+  ]) {
+    assert.match(sql, contract);
+  }
+});
+
 test('the operator must select every geographic and monetary pilot input explicitly', () => {
   for (const name of [
     'NORVA_PARTNERS_PILOT_COUNTRY',
@@ -111,6 +275,7 @@ test('the operator must select every geographic and monetary pilot input explici
     'pilot_minimum_age',
     'candidate_commit_sha',
     'deployment_environment',
+    'preactivation_mode',
   ]) {
     assert.match(shell, new RegExp(`-v ${variable}=`));
     assert.match(sql, new RegExp(`:'?${variable}'?`));
@@ -195,4 +360,11 @@ test('the runbook separates local preflight from protected external evidence', (
   assert.match(runbook, /ne crée aucune preuve fournisseur/);
   assert.match(runbook, /préflight cash s'exécute après la mise en service/);
   assert.match(runbook, /partners_payouts_live=false/);
+  assert.match(runbook, /Canari financier supervisé : un compte, jamais `pilot_ready`/);
+  assert.match(runbook, /NORVA_PARTNERS_PREACTIVATION_MODE='financial_canary'/);
+  assert.match(runbook, /norva_partners_financial_canary_subject_pseudonym_v1/);
+  assert.match(runbook, /norva_partners_financial_canary_transaction_hash_v1/);
+  assert.match(runbook, /financial_canary_authorization/);
+  assert.match(runbook, /admin_partners_financial_canary_cycle_create/);
+  assert.match(runbook, /admin_partners_financial_canary_cycle_approve/);
 });

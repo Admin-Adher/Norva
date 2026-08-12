@@ -1564,9 +1564,19 @@ test('Google Play Orders credential installer is atomic, rolling and permission-
   assert.match(installer, /tv\.norva\.phone/);
   assert.match(installer, /recreate_edge functions norva-edge-functions/);
   assert.match(installer, /recreate_edge functions2 norva-edge-functions-2/);
+  assert.match(installer, /command -v python3/);
+  assert.match(installer, /from cryptography\.hazmat\.primitives import hashes, serialization/);
   assert.match(installer, /https:\/\/www\.googleapis\.com\/auth\/androidpublisher/);
-  assert.match(installer, /androidpublisher\/v3\/applications\/tv\.norva\.phone\/orders/);
-  assert.match(installer, /orderResponse\.status !== 404/);
-  assert.match(installer, /previous Edge environment was restored/);
+  assert.match(installer, /androidpublisher\/v3\/"[\s\S]*applications\/tv\.norva\.phone\/orders/);
+  assert.match(installer, /serialization\.load_pem_private_key/);
+  assert.match(installer, /order_status != 404/);
+  assert.doesNotMatch(installer, /node - "\$work\/service-account\.json"/);
+  assert.match(installer, /previous Edge environment was restored and verified/);
+  assert.match(installer, /rollback is incomplete/);
+  assert.match(installer, /runtime\.get\(key, ""\) != expected\.get\(key, ""\)/);
+  assert.doesNotMatch(
+    installer,
+    /recreate_edge functions(?:2)?[^\n]*\|\| true/,
+  );
   assert.doesNotMatch(installer, /Read-Host[\s\S]{0,80}service account/i);
 });

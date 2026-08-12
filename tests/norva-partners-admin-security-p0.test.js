@@ -51,11 +51,12 @@ const frictionlessReleaseMigration = fs.readFileSync(
 );
 
 function section(source, start, end) {
-  const startIndex = source.indexOf(start);
+  const normalizedSource = source.replace(/\r\n?/g, '\n');
+  const startIndex = normalizedSource.indexOf(start);
   assert.notEqual(startIndex, -1, `missing section start: ${start}`);
-  const endIndex = source.indexOf(end, startIndex + start.length);
+  const endIndex = normalizedSource.indexOf(end, startIndex + start.length);
   assert.notEqual(endIndex, -1, `missing section end: ${end}`);
-  return source.slice(startIndex, endIndex);
+  return normalizedSource.slice(startIndex, endIndex);
 }
 
 test('shared Partners reads authorize Support, Risk or Finance operators', () => {

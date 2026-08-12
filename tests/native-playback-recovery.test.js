@@ -1510,7 +1510,10 @@ test('standalone binds every recovered stream to the exact native recovery token
   );
   assert.match(vodFlow, /playbackPreferences:[\s\S]{0,180}recoveryToken/);
   assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
-  assert.match(liveFlow, /activeStreamId:[\s\S]{0,140}recoveryToken/);
+  assert.match(
+    liveFlow,
+    /activeStreamId:[^\r\n]*\r?\n\s*sessionId:\s*freshLiveSessionId,\r?\n\s*recoveryToken\b/,
+  );
 });
 
 test('standalone Live recovery releases the previous cloud session before creating one replacement', () => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Fail-closed, read-only preactivation check for an explicit pilot corridor.
+# The optional financial canary mode never weakens the official 20-50 pilot.
 # Secret values are inspected in memory and are never printed.
 
 set -euo pipefail
@@ -19,6 +20,7 @@ PILOT_THRESHOLD_MINOR="${NORVA_PARTNERS_PILOT_THRESHOLD_MINOR:-}"
 PILOT_MINIMUM_AGE="${NORVA_PARTNERS_PILOT_MINIMUM_AGE:-}"
 CANDIDATE_COMMIT_SHA="${NORVA_PARTNERS_CANDIDATE_COMMIT_SHA:-}"
 DEPLOYMENT_ENVIRONMENT="${NORVA_PARTNERS_DEPLOYMENT_ENVIRONMENT:-}"
+PREACTIVATION_MODE="${NORVA_PARTNERS_PREACTIVATION_MODE:-pilot}"
 
 FAILURES=0
 
@@ -35,6 +37,10 @@ pass() {
 }
 
 validate_pilot_inputs() {
+  if [[ "$PREACTIVATION_MODE" != 'pilot' \
+    && "$PREACTIVATION_MODE" != 'financial_canary' ]]; then
+    fail "pilot_input.preactivation_mode" "pilot_or_financial_canary_required"
+  fi
   if [[ ! "$PILOT_COUNTRY" =~ ^[A-Z]{2}$ ]]; then
     fail "pilot_input.country" "explicit_iso2_required"
   fi
@@ -67,6 +73,10 @@ validate_pilot_inputs() {
     && "$DEPLOYMENT_ENVIRONMENT" != 'production' ]]; then
     fail "pilot_input.deployment_environment" \
       "explicit_preproduction_or_production_required"
+  fi
+  if [[ "$PREACTIVATION_MODE" == 'financial_canary' \
+    && "$DEPLOYMENT_ENVIRONMENT" != 'production' ]]; then
+    fail "pilot_input.financial_canary" "production_environment_required"
   fi
 }
 
@@ -395,6 +405,7 @@ else
         -v pilot_minimum_age="$PILOT_MINIMUM_AGE" \
         -v candidate_commit_sha="$CANDIDATE_COMMIT_SHA" \
         -v deployment_environment="$DEPLOYMENT_ENVIRONMENT" \
+        -v preactivation_mode="$PREACTIVATION_MODE" \
         -U "$DB_USER" -d "$DB_NAME" \
         -qAt -F '|' < "$SQL_FILE"
   )"; then
@@ -412,11 +423,15 @@ else
 fi
 
 if (( FAILURES > 0 )); then
-  printf '\nPartners pilot preactivation: BLOCKED (%s blocker(s)).\n' "$FAILURES" >&2
+  printf '\nPartners %s preactivation: BLOCKED (%s blocker(s)).\n' \
+    "$PREACTIVATION_MODE" "$FAILURES" >&2
   echo "No flag, gate, route, cron or provider configuration was changed." >&2
   exit 1
 fi
 
 echo
-echo "Partners pilot preactivation: PASS."
+printf 'Partners %s preactivation: PASS.\n' "$PREACTIVATION_MODE"
+if [[ "$PREACTIVATION_MODE" == 'financial_canary' ]]; then
+  echo "This one-account canary evidence does not satisfy pilot_ready or the 20-50 pilot cohort."
+fi
 echo "This is configuration evidence only; protected external release evidence is still required."
