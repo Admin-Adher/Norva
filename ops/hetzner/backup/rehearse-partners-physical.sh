@@ -3,11 +3,11 @@
 # rehearse-partners-physical.sh
 #
 # Restore the latest R2 physical base backup into a short-lived, no-network
-# PostgreSQL clone, either hide pseudonymised deleted accounts from the
-# privacy-preserving referral projection after the audited 26b3ffc database
-# baseline atomically (`predeploy`), or prove that it is already present
-# without replaying it (`postdeploy`), then run the verifier and
-# restore-compatible pgTAP.
+# PostgreSQL clone, either apply the financial-canary migration after the
+# audited 9961726 database baseline atomically (`predeploy`), or prove that it
+# is already present without replaying it (`postdeploy`), then run the verifier
+# and restore-compatible pgTAP. The native-heartbeat migration is part of that
+# baseline and remains an explicit fail-closed marker.
 #
 # This script is intentionally root-only because /etc/norva-backup.env is
 # root-owned. The live container is inspected and receives one read-only SHOW
@@ -96,8 +96,8 @@ if [[ ! "$DB_CONTAINER" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   exit 1
 fi
 
-readonly BASELINE_CONTRACT="d120672"
-readonly TARGET_MIGRATION="supabase/migrations/20260812082001_partners_referral_visible_numbering.sql"
+readonly BASELINE_CONTRACT="9961726"
+readonly TARGET_MIGRATION="supabase/migrations/20260812122425_partners_financial_canary_atomic_cycle.sql"
 readonly BASELINE_CORE_MARKERS="1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1"
 readonly FRICTIONLESS_MARKERS_COMPLETE="1|1|1"
 readonly OWNER_RISK_MARKER_COMPLETE="1"
@@ -121,6 +121,10 @@ readonly REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE="1"
 readonly REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_PENDING="0"
 readonly REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE="1"
 readonly REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING="0"
+readonly FINANCIAL_CANARY_MARKER_COMPLETE="1|12|4"
+readonly FINANCIAL_CANARY_MARKER_PENDING="0|0|0"
+readonly NATIVE_HEARTBEAT_MARKER_COMPLETE="1"
+readonly NATIVE_HEARTBEAT_MARKER_PENDING="0"
 readonly VERIFIER="ops/hetzner/backup/verify-partners-restore.sql"
 # The exhaustive mutation suites intentionally assume a blank disposable CI
 # database. A physical restore contains real operators, requests and financial
@@ -281,7 +285,7 @@ for candidate_file in "${CANDIDATE_FILES[@]}"; do
 done
 proof_line "candidate_files=${#CANDIDATE_FILES[@]}"
 proof_line "baseline_contract=$BASELINE_CONTRACT"
-proof_line "baseline_markers_verified=43"
+proof_line "baseline_markers_verified=47"
 proof_line "target_migration_sha256=$(sha256sum "$CANDIDATE_DIR/$TARGET_MIGRATION" | awk '{print $1}')"
 
 CURRENT_STEP="exact PostgreSQL image verification"
@@ -808,6 +812,99 @@ from routine_ids;
 SQL
 }
 
+capture_financial_canary_marker() {
+  clone_psql -At -v ON_ERROR_STOP=1 <<'SQL'
+with expected_routine(signature) as (
+  values
+    ('affiliate_private.guard_financial_canary_run_mutation()'),
+    ('affiliate_private.partners_financial_canary_authorization_current(text,uuid,text,text)'),
+    ('affiliate_private.partners_financial_canary_lineage_current(uuid,boolean)'),
+    ('affiliate_private.guard_financial_canary_cycle_exclusivity()'),
+    ('affiliate_private.guard_financial_canary_cycle_approval()'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)'),
+    ('affiliate_private.guard_financial_canary_manual_batch()'),
+    ('public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)'),
+    ('public.admin_partners_financial_canary_cycle_approve(text,text,text)'),
+    ('public.admin_partners_financial_canary_cycle_abort(text,text,text)')
+),
+expected_trigger(table_name, trigger_name, trigger_type) as (
+  values
+    ('affiliate_financial_canary_runs', 'affiliate_financial_canary_runs_guard', 31::smallint),
+    ('affiliate_payout_cycles', 'affiliate_payout_cycles_00_financial_canary_exclusivity_guard', 23::smallint),
+    ('affiliate_payout_cycles', 'affiliate_payout_cycles_financial_canary_approval_guard', 19::smallint),
+    ('affiliate_revolut_manual_batches', 'affiliate_revolut_manual_batches_financial_canary_guard', 7::smallint)
+)
+select
+  (to_regclass('affiliate_private.affiliate_financial_canary_runs') is not null)::int::text
+  || '|' || (
+    select count(*)
+    from expected_routine routine_row
+    where to_regprocedure(routine_row.signature) is not null
+  )::text
+  || '|' || (
+    select count(*)
+    from expected_trigger expected
+    join pg_catalog.pg_class relation
+      on relation.oid = to_regclass(
+        'affiliate_private.' || expected.table_name
+      )
+    join pg_catalog.pg_trigger trigger_row
+      on trigger_row.tgrelid = relation.oid
+      and trigger_row.tgname = expected.trigger_name
+      and trigger_row.tgtype = expected.trigger_type
+      and trigger_row.tgenabled = 'O'
+      and not trigger_row.tgisinternal
+  )::text;
+SQL
+}
+
+capture_native_heartbeat_marker() {
+  clone_psql -At -v ON_ERROR_STOP=1 <<'SQL'
+select (
+  exists (
+    select 1
+    from information_schema.columns column_row
+    where column_row.table_schema = 'public'
+      and column_row.table_name = 'cloud_playback_sessions'
+      and column_row.column_name = 'native_heartbeat_at'
+      and column_row.data_type = 'timestamp with time zone'
+      and column_row.is_nullable = 'YES'
+  )
+  and not has_table_privilege(
+    'anon',
+    'public.cloud_playback_sessions',
+    'UPDATE'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.cloud_playback_sessions',
+    'UPDATE'
+  )
+  and has_table_privilege(
+    'service_role',
+    'public.cloud_playback_sessions',
+    'UPDATE'
+  )
+  and not exists (
+    select 1
+    from information_schema.column_privileges privilege_row
+    where privilege_row.table_schema = 'public'
+      and privilege_row.table_name = 'cloud_playback_sessions'
+      and privilege_row.grantee in ('anon', 'authenticated')
+      and privilege_row.privilege_type = 'UPDATE'
+  )
+  and not exists (
+    select 1
+    from pg_catalog.pg_policy policy_row
+    where policy_row.polrelid = 'public.cloud_playback_sessions'::regclass
+      and policy_row.polname = 'cloud_playback_sessions_update_own'
+  )
+)::int::text;
+SQL
+}
+
 CURRENT_STEP="background worker neutralization"
 ACTUAL_CLONE_PRELOADS="$(clone_psql -At -v ON_ERROR_STOP=1 \
   -c 'show shared_preload_libraries;' \
@@ -940,13 +1037,21 @@ REFERRAL_VISIBLE_NUMBERING_MARKER="$(
   capture_referral_visible_numbering_marker \
     2> "$RAW_DIR/referral-visible-numbering-precondition.log"
 )" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER}|${REFERRAL_VISIBLE_NUMBERING_MARKER}"
+FINANCIAL_CANARY_MARKER="$(
+  capture_financial_canary_marker \
+    2> "$RAW_DIR/financial-canary-precondition.log"
+)" || fail
+NATIVE_HEARTBEAT_MARKER="$(
+  capture_native_heartbeat_marker \
+    2> "$RAW_DIR/native-heartbeat-precondition.log"
+)" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER}|${REFERRAL_VISIBLE_NUMBERING_MARKER}|${FINANCIAL_CANARY_MARKER}|${NATIVE_HEARTBEAT_MARKER}"
 if [[ "$REHEARSAL_MODE" == "predeploy" ]]; then
-  # The audited d120672 database already hides deleted referred accounts.
-  # Only contiguous member-facing numbering remains pending replay.
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING}"
+  # The audited 9961726 database includes referral numbering and native
+  # heartbeat. Only the one-shot financial-canary contract remains pending.
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE}|${FINANCIAL_CANARY_MARKER_PENDING}|${NATIVE_HEARTBEAT_MARKER_COMPLETE}"
 else
-  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE}"
+  EXPECTED_MARKERS_BEFORE="${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE}|${FINANCIAL_CANARY_MARKER_COMPLETE}|${NATIVE_HEARTBEAT_MARKER_COMPLETE}"
 fi
 readonly EXPECTED_MARKERS_BEFORE
 proof_line "migration_markers_before=$MIGRATION_MARKERS"
@@ -1091,8 +1196,16 @@ REFERRAL_VISIBLE_NUMBERING_MARKER="$(
   capture_referral_visible_numbering_marker \
     2> "$RAW_DIR/referral-visible-numbering-postcondition.log"
 )" || fail
-MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER}|${REFERRAL_VISIBLE_NUMBERING_MARKER}"
-if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE}" ]]; then
+FINANCIAL_CANARY_MARKER="$(
+  capture_financial_canary_marker \
+    2> "$RAW_DIR/financial-canary-postcondition.log"
+)" || fail
+NATIVE_HEARTBEAT_MARKER="$(
+  capture_native_heartbeat_marker \
+    2> "$RAW_DIR/native-heartbeat-postcondition.log"
+)" || fail
+MIGRATION_MARKERS="${MIGRATION_MARKERS}|${DEPLOYMENT_MANIFEST_EVENT_MARKER}|${FRICTIONLESS_MIGRATION_MARKERS}|${OWNER_RISK_MIGRATION_MARKER}|${MULTICURRENCY_MIGRATION_MARKERS}|${WEB_TAX_MIGRATION_MARKERS}|${OWNER_REVIEW_VALIDITY_MARKER}|${BOOTSTRAP_BOOLEAN_MARKER}|${DIDIT_GUIDED_PREFLIGHT_MARKER}|${FR_PILOT_USD_ALIGNMENT_MARKER}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS}|${DIDIT_REVIEW_RECOVERY_MARKER}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER}|${REFERRAL_VISIBILITY_MARKER}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER}|${REFERRAL_VISIBLE_NUMBERING_MARKER}|${FINANCIAL_CANARY_MARKER}|${NATIVE_HEARTBEAT_MARKER}"
+if [[ "$MIGRATION_MARKERS" != "${BASELINE_CORE_MARKERS}|${FRICTIONLESS_MARKERS_COMPLETE}|${OWNER_RISK_MARKER_COMPLETE}|${MULTICURRENCY_MARKERS_COMPLETE}|${WEB_TAX_MARKERS_COMPLETE}|${OWNER_REVIEW_VALIDITY_MARKER_COMPLETE}|${BOOTSTRAP_BOOLEAN_MARKER_COMPLETE}|${DIDIT_GUIDED_PREFLIGHT_MARKER_COMPLETE}|${FR_PILOT_USD_ALIGNMENT_MARKER_COMPLETE}|${DIDIT_PREFLIGHT_REGISTRY_TRUTH_MARKER_COMPLETE}|${DIDIT_CERTIFICATION_RPC_ALIAS_MARKERS_COMPLETE}|${DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE}|${DIDIT_SIGNED_REVIEW_GRACE_MARKER_COMPLETE}|${DIDIT_ORPHAN_PURGE_RECOVERY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_MARKER_COMPLETE}|${REFERRAL_VISIBILITY_DELETED_ACCOUNT_MARKER_COMPLETE}|${REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE}|${FINANCIAL_CANARY_MARKER_COMPLETE}|${NATIVE_HEARTBEAT_MARKER_COMPLETE}" ]]; then
   fail
 fi
 proof_line "migration_markers_after=$MIGRATION_MARKERS"
@@ -1292,6 +1405,18 @@ with expected(signature) as (
     ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)'),
     ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)'),
     ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)'),
+    ('affiliate_private.guard_financial_canary_run_mutation()'),
+    ('affiliate_private.partners_financial_canary_authorization_current(text,uuid,text,text)'),
+    ('affiliate_private.partners_financial_canary_lineage_current(uuid,boolean)'),
+    ('affiliate_private.guard_financial_canary_cycle_exclusivity()'),
+    ('affiliate_private.guard_financial_canary_cycle_approval()'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)'),
+    ('affiliate_private.guard_financial_canary_manual_batch()'),
+    ('public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)'),
+    ('public.admin_partners_financial_canary_cycle_approve(text,text,text)'),
+    ('public.admin_partners_financial_canary_cycle_abort(text,text,text)'),
     ('affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'),
     ('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)'),
     ('affiliate_private.is_managed_partners_flag(text)'),
@@ -1309,7 +1434,7 @@ left join pg_catalog.pg_proc routine
   on routine.oid = to_regprocedure(expected.signature);
 SQL
 )" || fail
-if [[ "$ROUTINE_OWNER_CHECK" != "172|0" ]]; then
+if [[ "$ROUTINE_OWNER_CHECK" != "184|0" ]]; then
   fail
 fi
 RELATION_OWNER_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
@@ -1334,6 +1459,7 @@ with expected(relation_name) as (
     ('affiliate_private.affiliate_access_credit_quotes'),
     ('affiliate_private.affiliate_access_credit_redemptions'),
     ('affiliate_private.affiliate_web_tax_policies'),
+    ('affiliate_private.affiliate_financial_canary_runs'),
     ('public.cloud_access_grants')
 )
 select count(*)::text || '|' || count(*) filter (
@@ -1346,16 +1472,82 @@ left join pg_catalog.pg_class relation
   on relation.oid = to_regclass(expected.relation_name);
 SQL
 )" || fail
-if [[ "$RELATION_OWNER_CHECK" != "19|0" ]]; then
+if [[ "$RELATION_OWNER_CHECK" != "20|0" ]]; then
+  fail
+fi
+
+FINANCIAL_CANARY_ACL_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
+  2> "$RAW_DIR/financial-canary-acl-postcondition.log" <<'SQL'
+with expected(signature, security_definer, volatility, access_role) as (
+  values
+    ('affiliate_private.guard_financial_canary_run_mutation()', true, 'v', 'none'),
+    ('affiliate_private.partners_financial_canary_authorization_current(text,uuid,text,text)', true, 's', 'none'),
+    ('affiliate_private.partners_financial_canary_lineage_current(uuid,boolean)', true, 's', 'none'),
+    ('affiliate_private.guard_financial_canary_cycle_exclusivity()', true, 'v', 'none'),
+    ('affiliate_private.guard_financial_canary_cycle_approval()', true, 'v', 'none'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)', true, 'v', 'authenticated'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)', true, 'v', 'authenticated'),
+    ('affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)', true, 'v', 'authenticated'),
+    ('affiliate_private.guard_financial_canary_manual_batch()', true, 'v', 'none'),
+    ('public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)', false, 'v', 'authenticated'),
+    ('public.admin_partners_financial_canary_cycle_approve(text,text,text)', false, 'v', 'authenticated'),
+    ('public.admin_partners_financial_canary_cycle_abort(text,text,text)', false, 'v', 'authenticated')
+)
+select count(*)::text || '|' || count(*) filter (
+  where routine.oid is null
+    or pg_catalog.pg_get_userbyid(routine.proowner) <> 'supabase_admin'
+    or routine.prosecdef <> expected.security_definer
+    or routine.provolatile <> expected.volatility::"char"
+    or routine.proconfig is distinct from array['search_path=""']::text[]
+    or has_function_privilege('anon', routine.oid, 'EXECUTE')
+    or has_function_privilege('service_role', routine.oid, 'EXECUTE')
+    or has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+      <> (expected.access_role = 'authenticated')
+)::text
+from expected
+left join pg_catalog.pg_proc routine
+  on routine.oid = to_regprocedure(expected.signature);
+SQL
+)" || fail
+if [[ "$FINANCIAL_CANARY_ACL_CHECK" != "12|0" ]]; then
+  fail
+fi
+
+FINANCIAL_CANARY_TABLE_CHECK="$(clone_psql -At -v ON_ERROR_STOP=1 \
+  2> "$RAW_DIR/financial-canary-table-postcondition.log" <<'SQL'
+select (
+  relation.relkind = 'r'
+  and pg_catalog.pg_get_userbyid(relation.relowner) = 'supabase_admin'
+  and relation.relrowsecurity
+  and not exists (
+    select 1
+    from pg_catalog.pg_policy policy_row
+    where policy_row.polrelid = relation.oid
+  )
+  and not has_table_privilege('anon', relation.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+  and not has_table_privilege('authenticated', relation.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+  and not has_table_privilege('service_role', relation.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+)::int::text || '|' || (
+  select count(*)::text
+  from affiliate_private.affiliate_financial_canary_runs
+)
+from pg_catalog.pg_class relation
+where relation.oid =
+  'affiliate_private.affiliate_financial_canary_runs'::regclass;
+SQL
+)" || fail
+if [[ "$FINANCIAL_CANARY_TABLE_CHECK" != "1|0" ]]; then
   fail
 fi
 proof_line "migrations_applied=$MIGRATIONS_APPLIED"
 proof_line "migrations_atomic=$MIGRATIONS_ATOMIC"
 proof_line "migration_replay_skipped=$MIGRATION_REPLAY_SKIPPED"
 proof_line "migration_routine_owner=supabase_admin"
-proof_line "migration_routines_verified=172"
+proof_line "migration_routines_verified=184"
 proof_line "migration_relation_owner=supabase_admin"
-proof_line "migration_relations_verified=19"
+proof_line "migration_relations_verified=20"
+proof_line "financial_canary_routine_acl_verified=12"
+proof_line "financial_canary_table_empty=true"
 
 CURRENT_STEP="post-migration sensitive-state verification"
 POST_MIGRATION_SENSITIVE_STATE="$(capture_sensitive_partner_state \

@@ -200,19 +200,21 @@ son PostgreSQL jetable. Les workers `pg_cron` et `pg_net` sont neutralisés dès
 le démarrage en les retirant des préloads. Le script ne désactive pas les lignes
 restaurées de `cron.job` : sans scheduler, elles restent inertes dans ce clone
 isolé, et leurs nombres total et actif sont contrôlés avant et après la
-répétition. Pour cette release, en `predeploy`, les 35 marqueurs de la baseline
-auditée `f0e3212` doivent tous être présents : la politique France P0 reste
-fermée, non attribuée et libellée en USD, tandis que le marqueur de vérité du
-préflight Didit doit encore valoir `0`. Une seule migration est rejouée dans une
-transaction unique :
+répétition. Pour cette release, en `predeploy`, les 47 composantes du contrat de
+baseline audité `9961726` sont vérifiées : la politique France P0 reste fermée,
+non attribuée et libellée en USD, la protection native heartbeat est déjà
+présente, et le marqueur composite du canari financier doit encore valoir
+`0|0|0` (table, routines et triggers absents). Une seule migration est rejouée
+dans une transaction unique :
 
-1. `20260810080836_partners_didit_preflight_registry_truth.sql`.
+1. `20260812122425_partners_financial_canary_atomic_cycle.sql`.
 
-En `postdeploy`, les 36 marqueurs doivent tous être présents : aucune migration
-n'est rejouée, puis le vérificateur et le pgTAP sont exécutés sur l'état déjà
-migré. La politique France, les flags, les approbations et le journal économique
-doivent être strictement inchangés. Un état partiel est refusé dans les deux
-modes.
+En `postdeploy`, le marqueur composite du canari doit valoir `1|12|4` et la
+protection heartbeat doit rester complète : aucune migration n'est rejouée,
+puis le vérificateur et les 129 assertions pgTAP sont exécutés sur l'état déjà
+migré. La politique France, les flags, les approbations, les données financières
+et les crons doivent être strictement inchangés. Un état partiel est refusé dans
+les deux modes.
 Le conteneur et le répertoire temporaire sont toujours supprimés par le trap de
 sortie.
 
@@ -224,16 +226,18 @@ ainsi que `pgtap_profile=physical_restore_compatible_v1` avant toute migration
 de production.
 
 La preuve `predeploy` du candidat actuel doit contenir
-`baseline_contract=f0e3212`, `baseline_markers_verified=36`,
+`baseline_contract=9961726`, `baseline_markers_verified=47`,
 `rehearsal_mode=predeploy`, `migrations_applied=1`,
-`migrations_atomic=true`, `migration_replay_skipped=false`, les 35 marqueurs
-de baseline à `1` puis le marqueur du préflight à `0` avant, et 36 marqueurs `1`
-après. Elle doit
-également contenir `migration_routines_verified=164` et
-`migration_relations_verified=19`. La preuve `postdeploy` doit contenir
-`baseline_contract=f0e3212`, `rehearsal_mode=postdeploy`,
-`migrations_applied=0`, `migration_replay_skipped=true`, et 36 marqueurs `1`
-avant comme après, avec les mêmes 164 routines et 19 relations vérifiées.
+`migrations_atomic=true`, `migration_replay_skipped=false`, le canari à
+`0|0|0` avant puis `1|12|4` après, et le heartbeat à `1` avant comme après.
+Elle doit également contenir `migration_routines_verified=184`,
+`migration_relations_verified=20`,
+`financial_canary_routine_acl_verified=12` et
+`financial_canary_table_empty=true`. La preuve `postdeploy` doit contenir
+`baseline_contract=9961726`, `rehearsal_mode=postdeploy`,
+`migrations_applied=0`, `migration_replay_skipped=true`, le canari à `1|12|4`
+et le heartbeat à `1` avant comme après, avec les mêmes 184 routines, 20
+relations et 129 assertions pgTAP vérifiées.
 
 ## Signes que les backups sont sains (à regarder de temps en temps)
 

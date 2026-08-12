@@ -436,6 +436,9 @@ begin
     'public.admin_partners_revolut_beneficiary_binding_verify(text,text,text)',
     'public.admin_partners_revolut_beneficiary_binding_reject(text,text,text)',
     'public.admin_partners_revolut_beneficiary_binding_revoke(text,text,text)',
+    'public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)',
+    'public.admin_partners_financial_canary_cycle_approve(text,text,text)',
+    'public.admin_partners_financial_canary_cycle_abort(text,text,text)',
     'public.admin_partners_revolut_manual_batch_prepare(text,text,text)',
     'public.admin_partners_revolut_manual_batch_payload(text)',
     'public.admin_partners_revolut_manual_batch_mark_exported(text,text,text,text,text)',
@@ -531,6 +534,7 @@ begin
       end if;
     elsif v_signature like 'public.admin_partners_revolut_%'
       or v_signature like 'public.admin_partners_payout_route_%'
+      or v_signature like 'public.admin_partners_financial_canary_cycle_%'
       or v_signature like 'public.admin_partners_kyc_certification_%'
       or v_signature like 'public.admin_partners_kyc_human_review_%'
     then
@@ -590,6 +594,9 @@ begin
       ('affiliate_private.partners_service_fiscal_profile_self_attest(uuid,text,text,boolean,text)', true, 'v', 'service_role'),
       ('affiliate_private.partners_service_payout_onboarding_request(uuid,text,boolean,text)', true, 'v', 'service_role'),
       ('affiliate_private.admin_partners_revolut_manual_batch_prepare(text,text,text)', true, 'v', 'authenticated'),
+      ('public.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)', false, 'v', 'authenticated'),
+      ('public.admin_partners_financial_canary_cycle_approve(text,text,text)', false, 'v', 'authenticated'),
+      ('public.admin_partners_financial_canary_cycle_abort(text,text,text)', false, 'v', 'authenticated'),
       ('affiliate_private.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)', true, 'v', 'owner'),
       ('public.partners_worker_web_tax_resolve(uuid,text,text,text,integer,bigint,text,timestamptz)', true, 'v', 'service_role'),
       ('affiliate_private.is_managed_partners_flag(text)', false, 'i', 'owner'),
@@ -1579,6 +1586,9 @@ begin
             'affiliate_private.admin_partners_commission_reverse(text,text,text)',
             'affiliate_private.admin_partners_payout_cycle_create(date,date,text,boolean,text,text)',
             'affiliate_private.admin_partners_payout_cycle_approve(text,text,text)',
+            'affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)',
+            'affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)',
+            'affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)',
             'affiliate_private.admin_partners_risk_queue(integer,integer,text)',
             'affiliate_private.admin_partners_kyc_human_review_queue(integer,integer,text)',
             'affiliate_private.admin_partners_kyc_human_review_locator(text,text,text)',

@@ -6,13 +6,13 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
-test('physical rehearsal preserves the complete Didit contract while numbering visible referrals', () => {
+test('physical rehearsal preserves Didit while staging the financial canary', () => {
   const rehearsal = read('ops/hetzner/backup/rehearse-partners-physical.sh');
 
-  assert.match(rehearsal, /readonly BASELINE_CONTRACT="d120672"/);
+  assert.match(rehearsal, /readonly BASELINE_CONTRACT="9961726"/);
   assert.match(
     rehearsal,
-    /readonly TARGET_MIGRATION="supabase\/migrations\/20260812082001_partners_referral_visible_numbering\.sql"/,
+    /readonly TARGET_MIGRATION="supabase\/migrations\/20260812122425_partners_financial_canary_atomic_cycle\.sql"/,
   );
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /DIDIT_REVIEW_RECOVERY_MARKER_PENDING="0"/);
@@ -36,6 +36,11 @@ test('physical rehearsal preserves the complete Didit contract while numbering v
   assert.match(rehearsal, /REFERRAL_VISIBLE_NUMBERING_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /REFERRAL_VISIBLE_NUMBERING_MARKER_PENDING="0"/);
   assert.match(rehearsal, /capture_referral_visible_numbering_marker\(\)/);
+  assert.match(rehearsal, /capture_financial_canary_marker\(\)/);
+  assert.match(rehearsal, /capture_native_heartbeat_marker\(\)/);
+  assert.match(rehearsal, /FINANCIAL_CANARY_MARKER_PENDING="0\|0\|0"/);
+  assert.match(rehearsal, /FINANCIAL_CANARY_MARKER_COMPLETE="1\|12\|4"/);
+  assert.match(rehearsal, /NATIVE_HEARTBEAT_MARKER_COMPLETE="1"/);
   assert.match(rehearsal, /partners_service_referral_visibility/);
   assert.match(rehearsal, /partners_service_didit_purge_orphans/);
   assert.match(rehearsal, /partners_service_didit_purge_recover/);

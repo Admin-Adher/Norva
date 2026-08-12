@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "evidence_type": "partners_financial_canary",
+  "status": "draft",
+  "canary_key": "financial-canary-draft-cash-v1",
+  "repository": "Admin-Adher/Norva",
+  "target_environment": "production",
+  "contains_personal_data": false,
+  "scope": {
+    "account_count": 1,
+    "synthetic_data": false,
+    "pilot_ready_eligible": false,
+    "generalization_ready_eligible": false
+  },
+  "outcome_path": "cash_manual_payout",
+  "authorization": {
+    "authorization_binding_sha256": null,
+    "lineage_binding_sha256": null,
+    "country_code": null,
+    "currency": null,
+    "currency_exponent": null,
+    "ceiling_minor": null,
+    "authorized_at": null,
+    "expires_at": null,
+    "gate_package_sha256s": {
+      "legal_and_tax_approved": null,
+      "privacy_approved": null,
+      "country_policy_approved": null,
+      "manual_payout_workflow_verified": null
+    },
+    "evidence": null
+  },
+  "deployments": {
+    "payment_ingest": {
+      "commit_sha": null,
+      "deployment_id": null,
+      "deployed_at": null,
+      "evidence": null
+    },
+    "maturation_release": {
+      "commit_sha": null,
+      "deployment_id": null,
+      "deployed_at": null,
+      "evidence": null
+    },
+    "outcome": {
+      "commit_sha": null,
+      "deployment_id": null,
+      "deployed_at": null,
+      "evidence": null
+    }
+  },
+  "preflight": {
+    "mode": "financial_canary",
+    "passed_at": null,
+    "failed_checks": null,
+    "active_allowlist_count": 0,
+    "bound_account_count": 0,
+    "lineage_contract": "partners-financial-canary-lineage-v1",
+    "safe_flags_before": {
+      "partners_enabled": true,
+      "partners_invite_only": false,
+      "partners_cash_pilot_allowlist_only": true,
+      "partners_earnings_enabled": true,
+      "partners_credit_redemptions_enabled": true,
+      "partners_shadow_mode": true,
+      "partners_payouts_live": false,
+      "partners_tv_relay_enabled": false,
+      "partners_revolut_api_enabled": false,
+      "edge_revolut_api_enabled": false,
+      "business_api_credentials_present": false,
+      "forbidden_provider_crons_active": 0
+    },
+    "evidence": null
+  },
+  "lineage": {
+    "payment": {
+      "lineage_binding_sha256": null,
+      "transaction_binding_sha256": null,
+      "fact_binding_sha256": null,
+      "attribution_binding_sha256": null,
+      "environment": null,
+      "rail": null,
+      "event_type": null,
+      "facts_status": null,
+      "occurred_at": null,
+      "currency": null,
+      "currency_exponent": null,
+      "gross_minor": null,
+      "tax_minor": null,
+      "eligible_minor": null,
+      "evidence": null
+    },
+    "accrual": {
+      "lineage_binding_sha256": null,
+      "entry_binding_sha256": null,
+      "commission_rate_bps": 2000,
+      "amount_minor": null,
+      "created_at": null,
+      "matures_at": null,
+      "pending_balanced": false,
+      "evidence": null
+    },
+    "maturation": {
+      "lineage_binding_sha256": null,
+      "job_binding_sha256": null,
+      "release_entry_binding_sha256": null,
+      "status": null,
+      "available_at": null,
+      "completed_at": null,
+      "release_amount_minor": null,
+      "reversed_minor": 0,
+      "recovery_due_minor": 0,
+      "available_balanced": false,
+      "shadow_reconciliation_clean": false,
+      "evidence": null
+    }
+  },
+  "outcome": {
+    "cash_manual_payout": {
+      "provider": "revolut",
+      "execution_adapter": "revolut_manual",
+      "business_api_enabled": false,
+      "request_binding_sha256": null,
+      "allocation_binding_sha256": null,
+      "cycle_binding_sha256": null,
+      "batch_binding_sha256": null,
+      "execution_binding_sha256": null,
+      "maker_binding_sha256": null,
+      "checker_binding_sha256": null,
+      "maker_mfa_aal2": false,
+      "checker_mfa_aal2": false,
+      "currency": null,
+      "amount_minor": null,
+      "item_count": 0,
+      "batch_status": null,
+      "execution_state": null,
+      "reconciliation_status": null,
+      "reference_contract": "norva-payout-reference-v1",
+      "statement_contract": "revolut-manual-statement-v2",
+      "beneficiary_binding_contract": "revolut-beneficiary-binding-v1",
+      "prepared_at": null,
+      "maker_approved_at": null,
+      "checker_approved_at": null,
+      "exported_at": null,
+      "submitted_at": null,
+      "paid_observed_at": null,
+      "statement_imported_at": null,
+      "reconciled_at": null,
+      "open_incidents": 0,
+      "evidence": {
+        "batch_prepare": null,
+        "maker_approval": null,
+        "checker_approval": null,
+        "export": null,
+        "manual_transfer": null,
+        "statement_import": null,
+        "reconciliation": null
+      }
+    },
+    "subscription_conversion": null
+  },
+  "supervision": {
+    "release_manager_binding_sha256": null,
+    "aal2_verified": false,
+    "approved_at": null,
+    "evidence": null
+  },
+  "safety_closure": {
+    "closed_at": null,
+    "payout_window_opened": false,
+    "flags_after": {
+      "partners_enabled": true,
+      "partners_invite_only": false,
+      "partners_cash_pilot_allowlist_only": true,
+      "partners_earnings_enabled": true,
+      "partners_credit_redemptions_enabled": true,
+      "partners_shadow_mode": true,
+      "partners_payouts_live": false,
+      "partners_tv_relay_enabled": false,
+      "partners_revolut_api_enabled": false,
+      "edge_revolut_api_enabled": false,
+      "business_api_credentials_present": false,
+      "forbidden_provider_crons_active": 0
+    },
+    "open_canary_batches": 0,
+    "open_canary_incidents": 0,
+    "subject_vault_entry_present": false,
+    "authorization_vault_entry_present": false,
+    "evidence": null
+  },
+  "failure": {
+    "failed_at": null,
+    "phase": null,
+    "code": null,
+    "evidence": null
+  }
+}

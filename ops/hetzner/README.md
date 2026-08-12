@@ -65,7 +65,9 @@ Sur un box type 2×NVMe (SSD) + éventuellement 2×HDD (ex. le box i7-7700 / 64 
 
 ### Phase 0 — Préparer le serveur (toi, hors repo)
 1. Provisionner le box (Ubuntu LTS), `mdadm` RAID1 sur les NVMe, partitions ci-dessus.
-2. `docker` + `docker compose`, `ufw` (n'exposer que 80/443 + SSH), `fail2ban`, mises à jour auto.
+2. `docker` + `docker compose`, `python3` + `python3-cryptography` (rotation
+   Google Play Orders fail-closed), `ufw` (n'exposer que 80/443 + SSH),
+   `fail2ban`, mises à jour auto.
 3. Domaine + DNS + **TLS** (Caddy ou nginx + Let's Encrypt) devant Kong.
 4. **Fermer le gap de reproductibilité** (§7.4.8) : t'assurer que le schéma dumpé contient bien
    les fixes appliqués à la main en prod (index dedup, circuit-breaker, admin grouping…). Le dump

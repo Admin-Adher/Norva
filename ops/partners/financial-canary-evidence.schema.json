@@ -1,0 +1,565 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://norva.tv/schemas/partners-financial-canary-evidence-v1.json",
+  "title": "Norva Partners financial canary evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_type",
+    "status",
+    "canary_key",
+    "repository",
+    "target_environment",
+    "contains_personal_data",
+    "scope",
+    "outcome_path",
+    "authorization",
+    "deployments",
+    "preflight",
+    "lineage",
+    "outcome",
+    "supervision",
+    "safety_closure",
+    "failure"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "evidence_type": { "const": "partners_financial_canary" },
+    "status": { "enum": ["draft", "verified", "failed_closed"] },
+    "canary_key": {
+      "type": "string",
+      "pattern": "^financial-canary-[a-z0-9][a-z0-9-]{7,95}$"
+    },
+    "repository": { "const": "Admin-Adher/Norva" },
+    "target_environment": { "const": "production" },
+    "contains_personal_data": { "const": false },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_count",
+        "synthetic_data",
+        "pilot_ready_eligible",
+        "generalization_ready_eligible"
+      ],
+      "properties": {
+        "account_count": { "const": 1 },
+        "synthetic_data": { "const": false },
+        "pilot_ready_eligible": { "const": false },
+        "generalization_ready_eligible": { "const": false }
+      }
+    },
+    "outcome_path": {
+      "enum": ["cash_manual_payout", "subscription_conversion"]
+    },
+    "authorization": { "$ref": "#/$defs/authorization" },
+    "deployments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payment_ingest", "maturation_release", "outcome"],
+      "properties": {
+        "payment_ingest": { "$ref": "#/$defs/deployment" },
+        "maturation_release": { "$ref": "#/$defs/deployment" },
+        "outcome": { "$ref": "#/$defs/deployment" }
+      }
+    },
+    "preflight": { "$ref": "#/$defs/preflight" },
+    "lineage": { "$ref": "#/$defs/lineage" },
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "supervision": { "$ref": "#/$defs/supervision" },
+    "safety_closure": { "$ref": "#/$defs/safetyClosure" },
+    "failure": { "$ref": "#/$defs/failure" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "outcome_path": { "const": "cash_manual_payout" } }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "cash_manual_payout": { "$ref": "#/$defs/cashOutcome" },
+              "subscription_conversion": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "outcome_path": { "const": "subscription_conversion" } }
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "cash_manual_payout": { "type": "null" },
+              "subscription_conversion": { "$ref": "#/$defs/conversionOutcome" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nullableSha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableTimestamp": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "nullableMoney": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 1000000000000
+    },
+    "evidenceReference": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["run_id", "sha256", "url", "verified_at"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "verified_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "safeFlags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "partners_enabled",
+        "partners_invite_only",
+        "partners_cash_pilot_allowlist_only",
+        "partners_earnings_enabled",
+        "partners_credit_redemptions_enabled",
+        "partners_shadow_mode",
+        "partners_payouts_live",
+        "partners_tv_relay_enabled",
+        "partners_revolut_api_enabled",
+        "edge_revolut_api_enabled",
+        "business_api_credentials_present",
+        "forbidden_provider_crons_active"
+      ],
+      "properties": {
+        "partners_enabled": { "type": "boolean" },
+        "partners_invite_only": { "type": "boolean" },
+        "partners_cash_pilot_allowlist_only": { "type": "boolean" },
+        "partners_earnings_enabled": { "type": "boolean" },
+        "partners_credit_redemptions_enabled": { "type": "boolean" },
+        "partners_shadow_mode": { "type": "boolean" },
+        "partners_payouts_live": { "type": "boolean" },
+        "partners_tv_relay_enabled": { "type": "boolean" },
+        "partners_revolut_api_enabled": { "type": "boolean" },
+        "edge_revolut_api_enabled": { "type": "boolean" },
+        "business_api_credentials_present": { "type": "boolean" },
+        "forbidden_provider_crons_active": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_sha", "deployment_id", "deployed_at", "evidence"],
+      "properties": {
+        "commit_sha": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "deployment_id": { "type": ["string", "null"] },
+        "deployed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_binding_sha256",
+        "lineage_binding_sha256",
+        "country_code",
+        "currency",
+        "currency_exponent",
+        "ceiling_minor",
+        "authorized_at",
+        "expires_at",
+        "gate_package_sha256s",
+        "evidence"
+      ],
+      "properties": {
+        "authorization_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "lineage_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "country_code": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+        "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+        "currency_exponent": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
+        "ceiling_minor": { "$ref": "#/$defs/nullableMoney" },
+        "authorized_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "expires_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "gate_package_sha256s": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "legal_and_tax_approved",
+            "privacy_approved",
+            "country_policy_approved",
+            "manual_payout_workflow_verified"
+          ],
+          "properties": {
+            "legal_and_tax_approved": { "$ref": "#/$defs/nullableSha256" },
+            "privacy_approved": { "$ref": "#/$defs/nullableSha256" },
+            "country_policy_approved": { "$ref": "#/$defs/nullableSha256" },
+            "manual_payout_workflow_verified": { "$ref": "#/$defs/nullableSha256" }
+          }
+        },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "passed_at",
+        "failed_checks",
+        "active_allowlist_count",
+        "bound_account_count",
+        "lineage_contract",
+        "safe_flags_before",
+        "evidence"
+      ],
+      "properties": {
+        "mode": { "const": "financial_canary" },
+        "passed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "failed_checks": { "type": ["integer", "null"], "minimum": 0 },
+        "active_allowlist_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 1 },
+        "bound_account_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 1 },
+        "lineage_contract": { "const": "partners-financial-canary-lineage-v1" },
+        "safe_flags_before": { "$ref": "#/$defs/safeFlags" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payment", "accrual", "maturation"],
+      "properties": {
+        "payment": { "$ref": "#/$defs/payment" },
+        "accrual": { "$ref": "#/$defs/accrual" },
+        "maturation": { "$ref": "#/$defs/maturation" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cash_manual_payout", "subscription_conversion"],
+      "properties": {
+        "cash_manual_payout": {
+          "oneOf": [
+            { "$ref": "#/$defs/cashOutcome" },
+            { "type": "null" }
+          ]
+        },
+        "subscription_conversion": {
+          "oneOf": [
+            { "$ref": "#/$defs/conversionOutcome" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lineage_binding_sha256",
+        "transaction_binding_sha256",
+        "fact_binding_sha256",
+        "attribution_binding_sha256",
+        "environment",
+        "rail",
+        "event_type",
+        "facts_status",
+        "occurred_at",
+        "currency",
+        "currency_exponent",
+        "gross_minor",
+        "tax_minor",
+        "eligible_minor",
+        "evidence"
+      ],
+      "properties": {
+        "lineage_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "transaction_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "fact_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "attribution_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "environment": { "type": ["string", "null"], "enum": [null, "production", "sandbox"] },
+        "rail": { "type": ["string", "null"], "enum": [null, "web", "google_play", "revenuecat"] },
+        "event_type": { "type": ["string", "null"], "enum": [null, "capture", "renewal", "refund", "chargeback", "transfer"] },
+        "facts_status": { "type": ["string", "null"], "enum": [null, "complete", "incomplete"] },
+        "occurred_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+        "currency_exponent": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
+        "gross_minor": { "$ref": "#/$defs/nullableMoney" },
+        "tax_minor": { "$ref": "#/$defs/nullableMoney" },
+        "eligible_minor": { "$ref": "#/$defs/nullableMoney" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "accrual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lineage_binding_sha256",
+        "entry_binding_sha256",
+        "commission_rate_bps",
+        "amount_minor",
+        "created_at",
+        "matures_at",
+        "pending_balanced",
+        "evidence"
+      ],
+      "properties": {
+        "lineage_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "entry_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "commission_rate_bps": { "type": ["integer", "null"], "minimum": 0, "maximum": 10000 },
+        "amount_minor": { "$ref": "#/$defs/nullableMoney" },
+        "created_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "matures_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "pending_balanced": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "maturation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lineage_binding_sha256",
+        "job_binding_sha256",
+        "release_entry_binding_sha256",
+        "status",
+        "available_at",
+        "completed_at",
+        "release_amount_minor",
+        "reversed_minor",
+        "recovery_due_minor",
+        "available_balanced",
+        "shadow_reconciliation_clean",
+        "evidence"
+      ],
+      "properties": {
+        "lineage_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "job_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "release_entry_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "status": { "type": ["string", "null"], "enum": [null, "succeeded", "failed"] },
+        "available_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "completed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "release_amount_minor": { "$ref": "#/$defs/nullableMoney" },
+        "reversed_minor": { "$ref": "#/$defs/nullableMoney" },
+        "recovery_due_minor": { "$ref": "#/$defs/nullableMoney" },
+        "available_balanced": { "type": "boolean" },
+        "shadow_reconciliation_clean": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "cashEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batch_prepare",
+        "maker_approval",
+        "checker_approval",
+        "export",
+        "manual_transfer",
+        "statement_import",
+        "reconciliation"
+      ],
+      "properties": {
+        "batch_prepare": { "$ref": "#/$defs/evidenceReference" },
+        "maker_approval": { "$ref": "#/$defs/evidenceReference" },
+        "checker_approval": { "$ref": "#/$defs/evidenceReference" },
+        "export": { "$ref": "#/$defs/evidenceReference" },
+        "manual_transfer": { "$ref": "#/$defs/evidenceReference" },
+        "statement_import": { "$ref": "#/$defs/evidenceReference" },
+        "reconciliation": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "cashOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "execution_adapter",
+        "business_api_enabled",
+        "request_binding_sha256",
+        "allocation_binding_sha256",
+        "cycle_binding_sha256",
+        "batch_binding_sha256",
+        "execution_binding_sha256",
+        "maker_binding_sha256",
+        "checker_binding_sha256",
+        "maker_mfa_aal2",
+        "checker_mfa_aal2",
+        "currency",
+        "amount_minor",
+        "item_count",
+        "batch_status",
+        "execution_state",
+        "reconciliation_status",
+        "reference_contract",
+        "statement_contract",
+        "beneficiary_binding_contract",
+        "prepared_at",
+        "maker_approved_at",
+        "checker_approved_at",
+        "exported_at",
+        "submitted_at",
+        "paid_observed_at",
+        "statement_imported_at",
+        "reconciled_at",
+        "open_incidents",
+        "evidence"
+      ],
+      "properties": {
+        "provider": { "const": "revolut" },
+        "execution_adapter": { "const": "revolut_manual" },
+        "business_api_enabled": { "const": false },
+        "request_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "allocation_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "cycle_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "batch_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "execution_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "maker_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "checker_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "maker_mfa_aal2": { "type": "boolean" },
+        "checker_mfa_aal2": { "type": "boolean" },
+        "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+        "amount_minor": { "$ref": "#/$defs/nullableMoney" },
+        "item_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 1 },
+        "batch_status": { "type": ["string", "null"], "enum": [null, "prepared", "exported", "submitted", "settled", "exception"] },
+        "execution_state": { "type": ["string", "null"], "enum": [null, "prepared", "exported", "submitted", "processing", "paid", "failed", "exception"] },
+        "reconciliation_status": { "type": ["string", "null"], "enum": [null, "not_ready", "pending", "confirmed", "exception"] },
+        "reference_contract": { "const": "norva-payout-reference-v1" },
+        "statement_contract": { "const": "revolut-manual-statement-v2" },
+        "beneficiary_binding_contract": { "const": "revolut-beneficiary-binding-v1" },
+        "prepared_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "maker_approved_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "checker_approved_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "exported_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "submitted_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "paid_observed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "statement_imported_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "reconciled_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "open_incidents": { "type": ["integer", "null"], "minimum": 0 },
+        "evidence": { "$ref": "#/$defs/cashEvidence" }
+      }
+    },
+    "conversionEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quote", "redemption", "access_projection"],
+      "properties": {
+        "quote": { "$ref": "#/$defs/evidenceReference" },
+        "redemption": { "$ref": "#/$defs/evidenceReference" },
+        "access_projection": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "conversionOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "catalog_binding_sha256",
+        "quote_binding_sha256",
+        "redemption_binding_sha256",
+        "grant_binding_sha256",
+        "plan_code",
+        "months",
+        "currency",
+        "currency_exponent",
+        "source_amount_minor",
+        "ledger_debit_minor",
+        "quoted_at",
+        "quote_expires_at",
+        "redeemed_at",
+        "grant_observed_at",
+        "grant_status",
+        "entitlement_visible",
+        "kyc_required",
+        "payout_tables_unchanged",
+        "evidence"
+      ],
+      "properties": {
+        "catalog_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "quote_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "redemption_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "grant_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "plan_code": { "type": ["string", "null"], "enum": [null, "plus", "family", "premium"] },
+        "months": { "type": ["integer", "null"], "minimum": 1, "maximum": 12 },
+        "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+        "currency_exponent": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
+        "source_amount_minor": { "$ref": "#/$defs/nullableMoney" },
+        "ledger_debit_minor": { "$ref": "#/$defs/nullableMoney" },
+        "quoted_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "quote_expires_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "redeemed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "grant_observed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "grant_status": { "type": ["string", "null"], "enum": [null, "active", "consumed"] },
+        "entitlement_visible": { "type": "boolean" },
+        "kyc_required": { "type": "boolean" },
+        "payout_tables_unchanged": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/conversionEvidence" }
+      }
+    },
+    "supervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_manager_binding_sha256", "aal2_verified", "approved_at", "evidence"],
+      "properties": {
+        "release_manager_binding_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "aal2_verified": { "type": "boolean" },
+        "approved_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "safetyClosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closed_at",
+        "payout_window_opened",
+        "flags_after",
+        "open_canary_batches",
+        "open_canary_incidents",
+        "subject_vault_entry_present",
+        "authorization_vault_entry_present",
+        "evidence"
+      ],
+      "properties": {
+        "closed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "payout_window_opened": { "type": "boolean" },
+        "flags_after": { "$ref": "#/$defs/safeFlags" },
+        "open_canary_batches": { "type": ["integer", "null"], "minimum": 0 },
+        "open_canary_incidents": { "type": ["integer", "null"], "minimum": 0 },
+        "subject_vault_entry_present": { "type": "boolean" },
+        "authorization_vault_entry_present": { "type": "boolean" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_at", "phase", "code", "evidence"],
+      "properties": {
+        "failed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "phase": {
+          "type": ["string", "null"],
+          "enum": [null, "authorization", "preflight", "payment", "accrual", "maturation", "outcome", "closure"]
+        },
+        "code": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]{2,63}$" },
+        "evidence": { "$ref": "#/$defs/evidenceReference" }
+      }
+    }
+  }
+}
