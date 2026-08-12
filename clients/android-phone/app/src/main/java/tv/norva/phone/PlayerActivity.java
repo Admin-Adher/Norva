@@ -132,9 +132,18 @@ public class PlayerActivity extends Activity {
             "tv.norva.phone.action.APPLY_FRESH_STREAM";
     public static final String EXTRA_RECOVERY_TOKEN = "recoveryToken";
     public static final String EXTRA_RECOVERY_PAYLOAD = "recoveryPayload";
-    // Ephemeral bearer (user session or paired-device token) used once to post
-    // authoritative first-frame truth. PlayerActivity is non-exported.
+    // Ephemeral launch bearer used once for first-frame truth. Long-lived lease
+    // and terminal events obtain a current credential through the nonce-scoped
+    // in-memory channel below; no refresh token enters this Activity.
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
+    public static final String EXTRA_PLAYBACK_SESSION_ID = "playbackSessionId";
+    public static final String EXTRA_PLAYBACK_CLOSE_REASON = "playbackCloseReason";
+    public static final String ACTION_REQUEST_PLAYBACK_AUTH =
+            "tv.norva.phone.action.REQUEST_PLAYBACK_AUTH";
+    public static final String ACTION_APPLY_PLAYBACK_AUTH =
+            "tv.norva.phone.action.APPLY_PLAYBACK_AUTH";
+    public static final String EXTRA_PLAYBACK_AUTH_CHANNEL_ID = "playbackAuthChannelId";
+    public static final String EXTRA_PLAYBACK_AUTH_REQUEST_NONCE = "playbackAuthRequestNonce";
     /**
      * Debug-only first-frame fixture hook. Instrumentation supplies an opaque
      * token and listens for {@link #ACTION_FIRST_FRAME_TEST_RESULT}. Success is
@@ -204,8 +213,25 @@ public class PlayerActivity extends Activity {
     private int pendingDelayedRecoveryGeneration;
     private boolean everReady = false;    // direct or fallback reached STATE_READY at least once
     private boolean firstFrameRendered = false;
+    private boolean firstFrameTelemetrySent = false;
     private long playbackLaunchElapsedMs;
     private String playbackAuthToken;
+    private String playbackAuthChannelId;
+    private String pendingPlaybackAuthRequestNonce;
+    private String pendingPlaybackAuthPurpose;
+    private String pendingTerminalTelemetryCode;
+    private boolean pendingTerminalSawLongStart;
+    private String pendingTerminalRecoveryReason;
+    private String pendingTerminalRecoveryRoute;
+    private int pendingTerminalRecoveryAttempt;
+    private BroadcastReceiver playbackAuthReceiver;
+    private String playbackSessionId;
+    private boolean terminalTelemetrySent = false;
+    private boolean sawLongStart = false;
+    private String lastRecoveryReason = "none";
+    private String lastRecoveryRoute = "direct";
+    private int recoveryAttempt = 0;
+    private long lastPlaybackHeartbeatElapsedMs = 0L;
     private String firstFrameTestToken;
     private boolean firstFrameTestResultEmitted;
     private boolean freshStreamRequested = false;
@@ -308,6 +334,9 @@ public class PlayerActivity extends Activity {
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
     private static final long LONG_START_MS = 8_000L;
+    private static final long FRESH_STREAM_TIMEOUT_MS = 60_000L;
+    private static final long HEARTBEAT_INTERVAL_MS = 60_000L;
+    private static final long PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS = 5_000L;
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
     private final Runnable healthyRecoveryReset = new Runnable() {
         @Override public void run() { playRetries = 0; }
@@ -331,6 +360,7 @@ public class PlayerActivity extends Activity {
                     && playbackUiState != PlaybackUiState.INITIAL_BUFFERING
                     && playbackUiState != PlaybackUiState.RECOVERING) return;
             longStartShown = true;
+            sawLongStart = true;
             renderPlaybackUiState(true);
         }
     };
@@ -344,6 +374,7 @@ public class PlayerActivity extends Activity {
             freshStreamRequested = false;
             freshStreamTimeoutDeferred = false;
             recoveryToken = null;
+            rememberRecoverySignal("fresh_stream_timeout", "fresh", false);
             boolean formatFailure = isFormatRecoveryReason(freshStreamReason);
             boolean deviceOffline = !hasUsableNetwork();
             showPlaybackFailure(
@@ -359,6 +390,20 @@ public class PlayerActivity extends Activity {
                                     ? getString(R.string.player_state_offline_message)
                                     : getString(R.string.player_reconnect_failed)),
                     formatFailure);
+        }
+    };
+    private final Runnable playbackHeartbeat = new Runnable() {
+        @Override public void run() {
+            if (!shouldRunPlaybackHeartbeat()) return;
+            requestPlaybackHeartbeatAuth();
+            errHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
+        }
+    };
+    private final Runnable playbackAuthTimeout = new Runnable() {
+        @Override public void run() {
+            // Missing MainActivity, renderer stalls and refresh failures are all
+            // fail-closed: skip this pulse and retry on the next normal cadence.
+            clearPendingPlaybackAuthRequest();
         }
     };
     private final Runnable delayedRecovery = new Runnable() {
@@ -396,7 +441,15 @@ public class PlayerActivity extends Activity {
         posterUrl = getIntent().getStringExtra(EXTRA_POSTER_URL);
         nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
         playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        playbackAuthChannelId = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        if (!NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)) {
+            playbackAuthChannelId = null;
+        }
+        playbackSessionId = NativePlaybackTelemetry.boundedSessionId(
+                getIntent().getStringExtra(EXTRA_PLAYBACK_SESSION_ID));
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        getIntent().removeExtra(EXTRA_PLAYBACK_SESSION_ID);
         if (BuildConfig.DEBUG) {
             firstFrameTestToken = getIntent().getStringExtra(EXTRA_FIRST_FRAME_TEST_TOKEN);
         }
@@ -412,6 +465,7 @@ public class PlayerActivity extends Activity {
         readTrackMetadata(getIntent().getStringExtra(EXTRA_TRACK_METADATA));
         initializePlaybackPreferences();
         registerFreshStreamReceiver();
+        registerPlaybackAuthReceiver();
         try {
             String vj = getIntent().getStringExtra(EXTRA_VARIANTS);
             if (vj != null && !vj.isEmpty()) {
@@ -622,6 +676,7 @@ public class PlayerActivity extends Activity {
                     transitionTo(readyState, false);
                 }
                 if (state == Player.STATE_ENDED) {
+                    stopPlaybackHeartbeat();
                     errHandler.removeCallbacks(bufferWatchdog);
                     errHandler.removeCallbacks(longStartNotice);
                     if (isPrematureEnd()) {
@@ -654,6 +709,10 @@ public class PlayerActivity extends Activity {
                 // diagnostics remain available to support in Logcat.
                 android.util.Log.w("NorvaPlayer", diagnose(error), error);
                 boolean formatFailure = isFormatFailure(error);
+                rememberRecoverySignal(
+                        error.getErrorCodeName(),
+                        fallbackTried ? "gateway" : "direct",
+                        false);
                 showPlaybackFailure(
                         PlaybackUiState.TERMINAL,
                         formatFailure
@@ -673,6 +732,9 @@ public class PlayerActivity extends Activity {
                         errHandler.removeCallbacks(bufferWatchdog);
                     }
                     errHandler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
+                    updatePlaybackHeartbeat();
+                } else {
+                    stopPlaybackHeartbeat();
                 }
                 if (firstFrameForCurrentRoute && engineReady) {
                     recoveryInProgress = false;
@@ -1095,10 +1157,12 @@ public class PlayerActivity extends Activity {
             firstFrameRendered = true;
             recordNativeFirstFrame();
         }
+        updatePlaybackHeartbeat();
     }
 
     private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state) {
         if (player == null || item == null) return;
+        stopPlaybackHeartbeat();
         clearPendingDelayedRecovery();
         engineReady = false;
         firstFrameForCurrentRoute = false;
@@ -1147,9 +1211,15 @@ public class PlayerActivity extends Activity {
         errHandler.removeCallbacks(bufferWatchdog);
         errHandler.removeCallbacks(longStartNotice);
         errHandler.removeCallbacks(freshStreamTimeout);
+        stopPlaybackHeartbeat();
         longStartScheduled = false;
         if (player != null) {
             try { player.stop(); } catch (Exception ignored) { }
+        }
+        if (!terminalTelemetrySent) {
+            terminalTelemetrySent = true;
+            requestTerminalTelemetryAuth(
+                    terminalTelemetryCode(state, recommendVersion));
         }
         if (errorTitleView != null) errorTitleView.setText(titleRes);
         if (errorView != null) errorView.setText(message);
@@ -1297,10 +1367,12 @@ public class PlayerActivity extends Activity {
 
     /** Device-side truth that media actually rendered, emitted once per launch. */
     private void recordNativeFirstFrame() {
-        final String authToken = playbackAuthToken;
-        playbackAuthToken = null;
-        NativePlaybackTelemetry.recordFirstFrame(authToken, sourceId, itemType, itemId,
+        if (firstFrameTelemetrySent) return;
+        firstFrameTelemetrySent = true;
+        NativePlaybackTelemetry.recordFirstFrame(
+                playbackAuthToken, playbackSessionId, sourceId, itemType, itemId,
                 Math.max(1L, SystemClock.elapsedRealtime() - playbackLaunchElapsedMs), isLocal);
+        playbackAuthToken = null;
         try {
             Bundle event = new Bundle();
             event.putString("content_type",
@@ -1315,6 +1387,175 @@ public class PlayerActivity extends Activity {
             // Measurement must never affect playback.
         }
         emitFirstFrameTestResult("first_frame", true);
+    }
+
+    private boolean shouldRunPlaybackHeartbeat() {
+        return !isLocal
+                && NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)
+                && NativePlaybackTelemetry.boundedSessionId(playbackSessionId) != null
+                && player != null
+                && player.isPlaying()
+                && firstFrameForCurrentRoute
+                && (playbackActive || isInPipMode())
+                && !endedNaturally
+                && playbackUiState != PlaybackUiState.TERMINAL
+                && playbackUiState != PlaybackUiState.OFFLINE;
+    }
+
+    private void registerPlaybackAuthReceiver() {
+        playbackAuthReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (!ACTION_APPLY_PLAYBACK_AUTH.equals(intent.getAction())) return;
+                acceptPlaybackAuth(intent);
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                playbackAuthReceiver,
+                new IntentFilter(ACTION_APPLY_PLAYBACK_AUTH),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private boolean requestPlaybackAuth(String purpose) {
+        if (!NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)
+                || pendingPlaybackAuthRequestNonce != null
+                || !("heartbeat".equals(purpose) || "terminal".equals(purpose))) {
+            return false;
+        }
+        String requestNonce = UUID.randomUUID().toString();
+        pendingPlaybackAuthRequestNonce = requestNonce;
+        pendingPlaybackAuthPurpose = purpose;
+        errHandler.removeCallbacks(playbackAuthTimeout);
+        errHandler.postDelayed(
+                playbackAuthTimeout,
+                PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS);
+        Intent request = new Intent(ACTION_REQUEST_PLAYBACK_AUTH)
+                .setPackage(getPackageName())
+                .putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId)
+                .putExtra(EXTRA_PLAYBACK_AUTH_REQUEST_NONCE, requestNonce);
+        sendBroadcast(request);
+        return true;
+    }
+
+    private void requestPlaybackHeartbeatAuth() {
+        if (!shouldRunPlaybackHeartbeat()) return;
+        requestPlaybackAuth("heartbeat");
+    }
+
+    private void requestTerminalTelemetryAuth(String terminalCode) {
+        if (isLocal) return;
+        // Terminal truth wins once playback has stopped. Preempt any pulse that
+        // was waiting on WebView token rotation; MainActivity will replace its
+        // pending nonce with the terminal request and reject the late pulse.
+        clearPendingPlaybackAuthRequest();
+        pendingTerminalTelemetryCode = NativePlaybackTelemetry.boundedTerminalCode(
+                terminalCode);
+        pendingTerminalSawLongStart = sawLongStart;
+        pendingTerminalRecoveryReason = NativePlaybackTelemetry.boundedRecoveryReason(
+                lastRecoveryReason);
+        pendingTerminalRecoveryRoute = NativePlaybackTelemetry.boundedRecoveryRoute(
+                lastRecoveryRoute);
+        pendingTerminalRecoveryAttempt = Math.max(0, Math.min(3, recoveryAttempt));
+        if (!requestPlaybackAuth("terminal")) clearPendingPlaybackAuthRequest();
+    }
+
+    private void acceptPlaybackAuth(Intent intent) {
+        if (intent == null || playbackAuthChannelId == null
+                || pendingPlaybackAuthRequestNonce == null) return;
+        String channelId = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        String requestNonce = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_REQUEST_NONCE);
+        if (!playbackAuthChannelId.equals(channelId)
+                || !pendingPlaybackAuthRequestNonce.equals(requestNonce)) return;
+        String bearer = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        intent.removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        String purpose = pendingPlaybackAuthPurpose;
+        String terminalCode = pendingTerminalTelemetryCode;
+        boolean terminalSawLongStart = pendingTerminalSawLongStart;
+        String terminalRecoveryReason = pendingTerminalRecoveryReason;
+        String terminalRecoveryRoute = pendingTerminalRecoveryRoute;
+        int terminalRecoveryAttempt = pendingTerminalRecoveryAttempt;
+        clearPendingPlaybackAuthRequest();
+        if ("heartbeat".equals(purpose)) {
+            if (shouldRunPlaybackHeartbeat()) {
+                lastPlaybackHeartbeatElapsedMs = SystemClock.elapsedRealtime();
+                NativePlaybackTelemetry.recordHeartbeat(bearer, playbackSessionId);
+            }
+            return;
+        }
+        if ("terminal".equals(purpose)) {
+            NativePlaybackTelemetry.recordTerminal(
+                    bearer,
+                    playbackSessionId,
+                    sourceId,
+                    itemType,
+                    itemId,
+                    terminalCode,
+                    terminalSawLongStart,
+                    terminalRecoveryReason,
+                    terminalRecoveryRoute,
+                    terminalRecoveryAttempt,
+                    isLocal);
+        }
+    }
+
+    private void clearPendingPlaybackAuthRequest() {
+        errHandler.removeCallbacks(playbackAuthTimeout);
+        pendingPlaybackAuthRequestNonce = null;
+        pendingPlaybackAuthPurpose = null;
+        pendingTerminalTelemetryCode = null;
+        pendingTerminalSawLongStart = false;
+        pendingTerminalRecoveryReason = null;
+        pendingTerminalRecoveryRoute = null;
+        pendingTerminalRecoveryAttempt = 0;
+    }
+
+    /**
+     * Start the lease pulse immediately for a newly rendered session. Subsequent
+     * lifecycle callbacks retain the 60-second cadence instead of duplicating
+     * network requests when Android enters PiP moments after the first frame.
+     */
+    private void updatePlaybackHeartbeat() {
+        stopPlaybackHeartbeat();
+        if (!shouldRunPlaybackHeartbeat()) return;
+        long elapsed = lastPlaybackHeartbeatElapsedMs == 0L
+                ? HEARTBEAT_INTERVAL_MS
+                : Math.max(0L,
+                        SystemClock.elapsedRealtime() - lastPlaybackHeartbeatElapsedMs);
+        if (elapsed >= HEARTBEAT_INTERVAL_MS) {
+            errHandler.post(playbackHeartbeat);
+        } else {
+            errHandler.postDelayed(
+                    playbackHeartbeat,
+                    HEARTBEAT_INTERVAL_MS - elapsed);
+        }
+    }
+
+    private void stopPlaybackHeartbeat() {
+        errHandler.removeCallbacks(playbackHeartbeat);
+        clearPendingPlaybackAuthRequest();
+    }
+
+    private void rememberRecoverySignal(String reason, String route, boolean newAttempt) {
+        lastRecoveryReason = NativePlaybackTelemetry.boundedRecoveryReason(reason);
+        lastRecoveryRoute = NativePlaybackTelemetry.boundedRecoveryRoute(route);
+        if (newAttempt) {
+            recoveryAttempt = Math.min(3, recoveryAttempt + 1);
+        } else if (recoveryAttempt == 0 && !"none".equals(lastRecoveryReason)) {
+            recoveryAttempt = 1;
+        }
+    }
+
+    private String terminalTelemetryCode(
+            PlaybackUiState state,
+            boolean recommendVersion
+    ) {
+        if (recommendVersion) return "native_format";
+        if (state == PlaybackUiState.OFFLINE) return "native_offline";
+        if ("fresh_stream_timeout".equals(lastRecoveryReason)
+                || "resolve_failed".equals(lastRecoveryReason)) {
+            return "native_reconnect_failed";
+        }
+        return "native_terminal";
     }
 
     private void emitFirstFrameTestResult(String outcome, boolean rendered) {
@@ -2578,6 +2819,10 @@ public class PlayerActivity extends Activity {
             freshStreamTimeoutDeferred = false;
             recoveryToken = null;
             clearPendingDelayedRecovery();
+            playbackSessionId = NativePlaybackTelemetry.boundedSessionId(
+                    payload.optString("sessionId", ""));
+            lastPlaybackHeartbeatElapsedMs = 0L;
+            rememberRecoverySignal(freshStreamReason, "fresh", false);
             originalUrl = nextUrl;
             fallbackUrl = emptyToNull(payload.optString("fallbackUrl", ""));
             streamHost = hostOf(nextUrl);
@@ -2602,6 +2847,7 @@ public class PlayerActivity extends Activity {
             recoveryToken = null;
             clearPendingDelayedRecovery();
             errHandler.removeCallbacks(freshStreamTimeout);
+            rememberRecoverySignal("resolve_failed", "fresh", false);
             showPlaybackFailure(
                     PlaybackUiState.TERMINAL,
                     R.string.player_error_title,
@@ -2751,6 +2997,7 @@ public class PlayerActivity extends Activity {
      */
     private void recoverPlayback(final String reason) {
         if (player == null || freshStreamRequested) return;
+        rememberRecoverySignal(reason, fallbackTried ? "gateway" : "direct", true);
         final int scheduledGeneration = ++recoveryGeneration;
         recoveryInProgress = true;
         engineReady = false;
@@ -2824,6 +3071,7 @@ public class PlayerActivity extends Activity {
         engineReady = false;
         firstFrameForCurrentRoute = false;
         freshStreamReason = reason == null ? "playback_interrupted" : reason;
+        rememberRecoverySignal(freshStreamReason, "fresh", false);
         recoveryToken = UUID.randomUUID().toString();
         long position = recoverPositionMs();
         long duration = player != null && player.getDuration() > 0
@@ -2844,7 +3092,7 @@ public class PlayerActivity extends Activity {
         sendBroadcast(request);
         errHandler.removeCallbacks(freshStreamTimeout);
         if (shouldAllowPlayback(playbackActive, isInPipMode())) {
-            errHandler.postDelayed(freshStreamTimeout, 25_000L);
+            errHandler.postDelayed(freshStreamTimeout, FRESH_STREAM_TIMEOUT_MS);
         } else {
             freshStreamTimeoutDeferred = true;
             resumePlaybackOnResume = true;
@@ -2856,6 +3104,7 @@ public class PlayerActivity extends Activity {
         recoveryGeneration++;
         clearPendingDelayedRecovery();
         fallbackTried = true;
+        rememberRecoverySignal(lastRecoveryReason, "gateway", false);
         playRetries = 0;              // one fresh in-place retry budget for the fallback URL
         trackPreferencesApplied = false;
         streamHost = hostOf(fallbackUrl);
@@ -3409,6 +3658,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void deactivatePlaybackForBackground() {
+        stopPlaybackHeartbeat();
         boolean wasActive = playbackActive;
         playbackActive = false;
         pipAutoEnterArmed = false;
@@ -3458,7 +3708,7 @@ public class PlayerActivity extends Activity {
         if (freshStreamRequested && freshStreamTimeoutDeferred) {
             freshStreamTimeoutDeferred = false;
             errHandler.removeCallbacks(freshStreamTimeout);
-            errHandler.postDelayed(freshStreamTimeout, 25_000L);
+            errHandler.postDelayed(freshStreamTimeout, FRESH_STREAM_TIMEOUT_MS);
         }
         if (player.getPlaybackState() == Player.STATE_BUFFERING) {
             errHandler.removeCallbacks(bufferWatchdog);
@@ -3556,11 +3806,27 @@ public class PlayerActivity extends Activity {
         } catch (Exception ignored) { }
     }
 
+    private String playbackCloseReason() {
+        if (endedNaturally) return "ended";
+        if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
+            return "variant_change";
+        }
+        if (freshStreamRequested) return "recovery_abandoned";
+        if (playbackUiState == PlaybackUiState.OFFLINE) return "offline";
+        if (playbackUiState == PlaybackUiState.TERMINAL) return "terminal";
+        return "closed";
+    }
+
     @Override
     protected void onStop() {
         super.onStop();
         persistPendingProgress();
-        if (!isInPipMode()) deactivatePlaybackForBackground();
+        if (!isInPipMode()) {
+            stopPlaybackHeartbeat();
+            deactivatePlaybackForBackground();
+        } else {
+            updatePlaybackHeartbeat();
+        }
     }
 
     /**
@@ -3569,6 +3835,7 @@ public class PlayerActivity extends Activity {
      */
     @Override
     public void finish() {
+        stopPlaybackHeartbeat();
         try {
             Intent data = null;
             if (player != null && itemId != null && !itemId.isEmpty()) {
@@ -3617,6 +3884,15 @@ public class PlayerActivity extends Activity {
                 data.putExtra("retryPlayback", true);
                 data.putExtra("retryReason", freshStreamReason);
             }
+            if (playbackSessionId != null) {
+                if (data == null) data = new Intent();
+                data.putExtra(EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
+                data.putExtra(EXTRA_PLAYBACK_CLOSE_REASON, playbackCloseReason());
+            }
+            if (playbackAuthChannelId != null) {
+                if (data == null) data = new Intent();
+                data.putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId);
+            }
             if (data != null) setResult(RESULT_OK, data);
             // Online exits are relayed to cloud by MainActivity.onActivityResult, so
             // drop any pending copy. Offline playback is launched WITHOUT a result
@@ -3632,6 +3908,7 @@ public class PlayerActivity extends Activity {
     protected void onPause() {
         super.onPause();
         persistPendingProgress();
+        stopPlaybackHeartbeat();
         // Android 12 auto-enter reports onPause immediately before PiP becomes
         // observable. Keep that one transition alive; every other background
         // path cancels recovery work and cannot restart playback.
@@ -3730,7 +4007,10 @@ public class PlayerActivity extends Activity {
     public void onPictureInPictureModeChanged(boolean isInPip, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPip, newConfig);
         pipAutoEnterArmed = false;
-        if (isInPip) playbackActive = true;
+        if (isInPip) {
+            playbackActive = true;
+            updatePlaybackHeartbeat();
+        }
         if (playerView != null) {
             // No transport UI inside the tiny PiP window.
             playerView.setUseController(!isInPip && !controlsLocked
@@ -3742,7 +4022,12 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stopPlaybackHeartbeat();
+        pendingPlaybackAuthRequestNonce = null;
+        playbackAuthChannelId = null;
         playbackAuthToken = null;
+        playbackSessionId = null;
+        lastPlaybackHeartbeatElapsedMs = 0L;
         firstFrameTestToken = null;
         playbackActive = false;
         pipAutoEnterArmed = false;
@@ -3755,6 +4040,10 @@ public class PlayerActivity extends Activity {
         if (freshStreamReceiver != null) {
             try { unregisterReceiver(freshStreamReceiver); } catch (Exception ignored) { }
             freshStreamReceiver = null;
+        }
+        if (playbackAuthReceiver != null) {
+            try { unregisterReceiver(playbackAuthReceiver); } catch (Exception ignored) { }
+            playbackAuthReceiver = null;
         }
         if (trackDialog != null) { trackDialog.dismiss(); trackDialog = null; }
         if (pipReceiver != null) { try { unregisterReceiver(pipReceiver); } catch (Exception ignored) { } pipReceiver = null; }

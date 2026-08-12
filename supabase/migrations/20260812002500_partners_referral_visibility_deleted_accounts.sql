@@ -11,6 +11,7 @@ declare
   v_expected text;
   v_replacement text;
   v_occurrences integer;
+  v_original_owner oid;
 begin
   v_oid := to_regprocedure(
     'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
@@ -19,6 +20,11 @@ begin
     raise exception 'Partners referral visibility projection is unavailable'
       using errcode = '55000';
   end if;
+
+  select proowner
+  into v_original_owner
+  from pg_proc
+  where oid = v_oid;
 
   v_definition := replace(
     pg_get_functiondef(v_oid),
@@ -61,12 +67,17 @@ begin
   v_rewritten := replace(v_rewritten, v_expected, v_replacement);
 
   execute v_rewritten;
+
+  if (select proowner from pg_proc where oid = v_oid)
+      <> v_original_owner then
+    raise exception 'Partners referral visibility owner changed during rewrite'
+      using errcode = '55000';
+  end if;
 end;
 $partners_referral_visibility_deleted_accounts$;
 
-alter function affiliate_private.partners_service_referral_visibility(
-  uuid, integer, text
-) owner to supabase_admin;
+-- CREATE OR REPLACE must preserve the pre-existing owner. Avoid a cross-role
+-- transfer so both blank and partially applied database replays stay portable.
 revoke all on function
   affiliate_private.partners_service_referral_visibility(uuid, integer, text)
   from public, anon, authenticated, service_role;
@@ -85,9 +96,7 @@ begin
   select pg_get_functiondef(v_oid)
   into v_definition;
 
-  if pg_get_userbyid((select proowner from pg_proc where oid = v_oid))
-      <> 'supabase_admin'
-    or not exists (
+  if not exists (
       select 1
       from pg_proc routine
       where routine.oid = v_oid

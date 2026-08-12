@@ -86,7 +86,7 @@ for (const target of nativeTargets) {
     assert.match(
       freshRequest,
       target.name === 'Android phone'
-        ? /errHandler\.postDelayed\(freshStreamTimeout, 25_000L\);/
+        ? /errHandler\.postDelayed\(freshStreamTimeout, FRESH_STREAM_TIMEOUT_MS\);/
         : /handler\.postDelayed\(freshStreamTimeout, 25_000L\);/,
     );
     assert.doesNotMatch(
@@ -442,8 +442,20 @@ test('Android TV keeps technical playback diagnostics out of the viewer UI', () 
 
 test('standalone VOD recovery resolves a fresh provider session at the saved timestamp', () => {
   const source = read('public/js/utils/standalone.js');
+  const resolver = section(
+    source,
+    'const resolveStreamPayload = async (streamUrl) =>',
+    '// History metadata used by the native resume callback',
+  );
+  const nativeLaunch = section(
+    source,
+    'const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras)',
+    'const nativeTitle =',
+  );
   const vodFlow = section(source, 'if (window.WatchPage)', 'if (window.VideoPlayer)');
 
+  assert.match(resolver, /sessionId:\s*resolved\s*&&\s*resolved\.sessionId/);
+  assert.match(nativeLaunch, /\.\.\.\(sessionId\s*\?\s*\{\s*sessionId\s*\}\s*:\s*\{\}\)/);
   assert.match(
     vodFlow,
     /const launchResolved = async \(resumeAt, fresh = false, recoveryToken = ''\)/,
@@ -459,6 +471,570 @@ test('standalone VOD recovery resolves a fresh provider session at the saved tim
     vodFlow,
     /registerNativeRecovery\([\s\S]{0,100}\(resumeAt, recoveryToken\) => launchResolved\(resumeAt, true, recoveryToken\)/,
   );
+  assert.match(vodFlow, /registerNativeVodCloudSession\(this, playbackSessionId\)/);
+  assert.match(vodFlow, /sessionId:\s*playbackSessionId[\s\S]{0,260}recoveryToken/);
+});
+
+test('standalone native close retries exact expiry after registry loss and acks only terminal success', async () => {
+  const requests = [];
+  const acknowledgements = [];
+  const attempts = new Map();
+  let releasePendingExpiry;
+  const pendingExpiry = new Promise((resolve) => { releasePendingExpiry = resolve; });
+  const pendingId = '10000000-0000-4000-8000-000000000001';
+  const retryId = '10000000-0000-4000-8000-000000000002';
+  const missingId = '10000000-0000-4000-8000-000000000003';
+  const gatewayErrorId = '10000000-0000-4000-8000-000000000004';
+  const nextId = '10000000-0000-4000-8000-000000000005';
+  const malformedSuccessId = '10000000-0000-4000-8000-000000000006';
+
+  class WatchPage {
+    constructor() {
+      this.activeCloudPlaybackSessionIds = new Set();
+      this.currentCloudPlaybackSessionId = null;
+    }
+
+    async _fetchServerResumeInfo() { return { answered: false }; }
+
+    registerCloudPlaybackSession(sessionId) {
+      this.currentCloudPlaybackSessionId = String(sessionId);
+      this.activeCloudPlaybackSessionIds.add(String(sessionId));
+    }
+
+    async stopCloudPlaybackSessions() {
+      this.currentCloudPlaybackSessionId = null;
+      this.activeCloudPlaybackSessionIds.clear();
+    }
+  }
+  class VideoPlayer {}
+  const location = { hash: '#series', origin: 'https://norva.tv', search: '' };
+  const document = {
+    readyState: 'complete',
+    addEventListener() {},
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    body: { classList: { contains() { return false; } } },
+  };
+  const expireSession = async (rawSessionId, options = {}) => {
+    const sessionId = String(rawSessionId);
+    const attempt = (attempts.get(sessionId) || 0) + 1;
+    attempts.set(sessionId, attempt);
+    requests.push([
+      sessionId,
+      options.keepalive === true,
+      Boolean(options.signal),
+    ]);
+    if (sessionId === pendingId) {
+      await pendingExpiry;
+      return { session: { id: sessionId, status: 'expired' }, gatewayErrors: 0 };
+    }
+    if (sessionId === retryId && attempt === 1) {
+      const error = new Error('temporary failure');
+      error.status = 503;
+      throw error;
+    }
+    if (sessionId === missingId) {
+      const error = new Error('already absent');
+      error.status = 404;
+      throw error;
+    }
+    if (sessionId === gatewayErrorId && attempt === 1) {
+      return { session: { id: sessionId, status: 'expired' }, gatewayErrors: 1 };
+    }
+    if (sessionId === malformedSuccessId && attempt === 1) {
+      return { gatewayErrors: 0 };
+    }
+    return { session: { id: sessionId, status: 'expired' }, gatewayErrors: 0 };
+  };
+  const window = {
+    NorvaTVCloud: {
+      playVideoJson() {},
+      ackPlaybackSessionClosed(sessionId) {
+        acknowledgements.push(String(sessionId));
+      },
+    },
+    NorvaCloud: {
+      token: '',
+      playback: {},
+      device: { playback: { expireSession } },
+    },
+    WatchPage,
+    VideoPlayer,
+    __norvaNative: {},
+    location,
+    history: { state: null, back() {} },
+    app: { currentPage: 'series', channelList: null, pages: { series: {} } },
+    API: { history: { save() { return Promise.resolve(); } } },
+    addEventListener() {},
+    dispatchEvent() {},
+  };
+  const context = vm.createContext({
+    window,
+    document,
+    localStorage: { getItem() { return null; }, setItem() {} },
+    location,
+    navigator: { userAgent: 'NorvaTV-test' },
+    URL,
+    console,
+    Date,
+    Map,
+    Set,
+    WeakMap,
+    Promise,
+    AbortController,
+    WatchPage,
+    VideoPlayer,
+    CustomEvent: class CustomEvent {
+      constructor(type, init) { this.type = type; this.detail = init?.detail; }
+    },
+    setTimeout,
+    clearTimeout,
+  });
+
+  vm.runInContext(read('public/js/utils/standalone.js'), context);
+  const drain = async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  assert.equal(window.__norvaNative.onPlaybackClosed('not-a-session', 'closed'), 'not_ready');
+  assert.equal(window.__norvaNative.onPlaybackClosed(pendingId, 'closed'), 'accepted');
+  assert.equal(window.__norvaNative.onPlaybackClosed(pendingId, 'duplicate'), 'accepted');
+  await drain();
+  assert.deepEqual(requests, [[pendingId, true, true]], 'duplicates must share one bounded in-flight expiry');
+  assert.deepEqual(acknowledgements, [], 'delivery acceptance is not a completion ACK');
+
+  const page = new WatchPage();
+  let nextResolverStarted = false;
+  const nextPlayback = page.play({
+    sourceId: 'atlas-pro',
+    id: 'episode-after-reload',
+    type: 'series',
+    title: 'Episode after reload',
+    containerExtension: 'mkv',
+  }, async () => {
+    nextResolverStarted = true;
+    return {
+      url: 'https://provider.example/episode-after-reload.mkv',
+      fallbackUrl: 'https://gateway.example/after-reload/raw',
+      sessionId: nextId,
+    };
+  });
+  await drain();
+  assert.equal(
+    nextResolverStarted,
+    false,
+    'a new VOD resolver must observe the exact-close barrier after registry loss',
+  );
+
+  releasePendingExpiry();
+  await nextPlayback;
+  await drain();
+  assert.deepEqual(acknowledgements, [pendingId]);
+  assert.equal(window.__norvaNative.onPlaybackClosed(pendingId, 'duplicate-after-ack'), 'accepted');
+  assert.deepEqual(requests, [[pendingId, true, true]], 'completed expiry must stay idempotent');
+  assert.deepEqual(acknowledgements, [pendingId, pendingId], 'lost native ACK can be replayed');
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(retryId, 'closed'), 'accepted');
+  await drain();
+  assert.equal(attempts.get(retryId), 1);
+  assert.equal(acknowledgements.includes(retryId), false, 'network failure must not ACK');
+  assert.equal(window.__norvaNative.onPlaybackClosed(retryId, 'retry'), 'accepted');
+  await drain();
+  assert.equal(attempts.get(retryId), 2);
+  assert.equal(acknowledgements.includes(retryId), true);
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(missingId, 'closed'), 'accepted');
+  await drain();
+  assert.equal(acknowledgements.includes(missingId), true, '404 means the exact session is already absent');
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(gatewayErrorId, 'closed'), 'accepted');
+  await drain();
+  assert.equal(acknowledgements.includes(gatewayErrorId), false, 'partial gateway cleanup must not ACK');
+  assert.equal(window.__norvaNative.onPlaybackClosed(gatewayErrorId, 'retry'), 'accepted');
+  await drain();
+  assert.equal(attempts.get(gatewayErrorId), 2);
+  assert.equal(acknowledgements.includes(gatewayErrorId), true);
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(malformedSuccessId, 'closed'), 'accepted');
+  await drain();
+  assert.equal(
+    acknowledgements.includes(malformedSuccessId),
+    false,
+    'a truncated or unstructured HTTP success must not ACK the native close',
+  );
+  assert.equal(window.__norvaNative.onPlaybackClosed(malformedSuccessId, 'retry'), 'accepted');
+  await drain();
+  assert.equal(attempts.get(malformedSuccessId), 2);
+  assert.equal(acknowledgements.includes(malformedSuccessId), true);
+});
+
+test('paired-device playback expiry uses its device credential and keepalive transport', async () => {
+  const requests = [];
+  const deviceToken = `nv_dev_${'D'.repeat(43)}`;
+  const values = new Map([['norva-cloud-device-token', deviceToken]]);
+  const window = { location: { origin: 'https://norva.tv', search: '' } };
+  const context = vm.createContext({
+    window,
+    localStorage: {
+      getItem: (key) => values.get(key) || null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+    navigator: { userAgent: 'NorvaTV-AndroidTV', language: 'en-US', languages: ['en-US'] },
+    document: { readyState: 'loading', addEventListener() {} },
+    fetch: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ gatewayErrors: 0 }),
+        text: async () => '',
+      };
+    },
+    URL,
+    URLSearchParams,
+    AbortController,
+    Intl,
+    Date,
+    Map,
+    Set,
+    WeakMap,
+    Promise,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    JSON,
+    Math,
+    console: { log() {}, warn() {}, debug() {}, error() {} },
+    performance: { now: () => 0 },
+    setTimeout,
+    clearTimeout,
+  });
+  window.window = window;
+  vm.runInContext(read('public/js/cloudApi.js'), context, { filename: 'public/js/cloudApi.js' });
+
+  const sessionId = '20000000-0000-4000-8000-000000000001';
+  await window.NorvaCloud.device.playback.expireSession(sessionId, { keepalive: true });
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, new RegExp(`/playback/sessions/${sessionId}/expire$`));
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.headers.Authorization, `Bearer ${deviceToken}`);
+  assert.equal(requests[0].options.keepalive, true);
+  assert.equal(requests[0].options.body, undefined);
+});
+
+test('playback expiry aborts while a 401 token refresh remains unresolved', async () => {
+  const accessToken = 'expired-access-token';
+  const values = new Map([['norva-cloud-token', accessToken]]);
+  let refreshStarted = false;
+  const window = {
+    location: { origin: 'https://norva.tv', search: '' },
+    NorvaAuth: {
+      refreshSession() {
+        refreshStarted = true;
+        return new Promise(() => {});
+      },
+    },
+  };
+  const context = vm.createContext({
+    window,
+    localStorage: {
+      getItem: (key) => values.get(key) || null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+    navigator: { userAgent: 'NorvaTV-AndroidPhone', language: 'en-US', languages: ['en-US'] },
+    document: { readyState: 'loading', addEventListener() {} },
+    fetch: async () => ({
+      ok: false,
+      status: 401,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ error: 'expired token' }),
+      text: async () => '',
+    }),
+    URL,
+    URLSearchParams,
+    AbortController,
+    Intl,
+    Date,
+    Map,
+    Set,
+    WeakMap,
+    Promise,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    JSON,
+    Math,
+    console: { log() {}, warn() {}, debug() {}, error() {} },
+    performance: { now: () => 0 },
+    setTimeout,
+    clearTimeout,
+  });
+  window.window = window;
+  vm.runInContext(read('public/js/cloudApi.js'), context, { filename: 'public/js/cloudApi.js' });
+
+  const controller = new AbortController();
+  const expiry = window.NorvaCloud.playback.expireSession(
+    '20000000-0000-4000-8000-000000000002',
+    { signal: controller.signal },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshStarted, true);
+  controller.abort();
+  await assert.rejects(expiry, (error) => error?.name === 'AbortError');
+});
+
+test('standalone native VOD owns, replaces, and closes cloud sessions exactly once', async () => {
+  const launches = [];
+  const lifecycle = [];
+  const scheduled = [];
+  const acknowledgements = [];
+  const initialSessionId = '30000000-0000-4000-8000-000000000001';
+  const freshSessionId = '30000000-0000-4000-8000-000000000002';
+  const nextSessionId = '30000000-0000-4000-8000-000000000003';
+  let releasePendingExpiry;
+  const pendingExpiry = new Promise((resolve) => { releasePendingExpiry = resolve; });
+
+  class WatchPage {
+    constructor() {
+      this.activeCloudPlaybackSessionIds = new Set();
+      this.currentCloudPlaybackSessionId = null;
+    }
+
+    async _fetchServerResumeInfo() {
+      return { answered: false };
+    }
+
+    registerCloudPlaybackSession(sessionId) {
+      lifecycle.push(['register', String(sessionId)]);
+      this.currentCloudPlaybackSessionId = String(sessionId);
+      this.activeCloudPlaybackSessionIds.add(String(sessionId));
+    }
+
+    async stopCloudPlaybackSessions(options = {}) {
+      const sessionIds = Array.from(this.activeCloudPlaybackSessionIds);
+      lifecycle.push([
+        'stop',
+        sessionIds,
+        options.keepalive === true,
+      ]);
+      this.currentCloudPlaybackSessionId = null;
+      this.activeCloudPlaybackSessionIds.clear();
+    }
+  }
+
+  class VideoPlayer {}
+
+  const location = { hash: '#series', origin: 'https://norva.tv', search: '' };
+  const document = {
+    readyState: 'complete',
+    addEventListener() {},
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    body: { classList: { contains() { return false; } } },
+  };
+  const window = {
+    NorvaTVCloud: {
+      playVideoJson(payload) { launches.push(JSON.parse(payload)); },
+      ackPlaybackSessionClosed(sessionId) {
+        acknowledgements.push(String(sessionId));
+      },
+    },
+    NorvaCloud: {
+      token: 'user-token-present',
+      playback: {
+        async expireSession(rawSessionId, options = {}) {
+          const sessionId = String(rawSessionId);
+          lifecycle.push(['expiry-pending', sessionId, options.keepalive === true]);
+          if (sessionId === freshSessionId) await pendingExpiry;
+          lifecycle.push(['expiry-resolved', sessionId]);
+          return { session: { id: sessionId, status: 'expired' }, gatewayErrors: 0 };
+        },
+      },
+    },
+    WatchPage,
+    VideoPlayer,
+    __norvaNative: {},
+    location,
+    history: { state: null, back() {} },
+    app: {
+      currentPage: 'series',
+      channelList: null,
+      pages: { series: {} },
+    },
+    API: {
+      history: { save() { return Promise.resolve(); } },
+      proxy: {
+        xtream: {
+          async getStreamUrl() {
+            lifecycle.push(['resolve', freshSessionId]);
+            return {
+              url: 'https://provider.example/episode-fresh.mkv',
+              fallbackUrl: 'https://gateway.example/session-fresh/raw',
+              sessionId: freshSessionId,
+            };
+          },
+        },
+      },
+    },
+    addEventListener() {},
+    dispatchEvent() {},
+  };
+  const localStorage = {
+    getItem() { return null; },
+    setItem() {},
+  };
+  const context = vm.createContext({
+    window,
+    document,
+    localStorage,
+    location,
+    navigator: { userAgent: 'NorvaTV-test' },
+    URL,
+    console,
+    Date,
+    Map,
+    Set,
+    Promise,
+    WatchPage,
+    VideoPlayer,
+    CustomEvent: class CustomEvent {
+      constructor(type, init) { this.type = type; this.detail = init?.detail; }
+    },
+    setTimeout(callback, delay) {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
+    clearTimeout() {},
+  });
+
+  vm.runInContext(read('public/js/utils/standalone.js'), context);
+
+  const page = new WatchPage();
+  const content = {
+    sourceId: 'atlas-pro',
+    id: 'episode-3',
+    type: 'series',
+    title: 'Episode 3',
+    containerExtension: 'mkv',
+  };
+  await page.play(content, async () => ({
+    url: 'https://provider.example/episode-3.mkv',
+    fallbackUrl: 'https://gateway.example/session-initial/raw',
+    sessionId: initialSessionId,
+  }));
+
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].sessionId, initialSessionId);
+  assert.deepEqual(
+    lifecycle.filter(([event]) => event === 'register'),
+    [['register', initialSessionId]],
+  );
+
+  const retryResult = window.__norvaNative.retryPlayback(
+    'atlas-pro',
+    'episode',
+    'episode-3',
+    120,
+    'no_data_timeout',
+    'recovery-token-1',
+  );
+  assert.equal(retryResult, 'scheduled');
+  const recovery = scheduled.find(({ delay }) => delay === 1200);
+  assert.ok(recovery, 'the existing first bounded VOD retry must be scheduled');
+  await recovery.callback();
+
+  const replacementStop = lifecycle.findIndex(
+    ([event, sessionIds, keepalive]) => event === 'stop'
+      && sessionIds.includes(initialSessionId)
+      && keepalive === false,
+  );
+  const replacementResolve = lifecycle.findIndex(
+    ([event, sessionId]) => event === 'resolve' && sessionId === freshSessionId,
+  );
+  assert.ok(replacementStop >= 0, 'the initial cloud session must be stopped');
+  assert.ok(
+    replacementResolve > replacementStop,
+    'the provider replacement must be resolved only after the previous session stops',
+  );
+  assert.equal(launches.length, 2);
+  assert.equal(launches[1].sessionId, freshSessionId);
+  assert.deepEqual(
+    lifecycle.filter(([event]) => event === 'register'),
+    [
+      ['register', initialSessionId],
+      ['register', freshSessionId],
+    ],
+  );
+
+  assert.equal(
+    window.__norvaNative.onPlaybackClosed(freshSessionId, 'back'),
+    'accepted',
+    'the native close owns the active session once',
+  );
+  assert.equal(
+    window.__norvaNative.onPlaybackClosed(freshSessionId, 'duplicate-result'),
+    'accepted',
+    'a duplicate native result must join the same exact expiry',
+  );
+
+  window.__norvaResetPlayThrottle();
+  let nextResolverStarted = false;
+  const nextPlayback = page.play({
+    ...content,
+    id: 'episode-4',
+    title: 'Episode 4',
+  }, async () => {
+    nextResolverStarted = true;
+    lifecycle.push(['resolve', nextSessionId]);
+    return {
+      url: 'https://provider.example/episode-4.mkv',
+      fallbackUrl: 'https://gateway.example/session-next/raw',
+      sessionId: nextSessionId,
+    };
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    nextResolverStarted,
+    false,
+    'the next episode resolver must wait while native close expiry is pending',
+  );
+
+  releasePendingExpiry();
+  await nextPlayback;
+  assert.equal(nextResolverStarted, true);
+  const expiryResolvedAt = lifecycle.findIndex(
+    ([event, sessionId]) => event === 'expiry-resolved' && sessionId === freshSessionId,
+  );
+  const nextResolveAt = lifecycle.findIndex(
+    ([event, sessionId]) => event === 'resolve' && sessionId === nextSessionId,
+  );
+  assert.ok(
+    expiryResolvedAt >= 0 && nextResolveAt > expiryResolvedAt,
+    'the next session may be minted only after close expiry resolves',
+  );
+
+  assert.equal(
+    lifecycle.filter(
+      ([event, sessionId, keepalive]) => event === 'expiry-pending'
+        && sessionId === freshSessionId
+        && keepalive === true,
+    ).length,
+    1,
+  );
+  assert.deepEqual(acknowledgements, [freshSessionId]);
+  assert.equal(launches[2].sessionId, nextSessionId);
 });
 
 test('standalone Live recovery re-resolves the channel instead of replaying a stale URL', () => {
@@ -472,7 +1048,261 @@ test('standalone Live recovery re-resolves the channel instead of replaying a st
   );
   assert.match(liveFlow, /if \(!fresh\?\.url\) throw new Error\('No fresh live stream URL returned'\)/);
   assert.match(liveFlow, /nativePlay\(fresh\.url,[\s\S]*?fresh\.fallbackUrl \|\| null/);
+  assert.match(liveFlow, /sessionId:\s*freshLiveSessionId/);
+  assert.match(liveFlow, /sessionId:\s*initialLiveSessionId/);
+  assert.match(liveFlow, /registerNativeLiveCloudSession\(this, channel, freshLiveSessionId\)/);
+  assert.match(liveFlow, /registerNativeLiveCloudSession\(this, channel, initialLiveSessionId\)/);
   assert.match(liveFlow, /registerNativeRecovery\(meta, relaunchLive\)/);
+});
+
+test('standalone native Live owns initial and fresh sessions without entering the VOD lifecycle', async () => {
+  const launches = [];
+  const lifecycle = [];
+  const scheduled = [];
+  const acknowledgements = [];
+  const initialSessionId = '40000000-0000-4000-8000-000000000001';
+  const freshSessionId = '40000000-0000-4000-8000-000000000002';
+  const nextSessionId = '40000000-0000-4000-8000-000000000003';
+  let freshResolverStarted = false;
+  let releaseInitialExpiry;
+  const initialExpiry = new Promise((resolve) => { releaseInitialExpiry = resolve; });
+
+  class WatchPage {}
+  class VideoPlayer {
+    constructor() {
+      this.activeCloudPlaybackSessionIds = new Set();
+      this.currentCloudPlaybackSessionId = null;
+    }
+
+    registerCloudPlaybackSession(sessionId) {
+      const id = String(sessionId);
+      lifecycle.push(['register-live', id]);
+      this.currentCloudPlaybackSessionId = id;
+      this.activeCloudPlaybackSessionIds.add(id);
+    }
+
+    async stopCloudPlaybackSessions() {
+      const ids = Array.from(this.activeCloudPlaybackSessionIds);
+      lifecycle.push(['stop-live', ids]);
+      this.currentCloudPlaybackSessionId = null;
+      this.activeCloudPlaybackSessionIds.clear();
+    }
+
+    async prepareLiveSwitch() {
+      lifecycle.push(['prepare-live-switch']);
+      await this.stopCloudPlaybackSessions();
+    }
+  }
+
+  const location = { hash: '#live', origin: 'https://norva.tv', search: '' };
+  const document = {
+    readyState: 'complete',
+    addEventListener() {},
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    body: { classList: { contains() { return false; } } },
+  };
+  const window = {
+    NodeCastNative: {
+      playVideoJson(payload) { launches.push(JSON.parse(payload)); },
+    },
+    NorvaTVCloud: {
+      ackPlaybackSessionClosed(sessionId) {
+        acknowledgements.push(String(sessionId));
+      },
+    },
+    WatchPage,
+    VideoPlayer,
+    __norvaNative: {},
+    location,
+    history: { state: null, back() {} },
+    app: { currentPage: 'live', channelList: null },
+    API: {
+      proxy: {
+        xtream: {
+          async getStreamUrl() {
+            freshResolverStarted = true;
+            lifecycle.push(['resolve-live', freshSessionId]);
+            return {
+              url: 'https://provider.example/live/fresh.ts',
+              fallbackUrl: 'https://gateway.example/live-fresh/raw',
+              sessionId: freshSessionId,
+            };
+          },
+        },
+      },
+    },
+    NorvaCloud: {
+      token: 'user-token-present',
+      playback: {
+        async expireSession(sessionId) {
+          const id = String(sessionId);
+          lifecycle.push(['expire-live', id]);
+          if (id === initialSessionId) await initialExpiry;
+          return { session: { id, status: 'expired' }, gatewayErrors: 0 };
+        },
+      },
+    },
+    addEventListener() {},
+    dispatchEvent() {},
+  };
+  const localStorage = {
+    getItem() { return 'standalone'; },
+    setItem() {},
+  };
+  const context = vm.createContext({
+    window,
+    document,
+    localStorage,
+    location,
+    navigator: { userAgent: 'NorvaTV-test' },
+    URL,
+    console,
+    Date,
+    Map,
+    Set,
+    WeakMap,
+    Promise,
+    WatchPage,
+    VideoPlayer,
+    CustomEvent: class CustomEvent {
+      constructor(type, init) { this.type = type; this.detail = init?.detail; }
+    },
+    setTimeout(callback, delay) {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
+    clearTimeout() {},
+  });
+
+  vm.runInContext(read('public/js/utils/standalone.js'), context);
+
+  const player = new VideoPlayer();
+  window.app.player = player;
+  const channel = {
+    sourceId: 'atlas-pro',
+    sourceType: 'xtream',
+    id: 'channel-42',
+    streamId: '42',
+    name: 'Test Live',
+    cloudPlaybackSessionId: initialSessionId,
+  };
+  await player.play(
+    channel,
+    'https://provider.example/live/initial.ts',
+    {
+      fallbackUrl: 'https://gateway.example/live-initial/raw',
+      sessionId: initialSessionId,
+    },
+  );
+
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].sessionId, initialSessionId);
+  assert.deepEqual(
+    lifecycle.filter(([event]) => event === 'register-live'),
+    [['register-live', initialSessionId]],
+  );
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(initialSessionId, 'retry'), 'accepted');
+  assert.equal(
+    window.__norvaNative.onPlaybackClosed(initialSessionId, 'duplicate-result'),
+    'accepted',
+    'a duplicate Live close must join its exact in-flight expiry',
+  );
+  assert.equal(channel.cloudPlaybackSessionId, null);
+  assert.equal(player.currentCloudPlaybackSessionId, null);
+  assert.equal(player.activeCloudPlaybackSessionIds.size, 0);
+
+  const retry = window.__norvaNative.retryPlayback(
+    'atlas-pro',
+    'channel',
+    '42',
+    0,
+    'no_data_timeout',
+    'live-recovery-token-1',
+  );
+  assert.equal(retry, 'scheduled');
+  const recovery = scheduled.find(({ delay }) => delay === 250);
+  assert.ok(recovery, 'the pre-existing Live recovery must be scheduled once');
+  const recoveryTask = recovery.callback();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    freshResolverStarted,
+    false,
+    'fresh Live resolution must wait for exact native-close expiry',
+  );
+
+  releaseInitialExpiry();
+  await recoveryTask;
+
+  assert.equal(freshResolverStarted, true);
+  assert.equal(launches.length, 2);
+  assert.equal(launches[1].sessionId, freshSessionId);
+  assert.deepEqual(
+    lifecycle.filter(([event]) => event === 'register-live'),
+    [
+      ['register-live', initialSessionId],
+      ['register-live', freshSessionId],
+    ],
+  );
+  assert.equal(
+    lifecycle.filter(([event, id]) => event === 'expire-live' && id === initialSessionId).length,
+    1,
+  );
+
+  window.__norvaResetPlayThrottle();
+  const nextChannel = {
+    ...channel,
+    id: 'channel-84',
+    streamId: '84',
+    name: 'Next Live',
+    cloudPlaybackSessionId: nextSessionId,
+  };
+  await player.play(
+    nextChannel,
+    'https://provider.example/live/next.ts',
+    {
+      fallbackUrl: 'https://gateway.example/live-next/raw',
+      sessionId: nextSessionId,
+    },
+  );
+  assert.equal(launches[2].sessionId, nextSessionId);
+  assert.equal(player.currentCloudPlaybackSessionId, nextSessionId);
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(freshSessionId, 'back'), 'accepted');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    lifecycle.filter(([event, id]) => event === 'expire-live' && id === freshSessionId).length,
+    1,
+  );
+  assert.equal(
+    player.currentCloudPlaybackSessionId,
+    nextSessionId,
+    'a delayed close from the prior Activity must not clear the newer Live owner',
+  );
+  assert.equal(player.activeCloudPlaybackSessionIds.has(nextSessionId), true);
+  assert.equal(nextChannel.cloudPlaybackSessionId, nextSessionId);
+
+  assert.equal(window.__norvaNative.onPlaybackClosed(nextSessionId, 'back'), 'accepted');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    lifecycle.filter(([event, id]) => event === 'expire-live' && id === nextSessionId).length,
+    1,
+  );
+  assert.equal(
+    window.__norvaNative.onPlaybackClosed('not-a-session', 'back'),
+    'not_ready',
+    'invalid ids must not reach either ownership queue',
+  );
+  assert.equal(
+    lifecycle.filter(([event]) => event === 'resolve-live').length,
+    1,
+    'the lifecycle fix must not add resolver retries',
+  );
+  assert.deepEqual(acknowledgements, [initialSessionId, freshSessionId, nextSessionId]);
 });
 
 test('standalone rejects duplicate playback intent before asynchronous resolution', () => {
@@ -686,6 +1516,11 @@ test('standalone binds every recovered stream to the exact native recovery token
 test('standalone Live recovery releases the previous cloud session before creating one replacement', () => {
   const source = read('public/js/utils/standalone.js');
   const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
+  const variantFlow = section(
+    source,
+    'window.__norvaPlayVariant = function (streamId, sourceId)',
+    'const nativeTitle =',
+  );
   const relaunch = section(
     liveFlow,
     "const relaunchLive = async (_resumeAt = 0, recoveryToken = '') =>",
@@ -699,5 +1534,26 @@ test('standalone Live recovery releases the previous cloud session before creati
   assert.ok(resolveAt > releaseAt, 'previous Live session must be released before replacement resolution');
   assert.equal(replacementResolutions.length, 1, 'Live recovery must create exactly one replacement session');
   assert.match(liveFlow, /await this\.prepareLiveSwitch\(\)/);
-  assert.match(liveFlow, /this\.registerCloudPlaybackSession\(channel\.cloudPlaybackSessionId\)/);
+  assert.match(liveFlow, /registerNativeLiveCloudSession\(this, channel, freshLiveSessionId\)/);
+  assert.match(
+    variantFlow,
+    /const pendingNativeClose = nativeLiveCleanupByOwner\.get\(window\.app\?\.player\);[\s\S]{0,100}await pendingNativeClose/,
+    'native variant selection must wait for the exact outgoing Live session expiry',
+  );
+});
+
+test('a delayed native ended ACK cannot autoplay after leaving the Series route', () => {
+  const source = read('public/js/pages/SeriesPage.js');
+  const ended = section(
+    source,
+    'onNativeEpisodeEnded(detail = {})',
+    'promptNextEpisode(nextEl)',
+  );
+
+  assert.match(
+    ended,
+    /this\.app\?\.currentPage !== 'series'/,
+    'a durable close ACK may arrive later and must not resurrect Series behind another route',
+  );
+  assert.match(ended, /this\.playEpisode\(nextEl\)/);
 });

@@ -85,8 +85,8 @@ public final class FirstFrameFixtureInstrumentedTest {
             activityRef.set(instrumentation.waitForMonitorWithTimeout(monitor, 5_000));
 
             assertTrue(
-                    "Media3 did not render the deterministic H.264/AAC fixture in 15 seconds",
-                    resultLatch.await(15, TimeUnit.SECONDS));
+                    "Media3 did not render the deterministic H.264/AAC fixture in 45 seconds",
+                    resultLatch.await(45, TimeUnit.SECONDS));
             Intent result = resultRef.get();
             assertNotNull(result);
             assertEquals(

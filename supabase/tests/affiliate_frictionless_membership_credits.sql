@@ -2659,6 +2659,7 @@ select extensions.ok(
       'overlay',
       'program',
       'provider',
+      'referrals',
       'schema_version'
     ]::text[]
     from frictionless_test_state state

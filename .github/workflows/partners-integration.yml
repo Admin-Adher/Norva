@@ -383,6 +383,7 @@ jobs:
           supabase/tests/affiliate_dispute_won.sql
           supabase/tests/affiliate_fiscal_payout_onboarding.sql
           supabase/tests/affiliate_frictionless_membership_credits.sql
+          supabase/tests/affiliate_referral_visibility.sql
           supabase/tests/affiliate_member_write_rate_limits.sql
           supabase/tests/affiliate_kyc_reverification_override.sql
           supabase/tests/affiliate_revolut_manual_hybrid.sql

@@ -245,7 +245,7 @@ test('Android phone native player is landscape and uses modern immersive mode', 
   assert.match(player, /BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/);
 });
 
-test('Android phone browsing shell also accounts for system bars', () => {
+test('Android phone browsing shell consumes system-bar insets exactly once', () => {
   const main = read(
     'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
   );
@@ -255,7 +255,16 @@ test('Android phone browsing shell also accounts for system bars', () => {
     main,
     /WindowInsets\.Type\.systemBars\(\)[\s\S]*WindowInsets\.Type\.displayCutout\(\)/,
   );
+  assert.match(
+    main,
+    /root\.setOnApplyWindowInsetsListener/,
+  );
   assert.match(main, /v\.setPadding\(safe\.left, safe\.top, safe\.right, safe\.bottom\)/);
+  assert.match(
+    main,
+    /return insets\.inset\(safe\.left, safe\.top, safe\.right, safe\.bottom\)/,
+    'children must receive only the unhandled remainder so CSS safe areas are not applied twice',
+  );
 });
 
 test('Android phone player UI telemetry is bounded and excludes provider payload', () => {

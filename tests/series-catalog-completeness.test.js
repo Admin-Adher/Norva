@@ -197,5 +197,5 @@ test('changed Series assets are cache-busted together', () => {
   const html = read('public/app.html');
   assert.match(html, /main\.css\?v=102/);
   assert.match(html, /api\.js\?v=77/);
-  assert.match(html, /SeriesPage\.js\?v=55/);
+  assert.match(html, /SeriesPage\.js\?v=56/);
 });

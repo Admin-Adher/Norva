@@ -11,8 +11,8 @@ const targets = [
     main: 'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
     manifest: 'clients/android-phone/app/src/main/AndroidManifest.xml',
     gradle: 'clients/android-phone/app/build.gradle',
-    versionCode: 18,
-    versionName: '1.3.5',
+    versionCode: 19,
+    versionName: '1.3.6',
     bridgeCount: 0,
   },
 ];
@@ -213,7 +213,10 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
   assert.doesNotMatch(phone, /@android\.webkit\.JavascriptInterface[\s\S]{0,120}purchaseForUser/);
   for (const telemetry of [phoneTelemetry, tvTelemetry]) {
     assert.match(telemetry, /norva-playback\/playback\/events/);
-    assert.match(telemetry, /body\.put\("eventType", "first_frame"\)/);
+    assert.match(
+      telemetry,
+      /body\.put\("eventType", "first_frame"\)|baseEvent\(\s*"first_frame"/,
+    );
     assert.match(telemetry, /Authorization", "Bearer " \+ authToken/);
     assert.match(telemetry, /setInstanceFollowRedirects\(false\)/);
     assert.doesNotMatch(telemetry, /Log\.|System\.out|printStackTrace/);
