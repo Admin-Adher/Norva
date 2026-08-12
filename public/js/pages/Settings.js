@@ -14,6 +14,12 @@ function isNativeShell() {
         || /[?&]mobile=1\b/.test(window.location.search || '');
 }
 
+function isTvSettingsShell() {
+    return document.documentElement?.classList?.contains('tv-mode')
+        || /NorvaTV-AndroidTV/i.test(navigator.userAgent || '')
+        || /[?&]tv=1\b/.test(window.location?.search || '');
+}
+
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
@@ -33,6 +39,7 @@ class SettingsPage {
     }
 
     init() {
+        this.applyCapabilityPolicy();
         this.initTabSemantics();
         // Tab switching
         this.tabs.forEach(tab => {
@@ -64,12 +71,34 @@ class SettingsPage {
         this.initUserManagement();
     }
 
+    applyCapabilityPolicy() {
+        if (!isTvSettingsShell()) return;
+        const allowed = new Set(['account', 'player', 'sources']);
+        this.tabs.forEach((tab) => {
+            const available = allowed.has(tab.dataset.tab);
+            tab.hidden = !available;
+            tab.setAttribute('aria-hidden', available ? 'false' : 'true');
+            if (!available) tab.tabIndex = -1;
+            if (tab.dataset.tab === 'player') {
+                const label = tab.querySelector('span');
+                if (label) label.textContent = 'Playback';
+            }
+        });
+        const advanced = document.getElementById('settings-advanced-toggle');
+        if (advanced) {
+            advanced.hidden = true;
+            advanced.setAttribute('aria-hidden', 'true');
+        }
+    }
+
     initTabSemantics() {
         const tabList = document.querySelector('#page-settings .settings-container > .tabs');
         if (tabList) {
             tabList.setAttribute('role', 'tablist');
             tabList.setAttribute('aria-label', 'Settings sections');
-            tabList.setAttribute('aria-orientation', 'horizontal');
+            tabList.setAttribute('aria-orientation', isTvSettingsShell() || window.matchMedia('(min-width: 769px)').matches
+                ? 'vertical'
+                : 'horizontal');
         }
         this.tabs.forEach((tab) => {
             const name = tab.dataset.tab;
@@ -90,7 +119,13 @@ class SettingsPage {
     }
 
     handleSettingsTabKeydown(event, currentTab) {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        // Logical tab traversal remains Left/Right on touch/web. The TV D-pad
+        // uses the vertical rail graph in tvNavigation.js.
+        const tabKeys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        const vertical = currentTab.closest('[role="tablist"]')?.getAttribute('aria-orientation') === 'vertical';
+        const previousKey = vertical ? 'ArrowUp' : 'ArrowLeft';
+        const nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
+        if (!(vertical ? [previousKey, nextKey, 'Home', 'End'] : tabKeys).includes(event.key)) return;
         const available = [...this.tabs].filter((tab) => !tab.disabled
             && !tab.hidden
             && tab.style.display !== 'none'
@@ -100,7 +135,7 @@ class SettingsPage {
         let nextIndex = currentIndex;
         if (event.key === 'Home') nextIndex = 0;
         else if (event.key === 'End') nextIndex = available.length - 1;
-        else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % available.length;
+        else if (event.key === nextKey) nextIndex = (currentIndex + 1) % available.length;
         else nextIndex = (currentIndex - 1 + available.length) % available.length;
         event.preventDefault();
         const next = available[nextIndex];
@@ -117,7 +152,16 @@ class SettingsPage {
             window.NorvaProfiles?.openSwitcher?.();
         });
 
+        document.getElementById('settings-tv-switch-profile')?.addEventListener('click', () => {
+            window.NorvaProfiles?.openSwitcher?.();
+        });
+
         document.getElementById('settings-signout-btn')?.addEventListener('click', () => this.signOut());
+        document.getElementById('settings-tv-signout-btn')?.addEventListener('click', () => this.signOut());
+
+        document.getElementById('settings-tv-handoff-btn')?.addEventListener('click', () => this.showTvHandoffInstructions());
+        document.getElementById('settings-tv-service-instructions-btn')?.addEventListener('click', () => this.showTvHandoffInstructions(true));
+        document.getElementById('settings-tv-legal-btn')?.addEventListener('click', () => this.showTvLegalInstructions());
 
         document.getElementById('settings-open-partners')?.addEventListener('click', (event) => {
             this.app?.openPartners?.(event.currentTarget);
@@ -165,6 +209,10 @@ class SettingsPage {
             if (!actionButton) return;
 
             const action = actionButton.dataset.sourceHealthAction;
+            if (action === 'show-instructions') {
+                this.showTvHandoffInstructions(true);
+                return;
+            }
             if (action === 'view-progress' && this.lastSourceHealthSummary && window.NorvaSourceHealth?.openProgress) {
                 window.NorvaSourceHealth.openProgress(this.lastSourceHealthSummary, this.app);
                 return;
@@ -178,6 +226,41 @@ class SettingsPage {
                 }
             }
         });
+
+        document.getElementById('settings-tv-service-health')?.addEventListener('click', (event) => {
+            const actionButton = event.target.closest('[data-source-health-action]');
+            if (!actionButton) return;
+            if (actionButton.dataset.sourceHealthAction === 'show-instructions') {
+                this.showTvHandoffInstructions(true);
+                return;
+            }
+            if (actionButton.dataset.sourceHealthAction === 'open-sources') {
+                this.showTvHandoffInstructions(true);
+            }
+        });
+    }
+
+    showTvHandoffInstructions(serviceSpecific = false) {
+        const title = serviceSpecific ? 'Review your TV service' : 'Manage your Norva account';
+        const message = serviceSpecific
+            ? 'Open norva.tv/account on a phone, tablet or computer to review your TV service. This TV never asks for provider credentials.'
+            : 'Open norva.tv/account on a phone, tablet or computer to manage your plan, payment method and library sources.';
+        if (window.NorvaModal?.alert) {
+            window.NorvaModal.alert(message, { title, confirmLabel: 'Done' });
+            return;
+        }
+        window.alert?.(message);
+    }
+
+    showTvLegalInstructions() {
+        if (window.NorvaModal?.alert) {
+            window.NorvaModal.alert(
+                'Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html',
+                { title: 'Privacy & legal', confirmLabel: 'Done' }
+            );
+            return;
+        }
+        window.alert?.('Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html');
     }
 
     // "Sign-in settings" as a lightweight in-context modal rather than a full-page
@@ -382,12 +465,24 @@ class SettingsPage {
         const user = this.app.currentUser || {};
         const email = document.getElementById('settings-account-email');
         const mode = document.getElementById('settings-account-mode');
+        const kicker = document.getElementById('settings-account-kicker');
+        const profileName = document.getElementById('settings-profile-name');
+        const tv = isTvSettingsShell();
 
         if (email) email.textContent = user.email || user.username || 'Paired Norva screen';
+        if (kicker) kicker.textContent = tv && user.device ? 'Identity' : 'Signed in as';
         if (mode) {
             mode.textContent = user.cloud
                 ? (user.device ? 'Paired cloud screen' : 'Norva Cloud account')
                 : (user.role ? `Local ${user.role}` : 'Local account');
+        }
+        if (tv && user.device && email && mode) {
+            const identity = email.textContent;
+            email.textContent = 'Paired cloud screen';
+            mode.textContent = identity;
+        }
+        if (profileName) {
+            profileName.textContent = window.NorvaProfiles?.current?.()?.name || 'Main Profile';
         }
 
         const accountOnly = document.getElementById('settings-open-account');
@@ -396,7 +491,9 @@ class SettingsPage {
         // only a device token, so the whole panel throws "Not signed in". Same guard as
         // the delete-account row below.
         if (accountOnly) accountOnly.style.display = (user.cloud && !user.device) ? '' : 'none';
-        if (switchProfile) switchProfile.style.display = user.cloud ? '' : 'none';
+        if (switchProfile) switchProfile.style.display = user.cloud && !tv ? '' : 'none';
+        const tvSwitchProfile = document.getElementById('settings-tv-switch-profile');
+        if (tvSwitchProfile) tvSwitchProfile.hidden = !(tv && user.cloud);
 
         // Account deletion is for real cloud accounts only (a device-paired
         // screen authenticates with a device token, not a user session).
@@ -448,7 +545,9 @@ class SettingsPage {
         //     once the APK ships the purchase bridge. Until then it stays hidden
         //     (external web payment links remain forbidden inside native).
         if (button) {
-            if (isNativeShell()) {
+            if (isTvSettingsShell()) {
+                button.style.display = 'none';
+            } else if (isNativeShell()) {
                 const ready = nativeBillingReady();
                 button.style.display = ready ? '' : 'none';
                 if (ready) button.textContent = 'Subscribe';
@@ -479,7 +578,9 @@ class SettingsPage {
                 && (provider === 'system' || provider === 'manual');
 
             plan.textContent = this.accessLabel(decision);
-            hint.textContent = this.accessHint(decision);
+            hint.textContent = isTvSettingsShell()
+                ? (this.app.currentUser?.device ? 'Valid via cloud synchronization' : 'Access available on this TV')
+                : this.accessHint(decision);
 
             if (includedAccess || hardBlocked) {
                 // Pilot/VIP/manual grants have no billing relationship. Hiding the
@@ -601,10 +702,37 @@ class SettingsPage {
                 ? await this.app.refreshSourceHealth()
                 : await window.NorvaSourceHealth.loadSummary();
             this.lastSourceHealthSummary = summary;
-            container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: false });
+            const tv = isTvSettingsShell();
+            container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, {
+                hideWhenReady: false,
+                tvHandoff: tv,
+                accountSummary: true
+            });
+            const serviceContainer = document.getElementById('settings-tv-service-health');
+            if (serviceContainer) {
+                serviceContainer.innerHTML = tv
+                    ? window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: false, tvHandoff: true })
+                    : '';
+            }
+            this.updateTvHandoffCopy(summary);
         } catch (err) {
             console.warn('[Settings] Unable to load TV service health:', err);
             container.innerHTML = '';
+            const serviceContainer = document.getElementById('settings-tv-service-health');
+            if (serviceContainer) serviceContainer.innerHTML = '';
+        }
+    }
+
+    updateTvHandoffCopy(summary = {}) {
+        if (!isTvSettingsShell()) return;
+        const needsAttention = !['ready'].includes(String(summary.state || '').toLowerCase());
+        const title = document.getElementById('settings-tv-handoff-title');
+        const copy = document.getElementById('settings-tv-handoff-copy');
+        if (title) title.textContent = 'Continue on phone or web';
+        if (copy) {
+            copy.innerHTML = needsAttention
+                ? 'Open <strong>norva.tv/account</strong> on a personal device to review your TV service. This TV never asks for provider credentials.'
+                : 'Open <strong>norva.tv/account</strong> on a personal device to manage your account and TV service. This TV never asks for provider credentials.';
         }
     }
 
@@ -1769,6 +1897,9 @@ class SettingsPage {
     }
 
     switchTab(tabName) {
+        if (isTvSettingsShell() && !['account', 'player', 'sources'].includes(tabName)) {
+            tabName = 'account';
+        }
         this.tabs.forEach(t => {
             const selected = t.dataset.tab === tabName;
             t.classList.toggle('active', selected);
@@ -1832,18 +1963,22 @@ class SettingsPage {
         // TV Settings uses a fixed header/tab shell with only the active panel
         // scrolling. Reset synchronously before any network request so entry can
         // never reveal a clipped title or a stale lower section.
-        if (document.documentElement.classList.contains('tv-mode')) {
+        if (isTvSettingsShell()) {
+            document.documentElement.classList.add('tv-settings-active');
             const page = document.getElementById('page-settings');
             const container = page?.querySelector('.settings-container');
             if (page) page.scrollTop = 0;
             if (container) container.scrollTop = 0;
             const activePanel = container?.querySelector('.tab-content.active');
             if (activePanel) activePanel.scrollTop = 0;
+            this.switchTab('account');
         }
 
         // Local hub user management stays available to local admins only.
         const usersTab = document.getElementById('users-tab');
-        const canManageLocalUsers = this.app.currentUser?.role === 'admin' && !this.app.currentUser?.cloud;
+        const canManageLocalUsers = !isTvSettingsShell()
+            && this.app.currentUser?.role === 'admin'
+            && !this.app.currentUser?.cloud;
         if (usersTab) {
             usersTab.style.display = canManageLocalUsers ? 'block' : 'none';
             if (!canManageLocalUsers && usersTab.classList.contains('active')) {
@@ -1854,7 +1989,7 @@ class SettingsPage {
         // "Screens & pairing" (devices) is a cloud-account-only feature.
         const screensTab = document.getElementById('screens-tab');
         if (screensTab) {
-            const cloudUser = !!this.app.currentUser?.cloud;
+            const cloudUser = !!this.app.currentUser?.cloud && !isTvSettingsShell();
             screensTab.style.display = cloudUser ? 'block' : 'none';
             if (!cloudUser && screensTab.classList.contains('active')) {
                 this.switchTab('account');
@@ -1972,7 +2107,7 @@ class SettingsPage {
     }
 
     hide() {
-        // Page is hidden
+        document.documentElement.classList.remove('tv-settings-active');
     }
 }
 

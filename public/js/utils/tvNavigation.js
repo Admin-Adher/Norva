@@ -1070,9 +1070,6 @@
         if (focusedTab && tabsHost?.contains(focusedTab)) {
             const index = tabs.indexOf(focusedTab);
             if (direction === 'ArrowLeft') {
-                if (index > 0) {
-                    return { handled: true, target: tabs[index - 1], selectTab: true, scroll: false };
-                }
                 return {
                     handled: true,
                     target: activeNavbarTarget(),
@@ -1081,28 +1078,28 @@
                 };
             }
             if (direction === 'ArrowRight') {
-                return {
-                    handled: true,
-                    target: index >= 0 && index < tabs.length - 1 ? tabs[index + 1] : null,
-                    selectTab: index >= 0 && index < tabs.length - 1,
-                    scroll: false
-                };
-            }
-            if (direction === 'ArrowUp') {
-                return { handled: true, target: null, selectTab: false, scroll: false };
-            }
-            if (direction === 'ArrowDown') {
-                // A focused-but-not-selected tab can only occur after external DOM
-                // focus. Select it first so the tab label and panel never disagree.
-                if (!focusedTab.classList.contains('active')) {
-                    return { handled: true, target: focusedTab, selectTab: true, scroll: false };
-                }
                 const panel = page.querySelector('.tab-content.active');
                 return {
                     handled: true,
                     target: settingsPanelCandidates(panel)[0] || null,
                     selectTab: false,
                     scroll: true
+                };
+            }
+            if (direction === 'ArrowUp') {
+                return {
+                    handled: true,
+                    target: index > 0 ? tabs[index - 1] : null,
+                    selectTab: index > 0,
+                    scroll: false
+                };
+            }
+            if (direction === 'ArrowDown') {
+                return {
+                    handled: true,
+                    target: index >= 0 && index < tabs.length - 1 ? tabs[index + 1] : null,
+                    selectTab: index >= 0 && index < tabs.length - 1,
+                    scroll: false
                 };
             }
         }
@@ -1119,9 +1116,10 @@
                 return { handled: true, target, selectTab: false, scroll: false };
             }
             if (direction === 'ArrowLeft') {
+                const activeTab = tabs.find((tab) => tab.classList.contains('active')) || tabs[0] || null;
                 return {
                     handled: true,
-                    target: activeNavbarTarget(),
+                    target: activeTab,
                     selectTab: false,
                     scroll: false
                 };

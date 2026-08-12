@@ -40,7 +40,7 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
 test('devices and pairing are permanent cloud-account destinations, not an Advanced tab', () => {
   const appHtml = read('public/app.html');
   const appJs = read('public/js/app.js');
-  assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>Devices &amp; screens/);
+  assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span>Devices<\/span>[\s\S]*?<\/button>/);
   assert.doesNotMatch(appHtml, /class="tab tab-advanced" data-tab="screens"/);
   assert.match(appHtml, /Add a TV, phone, tablet or browser/);
   assert.match(appHtml, /Your devices &amp; screens/);

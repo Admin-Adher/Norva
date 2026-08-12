@@ -445,6 +445,9 @@ public class MainActivity extends Activity {
         } else if ("/js/utils/tvNavigation.js".equals(path)) {
             assetPath = "www/js/utils/tvNavigation.js";
             mimeType = "application/javascript";
+        } else if ("/js/utils/sourceHealth.js".equals(path)) {
+            assetPath = "www/js/utils/sourceHealth.js";
+            mimeType = "application/javascript";
         } else if ("/js/utils/GenreRails.js".equals(path)) {
             assetPath = "www/js/utils/GenreRails.js";
             mimeType = "application/javascript";
@@ -501,6 +504,18 @@ public class MainActivity extends Activity {
             mimeType = "image/svg+xml";
         } else if ("/img/icons/norva-thumb-down.svg".equals(path)) {
             assetPath = "www/img/icons/norva-thumb-down.svg";
+            mimeType = "image/svg+xml";
+        } else if ("/img/icons/norva-account.svg".equals(path)) {
+            assetPath = "www/img/icons/norva-account.svg";
+            mimeType = "image/svg+xml";
+        } else if ("/img/icons/norva-movies.svg".equals(path)) {
+            assetPath = "www/img/icons/norva-movies.svg";
+            mimeType = "image/svg+xml";
+        } else if ("/img/icons/norva-live-tv.svg".equals(path)) {
+            assetPath = "www/img/icons/norva-live-tv.svg";
+            mimeType = "image/svg+xml";
+        } else if ("/img/icons/norva-logout.svg".equals(path)) {
+            assetPath = "www/img/icons/norva-logout.svg";
             mimeType = "image/svg+xml";
         } else if ("/app".equals(path) || "/app.html".equals(path)) {
             assetPath = "www/app.html";

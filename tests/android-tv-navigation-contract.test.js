@@ -777,9 +777,11 @@ test('Android TV Settings keeps vertical focus inside its active panel', () => {
   };
   vm.runInNewContext(`${functions}\nthis.settingsGraphMove = settingsGraphMove;`, context);
 
-  // Rail -> Account remains the existing explicit entry; Account -> panel starts
-  // at the semantic first action, not whichever rectangle is nearest.
-  assert.equal(context.settingsGraphMove(accountTab, 'ArrowDown').target, service);
+  // The TV settings categories form a vertical rail. Down selects the next
+  // category while Right enters the active panel at its semantic first action.
+  assert.equal(context.settingsGraphMove(accountTab, 'ArrowDown').target, screensTab);
+  assert.equal(context.settingsGraphMove(accountTab, 'ArrowDown').selectTab, true);
+  assert.equal(context.settingsGraphMove(accountTab, 'ArrowRight').target, service);
   // Horizontal navigation stays within the visual action row.
   assert.equal(context.settingsGraphMove(signOut, 'ArrowLeft').target, switchProfile);
   assert.equal(context.settingsGraphMove(legal, 'ArrowLeft').target, terms);
@@ -792,11 +794,11 @@ test('Android TV Settings keeps vertical focus inside its active panel', () => {
   assert.notEqual(atEnd.target, railBell);
   // Up from the first panel row returns to the selected tab.
   assert.equal(context.settingsGraphMove(service, 'ArrowUp').target, accountTab);
-  // Tabs advance and select horizontally, while an actual rail control remains
-  // outside this page-scoped graph so Down -> Logout behavior is untouched.
-  const nextTab = context.settingsGraphMove(accountTab, 'ArrowRight');
-  assert.equal(nextTab.target, screensTab);
-  assert.equal(nextTab.selectTab, true);
+  // Right enters the panel; an actual global rail control remains outside this
+  // page-scoped graph so Down -> Logout behavior is untouched.
+  const enterPanel = context.settingsGraphMove(accountTab, 'ArrowRight');
+  assert.equal(enterPanel.target, service);
+  assert.equal(enterPanel.selectTab, false);
   assert.equal(context.settingsGraphMove(railBell, 'ArrowDown').handled, false);
 });
 
@@ -957,19 +959,40 @@ test('Android TV live-data audit assets are opt-in and debug-only', () => {
     /debugBundledDpadAssets =\s*\(getApplicationInfo\(\)\.flags & android\.content\.pm\.ApplicationInfo\.FLAG_DEBUGGABLE\) != 0\s*&& getIntent\(\)\.getBooleanExtra\(EXTRA_DEBUG_BUNDLED_DPAD_ASSETS, false\);/
   );
   assert.match(main, /"\/js\/utils\/tvNavigation\.js"\.equals\(path\)/);
+  assert.match(main, /"\/js\/utils\/sourceHealth\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/utils\/GenreRails\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/pages\/SeriesPage\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/profiles\.js"\.equals\(path\)/);
   assert.match(main, /"\/js\/components\/MultiSelect\.js"\.equals\(path\)/);
   assert.match(main, /"\/css\/main\.css"\.equals\(path\)/);
+  assert.match(main, /"\/img\/icons\/norva-account\.svg"\.equals\(path\)/);
+  assert.match(main, /"\/img\/icons\/norva-live-tv\.svg"\.equals\(path\)/);
 });
 
 test('Android TV app shell cache-busts the repaired navigation script', () => {
-  assert.match(read('public/app.html'), /tvNavigation\.js\?v=31/);
+  assert.match(read('public/app.html'), /tvNavigation\.js\?v=32/);
   assert.match(read('public/support.html'), /tvNavigation\.js\?v=31/);
   assert.match(read('public/app.html'), /NavigationModel\.js\?v=1/);
   assert.match(read('public/app.html'), /NavigationAdapters\.js\?v=1/);
   assert.match(read('public/app.html'), /GenreRails\.js\?v=8/);
+});
+
+test('Android TV Settings exposes only read-only ten-foot capabilities', () => {
+  const settings = read('public/js/pages/Settings.js');
+  const html = read('public/app.html');
+  const css = read('public/css/main.css');
+
+  assert.match(settings, /const allowed = new Set\(\['account', 'player', 'sources'\]\)/);
+  assert.match(settings, /if \(isTvSettingsShell\(\) && !\['account', 'player', 'sources'\]\.includes\(tabName\)\)/);
+  assert.match(settings, /action === 'show-instructions'[\s\S]*showTvHandoffInstructions\(true\)[\s\S]*return;/);
+  assert.match(settings, /This TV never asks for provider credentials/);
+  assert.match(settings, /title\.textContent = 'Continue on phone or web'/);
+  assert.match(settings, /Valid via cloud synchronization/);
+  assert.match(html, /id="settings-tv-signout-btn"/);
+  assert.match(html, /id="settings-tv-legal-btn"/);
+  assert.match(css, /html\.tv-mode #page-settings \.settings-source-management[\s\S]*display: none !important/);
+  assert.match(css, /html\.tv-mode #page-settings #settings-tv-handoff-btn[\s\S]*display: none/);
+  assert.match(css, /html\.tv-mode #page-settings \.settings-container > \.tab-content[\s\S]*max-width: 1216px/);
 });
 
 test('Android TV Movies dashboard cards restore the lightweight preview after Back', () => {

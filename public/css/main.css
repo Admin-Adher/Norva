@@ -17577,6 +17577,14 @@ html.tv-mode #page-settings .settings-container {
   overflow: hidden;
 }
 
+html.tv-mode.tv-settings-active .navbar {
+  display: none;
+}
+
+html.tv-mode.tv-settings-active .main-content {
+  margin-left: 0;
+}
+
 html.tv-mode #page-settings .settings-container > h2 {
   grid-row: 1;
   margin: 0 0 10px;
@@ -20353,5 +20361,883 @@ html.tv-mode .partners-tv-shell .btn:focus {
 @media (prefers-reduced-motion: reduce) {
   .partners-skeleton {
     animation: none;
+  }
+}
+
+/* ============================================================================
+   Settings direction B — task rail + calm, divided account rows
+   ----------------------------------------------------------------------------
+   One shared structure serves web, touch WebViews and the Android TV shell.
+   Platform capability policy is applied by Settings.js; CSS owns layout only.
+   ============================================================================ */
+
+.settings-panel-header {
+  margin-bottom: var(--space-lg);
+}
+
+.settings-panel-header h2 {
+  margin: 0;
+  font-family: var(--font-display, 'Outfit', 'Inter', sans-serif);
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.settings-panel-header p {
+  max-width: 720px;
+  margin: var(--space-sm) 0 0;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.settings-tab-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  object-fit: contain;
+  opacity: 0.72;
+}
+
+.settings-row-group {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-account-section .setting-item,
+.settings-legal-section .setting-item,
+#tab-account > .settings-section:not(#settings-partners-row) .setting-item {
+  min-height: 88px;
+  margin: 0;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-account-identity strong {
+  display: block;
+  margin-top: var(--space-xs);
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.setting-eyebrow {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.settings-account-section .account-actions-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-account-section .account-actions-card .btn-danger {
+  border-color: color-mix(in srgb, var(--color-error) 34%, var(--color-border));
+  background: transparent;
+  color: var(--color-error);
+}
+
+.settings-account-section .account-actions-card .btn-danger:hover {
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+
+.settings-tv-profile-row,
+.settings-tv-handoff,
+.settings-tv-legal-btn,
+.settings-tv-legal-label,
+.settings-tv-signout,
+.settings-tv-service-overview {
+  display: none;
+}
+
+.settings-cookie-link {
+  color: var(--color-text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#settings-service-health .service-health-account {
+  min-height: 72px;
+  margin-bottom: var(--space-xl);
+  padding: 12px var(--space-md);
+  border-radius: var(--radius-md);
+}
+
+#settings-service-health .service-health-account .service-health-label,
+#settings-service-health .service-health-account .service-health-copy small {
+  display: none;
+}
+
+#settings-service-health .service-health-account .service-health-copy {
+  position: relative;
+  padding-left: 44px;
+}
+
+#settings-service-health .service-health-account .service-health-copy::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  transform: translateY(-50%);
+}
+
+#settings-service-health .service-health-account .service-health-copy::after {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 32px;
+  color: var(--color-success);
+  font-weight: 800;
+  line-height: 32px;
+  text-align: center;
+  transform: translateY(-50%);
+}
+
+#settings-service-health .service-health-account:not(.service-health-ready) .service-health-copy::before {
+  border-color: var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+}
+
+#settings-service-health .service-health-account:not(.service-health-ready) .service-health-copy::after {
+  content: '!';
+  color: var(--color-warning);
+}
+
+#settings-service-health .service-health-account .service-health-copy h3 {
+  margin: 0 0 2px;
+  font-size: 1rem;
+}
+
+.service-health-status-icon {
+  display: none;
+}
+
+#settings-service-health .service-health-account .service-health-copy::before,
+#settings-service-health .service-health-account .service-health-copy::after {
+  content: none;
+  display: none;
+}
+
+#settings-service-health .service-health-account .service-health-status-icon {
+  position: absolute;
+  display: block;
+  left: 0;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  transform: translateY(-50%);
+}
+
+#settings-service-health .service-health-account:not(.service-health-ready) .service-health-status-icon {
+  filter: sepia(1) saturate(2.3) hue-rotate(345deg);
+}
+
+#settings-service-health .service-health-account .service-health-copy p {
+  font-size: 0.78rem;
+}
+
+@media (min-width: 769px) {
+  #page-settings .settings-container {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 672px);
+    grid-template-rows: max-content minmax(0, 1fr);
+    column-gap: clamp(64px, 15vw, 192px);
+    justify-content: start;
+    width: min(100%, 1280px);
+    max-width: 1280px;
+    padding: clamp(48px, 6.875vw, 88px) var(--space-md) var(--space-2xl);
+    overflow: hidden;
+  }
+
+  #page-settings .settings-container > .settings-rail-title {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: end;
+    margin: 0 0 var(--space-lg);
+    font-family: var(--font-display, 'Outfit', 'Inter', sans-serif);
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+  }
+
+  #page-settings .settings-container > .tabs {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  #page-settings .settings-container > .tabs .tab,
+  #page-settings .settings-advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    min-height: 48px;
+    padding: 0 var(--space-md);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: left;
+    white-space: normal;
+  }
+
+  #page-settings .settings-container > .tabs .tab.tab-advanced {
+    display: none;
+    margin-left: var(--space-sm);
+    width: calc(100% - var(--space-sm));
+  }
+
+  #page-settings .settings-container > .tabs.show-advanced .tab.tab-advanced {
+    display: flex;
+  }
+
+  #page-settings .settings-container > .tabs .tab.active {
+    border-color: transparent;
+    background: var(--color-accent-dim);
+    color: var(--color-accent-hover);
+  }
+
+  #page-settings .settings-container > .tabs .tab.active .settings-tab-icon,
+  #page-settings .settings-container > .tabs .tab:hover .settings-tab-icon,
+  #page-settings .settings-advanced-toggle:hover .settings-tab-icon {
+    opacity: 1;
+  }
+
+  #page-settings .settings-container > .tab-content {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-width: 0;
+    min-height: 0;
+    max-width: 672px;
+    padding: var(--space-md) 0 var(--space-2xl);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  #page-settings .settings-container > .tab-content:not(.active) {
+    display: none;
+  }
+
+  #page-settings #tab-account .settings-section {
+    margin-bottom: var(--space-xl);
+  }
+
+  #page-settings #tab-account .settings-section h3 {
+    margin: 0;
+    padding: 0 0 var(--space-md);
+  }
+
+  #page-settings .settings-panel-header h2 {
+    font-size: clamp(1.75rem, 2.4vw, 2rem);
+  }
+}
+
+@media (max-width: 768px) {
+  #page-settings .settings-panel-header {
+    margin-top: var(--space-xs);
+  }
+
+  #page-settings .settings-container > .tabs .tab,
+  #page-settings .settings-advanced-toggle {
+    min-height: 44px;
+    gap: var(--space-sm);
+  }
+
+  #page-settings .settings-tab-icon {
+    display: none;
+  }
+
+  #page-settings .settings-account-identity,
+  #page-settings #tab-account > .settings-section .setting-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  #page-settings .setting-actions,
+  #page-settings .legal-links {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+/* TV-first Settings is a single 10-foot surface: persistent three-item rail,
+   one scroll owner and read-only account/service capabilities. */
+html.tv-mode #page-settings .settings-container {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-rows: max-content minmax(0, 1fr);
+  column-gap: 80px;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 40px;
+  overflow: hidden;
+}
+
+html.tv-mode #page-settings .settings-container > .settings-rail-title {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: end;
+  margin: 0 0 64px;
+  color: var(--color-text-primary);
+  font-family: var(--font-display, 'Outfit', 'Inter', sans-serif);
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0 clamp(20px, 2vw, 32px) 0 0;
+  overflow: visible;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  padding: 0 var(--space-xl);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+}
+
+html.tv-mode #page-settings .settings-tab-icon {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab.active {
+  border-color: transparent;
+  border-bottom-color: transparent;
+  background: var(--color-accent-dim);
+  color: var(--color-accent-hover);
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab:focus {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-hover);
+  background: var(--color-bg-tertiary);
+  box-shadow:
+    inset 0 0 0 2px var(--color-text-primary),
+    0 0 0 2px var(--color-accent-action) !important;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab.active:not(:focus) {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-hover);
+  box-shadow: none !important;
+}
+
+html.tv-mode #page-settings .settings-container > .tabs .tab[data-tab="screens"],
+html.tv-mode #page-settings .settings-container > .tabs .tab[data-tab="content"],
+html.tv-mode #page-settings .settings-container > .tabs .tab[data-tab="transcode"],
+html.tv-mode #page-settings .settings-container > .tabs .tab[data-tab="users"],
+html.tv-mode #page-settings .settings-advanced-toggle {
+  display: none !important;
+}
+
+html.tv-mode #page-settings .settings-container > .tab-content {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 1216px;
+  padding: clamp(4px, 1vh, 12px) var(--space-sm) var(--space-xl) 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: var(--space-lg);
+}
+
+html.tv-mode #page-settings .settings-panel-header {
+  margin-bottom: clamp(24px, 3.5vh, 40px);
+}
+
+html.tv-mode #page-settings .settings-panel-header h2 {
+  font-size: clamp(2.6rem, 4vw, 4rem);
+}
+
+html.tv-mode #page-settings .settings-panel-header p {
+  display: none;
+}
+
+html.tv-mode #page-settings .settings-section {
+  margin-bottom: clamp(20px, 2.8vh, 32px);
+}
+
+html.tv-mode #page-settings .settings-section h3 {
+  display: none;
+}
+
+html.tv-mode #page-settings .settings-account-section .setting-item,
+html.tv-mode #page-settings #tab-account > .settings-section .setting-item {
+  min-height: clamp(76px, 9vh, 96px);
+  padding: var(--space-md) var(--space-lg);
+}
+
+html.tv-mode #page-settings .settings-account-identity .setting-info,
+html.tv-mode #page-settings .settings-tv-profile-row .setting-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+html.tv-mode #page-settings .settings-account-identity .account-actions-card,
+html.tv-mode #page-settings #settings-open-account,
+html.tv-mode #page-settings #settings-switch-profile,
+html.tv-mode #page-settings #settings-signout-btn,
+html.tv-mode #page-settings #settings-manage-plan-btn,
+html.tv-mode #page-settings #settings-support-btn,
+html.tv-mode #page-settings #settings-partners-row,
+html.tv-mode #page-settings #settings-delete-account-row,
+html.tv-mode #page-settings .settings-legal-section .setting-info,
+html.tv-mode #page-settings .settings-legal-section .legal-links,
+html.tv-mode #page-settings .settings-source-management {
+  display: none !important;
+}
+
+html.tv-mode #page-settings .settings-tv-profile-row,
+html.tv-mode #page-settings .settings-tv-handoff,
+html.tv-mode #page-settings .settings-tv-legal-btn,
+html.tv-mode #page-settings .settings-tv-legal-label,
+html.tv-mode #page-settings .settings-tv-signout,
+html.tv-mode #page-settings .settings-tv-service-overview {
+  display: flex;
+}
+
+html.tv-mode #page-settings .settings-tv-profile-row {
+  justify-content: space-between;
+}
+
+html.tv-mode #page-settings .setting-eyebrow,
+html.tv-mode #page-settings .setting-label {
+  font-size: clamp(0.95rem, 1.35vw, 1.2rem);
+}
+
+html.tv-mode #page-settings .settings-account-identity strong,
+html.tv-mode #page-settings #settings-access-plan,
+html.tv-mode #page-settings .settings-tv-profile-row .setting-label,
+html.tv-mode #page-settings .settings-tv-legal-label {
+  font-size: clamp(1.35rem, 2.1vw, 1.9rem);
+  font-weight: 700;
+}
+
+html.tv-mode #page-settings .setting-hint {
+  font-size: clamp(1rem, 1.45vw, 1.25rem);
+}
+
+html.tv-mode #page-settings .btn {
+  min-height: 56px;
+  padding-inline: var(--space-xl);
+  font-size: clamp(1rem, 1.35vw, 1.2rem);
+}
+
+html.tv-mode #page-settings .service-health-card {
+  min-height: 108px;
+  margin-bottom: clamp(20px, 3vh, 36px);
+  padding: var(--space-md) var(--space-xl);
+  border-left: 4px solid var(--color-success);
+  border-radius: var(--radius-lg);
+}
+
+html.tv-mode #page-settings .service-health-card.service-health-unreachable,
+html.tv-mode #page-settings .service-health-card.service-health-degraded,
+html.tv-mode #page-settings .service-health-card.service-health-auth_failed,
+html.tv-mode #page-settings .service-health-card.service-health-expired,
+html.tv-mode #page-settings .service-health-card.service-health-not_configured {
+  border-left-color: var(--color-warning);
+  border-top-color: var(--color-border);
+  border-right-color: var(--color-border);
+  border-bottom-color: var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+html.tv-mode #page-settings .service-health-label,
+html.tv-mode #page-settings .service-health-copy small {
+  display: none;
+}
+
+html.tv-mode #page-settings .service-health-copy {
+  position: relative;
+  min-width: 0;
+  padding-left: 72px;
+}
+
+html.tv-mode #page-settings .service-health-copy::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  border: 2px solid var(--color-success);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  transform: translateY(-50%);
+}
+
+html.tv-mode #page-settings .service-health-copy::after {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 52px;
+  color: var(--color-success);
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 52px;
+  text-align: center;
+  transform: translateY(-50%);
+}
+
+html.tv-mode #page-settings .service-health-card.service-health-unreachable .service-health-copy::before,
+html.tv-mode #page-settings .service-health-card.service-health-degraded .service-health-copy::before,
+html.tv-mode #page-settings .service-health-card.service-health-auth_failed .service-health-copy::before,
+html.tv-mode #page-settings .service-health-card.service-health-expired .service-health-copy::before,
+html.tv-mode #page-settings .service-health-card.service-health-not_configured .service-health-copy::before {
+  border-color: var(--color-warning);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+}
+
+html.tv-mode #page-settings .service-health-card.service-health-unreachable .service-health-copy::after,
+html.tv-mode #page-settings .service-health-card.service-health-degraded .service-health-copy::after,
+html.tv-mode #page-settings .service-health-card.service-health-auth_failed .service-health-copy::after,
+html.tv-mode #page-settings .service-health-card.service-health-expired .service-health-copy::after,
+html.tv-mode #page-settings .service-health-card.service-health-not_configured .service-health-copy::after {
+  content: '!';
+  color: var(--color-warning);
+}
+
+html.tv-mode #page-settings .service-health-copy h3 {
+  margin: 0 0 var(--space-xs);
+  font-size: clamp(1.4rem, 2.2vw, 2rem);
+}
+
+html.tv-mode #page-settings .service-health-copy::before,
+html.tv-mode #page-settings .service-health-copy::after {
+  content: none;
+  display: none;
+}
+
+html.tv-mode #page-settings .service-health-status-icon {
+  position: absolute;
+  display: block;
+  left: 0;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  transform: translateY(-50%);
+}
+
+html.tv-mode #page-settings .service-health-card:not(.service-health-ready) .service-health-status-icon {
+  filter: sepia(1) saturate(2.3) hue-rotate(345deg);
+}
+
+html.tv-mode #page-settings .service-health-copy p {
+  max-width: 760px;
+  font-size: clamp(1rem, 1.45vw, 1.25rem);
+  line-height: 1.45;
+}
+
+html.tv-mode #page-settings .service-health-actions .btn:focus,
+html.tv-mode #page-settings .settings-tv-handoff .btn:focus,
+html.tv-mode #page-settings .settings-tv-legal-btn:focus,
+html.tv-mode #page-settings .settings-tv-signout:focus {
+  outline: none !important;
+  border-color: var(--color-accent-hover);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  box-shadow:
+    inset 0 0 0 2px var(--color-text-primary),
+    0 0 0 3px var(--color-accent-action) !important;
+}
+
+html.tv-mode #page-settings .settings-tv-handoff {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  margin: clamp(20px, 3vh, 36px) 0;
+  padding: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+html.tv-mode #page-settings .settings-tv-handoff-copy {
+  max-width: 760px;
+}
+
+html.tv-mode #page-settings #settings-tv-handoff-btn {
+  display: none;
+}
+
+html.tv-mode #page-settings .settings-tv-handoff-copy h3 {
+  display: block;
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  border: 0;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+html.tv-mode #page-settings .settings-tv-handoff-copy p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+  line-height: 1.55;
+}
+
+html.tv-mode #page-settings .settings-legal-section {
+  margin-bottom: var(--space-lg);
+}
+
+html.tv-mode #page-settings .settings-legal-section .setting-item {
+  justify-content: space-between;
+}
+
+html.tv-mode #page-settings .settings-tv-signout {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  width: 100%;
+  min-height: 68px;
+  color: var(--color-error);
+  background: var(--color-bg-secondary);
+}
+
+html.tv-mode #page-settings .settings-tv-signout img {
+  width: 24px;
+  height: 24px;
+}
+
+html.tv-mode #page-settings .settings-tv-service-overview {
+  flex-direction: column;
+}
+
+html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
+  margin-top: 0;
+}
+
+@media (max-height: 820px) and (min-width: 1100px) {
+  html.tv-mode #page-settings .settings-container {
+    padding-block: var(--space-xl);
+  }
+
+  html.tv-mode #page-settings .settings-panel-header,
+  html.tv-mode #page-settings .service-health-card,
+  html.tv-mode #page-settings .settings-section,
+  html.tv-mode #page-settings .settings-tv-handoff {
+    margin-bottom: var(--space-md);
+  }
+
+  html.tv-mode #page-settings .settings-account-section .setting-item,
+  html.tv-mode #page-settings #tab-account > .settings-section .setting-item {
+    min-height: 72px;
+    padding-block: var(--space-sm);
+  }
+}
+
+/* Android TV WebView reports a 960 x 540 CSS viewport at 2x density on a
+   1920 x 1080 panel. Preserve the same physical 10-foot composition without
+   inflating controls or clipping the Account surface. */
+@media (min-width: 769px) and (max-width: 1100px) {
+  html.tv-mode #page-settings .settings-container {
+    grid-template-columns: 170px minmax(0, 1fr);
+    column-gap: 40px;
+    padding: 0;
+  }
+
+  html.tv-mode #page-settings .settings-container > .settings-rail-title {
+    margin-bottom: 32px;
+    font-size: 1.125rem;
+  }
+
+  html.tv-mode #page-settings .settings-container > .tabs {
+    gap: 4px;
+    padding-right: 20px;
+  }
+
+  html.tv-mode #page-settings .settings-container > .tabs .tab {
+    gap: 8px;
+    min-height: 36px;
+    padding-inline: 18px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+  }
+
+  html.tv-mode #page-settings .settings-tab-icon {
+    width: 14px;
+    height: 14px;
+    flex-basis: 14px;
+  }
+
+  html.tv-mode #page-settings .settings-container > .tab-content {
+    width: 100%;
+    max-width: 608px;
+    padding: 5px 0 16px;
+  }
+
+  html.tv-mode #page-settings .settings-panel-header {
+    margin-bottom: 24px;
+  }
+
+  html.tv-mode #page-settings .settings-panel-header h2 {
+    font-size: clamp(1.3rem, 2vw, 2rem);
+  }
+
+  html.tv-mode #page-settings .service-health-card {
+    min-height: 54px;
+    margin-bottom: 20px;
+    padding: 8px 16px;
+    border-left-width: 2px;
+    border-radius: var(--radius-md);
+  }
+
+  html.tv-mode #page-settings .service-health-copy {
+    padding-left: 36px;
+  }
+
+  html.tv-mode #page-settings .service-health-status-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  html.tv-mode #page-settings .service-health-copy h3 {
+    margin-bottom: 2px;
+    font-size: 0.85rem;
+  }
+
+  html.tv-mode #page-settings .service-health-copy p {
+    font-size: 0.62rem;
+    line-height: 1.35;
+  }
+
+  html.tv-mode #page-settings .settings-section {
+    margin-bottom: 0;
+  }
+
+  html.tv-mode #page-settings .settings-account-section .setting-item,
+  html.tv-mode #page-settings #tab-account > .settings-section .setting-item {
+    min-height: 48px;
+    padding: 2px 12px;
+  }
+
+  html.tv-mode #page-settings #tab-account > .settings-account-section,
+  html.tv-mode #page-settings #tab-account > .settings-account-section + .settings-section {
+    margin-bottom: 0;
+  }
+
+  html.tv-mode #page-settings .setting-eyebrow {
+    font-size: 0.55rem;
+    line-height: 1.1;
+  }
+
+  html.tv-mode #page-settings .settings-account-identity strong,
+  html.tv-mode #page-settings #settings-access-plan,
+  html.tv-mode #page-settings .settings-tv-profile-row .setting-label,
+  html.tv-mode #page-settings .settings-tv-legal-label {
+    font-size: 0.95rem;
+    line-height: 1.1;
+  }
+
+  html.tv-mode #page-settings .setting-hint {
+    font-size: 0.68rem;
+    line-height: 1.1;
+  }
+
+  html.tv-mode #page-settings .setting-info strong,
+  html.tv-mode #page-settings .setting-info .setting-hint {
+    margin-top: 2px;
+  }
+
+  html.tv-mode #page-settings .btn {
+    min-height: 32px;
+    padding-inline: 16px;
+    font-size: 0.68rem;
+  }
+
+  html.tv-mode #page-settings .settings-tv-handoff {
+    min-height: 82px;
+    gap: 16px;
+    margin: 24px 0;
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  html.tv-mode #page-settings .settings-tv-handoff-copy h3 {
+    margin-bottom: 4px;
+    font-size: 0.95rem;
+  }
+
+  html.tv-mode #page-settings .settings-tv-handoff-copy p {
+    font-size: 0.66rem;
+    line-height: 1.5;
+  }
+
+  html.tv-mode #page-settings .settings-legal-section {
+    margin-bottom: 24px;
+  }
+
+  html.tv-mode #page-settings .settings-tv-signout {
+    min-height: 34px;
+    gap: 8px;
+  }
+
+  html.tv-mode #page-settings .settings-tv-signout img {
+    width: 12px;
+    height: 12px;
   }
 }

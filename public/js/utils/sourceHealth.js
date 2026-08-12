@@ -430,34 +430,87 @@
         const state = summary.state || 'degraded';
         const hidden = options.hideWhenReady !== false && state === 'ready';
         const prominent = options.prominent === true;
+        const tvHandoff = options.tvHandoff === true;
+        const accountSummary = options.accountSummary === true;
+        const publicState = tvHandoff
+            ? (state === 'ready' ? 'ready' : state === 'syncing' ? 'syncing' : 'degraded')
+            : state;
         const issueCount = summary.issues?.length || 0;
         const sourceCount = summary.sources?.length || 0;
         const primaryIssue = [...(summary.issues || [])].sort((a, b) => b.severity - a.severity)[0] || null;
         const primarySource = primaryIssue?.source || null;
-        const detail = sourceCount
-            ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${state === 'syncing' ? ', preparing catalog' : issueCount ? `, ${issueCount} need attention` : ''}`
-            : 'No service connected';
-        const progressAction = state === 'syncing'
+        const latestSync = [...(summary.sources || []), ...(summary.ready || [])]
+            .map((item) => item?.lastSync || item?.source?.last_sync || item?.source?.lastSync || item?.source?.last_synced_at)
+            .filter(Boolean)
+            .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+        const detail = options.detail || (latestSync
+            ? `Catalogue updated ${relativeTime(latestSync)}`
+            : sourceCount
+                ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${state === 'syncing' ? ', preparing catalogue' : issueCount ? `, ${issueCount} need attention` : ''}`
+                : 'No service connected');
+        const publicTvState = state === 'ready'
+            ? {
+                title: 'TV service is ready',
+                message: latestSync ? `Catalogue updated ${relativeTime(latestSync)}` : 'Your catalogue is ready to watch.',
+                action: 'View service'
+            }
+            : state === 'syncing'
+                ? {
+                    title: 'Preparing your TV service',
+                    message: 'Available titles appear as your catalogue is prepared.',
+                    action: 'Show instructions'
+                }
+                : {
+                    title: 'TV service needs attention',
+                    message: 'Some content may be unavailable. Available titles still play.',
+                    action: 'Show instructions'
+                };
+        const accountState = accountSummary && state === 'ready'
+            ? publicTvState
+            : null;
+        const title = tvHandoff ? publicTvState.title : (accountState?.title || summary.title || STATE_META[state]?.title || 'TV service');
+        const message = tvHandoff ? publicTvState.message : (accountState?.message || summary.message || STATE_META[state]?.message || '');
+        const actionLabel = tvHandoff ? publicTvState.action : (accountState?.action || summary.action || 'Manage service');
+        const actionName = tvHandoff && state !== 'ready' ? 'show-instructions' : 'open-sources';
+        const progressAction = state === 'syncing' && !tvHandoff
             ? '<button class="btn btn-secondary" data-source-health-action="view-progress">View progress</button>'
             : '';
+        const diagnosticAttributes = tvHandoff
+            ? ''
+            : ` data-source-health-source-id="${escapeHtml(sourceId(primarySource))}"
+                 data-source-health-source-type="${escapeHtml(sourceType(primarySource))}"`;
 
         return `
-            <div class="service-health-card service-health-${escapeHtml(state)} ${prominent ? 'service-health-prominent' : ''} ${hidden ? 'hidden' : ''}"
-                 data-source-health-state="${escapeHtml(state)}"
-                 data-source-health-source-id="${escapeHtml(sourceId(primarySource))}"
-                 data-source-health-source-type="${escapeHtml(sourceType(primarySource))}">
+            <div class="service-health-card service-health-${escapeHtml(publicState)} ${prominent ? 'service-health-prominent' : ''} ${accountSummary ? 'service-health-account' : ''} ${hidden ? 'hidden' : ''}"
+                 data-source-health-state="${escapeHtml(publicState)}"${diagnosticAttributes}>
                 <div class="service-health-copy">
-                    <span class="service-health-label">${escapeHtml(summary.label || STATE_META[state]?.label || 'Status')}</span>
-                    <h3>${escapeHtml(summary.title || STATE_META[state]?.title || 'TV service')}</h3>
-                    <p>${escapeHtml(summary.message || STATE_META[state]?.message || '')}</p>
+                    <img class="service-health-status-icon" src="/img/icons/norva-live-tv.svg" alt="" aria-hidden="true">
+                    <span class="service-health-label">${escapeHtml(tvHandoff ? STATE_META[publicState]?.label : (summary.label || STATE_META[state]?.label || 'Status'))}</span>
+                    <h3>${escapeHtml(title)}</h3>
+                    <p>${escapeHtml(message)}</p>
                     <small>${escapeHtml(detail)}</small>
                 </div>
                 <div class="service-health-actions">
-                    <button class="btn btn-primary" data-source-health-action="open-sources">${escapeHtml(summary.action || 'Manage service')}</button>
+                    <button class="btn ${tvHandoff || accountSummary ? 'btn-secondary' : 'btn-primary'}" data-source-health-action="${escapeHtml(actionName)}">${escapeHtml(actionLabel)}</button>
                     ${progressAction}
                 </div>
             </div>
         `;
+    }
+
+    function relativeTime(value) {
+        const then = new Date(value).getTime();
+        if (!Number.isFinite(then)) return 'recently';
+        const diff = Date.now() - then;
+        if (diff <= 0) return 'just now';
+        const minutes = Math.floor(diff / 60000);
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes} min ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `${days} d ago`;
+        return new Date(value).toLocaleDateString('en-US');
     }
 
     function progressSourceFrom(summary = {}) {

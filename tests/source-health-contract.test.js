@@ -130,6 +130,62 @@ test('catalog policy keeps a hard login failure actionable even with an older ca
   assert.equal(availability.browsable, false);
 });
 
+test('TV service handoff uses safe public copy and omits provider diagnostics', () => {
+  const health = sourceHealthHarness();
+  const html = health.cardHtml({
+    state: 'auth_failed',
+    title: 'Provider rejected private-provider-id',
+    message: 'password=secret-token',
+    issues: [{ severity: 4, source: { id: 'private-provider-id', type: 'xtream' } }],
+    sources: [{ id: 'private-provider-id', type: 'xtream' }],
+  }, { hideWhenReady: false, tvHandoff: true, accountSummary: true });
+
+  assert.match(html, /TV service needs attention/);
+  assert.match(html, /Some content may be unavailable\. Available titles still play\./);
+  assert.match(html, /data-source-health-action="show-instructions"/);
+  assert.match(html, /\/img\/icons\/norva-live-tv\.svg/);
+  assert.doesNotMatch(html, /private-provider-id|secret-token|xtream|auth_failed|Update login/);
+  assert.doesNotMatch(html, /data-source-health-source-(?:id|type)/);
+});
+
+test('Account health summary keeps the service price-neutral and secondary', () => {
+  const health = sourceHealthHarness();
+  const html = health.cardHtml({
+    state: 'ready',
+    sources: [{ id: 'source-1', lastSync: new Date(Date.now() - 120000).toISOString() }],
+  }, { hideWhenReady: false, accountSummary: true });
+
+  assert.match(html, /service-health-account/);
+  assert.match(html, /TV service is ready/);
+  assert.match(html, /Catalogue updated 2 min ago/);
+  assert.match(html, /btn btn-secondary/);
+  assert.match(html, /View service/);
+  assert.doesNotMatch(html, /price|billing|payment/i);
+});
+
+test('TV handoff stays on the ten-foot surface when the product modal is unavailable', () => {
+  let announced = '';
+  const window = {
+    alert(message) { announced = message; },
+    location: { search: '', pathname: '/app.html', href: '/app.html#settings' },
+  };
+  window.window = window;
+  const context = {
+    window,
+    navigator: { userAgent: 'NorvaTV-AndroidTV' },
+    document: { documentElement: { classList: { contains: () => true } } },
+    console,
+  };
+  vm.runInNewContext(SETTINGS_SOURCE, context, { filename: 'public/js/pages/Settings.js' });
+  const page = Object.create(window.SettingsPage.prototype);
+
+  page.showTvHandoffInstructions(true);
+
+  assert.match(announced, /Open norva\.tv\/account on a phone, tablet or computer/);
+  assert.match(announced, /never asks for provider credentials/);
+  assert.equal(window.location.href, '/app.html#settings');
+});
+
 test('Settings renders the exact summary returned by the App refresh seam', async () => {
   const container = { innerHTML: '' };
   const sharedSummary = { state: 'ready', sources: [{ source: { id: 'source-1' } }] };
@@ -151,7 +207,10 @@ test('Settings renders the exact summary returned by the App refresh seam', asyn
   const context = {
     window,
     navigator: { userAgent: '' },
-    document: { getElementById: (id) => id === 'settings-service-health' ? container : null },
+    document: {
+      documentElement: { classList: { contains: () => false } },
+      getElementById: (id) => id === 'settings-service-health' ? container : null,
+    },
     console,
   };
   vm.runInNewContext(SETTINGS_SOURCE, context, { filename: 'public/js/pages/Settings.js' });
@@ -179,7 +238,10 @@ test('Settings keeps a compatible direct loader fallback when no App seam exists
   const context = {
     window,
     navigator: { userAgent: '' },
-    document: { getElementById: (id) => id === 'settings-service-health' ? container : null },
+    document: {
+      documentElement: { classList: { contains: () => false } },
+      getElementById: (id) => id === 'settings-service-health' ? container : null,
+    },
     console,
   };
   vm.runInNewContext(SETTINGS_SOURCE, context, { filename: 'public/js/pages/Settings.js' });

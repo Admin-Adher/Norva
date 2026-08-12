@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=103">
+  <link rel="stylesheet" href="/css/main.css?v=106">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -813,36 +813,73 @@
       <!-- Settings Page -->
       <div id="page-settings" class="page">
         <div class="settings-container">
-          <h2>Settings</h2>
+          <h2 class="settings-rail-title">Settings</h2>
 
           <!-- Tabs -->
           <div class="tabs" role="tablist" aria-label="Settings sections">
-            <button class="tab active" data-tab="account" role="tab" aria-selected="true">Account</button>
-            <button class="tab" data-tab="screens" id="screens-tab" role="tab" aria-selected="false" style="display:none;">Devices &amp; screens</button>
-            <button class="tab" data-tab="player" role="tab" aria-selected="false">Playback &amp; Discovery</button>
-            <button class="tab tab-advanced" data-tab="sources" role="tab" aria-selected="false">TV Service</button>
-            <button class="tab tab-advanced" data-tab="transcode" role="tab" aria-selected="false">Transcoding</button>
-            <button class="tab tab-advanced" data-tab="content" role="tab" aria-selected="false">Manage Content</button>
-            <button class="tab tab-advanced" data-tab="users" id="users-tab" role="tab" aria-selected="false" style="display:none;">Local Users</button>
-            <button class="settings-advanced-toggle" id="settings-advanced-toggle" type="button" aria-expanded="false">Advanced</button>
+            <button class="tab active" data-tab="account" role="tab" aria-selected="true">
+              <img class="settings-tab-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Account</span>
+            </button>
+            <button class="tab" data-tab="screens" id="screens-tab" role="tab" aria-selected="false" style="display:none;">
+              <img class="settings-tab-icon" src="/assets/landing/norva-icon-web-android.svg" alt="" aria-hidden="true">
+              <span>Devices</span>
+            </button>
+            <button class="tab" data-tab="player" role="tab" aria-selected="false">
+              <img class="settings-tab-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Playback &amp; Discovery</span>
+            </button>
+            <button class="tab" data-tab="sources" role="tab" aria-selected="false">
+              <img class="settings-tab-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>TV Service</span>
+            </button>
+            <button class="tab" data-tab="content" role="tab" aria-selected="false">
+              <img class="settings-tab-icon" src="/img/icons/norva-series.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Library Management</span>
+            </button>
+            <button class="settings-advanced-toggle" id="settings-advanced-toggle" type="button" aria-expanded="false">
+              <img class="settings-tab-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Advanced</span>
+            </button>
+            <button class="tab tab-advanced" data-tab="transcode" role="tab" aria-selected="false">
+              <img class="settings-tab-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Transcoding</span>
+            </button>
+            <button class="tab tab-advanced" data-tab="users" id="users-tab" role="tab" aria-selected="false" style="display:none;">
+              <img class="settings-tab-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Local Users</span>
+            </button>
           </div>
 
           <!-- Account Tab -->
           <div id="tab-account" class="tab-content active">
-            <div id="settings-service-health"></div>
+            <header class="settings-panel-header">
+              <h2>Account</h2>
+            </header>
 
-            <div class="settings-section">
+            <div id="settings-service-health" aria-live="polite" aria-atomic="true"></div>
+
+            <div class="settings-section settings-account-section">
               <h3>Norva Account</h3>
-              <div class="account-settings-grid">
-                <div class="account-summary-card">
-                  <span class="setting-label">Signed in as</span>
-                  <strong id="settings-account-email">Norva user</strong>
-                  <span class="setting-hint" id="settings-account-mode">Cloud account</span>
+              <div class="settings-row-group">
+                <div class="setting-item settings-account-identity">
+                  <div class="setting-info">
+                    <span class="setting-eyebrow" id="settings-account-kicker">Signed in as</span>
+                    <strong id="settings-account-email">Norva user</strong>
+                    <span class="setting-hint" id="settings-account-mode">Cloud account</span>
+                  </div>
+                  <div class="setting-actions account-actions-card">
+                    <button class="btn btn-secondary" id="settings-open-account">Sign-in settings</button>
+                    <button class="btn btn-secondary" id="settings-switch-profile">Switch profile</button>
+                    <button class="btn btn-danger" id="settings-signout-btn">Sign out</button>
+                  </div>
                 </div>
-                <div class="account-actions-card">
-                  <button class="btn btn-secondary" id="settings-open-account">Sign-in settings</button>
-                  <button class="btn btn-secondary" id="settings-switch-profile">Switch profile</button>
-                  <button class="btn btn-danger" id="settings-signout-btn">Sign out</button>
+                <div class="setting-item settings-tv-profile-row">
+                  <div class="setting-info">
+                    <span class="setting-label">Active profile</span>
+                    <span class="setting-hint" id="settings-profile-name">Main Profile</span>
+                  </div>
+                  <button class="btn btn-secondary" id="settings-tv-switch-profile">Switch profile</button>
                 </div>
               </div>
             </div>
@@ -859,6 +896,14 @@
               </div>
             </div>
 
+            <div class="settings-tv-handoff" id="settings-tv-handoff">
+              <div class="settings-tv-handoff-copy">
+                <h3 id="settings-tv-handoff-title">Continue on phone or web</h3>
+                <p id="settings-tv-handoff-copy">Open <strong>norva.tv/account</strong> on a personal device to manage your account and TV service. This TV never asks for provider credentials.</p>
+              </div>
+              <button class="btn btn-secondary" id="settings-tv-handoff-btn" type="button">Show instructions</button>
+            </div>
+
             <div class="settings-section" id="settings-partners-row" hidden aria-hidden="true">
               <h3>Norva Partners</h3>
               <div class="setting-item partners-settings-entry">
@@ -870,18 +915,20 @@
               </div>
             </div>
 
-            <div class="settings-section">
+            <div class="settings-section settings-legal-section">
               <h3>Privacy &amp; legal</h3>
               <div class="setting-item">
+                <span class="settings-tv-legal-label">Privacy &amp; legal</span>
                 <div class="setting-info">
                   <span class="setting-label">Norva is a media player and includes no content</span>
-                  <span class="setting-hint">You connect a compatible source you own and are authorized to use. See how Norva handles your data. <a href="#" id="settings-cookie-prefs-btn" style="color:#8090b0;text-decoration:underline">Manage cookies</a></span>
+                  <span class="setting-hint">You connect a compatible source you own and are authorized to use. See how Norva handles your data. <a href="#" id="settings-cookie-prefs-btn" class="settings-cookie-link">Manage cookies</a></span>
                 </div>
                 <div class="legal-links">
                   <a class="btn btn-secondary" id="settings-privacy-link" href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
                   <a class="btn btn-secondary" id="settings-terms-link" href="/terms.html" target="_blank" rel="noopener">Terms</a>
                   <a class="btn btn-secondary" id="settings-legal-link" href="/mentions-legales.html" target="_blank" rel="noopener">Legal notice</a>
                 </div>
+                <button class="btn btn-secondary settings-tv-legal-btn" id="settings-tv-legal-btn" type="button">View documents</button>
               </div>
               <div class="setting-item" id="settings-delete-account-row" style="display:none">
                 <div class="setting-info">
@@ -891,10 +938,19 @@
                 <button class="btn btn-danger" id="settings-delete-account-btn">Delete account</button>
               </div>
             </div>
+
+            <button class="btn btn-danger settings-tv-signout" id="settings-tv-signout-btn" type="button">
+              <img src="/img/icons/norva-logout.svg?v=sharp-core-1" alt="" aria-hidden="true">
+              <span>Sign out of this TV</span>
+            </button>
           </div>
 
           <!-- Screens & Pairing Tab -->
           <div id="tab-screens" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>Devices</h2>
+              <p>Pair and manage the screens that use your Norva account.</p>
+            </header>
             <style>
               .screens-wrap{max-width:880px}
               .screens-pair{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(91,124,250,.12),rgba(181,121,255,.06));border:1px solid #2b3550;border-radius:16px;padding:22px}
@@ -974,6 +1030,23 @@
 
           <!-- Sources Tab -->
           <div id="tab-sources" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>TV Service</h2>
+              <p>Review the service behind your catalogue.</p>
+            </header>
+
+            <div class="settings-tv-service-overview">
+              <div id="settings-tv-service-health" aria-live="polite" aria-atomic="true"></div>
+              <div class="settings-tv-handoff">
+                <div class="settings-tv-handoff-copy">
+                  <h3>Continue on phone or web</h3>
+                  <p>Open <strong>norva.tv/account</strong> on a personal device to review your TV service. This TV never asks for provider credentials.</p>
+                </div>
+                <button class="btn btn-secondary" id="settings-tv-service-instructions-btn" type="button">Show instructions</button>
+              </div>
+            </div>
+
+            <div class="settings-source-management">
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
@@ -1062,10 +1135,15 @@
                 </select>
               </div>
             </div>
+            </div>
           </div>
 
           <!-- Player Tab -->
           <div id="tab-player" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>Playback &amp; Discovery</h2>
+              <p>Choose how Norva plays and recommends your content.</p>
+            </header>
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
@@ -1329,6 +1407,10 @@
 
           <!-- Transcoding Tab -->
           <div id="tab-transcode" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>Transcoding</h2>
+              <p>Advanced playback compatibility and quality controls.</p>
+            </header>
             <!-- Plain-language intro: reassure that defaults are fine. -->
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
@@ -1562,8 +1644,12 @@
             </details>
           </div>
 
-          <!-- Manage Content Tab -->
+          <!-- Library Management Tab -->
           <div id="tab-content" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>Library Management</h2>
+              <p>Choose what appears across your Norva screens.</p>
+            </header>
             <div class="content-browser">
               <p class="setting-hint" style="margin:0 0 16px;max-width:760px;line-height:1.55">
                 Choose what appears in Norva. Untick any genres, channels or shows you'd rather hide —
@@ -1603,6 +1689,10 @@
 
           <!-- Users Tab (Admin Only) -->
           <div id="tab-users" class="tab-content">
+            <header class="settings-panel-header">
+              <h2>Local Users</h2>
+              <p>Advanced access controls for this local Norva hub.</p>
+            </header>
             <div class="settings-section">
               <h3>User Management</h3>
               <p class="hint">Manage user accounts and permissions</p>
@@ -2029,11 +2119,11 @@
   <script defer src="/js/utils/hoverPreview.js?v=1"></script>
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
-  <script defer src="/js/utils/sourceHealth.js?v=8"></script>
+  <script defer src="/js/utils/sourceHealth.js?v=10"></script>
   <script defer src="/js/navigation/NavigationModel.js?v=1"></script>
   <script defer src="/js/navigation/NavigationAdapters.js?v=1"></script>
   <script defer src="/js/navigation/navigationBootstrap.js?v=1"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=31"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=32"></script>
   <script defer src="/js/utils/standalone.js?v=12"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
@@ -2053,7 +2143,7 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=56"></script>
   <script defer src="/js/pages/SeriesPage.js?v=56"></script>
-  <script defer src="/js/pages/Settings.js?v=48"></script>
+  <script defer src="/js/pages/Settings.js?v=52"></script>
   <script defer src="/js/pages/PartnersPage.js?v=10"></script>
   <script defer src="/js/pages/WatchPage.js?v=127"></script>
   <script defer src="/js/profiles.js?v=13"></script>
