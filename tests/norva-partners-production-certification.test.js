@@ -32,7 +32,7 @@ test('the restore runbook describes the exact post-f0e3212 preflight contract', 
 test('the app cache-busts the finalized Partners API and page contracts', () => {
   const app = read('public/app.html');
 
-  assert.match(app, /\/js\/cloudApi\.js\?v=59/);
+  assert.match(app, /\/js\/cloudApi\.js\?v=60/);
   assert.match(app, /\/js\/pages\/PartnersPage\.js\?v=10/);
 });
 

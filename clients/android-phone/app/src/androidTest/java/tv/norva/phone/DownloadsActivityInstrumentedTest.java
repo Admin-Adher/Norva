@@ -41,7 +41,9 @@ public final class DownloadsActivityInstrumentedTest {
         try {
             target.startActivity(new Intent(target, DownloadsActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            activity = instrumentation.waitForMonitorWithTimeout(monitor, 5_000);
+            // API 35 emulator cold-start class verification can exceed five
+            // seconds even though the Activity is launching normally.
+            activity = instrumentation.waitForMonitorWithTimeout(monitor, 15_000);
             assertNotNull("DownloadsActivity did not launch", activity);
 
             // Allow the first background manifest snapshot to bind.

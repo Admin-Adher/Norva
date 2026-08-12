@@ -7,6 +7,11 @@ import {
   nativeFallbackTokenExpiresAt,
   playbackTransportExpiresAt,
 } from "../_shared/playback-expiry.mjs";
+import {
+  decideNativePlaybackHeartbeat,
+  NATIVE_HEARTBEAT_ACTIVE_STATUSES,
+  NATIVE_HEARTBEAT_MAX_SESSION_AGE_SECONDS,
+} from "../_shared/native-playback-heartbeat-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -88,6 +93,8 @@ const PLAYBACK_EVENT_TYPES = new Set([
   "gateway_error",
   "seek",
 ]);
+const PLAYBACK_SESSION_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -143,7 +150,8 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 38,
+        version: 40,
+        nativeHeartbeatProtocol: 1,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -183,6 +191,17 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "playback" && segments[1] === "events") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await recordPlaybackEvent(req, identity.userId, supabase, identity.deviceId ?? null), 201);
+    }
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      segments[1] === "sessions" &&
+      segments[2] &&
+      segments[3] === "heartbeat" &&
+      !segments[4]
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await heartbeatPlaybackSession(segments[2], identity.userId, supabase));
     }
     if (req.method === "GET" && segments[0] === "playback" && segments[1] === "sessions" && segments[2]) {
       const identity = await requireIdentity(req, supabase);
@@ -866,15 +885,116 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
   return { session: data };
 }
 
+async function heartbeatPlaybackSession(id: string, userId: string, db: SupabaseClient) {
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(id)) {
+    throw new HttpError(400, "Invalid playback session id");
+  }
+
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const { data: session, error } = await db
+    .from("cloud_playback_sessions")
+    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify playback session");
+  if (!session) throw new HttpError(404, "Playback session unavailable");
+
+  const status = stringOr(session.status, "");
+  const sourceId = stringOrNull(session.source_id);
+  const createdAt = stringOr(session.created_at, "");
+  const policy = decideNativePlaybackHeartbeat({
+    nowMs,
+    status,
+    createdAt,
+    nativeHeartbeatAt: session.native_heartbeat_at,
+    expiresAt: session.expires_at,
+  });
+  if (!sourceId || !policy.accepted) throw new HttpError(410, "Playback session is not active");
+
+  // Once the first call establishes the native liveness chain, duplicate or
+  // over-eager callbacks are acknowledged without another session/activity write.
+  if (!policy.shouldWrite) return { ok: true };
+
+  const graceCutoffIso = new Date(policy.graceCutoffMs).toISOString();
+  const writeCutoffIso = new Date(policy.writeCutoffMs).toISOString();
+
+  let renewalQuery = db
+    .from("cloud_playback_sessions")
+    .update({ native_heartbeat_at: nowIso })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("source_id", sourceId)
+    .in("status", NATIVE_HEARTBEAT_ACTIVE_STATUSES)
+    .gte("created_at", new Date(nowMs - NATIVE_HEARTBEAT_MAX_SESSION_AGE_SECONDS * 1000).toISOString())
+    .lte("created_at", nowIso)
+    .or(`expires_at.gt.${nowIso},native_heartbeat_at.gt.${graceCutoffIso}`);
+  // The first heartbeat must establish its chain even when it arrives seconds
+  // after session creation. Later calls are rate-limited; concurrent first calls
+  // use an optimistic timestamp match so only one can write/touch activity.
+  renewalQuery = policy.hasHeartbeatChain
+    ? renewalQuery.lte("native_heartbeat_at", writeCutoffIso)
+    : renewalQuery.is("native_heartbeat_at", null);
+  const { data: renewed, error: renewalError } = await renewalQuery
+    .select("id")
+    .maybeSingle();
+  if (renewalError) throwDb(renewalError, "Unable to renew playback session");
+
+  // A concurrent heartbeat can win the conditional update. Revalidate before
+  // acknowledging it; never resurrect or touch a session that expired/ended in
+  // the race window.
+  if (!renewed) {
+    const { data: current, error: currentError } = await db
+      .from("cloud_playback_sessions")
+      .select("source_id,status,created_at,native_heartbeat_at,expires_at")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (currentError) throwDb(currentError, "Unable to recheck playback session");
+    const currentPolicy = current
+      ? decideNativePlaybackHeartbeat({
+        // Another request may have committed after this handler captured nowMs.
+        // Revalidation uses a fresh clock so that successful concurrent pulse is
+        // acknowledged rather than misclassified as a future timestamp.
+        nowMs: Date.now(),
+        status: current.status,
+        createdAt: current.created_at,
+        nativeHeartbeatAt: current.native_heartbeat_at,
+        expiresAt: current.expires_at,
+      })
+      : null;
+    if (stringOrNull(current?.source_id) !== sourceId || !currentPolicy?.accepted || currentPolicy.shouldWrite) {
+      throw new HttpError(410, "Playback session is not active");
+    }
+    return { ok: true };
+  }
+
+  const { error: activityError } = await db.rpc("provider_account_touch_by_source", {
+    p_source_id: sourceId,
+    p_kind: "native-heartbeat",
+  });
+  if (activityError) throwDb(activityError, "Unable to refresh playback activity");
+
+  return { ok: true };
+}
+
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
     .select("*, cloud_gateway_sessions(*)")
     .eq("id", id)
-    .eq("user_id", userId)
     .maybeSingle();
   if (error) throwDb(error, "Unable to load playback session");
   if (!session) throw new HttpError(404, "Playback session not found");
+  // The service-role client can distinguish a genuinely absent UUID from an
+  // existing session owned by another account. Native close delivery treats a
+  // 404 as an idempotent terminal success, so collapsing both cases would let
+  // an account switch incorrectly acknowledge a provider session it did not
+  // close. UUIDs are unguessable and ownership failures expose no row data.
+  if (stringOr(session.user_id, "") !== userId) {
+    throw new HttpError(403, "Playback session is not owned by this account");
+  }
 
   const gatewaySessions = Array.isArray(session.cloud_gateway_sessions)
     ? session.cloud_gateway_sessions
@@ -896,6 +1016,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       const rawResponse = await fetch(rawUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        signal: AbortSignal.timeout(8_000),
       });
       if (!rawResponse.ok && rawResponse.status !== 404) {
         const body = await rawResponse.text().catch(() => "");
@@ -914,6 +1035,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        signal: AbortSignal.timeout(8_000),
       });
       if (!response.ok && response.status !== 404) {
         const body = await response.text().catch(() => "");
@@ -1424,6 +1546,7 @@ async function requestEdgeCoordinator(runtimeConfig: RuntimeConfig, path: string
         Authorization: `Bearer ${runtimeConfig.relayTokenSecret}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {

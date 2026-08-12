@@ -837,6 +837,33 @@
         return _tokenRefreshInFlight;
     }
 
+    function awaitWithSignal(value, signal) {
+        if (!signal) return Promise.resolve(value);
+        if (signal.aborted) {
+            const error = new Error('Request aborted');
+            error.name = 'AbortError';
+            return Promise.reject(error);
+        }
+        return new Promise((resolve, reject) => {
+            const onAbort = () => {
+                const error = new Error('Request aborted');
+                error.name = 'AbortError';
+                reject(error);
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+            Promise.resolve(value).then(
+                (result) => {
+                    signal.removeEventListener('abort', onAbort);
+                    resolve(result);
+                },
+                (error) => {
+                    signal.removeEventListener('abort', onAbort);
+                    reject(error);
+                }
+            );
+        });
+    }
+
     async function requestToBase(baseUrl, method, path, body, options = {}) {
         // Only user-session calls (no explicit token) get the refresh-and-retry.
         // Device tokens ('' / device token) keep their own invalidation path.
@@ -873,7 +900,11 @@
         let _trRefreshed = false;
 
         if (response.status === 401 && usingUserToken && token) {
-            const fresh = await refreshAccessToken();
+            // Exact native-session closure owns a strict AbortSignal budget.
+            // Token rotation may continue safely in the auth single-flight, but
+            // this request must release its close barrier on time so Android can
+            // redeliver it rather than leaving the next episode blocked forever.
+            const fresh = await awaitWithSignal(refreshAccessToken(), options.signal);
             if (fresh && fresh !== token) {
                 token = fresh;
                 headers.Authorization = `Bearer ${token}`;
@@ -4266,6 +4297,12 @@
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                expireSession: (id, options = {}) => playbackSessionRequest(
+                    'POST',
+                    `/playback/sessions/${encodeURIComponent(id)}/expire`,
+                    null,
+                    { ...options, token: getDeviceToken() }
+                ),
                 event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
                 summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })
             },

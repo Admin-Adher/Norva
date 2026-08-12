@@ -99,6 +99,7 @@ test('phone recovery is retired on host timeout, Back, player close and variant 
   const bridge = method(main, 'private void registerPlayerRecoveryBridge()');
   const back = method(main, 'private void handleBackPressed()');
   const result = method(main, 'protected void onActivityResult(');
+  const continuedResult = method(main, 'private void continuePlayerResult(Intent data)');
   const openSimple = method(
     main,
     'final String fallbackUrl) {',
@@ -109,9 +110,10 @@ test('phone recovery is retired on host timeout, Back, player close and variant 
   assert.match(back, /clearPendingPlayerRecovery\(null\)/);
   assert.match(result, /getStringExtra\(PlayerActivity\.EXTRA_RECOVERY_TOKEN\)/);
   assert.match(result, /clearPendingPlayerRecovery\(null\)/);
-  assert.match(result, /selectedVariantStreamId/);
+  assert.match(result, /queuePlaybackSessionClose/);
+  assert.match(continuedResult, /selectedVariantStreamId/);
   assert.doesNotMatch(
-    result,
+    continuedResult,
     /window\.__norvaNative[\s\S]{0,100}\.retryPlayback\(/,
     'Back must not relaunch the player through an unbound legacy retry',
   );

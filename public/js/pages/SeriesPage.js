@@ -4065,6 +4065,9 @@ class SeriesPage {
     // its own next-episode flow (WatchPage.onEnded); this only covers the native path.
     onNativeEpisodeEnded(detail = {}) {
         if (!detail || (detail.itemType !== 'episode' && detail.itemType !== 'series')) return;
+        // Exact native session expiry is retried durably and its ACK can arrive
+        // after navigation. Never resurrect autoplay behind another active page.
+        if (this.app?.currentPage !== 'series') return;
         // Only when this series fiche is still the open view, with its episode list.
         if (!this.currentSeriesInfo || !this.seasonsContainer || this.detailsPanel?.classList.contains('hidden')) return;
         const all = [...this.seasonsContainer.querySelectorAll('.episode-item')];

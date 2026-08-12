@@ -93,6 +93,6 @@ test('cache versions publish the changed phone surfaces', () => {
   assert.match(appHtml, /HomePage\.js\?v=56/);
   assert.match(appHtml, /LivePage\.js\?v=9/);
   assert.match(appHtml, /MoviesPage\.js\?v=56/);
-  assert.match(appHtml, /SeriesPage\.js\?v=55/);
+  assert.match(appHtml, /SeriesPage\.js\?v=56/);
   assert.match(appHtml, /WatchPage\.js\?v=127/);
 });
