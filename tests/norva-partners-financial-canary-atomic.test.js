@@ -215,6 +215,11 @@ test('draft abort is Finance+AAL2, audited and cannot release an allocation', ()
   assert.match(abortRpc, /v_run\.state = 'draft'/);
   assert.match(abortRpc, /v_cycle\.status = 'draft'/);
   assert.match(abortRpc, /v_item\.allocation_entry_id is null/);
+  assert.doesNotMatch(abortRpc, /min\(item\.id\)/);
+  assert.match(
+    abortRpc,
+    /select count\(\*\)::integer[\s\S]*where item\.cycle_id = v_cycle\.id;[\s\S]*v_item_count <> 1[\s\S]*select item\.\*[\s\S]*where item\.cycle_id = v_cycle\.id\s+for update/,
+  );
   assert.match(
     abortRpc,
     /update affiliate_private\.affiliate_payout_cycles cycle\s+set status = 'cancelled'/,

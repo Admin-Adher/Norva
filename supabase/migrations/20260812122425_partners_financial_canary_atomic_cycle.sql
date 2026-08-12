@@ -680,8 +680,6 @@ declare
   v_candidate_count integer := 0;
   v_actor text;
   v_result jsonb;
-  v_batch_result jsonb;
-  v_batch affiliate_private.affiliate_revolut_manual_batches%rowtype;
   v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
   v_run affiliate_private.affiliate_financial_canary_runs%rowtype;
 begin
@@ -1511,7 +1509,6 @@ declare
   v_run affiliate_private.affiliate_financial_canary_runs%rowtype;
   v_cycle affiliate_private.affiliate_payout_cycles%rowtype;
   v_item affiliate_private.affiliate_payout_items%rowtype;
-  v_item_id uuid;
   v_item_count integer;
   v_actor text;
   v_stage text;
@@ -1581,8 +1578,8 @@ begin
       using errcode = 'P0003';
   end if;
 
-  select count(*)::integer, min(item.id)
-  into v_item_count, v_item_id
+  select count(*)::integer
+  into v_item_count
   from affiliate_private.affiliate_payout_items item
   where item.cycle_id = v_cycle.id;
   if v_item_count <> 1 then
@@ -1592,7 +1589,7 @@ begin
   select item.*
   into v_item
   from affiliate_private.affiliate_payout_items item
-  where item.id = v_item_id
+  where item.cycle_id = v_cycle.id
   for update;
 
   if v_cycle.item_count <> 1
