@@ -534,6 +534,9 @@ test('restore procedures explicitly verify the Partners private schema', () => {
     'affiliate_private.admin_partners_payout_onboarding_request_decide(text,text,text,text)',
     'affiliate_private.admin_partners_payout_onboarding_contact(text,text,uuid)',
     'affiliate_private.admin_partners_revolut_beneficiary_binding_authorize_by_request(text,text,text,text,integer,text,text)',
+    'affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)',
+    'affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)',
+    'affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)',
   ]) {
     assert.ok(
       privateExecuteAllowlist.includes(`'${signature}'`),

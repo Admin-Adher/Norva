@@ -24,6 +24,10 @@ const aal2Migration = fs.readFileSync(
   ),
   'utf8',
 ).replace(/\r\n?/g, '\n');
+const restoreVerifier = fs.readFileSync(
+  path.join(root, 'ops', 'hetzner', 'backup', 'verify-partners-restore.sql'),
+  'utf8',
+).replace(/\r\n?/g, '\n');
 
 function section(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -243,6 +247,17 @@ test('draft abort has a strict public wrapper and no implicit service-role grant
     migration,
     /grant execute on function\s+public\.admin_partners_financial_canary_cycle_abort\(text, text, text\)\s+to authenticated/,
   );
+  for (const signature of [
+    'affiliate_private.admin_partners_financial_canary_cycle_create(date,date,text,integer,bigint,text,text,text)',
+    'affiliate_private.admin_partners_financial_canary_cycle_approve(text,text,text)',
+    'affiliate_private.admin_partners_financial_canary_cycle_abort(text,text,text)',
+  ]) {
+    assert.match(
+      restoreVerifier,
+      new RegExp(signature.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${signature} must remain in the exact authenticated private-RPC allowlist`,
+    );
+  }
 });
 
 test('release-control lock serializes every payout cycle and manual batch mutation', () => {
