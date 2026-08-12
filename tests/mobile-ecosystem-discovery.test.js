@@ -69,11 +69,18 @@ test('transaction and win-back surfaces show the multi-device proof and name tab
   for (const file of [
     'public/paywall.html',
     'public/subscribe.html',
-    'public/subscription.html',
     'public/checkout-revolut.html',
   ]) {
     const source = read(file);
     assert.match(source, /\/assets\/landing\/norva-multi-device\.svg/, file);
     assert.match(source, /Android mobile \(phone and tablet\)[\s\S]{0,60}Android TV/i, file);
   }
+
+  const subscription = read('public/subscription.html');
+  assert.match(subscription, /\/img\/subscription\/norva-subscription-devices\.png/);
+  assert.match(subscription, /Android mobile \(phone and tablet\)[\s\S]{0,60}Android TV/i);
+  assert.ok(
+    fs.existsSync(path.join(root, 'public/img/subscription/norva-subscription-devices.png')),
+    'the subscription-specific multi-device artwork must ship with the page',
+  );
 });

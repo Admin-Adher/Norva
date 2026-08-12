@@ -125,6 +125,7 @@
     }
     @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
   </style>
+  <link rel="stylesheet" href="/css/subscription.css?v=1">
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
@@ -133,26 +134,35 @@
   <script>
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
   </script>
-  <main class="wrap">
+  <header class="site-header">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
-    <h1>Your subscription</h1>
-    <div class="ecosystem-proof" role="note">
-      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+  </header>
+  <main class="wrap">
+    <h1 id="page-title">Your subscription</h1>
+    <div class="subscription-stage">
+    <aside class="ecosystem-proof" aria-label="Norva across your screens">
+      <img src="/img/subscription/norva-subscription-devices.png" width="1586" height="992" fetchpriority="high" decoding="async" alt="Norva on a TV, tablet and phone">
       <span>
         <strong>Your Norva account travels with you.</strong>
         Keep profiles, favorites and playback progress in sync across Web, Android mobile (phone and tablet), and Android TV.
       </span>
+    </aside>
+    <section class="account-panel" aria-labelledby="page-title">
+      <div id="content" aria-live="polite" aria-busy="true"><div class="loading">Loading your subscription…</div></div>
+      <p class="note" id="store-note"></p>
+    </section>
     </div>
-    <div id="content"><div class="loading">Loading your subscription…</div></div>
-    <p class="note" id="store-note"></p>
     <section class="preference-card" id="marketing-preference" aria-labelledby="marketing-preference-title" hidden>
       <div class="preference-copy">
-        <strong id="marketing-preference-title">Product and offer emails</strong>
-        <p>Occasional Norva tips, trial follow-ups and relevant subscription offers.</p>
+        <div>
+          <strong id="marketing-preference-title">Product and offer emails</strong>
+          <p>Occasional Norva tips, trial follow-ups and relevant subscription offers.</p>
+        </div>
         <small id="marketing-preference-status" aria-live="polite">Loading your preference…</small>
       </div>
       <label class="preference-check">
         <input id="marketing-email-opt-in" type="checkbox">
+        <span class="switch-track" aria-hidden="true"></span>
         <span>Email me</span>
       </label>
     </section>
@@ -497,6 +507,19 @@
         modal.setAttribute('aria-modal', 'true');
         back.appendChild(modal);
         document.body.appendChild(back);
+        const backgroundRoots = [document.querySelector('.site-header'), document.querySelector('.wrap')]
+          .filter(Boolean)
+          .map(function (node) {
+            return {
+              node: node,
+              inert: node.inert === true,
+              ariaHidden: node.getAttribute('aria-hidden')
+            };
+          });
+        backgroundRoots.forEach(function (entry) {
+          entry.node.inert = true;
+          entry.node.setAttribute('aria-hidden', 'true');
+        });
         function focusables() {
           return Array.prototype.slice.call(
             modal.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')
@@ -509,6 +532,11 @@
           mo.disconnect();
           document.removeEventListener('keydown', onKey, true);
           back.remove();
+          backgroundRoots.forEach(function (entry) {
+            entry.node.inert = entry.inert;
+            if (entry.ariaHidden == null) entry.node.removeAttribute('aria-hidden');
+            else entry.node.setAttribute('aria-hidden', entry.ariaHidden);
+          });
           try { if (prevFocus && prevFocus.focus) prevFocus.focus(); } catch (_) { /* noop */ }
         }
         function onKey(e) {
@@ -661,6 +689,7 @@
           const granted = ['manual', 'system'].indexOf(String(proj.provider || '').toLowerCase()) !== -1;
           const label = decision.status === 'cancelled_at_period_end' ? 'Access until'
             : decision.status === 'trialing' ? 'Trial ends'
+            : decision.status === 'past_due' || decision.status === 'grace' ? 'Payment due'
             : granted ? 'Access until' : 'Renews';
           add(label, fmtDate(end));
         }
@@ -669,6 +698,7 @@
 
       function render(decision) {
         content.innerHTML = '';
+        content.setAttribute('aria-busy', 'false');
         storeNote.textContent = storeNoteText(decision);
 
         // Not signed in.
@@ -770,7 +800,7 @@
           // Web/Revolut → our own card-update flow; native → Google Play.
           const uc = updateCardLink(decision, true);
           if (uc) row.appendChild(uc);
-          const mb = manageButton(decision, isNative() ? 'Update on Google Play' : 'Update payment', true);
+          const mb = manageButton(decision, isNative() ? 'Update on Google Play' : (uc ? 'Manage billing' : 'Update payment'), true);
           if (mb) row.appendChild(mb);
           const cx = cancelButton(decision);
           if (cx) row.appendChild(cx);
@@ -828,21 +858,25 @@
         const row = el('div', 'actions');
         if (status === 'cancelled_at_period_end') {
           row.appendChild(resumeControl(decision));
-        } else if (!managedElsewhere(decision) && !isTvShell()) {
-          // Suppress this CTA for a sub managed elsewhere (web/Revolut opened on
-          // Android) or on the TV (no in-app billing) so we never start a second,
-          // conflicting subscription — the note says where to manage.
-          // Label by state: a real store sub can switch tier ("Change plan"); an
-          // auto/system trial has no chosen plan yet, so the CTA is to pick one.
-          const hasStorePlan = ['revolut', 'google_play', 'apple_app_store'].indexOf(entProvider(decision)) !== -1;
-          const change = el('a', hasStorePlan ? 'btn ghost' : 'btn', hasStorePlan ? 'Change plan' : 'Choose your plan');
-          change.setAttribute('href', subscribeHref());
-          row.appendChild(change);
-          const uc = updateCardLink(decision, false);
-          if (uc) row.appendChild(uc);
+          const cancelledManager = manageButton(decision);
+          if (cancelledManager) row.appendChild(cancelledManager);
+        } else {
+          const primaryManager = manageButton(decision, null, true);
+          if (primaryManager) row.appendChild(primaryManager);
+          if (!managedElsewhere(decision) && !isTvShell()) {
+            // Suppress this CTA for a sub managed elsewhere (web/Revolut opened on
+            // Android) or on the TV (no in-app billing) so we never start a second,
+            // conflicting subscription — the note says where to manage.
+            // Label by state: a real store sub can switch tier ("Change plan"); an
+            // auto/system trial has no chosen plan yet, so the CTA is to pick one.
+            const hasStorePlan = ['revolut', 'google_play', 'apple_app_store'].indexOf(entProvider(decision)) !== -1;
+            const change = el('a', (hasStorePlan && primaryManager) ? 'btn ghost' : 'btn', hasStorePlan ? 'Change plan' : 'Choose your plan');
+            change.setAttribute('href', subscribeHref());
+            row.appendChild(change);
+            const uc = updateCardLink(decision, false);
+            if (uc) row.appendChild(uc);
+          }
         }
-        const mb = manageButton(decision);
-        if (mb) row.appendChild(mb);
         if (status !== 'cancelled_at_period_end') {
           const cx = cancelButton(decision);
           if (cx) row.appendChild(cx);

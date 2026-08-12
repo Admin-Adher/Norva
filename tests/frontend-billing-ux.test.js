@@ -75,6 +75,18 @@ test('subscription exposes an explicit opt-in backed by the authenticated lifecy
   assert.match(source, /Billing and account emails are still sent when needed/);
 });
 
+test('subscription redesign keeps Norva tokens, responsive reflow and visible interaction states', () => {
+  const source = read('public/subscription.html');
+  const css = read('public/css/subscription.css');
+  assert.match(source, /\/css\/subscription\.css/);
+  assert.match(css, /--color-bg-primary/);
+  assert.match(css, /min-height:\s*48px/);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /@media \(max-width: 560px\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /\.ecosystem-proof img[\s\S]{0,180}height:\s*auto/);
+});
+
 test('plan copy uses exact annual equivalents and an explicit household distinction', () => {
   const subscribe = read('public/subscribe.html');
   const paywall = read('public/paywall.html');
@@ -174,6 +186,12 @@ test('hard-blocked accounts get support guidance without a billing CTA', () => {
     subscription.indexOf("if (status === 'past_due'"));
   assert.match(settings, /includedAccess \|\| hardBlocked/);
   assert.match(settings, /Access under review/);
+});
+
+test('payment issue copy distinguishes card recovery from billing management', () => {
+  const subscription = read('public/subscription.html');
+  assert.match(subscription, /decision\.status === 'past_due' \|\| decision\.status === 'grace' \? 'Payment due'/);
+  assert.match(subscription, /uc \? 'Manage billing' : 'Update payment'/);
 });
 
 test('login separates cloud and local-hub authentication without open redirects', () => {
