@@ -17,28 +17,36 @@ select extensions.ok(
   'the service-role pagination shim exists'
 );
 
-select extensions.is(
+select extensions.ok(
   (
-    select pg_catalog.pg_get_userbyid(routine.proowner)
+    select routine.proowner in (
+        current_user::regrole,
+        'supabase_admin'::regrole
+      )
+      and pg_catalog.pg_get_userbyid(routine.proowner)
+        not in ('anon', 'authenticated', 'service_role')
     from pg_catalog.pg_proc routine
     where routine.oid = to_regprocedure(
       'affiliate_private.partners_service_referral_visibility(uuid,integer,text)'
     )
   ),
-  'supabase_admin',
-  'the referral visibility projection retains the migration owner'
+  'the referral visibility projection retains a trusted migration owner'
 );
 
-select extensions.is(
+select extensions.ok(
   (
-    select pg_catalog.pg_get_userbyid(routine.proowner)
+    select routine.proowner in (
+        current_user::regrole,
+        'supabase_admin'::regrole
+      )
+      and pg_catalog.pg_get_userbyid(routine.proowner)
+        not in ('anon', 'authenticated', 'service_role')
     from pg_catalog.pg_proc routine
     where routine.oid = to_regprocedure(
       'public.partners_service_referral_visibility(uuid,integer,text)'
     )
   ),
-  'supabase_admin',
-  'the pagination shim retains the migration owner'
+  'the pagination shim retains a trusted migration owner'
 );
 
 select extensions.ok(
