@@ -1,0 +1,296 @@
+/**
+ * PairTvSheet — phone-WebView pairing flow opened from Home.
+ *
+ * The TV still creates and polls the code. This component only approves that
+ * code for the signed-in cloud account through the existing NorvaCloud seam.
+ */
+(function () {
+    'use strict';
+
+    const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const PAIRING_CODE_LENGTH = 6;
+
+    class PairTvSheet {
+        constructor(app) {
+            this.app = app;
+            this.overlay = null;
+            this.panel = null;
+            this.form = null;
+            this.input = null;
+            this.submitButton = null;
+            this.errorText = null;
+            this.liveRegion = null;
+            this.entryState = null;
+            this.successState = null;
+            this.requestEpoch = 0;
+            this.submitting = false;
+        }
+
+        canOpen() {
+            const isPhoneShell = Boolean(this.app?.isNativePhoneShell?.());
+            const isCloudAccount = Boolean(
+                this.app?.currentUser?.cloud || window.API?.isCloudMode?.()
+            );
+            const catalogReady = Boolean(this.app?.isCatalogReady?.());
+            return isPhoneShell && isCloudAccount && catalogReady;
+        }
+
+        build() {
+            if (this.overlay?.isConnected) return;
+
+            const overlay = document.createElement('div');
+            overlay.id = 'pair-tv-sheet';
+            overlay.className = 'modal-overlay pair-tv-sheet';
+            overlay.setAttribute('aria-hidden', 'true');
+            overlay.setAttribute('inert', '');
+            overlay.inert = true;
+            overlay.innerHTML = `
+                <section class="pair-tv-panel" role="dialog" aria-modal="true"
+                    aria-labelledby="pair-tv-title" aria-describedby="pair-tv-description" tabindex="-1">
+                    <div class="pair-tv-handle" aria-hidden="true"></div>
+
+                    <div class="pair-tv-state pair-tv-entry-state">
+                        <header class="pair-tv-header">
+                            <img class="pair-tv-device-icon" src="/img/icons/norva-devices-simple.svg?v=1" alt="">
+                            <div class="pair-tv-heading-copy">
+                                <h2 id="pair-tv-title">Pair your TV</h2>
+                                <p id="pair-tv-description">Connect your TV to your Norva account.</p>
+                            </div>
+                            <button type="button" class="pair-tv-close modal-close" aria-label="Close Pair your TV">
+                                <img src="/img/icons/norva-close-simple.svg?v=1" alt="">
+                            </button>
+                        </header>
+
+                        <ol class="pair-tv-steps" aria-label="Pairing instructions">
+                            <li>
+                                <span class="pair-tv-step-number" aria-hidden="true">1</span>
+                                <span><strong>Open Norva on your TV and leave the pairing code on screen.</strong></span>
+                            </li>
+                            <li>
+                                <span class="pair-tv-step-number" aria-hidden="true">2</span>
+                                <span><strong>Enter the 6-character code</strong></span>
+                            </li>
+                        </ol>
+
+                        <form class="pair-tv-form" novalidate>
+                            <label class="pair-tv-code-label" for="pair-tv-code">TV pairing code</label>
+                            <input id="pair-tv-code" name="pairing-code" type="text"
+                                inputmode="text" autocomplete="one-time-code" autocapitalize="characters"
+                                spellcheck="false" maxlength="6"
+                                pattern="[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}"
+                                aria-describedby="pair-tv-code-error">
+                            <p id="pair-tv-code-error" class="pair-tv-error" hidden></p>
+                            <button type="submit" class="btn btn-primary pair-tv-submit" disabled>Pair TV</button>
+                        </form>
+
+                        <button type="button" class="pair-tv-manage" data-pair-tv-manage>Manage all devices</button>
+                    </div>
+
+                    <div class="pair-tv-state pair-tv-success-state" hidden>
+                        <img class="pair-tv-success-icon" src="/img/icons/norva-check-circle-simple.svg?v=1" alt="">
+                        <h2 id="pair-tv-success-title" tabindex="-1">TV Connected</h2>
+                        <p>Your screen is now linked and synced with your account.</p>
+                        <button type="button" class="btn btn-primary pair-tv-done">Done</button>
+                        <button type="button" class="pair-tv-manage" data-pair-tv-manage>Manage all devices</button>
+                    </div>
+
+                    <p class="pair-tv-announcement" role="status" aria-live="polite" aria-atomic="true"></p>
+                </section>
+            `;
+
+            document.body.appendChild(overlay);
+            this.overlay = overlay;
+            this.panel = overlay.querySelector('.pair-tv-panel');
+            this.form = overlay.querySelector('.pair-tv-form');
+            this.input = overlay.querySelector('#pair-tv-code');
+            this.submitButton = overlay.querySelector('.pair-tv-submit');
+            this.errorText = overlay.querySelector('.pair-tv-error');
+            this.liveRegion = overlay.querySelector('.pair-tv-announcement');
+            this.entryState = overlay.querySelector('.pair-tv-entry-state');
+            this.successState = overlay.querySelector('.pair-tv-success-state');
+
+            overlay.querySelector('.modal-close')?.addEventListener('click', () => this.close());
+            overlay.querySelector('.pair-tv-done')?.addEventListener('click', () => this.close());
+            overlay.querySelectorAll('[data-pair-tv-manage]').forEach((button) => {
+                button.addEventListener('click', () => this.manageDevices());
+            });
+            this.input.addEventListener('input', () => this.onInput());
+            this.form.addEventListener('submit', (event) => {
+                event.preventDefault();
+                void this.submit();
+            });
+        }
+
+        open(opener = null) {
+            if (!this.canOpen()) return false;
+            this.build();
+
+            if (this.overlay.classList.contains('active')) {
+                this.panel?.focus?.({ preventScroll: true });
+                return true;
+            }
+
+            this.reset();
+            try { opener?.focus?.({ preventScroll: true }); } catch (_) { /* best effort */ }
+            this.overlay.inert = false;
+            this.overlay.removeAttribute('inert');
+            this.overlay.removeAttribute('aria-hidden');
+            this.overlay.classList.add('active');
+
+            window.NorvaModal?.installHygiene?.(this.overlay, {
+                onClose: () => this.close(),
+                initialFocus: this.panel
+            });
+            return true;
+        }
+
+        close() {
+            if (!this.overlay?.classList.contains('active')) return false;
+            this.requestEpoch += 1;
+            this.submitting = false;
+            this.overlay.classList.remove('active');
+            this.overlay.setAttribute('aria-hidden', 'true');
+            this.overlay.setAttribute('inert', '');
+            this.overlay.inert = true;
+            return true;
+        }
+
+        reset() {
+            this.requestEpoch += 1;
+            this.submitting = false;
+            this.entryState.hidden = false;
+            this.successState.hidden = true;
+            this.panel.setAttribute('aria-labelledby', 'pair-tv-title');
+            this.panel.setAttribute('aria-describedby', 'pair-tv-description');
+            this.input.value = '';
+            this.input.readOnly = false;
+            this.input.removeAttribute('aria-invalid');
+            this.submitButton.disabled = true;
+            this.submitButton.removeAttribute('aria-busy');
+            this.submitButton.textContent = 'Pair TV';
+            this.errorText.hidden = true;
+            this.errorText.textContent = '';
+            this.liveRegion.setAttribute('role', 'status');
+            this.liveRegion.setAttribute('aria-live', 'polite');
+            this.liveRegion.textContent = '';
+        }
+
+        normalizeCode(value) {
+            const allowed = new Set(PAIRING_ALPHABET);
+            return String(value || '')
+                .toUpperCase()
+                .split('')
+                .filter(character => allowed.has(character))
+                .join('')
+                .slice(0, PAIRING_CODE_LENGTH);
+        }
+
+        onInput() {
+            const normalized = this.normalizeCode(this.input.value);
+            if (this.input.value !== normalized) this.input.value = normalized;
+            this.clearError();
+            this.submitButton.disabled = this.submitting || normalized.length !== PAIRING_CODE_LENGTH;
+        }
+
+        clearError(options = {}) {
+            this.input.removeAttribute('aria-invalid');
+            this.errorText.hidden = true;
+            this.errorText.textContent = '';
+            if (!options.keepAnnouncement) {
+                this.liveRegion.setAttribute('role', 'status');
+                this.liveRegion.setAttribute('aria-live', 'polite');
+                this.liveRegion.textContent = '';
+            }
+        }
+
+        showError(message) {
+            this.input.setAttribute('aria-invalid', 'true');
+            this.errorText.textContent = message;
+            this.errorText.hidden = false;
+            this.liveRegion.setAttribute('role', 'alert');
+            this.liveRegion.setAttribute('aria-live', 'assertive');
+            this.liveRegion.textContent = message;
+        }
+
+        errorMessageForStatus(status) {
+            const safeStatus = Number(status);
+            if (safeStatus === 401) {
+                return 'Your session has expired. Sign in again, then retry pairing.';
+            }
+            if (safeStatus === 402) {
+                return 'Your device limit has been reached. Manage your devices before pairing this TV.';
+            }
+            if (safeStatus === 409 || safeStatus === 410) {
+                return 'This code is no longer available. Generate a new one on your TV.';
+            }
+            if (safeStatus === 400 || safeStatus === 404) {
+                return 'Code not found. Check the 6 characters shown on your TV.';
+            }
+            return 'Could not connect to Norva. Check your connection and try again.';
+        }
+
+        async submit() {
+            if (this.submitting) return false;
+
+            const code = this.normalizeCode(this.input.value);
+            if (code.length !== PAIRING_CODE_LENGTH) {
+                const message = 'Enter all 6 characters shown on your TV.';
+                this.showError(message);
+                this.input.focus({ preventScroll: true });
+                return false;
+            }
+
+            const approve = window.NorvaCloud?.pairing?.approve;
+            if (typeof approve !== 'function') {
+                this.showError(this.errorMessageForStatus(0));
+                return false;
+            }
+
+            this.submitting = true;
+            const requestEpoch = ++this.requestEpoch;
+            this.clearError({ keepAnnouncement: false });
+            this.input.readOnly = true;
+            this.submitButton.disabled = true;
+            this.submitButton.setAttribute('aria-busy', 'true');
+            this.submitButton.textContent = 'Connecting…';
+            this.liveRegion.setAttribute('role', 'status');
+            this.liveRegion.setAttribute('aria-live', 'polite');
+            this.liveRegion.textContent = 'Validating the code.';
+
+            try {
+                await approve(code);
+                if (requestEpoch !== this.requestEpoch || !this.overlay.classList.contains('active')) return false;
+
+                this.submitting = false;
+                this.input.value = '';
+                this.submitButton.removeAttribute('aria-busy');
+                this.entryState.hidden = true;
+                this.successState.hidden = false;
+                this.panel.setAttribute('aria-labelledby', 'pair-tv-success-title');
+                this.panel.removeAttribute('aria-describedby');
+                this.liveRegion.textContent = 'TV connected. Your screen is now linked and synced with your account.';
+                this.successState.querySelector('h2')?.focus?.({ preventScroll: true });
+                return true;
+            } catch (error) {
+                if (requestEpoch !== this.requestEpoch || !this.overlay.classList.contains('active')) return false;
+
+                this.submitting = false;
+                this.input.readOnly = false;
+                this.submitButton.removeAttribute('aria-busy');
+                this.submitButton.textContent = 'Pair TV';
+                this.submitButton.disabled = this.input.value.length !== PAIRING_CODE_LENGTH;
+                this.showError(this.errorMessageForStatus(error?.status));
+                this.input.focus({ preventScroll: true });
+                this.input.select?.();
+                return false;
+            }
+        }
+
+        manageDevices() {
+            this.close();
+            setTimeout(() => this.app?.openScreensSettings?.(), 0);
+        }
+    }
+
+    window.PairTvSheet = PairTvSheet;
+})();

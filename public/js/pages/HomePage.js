@@ -253,8 +253,9 @@ class HomePage {
                     document.getElementById('home-ecosystem')?.classList.add('hidden');
                     return;
                 }
-                if (e.target.closest('[data-ecosystem-pair]')) {
-                    this.app?.openScreensSettings?.();
+                const pairButton = e.target.closest('[data-ecosystem-pair]');
+                if (pairButton) {
+                    this.app?.openPairTvSheet?.(pairButton);
                     return;
                 }
                 const notificationsButton = e.target.closest('[data-ecosystem-notifications]');

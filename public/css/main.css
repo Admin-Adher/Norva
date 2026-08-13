@@ -21241,3 +21241,320 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
     height: 12px;
   }
 }
+
+/* ========================================
+   PHONE WEBVIEW — PAIR TV SHEET
+   ======================================== */
+
+.pair-tv-sheet {
+  z-index: 10060;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(5, 7, 12, 0.86);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.pair-tv-panel {
+  position: relative;
+  width: min(100%, 520px);
+  min-height: min(494px, 90dvh);
+  max-height: min(90dvh, 760px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 32px;
+  padding: 8px 24px max(24px, calc(var(--safe-area-inset-bottom) + 16px));
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+  animation: pair-tv-sheet-enter var(--transition-normal) ease-out;
+}
+
+.pair-tv-panel:focus {
+  outline: none;
+}
+
+:root:not(.tv-mode) .pair-tv-panel:focus-visible {
+  outline: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.pair-tv-handle {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 24px;
+  background: var(--color-border-light);
+  border-radius: var(--radius-full);
+}
+
+.pair-tv-header {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 44px;
+  gap: 12px;
+  align-items: start;
+}
+
+.pair-tv-device-icon {
+  width: 36px;
+  height: 36px;
+  margin-top: 18px;
+}
+
+.pair-tv-heading-copy h2,
+.pair-tv-success-state h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.pair-tv-heading-copy p {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.pair-tv-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin: -4px -8px 0 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.pair-tv-close img {
+  width: 22px;
+  height: 22px;
+}
+
+.pair-tv-close:focus-visible,
+.pair-tv-manage:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.pair-tv-steps {
+  display: grid;
+  gap: 32px;
+  margin: 26px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.pair-tv-steps li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.pair-tv-step-number {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: var(--color-accent-hover);
+  background: var(--color-accent-dim);
+  border: 0;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.pair-tv-steps strong {
+  display: block;
+  max-width: 270px;
+}
+
+.pair-tv-steps strong {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.pair-tv-code-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pair-tv-form input {
+  width: calc(100% - 39px);
+  height: 56px;
+  margin-left: 39px;
+  padding: 0 16px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  font-family: 'Inter', sans-serif;
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  caret-color: var(--color-accent);
+}
+
+.pair-tv-form input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+:root:not(.tv-mode) .pair-tv-form input:focus-visible {
+  outline: none;
+  border-radius: var(--radius-md);
+}
+
+.pair-tv-form input[aria-invalid="true"] {
+  border-color: var(--color-error);
+  outline-color: var(--color-error);
+}
+
+.pair-tv-error {
+  margin: 8px 0 0;
+  color: var(--color-error);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.pair-tv-submit,
+.pair-tv-done {
+  justify-content: center;
+  width: 100%;
+  min-height: 56px;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+}
+
+.pair-tv-submit:not(:disabled),
+.pair-tv-done {
+  background: var(--color-accent);
+}
+
+.pair-tv-submit {
+  margin-top: 56px;
+}
+
+.pair-tv-done {
+  margin-top: 24px;
+}
+
+.pair-tv-submit:disabled {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.pair-tv-manage {
+  display: block;
+  min-height: 44px;
+  margin: 12px auto 0;
+  padding: 10px 12px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pair-tv-success-state {
+  padding: 36px 0 8px;
+  text-align: center;
+}
+
+.pair-tv-success-icon {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 20px;
+}
+
+.pair-tv-success-state p {
+  max-width: 320px;
+  margin: 10px auto 8px;
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.pair-tv-success-state h2:focus {
+  outline: none;
+}
+
+:root:not(.tv-mode) .pair-tv-success-state h2:focus-visible {
+  outline: none;
+  border-radius: 0;
+}
+
+.pair-tv-state[hidden],
+.pair-tv-error[hidden] {
+  display: none;
+}
+
+.pair-tv-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Close the Pair TV module so contract scans for earlier page modules remain scoped. */
+/* END PHONE WEBVIEW — PAIR TV SHEET */
+
+@keyframes pair-tv-sheet-enter {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: hover) {
+  .pair-tv-close:hover,
+  .pair-tv-manage:hover {
+    color: var(--color-text-primary);
+    background: var(--color-bg-tertiary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pair-tv-panel {
+    animation: none;
+  }
+}

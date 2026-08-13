@@ -37,6 +37,16 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
   assert.match(method, /Enable notifications/);
 });
 
+test('phone Home opens the in-place Pair TV sheet instead of navigating to Settings', () => {
+  const home = read('public/js/pages/HomePage.js');
+  const delegatedClick = home.slice(
+    home.indexOf("this.container.addEventListener('click'"),
+    home.indexOf("this.container.addEventListener('keydown'"),
+  );
+  assert.match(delegatedClick, /openPairTvSheet/);
+  assert.doesNotMatch(delegatedClick, /openScreensSettings/);
+});
+
 test('devices and pairing are permanent cloud-account destinations, not an Advanced tab', () => {
   const appHtml = read('public/app.html');
   const appJs = read('public/js/app.js');

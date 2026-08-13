@@ -49,6 +49,7 @@ test('consumer payment, pairing and login pages never append raw exception copy'
     'public/cloud-pair.html',
     'public/cloud-link.html',
     'public/pair-approve.html',
+    'public/js/components/PairTvSheet.js',
     'public/login.html',
     'public/js/login.js',
     'public/subscribe.html'

@@ -16,6 +16,7 @@ const phoneMain = read('clients/android-phone/app/src/main/java/tv/norva/phone/M
 const account = read('public/account.html');
 const deleteAccount = read('public/delete-account.html');
 const norvaModal = read('public/js/components/NorvaModal.js');
+const pairTvSheet = read('public/js/components/PairTvSheet.js');
 const multiSelect = read('public/js/components/MultiSelect.js');
 const sourceManager = read('public/js/components/SourceManager.js');
 const mainCss = read('public/css/main.css');
@@ -171,9 +172,13 @@ test('all app-owned modal surfaces isolate the background and warning dialogs sh
   assert.match(norvaModal, /restoreBackground\(backgroundSnapshot\)/);
   assert.match(sourceManager, /NorvaModal\.installHygiene\(modal,[\s\S]{0,180}onClose: \(\) => finish\(false\)/);
   assert.match(sourceManager, /initialFocus: document\.getElementById\('warning-cancel'\)/);
+  assert.match(pairTvSheet, /class="pair-tv-close modal-close"/);
+  assert.match(pairTvSheet, /NorvaModal\?\.installHygiene\?\.\(this\.overlay/);
+  assert.match(pairTvSheet, /initialFocus: this\.panel/);
+  assert.match(pairTvSheet, /overlay\.setAttribute\('inert', ''\)/);
 });
 
 test('camera scanning is not exposed by the current mobile WebView surface', () => {
-  assert.doesNotMatch(app + settings, /getUserMedia|BarcodeDetector|html5-qrcode/i);
+  assert.doesNotMatch(app + settings + pairTvSheet, /getUserMedia|BarcodeDetector|html5-qrcode/i);
   assert.match(phoneMain, /onPermissionRequest\(PermissionRequest request\)/);
 });

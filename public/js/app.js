@@ -65,6 +65,7 @@ class App {
         this.sourceManager = new SourceManager();
         this.epgGuide = new EpgGuide();
         this.liveGuideFusion = new LiveGuideFusion(this);
+        this.pairTvSheet = new PairTvSheet(this);
 
         // Initialize page controllers
         this.pages.home = new HomePage(this);
@@ -2512,6 +2513,10 @@ class App {
         requestAnimationFrame(() => this.pages.settings?.switchTab?.('screens'));
     }
 
+    openPairTvSheet(opener = null) {
+        return this.pairTvSheet?.open?.(opener) || false;
+    }
+
     openPartners(opener = null) {
         const page = this.pages?.partners;
         if (!page?.canUsePartners?.()) return false;
@@ -3397,6 +3402,7 @@ class App {
         const navigationToken = (this._navigationToken || 0) + 1;
         this._navigationToken = navigationToken;
         if (this.currentPage && this.currentPage !== pageName) {
+            this.pairTvSheet?.close?.();
             this.pages?.[this.currentPage]?.beginFicheIntent?.();
         }
         const tvRouteToken = this.beginTvRouteTransition(pageName);
