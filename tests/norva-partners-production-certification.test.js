@@ -35,7 +35,7 @@ test('the restore runbook describes the exact post-9961726 financial-canary cont
 test('the app cache-busts the finalized Partners API and page contracts', () => {
   const app = read('public/app.html');
 
-  assert.match(app, /\/js\/cloudApi\.js\?v=60/);
+  assert.match(app, /\/js\/cloudApi\.js\?v=62/);
   assert.match(app, /\/js\/pages\/PartnersPage\.js\?v=10/);
 });
 

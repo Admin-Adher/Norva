@@ -63,6 +63,13 @@
     <string name="player_error_no_data">The provider accepted the connection but isn’t sending a playable stream.</string>
     <string name="player_error_unsupported">This video format cannot be played on this device.</string>
     <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
+    <string name="player_error_provider_in_use_title">Service already in use on another device</string>
+    <string name="player_error_provider_in_use">Another playback is currently using this service. Norva stopped the older playback when it belonged to Norva. Stop any remaining external playback, wait a moment, then try again.</string>
+    <string name="player_error_session_invalid_title">Playback session ended</string>
+    <string name="player_error_session_invalid">Norva can no longer verify this playback session. Return to the title and start it again.</string>
+    <string name="player_error_liveness_title">Playback verification interrupted</string>
+    <string name="player_error_liveness">Norva could not verify this playback for 45 seconds. Check your connection, then try again.</string>
+    <string name="native_playback_auth_error">Norva could not verify the playback session. Sign in again, then retry.</string>
     <!-- Premium TV player launch, focus, accessibility and recovery copy. -->
     <string name="player_aspect_short">Size</string>
     <string name="player_option_selected_description">%1$s, %2$s selected</string>

@@ -1,7 +1,21 @@
 import { connect } from "cloudflare:sockets";
+import {
+  classifyRelayPlaybackGeneration,
+  classifyRelaySessionClaims,
+  createRevocableRelayStream,
+  isRelayCoordinatorKey,
+  relayPlaybackSessionIsActive,
+} from "./relayPlaybackSessionPolicy.mjs";
+import {
+  openRelayCoordinatorRoute,
+} from "./relayCoordinatorRoute.mjs";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const PLAYBACK_SESSION_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RELAY_REVOCATION_CHECK_MS = 3_000;
+const RELAY_RELEASE_WAIT_MS = RELAY_REVOCATION_CHECK_MS + 500;
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -48,6 +62,8 @@ export default {
         return json(request, env, {
           ok: true,
           service: "norva-edge",
+          version: 2,
+          relaySessionRevocationProtocol: 1,
           components: {
             relay: true,
             imageProxy: true,
@@ -79,6 +95,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
+        await assertRelayPlaybackSessionActive(env, claims);
         return await proxyPlayback(request, env, claims, ctx);
       }
 
@@ -96,6 +113,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
+        await assertRelayPlaybackSessionActive(env, claims);
         return await relayVodInfo(request, env, claims, ctx);
       }
 
@@ -113,6 +131,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
+        await assertRelayPlaybackSessionActive(env, claims);
         return await relaySeriesInfo(request, env, claims, ctx);
       }
 
@@ -129,6 +148,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
+        await assertRelayPlaybackSessionActive(env, claims);
         return await relayProbeAudio(request, env, claims, ctx);
       }
 
@@ -163,6 +183,9 @@ export class ProviderSessionCoordinator {
 
       if (request.method === "GET" && action === "status") {
         return json(request, this.env, await this.status(url));
+      }
+      if (request.method === "GET" && action === "active") {
+        return json(request, this.env, await this.active(url));
       }
 
       if (request.method !== "POST") {
@@ -200,18 +223,60 @@ export class ProviderSessionCoordinator {
     };
   }
 
+  async active(url) {
+    const claims = {
+      v: 2,
+      purpose: "playback",
+      sid: stringOrNull(url.searchParams.get("playbackSessionId")),
+      coord: stringOrNull(url.searchParams.get("coord")),
+    };
+    const state = await this.loadState();
+    const active = relayPlaybackSessionIsActive(state.active, claims);
+    await this.saveState(state);
+    return { ok: true, active };
+  }
+
   async prepare(body) {
     const ownerKey = stringOrNull(body.ownerKey ?? body.owner_key);
     if (!ownerKey) throw new HttpError(400, "ownerKey is required");
+    const coord = stringOrNull(body.coord);
+    if (coord && !isRelayCoordinatorKey(coord)) throw new HttpError(400, "Invalid coordinator key");
 
     const state = await this.loadState();
     const sourceKey = stringOrNull(body.sourceKey ?? body.source_key ?? body.sourceId ?? body.source_id) || "account";
     const deviceKey = stringOrNull(body.deviceKey ?? body.device_key ?? body.deviceId ?? body.device_id) || "";
     const now = Date.now();
+    const playbackCreatedAt = normalizePlaybackCreatedAt(
+      body.playbackCreatedAt ?? body.playback_created_at,
+      now,
+    );
+    if (coord && !playbackCreatedAt) throw new HttpError(400, "playbackCreatedAt is required");
+    const playbackSessionId = stringOrNull(body.playbackSessionId ?? body.playback_session_id ?? body.sessionId);
+    const supersededPlaybackSessionIds = normalizePlaybackSessionIds(
+      body.supersededSessionIds ?? body.superseded_session_ids,
+    );
     const expireExisting = body.expireExisting !== false && body.expire_existing !== false;
-    const conflicts = expireExisting
-      ? state.active.filter((session) => isConflictingSession(session, { ownerKey, sourceKey, deviceKey }))
+    const next = {
+      coord,
+      ownerKey,
+      sourceKey,
+      deviceKey,
+      playbackSessionId,
+      playbackCreatedAt,
+      supersededPlaybackSessionIds,
+    };
+    const candidates = expireExisting
+      ? state.active.filter((session) => isConflictingSession(session, next))
       : [];
+    if (candidates.some((session) => {
+      const relation = classifyRelayPlaybackGeneration(session, next);
+      return relation === "current_newer" || relation === "ambiguous";
+    })) {
+      throw new HttpError(409, "A newer playback generation is already active");
+    }
+    const conflicts = candidates.filter((session) => (
+      classifyRelayPlaybackGeneration(session, next) === "current_older"
+    ));
 
     const gatewayExpired = await this.expireSessions(conflicts);
     const rawAborted = await this.expireRawPumps(conflicts.filter((session) => session.lane === "raw" && !session.gatewaySessionId));
@@ -220,12 +285,15 @@ export class ProviderSessionCoordinator {
     const lockTtlMs = boundedInt(body.lockTtlMs ?? body.lock_ttl_ms, 20_000, 2_000, 120_000);
     const lock = {
       id: crypto.randomUUID(),
+      coord,
       ownerKey,
       sourceKey,
       deviceKey,
       itemType: stringOrNull(body.itemType ?? body.item_type),
       itemId: stringOrNull(body.itemId ?? body.item_id),
       targetHash: stringOrNull(body.targetHash ?? body.target_hash),
+      playbackCreatedAt,
+      supersededPlaybackSessionIds,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + lockTtlMs).toISOString(),
     };
@@ -236,8 +304,11 @@ export class ProviderSessionCoordinator {
     // pump tears its TCP connection immediately, so a short settle is enough —
     // and no conflict means no wait at all.
     const hadGatewayConflict = conflicts.some((session) => session.gatewaySessionId);
+    const hadRelayConflict = conflicts.some((session) => session.lane === "relay");
     const waitMs = hadGatewayConflict
       ? boundedInt(this.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8000, 0, 15_000)
+      : hadRelayConflict
+        ? RELAY_RELEASE_WAIT_MS
       : conflicts.length ? 1500 : 0;
 
     return {
@@ -254,31 +325,69 @@ export class ProviderSessionCoordinator {
     const ownerKey = stringOrNull(body.ownerKey ?? body.owner_key);
     const sourceKey = stringOrNull(body.sourceKey ?? body.source_key ?? body.sourceId ?? body.source_id) || "account";
     if (!ownerKey) throw new HttpError(400, "ownerKey is required");
+    const coord = stringOrNull(body.coord);
+    if (coord && !isRelayCoordinatorKey(coord)) throw new HttpError(400, "Invalid coordinator key");
 
     const state = await this.loadState();
     const lockId = stringOrNull(body.lockId ?? body.lock_id);
+    const lock = lockId ? state.locks.find((entry) => entry.id === lockId) : null;
+    if (coord && !lock) throw new HttpError(409, "Playback coordinator lock expired");
     if (lockId) state.locks = state.locks.filter((lock) => lock.id !== lockId);
+
+    const playbackSessionId = stringOrNull(body.playbackSessionId ?? body.playback_session_id ?? body.sessionId);
+    const playbackCreatedAt = normalizePlaybackCreatedAt(
+      body.playbackCreatedAt ?? body.playback_created_at ?? lock?.playbackCreatedAt,
+    );
+    if (coord && (!playbackSessionId || !playbackCreatedAt)) {
+      throw new HttpError(400, "playbackSessionId and playbackCreatedAt are required");
+    }
+    const supersededPlaybackSessionIds = normalizePlaybackSessionIds(
+      body.supersededSessionIds
+        ?? body.superseded_session_ids
+        ?? lock?.supersededPlaybackSessionIds,
+    );
+
+    const alreadyActive = playbackSessionId
+      ? state.active.find((active) => active.playbackSessionId === playbackSessionId)
+      : null;
+    if (alreadyActive) {
+      await this.saveState(state);
+      return { ok: true, session: publicSession(alreadyActive), activeSessions: state.active.length, waitMs: 0 };
+    }
 
     const session = {
       id: crypto.randomUUID(),
+      coord,
       ownerKey,
       sourceKey,
       deviceKey: stringOrNull(body.deviceKey ?? body.device_key ?? body.deviceId ?? body.device_id) || "",
-      playbackSessionId: stringOrNull(body.playbackSessionId ?? body.playback_session_id ?? body.sessionId),
+      playbackSessionId,
       gatewaySessionId: stringOrNull(body.gatewaySessionId ?? body.gateway_session_id),
       itemType: stringOrNull(body.itemType ?? body.item_type),
       itemId: stringOrNull(body.itemId ?? body.item_id),
       targetHash: stringOrNull(body.targetHash ?? body.target_hash),
       lane: stringOrNull(body.lane),
-      createdAt: new Date().toISOString(),
+      playbackCreatedAt,
+      supersededPlaybackSessionIds,
+      createdAt: playbackCreatedAt || new Date().toISOString(),
       expiresAt: normalizeExpiresAt(body.expiresAt ?? body.expires_at),
     };
+
+    const conflicting = state.active.filter((active) => isConflictingSession(active, session));
+    if (conflicting.some((active) => {
+      const relation = classifyRelayPlaybackGeneration(active, session);
+      return relation === "current_newer" || relation === "ambiguous";
+    })) {
+      await this.saveState(state);
+      throw new HttpError(409, "A newer playback generation is already active");
+    }
 
     // Conflicting records used to be dropped SILENTLY here — their gateway ffmpeg
     // or raw pump kept holding the provider slot. Reap them for real.
     const evicted = state.active.filter((active) => {
       if (session.playbackSessionId && active.playbackSessionId === session.playbackSessionId) return false;
-      return isConflictingSession(active, session);
+      return isConflictingSession(active, session)
+        && classifyRelayPlaybackGeneration(active, session) === "current_older";
     });
     if (evicted.length) {
       await this.expireSessions(evicted.filter((active) => active.gatewaySessionId));
@@ -291,7 +400,15 @@ export class ProviderSessionCoordinator {
     state.active.push(session);
     await this.saveState(state);
 
-    return { ok: true, session: publicSession(session), activeSessions: state.active.length };
+    const hadGatewayConflict = evicted.some((active) => active.gatewaySessionId);
+    const hadRelayConflict = evicted.some((active) => active.lane === "relay");
+    const waitMs = hadGatewayConflict
+      ? boundedInt(this.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8000, 0, 15_000)
+      : hadRelayConflict
+        ? RELAY_RELEASE_WAIT_MS
+        : evicted.length ? 1500 : 0;
+
+    return { ok: true, session: publicSession(session), activeSessions: state.active.length, waitMs };
   }
 
   async end(body) {
@@ -300,10 +417,12 @@ export class ProviderSessionCoordinator {
     const gatewaySessionId = stringOrNull(body.gatewaySessionId ?? body.gateway_session_id);
     const ownerKey = stringOrNull(body.ownerKey ?? body.owner_key);
     const sourceKey = stringOrNull(body.sourceKey ?? body.source_key ?? body.sourceId ?? body.source_id);
+    const coord = stringOrNull(body.coord);
 
     const matches = state.active.filter((session) => matchesSessionEndRequest(session, {
       playbackSessionId,
       gatewaySessionId,
+      coord,
       ownerKey,
       sourceKey,
     }));
@@ -429,10 +548,16 @@ async function routeSessionCoordinator(request, env) {
   }
   const url = new URL(request.url);
   const body = request.method === "GET" ? Object.fromEntries(url.searchParams.entries()) : await readJson(request.clone());
+  const coord = stringOrNull(body.coord);
+  if (coord && !isRelayCoordinatorKey(coord)) {
+    return json(request, env, { error: "Invalid coordinator key" }, 400);
+  }
   const ownerKey = stringOrNull(body.ownerKey ?? body.owner_key ?? body.userId ?? body.user_id ?? body.accountId ?? body.account_id);
-  if (!ownerKey) return json(request, env, { error: "ownerKey is required" }, 400);
+  if (!coord && !ownerKey) return json(request, env, { error: "coord or ownerKey is required" }, 400);
   const sourceKey = stringOrNull(body.sourceKey ?? body.source_key ?? body.sourceId ?? body.source_id) || "account";
-  const objectName = await sha256Hex(`owner:${ownerKey}|source:${sourceKey}`);
+  const objectName = coord
+    ? `provider:${coord}`
+    : await sha256Hex(`owner:${ownerKey}|source:${sourceKey}`);
   const id = env.PROVIDER_SESSION_COORDINATOR.idFromName(objectName);
   const stub = env.PROVIDER_SESSION_COORDINATOR.get(id);
   const response = await stub.fetch(request);
@@ -443,6 +568,51 @@ async function routeSessionCoordinator(request, env) {
     statusText: response.statusText,
     headers,
   });
+}
+
+async function assertRelayPlaybackSessionActive(env, claims) {
+  const disposition = classifyRelaySessionClaims(claims);
+  if (disposition.kind === "service") return;
+  if (disposition.kind === "legacy_playback") {
+    throw new HttpError(409, "Playback session is no longer active", {
+      code: "PLAYBACK_SUPERSEDED",
+    });
+  }
+  if (disposition.kind !== "playback") {
+    throw new HttpError(400, "Invalid relay playback claims");
+  }
+  if (await relayPlaybackSessionActive(env, claims) !== true) {
+    throw new HttpError(409, "Playback session was replaced", {
+      code: "PLAYBACK_SUPERSEDED",
+    });
+  }
+}
+
+async function relayPlaybackSessionActive(env, claims) {
+  const disposition = classifyRelaySessionClaims(claims);
+  if (disposition.kind !== "playback" || !env.PROVIDER_SESSION_COORDINATOR) return false;
+  const id = env.PROVIDER_SESSION_COORDINATOR.idFromName(`provider:${disposition.coord}`);
+  const stub = env.PROVIDER_SESSION_COORDINATOR.get(id);
+  const activeUrl = new URL("https://norva-session-coordinator/sessions/active");
+  activeUrl.searchParams.set("playbackSessionId", disposition.sid);
+  activeUrl.searchParams.set("coord", disposition.coord);
+  const response = await stub.fetch(activeUrl.toString());
+  const body = await response.json().catch(() => ({}));
+  return response.ok && body?.active === true;
+}
+
+function withRelayPlaybackLiveness(response, request, env, claims) {
+  if (request.method === "HEAD" || !response.body) return response;
+  return new Response(
+    createRevocableRelayStream(response.body, {
+      isActive: () => relayPlaybackSessionActive(env, claims),
+    }),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    },
+  );
 }
 
 async function proxyPlayback(request, env, claims, ctx) {
@@ -477,7 +647,7 @@ async function proxyPlayback(request, env, claims, ctx) {
     if (requestedRange) headers.set("range", requestedRange);
     try {
       const sock = await trySocketPath(targetUrl, request, headers, env);
-      if (sock) return sock;
+      if (sock) return withRelayPlaybackLiveness(sock, request, env, claims);
     } catch (_) { /* fall through to the normal path */ }
     clearSocketHint(streamKey);
     headers.delete("range");
@@ -510,7 +680,7 @@ async function proxyPlayback(request, env, claims, ctx) {
       const sock = await trySocketPath(targetUrl, request, headers, env);
       if (sock) {
         markNeedsSocket(streamKey);
-        return sock;
+        return withRelayPlaybackLiveness(sock, request, env, claims);
       }
     } catch (e) {
       console.warn(JSON.stringify({ tag: "norva-relay-socket-fallback-error", error: String((e && e.message) || e) }));
@@ -576,7 +746,7 @@ async function proxyPlayback(request, env, claims, ctx) {
   if (request.method === "HEAD" || !isHlsPlaylist(targetUrl, upstream.headers)) {
     // Advertise range support so the player enables client-side seeking.
     if (!responseHeaders.has("Accept-Ranges")) responseHeaders.set("Accept-Ranges", "bytes");
-    return new Response(abortOnCancel(upstream.body, upstreamAbort), {
+    return new Response(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -585,7 +755,7 @@ async function proxyPlayback(request, env, claims, ctx) {
 
   const contentLength = Number.parseInt(upstream.headers.get("content-length") ?? "0", 10);
   if (Number.isFinite(contentLength) && contentLength > 2_000_000) {
-    return new Response(abortOnCancel(upstream.body, upstreamAbort), {
+    return new Response(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -664,8 +834,16 @@ async function resolveContentLength(targetUrl, baseHeaders) {
 // aborted its fetch) aborts the UPSTREAM connection instead of letting the runtime
 // return it to the keepalive pool. On single-slot IPTV providers that lingering
 // pooled connection is exactly what keeps the next attempt 458ing.
-function abortOnCancel(body, controller) {
+function abortOnCancel(body, controller, livenessProbe = null) {
   if (!body) return body;
+  if (typeof livenessProbe === "function") {
+    return createRevocableRelayStream(body, {
+      isActive: livenessProbe,
+      abort() {
+        try { controller.abort(); } catch (_) { /* already aborted */ }
+      },
+    });
+  }
   try {
     const reader = body.getReader();
     return new ReadableStream({
@@ -804,10 +982,13 @@ async function rewriteUriAttribute(line, baseUrl, claims, env, request) {
 
 async function signedRelayUrl(targetUrl, claims, env, request) {
   const payload = JSON.stringify({
-    v: 1,
+    v: claims.v,
+    purpose: claims.purpose,
     sid: claims.sid,
-    uid: claims.uid,
+    ...(claims.uid ? { uid: claims.uid } : {}),
+    ...(claims.route ? { route: claims.route } : {}),
     url: targetUrl,
+    ...(claims.ua ? { ua: claims.ua } : {}),
     exp: claims.exp,
   });
   const signature = await hmacBase64Url(env.RELAY_TOKEN_SECRET, payload);
@@ -826,8 +1007,19 @@ async function verifyRelayToken(token, secret) {
     throw new HttpError(401, "Invalid relay token signature");
   }
 
-  const claims = JSON.parse(payload);
-  if (!claims || claims.v !== 1 || !claims.sid || !claims.uid || !claims.url || !claims.exp) {
+  const rawClaims = JSON.parse(payload);
+  let disposition = classifyRelaySessionClaims(rawClaims);
+  let claims = rawClaims;
+  if (disposition.kind === "sealed_playback") {
+    try {
+      const coord = await openRelayCoordinatorRoute(secret, disposition.route);
+      claims = { ...rawClaims, coord };
+      disposition = classifyRelaySessionClaims(claims);
+    } catch (_) {
+      throw new HttpError(401, "Invalid relay coordinator route");
+    }
+  }
+  if (!claims || disposition.kind === "invalid" || disposition.kind === "sealed_playback" || !claims.url || !claims.exp) {
     throw new HttpError(400, "Invalid relay token claims");
   }
   const url = new URL(claims.url);
@@ -1868,6 +2060,23 @@ function normalizeExpiresAt(value) {
   return new Date(Date.now() + 15 * 60 * 1000).toISOString();
 }
 
+function normalizePlaybackCreatedAt(value, now = Date.now()) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) return null;
+  // Session creation is a current server-side operation. Reject stale/future
+  // generation hints rather than letting a delayed caller evict the live one.
+  if (parsed < now - 10 * 60 * 1000 || parsed > now + 60 * 1000) return null;
+  return new Date(parsed).toISOString();
+}
+
+function normalizePlaybackSessionIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((entry) => stringOrNull(entry))
+    .filter((entry) => entry && PLAYBACK_SESSION_UUID_PATTERN.test(entry)))]
+    .slice(0, 64);
+}
+
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -1877,6 +2086,7 @@ function publicBaseUrl(request, env) {
 }
 
 function isConflictingSession(session, next) {
+  if (session?.coord && next?.coord) return session.coord === next.coord;
   if (!session || session.ownerKey !== next.ownerKey) return false;
   if (session.sourceKey && next.sourceKey && session.sourceKey !== next.sourceKey) return false;
   if (next.deviceKey && session.deviceKey && next.deviceKey === session.deviceKey) return true;
@@ -1889,6 +2099,7 @@ function matchesSessionEndRequest(session, request) {
   const gatewaySessionId = stringOrNull(request?.gatewaySessionId);
   const ownerKey = stringOrNull(request?.ownerKey);
   const sourceKey = stringOrNull(request?.sourceKey);
+  const coord = stringOrNull(request?.coord);
 
   if (playbackSessionId && session.playbackSessionId === playbackSessionId) return true;
   if (gatewaySessionId && session.gatewaySessionId === gatewaySessionId) return true;
@@ -1898,6 +2109,8 @@ function matchesSessionEndRequest(session, request) {
   // the old raw/engine session delete the replacement Gateway session that was
   // just created for the same account and source.
   if (playbackSessionId || gatewaySessionId) return false;
+
+  if (coord) return session.coord === coord;
 
   return Boolean(
     ownerKey &&
@@ -1909,6 +2122,7 @@ function matchesSessionEndRequest(session, request) {
 function publicSession(session) {
   return {
     id: session.id,
+    coord: session.coord ? "present" : "",
     sourceKey: session.sourceKey,
     deviceKey: session.deviceKey ? "present" : "",
     playbackSessionId: session.playbackSessionId || null,
@@ -1923,6 +2137,7 @@ function publicSession(session) {
 function publicLock(lock) {
   return {
     id: lock.id,
+    coord: lock.coord ? "present" : "",
     sourceKey: lock.sourceKey,
     deviceKey: lock.deviceKey ? "present" : "",
     itemType: lock.itemType || null,

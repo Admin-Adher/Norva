@@ -112,6 +112,14 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_RECOVERY_TOKEN = "recoveryToken";
     public static final String EXTRA_RECOVERY_PAYLOAD = "recoveryPayload";
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
+    public static final String EXTRA_PLAYBACK_SESSION_ID = "playbackSessionId";
+    public static final String ACTION_REQUEST_PLAYBACK_AUTH =
+            "tv.norva.tv.action.REQUEST_PLAYBACK_AUTH";
+    public static final String ACTION_APPLY_PLAYBACK_AUTH =
+            "tv.norva.tv.action.APPLY_PLAYBACK_AUTH";
+    public static final String EXTRA_PLAYBACK_AUTH_CHANNEL_ID = "playbackAuthChannelId";
+    public static final String EXTRA_PLAYBACK_AUTH_REQUEST_NONCE = "playbackAuthRequestNonce";
+    public static final String EXTRA_PLAYBACK_AUTH_KIND = "playbackAuthKind";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -204,6 +212,16 @@ public class PlayerActivity extends Activity {
     private boolean firstFrameRendered = false;
     private long playbackLaunchElapsedMs;
     private String playbackAuthToken;
+    private String playbackAuthChannelId;
+    private String pendingPlaybackAuthRequestNonce;
+    private String pendingPlaybackAuthPurpose;
+    private boolean pendingProviderBusyReport;
+    private BroadcastReceiver playbackAuthReceiver;
+    private boolean playbackHeartbeatRequestInFlight;
+    private long playbackHeartbeatGeneration;
+    private String playbackSessionId;
+    private final PlaybackHeartbeatFailurePolicy playbackHeartbeatFailurePolicy =
+            new PlaybackHeartbeatFailurePolicy();
     private boolean freshStreamRequested = false;
     private String freshStreamReason;
     private String recoveryToken;
@@ -231,6 +249,8 @@ public class PlayerActivity extends Activity {
     private boolean userWantsPlayback = true;
     private boolean applyingLifecyclePlaybackState = false;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+    private static final long PLAYBACK_HEARTBEAT_INTERVAL_MS = 5_000L;
+    private static final long PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS = 5_000L;
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
     // A live feed is an open-ended socket: some panels close an otherwise healthy
     // connection every few minutes. That is not an end-of-program and must never
@@ -326,6 +346,31 @@ public class PlayerActivity extends Activity {
         }
     };
 
+    private final Runnable playbackHeartbeat = new Runnable() {
+        @Override
+        public void run() {
+            if (!shouldRunPlaybackHeartbeat()) return;
+            if (!playbackHeartbeatRequestInFlight
+                    && !requestPlaybackAuth("heartbeat")) {
+                handlePlaybackHeartbeatResult(playbackSessionId, "AUTH_UNAVAILABLE");
+            }
+            handler.postDelayed(this, PLAYBACK_HEARTBEAT_INTERVAL_MS);
+        }
+    };
+
+    private final Runnable playbackAuthTimeout = new Runnable() {
+        @Override
+        public void run() {
+            String purpose = pendingPlaybackAuthPurpose;
+            clearPendingPlaybackAuthRequest();
+            if ("heartbeat".equals(purpose)) {
+                handlePlaybackHeartbeatResult(playbackSessionId, "AUTH_UNAVAILABLE");
+            } else if ("provider_failure".equals(purpose)) {
+                pendingProviderBusyReport = false;
+            }
+        }
+    };
+
     private final Runnable freshStreamTimeout = new Runnable() {
         @Override public void run() {
             if (!freshStreamRequested) return;
@@ -353,7 +398,15 @@ public class PlayerActivity extends Activity {
         preferenceScopeJson = getIntent().getStringExtra(EXTRA_PREFERENCE_SCOPE);
         cloudPlaybackPreferencesJson = getIntent().getStringExtra(EXTRA_PLAYBACK_PREFERENCES);
         playbackAuthToken = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        playbackAuthChannelId = getIntent().getStringExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        if (!NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)) {
+            playbackAuthChannelId = null;
+        }
+        playbackSessionId = NativePlaybackTelemetry.boundedSessionId(
+                getIntent().getStringExtra(EXTRA_PLAYBACK_SESSION_ID));
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        getIntent().removeExtra(EXTRA_PLAYBACK_SESSION_ID);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
@@ -365,6 +418,7 @@ public class PlayerActivity extends Activity {
         readTrackMetadata(getIntent().getStringExtra(EXTRA_TRACK_METADATA));
         initializePlaybackPreferences(true);
         registerFreshStreamReceiver();
+        registerPlaybackAuthReceiver();
         try {
             String vj = getIntent().getStringExtra(EXTRA_VARIANTS);
             if (vj != null && !vj.isEmpty()) {
@@ -654,7 +708,8 @@ public class PlayerActivity extends Activity {
         DataSource.Factory dataSourceFactory = new BoundedRangeDataSource.Factory(http);
 
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory)
+                        .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy()))
                 .build();
         player.setVideoSurfaceView(surfaceView);
         // MediaSession: Assistant voice transport ("mets pause", "reprends"), the
@@ -699,7 +754,12 @@ public class PlayerActivity extends Activity {
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
                 handler.removeCallbacks(healthyRecoveryReset);
-                if (isPlaying) handler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
+                if (isPlaying) {
+                    handler.postDelayed(healthyRecoveryReset, HEALTHY_RECOVERY_RESET_MS);
+                    updatePlaybackHeartbeat();
+                } else {
+                    stopPlaybackHeartbeat();
+                }
                 updatePlayPauseLabel();
             }
 
@@ -725,11 +785,17 @@ public class PlayerActivity extends Activity {
                     firstFrameRendered = true;
                     hideStartupContext();
                     if (!controlsVisible) showControls(playPauseBtn);
-                    final String authToken = playbackAuthToken;
+                    final String firstFrameBearer = playbackAuthToken;
                     playbackAuthToken = null;
-                    NativePlaybackTelemetry.recordFirstFrame(authToken, sourceId, itemType, itemId,
+                    NativePlaybackTelemetry.recordFirstFrame(
+                            firstFrameBearer,
+                            playbackSessionId,
+                            sourceId,
+                            itemType,
+                            itemId,
                             Math.max(1L, android.os.SystemClock.elapsedRealtime()
                                     - playbackLaunchElapsedMs));
+                    updatePlaybackHeartbeat();
                 }
             }
 
@@ -737,6 +803,12 @@ public class PlayerActivity extends Activity {
             public void onPlayerError(PlaybackException error) {
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
+                final int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
+                if (ProviderPlaybackPolicy.isProviderBusyHttpStatus(httpStatus)) {
+                    android.util.Log.w(TAG, "Provider account busy (HTTP 458)");
+                    showProviderAccountConflict(true);
+                    return;
+                }
                 final String diagnostic = diagnose(error);
                 // Keep provider/ExoPlayer internals available to support without
                 // exposing hosts, exception classes or stack details on the TV.
@@ -836,6 +908,196 @@ public class PlayerActivity extends Activity {
                 }
             }
         }, "norva-playback-status").start();
+    }
+
+    private boolean shouldRunPlaybackHeartbeat() {
+        return NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)
+                && NativePlaybackTelemetry.boundedSessionId(playbackSessionId) != null
+                && player != null
+                && player.isPlaying()
+                && firstFrameRendered
+                && canPlayInCurrentLifecycle()
+                && (errorPanel == null || errorPanel.getVisibility() != View.VISIBLE);
+    }
+
+    private void updatePlaybackHeartbeat() {
+        stopPlaybackHeartbeat();
+        if (shouldRunPlaybackHeartbeat()) handler.post(playbackHeartbeat);
+    }
+
+    private void stopPlaybackHeartbeat() {
+        handler.removeCallbacks(playbackHeartbeat);
+        playbackHeartbeatGeneration++;
+        playbackHeartbeatRequestInFlight = false;
+        playbackHeartbeatFailurePolicy.reset();
+        // A Media3 stop can dispatch onIsPlayingChanged(false) after the 458
+        // handler has already requested its fresh provider-failure credential.
+        // Stop only the lease pulse here; preserve that terminal one-shot until
+        // it is delivered, times out, or the Activity is destroyed.
+        if (!"provider_failure".equals(pendingPlaybackAuthPurpose)) {
+            clearPendingPlaybackAuthRequest();
+            pendingProviderBusyReport = false;
+        }
+    }
+
+    private void registerPlaybackAuthReceiver() {
+        playbackAuthReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null
+                        || !ACTION_APPLY_PLAYBACK_AUTH.equals(intent.getAction())) return;
+                acceptPlaybackAuth(intent);
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                playbackAuthReceiver,
+                new IntentFilter(ACTION_APPLY_PLAYBACK_AUTH),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private boolean requestPlaybackAuth(String purpose) {
+        if (!NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)
+                || !("heartbeat".equals(purpose) || "provider_failure".equals(purpose))) {
+            return false;
+        }
+        if (pendingPlaybackAuthRequestNonce != null) return true;
+        String requestNonce = UUID.randomUUID().toString();
+        pendingPlaybackAuthRequestNonce = requestNonce;
+        pendingPlaybackAuthPurpose = purpose;
+        handler.removeCallbacks(playbackAuthTimeout);
+        handler.postDelayed(playbackAuthTimeout, PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS);
+        try {
+            sendBroadcast(new Intent(ACTION_REQUEST_PLAYBACK_AUTH)
+                    .setPackage(getPackageName())
+                    .putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId)
+                    .putExtra(EXTRA_PLAYBACK_AUTH_REQUEST_NONCE, requestNonce));
+            return true;
+        } catch (RuntimeException ignored) {
+            clearPendingPlaybackAuthRequest();
+            return false;
+        }
+    }
+
+    private void acceptPlaybackAuth(Intent intent) {
+        if (intent == null || playbackAuthChannelId == null
+                || pendingPlaybackAuthRequestNonce == null) return;
+        String channelId = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        String requestNonce = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_REQUEST_NONCE);
+        if (!playbackAuthChannelId.equals(channelId)
+                || !pendingPlaybackAuthRequestNonce.equals(requestNonce)) return;
+        String kind = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_KIND);
+        String bearer = intent.getStringExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        intent.removeExtra(EXTRA_PLAYBACK_AUTH_KIND);
+        intent.removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
+        String purpose = pendingPlaybackAuthPurpose;
+        boolean reportProviderBusy = pendingProviderBusyReport;
+        pendingProviderBusyReport = false;
+        clearPendingPlaybackAuthRequest();
+        if (!NativePlaybackAuthPolicy.isFreshBearer(
+                kind, bearer, System.currentTimeMillis() / 1000L)) {
+            if ("heartbeat".equals(purpose)) {
+                handlePlaybackHeartbeatResult(playbackSessionId, "AUTH_UNAVAILABLE");
+            }
+            return;
+        }
+        if ("heartbeat".equals(purpose)) {
+            final String heartbeatSessionId = playbackSessionId;
+            final long heartbeatGeneration = playbackHeartbeatGeneration;
+            playbackHeartbeatRequestInFlight = true;
+            NativePlaybackTelemetry.recordHeartbeat(
+                    bearer,
+                    heartbeatSessionId,
+                    resultCode -> runOnUiThread(new Runnable() {
+                        @Override public void run() {
+                            if (heartbeatGeneration != playbackHeartbeatGeneration) return;
+                            playbackHeartbeatRequestInFlight = false;
+                            handlePlaybackHeartbeatResult(heartbeatSessionId, resultCode);
+                        }
+                    }));
+            return;
+        }
+        if ("provider_failure".equals(purpose) && reportProviderBusy) {
+            NativePlaybackTelemetry.reportProviderBusy(bearer, playbackSessionId);
+        }
+    }
+
+    private void clearPendingPlaybackAuthRequest() {
+        handler.removeCallbacks(playbackAuthTimeout);
+        pendingPlaybackAuthRequestNonce = null;
+        pendingPlaybackAuthPurpose = null;
+    }
+
+    private void handlePlaybackHeartbeatResult(
+            final String heartbeatSessionId, final String resultCode) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (heartbeatSessionId == null
+                        || !heartbeatSessionId.equals(playbackSessionId)
+                        || isFinishing() || player == null || endedNaturally) return;
+                PlaybackHeartbeatFailurePolicy.Decision decision =
+                        playbackHeartbeatFailurePolicy.onResult(
+                                resultCode,
+                                android.os.SystemClock.elapsedRealtime());
+                if (decision == PlaybackHeartbeatFailurePolicy.Decision.STOP_SUPERSEDED) {
+                    showProviderAccountConflict(false);
+                } else if (decision
+                        == PlaybackHeartbeatFailurePolicy.Decision.STOP_SESSION_INVALID) {
+                    showPlaybackSessionInvalid();
+                } else if (decision
+                        == PlaybackHeartbeatFailurePolicy.Decision.STOP_NETWORK_UNVERIFIED) {
+                    showPlaybackLivenessLost();
+                }
+            }
+        });
+    }
+
+    private void stopForPlaybackVerificationFailure(String title, String message) {
+        recoveryGeneration++;
+        clearFreshStreamRequest(true);
+        handler.removeCallbacks(bufferWatchdog);
+        handler.removeCallbacks(healthyRecoveryReset);
+        stopPlaybackHeartbeat();
+        if (player != null) {
+            try { player.stop(); } catch (RuntimeException ignored) { }
+        }
+        showActionableError(title, message);
+    }
+
+    private void showPlaybackSessionInvalid() {
+        stopForPlaybackVerificationFailure(
+                getString(R.string.player_error_session_invalid_title),
+                getString(R.string.player_error_session_invalid));
+    }
+
+    private void showPlaybackLivenessLost() {
+        stopForPlaybackVerificationFailure(
+                getString(R.string.player_error_liveness_title),
+                getString(R.string.player_error_liveness));
+    }
+
+    private void showProviderAccountConflict(boolean reportProviderBusy) {
+        recoveryGeneration++;
+        clearFreshStreamRequest(true);
+        handler.removeCallbacks(bufferWatchdog);
+        handler.removeCallbacks(healthyRecoveryReset);
+        stopPlaybackHeartbeat();
+        if (player != null) {
+            try { player.stop(); } catch (RuntimeException ignored) { }
+        }
+        showActionableError(
+                getString(R.string.player_error_provider_in_use_title),
+                getString(R.string.player_error_provider_in_use));
+        if (reportProviderBusy) reportProviderBusy();
+    }
+
+    private void reportProviderBusy() {
+        clearPendingPlaybackAuthRequest();
+        pendingProviderBusyReport = true;
+        if (!requestPlaybackAuth("provider_failure")) {
+            pendingProviderBusyReport = false;
+        }
     }
 
     /** Map ExoPlayer errors to concise, actionable copy; technical details stay in Logcat. */
@@ -1395,6 +1657,9 @@ public class PlayerActivity extends Activity {
             }
 
             clearFreshStreamRequest(false);
+            playbackSessionId = NativePlaybackTelemetry.boundedSessionId(
+                    payload.optString("sessionId", ""));
+            playbackHeartbeatFailurePolicy.reset();
             originalUrl = nextUrl;
             fallbackUrl = emptyToNull(payload.optString("fallbackUrl", ""));
             streamHost = hostOf(nextUrl);
@@ -3518,6 +3783,7 @@ public class PlayerActivity extends Activity {
         if (isInPip) hideOverlayNow();
         else showControls();
         applyPlaybackIntent();
+        updatePlaybackHeartbeat();
     }
 
     /**
@@ -3573,6 +3839,7 @@ public class PlayerActivity extends Activity {
         super.onStart();
         activityForeground = true;
         applyPlaybackIntent();
+        updatePlaybackHeartbeat();
     }
 
     @Override
@@ -3580,11 +3847,13 @@ public class PlayerActivity extends Activity {
         super.onResume();
         activityForeground = true;
         applyPlaybackIntent();
+        updatePlaybackHeartbeat();
     }
 
     @Override
     protected void onPause() {
         activityForeground = false;
+        stopPlaybackHeartbeat();
         maybePersistProgress(true);
         applyPlaybackIntent();
         super.onPause();
@@ -3593,6 +3862,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onStop() {
         activityForeground = false;
+        stopPlaybackHeartbeat();
         maybePersistProgress(true);
         applyPlaybackIntent();
         super.onStop();
@@ -3650,6 +3920,10 @@ public class PlayerActivity extends Activity {
                 data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
                 data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
             }
+            if (playbackAuthChannelId != null) {
+                if (data == null) data = new android.content.Intent();
+                data.putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId);
+            }
             if (data != null) setResult(RESULT_OK, data);
         } catch (Exception ignored) { /* result is best-effort */ }
         super.finish();
@@ -3657,9 +3931,22 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stopPlaybackHeartbeat();
         playbackAuthToken = null;
+        pendingPlaybackAuthRequestNonce = null;
+        pendingPlaybackAuthPurpose = null;
+        pendingProviderBusyReport = false;
+        playbackHeartbeatRequestInFlight = false;
+        playbackHeartbeatGeneration++;
+        playbackAuthChannelId = null;
+        playbackSessionId = null;
+        playbackHeartbeatFailurePolicy.reset();
         clearFreshStreamRequest(true);
         handler.removeCallbacksAndMessages(null);
+        if (playbackAuthReceiver != null) {
+            try { unregisterReceiver(playbackAuthReceiver); } catch (Exception ignored) { }
+            playbackAuthReceiver = null;
+        }
         if (freshStreamReceiver != null) {
             try { unregisterReceiver(freshStreamReceiver); } catch (Exception ignored) { }
             freshStreamReceiver = null;

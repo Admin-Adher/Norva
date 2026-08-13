@@ -25,6 +25,10 @@ final class NativePlaybackTelemetry {
     private NativePlaybackTelemetry() {
     }
 
+    interface HeartbeatCallback {
+        void onResult(String resultCode);
+    }
+
     static String boundedSessionId(String value) {
         if (value == null || value.length() != 36 || !UUID.matcher(value).matches()) return null;
         return value.toLowerCase(Locale.ROOT);
@@ -42,6 +46,7 @@ final class NativePlaybackTelemetry {
             case "playback_interrupted":
             case "fresh_stream_timeout":
             case "resolve_failed":
+            case "provider_busy":
             case "none":
                 return normalized;
             default:
@@ -104,6 +109,11 @@ final class NativePlaybackTelemetry {
     }
 
     static void recordHeartbeat(final String authToken, final String playbackSessionId) {
+        recordHeartbeat(authToken, playbackSessionId, null);
+    }
+
+    static void recordHeartbeat(final String authToken, final String playbackSessionId,
+                                final HeartbeatCallback callback) {
         final String boundedSessionId = boundedSessionId(playbackSessionId);
         if (!validAuthToken(authToken) || boundedSessionId == null) return;
         startWorker("norva-playback-heartbeat", new Runnable() {
@@ -119,11 +129,42 @@ final class NativePlaybackTelemetry {
                     connection.setFixedLengthStreamingMode(0);
                     OutputStream out = connection.getOutputStream();
                     out.close();
-                    consumeBoundedResponse(connection);
+                    int status = connection.getResponseCode();
+                    String response = readBoundedResponse(connection);
+                    String result = status >= 200 && status < 300
+                            ? "ok"
+                            : (status == 409 && response.contains(
+                                    ProviderPlaybackPolicy.PLAYBACK_SUPERSEDED)
+                                    ? ProviderPlaybackPolicy.PLAYBACK_SUPERSEDED
+                                    : "HTTP_" + status);
+                    if (callback != null) callback.onResult(result);
                 } catch (Throwable ignored) {
                     // A missed lease pulse must never interrupt playback.
+                    if (callback != null) callback.onResult("NETWORK_ERROR");
                 } finally {
                     if (connection != null) connection.disconnect();
+                }
+            }
+        });
+    }
+
+    static void reportProviderBusy(final String authToken, final String playbackSessionId) {
+        final String boundedSessionId = boundedSessionId(playbackSessionId);
+        if (!validAuthToken(authToken) || boundedSessionId == null) return;
+        startWorker("norva-provider-busy", new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject body = new JSONObject();
+                    body.put("code", "PROVIDER_BUSY");
+                    body.put("networkCause", "PROVIDER_BUSY");
+                    body.put("upstreamStatus", ProviderPlaybackPolicy.HTTP_PROVIDER_BUSY);
+                    postJson(
+                            PLAYBACK_SESSIONS_URL + boundedSessionId + "/provider-failure",
+                            authToken,
+                            body);
+                } catch (Throwable ignored) {
+                    // The local terminal state is authoritative even if reporting fails.
                 }
             }
         });
@@ -225,17 +266,24 @@ final class NativePlaybackTelemetry {
     }
 
     private static void consumeBoundedResponse(HttpURLConnection connection) throws Exception {
+        readBoundedResponse(connection);
+    }
+
+    private static String readBoundedResponse(HttpURLConnection connection) throws Exception {
         InputStream in = connection.getResponseCode() < 400
                 ? connection.getInputStream() : connection.getErrorStream();
-        if (in == null) return;
+        if (in == null) return "";
         try {
             byte[] sink = new byte[256];
             int remaining = MAX_RESPONSE_BYTES;
+            StringBuilder response = new StringBuilder();
             while (remaining > 0) {
                 int read = in.read(sink, 0, Math.min(sink.length, remaining));
                 if (read < 0) break;
+                response.append(new String(sink, 0, read, StandardCharsets.UTF_8));
                 remaining -= read;
             }
+            return response.toString();
         } finally {
             in.close();
         }

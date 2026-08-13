@@ -4,7 +4,6 @@ import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import {
   engineRawTokenExpiresAt,
-  nativeFallbackTokenExpiresAt,
   playbackTransportExpiresAt,
 } from "../_shared/playback-expiry.mjs";
 import {
@@ -12,6 +11,11 @@ import {
   NATIVE_HEARTBEAT_ACTIVE_STATUSES,
   NATIVE_HEARTBEAT_MAX_SESSION_AGE_SECONDS,
 } from "../_shared/native-playback-heartbeat-policy.mjs";
+import {
+  decideProviderCircuit,
+  isProviderBusyFailure,
+} from "../_shared/provider-playback-circuit-policy.mjs";
+import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -77,6 +81,12 @@ const RUNTIME_CONFIG_KEYS = [
 const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
   Deno.env.get("NORVA_PROVIDER_SLOT_RELEASE_DELAY_MS") ?? Deno.env.get("PROVIDER_SLOT_RELEASE_DELAY_MS"),
   2_500,
+  0,
+  15_000,
+);
+const PROVIDER_NATIVE_TAKEOVER_GRACE_MS = boundedInt(
+  Deno.env.get("NORVA_PROVIDER_NATIVE_TAKEOVER_GRACE_MS"),
+  6_000,
   0,
   15_000,
 );
@@ -150,8 +160,10 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 40,
+        version: 42,
         nativeHeartbeatProtocol: 1,
+        providerCircuitProtocol: 1,
+        relayTakeoverProtocol: 1,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -202,6 +214,20 @@ Deno.serve(async (req) => {
     ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await heartbeatPlaybackSession(segments[2], identity.userId, supabase));
+    }
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      segments[1] === "sessions" &&
+      segments[2] &&
+      segments[3] === "provider-failure" &&
+      !segments[4]
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      return json(
+        req,
+        await reportProviderPlaybackFailure(req, segments[2], identity.userId, supabase),
+      );
     }
     if (req.method === "GET" && segments[0] === "playback" && segments[1] === "sessions" && segments[2]) {
       const identity = await requireIdentity(req, supabase);
@@ -306,19 +332,32 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   return { userId: device.user_id, deviceId: device.id };
 }
 
-async function requirePlaybackCapacity(userId: string, db: SupabaseClient) {
+async function requirePlaybackCapacity(
+  userId: string,
+  db: SupabaseClient,
+  replacingProviderAccountHash: string | null = null,
+) {
   const decision = await getEntitlementDecision(db, userId);
   if (!decision.allowed) throwEntitlementRequired("playback", decision);
 
   const limit = limitNumber(decision.limits, "concurrent_streams", 0);
   if (limit <= 0) throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
 
-  const { count, error } = await db
+  let activeQuery = db
     .from("cloud_playback_sessions")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
     .in("status", ["pending", "ready"])
     .gt("expires_at", new Date().toISOString());
+  // Starting another title on the same single-slot provider account is a
+  // replacement, not a second concurrent entitlement. The atomic claim below
+  // expires that exact account's previous session before the new one is visible.
+  if (replacingProviderAccountHash) {
+    activeQuery = activeQuery.or(
+      `provider_account_hash.is.null,provider_account_hash.neq.${replacingProviderAccountHash}`,
+    );
+  }
+  const { count, error } = await activeQuery;
 
   if (error) throwDb(error, "Unable to verify Norva access limits");
   if ((count ?? 0) >= limit) {
@@ -335,6 +374,185 @@ function throwEntitlementRequired(feature: string, decision: unknown, usage?: un
   });
 }
 
+function publicPlaybackSession(value: unknown): JsonRecord {
+  const session = recordOrEmpty(value);
+  const {
+    provider_account_hash: _providerAccountHash,
+    superseded_by: _supersededBy,
+    ...safe
+  } = session;
+  return safe;
+}
+
+async function providerAccountHashFromUrl(targetUrl: string): Promise<string> {
+  const accountKey = providerAccountKeyFromUrl(targetUrl);
+  if (!accountKey) throw new HttpError(422, "Provider account could not be identified");
+  return await sha256Hex(accountKey);
+}
+
+async function assertProviderCircuitClosed(
+  providerAccountHash: string,
+  db: SupabaseClient,
+) {
+  const { data, error } = await db
+    .from("provider_playback_circuits")
+    .select("blocked_until,failure_count,reason_code")
+    .eq("provider_account_hash", providerAccountHash)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify provider playback availability");
+  const decision = decideProviderCircuit({ blockedUntil: data?.blocked_until });
+  if (!decision.open) return;
+  throw new HttpError(409, "Provider account is already in use", {
+    code: "PROVIDER_ACCOUNT_BUSY",
+    upstreamStatus: 458,
+    retryAfterSeconds: decision.retryAfterSeconds,
+    blockedUntil: data?.blocked_until ?? null,
+  });
+}
+
+async function openProviderPlaybackCircuit(
+  providerAccountHash: string,
+  db: SupabaseClient,
+  escalate: boolean,
+) {
+  const { data, error } = await db.rpc("open_provider_playback_circuit", {
+    p_provider_account_hash: providerAccountHash,
+    p_reason_code: "PROVIDER_BUSY",
+    p_escalate: escalate,
+  });
+  if (error) throwDb(error, "Unable to open provider playback circuit");
+  const row = Array.isArray(data) ? recordOrEmpty(data[0]) : recordOrEmpty(data);
+  const blockedUntil = stringOrNull(row.blocked_until);
+  const decision = decideProviderCircuit({ blockedUntil });
+  return {
+    code: "PROVIDER_ACCOUNT_BUSY",
+    upstreamStatus: 458,
+    blockedUntil,
+    retryAfterSeconds: decision.retryAfterSeconds,
+    failureCount: boundedInt(row.failure_count, 1, 1, 16),
+  };
+}
+
+async function releaseSupersededPlaybackSessions(
+  sessionIds: string[],
+  db: SupabaseClient,
+) {
+  if (!sessionIds.length) return 0;
+  const { data: sessions, error } = await db
+    .from("cloud_playback_sessions")
+    .select("id,user_id")
+    .in("id", sessionIds);
+  if (error) throwDb(error, "Unable to load superseded playback sessions");
+  const results = await Promise.allSettled(
+    (sessions ?? []).map((session) => expirePlaybackSession(
+      stringOr(session.id, ""),
+      stringOr(session.user_id, ""),
+      db,
+    )),
+  );
+  results.forEach((result) => {
+    if (result.status === "rejected") {
+      console.warn(
+        "[norva-playback] superseded transport cleanup failed",
+        result.reason instanceof Error ? result.reason.message : "unknown",
+      );
+    }
+  });
+  return sessionIds.length;
+}
+
+const PROVIDER_NETWORK_CAUSES = new Set([
+  "PROVIDER_BUSY",
+  "PROVIDER_CONNECT_TIMEOUT",
+  "PROVIDER_RESPONSE_TIMEOUT",
+  "PROVIDER_CONNECTION_RESET",
+  "PROVIDER_DNS_FAILURE",
+  "PROVIDER_TLS_FAILURE",
+  "PROVIDER_NETWORK_UNREACHABLE",
+  "PROVIDER_HTTP_ERROR",
+]);
+
+function boundedProviderNetworkCause(value: unknown) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return PROVIDER_NETWORK_CAUSES.has(normalized) ? normalized : "PROVIDER_HTTP_ERROR";
+}
+
+async function reportProviderPlaybackFailure(
+  req: Request,
+  id: string,
+  userId: string,
+  db: SupabaseClient,
+) {
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(id)) {
+    throw new HttpError(400, "Invalid playback session id");
+  }
+  const body = await readJson(req);
+  const { data: session, error } = await db
+    .from("cloud_playback_sessions")
+    .select("id,user_id,status,provider_account_hash,superseded_at,error_code")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify provider playback failure");
+  if (!session) throw new HttpError(404, "Playback session unavailable");
+  if (session.superseded_at) {
+    throw new HttpError(409, "Playback session was replaced", {
+      code: "PLAYBACK_SUPERSEDED",
+    });
+  }
+
+  const providerAccountHash = stringOr(session.provider_account_hash, "");
+  if (!providerAccountHash) throw new HttpError(409, "Playback session has no provider account");
+  const upstreamStatus = boundedNullableInt(
+    body.upstreamStatus ?? body.upstream_status ?? body.httpStatus ?? body.http_status,
+    400,
+    599,
+  );
+  const requestedCode = stringOr(body.code ?? body.errorCode ?? body.error_code, "");
+  const providerBusy = isProviderBusyFailure({ code: requestedCode, upstreamStatus });
+  const networkCause = providerBusy
+    ? "PROVIDER_BUSY"
+    : boundedProviderNetworkCause(body.networkCause ?? body.network_cause ?? requestedCode);
+
+  // Idempotent client reporting: one playback attempt can surface the same
+  // terminal signal through Media3 and its WebView close callback. Do not extend
+  // the circuit or increase its failure count twice for the same session.
+  if (stringOr(session.error_code, "") === networkCause.toLowerCase()) {
+    return { ok: true, duplicate: true, code: networkCause };
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await db
+    .from("cloud_playback_sessions")
+    .update({
+      status: "failed",
+      error_code: networkCause.toLowerCase(),
+      error_message: networkCause,
+      expires_at: now,
+      updated_at: now,
+    })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .in("status", ["pending", "ready"])
+    .is("error_code", null)
+    .select("id")
+    .maybeSingle();
+  if (updateError) throwDb(updateError, "Unable to record provider playback failure");
+  if (!updated) return { ok: true, duplicate: true, code: networkCause };
+
+  const circuit = providerBusy
+    ? await openProviderPlaybackCircuit(providerAccountHash, db, false)
+    : null;
+  const cleanup = await expirePlaybackSession(id, userId, db).catch(() => null);
+  return {
+    ok: true,
+    code: networkCause,
+    upstreamStatus,
+    circuit,
+    transportReleased: Boolean(cleanup),
+  };
+}
+
 async function createPlaybackSession(
   req: Request,
   userId: string,
@@ -346,7 +564,14 @@ async function createPlaybackSession(
   const deviceId = stringOrNull(body.deviceId ?? body.device_id) ?? defaultDeviceId;
   const itemType = stringOr(body.itemType ?? body.item_type, "");
   const itemId = stringOr(body.itemId ?? body.item_id, "");
-  let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
+  if (!sourceId || !itemType || !itemId) {
+    throw new HttpError(400, "sourceId, itemType and itemId are required");
+  }
+  // The source ownership check must happen before any provider target is
+  // resolved or hashed. Client-provided URLs are deliberately ignored.
+  await assertOwnedSource(sourceId, userId, db);
+  if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+
   const requestedMode = stringOr(body.mode, "auto");
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const parentSeriesId = itemType === "series"
@@ -358,7 +583,7 @@ async function createPlaybackSession(
       "",
     )
     : "";
-  const episodeCoordinates = sourceId && itemType === "series" && itemId
+  const episodeCoordinates = itemType === "series"
     ? await resolveCatalogSeriesEpisodeCoordinates(
       db,
       userId,
@@ -380,32 +605,25 @@ async function createPlaybackSession(
   // Coordinates owned by the user are authoritative. Never let a caller attach
   // arbitrary bytes to an otherwise valid source/item tuple: exact-file caches
   // and language fanout are keyed from those coordinates.
-  if (sourceId && itemType && itemId) {
-    const resolved = episodeCoordinates
-      ? await resolveExactEpisodePlaybackTarget(
-        sourceId,
-        userId,
-        episodeCoordinates,
-        requestedPlaybackHint,
-        db,
-      )
-      : await resolvePlaybackTarget(
-        sourceId,
-        itemType,
-        itemId,
-        userId,
-        db,
-        requestedPlaybackHint,
-      );
-    targetUrl = resolved.targetUrl;
-    requestedPlaybackHint = mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint);
-  }
-  if (!itemType || !itemId || !targetUrl) {
-    throw new HttpError(400, "itemType, itemId and targetUrl are required");
-  }
+  const resolved = episodeCoordinates
+    ? await resolveExactEpisodePlaybackTarget(
+      sourceId,
+      userId,
+      episodeCoordinates,
+      requestedPlaybackHint,
+      db,
+    )
+    : await resolvePlaybackTarget(
+      sourceId,
+      itemType,
+      itemId,
+      userId,
+      db,
+      requestedPlaybackHint,
+    );
+  const targetUrl = resolved.targetUrl;
+  requestedPlaybackHint = mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint);
   assertHttpUrl(targetUrl);
-  if (sourceId) await assertOwnedSource(sourceId, userId, db);
-  if (deviceId) await assertOwnedDevice(deviceId, userId, db);
 
   const mode = choosePlaybackMode(requestedMode, body);
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
@@ -422,90 +640,109 @@ async function createPlaybackSession(
     ? transportExpiresAt
     : expiresAt;
   const targetUrlHash = await sha256Hex(targetUrl);
+  const providerAccountScope = "providerAccountScope" in resolved
+    ? stringOr(resolved.providerAccountScope, "")
+    : "";
+  const providerAccountHash = providerAccountScope
+    ? await sha256Hex(providerAccountScope)
+    : await providerAccountHashFromUrl(targetUrl);
+  await assertProviderCircuitClosed(providerAccountHash, db);
 
-  const closedGatewaySessions = await closeOpenGatewaySessionsForUser(userId, db);
+  await requirePlaybackCapacity(userId, db, providerAccountHash);
+
+  const sessionId = crypto.randomUUID();
+  const sessionStatus = mode === "transcode" ? "pending" : "ready";
+  const { data: claimRows, error: claimError } = await db.rpc(
+    "claim_cloud_playback_session",
+    {
+      p_session_id: sessionId,
+      p_user_id: userId,
+      p_source_id: sourceId,
+      p_device_id: deviceId,
+      p_item_type: itemType,
+      p_item_id: itemId,
+      p_mode: mode,
+      p_status: sessionStatus,
+      p_target_url_hash: targetUrlHash,
+      p_provider_account_hash: providerAccountHash,
+      p_stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
+      p_playback_hint: requestedPlaybackHint,
+      p_expires_at: expiresAt,
+    },
+  );
+  if (claimError) throwDb(claimError, "Unable to claim provider playback session");
+
+  const claim = Array.isArray(claimRows)
+    ? recordOrEmpty(claimRows[0])
+    : recordOrEmpty(claimRows);
+  const supersededSessionIds = Array.isArray(claim.superseded_session_ids)
+    ? claim.superseded_session_ids
+      .map((value) => stringOrNull(value))
+      .filter((value): value is string => Boolean(value))
+    : [];
+  const { data: session, error: sessionError } = await db
+    .from("cloud_playback_sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .single();
+  if (sessionError || !session) {
+    if (sessionError) throwDb(sessionError, "Unable to load claimed playback session");
+    throw new HttpError(500, "Unable to load claimed playback session");
+  }
+
+  const playbackCreatedAt = stringOr(session.created_at, new Date().toISOString());
   const edgeCoordination = mode === "transcode"
     ? await prepareEdgeSessionCoordinator({
       userId,
       sourceId,
       deviceId,
+      providerAccountHash,
       itemType,
       itemId,
       targetUrlHash,
+      playbackCreatedAt,
+      supersededSessionIds,
       expiresAt: gatewayTransportExpiresAt,
     }, db)
     : null;
-  // Only the cloud-gateway transcode path shares the provider's single slot, so
-  // only it benefits from a brief release wait after evicting a previous gateway
-  // session. Direct/relay (residential native players, pass-through) never hold a
-  // gateway slot — make them wait nothing. The gateway also retries provider 401s
-  // internally, so this is a small head start, not the old 8s blanket stall that
-  // made switching titles feel slow.
-  const needsSlotWait = mode === "transcode" && closedGatewaySessions > 0;
-  const startupWaitMs = Math.max(
-    edgeCoordination?.waitMs ?? 0,
-    needsSlotWait ? PROVIDER_SLOT_RELEASE_DELAY_MS : 0,
-  );
+  // The cloud-gateway transcode path uses its coordinator's bounded release wait.
+  // Direct/relay replacement is handled after the atomic claim: the old native
+  // session is marked superseded first, then gets one short heartbeat window to
+  // close its provider socket. No gateway or provider-auth retry is involved.
+  const startupWaitMs = edgeCoordination?.waitMs ?? 0;
   if (startupWaitMs) await sleep(startupWaitMs);
-  await requirePlaybackCapacity(userId, db);
 
-  const { data: session, error } = await db
-    .from("cloud_playback_sessions")
-    .insert({
-      user_id: userId,
-      source_id: sourceId,
-      device_id: deviceId,
-      item_type: itemType,
-      item_id: itemId,
-      mode,
-      status: mode === "transcode" ? "pending" : "ready",
-      target_url_hash: targetUrlHash,
-      stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
-      playback_hint: requestedPlaybackHint,
-      expires_at: expiresAt,
-    })
-    .select("*")
-    .single();
-  if (error) throwDb(error, "Unable to create playback session");
+  const releasedSuperseded = await releaseSupersededPlaybackSessions(
+    supersededSessionIds,
+    db,
+  );
+  if (mode === "transcode" && releasedSuperseded > 0 && !startupWaitMs) {
+    await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
+  }
+  // Gateway pumps can be aborted server-side immediately. A direct native
+  // session is owned by the previous device, so give its short heartbeat poll
+  // one bounded window to observe PLAYBACK_SUPERSEDED and release the provider
+  // socket before this replacement URL is returned.
+  if (mode !== "transcode" && releasedSuperseded > 0) {
+    await sleep(PROVIDER_NATIVE_TAKEOVER_GRACE_MS);
+  }
 
   // Account busy-lock writer: every playback session start means this provider account's
   // single connection slot is (about to be) held — direct native plays included. Best-effort.
   await touchProviderAccountByUrl(db, targetUrl, "session");
 
   if (mode === "direct") {
-    // Direct plays straight from the device's residential IP. Some providers
-    // reject that IP (e.g. HTTP 401) while accepting the media gateway's IP, so
-    // hand the native player a gateway byte-pipe URL to fall back to on an
-    // auth/IP/connection error. Minting it is just an HMAC — no DB write, no
-    // provider connection (see createBytePipeAccess) — so it's safe to attach to
-    // every direct response; the gateway only dials the provider if the device
-    // actually fetches it. Best-effort: if the gateway isn't configured, direct
-    // still works without a fallback.
-    let fallbackUrl: string | null = null;
-    let fallbackExpiresAt: string | null = null;
-    try {
-      fallbackExpiresAt = nativeFallbackTokenExpiresAt({
-        itemType,
-        playbackHint: requestedPlaybackHint,
-        sessionTtlSeconds: ttlSeconds,
-      });
-      const fb = await createBytePipeAccess(
-        session.id,
-        userId,
-        targetUrl,
-        fallbackExpiresAt,
-        db,
-        userAgent,
-      );
-      fallbackUrl = fb.url;
-    } catch (_) { /* gateway not configured — no fallback, direct unaffected */ }
+    // Native playback gets exactly one transport. A hidden gateway fallback
+    // would turn one provider refusal into a second concurrent connection and
+    // obscure the original HTTP/network cause.
     return {
-      session,
+      session: publicPlaybackSession(session),
       playback: {
         mode,
         url: targetUrl,
-        fallbackUrl,
-        fallbackExpiresAt,
+        fallbackUrl: null,
+        fallbackExpiresAt: null,
         expiresAt,
       },
     };
@@ -533,7 +770,9 @@ async function createPlaybackSession(
       // instead of the two lanes silently fighting a single-slot provider (458).
       // Coordinator unavailable → null → plays exactly as before (best-effort).
       const rawCoordination = await prepareEdgeSessionCoordinator({
-        userId, sourceId, deviceId, itemType, itemId, targetUrlHash,
+        userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
+        playbackCreatedAt,
+        supersededSessionIds,
         // The cloud playback session still expires after 15 minutes, but the
         // coordinator must not abort a legitimate later Range request. A new
         // playback start evicts this source-scoped record immediately.
@@ -552,7 +791,8 @@ async function createPlaybackSession(
         playbackSessionId: session.id,
         gatewaySessionId: null,
         lane: "raw",
-        itemType, itemId, targetUrlHash, expiresAt: rawTokenExpiresAt,
+        itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds,
+        expiresAt: rawTokenExpiresAt,
       });
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
@@ -747,7 +987,7 @@ async function createPlaybackSession(
         } catch (_) { /* exact-language union is best-effort; playback must continue */ }
       }
       return {
-        session,
+        session: publicPlaybackSession(session),
         playback: {
           mode: "relay",
           url: pipe.url,
@@ -767,29 +1007,95 @@ async function createPlaybackSession(
         },
       };
     }
-    // Relay credentials stay aligned with the revocable entitlement session.
-    // Unlike a Gateway session, the stateless relay does not currently consult
-    // the coordinator/session ledger on every segment request.
-    const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
-    return {
-      session,
-      playback: {
-        mode,
-        url: relay.url,
-        tokenExpiresAt: expiresAt,
-      },
-    };
+    // Browser-safe relay traffic is registered in the same revocable session
+    // module as gateway and raw lanes. Every /relay request proves this exact
+    // generation is still active, so a cross-device claim can stop an already
+    // issued browser URL instead of waiting for its token to expire.
+    const relayTransportExpiresAt = transportExpiresAt;
+    const relayCoordination = await prepareEdgeSessionCoordinator({
+      userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
+      playbackCreatedAt,
+      supersededSessionIds,
+      expiresAt: relayTransportExpiresAt,
+    }, db);
+    if (!relayCoordination?.lockId) {
+      const coordinationError = new HttpError(503, "Playback session coordinator is unavailable", {
+        code: "PLAYBACK_COORDINATOR_UNAVAILABLE",
+      });
+      await recordPlaybackSessionFailure(db, {
+        userId, deviceId, playbackSessionId: session.id, sourceId, itemType, itemId,
+        playbackMode: mode, clientMetadata, error: coordinationError,
+      });
+      throw coordinationError;
+    }
+    if (relayCoordination.waitMs) await sleep(relayCoordination.waitMs);
+
+    try {
+      const relay = await createRelayAccess(
+        session.id,
+        userId,
+        targetUrl,
+        relayTransportExpiresAt,
+        db,
+        relayCoordination.coord,
+        userAgent,
+      );
+      const relayCommit = await commitEdgeSessionCoordinator(relayCoordination, {
+        playbackSessionId: session.id,
+        gatewaySessionId: null,
+        lane: "relay",
+        itemType,
+        itemId,
+        targetUrlHash,
+        playbackCreatedAt,
+        supersededSessionIds,
+        expiresAt: relayTransportExpiresAt,
+      });
+      if (!relayCommit?.ok) {
+        throw new HttpError(503, "Playback session coordinator did not accept the relay session", {
+          code: "PLAYBACK_COORDINATOR_UNAVAILABLE",
+        });
+      }
+      if (relayCommit.waitMs) await sleep(relayCommit.waitMs);
+      return {
+        session: publicPlaybackSession(session),
+        playback: {
+          mode,
+          url: relay.url,
+          tokenExpiresAt: relayTransportExpiresAt,
+        },
+      };
+    } catch (error) {
+      await abortEdgeSessionCoordinator(relayCoordination);
+      await recordPlaybackSessionFailure(db, {
+        userId, deviceId, playbackSessionId: session.id, sourceId, itemType, itemId,
+        playbackMode: mode, clientMetadata, error,
+      });
+      throw error;
+    }
   }
 
   let gateway;
   try {
-    gateway = await createGatewaySession(session.id, userId, targetUrl, gatewayTransportExpiresAt, db, mode, userAgent, requestedPlaybackHint);
+    gateway = await createGatewaySession(
+      session.id,
+      userId,
+      targetUrl,
+      providerAccountHash,
+      gatewayTransportExpiresAt,
+      db,
+      mode,
+      userAgent,
+      requestedPlaybackHint,
+    );
     await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
       itemType,
       itemId,
       targetUrlHash,
+      playbackCreatedAt,
+      supersededSessionIds,
       expiresAt: gatewayTransportExpiresAt,
     });
   } catch (error) {
@@ -847,7 +1153,7 @@ async function createPlaybackSession(
     }
     : gateway.session;
   return {
-    session,
+    session: publicPlaybackSession(session),
     playback: {
       mode,
       status: gateway.status,
@@ -882,7 +1188,7 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
     .maybeSingle();
   if (error) throwDb(error, "Unable to load playback session");
   if (!data) throw new HttpError(404, "Playback session not found");
-  return { session: data };
+  return { session: publicPlaybackSession(data) };
 }
 
 async function heartbeatPlaybackSession(id: string, userId: string, db: SupabaseClient) {
@@ -894,12 +1200,17 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
   const nowIso = new Date(nowMs).toISOString();
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
-    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at")
+    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throwDb(error, "Unable to verify playback session");
   if (!session) throw new HttpError(404, "Playback session unavailable");
+  if (session.superseded_at) {
+    throw new HttpError(409, "Playback session was replaced", {
+      code: "PLAYBACK_SUPERSEDED",
+    });
+  }
 
   const status = stringOr(session.status, "");
   const sourceId = stringOrNull(session.source_id);
@@ -947,11 +1258,16 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
   if (!renewed) {
     const { data: current, error: currentError } = await db
       .from("cloud_playback_sessions")
-      .select("source_id,status,created_at,native_heartbeat_at,expires_at")
+      .select("source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at")
       .eq("id", id)
       .eq("user_id", userId)
       .maybeSingle();
     if (currentError) throwDb(currentError, "Unable to recheck playback session");
+    if (current?.superseded_at) {
+      throw new HttpError(409, "Playback session was replaced", {
+        code: "PLAYBACK_SUPERSEDED",
+      });
+    }
     const currentPolicy = current
       ? decideNativePlaybackHeartbeat({
         // Another request may have committed after this handler captured nowMs.
@@ -1052,6 +1368,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   await endEdgeSessionCoordinator({
     userId,
     sourceId: stringOrNull(session.source_id),
+    providerAccountHash: stringOrNull(session.provider_account_hash),
     playbackSessionId: id,
     gatewaySessionId: gatewaySessions
       .map((gateway: JsonRecord) => stringOrNull(gateway.external_session_id))
@@ -1081,7 +1398,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   if (updateError) throwDb(updateError, "Unable to expire playback session");
 
   return {
-    session: expired,
+    session: publicPlaybackSession(expired),
     gatewayClosed: closedGatewayIds.length,
     rawPumpsAborted,
     gatewayErrors: gatewayErrors.length,
@@ -1176,7 +1493,6 @@ async function recordPlaybackEvent(
   if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
   }
-
   return { event: data };
 }
 
@@ -1445,9 +1761,12 @@ async function prepareEdgeSessionCoordinator(
     userId: string;
     sourceId: string | null;
     deviceId: string | null;
+    providerAccountHash: string;
     itemType: string;
     itemId: string;
     targetUrlHash: string;
+    playbackCreatedAt: string;
+    supersededSessionIds: string[];
     expiresAt: string;
   },
   db: SupabaseClient,
@@ -1458,13 +1777,20 @@ async function prepareEdgeSessionCoordinator(
   const ownerKey = await sha256Hex(options.userId);
   const sourceKey = options.sourceId ? await sha256Hex(options.sourceId) : "account";
   const deviceKey = options.deviceId ? await sha256Hex(options.deviceId) : "";
+  const coord = await hmacBase64Url(
+    runtimeConfig.relayTokenSecret,
+    `provider-account:${options.providerAccountHash}`,
+  );
   const body = compactRecord({
+    coord,
     ownerKey,
     sourceKey,
     deviceKey,
     itemType: options.itemType,
     itemId: options.itemId,
     targetHash: options.targetUrlHash,
+    playbackCreatedAt: options.playbackCreatedAt,
+    supersededSessionIds: options.supersededSessionIds,
     expiresAt: options.expiresAt,
   });
 
@@ -1473,6 +1799,7 @@ async function prepareEdgeSessionCoordinator(
 
   return {
     runtimeConfig,
+    coord,
     ownerKey,
     sourceKey,
     deviceKey,
@@ -1490,12 +1817,15 @@ async function commitEdgeSessionCoordinator(
     itemType: string;
     itemId: string;
     targetUrlHash: string;
+    playbackCreatedAt: string;
+    supersededSessionIds: string[];
     expiresAt: string;
   },
 ) {
-  if (!coordination?.runtimeConfig || !coordination.lockId) return;
-  await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/start", compactRecord({
+  if (!coordination?.runtimeConfig || !coordination.lockId) return null;
+  const payload = await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/start", compactRecord({
     lockId: coordination.lockId,
+    coord: coordination.coord,
     ownerKey: coordination.ownerKey,
     sourceKey: coordination.sourceKey,
     deviceKey: coordination.deviceKey,
@@ -1505,14 +1835,20 @@ async function commitEdgeSessionCoordinator(
     itemType: options.itemType,
     itemId: options.itemId,
     targetHash: options.targetUrlHash,
+    playbackCreatedAt: options.playbackCreatedAt,
+    supersededSessionIds: options.supersededSessionIds,
     expiresAt: options.expiresAt,
   }));
+  return payload?.ok === true
+    ? { ok: true, waitMs: boundedInt(payload.waitMs, 0, 0, 15_000) }
+    : null;
 }
 
 async function abortEdgeSessionCoordinator(coordination: Awaited<ReturnType<typeof prepareEdgeSessionCoordinator>>) {
   if (!coordination?.runtimeConfig || !coordination.lockId) return;
   await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/abort", {
     lockId: coordination.lockId,
+    coord: coordination.coord,
     ownerKey: coordination.ownerKey,
     sourceKey: coordination.sourceKey,
   });
@@ -1522,6 +1858,7 @@ async function endEdgeSessionCoordinator(
   options: {
     userId: string;
     sourceId: string | null;
+    providerAccountHash: string | null;
     playbackSessionId: string;
     gatewaySessionId: string | null;
   },
@@ -1529,7 +1866,14 @@ async function endEdgeSessionCoordinator(
 ) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return;
+  const coord = options.providerAccountHash
+    ? await hmacBase64Url(
+      runtimeConfig.relayTokenSecret,
+      `provider-account:${options.providerAccountHash}`,
+    )
+    : null;
   await requestEdgeCoordinator(runtimeConfig, "/sessions/end", compactRecord({
+    coord,
     ownerKey: await sha256Hex(options.userId),
     sourceKey: options.sourceId ? await sha256Hex(options.sourceId) : "account",
     playbackSessionId: options.playbackSessionId,
@@ -1794,10 +2138,6 @@ async function resolvePlaybackTarget(
     }),
     {},
   );
-  if (typeof hint.targetUrl === "string") {
-    return { targetUrl: hint.targetUrl, playbackHint: storedPlaybackHint };
-  }
-
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
@@ -1813,6 +2153,18 @@ async function resolvePlaybackTarget(
         container,
       }),
       playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container })),
+    };
+  }
+
+  if (typeof hint.targetUrl === "string") {
+    // M3U item URLs are imported by trusted server-side sync, but they do not
+    // encode a provider account identity. Scope their breaker/claim key to the
+    // authenticated owner and owned source instead of deriving a global key
+    // from an opaque catalogue URL.
+    return {
+      targetUrl: hint.targetUrl,
+      playbackHint: storedPlaybackHint,
+      providerAccountScope: `user-source:${userId}:${sourceId}`,
     };
   }
 
@@ -1918,6 +2270,7 @@ async function createRelayAccess(
   targetUrl: string,
   expiresAt: string,
   db: SupabaseClient,
+  coord: string,
   userAgent: string | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(db);
@@ -1925,10 +2278,15 @@ async function createRelayAccess(
     throw new HttpError(503, "Norva Relay is not configured");
   }
 
+  // The provider-account coordinator is stable across Norva users who share a
+  // provider credential. Seal it with a random nonce before it enters the
+  // browser-visible token so it cannot become a cross-account correlation id.
+  const route = await sealRelayCoordinatorRoute(runtimeConfig.relayTokenSecret, coord);
   const payload = JSON.stringify({
-    v: 1,
+    v: 2,
+    purpose: "playback",
     sid: playbackSessionId,
-    uid: userId,
+    route,
     url: targetUrl,
     // Carry the source's IPTV User-Agent so the relay reaches the provider with
     // the same UA the gateway uses (a browser UA is 403'd by providers).
@@ -1985,6 +2343,7 @@ async function createGatewaySession(
   playbackSessionId: string,
   userId: string,
   targetUrl: string,
+  providerAccountHash: string,
   expiresAt: string,
   db: SupabaseClient,
   mode: "direct" | "relay" | "transcode",
@@ -2050,7 +2409,21 @@ async function createGatewaySession(
       audioMode: "transcode",
     }));
   }
-  if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
+  if (!response.ok) {
+    const gatewayFailureCode = stringOr(
+      gatewayBody.code ?? gatewayBody.errorCode ?? gatewayBody.error_code,
+      "",
+    );
+    if (isProviderBusyFailure({
+      code: gatewayFailureCode,
+      upstreamStatus: response.status,
+    })) {
+      // This is the only escalating signal: norva-playback itself observed the
+      // gateway's HTTP 458. Open the circuit before preserving that exact error.
+      await openProviderPlaybackCircuit(providerAccountHash, db, true);
+    }
+    throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
+  }
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
   const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
   // The gateway resolves the absolute ffmpeg stream index it actually mapped.
@@ -8344,8 +8717,13 @@ function classifyPlaybackFailure(error: unknown) {
   const detailText = sanitizeTelemetryText(textFromGatewayDetails(details));
   const combined = `${message} ${detailText}`.toLowerCase();
   const providerStatus = extractProviderStatus(details, combined);
+  const gatewayCode = isRecord(details)
+    ? stringOr(details.code ?? details.errorCode ?? details.error_code, "")
+    : "";
+  const providerBusy = isProviderBusyFailure({ code: gatewayCode, upstreamStatus: providerStatus });
   const providerConcurrencySignal = Boolean(
-    providerStatus === 401 ||
+    providerBusy ||
+      providerStatus === 401 ||
       providerStatus === 403 ||
       providerStatus === 429 ||
       /\b(maximum|max|too many|concurrent|connection limit|connections?)\b/.test(combined) ||
@@ -8360,10 +8738,15 @@ function classifyPlaybackFailure(error: unknown) {
         : "playback_session_failed";
   return {
     gatewayStatus,
+    gatewayCode,
     providerStatus,
     providerConcurrencySignal,
     failureCategory,
-    errorCode: providerConcurrencySignal ? "provider_concurrency_or_auth" : `gateway_${gatewayStatus || "error"}`,
+    errorCode: providerBusy
+      ? "provider_busy"
+      : providerConcurrencySignal
+        ? "provider_concurrency_or_auth"
+        : `gateway_${gatewayStatus || "error"}`,
     errorMessage: truncateText(sanitizeTelemetryText(message), 240),
     gatewayDetails: truncateText(detailText, 500),
   };
@@ -8372,7 +8755,7 @@ function classifyPlaybackFailure(error: unknown) {
 function extractProviderStatus(details: unknown, text: string) {
   const fromRecord = firstNumericField(details, ["providerStatus", "provider_status", "upstreamStatus", "upstream_status", "statusCode", "status_code"]);
   if (fromRecord) return fromRecord;
-  const match = text.match(/\b(401|403|408|429|500|502|503|504)\b/);
+  const match = text.match(/\b(401|403|408|429|458|500|502|503|504)\b/);
   return match ? Number.parseInt(match[1], 10) : null;
 }
 

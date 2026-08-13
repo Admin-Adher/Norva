@@ -145,8 +145,9 @@ test('native heartbeat is a versioned authenticated REST route with a bounded re
   const edge = read(edgePath);
   const router = section(edge, 'Deno.serve(async (req) => {', 'async function requireIdentity');
 
-  assert.match(router, /version:\s*40/);
+  assert.match(router, /version:\s*42/);
   assert.match(router, /nativeHeartbeatProtocol:\s*1/);
+  assert.match(router, /providerCircuitProtocol:\s*1/);
   assert.match(
     router,
     /req\.method === "POST"[\s\S]*?segments\[0\] === "playback"[\s\S]*?segments\[1\] === "sessions"[\s\S]*?segments\[2\][\s\S]*?segments\[3\] === "heartbeat"[\s\S]*?requireIdentity\(req, supabase\)[\s\S]*?heartbeatPlaybackSession\(segments\[2\], identity\.userId, supabase\)/,
@@ -162,7 +163,12 @@ test('native heartbeat derives the source from an owned active session and never
   );
 
   assert.match(heartbeat, /\.from\("cloud_playback_sessions"\)/);
-  assert.match(heartbeat, /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at"\)/);
+  assert.match(
+    heartbeat,
+    /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at"\)/,
+  );
+  assert.doesNotMatch(heartbeat, /superseded_by/);
+  assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(heartbeat, /\.eq\("id", id\)/);
   assert.match(heartbeat, /\.eq\("user_id", userId\)/);
   assert.match(heartbeat, /\.eq\("source_id", sourceId\)/);

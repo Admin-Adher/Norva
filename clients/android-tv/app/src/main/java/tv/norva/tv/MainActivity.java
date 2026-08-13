@@ -39,6 +39,7 @@ import android.widget.TextView;
 import androidx.core.content.ContextCompat;
 
 import java.lang.ref.WeakReference;
+import java.util.UUID;
 
 /**
  * Norva TV — Android TV client.
@@ -89,6 +90,17 @@ public class MainActivity extends Activity {
     private String pendingPlayerRecoveryKey;
     private long pendingPlayerRecoveryExpiresAtElapsedMs;
     private static final long PLAYER_RECOVERY_TTL_MS = 30_000L;
+    // Auth credentials stay in memory and cross the WebView boundary only in
+    // response to a canonical nonce owned by the currently active player.
+    private BroadcastReceiver playbackAuthReceiver;
+    private final Object playbackAuthLock = new Object();
+    private String activePlaybackAuthChannelId;
+    private String pendingPlaybackAuthRequestNonce;
+    private long pendingPlaybackAuthExpiresAtElapsedMs;
+    private Intent pendingPlayerLaunchIntent;
+    private String pendingPlayerLaunchNonce;
+    private long pendingPlayerLaunchExpiresAtElapsedMs;
+    private static final long PLAYBACK_AUTH_REQUEST_TTL_MS = 5_000L;
 
     // Poster/title of the playback in flight, kept for the launcher's Play Next
     // row (the player result only carries ids + position).
@@ -132,6 +144,7 @@ public class MainActivity extends Activity {
         buildExitPanel();
         showSplash();
         registerPlayerRecoveryBridge();
+        registerPlaybackAuthBridge();
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
@@ -286,6 +299,221 @@ public class MainActivity extends Activity {
                 playerRecoveryReceiver,
                 recoveryFilter,
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * Receive credential requests only from this application and bind each one
+     * to both the active PlayerActivity channel and a one-shot nonce.
+     */
+    private void registerPlaybackAuthBridge() {
+        playbackAuthReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null
+                        || !PlayerActivity.ACTION_REQUEST_PLAYBACK_AUTH.equals(intent.getAction())
+                        || webView == null || !cloudBridgeAdded
+                        || !isTrustedCloudUrl(webView.getUrl())) return;
+                String channelId = intent.getStringExtra(
+                        PlayerActivity.EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+                String requestNonce = intent.getStringExtra(
+                        PlayerActivity.EXTRA_PLAYBACK_AUTH_REQUEST_NONCE);
+                if (!NativePlaybackAuthPolicy.validNonce(channelId)
+                        || !NativePlaybackAuthPolicy.validNonce(requestNonce)) return;
+                synchronized (playbackAuthLock) {
+                    if (!channelId.equals(activePlaybackAuthChannelId)
+                            || pendingPlayerLaunchIntent != null) return;
+                    pendingPlaybackAuthRequestNonce = requestNonce;
+                    pendingPlaybackAuthExpiresAtElapsedMs =
+                            android.os.SystemClock.elapsedRealtime()
+                                    + PLAYBACK_AUTH_REQUEST_TTL_MS;
+                }
+                requestPlaybackAuthFromWeb(channelId, requestNonce);
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                playbackAuthReceiver,
+                new IntentFilter(PlayerActivity.ACTION_REQUEST_PLAYBACK_AUTH),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * Ask only the trusted Norva origin for a current credential. A paired-TV
+     * device token wins; user sessions use the existing rotation-aware async
+     * access-token path. Refresh tokens never leave JavaScript storage.
+     */
+    private void requestPlaybackAuthFromWeb(final String channelId, final String requestNonce) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (playbackAuthLock) {
+                    boolean playerRequest = requestNonce.equals(pendingPlaybackAuthRequestNonce);
+                    boolean launchRequest = requestNonce.equals(pendingPlayerLaunchNonce);
+                    if (!channelId.equals(activePlaybackAuthChannelId)
+                            || (!playerRequest && !launchRequest)) return;
+                }
+                if (webView == null || !cloudBridgeAdded
+                        || !isTrustedCloudUrl(webView.getUrl())) {
+                    expirePlaybackAuthRequest(channelId, requestNonce);
+                    return;
+                }
+                String script = "(function(){var c=" + jsStr(channelId)
+                        + ",n=" + jsStr(requestNonce)
+                        + ";var done=function(k,t){try{NorvaTVCloud.providePlaybackAuth("
+                        + "c,n,k,typeof t==='string'?t:'');}catch(_){}};try{"
+                        + "var d=localStorage.getItem('norva-cloud-device-token')||"
+                        + "(window.NorvaCloud&&window.NorvaCloud.deviceToken)||'';"
+                        + "if(d){done('device',d);return;}"
+                        + "if(window.NorvaAuth&&typeof window.NorvaAuth.getAccessToken==='function'){"
+                        + "Promise.resolve(window.NorvaAuth.getAccessToken()).then("
+                        + "function(t){done('user',t);},function(){done('none','');});return;}"
+                        + "done('none','');}catch(_){done('none','');}})()";
+                try {
+                    webView.evaluateJavascript(script, null);
+                } catch (Exception ignored) {
+                    expirePlaybackAuthRequest(channelId, requestNonce);
+                    return;
+                }
+                uiHandler.postDelayed(
+                        new Runnable() {
+                            @Override public void run() {
+                                expirePlaybackAuthRequest(channelId, requestNonce);
+                            }
+                        },
+                        PLAYBACK_AUTH_REQUEST_TTL_MS + 250L);
+            }
+        });
+    }
+
+    /** Claim and clear a timed-out nonce; launch auth fails visibly and closed. */
+    private void expirePlaybackAuthRequest(String channelId, String requestNonce) {
+        boolean launchExpired = false;
+        synchronized (playbackAuthLock) {
+            if (channelId == null || requestNonce == null
+                    || !channelId.equals(activePlaybackAuthChannelId)) return;
+            if (requestNonce.equals(pendingPlayerLaunchNonce)) {
+                pendingPlayerLaunchIntent = null;
+                pendingPlayerLaunchNonce = null;
+                pendingPlayerLaunchExpiresAtElapsedMs = 0L;
+                launchExpired = true;
+            } else if (requestNonce.equals(pendingPlaybackAuthRequestNonce)) {
+                pendingPlaybackAuthRequestNonce = null;
+                pendingPlaybackAuthExpiresAtElapsedMs = 0L;
+            } else {
+                return;
+            }
+        }
+        if (launchExpired) failAuthenticatedPlayerLaunch(channelId);
+    }
+
+    /**
+     * Accept one response for either the pending launch or the active player's
+     * heartbeat/provider-failure request. Duplicate and stale responses are
+     * consumed without ever forwarding their credential.
+     */
+    private void deliverPlaybackAuth(String channelId, String requestNonce,
+                                     String kind, String bearer) {
+        Intent launchIntent = null;
+        boolean playerRequest = false;
+        synchronized (playbackAuthLock) {
+            if (!NativePlaybackAuthPolicy.validNonce(channelId)
+                    || !NativePlaybackAuthPolicy.validNonce(requestNonce)
+                    || !channelId.equals(activePlaybackAuthChannelId)) return;
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (requestNonce.equals(pendingPlayerLaunchNonce)) {
+                if (pendingPlayerLaunchExpiresAtElapsedMs <= 0L
+                        || now > pendingPlayerLaunchExpiresAtElapsedMs) {
+                    pendingPlayerLaunchIntent = null;
+                    pendingPlayerLaunchNonce = null;
+                    pendingPlayerLaunchExpiresAtElapsedMs = 0L;
+                    failAuthenticatedPlayerLaunch(channelId);
+                    return;
+                }
+                launchIntent = pendingPlayerLaunchIntent;
+                pendingPlayerLaunchIntent = null;
+                pendingPlayerLaunchNonce = null;
+                pendingPlayerLaunchExpiresAtElapsedMs = 0L;
+            } else if (requestNonce.equals(pendingPlaybackAuthRequestNonce)) {
+                if (pendingPlaybackAuthExpiresAtElapsedMs <= 0L
+                        || now > pendingPlaybackAuthExpiresAtElapsedMs) {
+                    pendingPlaybackAuthRequestNonce = null;
+                    pendingPlaybackAuthExpiresAtElapsedMs = 0L;
+                    return;
+                }
+                pendingPlaybackAuthRequestNonce = null;
+                pendingPlaybackAuthExpiresAtElapsedMs = 0L;
+                playerRequest = true;
+            } else {
+                return;
+            }
+        }
+
+        if (!NativePlaybackAuthPolicy.isFreshBearer(
+                kind, bearer, System.currentTimeMillis() / 1000L)) {
+            if (launchIntent != null) failAuthenticatedPlayerLaunch(channelId);
+            return;
+        }
+        if (launchIntent != null) {
+            launchIntent.putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_TOKEN, bearer);
+            startActivityForResult(launchIntent, REQ_PLAYER);
+            return;
+        }
+        if (playerRequest) {
+            Intent response = new Intent(PlayerActivity.ACTION_APPLY_PLAYBACK_AUTH)
+                    .setPackage(getPackageName())
+                    .putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_CHANNEL_ID, channelId)
+                    .putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_REQUEST_NONCE, requestNonce)
+                    .putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_KIND, kind)
+                    .putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_TOKEN, bearer);
+            sendBroadcast(response);
+        }
+    }
+
+    private String activatePlaybackAuthChannel(Intent intent) {
+        String channelId = UUID.randomUUID().toString();
+        synchronized (playbackAuthLock) {
+            activePlaybackAuthChannelId = channelId;
+            pendingPlaybackAuthRequestNonce = null;
+            pendingPlaybackAuthExpiresAtElapsedMs = 0L;
+            pendingPlayerLaunchIntent = null;
+            pendingPlayerLaunchNonce = null;
+            pendingPlayerLaunchExpiresAtElapsedMs = 0L;
+        }
+        intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_CHANNEL_ID, channelId);
+        return channelId;
+    }
+
+    private void clearPlaybackAuthChannel(String channelId) {
+        synchronized (playbackAuthLock) {
+            if (channelId != null && !channelId.equals(activePlaybackAuthChannelId)) return;
+            activePlaybackAuthChannelId = null;
+            pendingPlaybackAuthRequestNonce = null;
+            pendingPlaybackAuthExpiresAtElapsedMs = 0L;
+            pendingPlayerLaunchIntent = null;
+            pendingPlayerLaunchNonce = null;
+            pendingPlayerLaunchExpiresAtElapsedMs = 0L;
+        }
+    }
+
+    private void beginAuthenticatedPlayerLaunch(Intent intent, String channelId) {
+        String requestNonce = UUID.randomUUID().toString();
+        synchronized (playbackAuthLock) {
+            if (!channelId.equals(activePlaybackAuthChannelId)) return;
+            pendingPlayerLaunchIntent = intent;
+            pendingPlayerLaunchNonce = requestNonce;
+            pendingPlayerLaunchExpiresAtElapsedMs =
+                    android.os.SystemClock.elapsedRealtime() + PLAYBACK_AUTH_REQUEST_TTL_MS;
+        }
+        requestPlaybackAuthFromWeb(channelId, requestNonce);
+    }
+
+    private void failAuthenticatedPlayerLaunch(String channelId) {
+        if (channelId != null) clearPlaybackAuthChannel(channelId);
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                showNetworkError(getString(R.string.native_playback_auth_error));
+            }
+        });
     }
 
     /**
@@ -1041,6 +1269,17 @@ public class MainActivity extends Activity {
         public void onProgressSaved(final String token) {
             MainActivity.this.confirmProgressSaved(token);
         }
+
+        /** Complete exactly one nonce-scoped native launch/liveness request. */
+        @android.webkit.JavascriptInterface
+        public void providePlaybackAuth(final String channelId, final String requestNonce,
+                                        final String kind, final String bearer) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    deliverPlaybackAuth(channelId, requestNonce, kind, bearer);
+                }
+            });
+        }
     }
 
     private static final int REQ_PLAYER = 1001;
@@ -1087,6 +1326,18 @@ public class MainActivity extends Activity {
                             final String variantsJson, final String activeStreamId,
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson) {
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl,
+                poster, nextTitle, variantsJson, activeStreamId, trackMetadataJson,
+                preferenceScopeJson, playbackPreferencesJson, null);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds,
+                            final String fallbackUrl, final String poster, final String nextTitle,
+                            final String variantsJson, final String activeStreamId,
+                            final String trackMetadataJson, final String preferenceScopeJson,
+                            final String playbackPreferencesJson,
+                            final String playbackSessionId) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -1113,53 +1364,36 @@ public class MainActivity extends Activity {
                 if (playbackPreferencesJson != null && !playbackPreferencesJson.isEmpty()) {
                     intent.putExtra(EXTRA_PLAYBACK_PREFERENCES, playbackPreferencesJson);
                 }
+                if (playbackSessionId != null && !playbackSessionId.isEmpty()) {
+                    intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
+                }
                 launchPlayerWithEphemeralAuth(intent);
             }
         });
     }
 
     private void launchPlayerWithEphemeralAuth(final android.content.Intent intent) {
-        if (webView == null || !cloudBridgeAdded || !isTrustedCloudUrl(webView.getUrl())) {
+        final boolean trustedCloud = webView != null && cloudBridgeAdded
+                && isTrustedCloudUrl(webView.getUrl());
+        final String rawSessionId = intent.getStringExtra(
+                PlayerActivity.EXTRA_PLAYBACK_SESSION_ID);
+        final String boundedSessionId = NativePlaybackTelemetry.boundedSessionId(rawSessionId);
+
+        // Standalone/server playback has no cloud credential or liveness lease;
+        // an optional local resolver id must not turn that mode into cloud auth.
+        if (!cloudBridgeAdded) {
             startActivityForResult(intent, REQ_PLAYER);
             return;
         }
-        final java.util.concurrent.atomic.AtomicBoolean launched =
-                new java.util.concurrent.atomic.AtomicBoolean(false);
-        final Runnable fallback = new Runnable() {
-            @Override
-            public void run() {
-                if (launched.compareAndSet(false, true)) {
-                    startActivityForResult(intent, REQ_PLAYER);
-                }
-            }
-        };
-        uiHandler.postDelayed(fallback, 250L);
-        webView.evaluateJavascript(
-                "(function(){try{var d=localStorage.getItem('norva-cloud-device-token')||'';"
-                        + "var u=localStorage.getItem('norva-cloud-token')||'';"
-                        + "if(!u){var s=JSON.parse(localStorage.getItem('norva-cloud-session')||'null');"
-                        + "u=(s&&s.access_token)||'';}return d||u||'';}catch(e){return '';}})()",
-                new ValueCallback<String>() {
-                    @Override
-                    public void onReceiveValue(String raw) {
-                        String token = decodeJavascriptString(raw);
-                        if (!launched.compareAndSet(false, true)) return;
-                        uiHandler.removeCallbacks(fallback);
-                        if (!token.isEmpty() && token.length() <= 16_384) {
-                            intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_TOKEN, token);
-                        }
-                        startActivityForResult(intent, REQ_PLAYER);
-                    }
-                });
-    }
-
-    private static String decodeJavascriptString(String raw) {
-        try {
-            if (raw == null || "null".equals(raw)) return "";
-            return new org.json.JSONArray("[" + raw + "]").optString(0, "");
-        } catch (Exception ignored) {
-            return "";
+        // A cloud callback never falls through without fresh authentication.
+        // Malformed cloud UUIDs fail closed instead of being silently dropped.
+        if (!trustedCloud || (rawSessionId != null && boundedSessionId == null)) {
+            failAuthenticatedPlayerLaunch(null);
+            return;
         }
+
+        String channelId = activatePlaybackAuthChannel(intent);
+        beginAuthenticatedPlayerLaunch(intent, channelId);
     }
 
     /** JSON-payload launch used by the newest web bridge (playVideoJson). */
@@ -1196,7 +1430,8 @@ public class MainActivity extends Activity {
                     emptyToNull(o.optString("activeStreamId")),
                     trackMetadata == null ? null : trackMetadata.toString(),
                     preferenceScope == null ? null : preferenceScope.toString(),
-                    playbackPreferences == null ? null : playbackPreferences.toString());
+                    playbackPreferences == null ? null : playbackPreferences.toString(),
+                    emptyToNull(o.optString("sessionId")));
         } catch (Exception ignored) {
             // A malformed payload simply doesn't start playback; the web side
             // falls back to the legacy fixed-signature bridge methods.
@@ -1215,7 +1450,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        if (requestCode != REQ_PLAYER) return;
+        String returnedPlaybackAuthChannel = data == null
+                ? null : data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
+        if (returnedPlaybackAuthChannel != null) {
+            clearPlaybackAuthChannel(returnedPlaybackAuthChannel);
+        }
+        if (data == null || webView == null) return;
         // Backup acknowledgement for timeout/Back cancellation. The private
         // cancellation broadcast normally clears this first; the result token
         // covers lifecycle races where MainActivity was not resumed yet.
@@ -1900,9 +2141,14 @@ public class MainActivity extends Activity {
             currentRef = new WeakReference<>(null);
         }
         clearPendingPlayerRecovery(null);
+        clearPlaybackAuthChannel(null);
         if (playerRecoveryReceiver != null) {
             try { unregisterReceiver(playerRecoveryReceiver); } catch (Exception ignored) { }
             playerRecoveryReceiver = null;
+        }
+        if (playbackAuthReceiver != null) {
+            try { unregisterReceiver(playbackAuthReceiver); } catch (Exception ignored) { }
+            playbackAuthReceiver = null;
         }
         if (webView != null) {
             webView.destroy();

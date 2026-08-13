@@ -630,22 +630,30 @@ test('engine-to-gateway fallback remuxes the exact file at position with the act
   assert.strictEqual(page.loaded.options.playbackPreferences, null);
 });
 
-test('delayed engine setup retries never destroy a replacement engine', () => {
+test('provider busy exits the engine before any gateway fallback or delayed retry', () => {
   const start = watchSrc.indexOf('async playWithEngine(');
   const end = watchSrc.indexOf('\n    async fallbackEngineToTranscode(', start);
   const body = watchSrc.slice(start, end);
-  const slotRetry = body.slice(body.indexOf('if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES)'),
-    body.indexOf('// A SOURCEOPEN_TIMEOUT'));
   const sourceOpenRetry = body.slice(body.indexOf('if (/SOURCEOPEN_TIMEOUT/i.test(msg)'),
     body.indexOf('// Slot still busy'));
-  assert.ok(slotRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return;'),
-    'slot retry must abandon a stale wait');
+  const providerBusy = body.slice(body.indexOf('if (isSlotBusy(msg))'),
+    body.indexOf('// Provider auth/rate-limit blocks'));
+  assert.ok(providerBusy.includes('await this.reportProviderPlaybackFailure(msg);'));
+  assert.ok(providerBusy.includes('this.destroyEngine();'));
+  assert.ok(providerBusy.includes('return;'));
+  assert.ok(!providerBusy.includes('continue;'));
+  assert.ok(!providerBusy.includes('fallbackEngineToTranscode'));
   assert.ok(sourceOpenRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) return;'),
     'SOURCEOPEN retry must abandon a stale wait');
-  assert.ok(!slotRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine()'),
-    'slot retry must not destroy a newer engine');
   assert.ok(!sourceOpenRetry.includes('if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine()'),
     'SOURCEOPEN retry must not destroy a newer engine');
+});
+
+test('legacy transcode opens only one upstream session and never retries provider failures', () => {
+  const transcode = fs.readFileSync(path.join(ROOT, 'server/routes/transcode.js'), 'utf8');
+  assert.doesNotMatch(transcode, /RETRYABLE_CODES|RETRY_DELAYS_MS|MAX_ATTEMPTS/);
+  assert.doesNotMatch(transcode, /provider slot likely still busy, retrying/);
+  assert.strictEqual((transcode.match(/transcodeSession\.createSession\(/g) || []).length, 1);
 });
 
 test('engine retry budget cannot re-arm inside the historical ~50 second crash loop', () => {
