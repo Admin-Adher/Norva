@@ -6,6 +6,11 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
+const {
+    classifyProviderFetchFailure,
+    classifyProviderResponseFailure,
+    shouldRetryProviderStatus,
+} = require('./providerFailure');
 
 const app = express();
 
@@ -490,25 +495,9 @@ const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64)
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
-// The provider allows a single concurrent connection; a fresh session can hit a
-// 401 while the previous connection's slot is still releasing. Retry startup a
-// few times (after re-evicting + waiting) before surfacing a 502 to the client.
-// Defaults tuned for fast-fail: a dead/blocked channel surfaces a 502 in ~3s
-// (1 retry @ 1.5s) instead of ~12s (2 retries @ 4s), and hits the provider 2x
-// instead of 3x — far less load on a single-slot provider's anti-abuse. A
-// legitimate channel switch still gets its retry: the client already frees the
-// old slot (prepareLiveSwitch) ~1-2s before the new ffmpeg starts, so the slot
-// is released by the 1.5s retry. Overridable via env.
-const PROVIDER_AUTH_RETRY_LIMIT = clampInt(process.env.PROVIDER_AUTH_RETRY_LIMIT, 1, 0, 5);
-const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DELAY_MS, 1_500, 0, 15_000);
-// The in-browser byte-pipe (/raw) issues many short byte-range requests. The
-// single-slot provider can 401/403/429 one whose connection slot from the prior
-// read hasn't released yet (~PROVIDER_SLOT_RELEASE_DELAY_MS). ffmpeg rides this
-// out via auto-reconnect; mirror it here with a few quick retries so a transient
-// provider auth blip doesn't abort playback. Fewer attempts with LONGER quiet gaps:
-// a single-slot provider only frees the slot after it sees no connection for a
-// stretch (~8s), so packing many quick retries keeps poking it and the slot never
-// goes quiet. Bigger gaps give the provider real silence to release between tries.
+// The in-browser byte-pipe may retry transient transport/server failures within a
+// single gateway route. Provider/account 4xx responses, including 458, are never
+// retried and never switch to direct playback.
 const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 3, 0, 8);
 const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 9000];
 // Some providers accept HTTP and return 200/206 headers but never produce a
@@ -525,7 +514,7 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 79;
+const GATEWAY_VERSION = 80;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -616,6 +605,7 @@ app.get('/health', (req, res) => {
         ok: true,
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
+        providerCircuitProtocol: 1,
         codecProbe: true,
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
         codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
@@ -1299,14 +1289,10 @@ app.get('/raw/:token', async (req, res) => {
     const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
     const startupDeadlineAt = Date.now() + RAW_STARTUP_DEADLINE_MS;
 
-    // Retry transient provider auth/slot failures (single-slot 401/403/429/458) so a
-    // burst of byte-range reads doesn't get one connection rejected and abort the
-    // whole pump. 458 = "max connections": on a reload/resume the new stream opens
-    // while the PRIOR session's slot is still releasing (~8s), so the first /raw 458s
-    // and playback dies (PROBE_HTTP_458). The backoff below spans that release window.
-    // Anything else (206/200/404/...) passes straight through.
-    // Auth/fetch/non-media retries and no-data retries have independent budgets,
-    // but all attempts consume the same hard wall-clock deadline.
+    // Retry only transient network/server failures and empty responses. Every 4xx,
+    // especially the provider's single-account 458, is terminal on its first response
+    // so the playback edge can open the account circuit without creating a request
+    // cascade. All attempts still consume the same hard wall-clock deadline.
     const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT + RAW_NO_DATA_RETRY_LIMIT;
     let upstream = null;
     let sniffedBody = null; // { chunk, reader } validated before response headers are committed
@@ -1338,8 +1324,13 @@ app.get('/raw/:token', async (req, res) => {
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
             if (hitDeadline) { sendRawStartupTimeout(res); return; }
             if (providerRetryAttempts >= RAW_PROVIDER_RETRY_LIMIT || attempt >= maxAttempts) {
-                rememberRawFailure('provider_fetch_failed');
-                return res.status(502).json({ error: 'Byte pipe failed', details: String((err && err.message) || err) });
+                const networkFailure = classifyProviderFetchFailure(err);
+                rememberRawFailure(networkFailure.category);
+                return res.status(502).json({
+                    error: 'Unable to reach the media provider',
+                    code: networkFailure.code,
+                    networkCause: networkFailure.category,
+                });
             }
             providerRetryAttempts += 1;
             rawStreamStats.providerRetries += 1;
@@ -1357,13 +1348,13 @@ app.get('/raw/:token', async (req, res) => {
             sendRawStartupTimeout(res, status);
             return;
         }
-        const retryable = upstream.status === 401 || upstream.status === 403 || upstream.status === 429 || upstream.status === 458;
+        const retryable = shouldRetryProviderStatus(upstream.status);
         if (retryable && providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
             providerRetryAttempts += 1;
             rawStreamStats.providerRetries += 1;
             const status = upstream.status;
             abandonRawAttempt(attemptGuard, upstream.body, 'raw_retryable_provider_status');
-            console.warn(`[media-gateway] /raw provider ${status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
+            console.warn(`[media-gateway] /raw provider transient ${status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
             if (!await waitForRetry(attempt, status)) return;
             continue;
         }
@@ -4295,17 +4286,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
             await stopSession(session);
-            // Slot-busy upstream → a typed, retryable error. The "(HTTP 458 max
-            // connections)" token also keeps the web client's text classifiers
-            // matching (ffmpeg's own message never contains the number 458).
+            // Slot-busy upstream is terminal. Preserve the exact 458 so callers open
+            // the account circuit instead of treating it as a retryable gateway 503.
             if (isProviderSlotBusyFailure(session)) {
-                res.set('Retry-After', '8');
-                return res.status(503).json({
-                    error: 'Provider connection slot busy',
+                return res.status(458).json({
+                    error: 'This TV service is already being used on another device.',
                     code: 'PROVIDER_BUSY',
                     upstreamStatus: 458,
-                    retryAfter: 8,
-                    details: `${detail} (HTTP 458 max connections)`
                 });
             }
             return res.status(502).json({
@@ -4473,21 +4460,14 @@ function isProviderSlotBusyFailure(session) {
         || text.includes('4xx client error, but not one of');
 }
 
-// Start FFmpeg and wait for the first playlist. If startup fails because the
-// provider's single connection slot wasn't free yet (401/403/timeout), wait for
-// the slot to release and retry, instead of bubbling a 502 that pushes the web
-// client into a relay/direct fallback it can never play (e.g. MKV in-browser).
+// Start FFmpeg and wait for the first playlist. Provider/account failures are
+// terminal. The only second attempt is a local demux probe-budget correction for
+// an already-known file profile; it is not a gateway/direct or account retry.
 async function startSessionWithProviderRetry(session) {
-    // Slot-busy (458) gets its own, longer ladder: the provider frees the slot ~8s
-    // after the previous consumer drops, so 2s/6s/9s spans the release window.
-    // Plain auth failures keep the single fast retry (fast-fail on dead channels).
-    const SLOT_BUSY_RETRY_DELAYS_MS = [2000, 6000, 9000];
-    const maxProviderAttempts = 1 + Math.max(PROVIDER_AUTH_RETRY_LIMIT, SLOT_BUSY_RETRY_DELAYS_MS.length);
     // A known-profile probe fallback is a local demux retry, not a provider
     // concurrency failure. Give it one separate attempt so it cannot consume
-    // one rung of the provider's 458/auth retry ladder.
-    const maxTotalAttempts = maxProviderAttempts + 1;
-    let providerAttempts = 0;
+    // a provider/account retry budget.
+    const maxTotalAttempts = 2;
     for (let totalAttempt = 1; totalAttempt <= maxTotalAttempts; totalAttempt += 1) {
         if (totalAttempt > 1) {
             await stopChildProcess(session.ffmpeg).catch(() => {});
@@ -4503,7 +4483,6 @@ async function startSessionWithProviderRetry(session) {
             if (session.status === 'starting') session.status = 'ready';
             return true;
         } catch (err) {
-            const slotBusy = isProviderSlotBusyFailure(session);
             if (
                 session.fastInputProbe === true
                 && session.forceFullInputProbe !== true
@@ -4515,16 +4494,7 @@ async function startSessionWithProviderRetry(session) {
                 console.warn(`[media-gateway] known-profile input probe was insufficient for ${session.id}; retrying once with the full VOD probe budget`);
                 continue;
             }
-            providerAttempts += 1;
-            const authRetryBudget = 1 + PROVIDER_AUTH_RETRY_LIMIT;
-            if (providerAttempts >= maxProviderAttempts
-                || !isProviderConcurrencyFailure(session)
-                || (!slotBusy && providerAttempts >= authRetryBudget)) return false;
-            const waitMs = slotBusy
-                ? SLOT_BUSY_RETRY_DELAYS_MS[Math.min(providerAttempts - 1, SLOT_BUSY_RETRY_DELAYS_MS.length - 1)]
-                : PROVIDER_AUTH_RETRY_DELAY_MS;
-            console.warn(`[media-gateway] provider ${slotBusy ? 'slot busy (458)' : 'auth failure'} for ${session.id} (attempt ${providerAttempts}/${maxProviderAttempts}); waiting ${waitMs}ms before retry`);
-            await sleep(waitMs);
+            return false;
         }
     }
     return false;
@@ -5718,7 +5688,7 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         const text = await response.text();
         const payload = text ? safeJson(text) : {};
         if (!response.ok) {
-            const failure = classifyProviderFailure(response.status, payload);
+            const failure = classifyProviderResponseFailure(response.status, payload);
             const error = new Error(failure.publicMessage);
             error.status = failure.status;
             error.publicMessage = failure.publicMessage;
@@ -5736,10 +5706,12 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
             );
         }
         if (err.status) throw err;
+        const networkFailure = classifyProviderFetchFailure(err);
         const error = new Error('Unable to reach IPTV provider');
         error.status = err.name === 'AbortError' ? 504 : 502;
         error.publicMessage = 'Unable to reach IPTV provider';
-        error.details = err.message;
+        error.code = networkFailure.code;
+        error.details = { networkCause: networkFailure.category };
         throw error;
     } finally {
         clearTimeout(timer);
@@ -5753,36 +5725,6 @@ function safeJson(text) {
     } catch (_) {
         return { raw: String(text || '').slice(0, 2000) };
     }
-}
-
-function classifyProviderFailure(status, payload) {
-    const text = JSON.stringify(payload || {}).toLowerCase();
-    if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|max(?:imum)? connections?|active connections?|connection limit|same account.*ip|account sharing/.test(text)) {
-        return {
-            status: 429,
-            code: 'PROVIDER_MULTI_IP',
-            publicMessage: 'IPTV provider refused the account because it already sees one active connection. Stop all other playback attempts, wait 1–2 minutes, then retry from one device.'
-        };
-    }
-    if (status === 458) {
-        return {
-            status: 503,
-            code: 'PROVIDER_BUSY',
-            publicMessage: 'IPTV provider connection slot busy (HTTP 458 max connections). Retry in a few seconds.'
-        };
-    }
-    if (status === 429 || /too many requests|rate limit|ratelimit/.test(text)) {
-        return {
-            status: 429,
-            code: 'PROVIDER_RATE_LIMIT',
-            publicMessage: 'IPTV provider is rate limiting this account. Wait a moment, then retry.'
-        };
-    }
-    return {
-        status,
-        code: 'PROVIDER_REQUEST_FAILED',
-        publicMessage: 'IPTV provider request failed'
-    };
 }
 
 function asRecord(value) {
