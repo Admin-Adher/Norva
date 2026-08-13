@@ -224,6 +224,7 @@ public class PlayerActivity extends Activity {
     private String pendingTerminalRecoveryReason;
     private String pendingTerminalRecoveryRoute;
     private int pendingTerminalRecoveryAttempt;
+    private boolean pendingProviderBusyReport;
     private BroadcastReceiver playbackAuthReceiver;
     private String playbackSessionId;
     private boolean terminalTelemetrySent = false;
@@ -335,7 +336,9 @@ public class PlayerActivity extends Activity {
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
     private static final long LONG_START_MS = 8_000L;
     private static final long FRESH_STREAM_TIMEOUT_MS = 60_000L;
-    private static final long HEARTBEAT_INTERVAL_MS = 60_000L;
+    // Poll faster than the server-side liveness write cadence so a superseded
+    // native session stops within roughly 30 seconds without extending its lease.
+    private static final long HEARTBEAT_INTERVAL_MS = 5_000L;
     private static final long PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS = 5_000L;
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
     private final Runnable healthyRecoveryReset = new Runnable() {
@@ -404,6 +407,7 @@ public class PlayerActivity extends Activity {
             // Missing MainActivity, renderer stalls and refresh failures are all
             // fail-closed: skip this pulse and retry on the next normal cadence.
             clearPendingPlaybackAuthRequest();
+            pendingProviderBusyReport = false;
         }
     };
     private final Runnable delayedRecovery = new Runnable() {
@@ -584,7 +588,8 @@ public class PlayerActivity extends Activity {
                 // silently skips it when absent. (See clients/android-ffmpeg-decoder.)
                 .setRenderersFactory(new DefaultRenderersFactory(this)
                         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON))
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory)
+                        .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy()))
                 // Symmetric ±10s so the controller's rewind/fast-forward and the
                 // double-tap gesture both jump a predictable, equal amount.
                 .setSeekBackIncrementMs(10_000)
@@ -693,6 +698,12 @@ public class PlayerActivity extends Activity {
                 errHandler.removeCallbacks(bufferWatchdog);
                 errHandler.removeCallbacks(longStartNotice);
                 engineReady = false;
+                int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
+                if (ProviderPlaybackPolicy.isProviderBusyHttpStatus(httpStatus)) {
+                    android.util.Log.w("NorvaPlayer", "Provider account busy (HTTP 458)");
+                    showProviderAccountConflict(true);
+                    return;
+                }
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
                 // accepted. A single-slot panel can also answer "busy" with a non-media
@@ -1222,7 +1233,10 @@ public class PlayerActivity extends Activity {
                     terminalTelemetryCode(state, recommendVersion));
         }
         if (errorTitleView != null) errorTitleView.setText(titleRes);
-        if (errorView != null) errorView.setText(message);
+        if (errorView != null) {
+            errorView.setText(message);
+            errorView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
+        }
         boolean canChangeVersion = recommendVersion && variants != null && variants.length() > 1;
         if (retryButton != null) {
             retryButton.setVisibility(retryAllowed ? View.VISIBLE : View.GONE);
@@ -1249,6 +1263,21 @@ public class PlayerActivity extends Activity {
                 "show",
                 "error",
                 state.name().toLowerCase(Locale.ROOT));
+    }
+
+    private void showProviderAccountConflict(boolean reportProviderBusy) {
+        pendingProviderBusyReport = reportProviderBusy;
+        rememberRecoverySignal("provider_busy", "direct", false);
+        showPlaybackFailure(
+                PlaybackUiState.TERMINAL,
+                R.string.player_error_provider_in_use_title,
+                getString(R.string.player_error_provider_in_use),
+                false,
+                true);
+    }
+
+    private void reportProviderBusy(String bearer) {
+        NativePlaybackTelemetry.reportProviderBusy(bearer, playbackSessionId);
     }
 
     private boolean hasUsableNetwork() {
@@ -1447,7 +1476,9 @@ public class PlayerActivity extends Activity {
         // Terminal truth wins once playback has stopped. Preempt any pulse that
         // was waiting on WebView token rotation; MainActivity will replace its
         // pending nonce with the terminal request and reject the late pulse.
+        boolean reportProviderBusy = pendingProviderBusyReport;
         clearPendingPlaybackAuthRequest();
+        pendingProviderBusyReport = reportProviderBusy;
         pendingTerminalTelemetryCode = NativePlaybackTelemetry.boundedTerminalCode(
                 terminalCode);
         pendingTerminalSawLongStart = sawLongStart;
@@ -1456,7 +1487,10 @@ public class PlayerActivity extends Activity {
         pendingTerminalRecoveryRoute = NativePlaybackTelemetry.boundedRecoveryRoute(
                 lastRecoveryRoute);
         pendingTerminalRecoveryAttempt = Math.max(0, Math.min(3, recoveryAttempt));
-        if (!requestPlaybackAuth("terminal")) clearPendingPlaybackAuthRequest();
+        if (!requestPlaybackAuth("terminal")) {
+            clearPendingPlaybackAuthRequest();
+            pendingProviderBusyReport = false;
+        }
     }
 
     private void acceptPlaybackAuth(Intent intent) {
@@ -1474,15 +1508,33 @@ public class PlayerActivity extends Activity {
         String terminalRecoveryReason = pendingTerminalRecoveryReason;
         String terminalRecoveryRoute = pendingTerminalRecoveryRoute;
         int terminalRecoveryAttempt = pendingTerminalRecoveryAttempt;
+        boolean reportProviderBusy = pendingProviderBusyReport;
+        pendingProviderBusyReport = false;
         clearPendingPlaybackAuthRequest();
         if ("heartbeat".equals(purpose)) {
             if (shouldRunPlaybackHeartbeat()) {
                 lastPlaybackHeartbeatElapsedMs = SystemClock.elapsedRealtime();
-                NativePlaybackTelemetry.recordHeartbeat(bearer, playbackSessionId);
+                final String heartbeatSessionId = playbackSessionId;
+                NativePlaybackTelemetry.recordHeartbeat(
+                        bearer,
+                        heartbeatSessionId,
+                        resultCode -> {
+                            if (!ProviderPlaybackPolicy.isPlaybackSuperseded(resultCode)) return;
+                            runOnUiThread(() -> {
+                                if (heartbeatSessionId != null
+                                        && heartbeatSessionId.equals(playbackSessionId)
+                                        && !isFinishing()) {
+                                    showProviderAccountConflict(false);
+                                }
+                            });
+                        });
             }
             return;
         }
         if ("terminal".equals(purpose)) {
+            if (reportProviderBusy) {
+                reportProviderBusy(bearer);
+            }
             NativePlaybackTelemetry.recordTerminal(
                     bearer,
                     playbackSessionId,

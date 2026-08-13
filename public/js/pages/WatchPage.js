@@ -177,6 +177,11 @@ class WatchPage {
         this.activeSessionIds = new Set();
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
+        this._cloudPlaybackHeartbeatTimer = null;
+        this._cloudPlaybackHeartbeatGeneration = 0;
+        this._cloudPlaybackHeartbeatInFlight = false;
+        this._cloudPlaybackSupersededHandled = false;
+        this._reportedProviderFailureKeys = new Set();
         this.playbackTelemetry = null;
         this._playRequestedAt = 0;
         this._firstFrameReported = false;
@@ -1630,7 +1635,8 @@ class WatchPage {
                 resolved = await streamUrlResolver();
             } catch (err) {
                 if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-                this.showPlaybackError(err?.message || 'This title could not be started. Please try again.', { immediate: true });
+                const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
+                this.showPlaybackError(errorText, { immediate: true });
                 return;
             }
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
@@ -2622,9 +2628,113 @@ class WatchPage {
         if (!id) return;
         this.currentCloudPlaybackSessionId = id;
         this.activeCloudPlaybackSessionIds.add(id);
+        this._cloudPlaybackSupersededHandled = false;
+        this.startCloudPlaybackHeartbeat(id);
+    }
+
+    stopCloudPlaybackHeartbeat() {
+        this._cloudPlaybackHeartbeatGeneration += 1;
+        if (this._cloudPlaybackHeartbeatTimer) {
+            clearInterval(this._cloudPlaybackHeartbeatTimer);
+            this._cloudPlaybackHeartbeatTimer = null;
+        }
+        this._cloudPlaybackHeartbeatInFlight = false;
+    }
+
+    startCloudPlaybackHeartbeat(sessionId) {
+        this.stopCloudPlaybackHeartbeat();
+        const id = String(sessionId || '').trim();
+        if (!id) return;
+        const generation = this._cloudPlaybackHeartbeatGeneration;
+        const pulse = async () => {
+            if (
+                generation !== this._cloudPlaybackHeartbeatGeneration
+                || this.currentCloudPlaybackSessionId !== id
+                || this._cloudPlaybackHeartbeatInFlight
+            ) return;
+            const cloud = window.NorvaCloud;
+            const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+            const heartbeat = api?.heartbeatSession;
+            if (typeof heartbeat !== 'function') return;
+
+            this._cloudPlaybackHeartbeatInFlight = true;
+            try {
+                await heartbeat(id);
+            } catch (error) {
+                if (
+                    generation === this._cloudPlaybackHeartbeatGeneration
+                    && this.currentCloudPlaybackSessionId === id
+                    && this.isPlaybackSupersededError(error)
+                ) {
+                    await this.handlePlaybackSuperseded(id);
+                }
+            } finally {
+                if (generation === this._cloudPlaybackHeartbeatGeneration) {
+                    this._cloudPlaybackHeartbeatInFlight = false;
+                }
+            }
+        };
+        void pulse();
+        this._cloudPlaybackHeartbeatTimer = setInterval(() => { void pulse(); }, 5000);
+    }
+
+    async handlePlaybackSuperseded(sessionId) {
+        if (
+            this._cloudPlaybackSupersededHandled
+            || String(sessionId || '') !== String(this.currentCloudPlaybackSessionId || '')
+        ) return;
+        this._cloudPlaybackSupersededHandled = true;
+        this.stopCloudPlaybackHeartbeat();
+        this.destroyEngine();
+        await this.releasePlaybackPipelineForRetry();
+        this.showPlaybackError('PLAYBACK_SUPERSEDED', { immediate: true });
+    }
+
+    providerFailureSignal(error) {
+        const text = this.getErrorText(error);
+        if (this.isProviderBusyError(text)) {
+            return { code: 'PROVIDER_BUSY', networkCause: 'PROVIDER_BUSY', upstreamStatus: 458 };
+        }
+        const mappings = [
+            [/PROVIDER_CONNECT_TIMEOUT|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/i, 'PROVIDER_CONNECT_TIMEOUT'],
+            [/PROVIDER_RESPONSE_TIMEOUT|UND_ERR_HEADERS_TIMEOUT/i, 'PROVIDER_RESPONSE_TIMEOUT'],
+            [/PROVIDER_CONNECTION_RESET|ECONNRESET|UND_ERR_SOCKET|EPIPE/i, 'PROVIDER_CONNECTION_RESET'],
+            [/PROVIDER_DNS_FAILURE|ENOTFOUND|EAI_AGAIN/i, 'PROVIDER_DNS_FAILURE'],
+            [/PROVIDER_TLS_FAILURE|CERT|TLS|SSL/i, 'PROVIDER_TLS_FAILURE'],
+            [/PROVIDER_NETWORK_UNREACHABLE|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/i, 'PROVIDER_NETWORK_UNREACHABLE'],
+        ];
+        const match = mappings.find(([pattern]) => pattern.test(text));
+        return match ? { code: match[1], networkCause: match[1] } : null;
+    }
+
+    async reportProviderPlaybackFailure(error, sessionId = this.currentCloudPlaybackSessionId) {
+        const id = String(sessionId || this.playbackTelemetry?.sessionId || '').trim();
+        const signal = this.providerFailureSignal(error);
+        if (!id || !signal) return false;
+        const key = `${id}:${signal.code}`;
+        if (this._reportedProviderFailureKeys.has(key)) return true;
+
+        const cloud = window.NorvaCloud;
+        const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+        const report = api?.reportProviderFailure;
+        if (typeof report !== 'function') return false;
+
+        this._reportedProviderFailureKeys.add(key);
+        if (this._reportedProviderFailureKeys.size > 64) {
+            this._reportedProviderFailureKeys.delete(this._reportedProviderFailureKeys.values().next().value);
+        }
+        try {
+            await report(id, signal);
+            return true;
+        } catch (reportError) {
+            this._reportedProviderFailureKeys.delete(key);
+            console.warn('[WatchPage] Provider failure report failed:', reportError?.message || reportError);
+            return false;
+        }
     }
 
     async stopCloudPlaybackSessions(options = {}) {
+        this.stopCloudPlaybackHeartbeat();
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
@@ -2801,13 +2911,20 @@ class WatchPage {
         if (typeof error === 'string') return error;
 
         const payload = error.payload || {};
+        const payloadDetails = payload.details && typeof payload.details === 'object'
+            ? payload.details
+            : {};
         return [
             error.code,
             error.upstreamStatus,
             error.message,
             error.details,
+            payload.code,
             payload.error,
-            payload.details
+            payloadDetails.code,
+            payloadDetails.networkCause,
+            payloadDetails.upstreamStatus,
+            typeof payload.details === 'string' ? payload.details : ''
         ].filter(Boolean).join(' ');
     }
 
@@ -2820,7 +2937,12 @@ class WatchPage {
     }
 
     isTerminalPlaybackError(message) {
-        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|401|403|404|416|429|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|PROVIDER_(ACCOUNT_)?BUSY|PLAYBACK_SUPERSEDED|401|403|404|416|429|458|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
+    }
+
+    isPlaybackSupersededError(error) {
+        const text = this.getErrorText(error);
+        return /PLAYBACK_SUPERSEDED/i.test(text);
     }
 
     isRangeSeekFailure(message) {
@@ -2835,14 +2957,50 @@ class WatchPage {
         // treat like a connection block so we never mark the title broken or hard-spin.
         // NB: (?:\b|_)458 — underscore is a word char in JS regex, so \b458\b can NEVER
         // match "BLOCK_HTTP_458"/"PROBE_HTTP_458" (the exact codes the engine emits).
-        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|401|403|429|(?:\b|_)458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|PROVIDER_(ACCOUNT_)?BUSY|401|403|429|(?:\b|_)458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
     }
 
     // Provider single-slot "max connections" (HTTP 458): transient — the slot frees
     // ~8s after the previous consumer drops. Matches the engine's BLOCK_HTTP_458 /
     // PROBE_HTTP_458 codes AND the gateway's typed PROVIDER_BUSY details.
     isProviderBusyError(message) {
-        return /(?:\b|_)458\b|PROVIDER_BUSY|max connections?/i.test(String(message || ''));
+        return /(?:\b|_)458\b|PROVIDER_(ACCOUNT_)?BUSY|max connections?/i.test(String(message || ''));
+    }
+
+    playbackSupersededCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: 'Service déjà utilisé sur un autre appareil',
+                message: 'Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place.',
+                hint: 'Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée.',
+                retry: 'Reprendre ici',
+            };
+        }
+        return {
+            title: 'Service already in use on another device',
+            message: 'Norva stopped this playback because another playback took its place.',
+            hint: 'To resume here, select Play here. The most recent playback will be kept.',
+            retry: 'Play here',
+        };
+    }
+
+    providerAccountConflictCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: 'Service déjà utilisé sur un autre appareil',
+                message: 'Une autre lecture utilise actuellement ce service. Norva a arrêté l’ancienne lecture lorsqu’elle lui appartenait.',
+                hint: 'Arrêtez toute lecture externe éventuelle, attendez un instant, puis appuyez sur Réessayer.',
+                retry: 'Réessayer',
+            };
+        }
+        return {
+            title: 'Service already in use on another device',
+            message: 'Another playback is currently using this service. Norva stopped the older playback when it belonged to Norva.',
+            hint: 'Stop any remaining external playback, wait a moment, then select Retry.',
+            retry: 'Retry',
+        };
     }
 
     getProbeFailureText(info) {
@@ -2859,8 +3017,26 @@ class WatchPage {
         const text = this.sanitizePlaybackMessage(message);
         const cloud = this.isCloudPlaybackMode();
 
+        if (this.isPlaybackSupersededError(text)) {
+            return this.playbackSupersededCopy().message;
+        }
         if (this.isProviderBusyError(text)) {
-            return 'This provider allows only one stream at a time and the slot is busy right now. Stop any other playback, wait a few seconds, then press play again — it frees up shortly after the previous video stops.';
+            return this.providerAccountConflictCopy().message;
+        }
+        if (/PROVIDER_(CONNECT|RESPONSE)_TIMEOUT|UND_ERR_(CONNECT|HEADERS)_TIMEOUT|ETIMEDOUT/i.test(text)) {
+            return 'The TV service did not respond before the connection timed out. Retry once the service is reachable.';
+        }
+        if (/PROVIDER_DNS_FAILURE|ENOTFOUND|EAI_AGAIN/i.test(text)) {
+            return 'The TV service address could not be resolved. Check the service address in Settings.';
+        }
+        if (/PROVIDER_TLS_FAILURE|certificate|TLS|SSL/i.test(text)) {
+            return 'The TV service could not establish a secure connection.';
+        }
+        if (/PROVIDER_CONNECTION_RESET|ECONNRESET|UND_ERR_SOCKET|EPIPE/i.test(text)) {
+            return 'The TV service closed the network connection before playback could start.';
+        }
+        if (/PROVIDER_NETWORK_UNREACHABLE|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/i.test(text)) {
+            return 'The network route to the TV service is unavailable.';
         }
         if (/NO_SUPPORTED_MIME/i.test(text)) {
             return "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it.";
@@ -3220,13 +3396,8 @@ class WatchPage {
         this.gatewaySourceTimestamps = false;
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
 
-        // Single-slot providers (e.g. super8k) answer HTTP 458 "max connections" while
-        // their one slot is still held by a just-closed playback — it frees ~8s after
-        // the previous connection drops. Failing straight to "unplayable" is what left
-        // the user staring at an endless spinner. Instead retry the whole load a few
-        // times with backoff: reopening a title right after another recovers on its own
-        // once the slot frees, and the status badge shows it's reconnecting (not frozen).
-        const SLOT_BUSY_RETRIES = 3;
+        // HTTP 458 is a provider-account conflict, not a media/container error.
+        // It is handled inside the loop before any transcode fallback or retry.
         const isSlotBusy = (m) => this.isProviderBusyError(m);
         for (let attempt = 0; ; attempt++) {
             // Engine info logs are DEV-ONLY: they fire on every load AND every seek
@@ -3289,19 +3460,10 @@ class WatchPage {
                 }
                 if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                 const msg = String(e && (e.message || e));
-                if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES) {
+                if (this.isPlaybackSupersededError(e)) {
                     this.destroyEngine();
-                    // Give the relay's upstream socket a moment to actually drop —
-                    // the client-side abort alone leaves it lingering briefly.
-                    await this.waitForProviderSlotRelease(800);
-                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-                    const waitMs = 4000 + attempt * 4000; // 4s, 8s, 12s — the slot frees ~8s after the prior drop
-                    console.warn(`[NorvaEngine] slot busy (458), retry ${attempt + 1}/${SLOT_BUSY_RETRIES} in ${waitMs}ms`);
-                    try { this.showLoading(); } catch (_) {}
-                    try { this.updateTranscodeStatus('direct', `Stream busy, reconnecting… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
-                    await new Promise((r) => setTimeout(r, waitMs));
-                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-                    continue;
+                    await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                    return;
                 }
                 // A SOURCEOPEN_TIMEOUT means the browser deferred opening the MediaSource (a known
                 // intermittent quirk) — it clears on a fresh engine attempt, which is exactly why
@@ -3316,19 +3478,18 @@ class WatchPage {
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     continue;
                 }
-                // Slot still busy after every in-line retry: the provider's connection
-                // limit is the bottleneck, NOT the container — nothing was even fetched.
+                // A first 458 is authoritative: the provider's connection limit is
+                // the bottleneck, not the container. Open the account circuit and stop.
                 // A transcode fallback would open yet ANOTHER upstream connection against
                 // the same saturated slot (and 458 too), deepening the contention. Surface
-                // the real condition instead (the error UI maps 458 to a clear "one stream
-                // at a time" message and suppresses the aggressive 2s auto-refresh), and
-                // schedule ONE longer retry spanning the provider's ~8s slot-release window.
+                // the real condition instead. The error UI suppresses auto-refresh;
+                // only a deliberate viewer retry may create a new server-owned session.
                 if (isSlotBusy(msg)) {
                     this.reportEngineFailure({ stage: 'load', message: msg });
+                    await this.reportProviderPlaybackFailure(msg);
                     this.destroyEngine();
-                    // showPlaybackError classifies this as provider-busy: specific
-                    // "one stream at a time" message + ONE ~15s scheduled retry
-                    // (guard-railed to once per minute per title).
+                    // showPlaybackError classifies this as provider-busy and never
+                    // schedules another connection attempt.
                     this.handleEngineUnplayable(e);
                     return;
                 }
@@ -3382,6 +3543,11 @@ class WatchPage {
         const c = this.content || {};
         if (!c.sourceId || !c.id) return false;
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (this._cloudGatewayTranscodeFallbackTried) return false;
+        // This is the single server-side recovery lane for the current
+        // playback intention. Consume its budget before resolving the Gateway
+        // session so a failed resolve/load cannot cascade into Relay/direct.
+        this._cloudGatewayTranscodeFallbackTried = true;
         const contentAtStart = c;
         const itemIdAtStart = String(c.id);
         const sourceIdAtStart = String(c.sourceId);
@@ -5495,7 +5661,6 @@ class WatchPage {
                 const isCodecError = error.code === 3 || error.code === 4;
                 const message = (isCodecError ? 'MEDIA_ELEMENT_ERROR: Format error — ' : '')
                     + (error.message || `code ${error.code}`);
-                this.logRelayUpstreamDiagnostic(currentSrc);
                 if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
                 this.sendPlaybackEvent('playback_error', {
                     errorCode: String(error.code),
@@ -5504,41 +5669,6 @@ class WatchPage {
                 this.handlePlaybackFailure(message)
                     .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
             }
-        }
-    }
-
-    /**
-     * Diagnostic only (no effect on playback or fallback): the <video> element
-     * never exposes the HTTP status behind a fatal error, so a provider 401/403/
-     * 404 is indistinguishable from a codec failure ("Video error: 4"). When a
-     * relay/direct URL fails, re-request it once with a tiny range to read the
-     * relay's X-Norva-Upstream-* headers and log the real provider status+reason,
-     * so the cause (connection limit vs wrong container vs dead link) is visible.
-     */
-    async logRelayUpstreamDiagnostic(src) {
-        try {
-            if (!src || typeof fetch !== 'function') return;
-            if (/^(blob:|data:|mediasource:)/i.test(src)) return; // engine/MSE: not a provider URL
-            const res = await fetch(src, {
-                method: 'GET',
-                headers: { Range: 'bytes=0-1' },
-                cache: 'no-store',
-            });
-            const upstreamStatus = res.headers.get('x-norva-upstream-status');
-            const upstreamReason = res.headers.get('x-norva-upstream-reason');
-            const upstreamFinal = res.headers.get('x-norva-upstream-final');
-            if (res.ok && !upstreamStatus) {
-                console.warn('[WatchPage] Relay upstream diagnostic: stream reachable (http=' +
-                    res.status + ') — failure was likely client-side decode/codec, not the provider.');
-                return;
-            }
-            console.warn('[WatchPage] Relay upstream diagnostic:',
-                'http=' + res.status,
-                'upstream=' + (upstreamStatus || 'n/a'),
-                'reason="' + (upstreamReason || '') + '"',
-                upstreamFinal ? 'final=' + upstreamFinal : '');
-        } catch (e) {
-            console.warn('[WatchPage] Relay upstream diagnostic failed:', e?.message || e);
         }
     }
 
@@ -5565,10 +5695,32 @@ class WatchPage {
         try {
             this._lastFailureMsg = message;
             this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+            if (this.isPlaybackSupersededError(message)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return;
+            }
+            if (this.isProviderBusyError(message)) {
+                await this.reportProviderPlaybackFailure(message);
+                await this.releasePlaybackPipelineForRetry();
+                if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                    this.showPlaybackError(message, { immediate: true });
+                }
+                return;
+            }
+            const gatewayFallbackAlreadyAttempted = this._cloudGatewayTranscodeFallbackTried;
             const retriedWithGatewayTranscode = await this.retryWithCloudGatewayTranscode(message);
             if (retriedWithGatewayTranscode) return;
 
-            const retriedWithRelay = await this.retryWithCloudRelay(message);
+            // retryWithCloudGatewayTranscode consumes the one server-side
+            // fallback budget before it resolves anything. If that lane was
+            // attempted here or by fallbackEngineToTranscode, do not open a
+            // second upstream connection through Relay/direct in this same
+            // incident. A deliberate viewer retry starts a fresh intention.
+            const gatewayFallbackAttempted = gatewayFallbackAlreadyAttempted
+                || this._cloudGatewayTranscodeFallbackTried;
+            const retriedWithRelay = gatewayFallbackAttempted
+                ? false
+                : await this.retryWithCloudRelay(message);
             if (retriedWithRelay) return;
 
             const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
@@ -5639,10 +5791,12 @@ class WatchPage {
         // gateway-only containers (MKV/AVI/…) — don't even try; let the gateway
         // transcode retry (already attempted first) own the recovery.
         if (this.isGatewayOnlyContainer()) return false;
-        const gatewaySessionGone = /Gateway session (not found|expired)/i.test(message || '');
-        if (!gatewaySessionGone && (this.currentPlaybackMode === 'gateway-session'
+        // Never turn a failed/expired gateway session into a second direct
+        // provider request. Preserve that first control-plane cause and wait
+        // for an explicit viewer retry to create one new session.
+        if (this.currentPlaybackMode === 'gateway-session'
             || this.isGatewayPlaybackUrl(this.currentUrl)
-            || this.isGatewayPlaybackUrl(this.baseStreamUrl))) {
+            || this.isGatewayPlaybackUrl(this.baseStreamUrl)) {
             return false;
         }
 
@@ -5669,6 +5823,10 @@ class WatchPage {
             }));
             return true;
         } catch (error) {
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return true;
+            }
             console.warn('[WatchPage] Relay fallback failed:', error?.message || error);
             return false;
         }
@@ -5708,29 +5866,22 @@ class WatchPage {
                 resumeTime: position
             };
 
-            let result = null;
-            let lastError = null;
             await this.waitForProviderSlotRelease(1400);
-            for (let attempt = 0; attempt < 2; attempt += 1) {
-                try {
-                    result = await API.proxy.xtream.getStreamUrl(
-                        this.content.sourceId,
-                        this.content.id,
-                        itemType,
-                        container,
-                        playbackHint
-                    );
-                    break;
-                } catch (error) {
-                    lastError = error;
-                    if (attempt === 0) {
-                        const retryDelay = this.getAudioSwitchRetryDelay(error);
-                        console.warn(`[WatchPage] Gateway transcode session failed, retrying after ${retryDelay}ms provider cooldown:`, error?.message || error);
-                        await this.waitForProviderSlotRelease(retryDelay);
-                    }
+            let result;
+            try {
+                result = await API.proxy.xtream.getStreamUrl(
+                    this.content.sourceId,
+                    this.content.id,
+                    itemType,
+                    container,
+                    playbackHint
+                );
+            } catch (error) {
+                if (this.isProviderBusyError(this.getErrorText(error))) {
+                    await this.reportProviderPlaybackFailure(error);
                 }
+                throw error;
             }
-            if (!result && lastError) throw lastError;
 
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
@@ -5742,6 +5893,10 @@ class WatchPage {
             }));
             return true;
         } catch (error) {
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return true;
+            }
             console.warn('[WatchPage] Gateway transcode fallback failed:', error?.message || error);
             return false;
         }
@@ -5830,32 +5985,36 @@ class WatchPage {
         // A provider auth / rate-limit block (401/403/429) does not clear on a
         // reload — auto-refreshing just spins on the same blocked path. Skip it
         // and point the user to a residential path (native app / local hub).
-        const providerBusy = this.isProviderBusyError(safeMessage);
+        const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
+        const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
         const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
-        // Provider slot-busy (458) is transient: schedule ONE longer retry that lands
-        // safely past the ~8s slot-release window (the guard caps it at one/minute).
-        // A hard block (401/403/429) does NOT clear on refresh — no auto-retry there.
-        const refreshScheduled = providerBusy
-            ? this.schedulePlaybackErrorRefresh(15000)
+        const conflictCopy = playbackSuperseded
+            ? this.playbackSupersededCopy()
+            : providerBusy ? this.providerAccountConflictCopy() : null;
+        // A 458 opens a server-side circuit. Automatic retries would extend the
+        // provider conflict; only an explicit user retry may probe after cooldown.
+        const refreshScheduled = playbackSuperseded || providerBusy
+            ? false
             : providerBlocked ? false : this.schedulePlaybackErrorRefresh();
-        const refreshHint = providerBusy
-            ? (refreshScheduled
-                ? 'The slot usually frees a few seconds after the other stream stops — retrying automatically in ~15 seconds…'
-                : 'If the slot is still busy, stop the other playback and press Retry.')
+        const refreshHint = playbackSuperseded || providerBusy
+            ? conflictCopy.hint
             : providerBlocked
                 ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
                 : refreshScheduled
                     ? 'Retrying automatically in 2 seconds…'
                     : 'If the problem persists, use Retry below.';
-        const refreshBtnLabel = (providerBusy || providerBlocked) ? 'Retry' : 'Retry now';
+        const refreshBtnLabel = playbackSuperseded || providerBusy ? conflictCopy.retry : ((providerBlocked) ? 'Retry' : 'Retry now');
+        const errorTitle = playbackSuperseded || providerBusy ? conflictCopy.title : 'Unable to play this title';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
-                <p class="watch-error-title">⚠ Unable to play this title</p>
-                <p class="watch-error-msg">${friendly}</p>
-                <p class="watch-error-refresh">${refreshHint}</p>
-                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${refreshBtnLabel}</button>
+                <p class="watch-error-title">${this.escapeHtml(errorTitle)}</p>
+                <p class="watch-error-msg">${this.escapeHtml(friendly)}</p>
+                <p class="watch-error-refresh">${this.escapeHtml(refreshHint)}</p>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(refreshBtnLabel)}</button>
             </div>`;
+        errorEl.setAttribute('role', 'alert');
+        errorEl.setAttribute('aria-live', 'assertive');
         errorEl.classList.remove('hidden');
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
             this.clearPlaybackErrorRefreshTimer();
@@ -5967,9 +6126,14 @@ class WatchPage {
         } catch (error) {
             // A slot still busy after the retry is a provider-side state — a full page
             // reload would just replay the whole cascade against the same busy slot.
-            if (this.isProviderBusyError(error?.message)) {
-                console.warn('[WatchPage] In-place retry hit a busy provider slot:', error?.message || error);
-                this.showPlaybackError(error?.message || 'BLOCK_HTTP_458', { immediate: true });
+            const errorText = this.getErrorText(error);
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return;
+            }
+            if (this.isProviderBusyError(errorText)) {
+                console.warn('[WatchPage] In-place retry hit a busy provider slot:', errorText);
+                this.showPlaybackError(errorText || 'BLOCK_HTTP_458', { immediate: true });
                 return;
             }
             console.warn('[WatchPage] In-place retry failed, falling back to a page refresh:', error?.message || error);
@@ -7244,6 +7408,14 @@ class WatchPage {
                 );
             } catch (error) {
                 lastError = error;
+                if (this.isPlaybackSupersededError(error)) {
+                    await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                    break;
+                }
+                if (this.isProviderBusyError(this.getErrorText(error))) {
+                    await this.reportProviderPlaybackFailure(error);
+                    break;
+                }
                 if (attempt === 0) {
                     const retryDelay = this.getAudioSwitchRetryDelay(error);
                     console.warn(`[WatchPage] Audio switch session failed, retrying after ${retryDelay}ms provider cooldown:`, error?.message || error);

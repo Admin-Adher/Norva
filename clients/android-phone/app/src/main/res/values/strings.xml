@@ -19,6 +19,8 @@
     <string name="player_error_network">The connection was interrupted. Check your network, then try again.</string>
     <string name="player_error_unsupported">This video format cannot be played on this device.</string>
     <string name="player_error_generic">Playback stopped unexpectedly. Please try again.</string>
+    <string name="player_error_provider_in_use_title">Service already in use on another device</string>
+    <string name="player_error_provider_in_use">Another playback is currently using this service. Norva stopped the older playback when it belonged to Norva. Stop any remaining external playback, wait a moment, then try again.</string>
     <string name="player_show_controls">Show playback controls</string>
     <string name="player_state_preparing">Preparing playback…</string>
     <string name="player_state_initial_buffering">Starting playback…</string>

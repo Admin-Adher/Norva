@@ -16,8 +16,9 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 26
-        versionName "3.8.13-hybrid"
+        versionCode 27
+        versionName "3.8.14-hybrid"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -85,5 +86,7 @@ dependencies {
     // Watch Next ("Play Next") row on the Android TV home screen.
     // 1.1.0 exposes the Watch Next builder contract as public API.
     implementation "androidx.tvprovider:tvprovider:1.1.0"
+    androidTestImplementation "androidx.test:runner:1.6.2"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
     testImplementation "junit:junit:4.13.2"
 }

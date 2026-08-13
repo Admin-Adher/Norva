@@ -779,14 +779,9 @@
     }
 
     async function playbackRequest(session, options = {}) {
-        try {
-            return await requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
-        } catch (error) {
-            if (error.status === 404 || error.status === 405) {
-                return request('POST', '/playback/sessions', session, options);
-            }
-            throw error;
-        }
+        // Creation is security-sensitive and has no legacy fallback: a partial
+        // deployment must fail closed instead of bypassing provider arbitration.
+        return requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
     }
 
     async function playbackSessionRequest(method, path, body, options = {}) {
@@ -800,6 +795,19 @@
         }
     }
 
+    // Playback takeover liveness is owned only by norva-playback. Falling back
+    // to norva-cloud on 404/405 would hide a partial rollout and let an older
+    // browser continue after another device has claimed the provider account.
+    function playbackHeartbeatRequest(id, options = {}) {
+        return requestToBase(
+            playbackBase(),
+            'POST',
+            `/playback/sessions/${encodeURIComponent(id)}/heartbeat`,
+            null,
+            options
+        );
+    }
+
     // Pull the deepest upstream detail out of an error payload so callers see
     // the real cause (e.g. the provider "401 Unauthorized" the cloud gateway
     // reports) instead of only the generic top-level "Media gateway refused the
@@ -809,7 +817,17 @@
         if (typeof value === 'string') return value.trim();
         if (typeof value !== 'object') return '';
         const parts = [];
-        for (const key of ['details', 'error', 'message', 'reason']) {
+        for (const key of [
+            'code',
+            'networkCause',
+            'network_cause',
+            'upstreamStatus',
+            'upstream_status',
+            'details',
+            'error',
+            'message',
+            'reason'
+        ]) {
             const nested = extractUpstreamDetail(value[key], depth + 1);
             if (nested) parts.push(nested);
         }
@@ -4130,6 +4148,8 @@
             list: () => listSourcesCached(),
             create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
+            toggle: (id) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`).then((r) => { invalidateSourcesCache(); return r; }),
+            test: (id) => request('POST', `/sources/${encodeURIComponent(id)}/test`),
             seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId),
             shortEpg: (id, streamId, limit = 8) => request(
                 'GET',
@@ -4228,11 +4248,17 @@
         playback: {
             createSession: (session) => playbackRequest(session),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
+            heartbeatSession: (id) => playbackHeartbeatRequest(id),
             expireSession: (id, options = {}) => playbackSessionRequest(
                 'POST',
                 `/playback/sessions/${encodeURIComponent(id)}/expire`,
                 null,
                 options
+            ),
+            reportProviderFailure: (id, failure) => playbackSessionRequest(
+                'POST',
+                `/playback/sessions/${encodeURIComponent(id)}/provider-failure`,
+                failure
             ),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
             summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`),
@@ -4265,6 +4291,12 @@
             failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() }),
             sources: {
                 list: () => request('GET', '/device/sources', null, { token: getDeviceToken() }),
+                test: (id) => request(
+                    'POST',
+                    `/device/sources/${encodeURIComponent(id)}/test`,
+                    null,
+                    { token: getDeviceToken() }
+                ),
                 seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId, { token: getDeviceToken() }),
                 shortEpg: (id, streamId, limit = 8) => request(
                     'GET',
@@ -4297,11 +4329,18 @@
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
                 expireSession: (id, options = {}) => playbackSessionRequest(
                     'POST',
                     `/playback/sessions/${encodeURIComponent(id)}/expire`,
                     null,
                     { ...options, token: getDeviceToken() }
+                ),
+                reportProviderFailure: (id, failure) => playbackSessionRequest(
+                    'POST',
+                    `/playback/sessions/${encodeURIComponent(id)}/provider-failure`,
+                    failure,
+                    { token: getDeviceToken() }
                 ),
                 event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
                 summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })

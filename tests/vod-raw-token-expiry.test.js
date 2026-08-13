@@ -146,7 +146,7 @@ test('edge keeps session expiry short while signing VOD engine raw URL with its 
     'utf8',
   );
   const engineStart = source.indexOf('if (body.enginePipe === true || body.engine_pipe === true)');
-  const engineEnd = source.indexOf('\n    const relay = await createRelayAccess(', engineStart);
+  const engineEnd = source.indexOf('\n    const relayTransportExpiresAt = transportExpiresAt;', engineStart);
   assert.notEqual(engineStart, -1);
   assert.notEqual(engineEnd, -1);
   const engineBranch = source.slice(engineStart, engineEnd);
@@ -170,7 +170,7 @@ test('edge keeps session expiry short while signing VOD engine raw URL with its 
   assert.match(source, /expires_at: expiresAt/);
 });
 
-test('norva-playback signs the dormant native fallback with its own transport expiry', () => {
+test('norva-playback direct mode never mints a dormant gateway fallback', () => {
   const source = fs.readFileSync(
     path.join(root, 'supabase', 'functions', 'norva-playback', 'index.ts'),
     'utf8',
@@ -181,18 +181,10 @@ test('norva-playback signs the dormant native fallback with its own transport ex
   assert.notEqual(directEnd, -1);
   const directBranch = source.slice(directStart, directEnd);
 
-  assert.match(
-    source,
-    /nativeFallbackTokenExpiresAt[\s\S]{0,160}from\s+["']\.\.\/_shared\/playback-expiry\.mjs["']/,
-  );
-  assert.match(directBranch, /fallbackExpiresAt = nativeFallbackTokenExpiresAt\(\{/);
-  assert.match(directBranch, /playbackHint:\s*requestedPlaybackHint/);
-  assert.match(directBranch, /sessionTtlSeconds:\s*ttlSeconds/);
-  assert.match(
-    directBranch,
-    /createBytePipeAccess\(\s*session\.id,\s*userId,\s*targetUrl,\s*fallbackExpiresAt,/,
-  );
-  assert.match(directBranch, /fallbackUrl,\s*fallbackExpiresAt,\s*expiresAt,/);
+  assert.doesNotMatch(source, /nativeFallbackTokenExpiresAt/);
+  assert.doesNotMatch(directBranch, /createBytePipeAccess\(/);
+  assert.match(directBranch, /fallbackUrl:\s*null/);
+  assert.match(directBranch, /fallbackExpiresAt:\s*null/);
 });
 
 test('gateway /raw accepts a valid duration-aware expiration beyond 15 minutes', () => {
@@ -218,38 +210,52 @@ test('gateway /raw accepts a valid duration-aware expiration beyond 15 minutes',
   assert.equal(Number(durationAwareClaims.exp) * 1000 < now, false);
 });
 
-for (const edgeFile of ['norva-playback', 'norva-cloud']) {
-  test(`${edgeFile} keeps entitlement and relay short while gateway gets the media transport expiry`, () => {
-    const source = fs.readFileSync(
-      path.join(root, 'supabase', 'functions', edgeFile, 'index.ts'),
-      'utf8',
-    );
-    const start = source.indexOf('const ttlSeconds = boundedInt(');
-    assert.notEqual(start, -1);
-    const branch = source.slice(start, source.indexOf('\n  if (sourceId && gateway.startupMs)', start));
+test('norva-playback keeps entitlement short while every revocable media transport covers the VOD', () => {
+  const source = fs.readFileSync(
+    path.join(root, 'supabase', 'functions', 'norva-playback', 'index.ts'),
+    'utf8',
+  );
+  const start = source.indexOf('const ttlSeconds = boundedInt(');
+  assert.notEqual(start, -1);
+  const branch = source.slice(start, source.indexOf('\n  if (sourceId && gateway.startupMs)', start));
 
-    assert.match(
-      source,
-      /playbackTransportExpiresAt[\s\S]{0,160}from\s+["']\.\.\/_shared\/playback-expiry\.mjs["']/,
-    );
-    assert.match(branch, /boundedInt\([^;]+900,\s*60,\s*7200\)/);
-    assert.match(branch, /const expiresAt = new Date\(Date\.now\(\) \+ ttlSeconds \* 1000\)\.toISOString\(\)/);
-    assert.match(
-      branch,
-      /const transportExpiresAt = playbackTransportExpiresAt\(\{\s*itemType,\s*playbackHint:\s*requestedPlaybackHint,\s*sessionTtlSeconds:\s*ttlSeconds,\s*\}\)/,
-    );
-    assert.match(branch, /expires_at:\s*expiresAt/);
-    assert.match(
-      branch,
-      /const gatewayTransportExpiresAt = mode === "transcode"\s*\? transportExpiresAt\s*:\s*expiresAt/,
-    );
-    assert.match(
-      branch,
-      /createRelayAccess\(session\.id,\s*userId,\s*targetUrl,\s*expiresAt,/,
-    );
-    assert.match(branch, /tokenExpiresAt:\s*expiresAt/);
-    assert.match(branch, /prepareEdgeSessionCoordinator\(\{[\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);
-    assert.match(branch, /createGatewaySession\([\s\S]*?gatewayTransportExpiresAt/);
-    assert.match(branch, /commitEdgeSessionCoordinator\([\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);
-  });
-}
+  assert.match(
+    source,
+    /playbackTransportExpiresAt[\s\S]{0,160}from\s+["']\.\.\/_shared\/playback-expiry\.mjs["']/,
+  );
+  assert.match(branch, /boundedInt\([^;]+900,\s*60,\s*7200\)/);
+  assert.match(branch, /const expiresAt = new Date\(Date\.now\(\) \+ ttlSeconds \* 1000\)\.toISOString\(\)/);
+  assert.match(
+    branch,
+    /const transportExpiresAt = playbackTransportExpiresAt\(\{\s*itemType,\s*playbackHint:\s*requestedPlaybackHint,\s*sessionTtlSeconds:\s*ttlSeconds,\s*\}\)/,
+  );
+  assert.match(branch, /expires_at:\s*expiresAt/);
+  assert.match(
+    branch,
+    /const gatewayTransportExpiresAt = mode === "transcode"\s*\? transportExpiresAt\s*:\s*expiresAt/,
+  );
+  assert.match(
+    branch,
+    /createRelayAccess\(\s*session\.id,\s*userId,\s*targetUrl,\s*relayTransportExpiresAt,/,
+  );
+  assert.match(branch, /tokenExpiresAt:\s*relayTransportExpiresAt/);
+  assert.match(branch, /prepareEdgeSessionCoordinator\(\{[\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);
+  assert.match(branch, /createGatewaySession\([\s\S]*?gatewayTransportExpiresAt/);
+  assert.match(branch, /commitEdgeSessionCoordinator\([\s\S]*?expiresAt:\s*gatewayTransportExpiresAt/);
+});
+
+test('norva-cloud keeps legacy playback creation tombstoned instead of minting transport access', () => {
+  const source = fs.readFileSync(
+    path.join(root, 'supabase', 'functions', 'norva-cloud', 'index.ts'),
+    'utf8',
+  );
+  const start = source.indexOf('async function createPlaybackSession(');
+  const end = source.indexOf('\nasync function getPlaybackSession(', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const branch = source.slice(start, end);
+
+  assert.match(branch, /throw new HttpError\(410,/);
+  assert.match(branch, /code:\s*"PLAYBACK_CREATION_MOVED"/);
+  assert.doesNotMatch(branch, /playbackTransportExpiresAt|createRelayAccess|createGatewaySession|cloud_playback_sessions/);
+});

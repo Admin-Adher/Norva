@@ -23,7 +23,7 @@ import {
 } from "../_shared/paywall-experiments.ts";
 
 type JsonRecord = Record<string, unknown>;
-type CloudUser = { id: string; email?: string };
+type CloudUser = { id: string; email?: string; app_metadata?: JsonRecord | null };
 type CloudDevice = {
   id: string;
   user_id: string;
@@ -322,7 +322,9 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 22,
+        version: 24,
+        playbackCreationProtocol: 1,
+        relayTakeoverProtocol: 1,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -393,6 +395,9 @@ async function route(
     }
     if (req.method === "GET" && id === "sources" && action && segments[3] === "epg") {
       return { body: await getSourceEpg(url, action, device.user_id, db) };
+    }
+    if (req.method === "POST" && id === "sources" && action && segments[3] === "test") {
+      return { body: await testSourceConnection(action, device.user_id, db) };
     }
     if (req.method === "GET" && id === "media-items") {
       return { body: await listMediaItems(url, device.user_id, db) };
@@ -1444,11 +1449,42 @@ async function testSourceConnection(id: string, userId: string, db: SupabaseClie
   const type = stringOr((src as JsonRecord | null)?.source_type, "");
   try {
     const config = await loadSourceConfig(id, userId, db);
-    await validateCloudSource(type, config, await getRuntimeConfig(db));
-    return { success: true };
+    const validation = await validateCloudSource(type, config, await getRuntimeConfig(db));
+    return {
+      success: true,
+      status: stringOrNull(validation.status) ?? "reachable",
+      checkedAt: new Date().toISOString(),
+    };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : "Connection failed" };
+    const status = err instanceof HttpError ? err.status : 502;
+    const details = err instanceof HttpError ? recordOrEmpty(err.details) : {};
+    const code = stringOr(
+      details.code,
+      status === 504 ? "PROVIDER_RESPONSE_TIMEOUT" : "PROVIDER_REQUEST_FAILED",
+    );
+    return {
+      success: false,
+      code,
+      status,
+      error: sourceConnectionPublicMessage(code, status),
+      checkedAt: new Date().toISOString(),
+    };
   }
+}
+
+function sourceConnectionPublicMessage(code: string, status: number): string {
+  if (code === "PROVIDER_BUSY" || status === 458) {
+    return "This TV service is already being used on another device.";
+  }
+  if (code === "PROVIDER_CONNECT_TIMEOUT" || code === "PROVIDER_RESPONSE_TIMEOUT" || status === 504) {
+    return "The TV service did not respond before the connection timed out.";
+  }
+  if (code === "PROVIDER_DNS_FAILURE") return "The TV service address could not be resolved.";
+  if (code === "PROVIDER_TLS_FAILURE") return "The TV service could not establish a secure connection.";
+  if (code === "PROVIDER_CONNECTION_RESET") return "The TV service closed the network connection unexpectedly.";
+  if (code === "PROVIDER_NETWORK_UNREACHABLE") return "The network route to the TV service is unavailable.";
+  if (status === 401 || status === 403) return "The TV service refused these login details.";
+  return "Norva could not reach this TV service.";
 }
 
 // Per-source sync status for the client's post-"Sync now" poll. Shape matches what refreshSource
@@ -1542,25 +1578,18 @@ function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
 
 // Validate Xtream credentials via the media gateway (the IP the provider tolerates)
 // so adding/updating a source never trips the provider's user_multi_ip block from
-// this edge runtime's datacenter IP. Falls back to a direct edge fetch only when the
-// gateway itself can't serve the request — unconfigured, unreachable, or an older
-// build that rejects the `account_info` action (400). A provider verdict (401 bad
-// creds, 429 multi_ip) is surfaced as-is, never silently retried direct.
+// this edge runtime's datacenter IP. A direct edge fetch is used only when no gateway
+// is configured. Once the gateway path is selected, every provider or network verdict
+// is surfaced as-is and is never retried through a second route.
 async function validateXtreamAccount(
   runtimeConfig: RuntimeConfig,
   creds: { serverUrl: string; username: string; password: string },
 ): Promise<JsonRecord> {
   const { serverUrl, username, password } = creds;
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
-    try {
-      return recordOrEmpty(
-        await requestGatewayMetadata(runtimeConfig, { serverUrl, username, password, action: "account_info" }, 20000),
-      );
-    } catch (error) {
-      const status = error instanceof HttpError ? error.status : 502;
-      if (![400, 404, 405, 502, 503, 504].includes(status)) throw error;
-      console.warn("[norva-cloud] gateway account-info unavailable, falling back to direct", status);
-    }
+    return recordOrEmpty(
+      await requestGatewayMetadata(runtimeConfig, { serverUrl, username, password, action: "account_info" }, 20000),
+    );
   }
   return recordOrEmpty(await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000));
 }
@@ -3822,190 +3851,17 @@ async function updateDeviceCommand(req: Request, id: string, device: CloudDevice
   return { command: data };
 }
 
-async function createPlaybackSession(req: Request, userId: string, db: SupabaseClient, defaultDeviceId: string | null = null) {
-  const body = await readJson(req);
-  const sourceId = stringOrNull(body.sourceId ?? body.source_id);
-  const deviceId = stringOrNull(body.deviceId ?? body.device_id) ?? defaultDeviceId;
-  const itemType = stringOr(body.itemType ?? body.item_type, "");
-  const itemId = stringOr(body.itemId ?? body.item_id, "");
-  let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
-  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
-  const requestedMode = stringOr(body.mode, "auto");
-  const parentSeriesId = itemType === "series"
-    ? stringOr(
-      requestedPlaybackHint.audioSeriesId
-        ?? requestedPlaybackHint.audio_series_id
-        ?? requestedPlaybackHint.seriesId
-        ?? requestedPlaybackHint.series_id,
-      "",
-    )
-    : "";
-  const exactEpisodeCoordinates = sourceId && itemType === "series" && itemId
-    ? await resolveCatalogSeriesEpisodeCoordinates(
-      db,
-      userId,
-      sourceId,
-      parentSeriesId,
-      itemId,
-    )
-    : null;
-  // Owned coordinates are authoritative. Ignore a caller-supplied URL whenever
-  // source/item coordinates are present so arbitrary bytes cannot be associated
-  // with another catalog item during a rolling fallback to norva-cloud.
-  if (sourceId && itemType && itemId) {
-    targetUrl = await resolvePlaybackTarget(
-      sourceId,
-      itemType,
-      itemId,
-      userId,
-      db,
-      requestedPlaybackHint,
-      exactEpisodeCoordinates,
-    );
-  }
-  if (!itemType || !itemId || !targetUrl) {
-    throw new HttpError(400, "itemType, itemId and targetUrl are required");
-  }
-  assertHttpUrl(targetUrl);
-  if (sourceId) await assertOwnedSource(sourceId, userId, db);
-  if (deviceId) await assertOwnedDevice(deviceId, userId, db);
-
-  const mode = choosePlaybackMode(requestedMode, body);
-  const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
-  // Keep the revocable entitlement session short, while allowing the actual
-  // transcode transport to cover a complete VOD or a bounded long Live session.
-  const transportExpiresAt = playbackTransportExpiresAt({
-    itemType,
-    playbackHint: requestedPlaybackHint,
-    sessionTtlSeconds: ttlSeconds,
+async function createPlaybackSession(
+  _req: Request,
+  _userId: string,
+  _db: SupabaseClient,
+  _defaultDeviceId: string | null = null,
+): Promise<never> {
+  // Compatibility tombstone: all creation must pass through norva-playback's
+  // owned-target resolution, provider circuit and atomic account claim.
+  throw new HttpError(410, "Playback session creation has moved to norva-playback", {
+    code: "PLAYBACK_CREATION_MOVED",
   });
-  const gatewayTransportExpiresAt = mode === "transcode"
-    ? transportExpiresAt
-    : expiresAt;
-  const targetUrlHash = await sha256Hex(targetUrl);
-  const edgeCoordination = mode === "transcode"
-    ? await prepareEdgeSessionCoordinator({
-      userId,
-      sourceId,
-      deviceId,
-      itemType,
-      itemId,
-      targetUrlHash,
-      expiresAt: gatewayTransportExpiresAt,
-    }, db)
-    : null;
-  if (edgeCoordination?.waitMs) await sleep(edgeCoordination.waitMs);
-
-  const { data: session, error } = await db
-    .from("cloud_playback_sessions")
-    .insert({
-      user_id: userId,
-      source_id: sourceId,
-      device_id: deviceId,
-      item_type: itemType,
-      item_id: itemId,
-      mode,
-      status: mode === "transcode" ? "pending" : "ready",
-      target_url_hash: targetUrlHash,
-      stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
-      playback_hint: requestedPlaybackHint,
-      expires_at: expiresAt,
-    })
-    .select("*")
-    .single();
-  if (error) throwDb(error, "Unable to create playback session");
-
-  // Account busy-lock writer (twin of norva-playback createPlaybackSession) — covers the older
-  // native/device fallback that routes playback through norva-cloud. Best-effort.
-  try {
-    if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: "session" });
-  } catch (_) { /* best-effort */ }
-
-  if (mode === "direct") {
-    return {
-      session,
-      playback: {
-        mode,
-        url: targetUrl,
-        expiresAt,
-      },
-    };
-  }
-
-  if (mode === "relay") {
-    const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db);
-    return {
-      session,
-      playback: {
-        mode,
-        url: relay.url,
-        tokenExpiresAt: expiresAt,
-      },
-    };
-  }
-
-  let gateway;
-  try {
-    gateway = await createGatewaySession(session.id, userId, targetUrl, gatewayTransportExpiresAt, db, requestedPlaybackHint);
-    await commitEdgeSessionCoordinator(edgeCoordination, {
-      playbackSessionId: session.id,
-      gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
-      itemType,
-      itemId,
-      targetUrlHash,
-      expiresAt: gatewayTransportExpiresAt,
-    });
-  } catch (error) {
-    await abortEdgeSessionCoordinator(edgeCoordination);
-    throw error;
-  }
-  if (sourceId && gateway.startupMs) {
-    await recordPlaybackStartupObservation(db, {
-      userId,
-      sourceId,
-      itemType,
-      itemId,
-      startupMs: gateway.startupMs,
-    });
-  }
-  const gatewaySessionResponse = gateway.session && typeof gateway.session === "object"
-    ? {
-      ...gateway.session,
-      audioStreamIndex: gateway.audioStreamIndex ?? null,
-      audio_stream_index: gateway.audioStreamIndex ?? null,
-      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
-      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
-      actualStartOffset: gateway.actualStartOffset ?? 0,
-      actual_start_offset: gateway.actualStartOffset ?? 0,
-      localSeekTarget: gateway.localSeekTarget ?? 0,
-      local_seek_target: gateway.localSeekTarget ?? 0,
-      sourceTimestamps: gateway.sourceTimestamps === true,
-      source_timestamps: gateway.sourceTimestamps === true,
-    }
-    : gateway.session;
-  return {
-    session,
-    playback: {
-      mode,
-      status: gateway.status,
-      url: gateway.hlsUrl,
-      gatewaySession: gatewaySessionResponse,
-      gatewayRequired: !gateway.hlsUrl,
-      startupMs: gateway.startupMs ?? null,
-      audioStreamIndex: gateway.audioStreamIndex ?? null,
-      audio_stream_index: gateway.audioStreamIndex ?? null,
-      requestedSeekOffset: gateway.requestedSeekOffset ?? 0,
-      requested_seek_offset: gateway.requestedSeekOffset ?? 0,
-      actualStartOffset: gateway.actualStartOffset ?? 0,
-      actual_start_offset: gateway.actualStartOffset ?? 0,
-      localSeekTarget: gateway.localSeekTarget ?? 0,
-      local_seek_target: gateway.localSeekTarget ?? 0,
-      sourceTimestamps: gateway.sourceTimestamps === true,
-      source_timestamps: gateway.sourceTimestamps === true,
-      codecProfile: gateway.codecProfile ?? null,
-    },
-  };
 }
 
 async function getPlaybackSession(id: string, userId: string, db: SupabaseClient) {
@@ -4017,7 +3873,19 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
     .maybeSingle();
   if (error) throwDb(error, "Unable to load playback session");
   if (!data) throw new HttpError(404, "Playback session not found");
-  return { session: data };
+  return { session: publicPlaybackSession(data) };
+}
+
+function publicPlaybackSession(value: unknown): JsonRecord {
+  const session = recordOrEmpty(value);
+  const {
+    provider_account_hash: _providerAccountHash,
+    // Rolling-deployment compatibility for databases that have not dropped the
+    // historical cross-user replacement identifier yet.
+    superseded_by: _supersededBy,
+    ...safe
+  } = session;
+  return safe;
 }
 
 async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
@@ -4117,7 +3985,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   if (updateError) throwDb(updateError, "Unable to expire playback session");
 
   return {
-    session: expired,
+    session: publicPlaybackSession(expired),
     gatewayClosed: closedGatewayIds.length,
     rawPumpsAborted,
     gatewayErrors: gatewayErrors.length,
@@ -4701,31 +4569,6 @@ async function fetchJson(url: string, timeoutMs: number) {
   return payload;
 }
 
-// Fetch Xtream catalogue/VOD metadata, preferring the media gateway so the crawl
-// reaches the provider from the SAME tolerated IP as streaming instead of this
-// Supabase edge runtime's provider-BLOCKED datacenter IP (user_multi_ip + empty
-// catalogues). Falls back to a direct fetch only on gateway-side problems.
-// deno-lint-ignore no-explicit-any
-async function fetchProviderMetadata(
-  runtimeConfig: RuntimeConfig,
-  args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string>; timeoutMs?: number },
-): Promise<any> {
-  const timeoutMs = args.timeoutMs ?? 25000;
-  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
-    try {
-      return await requestGatewayMetadata(runtimeConfig, args, Math.max(timeoutMs + 10000, 45000));
-    } catch (error) {
-      const status = error instanceof HttpError ? error.status : 502;
-      if (![404, 405, 502, 503, 504].includes(status)) throw error;
-      console.warn("[norva-cloud] gateway metadata unavailable, falling back to direct", args.action, status);
-    }
-  }
-  return fetchJson(
-    xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
-    timeoutMs,
-  );
-}
-
 async function requestGatewayMetadata(
   runtimeConfig: RuntimeConfig,
   args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string> },
@@ -4751,15 +4594,69 @@ async function requestGatewayMetadata(
       }),
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new HttpError(response.status, "Media gateway refused the metadata request", payload);
+    if (!response.ok) {
+      const payloadRecord = recordOrEmpty(payload);
+      const payloadDetails = recordOrEmpty(payloadRecord.details);
+      const rawCode = stringOr(payloadRecord.code, "").trim().toUpperCase();
+      const rawNetworkCause = stringOr(
+        payloadDetails.networkCause ?? payloadDetails.network_cause,
+        "",
+      ).trim().toLowerCase();
+      const safeCode = /^[A-Z][A-Z0-9_]{0,63}$/.test(rawCode)
+        ? rawCode
+        : response.status === 504
+          ? "PROVIDER_RESPONSE_TIMEOUT"
+          : "PROVIDER_REQUEST_FAILED";
+      const safeNetworkCause = /^[a-z][a-z0-9_]{0,63}$/.test(rawNetworkCause)
+        ? rawNetworkCause
+        : "provider";
+      throw new HttpError(response.status, "Media gateway refused the metadata request", {
+        code: response.status === 458 ? "PROVIDER_BUSY" : safeCode,
+        networkCause: safeNetworkCause,
+        upstreamStatus: response.status,
+      });
+    }
     return payload;
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    const aborted = error instanceof Error && error.name === "AbortError";
-    throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
+    const failure = classifyGatewayNetworkFailure(error);
+    throw new HttpError(
+      failure.code === "PROVIDER_RESPONSE_TIMEOUT" ? 504 : 502,
+      "Unable to reach media gateway",
+      failure,
+    );
   } finally {
     clearTimeout(timer);
   }
+}
+
+function classifyGatewayNetworkFailure(error: unknown): { code: string; networkCause: string } {
+  const errorRecord = recordOrEmpty(error);
+  const causeRecord = recordOrEmpty(errorRecord.cause);
+  const normalized = stringOr(
+    causeRecord.code,
+    stringOr(errorRecord.code, error instanceof Error ? error.name : ""),
+  ).trim().toUpperCase();
+
+  if (normalized === "ABORTERROR" || normalized === "UND_ERR_HEADERS_TIMEOUT") {
+    return { code: "PROVIDER_RESPONSE_TIMEOUT", networkCause: "timeout" };
+  }
+  if (normalized === "UND_ERR_CONNECT_TIMEOUT" || normalized === "ETIMEDOUT") {
+    return { code: "PROVIDER_CONNECT_TIMEOUT", networkCause: "timeout" };
+  }
+  if (normalized === "ECONNRESET" || normalized === "UND_ERR_SOCKET" || normalized === "EPIPE") {
+    return { code: "PROVIDER_CONNECTION_RESET", networkCause: "connection_reset" };
+  }
+  if (normalized === "ENOTFOUND" || normalized === "EAI_AGAIN") {
+    return { code: "PROVIDER_DNS_FAILURE", networkCause: "dns" };
+  }
+  if (normalized === "ENETUNREACH" || normalized === "EHOSTUNREACH" || normalized === "ECONNREFUSED") {
+    return { code: "PROVIDER_NETWORK_UNREACHABLE", networkCause: "network_unreachable" };
+  }
+  if (/CERT|TLS|SSL/.test(normalized)) {
+    return { code: "PROVIDER_TLS_FAILURE", networkCause: "tls" };
+  }
+  return { code: "PROVIDER_REQUEST_FAILED", networkCause: "network" };
 }
 
 async function fetchText(url: string, timeoutMs: number, maxBytes: number, headers = providerHeaders()) {

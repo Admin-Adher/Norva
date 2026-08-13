@@ -777,10 +777,11 @@
       return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
     }
 
-    // Fetch [start, start+len) and insert it as a read-ahead window (LRU). Transient provider
-    // hiccups (mid-range reset → short read/network drop, single-slot 429/458/5xx) retry HERE,
-    // bounded — a retried window is a ~1s hiccup, a surfaced error is a full lane failover with
-    // the whole MSE/subtitle teardown that entails.
+    // Fetch [start, start+len) and insert it as a read-ahead window (LRU).
+    // Truncation, range mismatch and selected transient network/server failures
+    // retry here with a bounded budget. HTTP 458 is deliberately excluded: it
+    // is an authoritative single-slot conflict that WatchPage must report and
+    // use to open the per-account circuit before any second connection exists.
     async _cacheWindow(start, len) {
       let lastErr = null;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -794,7 +795,7 @@
           lastErr = e;
           if (this._ac.signal.aborted) throw e;
           const msg = String((e && e.message) || e);
-          if (!/BLOCK_SHORT_READ|BLOCK_RANGE_MISMATCH|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|458|502|503)/i.test(msg)) throw e;
+          if (!/BLOCK_SHORT_READ|BLOCK_RANGE_MISMATCH|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|502|503)/i.test(msg)) throw e;
           await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
         }
       }

@@ -26,6 +26,11 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
+EXPECTED_PLAYBACK_VERSION=42
+EXPECTED_PLAYBACK_PROTOCOL=1
+EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
+EXPECTED_CLOUD_VERSION=24
+EXPECTED_CLOUD_PROTOCOL=1
 
 [[ -d "$FUNCS_DIR" ]] || { echo "ERROR: $FUNCS_DIR not found" >&2; exit 1; }
 
@@ -76,6 +81,66 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     echo "ERROR: no edge-runtime service found in $COMPOSE" >&2
     exit 1
   fi
+
+  file_digest_in_service() {
+    local service="$1"
+    local path="$2"
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T "$service" \
+      deno eval --quiet \
+      'const bytes = await Deno.readFile(Deno.args[0]); const digest = await crypto.subtle.digest("SHA-256", bytes); console.log(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));' \
+      "$path"
+  }
+
+  function_health_in_service() {
+    local service="$1"
+    local function_name="$2"
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T "$service" \
+      deno eval --quiet \
+      'const response = await fetch(`http://127.0.0.1:9000/${Deno.args[0]}/health`); if (!response.ok) throw new Error(`health ${response.status}`); console.log(await response.text());' \
+      "$function_name"
+  }
+
+  verify_function_protocol() {
+    local service="$1"
+    local playback_path="/home/deno/functions/norva-playback/index.ts"
+    local cloud_path="/home/deno/functions/norva-cloud/index.ts"
+    local expected_playback_digest
+    local expected_cloud_digest
+    local observed_playback_digest
+    local observed_cloud_digest
+    local playback_health
+    local cloud_health
+
+    expected_playback_digest="$(sha256sum "$FUNCS_DIR/norva-playback/index.ts" | awk '{print $1}')"
+    expected_cloud_digest="$(sha256sum "$FUNCS_DIR/norva-cloud/index.ts" | awk '{print $1}')"
+    observed_playback_digest="$(file_digest_in_service "$service" "$playback_path")"
+    observed_cloud_digest="$(file_digest_in_service "$service" "$cloud_path")"
+    [[ "$observed_playback_digest" == "$expected_playback_digest" ]] || {
+      echo "ERROR: $service norva-playback source digest mismatch" >&2
+      exit 1
+    }
+    [[ "$observed_cloud_digest" == "$expected_cloud_digest" ]] || {
+      echo "ERROR: $service norva-cloud source digest mismatch" >&2
+      exit 1
+    }
+
+    playback_health="$(function_health_in_service "$service" norva-playback)"
+    cloud_health="$(function_health_in_service "$service" norva-cloud)"
+    [[ "$playback_health" == *"\"version\":$EXPECTED_PLAYBACK_VERSION"* \
+        && "$playback_health" == *"\"providerCircuitProtocol\":$EXPECTED_PLAYBACK_PROTOCOL"* \
+        && "$playback_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* ]] || {
+      echo "ERROR: $service norva-playback protocol marker mismatch" >&2
+      exit 1
+    }
+    [[ "$cloud_health" == *"\"version\":$EXPECTED_CLOUD_VERSION"* \
+        && "$cloud_health" == *"\"playbackCreationProtocol\":$EXPECTED_CLOUD_PROTOCOL"* \
+        && "$cloud_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* ]] || {
+      echo "ERROR: $service norva-cloud protocol marker mismatch" >&2
+      exit 1
+    }
+    echo "   $service source digests and playback protocols verified"
+  }
+
   for service in "${function_services[@]}"; do
     echo ">> Recreating $service"
     previous_container_id="$(
@@ -110,6 +175,7 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
       sleep 1
     done
     echo "   $service is $health"
+    verify_function_protocol "$service"
   done
   echo ">> edge-runtime replicas recreated: ${function_services[*]}."
 else

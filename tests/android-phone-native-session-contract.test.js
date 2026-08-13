@@ -96,7 +96,7 @@ test('phone posts a lightweight authenticated heartbeat only during rendered act
   const destroy = method(player, 'protected void onDestroy()');
   const firstFrame = method(player, 'private void recordNativeFirstFrame()');
 
-  assert.match(player, /HEARTBEAT_INTERVAL_MS\s*=\s*60_000L/);
+  assert.match(player, /HEARTBEAT_INTERVAL_MS\s*=\s*5_000L/);
   assert.match(heartbeatRunnable, /requestPlaybackHeartbeatAuth\(\)/);
   assert.doesNotMatch(
     heartbeatRunnable,
@@ -129,7 +129,7 @@ test('phone posts a lightweight authenticated heartbeat only during rendered act
   );
   const heartbeat = method(
     telemetry,
-    'static void recordHeartbeat(final String authToken, final String playbackSessionId)',
+    'static void recordHeartbeat(final String authToken, final String playbackSessionId,',
   );
   assert.match(heartbeat, /setRequestMethod\("POST"\)/);
   assert.match(heartbeat, /setFixedLengthStreamingMode\(0\)/);
@@ -209,7 +209,11 @@ test('every native heartbeat obtains a current bearer through a nonce-scoped pri
   assert.match(accept, /playbackAuthChannelId\.equals\(channelId\)/);
   assert.match(accept, /pendingPlaybackAuthRequestNonce\.equals\(requestNonce\)/);
   assert.match(accept, /removeExtra\(EXTRA_PLAYBACK_AUTH_TOKEN\)/);
-  assert.match(accept, /NativePlaybackTelemetry\.recordHeartbeat\(bearer, playbackSessionId\)/);
+  assert.match(
+    accept,
+    /NativePlaybackTelemetry\.recordHeartbeat\([\s\S]{0,100}bearer,[\s\S]{0,100}heartbeatSessionId/,
+  );
+  assert.match(accept, /ProviderPlaybackPolicy\.isPlaybackSuperseded\(resultCode\)/);
   assert.match(accept, /lastPlaybackHeartbeatElapsedMs\s*=\s*SystemClock\.elapsedRealtime\(\)/);
   assert.doesNotMatch(accept, /playbackAuthToken\s*=/);
 

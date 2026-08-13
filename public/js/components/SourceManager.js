@@ -709,6 +709,24 @@ class SourceManager {
             : 'Check the service address and credentials, then try again.';
     }
 
+    sourceConnectionTestMessage(value) {
+        const payload = value?.payload || value || {};
+        const code = String(payload.code || value?.code || '').trim().toUpperCase();
+        const status = Number(payload.status ?? payload.upstreamStatus ?? value?.status ?? value?.upstreamStatus);
+        if (code === 'PROVIDER_BUSY' || code === 'PROVIDER_ACCOUNT_BUSY' || status === 458) {
+            return 'This TV service is already being used on another device.';
+        }
+        if (code === 'PROVIDER_CONNECT_TIMEOUT' || code === 'PROVIDER_RESPONSE_TIMEOUT' || status === 504) {
+            return 'The provider did not respond before the connection timed out.';
+        }
+        if (code === 'PROVIDER_DNS_FAILURE') return 'Norva cannot resolve the provider address.';
+        if (code === 'PROVIDER_TLS_FAILURE') return 'Norva could not establish a secure connection to the provider.';
+        if (code === 'PROVIDER_CONNECTION_RESET') return 'The connection to the provider was interrupted.';
+        if (code === 'PROVIDER_NETWORK_UNREACHABLE') return 'The network route to the provider is unavailable.';
+        if (status === 401 || status === 403) return 'The provider refused the saved username or password.';
+        return 'Norva cannot reach the provider right now.';
+    }
+
     hostFromUrl(raw) {
         try {
             const value = String(raw || '').trim();
@@ -1607,11 +1625,11 @@ class SourceManager {
             if (result.success) {
                 NorvaModal.toast('Connection successful!', 'success');
             } else {
-                NorvaModal.toast('Connection failed. Check the service details and try again.', 'error');
+                NorvaModal.toast(this.sourceConnectionTestMessage(result), 'error');
             }
         } catch (err) {
             console.warn('[SourceManager] Connection test failed:', err);
-            NorvaModal.toast('Connection failed. Check the service details and try again.', 'error');
+            NorvaModal.toast(this.sourceConnectionTestMessage(err), 'error');
         }
     }
 

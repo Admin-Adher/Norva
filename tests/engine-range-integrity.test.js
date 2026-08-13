@@ -105,7 +105,7 @@ test('persistent truncation surfaces BLOCK_SHORT_READ after bounded retries', as
     } finally { srv.close(); }
 });
 
-test('transient provider 458 recovers within the window retry ladder', async () => {
+test('the first provider 458 is terminal and never opens another range connection', async () => {
     let calls = 0;
     const srv = await startRangeServer(() => {
         calls += 1;
@@ -114,9 +114,8 @@ test('transient provider 458 recovers within the window retry ladder', async () 
     try {
         const NorvaEngine = loadEngineClass();
         const eng = bareEngine(NorvaEngine, `http://127.0.0.1:${srv.address().port}/f.mkv`);
-        const out = await eng._readRange(1024, 4096);
-        assert.strictEqual(out.length, 4096);
-        assert.strictEqual(calls, 2, 'one 458 then success');
+        await assert.rejects(() => eng._readRange(1024, 4096), /BLOCK_HTTP_458/);
+        assert.strictEqual(calls, 1, 'HTTP 458 must be surfaced before any range retry');
     } finally { srv.close(); }
 });
 

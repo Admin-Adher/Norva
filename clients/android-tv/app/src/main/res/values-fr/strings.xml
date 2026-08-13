@@ -63,6 +63,13 @@
     <string name="player_error_no_data">Le fournisseur accepte la connexion, mais n’envoie aucun flux lisible.</string>
     <string name="player_error_unsupported">Ce format vidéo ne peut pas être lu sur cet appareil.</string>
     <string name="player_error_generic">La lecture s’est arrêtée de manière inattendue. Veuillez réessayer.</string>
+    <string name="player_error_provider_in_use_title">Service déjà utilisé sur un autre appareil</string>
+    <string name="player_error_provider_in_use">Une autre lecture utilise actuellement ce service. Norva a arrêté l’ancienne lecture lorsqu’elle lui appartenait. Arrêtez toute lecture externe éventuelle, attendez un instant, puis réessayez.</string>
+    <string name="player_error_session_invalid_title">Session de lecture terminée</string>
+    <string name="player_error_session_invalid">Norva ne peut plus vérifier cette session de lecture. Revenez au titre, puis relancez-le.</string>
+    <string name="player_error_liveness_title">Vérification de lecture interrompue</string>
+    <string name="player_error_liveness">Norva n’a pas pu vérifier cette lecture pendant 45 secondes. Vérifiez votre connexion, puis réessayez.</string>
+    <string name="native_playback_auth_error">Norva n’a pas pu vérifier la session de lecture. Reconnectez votre compte, puis réessayez.</string>
     <!-- Démarrage, focus, accessibilité et récupération du lecteur TV premium. -->
     <string name="player_aspect_short">Taille</string>
     <string name="player_option_selected_description">%1$s, %2$s sélectionné</string>

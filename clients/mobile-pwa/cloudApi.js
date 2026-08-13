@@ -417,14 +417,9 @@
     }
 
     async function playbackRequest(session, options = {}) {
-        try {
-            return await requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
-        } catch (error) {
-            if (error.status === 404 || error.status === 405) {
-                return request('POST', '/playback/sessions', session, options);
-            }
-            throw error;
-        }
+        // Creation must fail closed if norva-playback is not deployed yet. The
+        // norva-cloud route intentionally cannot bypass provider arbitration.
+        return requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
     }
 
     async function playbackSessionRequest(method, path, body, options = {}) {
@@ -436,6 +431,16 @@
             }
             throw error;
         }
+    }
+
+    function playbackHeartbeatRequest(id, options = {}) {
+        return requestToBase(
+            playbackBase(),
+            'POST',
+            `/playback/sessions/${encodeURIComponent(id)}/heartbeat`,
+            null,
+            options
+        );
     }
 
     async function requestToBase(baseUrl, method, path, body, options = {}) {
@@ -585,6 +590,7 @@
 
         playback: {
             createSession: (session) => playbackRequest(session),
+            heartbeatSession: (id) => playbackHeartbeatRequest(id),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
@@ -626,6 +632,7 @@
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
                 event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
                 summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })
             }

@@ -1429,8 +1429,18 @@ const CloudAdapter = (() => {
             clearMediaCaches();
             return payload;
         }
-        if (method === 'POST' && /^\/sources\/[^/]+\/(toggle|test)$/.test(path)) {
-            return { success: true, cloud: true };
+        if (method === 'POST' && /^\/sources\/[^/]+\/toggle$/.test(path)) {
+            const id = await resolveSourceId(path.split('/')[2]);
+            if (!hasUserSession()) throw new Error('Sign in to change this TV provider.');
+            const payload = await NorvaCloud.sources.toggle(id);
+            clearMediaCaches();
+            return payload;
+        }
+        if (method === 'POST' && /^\/sources\/[^/]+\/test$/.test(path)) {
+            const id = await resolveSourceId(path.split('/')[2]);
+            const sourcesApi = cloudSourcesApi();
+            if (!sourcesApi.test) throw new Error('Connection testing is not available.');
+            return sourcesApi.test(id);
         }
         if ((method === 'GET' && /^\/sources\/[^/]+\/estimate$/.test(path)) || (method === 'POST' && path === '/sources/estimate')) {
             return { count: 0, estimatedItems: 0, needsWarning: false, threshold: 50000, cloud: true };
@@ -1536,15 +1546,18 @@ const CloudAdapter = (() => {
                 // raw provider URL from the cloud (direct), hand it to the local
                 // transcoder, and play its HLS through the normal pipeline. Only
                 // triggers when a local transcoder is present (desktop/localhost);
-                // norva.tv in a browser never hits this. On any failure it falls
-                // through to the normal cloud path.
+                // norva.tv in a browser never hits this. Once this adapter creates
+                // its direct cloud session, failure is terminal for this playback
+                // intention: creating a second gateway session would open another
+                // provider socket and prolong a single-slot HTTP 458 conflict.
                 const localTranscoder = _localTranscoderBase();
                 if (localTranscoder) {
+                    let direct = null;
                     try {
                         const hint = playbackHintFromQuery(query, container, type);
                         const cloudSourceId = await resolveSourceId(sourceId);
                         const userAgent = resolveCloudUserAgent();
-                        const direct = await cloudPlaybackApi().createSession({
+                        direct = await cloudPlaybackApi().createSession({
                             sourceId: cloudSourceId,
                             itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                             itemId: streamId,
@@ -1581,8 +1594,13 @@ const CloudAdapter = (() => {
                             startOffset: seekOffset
                         };
                     } catch (localErr) {
-                        console.warn('[Desktop] Local transcode failed; falling back to cloud gateway:', localErr?.message || localErr);
-                        // fall through to the normal cloud path below
+                        const directSessionId = direct?.session?.id;
+                        if (directSessionId) {
+                            await cloudPlaybackApi().expireSession(directSessionId, { keepalive: true })
+                                .catch(() => {});
+                        }
+                        console.warn('[Desktop] Local transcode failed; playback stopped before another cloud session could be created.');
+                        throw localErr;
                     }
                 }
 
@@ -1679,7 +1697,6 @@ const CloudAdapter = (() => {
                 // VOD whose container the browser can't play directly (mkv/avi/…):
                 // relay/direct can never work for it, so failures must stay on the
                 // gateway transcode path instead of cascading into "Media error".
-                const gatewayOnlyVod = isVodPlayback && needsGateway;
                 const playbackHint = playbackHintFromQuery(query, container, type);
                 // Native client (Android TV / standalone): a native ExoPlayer with
                 // hardware HEVC/MKV/AC3 decoders plays straight from the user's home
@@ -1790,175 +1807,42 @@ const CloudAdapter = (() => {
                         sessionId: enginePayload.session?.id
                     };
                 }
-                const remuxFirst = mode === 'transcode' && baseSession.playbackHint.gatewayMode === 'remux';
-                const createGatewayTranscodeSession = () => cloudPlaybackApi().createSession({
-                    ...baseSession,
-                    playbackHint: {
-                        ...baseSession.playbackHint,
-                        gatewayMode: 'transcode',
-                        audioMode: baseSession.playbackHint.audioMode || 'transcode'
-                    },
-                    mode: 'transcode',
-                    requiresTranscode: true
-                });
-                // The IPTV provider grants a single concurrent connection. Right
-                // after a refresh or a quick title switch its previous slot can
-                // still be held, so the gateway answers the first attempt(s) with
-                // a transient 502/503/504 ("Media gateway refused the session").
-                // The edge function re-runs its session cleanup + slot-release
-                // wait on every call, so retrying with a short backoff lets the
-                // slot free. Only provider-slot rejections are retried; a genuinely
-                // dead source fails with a different reason and surfaces at once,
-                // so this never reopens the old ~30s "Media error" storm.
-                const PROVIDER_SLOT_RETRY_DELAYS_MS = [2500, 5000];
-                const isProviderSlotBusy = (err) => {
-                    if (!err) return false;
-                    // Verbatim 458 "max connections" (relay pass-through) is the clearest busy signal.
-                    if (err.status === 458) return true;
-                    if (err.status !== 502 && err.status !== 503 && err.status !== 504) return false;
-                    const detail = err.payload?.details;
-                    const reason = String(
-                        detail && typeof detail === 'object' ? (detail.details ?? detail.error ?? '') : (detail ?? '')
-                    ).toLowerCase();
-                    // Reason not forwarded by the gateway: treat the 5xx as possibly transient.
-                    if (!reason) return true;
-                    // provider_busy / max connections / 458: the gateway's resynthesized 503
-                    // carries an explicit reason — it must match too, not fall through as dead
-                    // (it previously did: the regex had 401/403/slot but not these).
-                    return /\b401\b|\b403\b|\b458\b|unauthor|forbidden|timed out|connection reset|-1005[34]|concurren|\bslot\b|provider_busy|provider busy|max.{0,2}connection/.test(reason);
-                };
-                const attemptCreateGatewaySession = async () => {
-                    let payload;
-                    try {
-                        payload = await cloudPlaybackApi().createSession({
-                            ...baseSession,
-                            mode,
-                            requiresRelay: mode === 'relay',
-                            requiresTranscode: mode === 'transcode'
-                        });
-                        if (mode === 'transcode' && !payload.playback?.url && preferredMode !== 'direct') {
-                            // Gateway-only VOD can't play via relay or direct in the
-                            // browser, so retry the transcode instead of cascading
-                            // into an unplayable stream.
-                            payload = gatewayOnlyVod
-                                ? await createGatewayTranscodeSession()
-                                : await cloudPlaybackApi().createSession({
-                                    ...baseSession,
-                                    mode: 'relay',
-                                    requiresRelay: true
-                                });
-                        }
-                    } catch (error) {
-                        if (mode === 'direct') throw error;
-                        if (remuxFirst && (error.status === 502 || error.status === 503 || error.status === 504 || error.status === 500)) {
-                            try {
-                                payload = await createGatewayTranscodeSession();
-                            } catch (transcodeError) {
-                                if (!transcodeError.status || transcodeError.status < 500) throw transcodeError;
-                            }
-                        }
-                        // Gateway-only VOD is unplayable via relay/direct in the
-                        // browser, so never cascade into them — that is exactly what
-                        // produced the ~30s "Media error" storm on Resume. The gateway
-                        // already retries provider 401s internally; give the transcode
-                        // one more try, otherwise surface the failure.
-                        if (!payload && gatewayOnlyVod) {
-                            if (error.status === 500 || error.status === 502 || error.status === 503 || error.status === 504) {
-                                payload = await createGatewayTranscodeSession();
-                            }
-                            if (!payload) throw error;
-                        }
-                        if (!payload && mode === 'transcode' && preferredMode !== 'direct') {
-                            try {
-                                payload = await cloudPlaybackApi().createSession({
-                                    ...baseSession,
-                                    mode: 'relay',
-                                    requiresRelay: true
-                                });
-                            } catch (relayError) {
-                                if (relayError.status !== 503) throw relayError;
-                            }
-                        }
-                        if (!payload) {
-                            if (error.status !== 503 && error.status !== 502) throw error;
-                            payload = await cloudPlaybackApi().createSession({
-                                ...baseSession,
-                                mode: 'direct',
-                            });
-                        }
-                    }
-                    return payload;
-                };
                 let payload;
-                if (type === 'live') {
-                    // Single-slot provider: the gateway ALREADY retries the provider
-                    // internally (PROVIDER_AUTH_RETRY). The client retry-loop + the
-                    // relay/direct cascades below re-create sessions on top of that —
-                    // ~9-15 provider connections per failed zap — which is exactly
-                    // what trips the provider's anti-abuse cooldown. For live, do ONE
-                    // attempt; on a provider block, back off briefly so the cooldown
-                    // lifts instead of being prolonged. (relay/direct can't play live
-                    // in-browser anyway, so the cascades were dead weight.)
-                    //
-                    try {
-                        payload = await cloudPlaybackApi().createSession({
-                            ...baseSession,
-                            mode,
-                            requiresTranscode: mode === 'transcode'
-                        });
-                    } catch (sessionError) {
-                        // Slot BUSY (458 / PROVIDER_BUSY) is NOT a dead channel: the account's one
-                        // connection is momentarily held. The gateway ALREADY retried the provider
-                        // internally before returning this, so we do NOT re-create the session here
-                        // — that would restart the gateway's whole retry ladder and stack into a
-                        // connection storm on the single-slot account (the exact thing the
-                        // one-attempt rule prevents). Surface it as the recoverable "provider busy"
-                        // message (ChannelList shows "momentarily saturated — try again"), and do
-                        // NOT count it toward the source back-off tally. The server-side account
-                        // busy-lock is what actually prevents probes from causing these 458s now;
-                        // a residual 458 (another device / zap churn) just asks the user to retry.
+                // One playback intention creates exactly one cloud session in one
+                // selected mode. A failed gateway session is never followed by a
+                // relay/direct session: that cascade opens another provider socket,
+                // hides the first precise failure, and can prolong a 458 cooldown.
+                try {
+                    payload = await cloudPlaybackApi().createSession({
+                        ...baseSession,
+                        mode,
+                        requiresRelay: mode === 'relay',
+                        requiresTranscode: mode === 'transcode'
+                    });
+                } catch (sessionError) {
+                    if (type === 'live') {
                         if (_looksProviderSlotBusy(sessionError)) {
                             const busyErr = new Error('Channel temporarily unavailable (provider busy) — try again in a few seconds.');
                             busyErr.liveProviderBackoff = true;
                             throw busyErr;
                         }
                         if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
-                            // One dead channel's 403 must not block the source — only
-                            // a real cooldown (several distinct channels failing in a
-                            // short window) trips the back-off.
                             _noteLiveFailureMaybeBlock(sourceId, streamId);
                         }
-                        throw sessionError;
+                    } else if (!hasNativeOrLocal
+                        && !_looksProviderSlotBusy(sessionError)
+                        && _looksProviderBlocked(sessionError)) {
+                        _markSourceCloudBlocked(sourceId);
                     }
-                    // A success clears both the back-off and the recent-failure tally
-                    // so an earlier dead-channel click can't accrue toward a block.
+                    throw sessionError;
+                }
+                if (type === 'live') {
                     if (!hasNativeOrLocal) {
                         _clearLiveBlock(sourceId);
                         _recentLiveFails = _recentLiveFails.filter((f) => f.src !== String(sourceId));
                     }
-                } else {
-                    try {
-                        for (let providerAttempt = 0; ; providerAttempt += 1) {
-                            try {
-                                payload = await attemptCreateGatewaySession();
-                                break;
-                            } catch (sessionError) {
-                                if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
-                                    throw sessionError;
-                                }
-                                await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
-                            }
-                        }
-                    } catch (sessionError) {
-                        // Browser: a provider block means the cloud datacenter is
-                        // refused for this source — remember it so the next title hands
-                        // off instantly instead of spinning again.
-                        if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
-                            _markSourceCloudBlocked(sourceId);
-                        }
-                        throw sessionError;
-                    }
-                    if (!hasNativeOrLocal) _clearSourceCloudBlock(sourceId);
+                } else if (!hasNativeOrLocal) {
+                    _clearSourceCloudBlock(sourceId);
                 }
                 const url = payload.playback?.url || payload.url;
                 return {

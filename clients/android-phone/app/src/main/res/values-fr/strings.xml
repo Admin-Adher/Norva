@@ -13,6 +13,8 @@
     <string name="player_error_network">La connexion a été interrompue. Vérifiez votre réseau, puis réessayez.</string>
     <string name="player_error_unsupported">Ce format vidéo ne peut pas être lu sur cet appareil.</string>
     <string name="player_error_generic">La lecture s’est arrêtée de manière inattendue. Veuillez réessayer.</string>
+    <string name="player_error_provider_in_use_title">Service déjà utilisé sur un autre appareil</string>
+    <string name="player_error_provider_in_use">Une autre lecture utilise actuellement ce service. Norva a arrêté l’ancienne lecture lorsqu’elle lui appartenait. Arrêtez toute lecture externe éventuelle, attendez un instant, puis réessayez.</string>
     <string name="player_show_controls">Afficher les commandes de lecture</string>
     <string name="player_state_preparing">Préparation de la lecture…</string>
     <string name="player_state_initial_buffering">Démarrage de la lecture…</string>
