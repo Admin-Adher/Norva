@@ -150,7 +150,7 @@ test('engine provider connection blocks do not fall through to transcode', () =>
   assert.notEqual(fallbackIndex, -1, 'transcode fallback call missing from engine failure path');
   assert.ok(guardIndex < fallbackIndex, 'connection-limit guard must run before transcode fallback');
   const guardBody = watchSrc.slice(guardIndex, fallbackIndex);
-  assert.match(guardBody, /showPlaybackError\(msg, \{ immediate: true \}\)/);
+  assert.match(guardBody, /await this\.handlePlaybackFailure\(msg\)/);
   assert.match(guardBody, /return;/);
 });
 
@@ -292,8 +292,9 @@ test('terminal VOD failure surfaces the exact-file error instead of silently cha
   const start = watchSrc.indexOf('async handlePlaybackFailure(');
   const end = watchSrc.indexOf('\n    isFormatPlaybackError(', start);
   const body = watchSrc.slice(start, end);
-  assert.ok(body.includes('retryWithCloudGatewayTranscode(message)'));
-  assert.ok(body.includes('retryWithCloudRelay(message)'));
+  assert.ok(body.includes('const cloudLaneConsumed'));
+  assert.ok(body.includes('await this.releasePlaybackPipelineForRetry()'));
+  assert.ok(body.includes('this.showPlaybackError(message, { immediate: true })'));
   assert.ok(body.includes('retryWithFullVideoTranscode(message)'));
   assert.ok(body.includes('this.showPlaybackError(message)'));
   assert.ok(!body.includes('tryNextVersion('),
@@ -582,6 +583,8 @@ test('engine-to-gateway fallback remuxes the exact file at position with the act
     containerExtension: 'mkv'
   };
   page.currentPlaybackMode = 'engine';
+  page.isCloudPlaybackMode = () => false;
+  page.hasOpenedCloudPlaybackLaneForAttempt = () => false;
   page._playbackAttemptId = 17;
   page.isStalePlaybackAttempt = () => false;
   page.getResumeSnapshotPosition = () => 0;
@@ -628,6 +631,104 @@ test('engine-to-gateway fallback remuxes the exact file at position with the act
   assert.strictEqual(page.content.id, 'stream-ar');
   assert.strictEqual(page.loaded.options.resumeTarget, 3140);
   assert.strictEqual(page.loaded.options.playbackPreferences, null);
+});
+
+test('a cloud engine lane cannot open a second Gateway session in the same playback intention', async () => {
+  const calls = [];
+  const context = {
+    window: {},
+    console,
+    setTimeout,
+    clearTimeout,
+    API: { proxy: { xtream: { getStreamUrl: async (...args) => { calls.push(args); return {}; } } } },
+  };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mkv' };
+  page.currentPlaybackMode = 'engine';
+  page._playbackAttemptId = 7;
+  page._cloudPlaybackLaneAttemptId = 7;
+  page.isCloudPlaybackMode = () => true;
+  page.isStalePlaybackAttempt = () => false;
+
+  const recovered = await page.fallbackEngineToTranscode(7, 120);
+
+  assert.strictEqual(recovered, false);
+  assert.strictEqual(calls.length, 0, 'one user intention must never mint a second cloud session');
+});
+
+test('a terminal cloud media failure releases its lane without invoking any fallback resolver', async () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page._playbackAttemptId = 4;
+  page._cloudPlaybackLaneAttemptId = 4;
+  page._handlingPlaybackFailure = false;
+  page.hasCurrentMedia = () => false;
+  page.sendPlaybackEvent = () => {};
+  page.isPlaybackSupersededError = () => false;
+  page.isProviderBusyError = () => false;
+  page.isCloudPlaybackMode = () => true;
+  page.isStalePlaybackAttempt = () => false;
+  page.releasePlaybackPipelineForRetry = async () => { page.releaseCount = (page.releaseCount || 0) + 1; };
+  page.showPlaybackError = (message, options) => { page.shown = { message, options }; };
+  page.retryWithCloudGatewayTranscode = async () => { throw new Error('unexpected gateway fallback'); };
+  page.retryWithCloudRelay = async () => { throw new Error('unexpected relay fallback'); };
+  page.retryWithFullVideoTranscode = async () => { throw new Error('unexpected encode fallback'); };
+
+  await page.handlePlaybackFailure('MEDIA_ELEMENT_ERROR: Format error');
+
+  assert.strictEqual(page.releaseCount, 1);
+  assert.strictEqual(page.shown.message, 'MEDIA_ELEMENT_ERROR: Format error');
+  assert.strictEqual(page.shown.options.immediate, true);
+});
+
+test('the visible server-conversion action starts one fresh cloud session and no fallback cascade', async () => {
+  const calls = [];
+  const context = {
+    window: { location: { reload: () => { throw new Error('unexpected reload'); } } },
+    console,
+    setTimeout,
+    clearTimeout,
+    API: {
+      proxy: {
+        xtream: {
+          getStreamUrl: async (...args) => {
+            calls.push(args);
+            return { url: 'https://gateway.test/session/playlist.m3u8', sessionId: 'session-2' };
+          },
+        },
+      },
+    },
+  };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page._inPlaceRetryRunning = false;
+  page._playbackAttemptId = 9;
+  page._cloudPlaybackLaneAttemptId = 9;
+  page._preferredExplicitCloudMode = 'transcode';
+  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mkv' };
+  page.containerExtension = 'mkv';
+  page.getCurrentAudioPlaybackOptions = () => ({ audioStreamIndex: 2 });
+  page.getResumeSnapshotPosition = () => 180;
+  page.hidePlaybackError = () => {};
+  page.showLoading = () => {};
+  page.releasePlaybackPipelineForRetry = async () => {};
+  page.waitForProviderSlotRelease = async () => {};
+  page.isCloudPlaybackMode = () => true;
+  page.playbackMetadataFromResult = (result, extra = {}) => ({ ...result, ...extra, cloudPlaybackSessionId: result.sessionId });
+  page.loadVideo = async (url, options) => { page.loaded = { url, options }; };
+
+  await page.retryPlaybackInPlace();
+
+  assert.strictEqual(calls.length, 1);
+  const [, , , , hint] = calls[0];
+  assert.strictEqual(hint.mode, 'transcode');
+  assert.strictEqual(hint.gatewayMode, 'remux');
+  assert.strictEqual(hint.seekOffset, 180);
+  assert.strictEqual(page._playbackAttemptId, 10);
+  assert.strictEqual(page.loaded.options.playbackAttemptId, 10);
+  assert.strictEqual(page.content.cloudPlaybackSessionId, 'session-2');
 });
 
 test('provider busy exits the engine before any gateway fallback or delayed retry', () => {
