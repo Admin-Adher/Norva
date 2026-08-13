@@ -95,6 +95,11 @@ async function checkoutExtRef(userId: string, intentKey: string, generation: num
 
 type JsonRecord = Record<string, unknown>;
 
+type CheckoutPromotionTerms = {
+  base_amount_minor: number;
+  billing_cycles: number;
+};
+
 type CheckoutCommercialTerms = {
   plan: "plus" | "family";
   period: "monthly" | "annual";
@@ -105,6 +110,7 @@ type CheckoutCommercialTerms = {
   charge_mode: "after_trial" | "next_cycle" | "immediate" | "card_validation_only";
   trial_days: number | null;
   first_charge_at: string | null;
+  promotion_terms: CheckoutPromotionTerms | null;
 };
 
 function isoTimestampOrNull(value: unknown): string | null {
@@ -129,6 +135,20 @@ function checkoutTermsFromJournal(journal: unknown): CheckoutCommercialTerms | n
   const firstChargeAt = isoTimestampOrNull(meta.first_charge_at);
   if ((rawMode === "after_trial" || rawMode === "next_cycle") && !firstChargeAt) return null;
   if (String(meta.currency ?? "").toUpperCase() !== "USD") return null;
+  const hasPromoBase = meta.base_amount_cents != null;
+  const hasPromoCycles = meta.promo_cycles != null;
+  if (hasPromoBase !== hasPromoCycles) return null;
+  let promotionTerms: CheckoutPromotionTerms | null = null;
+  if (hasPromoBase && hasPromoCycles) {
+    const rawBase = Number(meta.base_amount_cents);
+    const rawCycles = Number(meta.promo_cycles);
+    if (!Number.isInteger(rawBase) || rawBase <= rawPrice || rawBase > 99_999
+        || !Number.isInteger(rawCycles) || rawCycles < 1 || rawCycles > 24) return null;
+    promotionTerms = {
+      base_amount_minor: rawBase,
+      billing_cycles: rawCycles,
+    };
+  }
   return {
     plan: meta.plan,
     period: meta.period,
@@ -139,6 +159,7 @@ function checkoutTermsFromJournal(journal: unknown): CheckoutCommercialTerms | n
     charge_mode: rawMode as CheckoutCommercialTerms["charge_mode"],
     trial_days: rawTrialDays,
     first_charge_at: firstChargeAt,
+    promotion_terms: promotionTerms,
   };
 }
 
@@ -166,6 +187,20 @@ async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, 
       body: { error: "network_error", message: error instanceof Error ? error.message : String(error) } as JsonRecord,
     };
   }
+}
+
+function revolutFailureDiagnostic(status: unknown, body: unknown): { status: number; code: string } {
+  const rawStatus = Number(status);
+  const safeStatus = Number.isInteger(rawStatus) && rawStatus >= 0 && rawStatus <= 599 ? rawStatus : 0;
+  const record = body && typeof body === "object" ? body as JsonRecord : {};
+  const nested = record.error && typeof record.error === "object" ? record.error as JsonRecord : {};
+  const rawCode = [record.code, nested.code, typeof record.error === "string" ? record.error : ""]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .find((value) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(value));
+  return {
+    status: safeStatus,
+    code: rawCode || (safeStatus === 0 ? "network_error" : "provider_rejected"),
+  };
 }
 
 type ExpectedCheckoutOrder = {
@@ -408,6 +443,7 @@ Deno.serve(async (req) => {
     // isolate — so /health tells us whether /checkout would fall inert (no values).
     return json({
       ok: true, service: "norva-revolut", configured: Boolean(REVOLUT_SECRET_KEY),
+      version: 1, checkoutTermsProtocol: 1,
       sandbox: isTestKey(), api_base: REVOLUT_API_BASE,
       env: { url: Boolean(SUPABASE_URL), service_key: Boolean(SERVICE_KEY), revolut_key: Boolean(REVOLUT_SECRET_KEY) },
     });
@@ -451,14 +487,32 @@ Deno.serve(async (req) => {
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
     const catalog = await getCatalog(db);
-    const amount = catalog.prices[plan]?.[period];
-    if (!amount) return json({ error: "Unknown plan" }, 400);
+    const checkoutRequestedAtMs = Date.now();
+    const cachedAmount = catalog.prices[plan]?.[period];
+    const cachedPromo = catalog.promos[plan]?.[period] ?? null;
+    const cachedPromoEndMs = cachedPromo?.ends_at ? new Date(cachedPromo.ends_at).getTime() : null;
+    const promoIsActive = Boolean(cachedPromo)
+      && cachedPromoEndMs !== null
+        ? Number.isFinite(cachedPromoEndMs) && cachedPromoEndMs > checkoutRequestedAtMs
+        : Boolean(cachedPromo);
+    const expiredPromoBase = cachedPromo && !promoIsActive ? Number(cachedPromo.base_cents) : null;
+    const amount = expiredPromoBase ?? cachedAmount;
+    if (!Number.isInteger(amount) || amount <= 0) return json({ error: "Unknown plan" }, 400);
     // Promo « N premières périodes » : le prix de base et le décompte voyagent
     // avec l'engagement (mapping + metadata) — le cron rebascule au prix de base
     // une fois les cycles promo épuisés. cycles null = réduction à vie.
-    const promoInfo = catalog.promos[plan]?.[period] ?? null;
+    const promoInfo = promoIsActive ? cachedPromo : null;
     const promoCycles = promoInfo?.cycles ?? null;
     const promoBase = promoCycles ? promoInfo!.base_cents : null;
+    const quotedPromoBase = promoInfo && typeof promoInfo.base_cents === "number" ? promoInfo.base_cents : null;
+    if (promoInfo && (quotedPromoBase === null || !Number.isInteger(quotedPromoBase)
+        || quotedPromoBase <= amount || quotedPromoBase > 99_999
+        || (promoCycles != null && (!Number.isInteger(promoCycles) || promoCycles < 1 || promoCycles > 24)))) {
+      return json({ error: "Checkout promotion is not configured safely", code: "promotion_terms_invalid" }, 503);
+    }
+    const promotionTerms: CheckoutPromotionTerms | null = promoBase && promoCycles
+      ? { base_amount_minor: promoBase, billing_cycles: promoCycles }
+      : null;
     let placement: string;
     let surface: ReturnType<typeof normalizePaywallSurface>;
     try {
@@ -493,7 +547,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id).maybeSingle();
     if (projectionReadError) return json({ error: "Could not verify current subscription" }, 503);
     const proj = projRow as { status?: string; provider?: string; trial_consumed_at?: string; trial_ends_at?: string; current_period_end?: string } | null;
-    const nowMs = Date.now();
+    const nowMs = checkoutRequestedAtMs;
     const trialEndMs = proj?.trial_ends_at ? new Date(proj.trial_ends_at).getTime() : 0;
     const periodEndMs = proj?.current_period_end ? new Date(proj.current_period_end).getTime() : 0;
     const projStatus = String(proj?.status ?? "");
@@ -574,6 +628,7 @@ Deno.serve(async (req) => {
       charge_mode: chargeMode,
       trial_days: kind === "trial_setup" ? TRIAL_DAYS : null,
       first_charge_at: firstChargeAt,
+      promotion_terms: promotionTerms,
     };
 
     const returnTo = (
@@ -673,7 +728,7 @@ Deno.serve(async (req) => {
         }).eq("order_id", intent.order_id);
         if (["PENDING", "PROCESSING", "AUTHORISED", "COMPLETED"].includes(remoteState)) {
           const { data: frozenOrder, error: frozenOrderError } = await db.from("cloud_revolut_orders")
-            .select("plan,period,requested_amount_cents,currency,charge_mode,trial_days,first_charge_at")
+            .select("plan,period,requested_amount_cents,currency,charge_mode,trial_days,first_charge_at,base_amount_cents,promo_cycles")
             .eq("order_id", intent.order_id).eq("user_id", user.id).maybeSingle();
           if (frozenOrderError || !frozenOrder) {
             return json({ error: "checkout_terms_unavailable", retryable: true }, 503);
@@ -842,18 +897,19 @@ Deno.serve(async (req) => {
     const orderId = String(created.body.id ?? "");
     const token = widgetToken(created.body);
     if (!created.ok || !orderId || !token) {
-      console.error("[norva-revolut] create order failed", created.status, JSON.stringify(created.body).slice(0, 400));
+      const providerFailure = revolutFailureDiagnostic(created.status, created.body);
+      console.error("[norva-revolut] create order failed", providerFailure.status, providerFailure.code);
       if (created.status !== 0) {
         await db.rpc("fail_revolut_checkout_intent", {
           p_intent_key: intentKey, p_lease_token: leaseToken,
-          p_error: JSON.stringify(created.body).slice(0, 500),
+          p_error: JSON.stringify(providerFailure),
         });
       }
       return json({
         error: created.status === 0 ? "checkout_creation_uncertain" : "Could not start checkout",
         retryable: created.status === 0,
         retry_after_ms: created.status === 0 ? 1500 : undefined,
-        detail: created.body,
+        code: providerFailure.code,
       }, created.status === 0 ? 503 : 502);
     }
 

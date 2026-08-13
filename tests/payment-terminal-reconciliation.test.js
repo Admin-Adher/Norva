@@ -119,9 +119,9 @@ test('promo, fallback price, attribution, system cleanup, and first play are bou
 test('checkout creation and reuse return the complete frozen server quote', () => {
   for (const field of [
     'plan', 'period', 'cadence', 'price_amount_minor', 'requested_amount_cents',
-    'currency', 'charge_mode', 'trial_days', 'first_charge_at',
+    'currency', 'charge_mode', 'trial_days', 'first_charge_at', 'promotion_terms',
   ]) assert.match(checkout, new RegExp(field));
-  assert.match(checkout, /\.select\("plan,period,requested_amount_cents,currency,charge_mode,trial_days,first_charge_at"\)/);
+  assert.match(checkout, /\.select\("plan,period,requested_amount_cents,currency,charge_mode,trial_days,first_charge_at,base_amount_cents,promo_cycles"\)/);
   assert.match(checkout, /const terms = checkoutTermsFromJournal\(frozenOrder\)/);
   const frozen = checkout.slice(checkout.indexOf('function checkoutTermsFromJournal'), checkout.indexOf('async function revolut'));
   assert.doesNotMatch(frozen, /fallback|commercialTerms|remote/);

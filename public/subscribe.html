@@ -243,11 +243,15 @@
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
   </style>
+  <link rel="stylesheet" href="/css/commerce.css?v=1">
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=2"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
-<body>
+<body class="commerce-page commerce-subscribe">
+  <a class="skip-link" href="#plans">Skip to plan selection</a>
+  <div class="ambient-rail" aria-hidden="true"></div>
+  <div class="campaign-backdrop" id="campaign-backdrop" aria-hidden="true"></div>
   <script>
     document.documentElement.classList.add('entitlement-pending');
     // Bigger targets + focus tuning on Android TV (D-pad navigation).
@@ -260,117 +264,125 @@
       document.documentElement.classList.add('native-prices-pending');
     }
   </script>
-  <main class="wrap">
-    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
-    <h1>Choose your Norva plan</h1>
-    <p class="lead">Every plan unlocks all of Norva. Plans differ only by how many
-      profiles your household gets. Eligible new customers can start with a free trial;
-      the exact terms are shown before checkout.</p>
-    <div class="platform-value" role="note">
-      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
-      <span>
-        <strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong>
-        Keep profiles, favorites and playback progress in sync on compatible devices.
-      </span>
-    </div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Norva home"><img src="/favicon.png" alt=""><span>Norva</span></a>
+    <span class="secure-context">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3z"></path><path d="M9.5 12l1.7 1.7 3.5-3.7"></path></svg>
+      <span>Secure subscription</span>
+    </span>
+  </header>
 
-    <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
-      <strong>Choose your plan on your phone or computer</strong>
-      Open norva.tv, sign in with this same Norva account, then choose your plan. Your access updates on this TV automatically.
-    </div>
+  <main class="wrap commerce-main" id="main-content">
+    <section class="subscribe-layout" aria-labelledby="page-title">
+      <header class="intro">
+        <p class="eyebrow" id="page-eyebrow">One account. Every Norva screen.</p>
+        <h1 id="page-title">Bring your catalog with you.</h1>
+        <p class="lead">Every plan unlocks all of Norva. Choose the number of personal profiles your household needs; eligible new customers see their exact free-trial and renewal terms before payment.</p>
+      </header>
 
-    <div class="status" id="already-sub"></div>
+      <figure class="product-proof">
+        <img src="/assets/landing/norva-multi-device.svg" alt="Norva running on a TV, laptop, tablet and phone">
+        <figcaption class="proof-caption">
+          <span><strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong> Profiles, favorites and playback progress stay in sync on compatible devices.</span>
+          <span class="platforms">Web · Mobile · TV</span>
+        </figcaption>
+      </figure>
 
-    <div class="toggle" role="group" aria-label="Billing period">
-      <button type="button" class="period" data-period="monthly" aria-pressed="false">Monthly</button>
-      <button type="button" class="period active" data-period="annual" aria-pressed="true">Annual <span class="save">Save 30%</span></button>
-    </div>
+      <section class="purchase-panel" id="plans" aria-labelledby="choose-plan-title">
+        <header class="purchase-header">
+          <div><h2 id="choose-plan-title">Choose your plan</h2><p>Every feature is included. Only the number of profiles changes.</p></div>
+          <span class="trial-pill">Eligible users · 7 days free</span>
+        </header>
 
-    <div class="grid">
-      <article class="card"
-        data-plan="plus"
-        data-product="norva_plus"
-        data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
-        data-monthly="4.99" data-annual="41.99" data-annual-note="That's about $3.50/mo, billed yearly.">
-        <h2>Norva</h2>
-        <p class="tag">Everything Norva does — for you and a plus-one.</p>
-        <div class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></div>
-        <small class="price-note"></small>
-        <ul>
-          <li>Up to 2 profiles</li>
-          <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
-          <li>Offline downloads (Android app)</li>
-          <li>Every Norva feature included</li>
-        </ul>
-        <button class="btn buy" type="button">Start 7-day free trial</button>
-      </article>
+        <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
+          <strong>Choose your plan on your phone or computer</strong>
+          Open norva.tv, sign in with this same Norva account, then choose your plan. Your access updates on this TV automatically.
+        </div>
 
-      <article class="card featured"
-        data-plan="family"
-        data-product="norva_family"
-        data-package-monthly="family_monthly" data-package-annual="family_annual"
-        data-monthly="8.99" data-annual="74.99" data-annual-note="That's about $6.25/mo, billed yearly.">
-        <span class="badge">Best for households</span>
-        <h2>Norva Family</h2>
-        <p class="tag">The full Norva experience for the whole home.</p>
-        <div class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></div>
-        <small class="price-note"></small>
-        <ul>
-          <li>Up to 5 profiles</li>
-          <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
-          <li>Offline downloads (Android app)</li>
-          <li>Every Norva feature included</li>
-        </ul>
-        <button class="btn buy" type="button">Start 7-day free trial</button>
-      </article>
-    </div>
+        <div class="status" id="already-sub"></div>
 
-    <p class="compare">Both plans include <b>every Norva feature</b>. The only difference is how many
-      profiles you get — <b>Norva</b> gives 2, <b>Norva Family</b> gives 5,
-      so everyone at home gets their own space, favorites and Continue Watching.</p>
+        <div class="toggle" role="group" aria-label="Billing period">
+          <button type="button" class="period" data-period="monthly" aria-pressed="false">Monthly</button>
+          <button type="button" class="period active" data-period="annual" aria-pressed="true">Annual <span class="save">Save 30%</span></button>
+        </div>
 
-    <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
-      <span class="pm-lbl">Secure card payment</span>
-      <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Visa">
-        <rect width="48" height="30" rx="4" fill="#fff"/>
-        <text x="24" y="20" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-weight="700" font-size="13" letter-spacing="0.5" fill="#1a1f71">VISA</text>
-      </svg>
-      <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Mastercard">
-        <rect width="48" height="30" rx="4" fill="#fff"/>
-        <circle cx="20" cy="15" r="7.5" fill="#eb001b"/>
-        <circle cx="28" cy="15" r="7.5" fill="#f79e1b" fill-opacity="0.9"/>
-      </svg>
-    </div>
+        <div class="promo-countdown" id="promo-countdown" role="timer" aria-live="off" aria-atomic="true" hidden>
+          <span id="promo-countdown-label">Offer ends in</span>
+          <time id="promo-countdown-value"></time>
+        </div>
+        <p class="sr-only" id="promo-status" role="status" aria-live="polite"></p>
 
-    <!-- Shown only on the web checkout (Revolut); native Play Billing has no such hold. -->
-    <div class="assurance" id="trial-assurance" role="note">
-      <span class="assurance-ico" aria-hidden="true">🔒</span>
-      <div>
-        <strong>No charge today — we only verify your card.</strong>
-        To open your free trial we place a tiny temporary authorization to confirm the card is valid.
-        It may appear briefly in your local currency, and is <b>released back to you right away and never debited.</b> Your first real payment happens only
-        after the 7‑day trial ends — and only if you don't cancel before then.
-        <b>We'll remind you by email before your trial ends, and you can cancel anytime before then.</b>
-      </div>
-    </div>
+        <div class="grid">
+          <article class="card"
+            data-plan="plus"
+            data-product="norva_plus"
+            data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
+            data-monthly="4.99" data-annual="41.99" data-annual-note="That's about $3.50/mo, billed yearly.">
+            <h2>Norva</h2>
+            <p class="tag">Everything Norva does — for you and a plus-one.</p>
+            <div class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></div>
+            <small class="price-note"></small>
+            <ul>
+              <li>Up to 2 profiles</li>
+              <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
+              <li>Offline downloads (Android app)</li>
+              <li>Every Norva feature included</li>
+            </ul>
+            <button class="btn buy" type="button">Start 7-day free trial</button>
+          </article>
 
-    <div class="status" id="status"></div>
+          <article class="card featured"
+            data-plan="family"
+            data-product="norva_family"
+            data-package-monthly="family_monthly" data-package-annual="family_annual"
+            data-monthly="8.99" data-annual="74.99" data-annual-note="That's about $6.25/mo, billed yearly.">
+            <span class="badge">Best for households</span>
+            <h2>Norva Family</h2>
+            <p class="tag">The full Norva experience for the whole home.</p>
+            <div class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></div>
+            <small class="price-note"></small>
+            <ul>
+              <li>Up to 5 profiles</li>
+              <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
+              <li>Offline downloads (Android app)</li>
+              <li>Every Norva feature included</li>
+            </ul>
+            <button class="btn buy" type="button">Start 7-day free trial</button>
+          </article>
+        </div>
 
-    <div class="confirm" id="trial-confirm" hidden>
-      <span class="badge-ok" aria-hidden="true">✓</span>
-      <h2 id="confirm-title">You're in</h2>
-      <p id="confirm-msg"></p>
-      <a class="btn" id="confirm-continue" href="/app#home">Continue to Norva</a>
-    </div>
+        <p class="compare">Both plans include <b>every Norva feature</b>. The only difference is profiles: <b>Norva</b> gives 2 and <b>Norva Family</b> gives 5, so everyone keeps their own favorites and Continue Watching.</p>
 
-    <div class="row">
-      <button class="btn ghost" id="restore" type="button">Restore purchases</button>
-      <a class="btn ghost" id="back" href="/app#home">Not now</a>
-    </div>
+        <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
+          <span class="pm-lbl">Secure card payment</span>
+          <span class="payment-marks" role="img" aria-label="Accepted payment methods: Visa and Mastercard">
+            <span class="payment-logo" aria-hidden="true"><img src="/img/payments/visa-brandmark.svg" alt="" width="34" height="11"></span>
+            <span class="payment-logo" aria-hidden="true"><img src="/img/payments/mastercard-symbol.svg" alt="" width="32" height="20"></span>
+          </span>
+        </div>
 
-    <p class="note">The free trial requires a payment method and converts to a paid plan unless
-      cancelled before it ends — cancel anytime. Norva is a media player; no content or TV
-      subscription is included. Your TV content stays provided by your own TV service.<br>
+        <div class="assurance" id="trial-assurance" role="note">
+          <svg class="assurance-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 018 0v3"></path></svg>
+          <div><strong>No charge today — we only verify your card.</strong> To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is <b>released right away and never debited.</b> Your first real payment happens only after the trial if you do not cancel. <b>We will email you a reminder before it ends.</b></div>
+        </div>
+
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+
+        <div class="confirm" id="trial-confirm" hidden>
+          <span class="badge-ok" aria-hidden="true">✓</span>
+          <h2 id="confirm-title">You're in</h2>
+          <p id="confirm-msg"></p>
+          <a class="btn" id="confirm-continue" href="/app#home">Continue to Norva</a>
+        </div>
+
+        <div class="row">
+          <button class="btn ghost" id="restore" type="button">Restore purchases</button>
+          <a class="btn ghost" id="back" href="/app#home">Not now</a>
+        </div>
+      </section>
+    </section>
+
+    <p class="note">The free trial requires a payment method and converts to a paid plan unless cancelled before it ends. Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.<br>
       <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> ·
       <a href="/subscription.html">Manage or cancel a subscription</a></p>
   </main>
@@ -378,6 +390,7 @@
   <script src="/js/cloudApi.js?v=52"></script>
   <script src="/js/authApi.js?v=6"></script>
   <script src="/js/navigation-safety.js?v=1"></script>
+  <script src="/js/promo-ui.js?v=1"></script>
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=17"></script>
   <script>
@@ -676,44 +689,19 @@
 
       // Badge labels (site copy is English) for the promo event catalog — the
       // event key is chosen in the admin Finance card, this maps it to display.
-      const PROMO_LABELS = {
-        black_friday: 'Black Friday', cyber_monday: 'Cyber Monday',
-        winter_sale: 'Winter Sale', summer_sale: 'Summer Sale',
-        christmas: 'Christmas Sale', new_year: 'New Year Sale',
-        lunar_new_year: 'Lunar New Year', eid: 'Eid Sale', easter: 'Easter Sale',
-        halloween: 'Halloween Sale', valentines: "Valentine's Sale",
-        back_to_school: 'Back to School', birthday: 'Birthday Sale',
-        flash: 'Flash Sale', other: 'Limited Offer'
-      };
+      const promoUi = window.NorvaPromoUI;
+      const PROMO_LABELS = Object.keys(promoUi.events).reduce(function (labels, key) {
+        labels[key] = promoUi.events[key].label;
+        return labels;
+      }, { other: 'Limited Offer' });
       let livePromos = null; // { plan: { period: { base_cents, event } } } when a promo is live
       let liveCampaignBg = null; // uploaded campaign background URL (overrides the event theme)
+      let countdownTimer = 0;
 
       // Visual identity per event: badge colors + a tinted card background, so a
       // Black Friday reads black-and-gold, Christmas red-and-green, etc. The
       // uploaded campaign image (admin Finance card) replaces the tint when set.
-      const PROMO_THEMES = {
-        black_friday:   { badge: 'linear-gradient(135deg,#ffb800,#ff6a00)', glow: 'rgba(255,184,0,.16)',  border: 'rgba(255,184,0,.5)' },
-        cyber_monday:   { badge: 'linear-gradient(135deg,#22d3ee,#6366f1)', glow: 'rgba(34,211,238,.14)', border: 'rgba(99,102,241,.55)' },
-        winter_sale:    { badge: 'linear-gradient(135deg,#7dd3fc,#38bdf8)', glow: 'rgba(125,211,252,.13)', border: 'rgba(125,211,252,.5)' },
-        summer_sale:    { badge: 'linear-gradient(135deg,#fbbf24,#fb7185)', glow: 'rgba(251,191,36,.14)', border: 'rgba(251,146,60,.5)' },
-        christmas:      { badge: 'linear-gradient(135deg,#ef4444,#16a34a)', glow: 'rgba(239,68,68,.14)',  border: 'rgba(239,68,68,.5)' },
-        new_year:       { badge: 'linear-gradient(135deg,#facc15,#f472b6)', glow: 'rgba(250,204,21,.14)', border: 'rgba(250,204,21,.5)' },
-        lunar_new_year: { badge: 'linear-gradient(135deg,#ef4444,#f59e0b)', glow: 'rgba(239,68,68,.16)',  border: 'rgba(245,158,11,.55)' },
-        eid:            { badge: 'linear-gradient(135deg,#10b981,#facc15)', glow: 'rgba(16,185,129,.15)', border: 'rgba(16,185,129,.5)' },
-        easter:         { badge: 'linear-gradient(135deg,#f9a8d4,#a5b4fc)', glow: 'rgba(249,168,212,.13)', border: 'rgba(165,180,252,.5)' },
-        halloween:      { badge: 'linear-gradient(135deg,#f97316,#7c3aed)', glow: 'rgba(249,115,22,.16)', border: 'rgba(249,115,22,.55)' },
-        valentines:     { badge: 'linear-gradient(135deg,#fb7185,#e11d48)', glow: 'rgba(251,113,133,.15)', border: 'rgba(225,29,72,.5)' },
-        back_to_school: { badge: 'linear-gradient(135deg,#38bdf8,#fbbf24)', glow: 'rgba(56,189,248,.13)', border: 'rgba(56,189,248,.5)' },
-        birthday:       { badge: 'linear-gradient(135deg,#f472b6,#8b5cf6)', glow: 'rgba(244,114,182,.15)', border: 'rgba(139,92,246,.5)' },
-        flash:          { badge: 'linear-gradient(135deg,#fde047,#f59e0b)', glow: 'rgba(253,224,71,.16)', border: 'rgba(253,224,71,.55)' },
-        other:          { badge: 'linear-gradient(135deg,#ff8067,#b579ff)', glow: 'rgba(181,121,255,.14)', border: 'rgba(181,121,255,.5)' }
-      };
-      const PROMO_ICONS = {
-        black_friday: '🛍️', cyber_monday: '💻', winter_sale: '❄️', summer_sale: '☀️',
-        christmas: '🎄', new_year: '🎆', lunar_new_year: '🧧', eid: '🌙', easter: '🐣',
-        halloween: '🎃', valentines: '💘', back_to_school: '🎒', birthday: '🎂',
-        flash: '⚡', other: '✨'
-      };
+      const PROMO_THEMES = promoUi.themes;
 
       // Nudge cliquable sous le toggle quand la vue Mensuel est active : ce
       // que le visiteur laisse sur la table en restant au mensuel (« up to »
@@ -746,11 +734,42 @@
           n.addEventListener('click', function () { applyPeriod('annual'); });
           document.querySelector('.toggle')?.insertAdjacentElement('afterend', n);
         }
-        n.textContent = '💡 Save up to $' + bestAmt.toFixed(2) + (firstYear ? ' your first year' : ' a year') + ' with annual billing →';
+        n.textContent = 'Save up to $' + bestAmt.toFixed(2) + (firstYear ? ' your first year' : ' a year') + ' with annual billing →';
         n.hidden = false;
       }
 
+      function pruneExpiredPromos(requestedNowMs) {
+        const nowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
+        if (!livePromos || typeof livePromos !== 'object') return 0;
+        let removed = 0;
+        Object.keys(livePromos).forEach(function (planKey) {
+          const periods = livePromos[planKey];
+          if (!periods || typeof periods !== 'object') return;
+          Object.keys(periods).forEach(function (periodKey) {
+            const promo = periods[periodKey];
+            if (promoUi.isActive(promo, nowMs)) return;
+            const baseCents = Number(promo && promo.base_cents);
+            const cardEl = document.querySelector('.card[data-plan="' + planKey + '"]');
+            if (cardEl && Number.isInteger(baseCents) && baseCents > 0) {
+              if (periodKey === 'annual') {
+                cardEl.dataset.annual = (promo.base_cents / 100).toFixed(2);
+                cardEl.dataset.annualNote = "That's about $" + (promo.base_cents / 1200).toFixed(2) + '/mo, billed yearly.';
+              } else if (periodKey === 'monthly') {
+                cardEl.dataset.monthly = (promo.base_cents / 100).toFixed(2);
+              }
+              const hint = cardEl.querySelector('.save-hint');
+              if (hint) hint.remove();
+            }
+            delete periods[periodKey];
+            removed += 1;
+          });
+          if (!Object.keys(periods).length) delete livePromos[planKey];
+        });
+        return removed;
+      }
+
       function applyPeriod(next) {
+        pruneExpiredPromos(Date.now());
         period = next;
         document.querySelectorAll('.period').forEach(function (b) {
           const on = b.dataset.period === period;
@@ -876,6 +895,7 @@
           }
         });
         refreshCtas(); // the current plan/period combo depends on the toggle
+        refreshCampaignPresentation();
       }
 
       document.querySelectorAll('.period').forEach(function (b) {
@@ -1232,9 +1252,60 @@
       // Web checkout only: on native the prices shown must stay the Play Console
       // ones — a web promo must never advertise a price Google won't charge.
       // The static data-* values remain the fallback when the endpoint is down.
+      function normalizeLiveCatalog(catalog, requestedNowMs) {
+        if (!catalog || !catalog.prices || typeof catalog.prices !== 'object') return null;
+        const nowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
+        const normalizedPrices = Object.create(null);
+        const normalizedPromos = Object.create(null);
+        const planKeys = Object.keys(catalog.prices);
+        for (let i = 0; i < planKeys.length; i += 1) {
+          const planKey = planKeys[i];
+          const price = catalog.prices[planKey];
+          const monthly = Number(price && price.monthly);
+          const annual = Number(price && price.annual);
+          if (!Number.isInteger(monthly) || monthly <= 0 || !Number.isInteger(annual) || annual <= 0) return null;
+          normalizedPrices[planKey] = { monthly: monthly, annual: annual };
+        }
+        const rawPromos = catalog.promos && typeof catalog.promos === 'object' ? catalog.promos : {};
+        const promoPlans = Object.keys(rawPromos);
+        for (let p = 0; p < promoPlans.length; p += 1) {
+          const planKey = promoPlans[p];
+          const periods = rawPromos[planKey];
+          if (!periods || typeof periods !== 'object' || !normalizedPrices[planKey]) return null;
+          const periodKeys = Object.keys(periods);
+          for (let c = 0; c < periodKeys.length; c += 1) {
+            const cadence = periodKeys[c];
+            if (cadence !== 'monthly' && cadence !== 'annual') return null;
+            const promo = periods[cadence];
+            const effectiveCents = normalizedPrices[planKey][cadence];
+            const baseCents = Number(promo && promo.base_cents);
+            const cycles = promo && promo.cycles == null ? null : Number(promo && promo.cycles);
+            if (!Number.isInteger(baseCents) || baseCents <= effectiveCents || baseCents > 99999
+                || (cycles !== null && (!Number.isInteger(cycles) || cycles < 1 || cycles > 24))) {
+              return null;
+            }
+            if (promoUi.isActive(promo, nowMs)) {
+              if (!normalizedPromos[planKey]) normalizedPromos[planKey] = Object.create(null);
+              normalizedPromos[planKey][cadence] = promo;
+              continue;
+            }
+            // The Edge catalog is cached briefly. Once an offer expires in that
+            // window, restore its server-provided base instead of painting the
+            // stale effective price. Missing base data makes the catalog unsafe.
+            normalizedPrices[planKey][cadence] = baseCents;
+          }
+        }
+        return Object.assign({}, catalog, {
+          prices: normalizedPrices,
+          promos: Object.keys(normalizedPromos).length ? normalizedPromos : null
+        });
+      }
+
       function applyLivePrices(catalog) {
         try {
-          if (!catalog || !catalog.prices) return false;
+          const normalized = normalizeLiveCatalog(catalog, Date.now());
+          if (!normalized) return false;
+          catalog = normalized;
           const b = window.NorvaBilling;
           if (!(b && b.isRevolutEnabled && b.isRevolutEnabled() && !b.hasNativeBilling() && !b.isNative())) return false;
           const prices = catalog.prices; // EFFECTIVE cents — an active promo is already applied
@@ -1296,28 +1367,6 @@
               save.hidden = true;
             }
           }
-          startPromoCountdown();
-          // Full-page campaign visual: shown when at least one promo is live AND
-          // an image was uploaded — painted on the document canvas (<html>), the
-          // lowest possible layer, with the legibility veil as first bg layer.
-          const anyPromo = !!(livePromos && Object.keys(livePromos).some(function (k) {
-            return livePromos[k] && Object.keys(livePromos[k]).length;
-          }));
-          const legacyBg = document.getElementById('campaign-bg');
-          if (legacyBg) legacyBg.remove(); // ancienne implémentation (calque z-index)
-          const rootEl = document.documentElement;
-          if (liveCampaignBg && anyPromo) {
-            rootEl.classList.add('has-campaign');
-            rootEl.style.backgroundImage =
-              'linear-gradient(180deg, rgba(9,11,16,.16) 0%, rgba(9,11,16,.5) 48%, rgba(9,11,16,.9) 100%), url("' + liveCampaignBg + '")';
-            // Un échec de chargement doit se VOIR — jamais un fond noir muet.
-            const probe = new Image();
-            probe.onerror = function () { console.warn('[norva] visuel de campagne inaccessible :', liveCampaignBg); };
-            probe.src = liveCampaignBg;
-          } else {
-            rootEl.classList.remove('has-campaign');
-            rootEl.style.backgroundImage = '';
-          }
           webPricesReady = true;
           webPricesError = '';
           document.documentElement.classList.remove('prices-pending');
@@ -1343,85 +1392,73 @@
         setStatus('Exact current prices could not be loaded. No purchase can start until they are available.', true);
       }
 
-      // Real urgency: countdown to the soonest promo_ends_at among active promos —
-      // the exact moment the server auto-disables the promo. At zero, the page
-      // honestly reverts to base prices in front of the visitor (never a fake,
-      // self-resetting timer — that's a sanctioned dark pattern).
-      let countdownTimer = 0;
-      function startPromoCountdown() {
+      // Campaign presentation follows the selected cadence and preferred plan.
+      // One offer expiring must never remove another still-active plan promotion.
+      function preferredCampaignPlan() {
+        if (wantedPlan === 'plus' || wantedPlan === 'family') return wantedPlan;
+        return currentPlan === 'plus' || currentPlan === 'family' ? currentPlan : '';
+      }
+      function expireSelectedPromo(selection) {
+        try {
+          pruneExpiredPromos(Date.now());
+          const promoStatus = document.getElementById('promo-status');
+          if (promoStatus) promoStatus.textContent = selection.label + ' has ended. Current prices are now displayed.';
+          applyPeriod(period);
+        } catch (_) { /* presentation must never block purchase */ }
+      }
+      function refreshCampaignPresentation() {
         clearInterval(countdownTimer);
-        const old = document.getElementById('promo-countdown');
-        if (old) old.remove();
-        if (!livePromos) return;
-        let soonest = null, soonestPromo = null;
-        Object.keys(livePromos).forEach(function (pl) {
-          Object.keys(livePromos[pl] || {}).forEach(function (per) {
-            const p = livePromos[pl][per];
-            if (!p || !p.ends_at) return;
-            const t = new Date(p.ends_at).getTime();
-            if (isFinite(t) && t > Date.now() && (soonest === null || t < soonest)) { soonest = t; soonestPromo = p; }
-          });
-        });
-        if (!soonest) return; // promo sans échéance → pas de compte à rebours
-        const grid = document.querySelector('.grid');
-        if (!grid) return;
-        const box = document.createElement('div');
-        box.id = 'promo-countdown';
-        // Chip verre fumé aux couleurs de l'événement : pastille nommée + gros
-        // chrono — lisible même sur un visuel de campagne chargé.
-        const theme = PROMO_THEMES[soonestPromo.event] || PROMO_THEMES.other;
-        box.style.borderColor = theme.border;
-        box.style.boxShadow = 'inset 0 1px 0 rgba(255,255,255,.07), 0 14px 38px -14px ' + theme.glow.replace(/[\d.]+\)$/, '.4)');
-        const label = (soonestPromo.label && String(soonestPromo.label).trim()) || PROMO_LABELS[soonestPromo.event] || PROMO_LABELS.other;
-        const ev = document.createElement('span');
-        ev.className = 'cd-ev';
-        ev.textContent = (PROMO_ICONS[soonestPromo.event] || PROMO_ICONS.other) + ' ' + label;
-        ev.style.background = theme.badge;
-        const txt = document.createElement('span');
-        txt.textContent = 'ends in';
-        const clock = document.createElement('b');
-        box.appendChild(ev);
-        box.appendChild(txt);
-        box.appendChild(clock);
-        grid.insertAdjacentElement('beforebegin', box);
-        const pad = function (x) { return String(x).padStart(2, '0'); };
+        countdownTimer = 0;
+        const box = document.getElementById('promo-countdown');
+        const countdownLabel = document.getElementById('promo-countdown-label');
+        const clock = document.getElementById('promo-countdown-value');
+        const title = document.getElementById('page-title');
+        const eyebrow = document.getElementById('page-eyebrow');
+        const backdrop = document.getElementById('campaign-backdrop');
+        const selection = promoUi.selectPromo(livePromos, preferredCampaignPlan(), period);
+        document.documentElement.classList.remove('has-campaign');
+        document.documentElement.style.backgroundImage = '';
+        document.body.dataset.promoActive = selection ? 'true' : 'false';
+        if (!selection) {
+          if (box) box.hidden = true;
+          if (backdrop) backdrop.style.removeProperty('--campaign-image');
+          if (eyebrow) eyebrow.textContent = 'One account. Every Norva screen.';
+          if (title) title.textContent = 'Bring your catalog with you.';
+          return;
+        }
+
+        if (eyebrow) eyebrow.textContent = 'Limited-time Norva offer';
+        if (title) title.textContent = selection.label;
+        const campaignUrl = liveCampaignBg || promoUi.wallpaperFor(selection.promo.event);
+        if (backdrop && campaignUrl) {
+          backdrop.style.setProperty('--campaign-image', 'url(' + JSON.stringify(campaignUrl) + ')');
+          const probe = new Image();
+          probe.onerror = function () { console.warn('[norva] campaign image unavailable'); };
+          probe.src = campaignUrl;
+        } else if (backdrop) {
+          backdrop.style.removeProperty('--campaign-image');
+        }
+        if (!box || !clock || !countdownLabel || selection.endsAtMs === null) {
+          if (box) box.hidden = true;
+          return;
+        }
+        box.hidden = false;
         const tick = function () {
-          const left = soonest - Date.now();
-          if (left <= 0) {
+          const countdown = promoUi.countdownTo(selection.endsAtMs);
+          if (!countdown || countdown.expired) {
             clearInterval(countdownTimer);
-            box.remove();
-            expirePromosNow();
+            countdownTimer = 0;
+            box.hidden = true;
+            expireSelectedPromo(selection);
             return;
           }
-          const d = Math.floor(left / 86400000);
-          const h = Math.floor(left / 3600000) % 24;
-          const m = Math.floor(left / 60000) % 60;
-          const s = Math.floor(left / 1000) % 60;
-          clock.textContent = (d > 0 ? d + 'd ' : '') + pad(h) + ':' + pad(m) + ':' + pad(s);
-          box.classList.toggle('urgent', left < 3600000);
+          countdownLabel.textContent = countdown.urgent ? 'Ends soon' : 'Offer ends in';
+          clock.textContent = countdown.text;
+          clock.setAttribute('aria-label', countdown.ariaText);
+          box.classList.toggle('urgent', countdown.urgent);
         };
         tick();
         countdownTimer = setInterval(tick, 1000);
-      }
-      // À zéro : retour honnête aux prix de base sans rechargement — le serveur a
-      // déjà basculé de son côté (auto-désactivation à promo_ends_at, cache 60 s).
-      function expirePromosNow() {
-        try {
-          if (livePromos) {
-            Object.keys(livePromos).forEach(function (pl) {
-              Object.keys(livePromos[pl] || {}).forEach(function (per) {
-                const p = livePromos[pl][per];
-                const cardEl = document.querySelector('.card[data-plan="' + pl + '"]');
-                if (cardEl && p && p.base_cents) {
-                  if (per === 'annual') cardEl.dataset.annual = (p.base_cents / 100).toFixed(2);
-                  else cardEl.dataset.monthly = (p.base_cents / 100).toFixed(2);
-                }
-              });
-            });
-          }
-          livePromos = null;
-          applyPeriod(period); // retire badges, prix barrés, économies — prix de base réaffichés
-        } catch (_) { /* jamais bloquant */ }
       }
 
       if (tvPurchaseOnly) {
@@ -1456,6 +1493,7 @@
       })().catch(function () {
         document.documentElement.classList.remove('entitlement-pending');
       });
+      window.addEventListener('pagehide', function () { clearInterval(countdownTimer); });
     })();
   </script>
 </body>

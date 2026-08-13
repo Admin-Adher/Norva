@@ -194,8 +194,10 @@ test('checkout shows a calendar first-charge date and blocks stale price fallbac
     'the authenticated quote must start in parallel with the bounded optional catalog');
   assert.doesNotMatch(checkout, /await pricePromise;/,
     'the optional public catalog must never block checkout indefinitely');
-  assert.match(checkout, /if \(publicCatalogAbandoned \|\| commercialQuote\) return false/,
-    'a late public response must never repaint the authenticated quote');
+  assert.match(checkout, /return publicCatalogAbandoned \|\| !catalog \? null : catalog/,
+    'a late public response must be discarded instead of painting monetary state');
+  assert.match(checkout, /applyServerCommercialTerms\(data\);[\s\S]{0,100}reconcileCheckoutPromotion\(catalog, quote\)/,
+    'optional campaign metadata may be reconciled only after the authenticated quote');
 });
 
 test('resubscribe copy reflects an immediate captured payment without false reassurance', () => {

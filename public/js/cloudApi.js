@@ -433,9 +433,11 @@
         if (!shouldShowRegionPrompt()) return;
         if (!document.body || document.getElementById('norva-region-prompt')) return;
         const pathname = window.location.pathname || '';
-        // Suppress on auth/pairing surfaces — match both the .html paths and the
-        // clean URLs Cloudflare Pages serves (e.g. "/account", "/login").
-        if (/\/(login|cloud|account|cloud-pair|hub-connect)(\.html)?\/?$/i.test(pathname)) return;
+        // Suppress on auth/pairing and commerce surfaces. Region organizes the
+        // media catalog; asking for it during plan selection or payment can stack
+        // a second dialog over consent and interrupts the checkout funnel. Match
+        // both .html paths and Cloudflare Pages clean URLs.
+        if (/\/(login|cloud|account|cloud-pair|hub-connect|subscribe|paywall|checkout-revolut)(\.html)?\/?$/i.test(pathname)) return;
         // On the app page, defer until a catalog actually exists: organizing regions
         // for an empty catalog is premature and stacks on top of the "connect your TV
         // service" onboarding. The App drives this from its catalog-ready flow
