@@ -10,7 +10,20 @@ function classifyUpstreamError(value) {
     const sanitized = sanitizeErrorMessage(value);
     const text = sanitized.toLowerCase();
 
-    if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|max(?:imum)? connections?|active connections?|connection limit|same account.*ip|account sharing/.test(text)) {
+    // ffmpeg disguises some provider HTTP 458 responses as the literal
+    // "4XX Client Error, but not one of 40{0,1,3,4}". A first 458 is
+    // authoritative: retrying the same account opens more competing sockets.
+    if (/(?:\b|_)458\b|max(?:imum)? connections?|4xx client error, but not one of/.test(text)) {
+        return {
+            code: 'UPSTREAM_PROVIDER_BUSY',
+            upstreamStatus: 458,
+            terminal: true,
+            friendly: 'This TV service is already being used on another device.',
+            details: sanitized
+        };
+    }
+
+    if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|active connections?|connection limit|same account.*ip|account sharing/.test(text)) {
         return {
             code: 'UPSTREAM_MULTI_IP',
             upstreamStatus: 429,
@@ -86,20 +99,6 @@ function classifyUpstreamError(value) {
             upstreamStatus: null,
             terminal: true,
             friendly: 'The provider returned an incomplete stream at this position. Try a nearby timestamp or another version.',
-            details: sanitized
-        };
-    }
-
-    // ffmpeg reports an upstream HTTP 458 (provider "max connections") as the literal
-    // "Server returned 4XX Client Error, but not one of 40{0,1,3,4}" — the number 458
-    // never appears. That state is TRANSIENT (the slot frees ~8s after the previous
-    // consumer drops), so it must be classified retryable, not terminal.
-    if (/(?:\b|_)458\b|max connections?|4xx client error, but not one of/.test(text)) {
-        return {
-            code: 'UPSTREAM_PROVIDER_BUSY',
-            upstreamStatus: 458,
-            terminal: false,
-            friendly: 'The provider allows only one active stream and the previous slot has not released yet. Retrying shortly…',
             details: sanitized
         };
     }

@@ -72,60 +72,28 @@ router.post('/session', async (req, res) => {
         // the first segment than audio-only/copy sessions, especially on CPU.
         const startupTimeoutMs = videoMode === 'encode' ? 45000 : 15000;
 
-        // Connection-limit / auth errors (401/403/429) on single-connection
-        // IPTV accounts are usually transient: the previous stream's slot (or
-        // the ffprobe pass that just ran) hasn't been released by the provider
-        // yet. Rather than failing the title outright, wait for the slot to
-        // free up and try again a couple of times before giving up.
-        const RETRYABLE_CODES = new Set([
-            'UPSTREAM_UNAUTHORIZED', 'UPSTREAM_FORBIDDEN', 'UPSTREAM_RATE_LIMIT',
-            'UPSTREAM_PROVIDER_BUSY'
-        ]);
-        // 2s + 6s + 9s spans the provider's ~8s slot-release window (the old
-        // 1.8s+3.5s topped out at 5.3s total — always INSIDE the busy window).
-        const RETRY_DELAYS_MS = [2000, 6000, 9000];
-        const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
-
-        let lastUpstream = null;
-        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            const session = await transcodeSession.createSession(url, sessionOptions);
-            await session.start();
-            const ready = await session.waitForPlaylist(startupTimeoutMs);
-
-            if (ready) {
-                return res.json({
-                    sessionId: session.id,
-                    playlistUrl: `/api/transcode/${session.id}/stream.m3u8`,
-                    status: session.status
-                });
-            }
-
-            // Surface the FFmpeg error (e.g. "Server returned 401 Unauthorized")
-            // so the client can show a meaningful message instead of spinning
-            const detail = (session.stderrTail || session.error || 'Playlist not generated in time').trim();
-            lastUpstream = normalizeUpstreamError(detail);
-            // Wait for FFmpeg to fully die (releases the provider connection)
-            // before we either retry or report failure.
-            await transcodeSession.removeSession(session.id);
-
-            const canRetry = RETRYABLE_CODES.has(lastUpstream.code) && attempt < MAX_ATTEMPTS - 1;
-            if (!canRetry) break;
-
-            const delay = RETRY_DELAYS_MS[attempt];
-            console.log(`[Transcode] ${lastUpstream.code} on attempt ${attempt + 1}/${MAX_ATTEMPTS}; ` +
-                `provider slot likely still busy, retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+        // One server-owned attempt only. Provider auth, limit and 458 responses
+        // are authoritative; retrying FFmpeg would create a connection cascade.
+        const session = await transcodeSession.createSession(url, sessionOptions);
+        await session.start();
+        const ready = await session.waitForPlaylist(startupTimeoutMs);
+        if (ready) {
+            return res.json({
+                sessionId: session.id,
+                playlistUrl: `/api/transcode/${session.id}/stream.m3u8`,
+                status: session.status
+            });
         }
 
-        const upstream = lastUpstream || normalizeUpstreamError('Playlist not generated in time');
-        if (upstream.code === 'UPSTREAM_PROVIDER_BUSY') res.set('Retry-After', '8');
+        const detail = (session.stderrTail || session.error || 'Playlist not generated in time').trim();
+        const upstream = normalizeUpstreamError(detail);
+        await transcodeSession.removeSession(session.id);
         return res.status(upstream.terminal ? 502 : 500).json({
             error: upstream.friendly,
             details: upstream.details.slice(-300),
             code: upstream.code,
             upstreamStatus: upstream.upstreamStatus,
-            terminal: upstream.terminal,
-            ...(upstream.code === 'UPSTREAM_PROVIDER_BUSY' ? { retryAfter: 8 } : {})
+            terminal: upstream.terminal
         });
 
     } catch (err) {

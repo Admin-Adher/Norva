@@ -13,11 +13,13 @@ test('classifies user_multi_ip as a provider connection-slot refusal', () => {
   assert.match(result.details, /user_multi_ip/);
 });
 
-test('classifies max connections wording as the same single-slot provider issue', () => {
+test('classifies max connections wording as the exact terminal HTTP 458 account conflict', () => {
   const result = classifyUpstreamError('Your line has reached max connections allowed');
 
-  assert.equal(result.code, 'UPSTREAM_MULTI_IP');
-  assert.equal(result.upstreamStatus, 429);
+  assert.equal(result.code, 'UPSTREAM_PROVIDER_BUSY');
+  assert.equal(result.upstreamStatus, 458);
+  assert.equal(result.terminal, true);
+  assert.equal(result.friendly, 'This TV service is already being used on another device.');
 });
 
 test('redacts credentials embedded in provider errors', () => {

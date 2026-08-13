@@ -8,8 +8,8 @@
 //   2. The provider-busy classifiers actually match the codes the engine emits
 //      (BLOCK_HTTP_458 / PROBE_HTTP_458 — underscore defeats \b, the original bug) and
 //      ffmpeg's 458 disguise ("Server returned 4XX Client Error, but not one of ...").
-//   3. server/utils/upstreamError.js classifies the ffmpeg-458 string as a RETRYABLE
-//      UPSTREAM_PROVIDER_BUSY (it used to be terminal UPSTREAM_REFUSED).
+//   3. server/utils/upstreamError.js classifies the first ffmpeg-458 string as a
+//      terminal UPSTREAM_PROVIDER_BUSY and the transcode path opens one session only.
 //   4. hls.js is vendored locally and both app entries define the promise-based
 //      window.ensureHls loader (local first, CDN fallback) — no bare CDN-only tag.
 //
@@ -157,11 +157,11 @@ test('engine provider connection blocks do not fall through to transcode', () =>
 // ── 3) hub upstream-error classification of ffmpeg's 458 disguise ──────────────
 const { normalizeUpstreamError } = require('../server/utils/upstreamError.js');
 
-test('ffmpeg 458 disguise classifies as retryable UPSTREAM_PROVIDER_BUSY', () => {
+test('ffmpeg 458 disguise is terminal on its first UPSTREAM_PROVIDER_BUSY signal', () => {
   const r = normalizeUpstreamError(
     'http://provider.example/movie/x.mkv: Server returned 4XX Client Error, but not one of 40{0,1,3,4}');
   assert.strictEqual(r.code, 'UPSTREAM_PROVIDER_BUSY');
-  assert.strictEqual(r.terminal, false);
+  assert.strictEqual(r.terminal, true);
   assert.strictEqual(r.upstreamStatus, 458);
 });
 

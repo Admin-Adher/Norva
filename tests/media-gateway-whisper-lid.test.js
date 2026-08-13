@@ -184,7 +184,7 @@ test('a timed-out detect-only process must close before the comparison can conti
   assert.equal(result.error, 'timeout');
 });
 
-test('production detect-only is signed-scope only, non-strict and falls back on the same WAV', () => {
+test('v80 production detect-only is signed-scope only, non-strict and falls back on the same WAV', () => {
   const root = path.join(__dirname, '..');
   const gateway = fs.readFileSync(
     path.join(root, 'services/media-gateway/src/index.js'),
@@ -196,7 +196,7 @@ test('production detect-only is signed-scope only, non-strict and falls back on 
   assert.notEqual(routeEnd, -1);
   const route = gateway.slice(routeStart, routeEnd);
 
-  assert.match(gateway, /const GATEWAY_VERSION = 79/);
+  assert.match(gateway, /const GATEWAY_VERSION = 80/);
   assert.match(gateway, /const LID_DETECT_ONLY_SCOPE = 'lid-production-detect-only'/);
   assert.match(gateway, /const LID_SHADOW_SCOPE = 'lid-shadow'/);
   assert.match(
