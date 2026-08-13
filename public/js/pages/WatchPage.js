@@ -153,6 +153,8 @@ class WatchPage {
         this._pendingSubtitlePreferenceApplied = false;
         this._videoEncodeFallbackTried = false;
         this._playbackAttemptId = 0;
+        this._cloudPlaybackLaneAttemptId = null;
+        this._preferredExplicitCloudMode = null;
         this._failoverAttemptId = null;
         this._engineRuntimeRecoveryAttemptId = null;
         this._engineMidRetries = 0;
@@ -1444,6 +1446,10 @@ class WatchPage {
                 this._suspendResumeSnapshotSave = false;
             }
         }
+        // A different title starts with the resolver's normal single-lane choice.
+        // A browser-engine failure may offer an explicit server conversion later,
+        // but that preference must never leak to the next title.
+        this._preferredExplicitCloudMode = null;
         const playbackAttemptId = this.beginPlaybackAttempt();
         // Fresh user-initiated playback → reset the engine mid-stream retry budget (the
         // automatic engine retries in onError don't go through play(), so they don't reset it).
@@ -1590,7 +1596,6 @@ class WatchPage {
         this._failoverAttemptId = null;
         this._playbackStatusOkReported = false;
         this._lastFailureMsg = null;
-        this._cloudRelayFallbackTried = false;
         this._cloudGatewayTranscodeFallbackTried = false;
         this._firstFrameReported = false;
         this._playStartedReported = false;
@@ -2296,7 +2301,19 @@ class WatchPage {
 
     beginPlaybackAttempt() {
         this._playbackAttemptId += 1;
+        this._cloudPlaybackLaneAttemptId = null;
         return this._playbackAttemptId;
+    }
+
+    noteCloudPlaybackLaneForAttempt(sessionId, playbackAttemptId = this._playbackAttemptId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        this._cloudPlaybackLaneAttemptId = playbackAttemptId;
+    }
+
+    hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId = this._playbackAttemptId) {
+        return Number.isFinite(playbackAttemptId)
+            && this._cloudPlaybackLaneAttemptId === playbackAttemptId;
     }
 
     isStalePlaybackAttempt(attemptId) {
@@ -2626,6 +2643,7 @@ class WatchPage {
     registerCloudPlaybackSession(sessionId) {
         const id = sessionId ? String(sessionId).trim() : '';
         if (!id) return;
+        this.noteCloudPlaybackLaneForAttempt(id);
         this.currentCloudPlaybackSessionId = id;
         this.activeCloudPlaybackSessionIds.add(id);
         this._cloudPlaybackSupersededHandled = false;
@@ -3000,6 +3018,24 @@ class WatchPage {
             message: 'Another playback is currently using this service. Norva stopped the older playback when it belonged to Norva.',
             hint: 'Stop any remaining external playback, wait a moment, then select Retry.',
             retry: 'Retry',
+        };
+    }
+
+    cloudTranscodeRecoveryCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: 'Conversion serveur nécessaire',
+                message: 'Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative.',
+                hint: 'Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur.',
+                retry: 'Convertir et lire',
+            };
+        }
+        return {
+            title: 'Server conversion required',
+            message: 'This browser cannot play the file directly. The first session was stopped before any other route was attempted.',
+            hint: 'Select Convert and play to start one new server session.',
+            retry: 'Convert and play',
         };
     }
 
@@ -3488,9 +3524,9 @@ class WatchPage {
                     this.reportEngineFailure({ stage: 'load', message: msg });
                     await this.reportProviderPlaybackFailure(msg);
                     this.destroyEngine();
-                    // showPlaybackError classifies this as provider-busy and never
-                    // schedules another connection attempt.
-                    this.handleEngineUnplayable(e);
+                    // The shared terminal handler expires the exact session before
+                    // rendering the provider-conflict state.
+                    await this.handlePlaybackFailure(msg);
                     return;
                 }
                 // Provider auth/rate-limit blocks (401/403/429) are not container failures.
@@ -3502,7 +3538,7 @@ class WatchPage {
                 if (this.isConnectionLimitError(msg)) {
                     this.reportEngineFailure({ stage: 'load', message: msg });
                     this.destroyEngine();
-                    this.showPlaybackError(msg, { immediate: true });
+                    await this.handlePlaybackFailure(msg);
                     return;
                 }
                 // Read the source-head verdict before tearing the engine down: a real-media demux
@@ -3535,11 +3571,18 @@ class WatchPage {
         }
     }
 
-    // Re-resolve the exact file through the Gateway after the browser engine fails.
-    // The Gateway starts with its fast remux lane (copying browser-safe H.264/AAC)
-    // and can promote only the unsafe codecs to encoding. Only ever runs after an
-    // engine failure, so it cannot regress a working title.
+    // Local-hub fallback after the browser engine fails. Hosted playback already
+    // owns one Relay/Gateway session, so opening a second cloud lane here would
+    // recreate the provider contention this recovery is meant to solve. The Web
+    // app instead offers one explicit server-conversion action after teardown.
     async fallbackEngineToTranscode(playbackAttemptId, startOffsetOverride = null) {
+        if (this.isCloudPlaybackMode()) {
+            this._preferredExplicitCloudMode = 'transcode';
+            if (this.hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId)) return false;
+            // Fail closed even if a legacy response omitted its session id: hosted
+            // code must never infer that it is safe to open another upstream lane.
+            return false;
+        }
         const c = this.content || {};
         if (!c.sourceId || !c.id) return false;
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
@@ -3680,6 +3723,10 @@ class WatchPage {
             // A provider error page is not a remux/decode failure. Reopening it through
             // another lane would only consume another provider connection.
             if (providerErrorHead) {
+                if (this.isCloudPlaybackMode()) {
+                    await this.handlePlaybackFailure(reason);
+                    return true;
+                }
                 this.handleEngineUnplayable(error);
                 return false;
             }
@@ -3720,6 +3767,10 @@ class WatchPage {
             if (await this.fallbackEngineToTranscode(playbackAttemptId, resumeAt)) return true;
 
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
+            if (this.isCloudPlaybackMode()) {
+                await this.handlePlaybackFailure(reason);
+                return true;
+            }
             this.handleEngineUnplayable(error);
             return false;
         } finally {
@@ -3976,6 +4027,10 @@ class WatchPage {
 
     async loadVideo(url, options = {}) {
         const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+        // Record the server-owned lane before validating the media URL. Even a
+        // malformed response consumed this intention's only provider session and
+        // must not be followed by an automatic second resolver call.
+        this.noteCloudPlaybackLaneForAttempt(options.cloudPlaybackSessionId, playbackAttemptId);
         if (this.isStalePlaybackAttempt(playbackAttemptId)) {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
             return;
@@ -5707,21 +5762,23 @@ class WatchPage {
                 }
                 return;
             }
-            const gatewayFallbackAlreadyAttempted = this._cloudGatewayTranscodeFallbackTried;
-            const retriedWithGatewayTranscode = await this.retryWithCloudGatewayTranscode(message);
-            if (retriedWithGatewayTranscode) return;
 
-            // retryWithCloudGatewayTranscode consumes the one server-side
-            // fallback budget before it resolves anything. If that lane was
-            // attempted here or by fallbackEngineToTranscode, do not open a
-            // second upstream connection through Relay/direct in this same
-            // incident. A deliberate viewer retry starts a fresh intention.
-            const gatewayFallbackAttempted = gatewayFallbackAlreadyAttempted
-                || this._cloudGatewayTranscodeFallbackTried;
-            const retriedWithRelay = gatewayFallbackAttempted
-                ? false
-                : await this.retryWithCloudRelay(message);
-            if (retriedWithRelay) return;
+            const cloudLaneConsumed = this.isCloudPlaybackMode()
+                && this.hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId);
+            if (this.isCloudPlaybackMode()) {
+                // Hosted playback is deliberately single-lane. Once any cloud
+                // session was returned, a demux/HLS failure must tear it down and
+                // stop. A second route is allowed only from the visible Retry CTA,
+                // which starts a new playback attempt after cleanup.
+                if (!cloudLaneConsumed) {
+                    console.warn('[WatchPage] Cloud failure had no session marker; refusing an automatic fallback.');
+                }
+                await this.releasePlaybackPipelineForRetry();
+                if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                    this.showPlaybackError(message, { immediate: true });
+                }
+                return;
+            }
 
             const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
             if (retriedWithEncode) return;
@@ -5784,6 +5841,7 @@ class WatchPage {
 
     async retryWithCloudRelay(message) {
         if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
         if (this._cloudRelayFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
@@ -5834,6 +5892,7 @@ class WatchPage {
 
     async retryWithCloudGatewayTranscode(message) {
         if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
         if (this._cloudGatewayTranscodeFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
@@ -5988,28 +6047,41 @@ class WatchPage {
         const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
         const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
         const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
+        const serverRecovery = !playbackSuperseded
+            && !providerBusy
+            && !providerBlocked
+            && this.isCloudPlaybackMode()
+            && this._preferredExplicitCloudMode === 'transcode';
         const conflictCopy = playbackSuperseded
             ? this.playbackSupersededCopy()
             : providerBusy ? this.providerAccountConflictCopy() : null;
+        const recoveryCopy = serverRecovery ? this.cloudTranscodeRecoveryCopy() : null;
         // A 458 opens a server-side circuit. Automatic retries would extend the
         // provider conflict; only an explicit user retry may probe after cooldown.
-        const refreshScheduled = playbackSuperseded || providerBusy
+        const refreshScheduled = playbackSuperseded || providerBusy || serverRecovery
             ? false
             : providerBlocked ? false : this.schedulePlaybackErrorRefresh();
         const refreshHint = playbackSuperseded || providerBusy
             ? conflictCopy.hint
+            : serverRecovery
+                ? recoveryCopy.hint
             : providerBlocked
                 ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
                 : refreshScheduled
                     ? 'Retrying automatically in 2 seconds…'
                     : 'If the problem persists, use Retry below.';
-        const refreshBtnLabel = playbackSuperseded || providerBusy ? conflictCopy.retry : ((providerBlocked) ? 'Retry' : 'Retry now');
-        const errorTitle = playbackSuperseded || providerBusy ? conflictCopy.title : 'Unable to play this title';
+        const refreshBtnLabel = playbackSuperseded || providerBusy
+            ? conflictCopy.retry
+            : serverRecovery ? recoveryCopy.retry : ((providerBlocked) ? 'Retry' : 'Retry now');
+        const errorTitle = playbackSuperseded || providerBusy
+            ? conflictCopy.title
+            : serverRecovery ? recoveryCopy.title : 'Unable to play this title';
+        const errorMessage = serverRecovery ? recoveryCopy.message : friendly;
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
                 <p class="watch-error-title">${this.escapeHtml(errorTitle)}</p>
-                <p class="watch-error-msg">${this.escapeHtml(friendly)}</p>
+                <p class="watch-error-msg">${this.escapeHtml(errorMessage)}</p>
                 <p class="watch-error-refresh">${this.escapeHtml(refreshHint)}</p>
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(refreshBtnLabel)}</button>
             </div>`;
@@ -6045,6 +6117,7 @@ class WatchPage {
 
     schedulePlaybackErrorRefresh(delayMs = this.playbackErrorRefreshDelayMs) {
         this.clearPlaybackErrorRefreshTimer();
+        if (this.isCloudPlaybackMode() && this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
 
         const key = this.getPlaybackErrorRefreshGuardKey();
         const now = Date.now();
@@ -6093,12 +6166,13 @@ class WatchPage {
             ? Math.max(0, Math.floor(positionOverride))
             : Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         this._inPlaceRetryRunning = true;
+        const playbackAttemptId = this.beginPlaybackAttempt();
         try {
             this.hidePlaybackError();
             this.showLoading();
-            // A fresh user-driven retry re-arms the whole fallback ladder
-            // (relay → gateway transcode → encode) for the new attempt.
-            this._cloudRelayFallbackTried = false;
+            // A visible user action starts exactly one new lane. If the browser
+            // engine proved incompatible, select server conversion up front;
+            // never create it as a hidden fallback after another cloud session.
             this._cloudGatewayTranscodeFallbackTried = false;
             this._videoEncodeFallbackTried = false;
             this._handlingPlaybackFailure = false;
@@ -6109,7 +6183,13 @@ class WatchPage {
             const position = retryPosition;
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
+            const explicitServerConversion = this.isCloudPlaybackMode()
+                && this._preferredExplicitCloudMode === 'transcode';
             const playbackHint = {
+                ...(explicitServerConversion ? {
+                    mode: 'transcode',
+                    gatewayMode: 'remux',
+                } : {}),
                 ...activeAudioOptions,
                 seekOffset: position,
                 startOffset: position,
@@ -6120,7 +6200,7 @@ class WatchPage {
             if (!result?.url) throw new Error('No stream URL from retry');
             this.content.cloudPlaybackSessionId = result.sessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-                playbackAttemptId: this._playbackAttemptId,
+                playbackAttemptId,
                 ...activeAudioOptions,
             }));
         } catch (error) {
@@ -6134,6 +6214,12 @@ class WatchPage {
             if (this.isProviderBusyError(errorText)) {
                 console.warn('[WatchPage] In-place retry hit a busy provider slot:', errorText);
                 this.showPlaybackError(errorText || 'BLOCK_HTTP_458', { immediate: true });
+                return;
+            }
+            if (this.isCloudPlaybackMode()) {
+                console.warn('[WatchPage] Explicit cloud retry failed without opening another route:', errorText);
+                await this.releasePlaybackPipelineForRetry();
+                this.showPlaybackError(errorText || 'Playback failed.', { immediate: true });
                 return;
             }
             console.warn('[WatchPage] In-place retry failed, falling back to a page refresh:', error?.message || error);
@@ -6153,6 +6239,7 @@ class WatchPage {
     shouldDeferPlaybackError(message) {
         if (this._pendingPlaybackErrorTimer) return false;
         if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
         if (!this.content?.id) return false;
         if (this.hasCurrentMedia()) return false;
         return this.isFormatPlaybackError(message)

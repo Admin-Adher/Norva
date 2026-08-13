@@ -323,7 +323,7 @@ test('source connection test calls the real cloud endpoint for both user and pai
 
 test('web player reports 458 once, shows the account conflict and does not auto retry', () => {
   const watch = read('public/js/pages/WatchPage.js');
-  const engine = section(watch, 'async playWithEngine(', '// Re-resolve the exact file through the Gateway');
+  const engine = section(watch, 'async playWithEngine(', '// Local-hub fallback after the browser engine fails.');
   const errorUi = section(watch, 'showPlaybackError(message, options = {})', '\n    hidePlaybackError() {');
 
   assert.match(watch, /reportProviderPlaybackFailure/);
@@ -331,7 +331,7 @@ test('web player reports 458 once, shows the account conflict and does not auto 
   assert.ok(watch.includes('Service déjà utilisé sur un autre appareil'));
   assert.doesNotMatch(engine, /SLOT_BUSY_RETRIES/);
   assert.doesNotMatch(errorUi, /providerBusy\s*\?\s*this\.schedulePlaybackErrorRefresh/);
-  assert.match(errorUi, /providerBusy\s*\?\s*false/);
+  assert.match(errorUi, /playbackSuperseded \|\| providerBusy \|\| serverRecovery[\s\S]{0,40}\? false/);
 });
 
 test('web VOD creates one cloud session and never cascades gateway, relay, or direct modes', () => {
@@ -372,19 +372,33 @@ test('web VOD creates one cloud session and never cascades gateway, relay, or di
     'async fallbackEngineToTranscode(playbackAttemptId, startOffsetOverride = null)',
     'async handleEngineRuntimeFailure(',
   );
+  const explicitRetry = section(
+    watch,
+    'async retryPlaybackInPlace(positionOverride = null)',
+    'clearPlaybackErrorRefreshTimer()',
+  );
   assert.doesNotMatch(watch, /logRelayUpstreamDiagnostic|Relay upstream diagnostic/);
   assert.match(relayFallback, /currentPlaybackMode === 'gateway-session'[\s\S]{0,260}return false/);
   assert.doesNotMatch(gatewayFallback, /for \(let attempt|retrying after|waitForProviderSlotRelease\(retryDelay\)/);
   assert.match(
-    terminalFailure,
-    /gatewayFallbackAttempted[\s\S]{0,420}gatewayFallbackAttempted\s*\?\s*false\s*:\s*await this\.retryWithCloudRelay\(message\)/,
-    'a failed Gateway fallback must make the Relay/direct lane ineligible for the same incident',
+    watch,
+    /hasOpenedCloudPlaybackLaneForAttempt\(playbackAttemptId\)/,
+    'the player must remember that the current user intention already opened an upstream lane',
   );
   assert.match(
     engineFallback,
-    /this\._cloudGatewayTranscodeFallbackTried\s*=\s*true/,
-    'the engine-to-Gateway handoff must consume the single fallback budget before resolving a session',
+    /this\.isCloudPlaybackMode\(\)[\s\S]{0,180}hasOpenedCloudPlaybackLaneForAttempt\(playbackAttemptId\)[\s\S]{0,80}return false/,
+    'an engine session already opened in the cloud must never resolve a second Gateway session automatically',
   );
+  assert.match(
+    terminalFailure,
+    /cloudLaneConsumed[\s\S]{0,420}releasePlaybackPipelineForRetry\(\)[\s\S]{0,260}showPlaybackError\(message, \{ immediate: true \}\)/,
+    'a failed cloud lane must be released and surfaced as a terminal state before any fallback resolver runs',
+  );
+  assert.match(explicitRetry, /const playbackAttemptId\s*=\s*this\.beginPlaybackAttempt\(\)/);
+  assert.match(explicitRetry, /explicitServerConversion[\s\S]*_preferredExplicitCloudMode\s*===\s*['"]transcode['"]/);
+  assert.match(explicitRetry, /explicitServerConversion[\s\S]{0,300}mode:\s*['"]transcode['"]/,
+    'only a fresh explicit retry may request one server-transcode session');
 });
 
 test('desktop local VOD owns one cloud session and never cascades into the cloud gateway', () => {
