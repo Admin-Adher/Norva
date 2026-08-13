@@ -421,7 +421,8 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /127\.0\.0\.1:9000\/\$\{Deno\.args\[0\]\}\/health/);
+  assert.match(deploy, /sha256sum "\$path" \| awk/);
+  assert.match(deploy, /http:\/\/\$\{container_ip\}:9000\/\$\{function_name\}\/health/);
   assert.match(deploy, /function_health_in_service "\$service" norva-playback/);
   assert.match(deploy, /providerCircuitProtocol/);
   assert.match(deploy, /function_health_in_service "\$service" norva-cloud/);

@@ -65,6 +65,10 @@ echo ">> config.toml declares $declared functions; $present norva-* dirs present
 
 echo ">> Recreating edge-runtime replicas to reload code and environment"
 if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
+  command -v curl >/dev/null 2>&1 || {
+    echo "ERROR: curl is required for per-replica protocol verification" >&2
+    exit 1
+  }
   [[ -f "$ENV_FILE" ]] || {
     echo "ERROR: $ENV_FILE not found" >&2
     exit 1
@@ -86,18 +90,32 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     local service="$1"
     local path="$2"
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T "$service" \
-      deno eval --quiet \
-      'const bytes = await Deno.readFile(Deno.args[0]); const digest = await crypto.subtle.digest("SHA-256", bytes); console.log(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));' \
-      "$path"
+      sha256sum "$path" | awk '{print $1}'
   }
 
   function_health_in_service() {
     local service="$1"
     local function_name="$2"
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE" exec -T "$service" \
-      deno eval --quiet \
-      'const response = await fetch(`http://127.0.0.1:9000/${Deno.args[0]}/health`); if (!response.ok) throw new Error(`health ${response.status}`); console.log(await response.text());' \
-      "$function_name"
+    local container_id
+    local container_ip
+    container_id="$(
+      docker compose --env-file "$ENV_FILE" -f "$COMPOSE" ps -q "$service"
+    )"
+    [[ -n "$container_id" ]] || {
+      echo "ERROR: $service has no container for health verification" >&2
+      return 1
+    }
+    container_ip="$(
+      docker inspect --format \
+        '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' \
+        "$container_id" | sed -n '1p'
+    )"
+    [[ -n "$container_ip" ]] || {
+      echo "ERROR: $service has no container IP for health verification" >&2
+      return 1
+    }
+    curl --fail --silent --show-error --max-time 10 \
+      "http://${container_ip}:9000/${function_name}/health"
   }
 
   verify_function_protocol() {
