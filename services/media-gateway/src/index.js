@@ -514,7 +514,11 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 83;
+const EXACT_MATROSKA_H264_HLS_TARGET_SECONDS = 2;
+const EXACT_MATROSKA_H264_MAX_WIDTH = 1920;
+const EXACT_MATROSKA_H264_MAX_HEIGHT = 1080;
+const EXACT_MATROSKA_H264_MAX_PIXELS = EXACT_MATROSKA_H264_MAX_WIDTH * EXACT_MATROSKA_H264_MAX_HEIGHT;
+const GATEWAY_VERSION = 84;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -614,6 +618,11 @@ app.get('/health', (req, res) => {
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         exactFileCodecProfileProtocol: 1,
+        exactMatroskaH264ReencodeProtocol: 1,
+        exactMatroskaH264HlsTargetSeconds: EXACT_MATROSKA_H264_HLS_TARGET_SECONDS,
+        exactMatroskaH264MaxWidth: EXACT_MATROSKA_H264_MAX_WIDTH,
+        exactMatroskaH264MaxHeight: EXACT_MATROSKA_H264_MAX_HEIGHT,
+        exactMatroskaH264MaxPixels: EXACT_MATROSKA_H264_MAX_PIXELS,
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
@@ -4248,6 +4257,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
         const requestCodecProfileReliable = hasReliableVodCodecProfile(normalizedCodecProfile);
+        // Freeze the long-GOP-safe route from the authenticated exact-file profile
+        // before ffprobe or FFmpeg can open a provider connection. Profiles discovered
+        // only by the Gateway probe are deliberately ineligible: switching after that
+        // probe would spend a second provider connection on single-slot accounts.
+        const forceExactMatroskaH264Reencode = shouldReencodeExactMatroskaH264({
+            sourceUrl,
+            codecProfile: normalizedCodecProfile,
+            codecProfileSource,
+            playbackHint: normalizedPlaybackHint,
+        });
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
         const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
         const codecProfileStartedAt = Date.now();
@@ -4301,6 +4320,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
             videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
+            forceExactMatroskaH264Reencode,
+            videoMode: null,
+            videoModeReason: null,
+            hlsTargetSeconds: forceExactMatroskaH264Reencode
+                ? EXACT_MATROSKA_H264_HLS_TARGET_SECONDS
+                : 4,
             status: 'starting',
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
@@ -4324,6 +4349,17 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 totalMs: null
             }
         };
+
+        session.videoMode = (
+            forceExactMatroskaH264Reencode ||
+            session.mode === 'transcode' ||
+            !shouldCopyVideo(session)
+        ) ? 'encode' : 'copy';
+        session.videoModeReason = forceExactMatroskaH264Reencode
+            ? 'exact_matroska_h264'
+            : (session.mode === 'transcode'
+                ? 'requested_transcode'
+                : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy'));
 
         sessions.set(id, session);
 
@@ -4381,6 +4417,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mode: session.mode,
             audioMode: audioModeForSession(session),
             videoMode: videoModeForSession(session),
+            videoModeReason: session.videoModeReason,
+            hlsTargetSeconds: session.hlsTargetSeconds,
             audioStreamIndex: session.audioStreamIndex,
             requestedSeekOffset: session.seekOffset || 0,
             actualStartOffset: session.actualStartOffset || 0,
@@ -4574,7 +4612,8 @@ function startFfmpeg(session) {
     const copyAudio = shouldCopyAudio(session);
     const audioArgs = audioArgsForSession(session, copyAudio);
     const audioMap = audioMapForSession(session, requireKnownStreams);
-    const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
+    const encodeVideo = videoModeForSession(session) === 'encode';
+    const forceExactMatroskaH264Reencode = session.forceExactMatroskaH264Reencode === true;
     const preserveCopySeekTimestamps = usesSourceTimestampedCopySeek(session, encodeVideo, copyAudio);
     const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
     const args = [
@@ -4624,6 +4663,9 @@ function startFfmpeg(session) {
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
+            ...(forceExactMatroskaH264Reencode
+                ? ['-force_key_frames', `expr:gte(t,n_forced*${EXACT_MATROSKA_H264_HLS_TARGET_SECONDS})`]
+                : []),
             ...audioArgs
         );
     } else {
@@ -4639,7 +4681,7 @@ function startFfmpeg(session) {
             ? ['-avoid_negative_ts', 'disabled', '-mpegts_copyts', '1', '-muxpreload', '0', '-muxdelay', '0']
             : []),
         '-f', 'hls',
-        '-hls_time', '4',
+        '-hls_time', String(session.hlsTargetSeconds || 4),
         '-hls_list_size', '0',
         // EVENT playlist: a growing VOD transcode the player can seek from the
         // start. Avoids the live-edge chase that LIVE playlists trigger, and
@@ -4714,7 +4756,7 @@ function seekArgsForSession(session, encodeVideo) {
     return { preInputSeek: ['-seekable', '0'], postInputSeek: ['-ss', String(seekOffset)] };
 }
 
-function usesSourceTimestampedCopySeek(session, encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session), copyAudio = shouldCopyAudio(session)) {
+function usesSourceTimestampedCopySeek(session, encodeVideo = videoModeForSession(session) === 'encode', copyAudio = shouldCopyAudio(session)) {
     // `-copyts` must cover every A/V output on the same clock. When video is
     // copied but audio is encoded (for example H.264 + E-AC-3 -> AAC), FFmpeg
     // preserves the video's absolute source PTS while the audio encoder starts
@@ -4869,6 +4911,53 @@ function isLiveSession(session) {
     }
 }
 
+// An H.264 stream can be browser-decodable yet still be unsuitable for copied
+// HLS when its source GOP is longer than the startup budget. The exact-file
+// profile does not currently expose GOP length, so the safe deployable boundary
+// is the complete, dated Matroska profile received with the authenticated session
+// request. Unknown/partial profiles, profiles learned only after Gateway ffprobe,
+// MP4 and live inputs retain their existing route.
+function shouldReencodeExactMatroskaH264(session) {
+    if (isLiveSession(session)) return false;
+    if (String(session.codecProfileSource || '').toLowerCase() !== 'request') return false;
+
+    const profile = asRecord(session.codecProfile);
+    const audioTracks = Array.isArray(profile.audioTracks)
+        ? profile.audioTracks
+        : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : null);
+    const subtitles = Array.isArray(profile.subtitles)
+        ? profile.subtitles
+        : (Array.isArray(profile.subtitleTracks)
+            ? profile.subtitleTracks
+            : (Array.isArray(profile.subtitle_tracks) ? profile.subtitle_tracks : null));
+    if (!audioTracks || !subtitles) return false;
+
+    const probeSource = normalizeCodecToken(profile.probeSource ?? profile.probe_source);
+    if (!['gatewayprobe', 'exactfileprobe', 'exactfilecodecprobe'].includes(probeSource)) return false;
+    const probedAt = Date.parse(String(profile.probedAt ?? profile.probed_at ?? ''));
+    if (!Number.isFinite(probedAt)) return false;
+
+    const durationSeconds = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return false;
+
+    // The one-thread 1080p fixture is proven comfortably realtime. 4K has no
+    // equivalent capacity proof on the production replica, so dimensions are a
+    // hard fail-closed boundary rather than an invitation to saturate the box.
+    const videoWidth = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const videoHeight = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (!Number.isInteger(videoWidth) || !Number.isInteger(videoHeight) || videoWidth <= 0 || videoHeight <= 0) return false;
+    if (
+        videoWidth > EXACT_MATROSKA_H264_MAX_WIDTH ||
+        videoHeight > EXACT_MATROSKA_H264_MAX_HEIGHT ||
+        videoWidth * videoHeight > EXACT_MATROSKA_H264_MAX_PIXELS
+    ) return false;
+
+    const container = normalizeCodecToken(profile.container);
+    if (!(container.includes('matroska') || container === 'mkv')) return false;
+    const videoCodec = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
+    return videoCodec.includes('h264') || videoCodec.includes('avc');
+}
+
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
 }
@@ -4878,7 +4967,12 @@ function audioModeForSession(session) {
 }
 
 function videoModeForSession(session) {
-    return (session.mode === 'transcode' || !shouldCopyVideo(session)) ? 'encode' : 'copy';
+    if (session.videoMode === 'encode' || session.videoMode === 'copy') return session.videoMode;
+    return (
+        session.forceExactMatroskaH264Reencode === true ||
+        session.mode === 'transcode' ||
+        !shouldCopyVideo(session)
+    ) ? 'encode' : 'copy';
 }
 
 function appendSubtitleOutputs(args, session, postInputSeek = []) {

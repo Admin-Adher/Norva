@@ -207,6 +207,94 @@ test('an unknown finite MKV video fails safe to encoding while live remains copy
     }), true, 'live keeps the existing non-probing compatibility path');
 });
 
+test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan before provider I/O', () => {
+    const shouldReencodeExactMatroskaH264 = loadGatewayFunction(
+        'shouldReencodeExactMatroskaH264',
+        'audioArgsForSession',
+        {
+            asRecord: gatewayGlobals.asRecord,
+            normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
+            EXACT_MATROSKA_H264_MAX_WIDTH: 1_920,
+            EXACT_MATROSKA_H264_MAX_HEIGHT: 1_080,
+            EXACT_MATROSKA_H264_MAX_PIXELS: 1_920 * 1_080,
+            isLiveSession: (session) => ['live', 'channel'].includes(
+                String(session?.playbackHint?.streamType || '').toLowerCase(),
+            ),
+        },
+    );
+    const exactMkvH264 = {
+        sourceUrl: 'https://provider.example/movie/account/file.mkv',
+        codecProfileSource: 'request',
+        playbackHint: { streamType: 'movie' },
+        codecProfile: {
+            videoCodec: 'h264',
+            videoWidth: 1_920,
+            videoHeight: 1_080,
+            audioCodec: 'aac',
+            audioTracks: [{ index: 1, codec: 'aac', channels: 2 }],
+            subtitles: [],
+            container: 'matroska,webm',
+            durationSeconds: 7_200,
+            probeSource: 'gateway_probe',
+            probedAt: '2026-08-15T00:00:00.000Z',
+        },
+    };
+
+    assert.strictEqual(shouldReencodeExactMatroskaH264(exactMkvH264), true);
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfileSource: 'gateway_probe',
+    }), false, 'a decision made only after Gateway ffprobe is too late for the no-extra-provider-connection invariant');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, probeSource: null },
+    }), false, 'an unproven client hint must not force an expensive encode');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, audioTracks: undefined },
+    }), false, 'a partial profile must stay on the existing conservative route');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        playbackHint: { streamType: 'live' },
+    }), false, 'live streams are excluded');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoCodec: 'hevc' },
+    }), false, 'HEVC already follows the ordinary video-transcode path');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, container: 'mov,mp4,m4a,3gp,3g2,mj2' },
+    }), false, 'MP4 remains on its existing route');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoWidth: 3_840, videoHeight: 2_160 },
+    }), false, '4K must not enter the CPU-expensive route without a dedicated capacity proof');
+    assert.strictEqual(shouldReencodeExactMatroskaH264({
+        ...exactMkvH264,
+        codecProfile: { ...exactMkvH264.codecProfile, videoWidth: undefined },
+    }), false, 'unknown dimensions fail closed instead of risking an unbounded encode');
+
+    const source = readGateway();
+    const decision = source.indexOf('const forceExactMatroskaH264Reencode = shouldReencodeExactMatroskaH264(');
+    const providerProbe = source.indexOf('await probeCodecProfile(sourceUrl');
+    const providerFfmpeg = source.indexOf('const started = await startSessionWithProviderRetry(session)');
+    assert.ok(decision >= 0 && decision < providerProbe && decision < providerFfmpeg,
+        'the exact-profile route must be frozen before ffprobe or FFmpeg can connect to the provider');
+});
+
+test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
+    const source = readGateway();
+
+    assert.match(source, /const GATEWAY_VERSION = 84;/);
+    assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
+    assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
+    assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);
+    assert.match(source, /forceExactMatroskaH264Reencode[\s\S]*'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{EXACT_MATROSKA_H264_HLS_TARGET_SECONDS\}\)`/);
+    assert.match(source, /'-hls_time',\s*String\(session\.hlsTargetSeconds\s*\|\|\s*4\)/);
+    assert.match(source, /'-hls_flags',\s*'independent_segments\+temp_file'/);
+    assert.doesNotMatch(source, /split_by_time/);
+});
+
 test('the first provider 458 seen by ffprobe is terminal while proxy 407 stays infrastructure', () => {
     const isFfprobeProviderBusyFailure = loadGatewayFunction(
         'isFfprobeProviderBusyFailure',
