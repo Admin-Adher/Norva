@@ -25,7 +25,45 @@ function normalizedFailureCode(error) {
         .find(Boolean) || '';
 }
 
+function failureChainText(error) {
+    const values = [];
+    const visited = new Set();
+    let current = error;
+    for (let depth = 0; current && depth < 6 && !visited.has(current); depth += 1) {
+        if (typeof current === 'string') {
+            values.push(current);
+            break;
+        }
+        visited.add(current);
+        for (const value of [
+            current.code,
+            current.name,
+            current.message,
+            current.status,
+            current.statusCode,
+            current.lastError,
+            current.logTail,
+        ]) {
+            if (value !== undefined && value !== null) values.push(String(value));
+        }
+        current = current.cause;
+    }
+    // Keep fields separate: the bounded proxy-auth regexes below must not assemble
+    // a signature from unrelated fields (for example "proxy timeout" + "auth failed").
+    return values.join('\n').toLowerCase();
+}
+
+function isProxyAuthenticationFailure(error) {
+    const text = failureChainText(error);
+    return text.includes('proxy_auth_failed')
+        || /proxy[^\n]{0,120}(?:authentication required|auth(?:entication)? failed|response[^\n]{0,40}\b407\b)/i.test(text)
+        || /\b407\b[^\n]{0,120}proxy/i.test(text);
+}
+
 function classifyProviderFetchFailure(error) {
+    if (isProxyAuthenticationFailure(error)) {
+        return { code: 'PROXY_AUTH_FAILED', category: 'proxy_auth' };
+    }
     const failureCode = normalizedFailureCode(error);
     const known = NETWORK_FAILURES.get(failureCode);
     if (known) return { ...known };
@@ -46,9 +84,16 @@ function shouldRetryProviderStatus(status) {
     return value === 502 || value === 503 || value === 504;
 }
 
-function classifyProviderResponseFailure(status, payload) {
+function classifyProviderResponseFailure(status, payload, options = {}) {
     const value = Number(status);
     const text = JSON.stringify(payload || {}).toLowerCase();
+    if (value === 407 && options.proxyConfigured === true) {
+        return {
+            status: 502,
+            code: 'PROXY_AUTH_FAILED',
+            publicMessage: 'The media service is temporarily unavailable.',
+        };
+    }
     if (value === 458 || /max(?:imum)? connections?|active connections?|connection limit/.test(text)) {
         return {
             status: 458,
@@ -80,5 +125,6 @@ function classifyProviderResponseFailure(status, payload) {
 module.exports = {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
+    isProxyAuthenticationFailure,
     shouldRetryProviderStatus,
 };
