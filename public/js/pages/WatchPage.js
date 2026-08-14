@@ -4228,7 +4228,7 @@ class WatchPage {
         // single-connection IPTV account rejects the new one with 401.
         this._suspendResumeSnapshotSave = true;
         try {
-            await this.stop();
+            await this.stop({ enqueueStoryboard: false });
         } finally {
             this._suspendResumeSnapshotSave = false;
         }
@@ -4843,12 +4843,15 @@ class WatchPage {
         if (this.volumeSlider) this.volumeSlider.value = savedVolume;
     }
 
-    stop() {
+    stop({ enqueueStoryboard = true } = {}) {
         this.cancelFirstFrameTelemetryObserver();
         this.cancelDeferredEngineTrackEnrichment();
-        // Warm the storyboard cache now, BEFORE teardown clears content/duration — the
-        // viewer is releasing the provider slot, so generation won't fight playback.
-        this.enqueueStoryboardForCache();
+        // Only a genuine exit after a rendered frame may warm the storyboard cache.
+        // Internal loadVideo() teardowns and abandoned starts must never open provider
+        // work ahead of the incoming media's first request/frame.
+        if (enqueueStoryboard && this._firstFrameReported) {
+            this.enqueueStoryboardForCache();
+        }
         this.destroyEngine();
         this._gatewaySeekRequestId += 1;
         clearTimeout(this._seekDebounceTimer);

@@ -73,6 +73,51 @@ test('first HTTP 458 opens an account circuit immediately and repeated failures 
   assert.equal(policy.isProviderBusyFailure({ upstreamStatus: 504 }), false);
 });
 
+test('background probes stop the same provider account after the first terminal 458 without treating proxy auth as provider busy', async () => {
+  const policyPath = path.join(
+    root,
+    'supabase/functions/_shared/provider-playback-circuit-policy.mjs',
+  );
+  const policy = await import(`${pathToFileURL(policyPath).href}?terminal=${Date.now()}`);
+
+  assert.equal(
+    policy.providerProbeTerminalCode({ status: 458, code: 'PROVIDER_BUSY' }),
+    'provider_busy',
+  );
+  assert.equal(
+    policy.providerProbeTerminalCode({ status: 502, code: 'PROXY_AUTH_FAILED' }),
+    'proxy_auth_failed',
+  );
+  assert.equal(
+    policy.providerProbeTerminalCode({ status: 407, code: 'PROVIDER_BUSY' }),
+    'proxy_auth_failed',
+    'proxy authentication must win over ambiguous provider text and never open a 458 circuit',
+  );
+  assert.equal(policy.providerProbeTerminalCode({ status: 502, code: 'UPSTREAM_ERROR' }), null);
+
+  const guard = policy.createProviderProbeTickGuard();
+  let providerCalls = 0;
+  for (const response of [
+    { status: 458, code: 'PROVIDER_BUSY' },
+    { status: 200, code: null },
+  ]) {
+    if (!guard.tryEnter('panel.example/account')) continue;
+    providerCalls += 1;
+    const terminal = policy.providerProbeTerminalCode(response);
+    if (terminal) guard.stop('panel.example/account', terminal);
+    guard.leave('panel.example/account');
+  }
+  assert.equal(providerCalls, 1, 'a second title from the same account must not be probed after 458');
+  assert.equal(guard.terminalCode('panel.example/account'), 'provider_busy');
+  assert.deepEqual(guard.terminalCodes(), ['provider_busy']);
+
+  const proxyGuard = policy.createProviderProbeTickGuard();
+  assert.equal(proxyGuard.tryEnter('panel.example/proxy-account'), true);
+  proxyGuard.stop('panel.example/proxy-account', 'proxy_auth_failed');
+  assert.equal(proxyGuard.tryEnter('panel.example/proxy-account'), false);
+  assert.equal(proxyGuard.terminalCode('panel.example/proxy-account'), 'proxy_auth_failed');
+});
+
 test('repeated client reports cannot extend a live circuit or increase its backoff', async () => {
   const policyPath = path.join(
     root,
@@ -183,6 +228,18 @@ test('client busy reports open a fixed circuit once while only a server-observed
   assert.doesNotMatch(record, /openProviderPlaybackCircuit/);
 });
 
+test('one playback intention makes only one Gateway creation request', () => {
+  const edge = read('supabase/functions/norva-playback/index.ts');
+  const gateway = section(edge, 'async function createGatewaySession(', 'async function requestGatewaySession(');
+
+  assert.equal(
+    (gateway.match(/requestGatewaySession\(/g) || []).length,
+    1,
+    'a generic 5xx must not open a second provider-backed Gateway session',
+  );
+  assert.doesNotMatch(edge, /shouldRetryGatewayWithAudioTranscode|audioFallbackReason:\s*"copy_start_failed"/);
+});
+
 test('playback edge checks the circuit, claims one account session and reports supersession', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const create = section(edge, 'async function createPlaybackSession(', 'async function getPlaybackSession(');
@@ -202,8 +259,9 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*44/);
+  assert.match(edge, /version:\s*45/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
+  assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
 });
 
 test('session creation derives the global account hash only from an owned server-resolved target', () => {
@@ -456,19 +514,22 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 82/);
+  assert.match(gateway, /const GATEWAY_VERSION = 83/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
-  assert.match(playback, /version:\s*44/);
+  assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);
+  assert.match(playback, /version:\s*45/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
+  assert.match(playback, /exactFileCodecProfileProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
   assert.match(cloud, /version:\s*24/);
   assert.match(cloud, /playbackCreationProtocol:\s*1/);
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=44/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=45/);
   assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
+  assert.match(deploy, /EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1/);
   assert.match(deploy, /sha256sum "\$path" \| awk/);
   assert.match(deploy, /http:\/\/\$\{container_ip\}:9000\/\$\{function_name\}\/health/);
   assert.match(deploy, /function_health_in_service "\$service" norva-playback/);

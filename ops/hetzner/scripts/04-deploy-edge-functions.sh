@@ -26,10 +26,11 @@ FUNCS_DIR="$REPO/supabase/functions"
 CONFIG="$REPO/supabase/config.toml"
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.supabase.yml"
 ENV_FILE="$(dirname "$COMPOSE")/.env"
-EXPECTED_PLAYBACK_VERSION=44
+EXPECTED_PLAYBACK_VERSION=45
 EXPECTED_PLAYBACK_PROTOCOL=1
 EXPECTED_RELAY_TAKEOVER_PROTOCOL=1
 EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false
+EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL=1
 EXPECTED_CLOUD_VERSION=24
 EXPECTED_CLOUD_PROTOCOL=1
 EXPECTED_CATALOG_VERSION=6
@@ -161,7 +162,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     [[ "$playback_health" == *"\"version\":$EXPECTED_PLAYBACK_VERSION"* \
         && "$playback_health" == *"\"providerCircuitProtocol\":$EXPECTED_PLAYBACK_PROTOCOL"* \
         && "$playback_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
-        && "$playback_health" == *"\"engineTrackProbeBlocking\":$EXPECTED_ENGINE_TRACK_PROBE_BLOCKING"* ]] || {
+        && "$playback_health" == *"\"engineTrackProbeBlocking\":$EXPECTED_ENGINE_TRACK_PROBE_BLOCKING"* \
+        && "$playback_health" == *"\"exactFileCodecProfileProtocol\":$EXPECTED_EXACT_FILE_CODEC_PROFILE_PROTOCOL"* ]] || {
       echo "ERROR: $service norva-playback protocol marker mismatch" >&2
       exit 1
     }

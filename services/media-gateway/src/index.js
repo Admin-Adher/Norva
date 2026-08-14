@@ -514,7 +514,7 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 82;
+const GATEWAY_VERSION = 83;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -613,6 +613,7 @@ app.get('/health', (req, res) => {
         knownVodInputProbeFastPathEnabled: KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED,
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
+        exactFileCodecProfileProtocol: 1,
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
@@ -1698,7 +1699,7 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             if (t.language && !audioLanguages.includes(t.language)) audioLanguages.push(t.language);
             if (t.default && !audioDefaultLanguage) audioDefaultLanguage = t.language || null;
         }
-        res.json({ audioLanguages, audioTracks, audioDefaultLanguage, subtitles });
+        res.json({ audioLanguages, audioTracks, audioDefaultLanguage, subtitles, codecProfile: profile });
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
         res.status(status).json({ error: err.publicMessage || 'Audio probe failed', code: err.code || undefined });
@@ -4261,6 +4262,22 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 }
             } catch (err) {
                 rememberProbeFailure(err.message || String(err), sourceUrl);
+                if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
+                    await removeSessionDir(outputDir).catch(() => {});
+                    return res.status(458).json({
+                        error: 'This TV service is already being used on another device.',
+                        code: 'PROVIDER_BUSY',
+                        upstreamStatus: 458,
+                    });
+                }
+                if (err?.code === 'PROXY_AUTH_FAILED') {
+                    await removeSessionDir(outputDir).catch(() => {});
+                    return res.status(502).json({
+                        error: 'The media service is temporarily unavailable.',
+                        code: 'PROXY_AUTH_FAILED',
+                        networkCause: 'proxy_auth',
+                    });
+                }
                 console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
             }
         }
@@ -4942,7 +4959,11 @@ function shouldCopyVideo(session) {
         session.codecProfile?.video_codec ||
         session.codecProfile?.video
     );
-    if (!codec) return true;
+    // Live streams deliberately avoid a second provider connection for codec
+    // discovery. Finite VOD has already gone through the bounded probe, so an
+    // unknown codec must fail safe to encoding instead of copying an undecodable
+    // MKV stream into an otherwise valid-looking browser HLS playlist.
+    if (!codec) return isLiveSession(session);
     return isKnownBrowserSafeVideo(codec);
 }
 
@@ -5237,6 +5258,14 @@ function backgroundProbeError(status, code, publicMessage) {
     return error;
 }
 
+function isFfprobeProviderBusyFailure(value) {
+    if (isProxyAuthenticationFailure(value)) return false;
+    const message = `${String(value?.message || value || '')}\n${String(value?.ffprobeLog || '')}`.toLowerCase();
+    return message.includes('http 458')
+        || message.includes('status 458')
+        || message.includes('max connection');
+}
+
 function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     return new Promise((resolve, reject) => {
         const backgroundKey = options.background === true ? proxyKeyFromUrl(sourceUrl) : '';
@@ -5283,6 +5312,13 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
                     'The media service is temporarily unavailable.',
                 );
             }
+            if (isFfprobeProviderBusyFailure(fallback)) {
+                return backgroundProbeError(
+                    458,
+                    'PROVIDER_BUSY',
+                    'This TV service is already being used on another device.',
+                );
+            }
             return fallback;
         };
         let stdout = '';
@@ -5318,9 +5354,12 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             clearTimeout(timer);
             releaseRegistration();
             if (code !== 0) {
-                reject(terminalError(new Error(
+                const failure = new Error(
                     `Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`,
-                )));
+                );
+                failure.ffprobeLog = stderr;
+                failure.logTail = stderr;
+                reject(terminalError(failure));
                 return;
             }
             try {
@@ -5369,21 +5408,37 @@ function hasUsefulCodecProfile(profile) {
 function mergeCodecProfiles(baseProfile, probeProfile) {
     const base = asRecord(baseProfile);
     const probe = asRecord(probeProfile);
+    const probedAudioTracks = Array.isArray(probe.audioTracks)
+        ? probe.audioTracks
+        : (Array.isArray(probe.audio_tracks) ? probe.audio_tracks : undefined);
+    const probedSubtitles = Array.isArray(probe.subtitles)
+        ? probe.subtitles
+        : (Array.isArray(probe.subtitleTracks)
+            ? probe.subtitleTracks
+            : (Array.isArray(probe.subtitle_tracks) ? probe.subtitle_tracks : undefined));
     return compactRecord({
         ...base,
         ...probe,
-        audioTracks: Array.isArray(probe.audioTracks) && probe.audioTracks.length ? probe.audioTracks : base.audioTracks,
-        subtitles: Array.isArray(probe.subtitles) && probe.subtitles.length ? probe.subtitles : base.subtitles,
+        // A fresh ffprobe result is authoritative even when a track family is
+        // empty. Falling back on length would resurrect stale stream indexes.
+        audioTracks: probedAudioTracks !== undefined ? probedAudioTracks : base.audioTracks,
+        subtitles: probedSubtitles !== undefined ? probedSubtitles : base.subtitles,
     });
 }
 
 function shouldProbeMissingSubtitleTracks(profile, playbackHint, sourceUrl) {
     const record = asRecord(profile);
-    if (
-        (Array.isArray(record.subtitles) && record.subtitles.length > 0) ||
-        (Array.isArray(record.subtitleTracks) && record.subtitleTracks.length > 0) ||
-        (Array.isArray(record.subtitle_tracks) && record.subtitle_tracks.length > 0)
-    ) return false;
+    const subtitleMaps = [record.subtitles, record.subtitleTracks, record.subtitle_tracks];
+    const hasEnumeratedSubtitles = subtitleMaps.some((value) => Array.isArray(value) && value.length > 0);
+    const hasSubtitleMap = subtitleMaps.some((value) => Array.isArray(value));
+    const hasExactProbeProvenance = Boolean(
+        stringOrNull(record.probeSource ?? record.probe_source) &&
+        stringOrNull(record.probedAt ?? record.probed_at)
+    );
+    // Non-empty indexes are useful evidence on their own. An empty map is
+    // authoritative only when it came from a completed, dated exact-file
+    // probe: Edge normalization also creates [] for legacy partial profiles.
+    if (hasEnumeratedSubtitles || (hasSubtitleMap && hasExactProbeProvenance)) return false;
 
     const hint = asRecord(playbackHint);
     // An exact zero is authoritative: there are no subtitle indexes to discover.

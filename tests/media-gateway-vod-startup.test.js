@@ -177,3 +177,57 @@ test('Gateway MPEG-TS HLS copies only AAC-LC stereo and transcodes MP3-family au
     const source = readGateway();
     assert.match(source, /TRANSCODE_AUDIO_ARGS[\s\S]*'-c:a', 'aac'[\s\S]*'-profile:a', 'aac_low'/);
 });
+
+test('an unknown finite MKV video fails safe to encoding while live remains copy-compatible', () => {
+    const shouldCopyVideo = loadGatewayFunction(
+        'shouldCopyVideo',
+        'isKnownBrowserSafeVideo',
+        {
+            normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
+            isLiveSession: (session) => session?.playbackHint?.streamType === 'live',
+            isKnownBrowserSafeVideo: (codec) => /h264|avc/i.test(String(codec || '')),
+        },
+    );
+
+    assert.strictEqual(shouldCopyVideo({
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: {},
+    }), false, 'an unproven finite MKV must never be copied blindly into browser HLS');
+    assert.strictEqual(shouldCopyVideo({
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { videoCodec: 'h264' },
+    }), true);
+    assert.strictEqual(shouldCopyVideo({
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { videoCodec: 'hevc' },
+    }), false);
+    assert.strictEqual(shouldCopyVideo({
+        playbackHint: { streamType: 'live' },
+        codecProfile: {},
+    }), true, 'live keeps the existing non-probing compatibility path');
+});
+
+test('the first provider 458 seen by ffprobe is terminal while proxy 407 stays infrastructure', () => {
+    const isFfprobeProviderBusyFailure = loadGatewayFunction(
+        'isFfprobeProviderBusyFailure',
+        'runFfprobe',
+        {
+            isProxyAuthenticationFailure: (value) => /407|proxy authentication/i.test(
+                `${String(value?.message || value || '')}\n${String(value?.logTail || '')}`
+            ),
+        },
+    );
+
+    assert.strictEqual(isFfprobeProviderBusyFailure(
+        new Error('Server returned 4XX Client Error, but not one of 40{0,1,3,4}')
+    ), false, 'a generic FFmpeg 4xx summary must not invent a provider 458');
+    assert.strictEqual(isFfprobeProviderBusyFailure(new Error('HTTP 458 max connections')), true);
+    assert.strictEqual(isFfprobeProviderBusyFailure(new Error('HTTP error 407 Proxy Authentication Required')), false);
+    const hiddenProxyFailure = new Error('Server returned 4XX Client Error, but not one of 40{0,1,3,4}');
+    hiddenProxyFailure.logTail = 'HTTP error 407 Proxy Authentication Required';
+    assert.strictEqual(isFfprobeProviderBusyFailure(hiddenProxyFailure), false);
+
+    const source = readGateway();
+    assert.match(source, /if \(err\?\.status === 458[\s\S]*code: 'PROVIDER_BUSY'[\s\S]*upstreamStatus: 458/);
+    assert.match(source, /if \(err\?\.code === 'PROXY_AUTH_FAILED'[\s\S]*networkCause: 'proxy_auth'/);
+});

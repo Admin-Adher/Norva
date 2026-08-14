@@ -12,8 +12,10 @@ import {
   NATIVE_HEARTBEAT_MAX_SESSION_AGE_SECONDS,
 } from "../_shared/native-playback-heartbeat-policy.mjs";
 import {
+  createProviderProbeTickGuard,
   decideProviderCircuit,
   isProviderBusyFailure,
+  providerProbeTerminalCode,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
@@ -160,9 +162,10 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 44,
+        version: 45,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
+        exactFileCodecProfileProtocol: 1,
         relayTakeoverProtocol: 1,
         engineTrackProbeBlocking: false,
         lidBenchmarkProtocol: 2,
@@ -246,6 +249,9 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "codec-profile-backfill") {
+      return json(req, await runCodecProfileBackfill(req, supabase));
     }
     // Dedicated route: an older edge replica returns 404 instead of interpreting a
     // benchmark payload as a normal audio-backfill mutation during a rolling deploy.
@@ -2401,18 +2407,11 @@ async function createGatewaySession(
     ...gatewayHints,
     ...(userAgent ? { userAgent } : {}),
   };
-  let { response, body: gatewayBody } = await requestGatewaySession(runtimeConfig.mediaGatewayUrl, runtimeConfig.mediaGatewayToken, baseGatewayBody);
-  if (!response.ok && shouldRetryGatewayWithAudioTranscode(gatewayHints, response.status)) {
-    const fallbackHint = mergePlaybackHints(playbackHint, {
-      audioMode: "transcode",
-      audioFallbackReason: "copy_start_failed",
-    });
-    ({ response, body: gatewayBody } = await requestGatewaySession(runtimeConfig.mediaGatewayUrl, runtimeConfig.mediaGatewayToken, {
-      ...baseGatewayBody,
-      playbackHint: fallbackHint,
-      audioMode: "transcode",
-    }));
-  }
+  const { response, body: gatewayBody } = await requestGatewaySession(
+    runtimeConfig.mediaGatewayUrl,
+    runtimeConfig.mediaGatewayToken,
+    baseGatewayBody,
+  );
   if (!response.ok) {
     const gatewayFailureCode = stringOr(
       gatewayBody.code ?? gatewayBody.errorCode ?? gatewayBody.error_code,
@@ -2514,16 +2513,6 @@ async function requestGatewaySession(
     response,
     body: await response.json().catch(() => ({})),
   };
-}
-
-function shouldRetryGatewayWithAudioTranscode(gatewayHints: JsonRecord, status: number) {
-  if (![500, 502, 503, 504].includes(status)) return false;
-  const requested = normalizeCodecToken(gatewayHints.audioMode ?? gatewayHints.audio_mode);
-  if (requested === "transcode" || requested === "encode") return false;
-  return Boolean(
-    firstUsefulCodecProfile(gatewayHints.codecProfile, gatewayHints.codec_profile) ||
-    stringOrNull(gatewayHints.audioCodec ?? gatewayHints.audio_codec),
-  );
 }
 
 function gatewayModeForPlayback(mode: "direct" | "relay" | "transcode", playbackHint: JsonRecord): "remux" | "transcode" {
@@ -2635,11 +2624,16 @@ async function persistObservedCodecProfile(
     codecProfile: JsonRecord;
     startupMs: number | null;
     audioMode: string | null;
+    variantId?: string | null;
+    strict?: boolean;
   },
 ) {
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
   const observedCodecProfile = normalizeCodecProfile(options.codecProfile);
-  if (!itemType || !options.itemId || !hasUsefulCodecProfile(observedCodecProfile)) return;
+  if (!itemType || !options.itemId || !hasUsefulCodecProfile(observedCodecProfile)) {
+    if (options.strict) throw new HttpError(422, "A useful codec profile is required");
+    return false;
+  }
 
   const observedAt = new Date().toISOString();
   const { data: item, error } = await db
@@ -2651,8 +2645,9 @@ async function persistObservedCodecProfile(
     .eq("external_id", options.itemId)
     .maybeSingle();
   if (error) {
+    if (options.strict) throwDb(error, "Unable to load media item for codec profile");
     console.warn("[norva-playback] unable to load media item for codec profile", error.message);
-    return;
+    return false;
   }
 
   const metadata = recordOrEmpty(item?.metadata);
@@ -2678,6 +2673,7 @@ async function persistObservedCodecProfile(
       })
       .eq("id", item.id);
     if (itemUpdateError) {
+      if (options.strict) throwDb(itemUpdateError, "Unable to persist media codec profile");
       console.warn("[norva-playback] unable to persist media codec profile", itemUpdateError.message);
     }
   }
@@ -2688,16 +2684,26 @@ async function persistObservedCodecProfile(
     compatibility_tier: tier,
     playback_cost_score: playbackCostScoreForObservation(tier, options.startupMs),
   });
-  const { error: variantError } = await db
+  let variantUpdate = db
     .from("cloud_title_variants")
     .update(variantPatch)
     .eq("user_id", options.userId)
     .eq("source_id", options.sourceId)
     .eq("item_type", itemType)
     .eq("external_id", options.itemId);
+  if (options.variantId) variantUpdate = variantUpdate.eq("id", options.variantId);
+  const { data: updatedVariants, error: variantError } = options.strict
+    ? await variantUpdate.select("id")
+    : await variantUpdate;
   if (variantError && !isProjectionMissing(variantError)) {
+    if (options.strict) throwDb(variantError, "Unable to persist exact variant codec profile");
     console.warn("[norva-playback] unable to persist variant codec profile", variantError.message);
+    return false;
   }
+  if (options.strict && (!Array.isArray(updatedVariants) || updatedVariants.length !== 1)) {
+    throw new HttpError(404, "Exact variant codec profile was not persisted");
+  }
+  return !variantError;
 }
 
 function mergePlaybackHints(base: JsonRecord, override: JsonRecord) {
@@ -2854,6 +2860,21 @@ function hasUsefulCodecProfile(profile: JsonRecord) {
     (Array.isArray(profile.subtitles) && profile.subtitles.length > 0) ||
     (Array.isArray(profile.subtitleTracks) && profile.subtitleTracks.length > 0) ||
     (Array.isArray(profile.subtitle_tracks) && profile.subtitle_tracks.length > 0)
+  );
+}
+
+function hasReliableVodCodecProfile(value: unknown) {
+  const raw = recordOrEmpty(value);
+  const audioTracks = raw.audioTracks ?? raw.audio_tracks;
+  const subtitles = raw.subtitles ?? raw.subtitleTracks ?? raw.subtitle_tracks;
+  if (!Array.isArray(audioTracks) || !Array.isArray(subtitles)) return false;
+  const profile = normalizeCodecProfile(raw);
+  return Boolean(
+    stringOrNull(profile.videoCodec) &&
+    stringOrNull(profile.audioCodec) &&
+    stringOrNull(profile.container) &&
+    stringOrNull(profile.probeSource) &&
+    stringOrNull(profile.probedAt)
   );
 }
 
@@ -6342,6 +6363,271 @@ function sanitizeLidBenchmarkResult(payload: JsonRecord): JsonRecord {
   };
 }
 
+async function assertProviderProbeCircuitClosedStrict(
+  db: SupabaseClient,
+  identityKey: string,
+) {
+  if (!identityKey) throw new HttpError(422, "Provider identity is unavailable");
+  const { data, error } = await db.rpc("provider_probe_circuit_state", {
+    p_identity_key: identityKey,
+  });
+  if (error) throwDb(error, "Unable to verify provider probe availability");
+  const state = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+  if (state?.open !== true) return;
+  throw new HttpError(409, "Provider probe circuit is open", {
+    code: "PROVIDER_PROBE_CIRCUIT_OPEN",
+    openUntil: stringOrNull(state.open_until),
+  });
+}
+
+async function runCodecProfileBackfill(
+  req: Request,
+  db: SupabaseClient,
+): Promise<JsonRecord> {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const userId = stringOr(body.userId, "").trim().toLowerCase();
+  const requestedVariantIds = Array.isArray(body.variantIds ?? body.variant_ids)
+    ? (body.variantIds ?? body.variant_ids) as unknown[]
+    : [];
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId)) {
+    throw new HttpError(400, "A valid userId is required");
+  }
+  if (!requestedVariantIds.length) {
+    throw new HttpError(400, "At least one exact variantId is required");
+  }
+  if (requestedVariantIds.some((value) =>
+    typeof value !== "string" || !PLAYBACK_SESSION_UUID_PATTERN.test(value.trim())
+  )) {
+    throw new HttpError(400, "Every variantId must be a UUID");
+  }
+  const uniqueVariantIds = [...new Set(
+    requestedVariantIds.map((value) => String(value).trim().toLowerCase()),
+  )];
+  if (uniqueVariantIds.length > 10) {
+    throw new HttpError(400, "At most ten exact variants may be backfilled");
+  }
+  const variantIds = uniqueVariantIds.slice(0, 10);
+
+  const initialBlock = await episodeBackgroundBlockReason(db, userId);
+  if (initialBlock) {
+    return {
+      protocol: 1,
+      requested: variantIds.length,
+      attempted: 0,
+      persisted: 0,
+      skipped: initialBlock,
+      results: [],
+    };
+  }
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Media gateway is not configured");
+  }
+
+  const { data: rawVariants, error: variantsError } = await db
+    .from("cloud_title_variants")
+    .select("id,source_id,external_id,item_type")
+    .eq("user_id", userId)
+    .eq("item_type", "movie")
+    .in("id", variantIds);
+  if (variantsError) throwDb(variantsError, "Unable to load exact movie variants");
+  const variants = (rawVariants ?? []).map((value) => value as JsonRecord);
+  if (variants.length !== variantIds.length) {
+    throw new HttpError(404, "One or more exact movie variants were not found");
+  }
+  const variantsById = new Map(
+    variants.map((variant) => [stringOr(variant.id, "").toLowerCase(), variant]),
+  );
+
+  let attempted = 0;
+  let persisted = 0;
+  let stopped: string | null = null;
+  const results: JsonRecord[] = [];
+
+  for (const variantId of variantIds) {
+    const variant = variantsById.get(variantId);
+    if (!variant) throw new HttpError(404, "Exact movie variant was not found");
+    const sourceId = stringOr(variant.source_id, "");
+    const externalId = stringOr(variant.external_id, "");
+    if (!sourceId || !externalId) {
+      throw new HttpError(422, "Exact movie variant is incomplete");
+    }
+
+    const sourceIdentity = await resolveSourceIdentity(sourceId, userId, db);
+    const identityKey = sourceIdentity.key;
+    if (!identityKey || identityKey.startsWith("source:")) {
+      stopped = "provider-identity-pending";
+      results.push({ variantId, status: "deferred", code: stopped });
+      break;
+    }
+
+    const target = await resolvePlaybackTarget(sourceId, "movie", externalId, userId, db);
+    const targetUrl = stringOrNull(target?.targetUrl);
+    if (!targetUrl) throw new HttpError(404, "Playback target unavailable");
+    const providerAccountHash = await providerAccountHashFromUrl(targetUrl);
+
+    const persistTrackMaps = async (profileValue: unknown) => {
+      const rawProfile = recordOrEmpty(profileValue);
+      const hasAudioMap = Array.isArray(rawProfile.audioTracks ?? rawProfile.audio_tracks);
+      const hasSubtitleMap = Array.isArray(
+        rawProfile.subtitles ?? rawProfile.subtitleTracks ?? rawProfile.subtitle_tracks,
+      );
+      if (!hasAudioMap && !hasSubtitleMap) {
+        throw new HttpError(502, "Media gateway omitted exact-file track maps");
+      }
+      const profile = normalizeCodecProfile(rawProfile);
+      const audioTracks = (Array.isArray(profile.audioTracks) ? profile.audioTracks as JsonRecord[] : [])
+        .map((track) => compactRecord({
+          index: boundedNullableInt(track.index, 0, 128),
+          lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+          codec: stringOrNull(track.codec),
+          channels: boundedNullableInt(track.channels, 0, 16),
+          default: booleanOrNull(track.default),
+        }));
+      const subtitleTracks = (Array.isArray(profile.subtitles) ? profile.subtitles as JsonRecord[] : [])
+        .map((track) => compactRecord({
+          index: boundedNullableInt(track.index, 0, 128),
+          lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+          codec: stringOrNull(track.codec),
+          subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
+          extractable: booleanOrNull(track.extractable),
+          forced: booleanOrNull(track.forced),
+        }));
+      const tracksPersisted = await shareFileTracks(
+        db,
+        identityKey,
+        "movie",
+        externalId,
+        audioTracks,
+        subtitleTracks,
+        hasAudioMap,
+        hasSubtitleMap,
+      );
+      if (!tracksPersisted) {
+        throw new HttpError(503, "Unable to persist exact-file track maps");
+      }
+    };
+
+    const beforeClaimBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+    if (beforeClaimBlock) {
+      stopped = beforeClaimBlock;
+      results.push({ variantId, status: "deferred", code: beforeClaimBlock });
+      break;
+    }
+    await assertProviderCircuitClosed(providerAccountHash, db);
+    await assertProviderProbeCircuitClosedStrict(db, identityKey);
+
+    const leaseOwner = `codec-profile:${crypto.randomUUID()}`;
+    if (!await claimProviderFileProbeStrict(db, identityKey, leaseOwner, 180)) {
+      stopped = "provider-lease-busy";
+      results.push({ variantId, status: "deferred", code: stopped });
+      break;
+    }
+
+    try {
+      const raceBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+      if (raceBlock) {
+        stopped = `${raceBlock}-race`;
+        results.push({ variantId, status: "deferred", code: stopped });
+        break;
+      }
+      await assertProviderCircuitClosed(providerAccountHash, db);
+      await assertProviderProbeCircuitClosedStrict(db, identityKey);
+
+      attempted += 1;
+      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+        },
+        body: JSON.stringify({
+          url: targetUrl,
+          userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const info = recordOrEmpty(await response.json().catch(() => ({})));
+      const providerCode = sanitizedProviderErrorCode(
+        info.code ?? info.errorCode ?? info.error_code,
+      );
+      const terminalCode = providerProbeTerminalCode({
+        status: response.status,
+        code: providerCode ?? undefined,
+      });
+
+      if (terminalCode === "proxy_auth_failed") {
+        stopped = "proxy_auth_failed";
+        results.push({ variantId, status: "failed", code: stopped });
+        break;
+      }
+      if (terminalCode === "provider_busy") {
+        const circuit = await openProviderPlaybackCircuit(providerAccountHash, db, true);
+        stopped = "provider_busy";
+        results.push({
+          variantId,
+          status: "blocked",
+          code: stopped,
+          retryAfterSeconds: circuit.retryAfterSeconds,
+        });
+        break;
+      }
+      if (
+        response.status === 409 ||
+        providerCode === "account_busy" ||
+        providerCode === "viewer_preempted" ||
+        providerCode === "background_busy"
+      ) {
+        stopped = providerCode || "provider_account_busy";
+        results.push({ variantId, status: "deferred", code: stopped });
+        break;
+      }
+      if (!response.ok) {
+        throw new HttpError(response.status, "Media gateway codec probe failed", {
+          code: providerCode || "gateway_probe_failed",
+        });
+      }
+
+      const observedProfile = recordOrEmpty(info.codecProfile ?? info.codec_profile);
+      if (!hasReliableVodCodecProfile(observedProfile)) {
+        throw new HttpError(502, "Media gateway returned an incomplete codec profile", {
+          code: "incomplete_codec_profile",
+        });
+      }
+      await persistObservedCodecProfile(db, {
+        userId,
+        sourceId,
+        itemType: "movie",
+        itemId: externalId,
+        codecProfile: observedProfile,
+        startupMs: null,
+        audioMode: null,
+        variantId,
+        strict: true,
+      });
+      await persistTrackMaps(observedProfile);
+      persisted += 1;
+      results.push({ variantId, status: "persisted" });
+    } finally {
+      await releaseProviderFileProbe(db, identityKey, leaseOwner);
+    }
+  }
+
+  return {
+    protocol: 1,
+    requested: variantIds.length,
+    attempted,
+    persisted,
+    stopped,
+    results,
+  };
+}
+
 async function runLidBenchmarkEndpoint(req: Request, db: SupabaseClient) {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
@@ -7991,7 +8277,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0,
     relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0,
     accountBusy: 0, cacheHydrated: 0, identityBusy: 0, circuitOpen: 0,
-    persistenceFailed: 0,
+    persistenceFailed: 0, providerBusy: 0, proxyAuthFailed: 0,
   };
   // Circuit-breaker tallies for this tick: cbOk = provider served us at least once; cbBanish =
   // auth/rate/5xx rejections. Recorded once at the end of the tick (see below).
@@ -7999,6 +8285,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   let cbBanish = 0;
   const probeHealthByIdentity = new Map<string, { ok: number; banish: number }>();
   const circuitOpenByIdentity = new Map<string, boolean>();
+  const providerProbeTickGuard = createProviderProbeTickGuard();
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -8061,6 +8348,37 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     } catch (_) { /* fail-open */ }
     accountBusyCache.set(accountKey, { busy, at: now });
     return busy;
+  };
+
+  const recordTerminalProbeFailure = async (
+    providerAccountKey: string,
+    candidateIdentityKey: string,
+    targetUrl: string,
+    status: number,
+    payload: JsonRecord,
+  ): Promise<"provider_busy" | "proxy_auth_failed" | null> => {
+    const terminalCode = providerProbeTerminalCode({
+      status,
+      code: sanitizedProviderErrorCode(
+        payload.code ?? payload.errorCode ?? payload.error_code,
+      ) ?? undefined,
+    });
+    if (!terminalCode) return null;
+    providerProbeTickGuard.stop(providerAccountKey, terminalCode);
+    if (terminalCode === "proxy_auth_failed") {
+      diag.proxyAuthFailed++;
+      return terminalCode;
+    }
+
+    if (terminalCode === "provider_busy") {
+      diag.providerBusy++;
+      if (candidateIdentityKey) circuitOpenByIdentity.set(candidateIdentityKey, true);
+      // This is trusted Gateway/Relay evidence, not a client report: open the
+      // server-owned playback circuit immediately and stop this account's tick.
+      const providerAccountHash = await providerAccountHashFromUrl(targetUrl);
+      await openProviderPlaybackCircuit(providerAccountHash, db, true);
+    }
+    return terminalCode;
   };
 
   const processOne = async (title: JsonRecord) => {
@@ -8150,6 +8468,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         return;
       }
 
+      const providerAccountKey = providerAccountKeyFromUrl(targetUrl);
+      const priorTerminalProbe = providerAccountKey
+        ? providerProbeTickGuard.terminalCode(providerAccountKey)
+        : null;
+      if (priorTerminalProbe) {
+        if (priorTerminalProbe === "provider_busy") diag.providerBusy++;
+        else diag.proxyAuthFailed++;
+        return;
+      }
+
       // Account busy-lock: someone (any user, any device, the gateway, a viewer mid-film whose
       // per-user signals went dark) currently holds this provider ACCOUNT — skip WITHOUT
       // stamping so the title retries next tick. Honors the manual-backfill bypass
@@ -8205,7 +8533,19 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           return;
         }
       }
-      if (!await claimProviderFileProbe(db, candidateIdentityKey, probeLeaseOwner)) {
+      // Keep one provider connection per account even when this tick has
+      // concurrency > 1. A unique distributed owner also prevents a second
+      // replica from treating the tick-wide owner as re-entrant.
+      if (!providerProbeTickGuard.tryEnter(providerAccountKey)) {
+        const blockedCode = providerProbeTickGuard.terminalCode(providerAccountKey);
+        if (blockedCode === "provider_busy") diag.providerBusy++;
+        else if (blockedCode === "proxy_auth_failed") diag.proxyAuthFailed++;
+        else diag.identityBusy++;
+        return;
+      }
+      const itemProbeLeaseOwner = `${probeLeaseOwner}:${stringOr(variant.id, crypto.randomUUID())}`;
+      if (!await claimProviderFileProbe(db, candidateIdentityKey, itemProbeLeaseOwner)) {
+        providerProbeTickGuard.leave(providerAccountKey);
         diag.identityBusy++;
         return;
       }
@@ -8239,13 +8579,48 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
             body: JSON.stringify({ url: targetUrl, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
           });
+          const gatewayInfo = recordOrEmpty(await gw.json().catch(() => ({})));
+          const terminalCode = await recordTerminalProbeFailure(
+            providerAccountKey,
+            candidateIdentityKey,
+            targetUrl,
+            gw.status,
+            gatewayInfo,
+          );
+          if (terminalCode) {
+            diag.relayNotOk++;
+            if (debug && !sample) {
+              sample = { stage: "gatewayProbeTerminal", status: gw.status, code: terminalCode };
+            }
+            return;
+          }
           if (!gw.ok) {
             diag.relayNotOk++;
             if (isBanishStatus(gw.status)) noteProbeHealth(false);
             if (debug && !sample) sample = { stage: "gatewayProbeNotOk", status: gw.status, host: new URL(targetUrl).host };
             return;
           }
-          info = await gw.json().catch(() => null);
+          info = gatewayInfo;
+          const observedProfile = recordOrEmpty(info?.codecProfile ?? info?.codec_profile);
+          if (variantItemType === "movie" && hasReliableVodCodecProfile(observedProfile)) {
+            try {
+              await persistObservedCodecProfile(db, {
+                userId,
+                sourceId,
+                itemType: "movie",
+                itemId: externalId,
+                codecProfile: observedProfile,
+                startupMs: null,
+                audioMode: null,
+                variantId: stringOr(variant.id, ""),
+                strict: true,
+              });
+            } catch (_) {
+              // The audio/subtitle map below remains independently useful. Keep
+              // the profile write observable and let the next probe repair it.
+              diag.persistenceFailed++;
+            }
+          }
           noteProbeHealth(true);
         } catch (_) { diag.relayNotOk++; noteProbeHealth(false); return; }
         // Count the provider hit against the identity's hourly budget (observability + cap).
@@ -8261,13 +8636,28 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
         const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
         const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
+        const relayInfo = recordOrEmpty(await res.json().catch(() => ({})));
+        const terminalCode = await recordTerminalProbeFailure(
+          providerAccountKey,
+          candidateIdentityKey,
+          targetUrl,
+          res.status,
+          relayInfo,
+        );
+        if (terminalCode) {
+          diag.relayNotOk++;
+          if (debug && !sample) {
+            sample = { stage: "relayProbeTerminal", status: res.status, code: terminalCode };
+          }
+          return;
+        }
         if (!res.ok) {
           diag.relayNotOk++;
           if (isBanishStatus(res.status)) noteProbeHealth(false);
-          if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
+          if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host };
           return;
         }
-        info = await res.json().catch(() => null);
+        info = relayInfo;
         noteProbeHealth(true);
       }
       if (debug && !sample && token) {
@@ -8422,7 +8812,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         await shareFileTracks(db, await resolveFileTracksKey(sourceId, userId, db, targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
       }
       } finally {
-        await releaseProviderFileProbe(db, candidateIdentityKey, probeLeaseOwner);
+        await releaseProviderFileProbe(db, candidateIdentityKey, itemProbeLeaseOwner);
+        providerProbeTickGuard.leave(providerAccountKey);
       }
     } catch (e) {
       diag.exception++;
@@ -8441,6 +8832,19 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       return { mode, processed: i, updated, diag, skipped: "viewer-midtick", lastId: String(titles[i - 1].id), hasMore: true, ...(debug ? { sample } : {}) };
     }
     await Promise.all(titles.slice(i, i + effConcurrency).map((t) => processOne(t as JsonRecord)));
+    const terminalCodes = providerProbeTickGuard.terminalCodes();
+    if (terminalCodes.length > 0) {
+      return {
+        mode,
+        processed: i,
+        updated,
+        diag,
+        skipped: terminalCodes.includes("provider_busy") ? "provider-busy" : "proxy-auth-failed",
+        lastId: i > 0 ? String(titles[i - 1].id) : afterId,
+        hasMore: true,
+        ...(debug ? { sample } : {}),
+      };
+    }
   }
 
   // Feed the circuit breaker ONE tick outcome (one write, no per-item row contention): a healthy

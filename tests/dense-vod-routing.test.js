@@ -137,7 +137,7 @@ test('Gateway seek never mixes source-timestamped copied video with rebased enco
     );
 });
 
-test('only an exact zero subtitle count suppresses the cold Gateway track probe', () => {
+test('only a proven exact subtitle map, including an empty one, suppresses the cold Gateway track probe', () => {
     const shouldProbeMissingSubtitleTracks = loadGatewayFunction(
         'shouldProbeMissingSubtitleTracks',
         'shouldProbeCodecProfile',
@@ -146,6 +146,7 @@ test('only an exact zero subtitle count suppresses the cold Gateway track probe'
             nullableInt: (value) => value === null || value === undefined || value === ''
                 ? null
                 : Number.parseInt(String(value), 10),
+            stringOrNull: (value) => String(value || '').trim() || null,
             path,
             URL
         }
@@ -169,6 +170,43 @@ test('only an exact zero subtitle count suppresses the cold Gateway track probe'
         }, 'https://provider.test/movie/no-subs.mkv'),
         false,
         'an exact zero is authoritative too'
+    );
+    assert.strictEqual(
+        shouldProbeMissingSubtitleTracks({
+            ...profile,
+            subtitles: [],
+            probeSource: 'gateway_probe',
+            probedAt: '2026-08-14T20:00:00.000Z'
+        }, {
+            container: 'mkv',
+            streamType: 'movie'
+        }, 'https://provider.test/movie/exact-no-subs.mkv'),
+        false,
+        'an exact empty subtitle map from the backfill must prevent a second provider probe'
+    );
+    assert.strictEqual(
+        shouldProbeMissingSubtitleTracks({
+            ...profile,
+            subtitle_tracks: [],
+            probe_source: 'gateway_probe',
+            probed_at: '2026-08-14T20:00:00.000Z'
+        }, {
+            container: 'mkv',
+            streamType: 'movie'
+        }, 'https://provider.test/movie/exact-no-subs-alias.mkv'),
+        false,
+        'the persisted snake-case empty map is authoritative too'
+    );
+    assert.strictEqual(
+        shouldProbeMissingSubtitleTracks({
+            ...profile,
+            subtitles: []
+        }, {
+            container: 'mkv',
+            streamType: 'movie'
+        }, 'https://provider.test/movie/normalized-partial-profile.mkv'),
+        true,
+        'normalization may synthesize an empty array; without probe provenance it is not authoritative'
     );
     assert.strictEqual(
         shouldProbeMissingSubtitleTracks(profile, {
@@ -454,7 +492,7 @@ test('dense browser VOD uses Gateway remux with audio transcode and selected tra
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
 });
 
-test('ordinary multi-audio VOD stays on the browser engine', async () => {
+test('ordinary unknown MKV keeps one bounded Engine lane until exact codecs are known', async () => {
     const { API, calls } = loadCloudApi();
     const result = await API.proxy.xtream.getStreamUrl(
         '00000000-0000-4000-8000-000000000001',
@@ -471,8 +509,98 @@ test('ordinary multi-audio VOD stays on the browser engine', async () => {
     assert.strictEqual(result.mode, 'engine');
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].requiresTranscode, undefined);
     assert.strictEqual(calls[0].enginePipe, true);
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 3);
+});
+
+test('a fresh probe replaces stale exact track maps even when the new maps are empty', () => {
+    const mergeCodecProfiles = loadGatewayFunction(
+        'mergeCodecProfiles',
+        'shouldProbeMissingSubtitleTracks',
+        {
+            asRecord: (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+            compactRecord: (value) => Object.fromEntries(
+                Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null)
+            )
+        }
+    );
+    const base = {
+        videoCodec: 'h264',
+        audioTracks: [{ index: 1, codec: 'aac' }],
+        subtitles: [{ index: 2, codec: 'subrip' }]
+    };
+
+    assert.deepStrictEqual(
+        mergeCodecProfiles(base, {
+            probeSource: 'gateway_probe',
+            probedAt: '2026-08-14T20:00:00.000Z',
+            audioTracks: [],
+            subtitles: []
+        }),
+        {
+            ...base,
+            probeSource: 'gateway_probe',
+            probedAt: '2026-08-14T20:00:00.000Z',
+            audioTracks: [],
+            subtitles: []
+        },
+        'an authoritative empty probe must remove stale audio and subtitle indexes'
+    );
+    assert.deepStrictEqual(
+        mergeCodecProfiles(base, { videoProfile: 'High' }),
+        { ...base, videoProfile: 'High' },
+        'an omitted map must preserve the previous exact map'
+    );
+});
+
+test('known H264 AAC MKV keeps video and audio on the fast Gateway copy path', async () => {
+    const { API, calls } = loadCloudApi();
+    const playbackHint = loadMediaUtils().playbackHintFromItem({
+        container_extension: 'mkv',
+        codec_profile: {
+            videoCodec: 'h264',
+            audioCodec: 'aac',
+            audioProfile: 'LC',
+            audioChannels: 2,
+        },
+    });
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'known-safe-mkv',
+        'movie',
+        'mkv',
+        playbackHint
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    assert.strictEqual(calls[0].playbackHint.audioMode, undefined);
+});
+
+test('MKV provider busy is terminal and never opens an engine or second Gateway lane', async () => {
+    const providerBusy = Object.assign(new Error('provider busy'), {
+        status: 458,
+        code: 'PROVIDER_BUSY'
+    });
+    const { API, calls } = loadCloudApi({ createSessionError: providerBusy });
+
+    await assert.rejects(
+        API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            'busy-mkv',
+            'movie',
+            'mkv',
+            { videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2 }
+        ),
+        (error) => error === providerBusy
+    );
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
 });
 
 test('dense but browser-safe MP4 keeps the normal relay path', async () => {

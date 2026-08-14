@@ -81,3 +81,58 @@ export function isProviderBusyFailure(value = {}) {
     || code === 'BLOCK_HTTP_458'
     || code === 'PROBE_HTTP_458';
 }
+
+/**
+ * Classify only failures that must terminate every later background probe for
+ * the same provider account during the current tick. Proxy authentication is
+ * deliberately checked first: a 407 is infrastructure failure, never evidence
+ * that the IPTV account itself is busy and must not open its playback circuit.
+ *
+ * @param {{ status?: number, upstreamStatus?: number, code?: string, errorCode?: string }} [value]
+ * @returns {'provider_busy'|'proxy_auth_failed'|null}
+ */
+export function providerProbeTerminalCode(value = {}) {
+  const status = Number(value.status ?? value.upstreamStatus);
+  const code = String(value.code || value.errorCode || '').trim().toUpperCase();
+  if (status === 407 || code === 'PROXY_AUTH_FAILED') return 'proxy_auth_failed';
+  if (isProviderBusyFailure(value)) return 'provider_busy';
+  return null;
+}
+
+/**
+ * Per-tick, per-provider-account guard for background probes. It prevents two
+ * concurrent titles from opening the same single-slot account and remembers a
+ * terminal 458/407 so every later title is skipped without another request.
+ */
+export function createProviderProbeTickGuard() {
+  const terminalByAccount = new Map();
+  const activeAccounts = new Set();
+  const keyOf = (value) => String(value || '').trim();
+  return Object.freeze({
+    terminalCode(accountKey) {
+      const key = keyOf(accountKey);
+      return key ? (terminalByAccount.get(key) || null) : null;
+    },
+    tryEnter(accountKey) {
+      const key = keyOf(accountKey);
+      if (!key) return true;
+      if (terminalByAccount.has(key) || activeAccounts.has(key)) return false;
+      activeAccounts.add(key);
+      return true;
+    },
+    leave(accountKey) {
+      const key = keyOf(accountKey);
+      if (key) activeAccounts.delete(key);
+    },
+    stop(accountKey, terminalCode) {
+      const key = keyOf(accountKey);
+      if (!key || !['provider_busy', 'proxy_auth_failed'].includes(terminalCode)) return false;
+      terminalByAccount.set(key, terminalCode);
+      activeAccounts.delete(key);
+      return true;
+    },
+    terminalCodes() {
+      return [...terminalByAccount.values()];
+    },
+  });
+}

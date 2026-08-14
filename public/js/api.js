@@ -1244,6 +1244,30 @@ const CloudAdapter = (() => {
         return ENGINE_DEMUXABLE_CONTAINERS.has(c);
     }
 
+    function isMatroskaContainer(container) {
+        const normalized = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        // MKA is audio-only and the Gateway HLS pipeline requires a video map.
+        return normalized === 'mkv';
+    }
+
+    function hasReliableVodCodecHint(playbackHint) {
+        const hint = playbackHint && typeof playbackHint === 'object' ? playbackHint : {};
+        const profile = hint.codecProfile && typeof hint.codecProfile === 'object'
+            ? hint.codecProfile
+            : (hint.codec_profile && typeof hint.codec_profile === 'object' ? hint.codec_profile : {});
+        const videoCodec = hint.videoCodec || hint.video_codec || profile.videoCodec || profile.video_codec || profile.video;
+        const audioTracks = Array.isArray(profile.audioTracks)
+            ? profile.audioTracks
+            : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+        const audioCodec = hint.audioCodec
+            || hint.audio_codec
+            || profile.audioCodec
+            || profile.audio_codec
+            || profile.audio
+            || audioTracks.find((track) => track && track.codec)?.codec;
+        return Boolean(normalizeCodecToken(videoCodec) && normalizeCodecToken(audioCodec));
+    }
+
     function normalizeCodecToken(value) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
     }
@@ -1708,6 +1732,17 @@ const CloudAdapter = (() => {
                 const denseTrackVod = isVodPlayback
                     && !nativePlayer
                     && shouldDenseVodUseGateway(container, playbackHint);
+                // Matroska is never browser-native. Once the exact file has a
+                // complete A/V profile, open one Gateway lane: FFmpeg can copy
+                // proven H.264/AAC streams and encode only unsafe codecs. An
+                // unknown MKV stays on the bounded in-browser engine; discovering
+                // codecs synchronously in Gateway can otherwise add tens of
+                // seconds to the click path. The background exact-file backfill
+                // upgrades those files without competing with an active viewer.
+                const profiledMkv = isVodPlayback
+                    && !nativePlayer
+                    && isMatroskaContainer(container)
+                    && hasReliableVodCodecHint(playbackHint);
                 // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
                 // directly, so serve it through the RELAY (pass-through, no transcode
                 // server) rather than the cloud gateway. The browser then seeks
@@ -1733,6 +1768,7 @@ const CloudAdapter = (() => {
                 const engineVod = isVodPlayback
                     && !nativePlayer
                     && !denseTrackVod
+                    && !profiledMkv
                     && !browserSafeVod
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
@@ -1745,7 +1781,20 @@ const CloudAdapter = (() => {
                             : engineVod
                                 ? 'engine'
                                 : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                if (denseTrackVod) {
+                if (profiledMkv) {
+                    // `mode=transcode` selects the Gateway transport; `remux`
+                    // lets the Gateway decide per exact stream whether to copy
+                    // or encode. Unknown/unsafe audio is normalized to AAC, while
+                    // a proven AAC-LC stereo track stays on the zero-cost copy path.
+                    playbackHint.gatewayMode = 'remux';
+                    if (!isSafeBrowserAudio(
+                        playbackHint.audioCodec,
+                        playbackHint.audioProfile,
+                        playbackHint.audioChannels
+                    ) && !playbackHint.audioMode) {
+                        playbackHint.audioMode = 'transcode';
+                    }
+                } else if (denseTrackVod) {
                     // Keep the video stream copied whenever it is browser-safe,
                     // but always encode the selected audio to AAC. The Gateway's
                     // codec probe still upgrades video to a full transcode when
