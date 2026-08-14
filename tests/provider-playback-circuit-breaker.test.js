@@ -15,6 +15,37 @@ function section(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+test('Edge and gateway derive the same provider identity for prefixed Xtream URLs', () => {
+  const edge = read('supabase/functions/norva-playback/index.ts');
+  const gatewayProxyPool = require('../services/media-gateway/src/providerProxyPool.js');
+  const functionSource = section(
+    edge,
+    'function providerAccountKeyFromUrl(url: string): string {',
+    '// POST /account-activity',
+  ).replace(
+    'function providerAccountKeyFromUrl(url: string): string {',
+    'function providerAccountKeyFromUrl(url) {',
+  );
+  const edgeProviderAccountKey = Function(
+    `"use strict"; ${functionSource}; return providerAccountKeyFromUrl;`,
+  )();
+
+  const prefixed = 'https://PANEL.EXAMPLE/prefix/movie/alice%2Btv/secret/42.mkv';
+  const literalPercent = 'https://panel.example/prefix/series/plus%252Buser/secret/7.mp4';
+  const metadata = 'https://panel.example/prefix/player_api.php?username=plus%252Buser';
+
+  assert.equal(edgeProviderAccountKey(prefixed), 'panel.example/alice+tv');
+  assert.equal(edgeProviderAccountKey(literalPercent), 'panel.example/plus%2Buser');
+  assert.equal(edgeProviderAccountKey(metadata), 'panel.example/plus%2Buser');
+  for (const url of [prefixed, literalPercent, metadata]) {
+    assert.equal(
+      gatewayProxyPool.providerAccountAffinityKey(url),
+      edgeProviderAccountKey(url),
+      `Edge and gateway must agree on the account key for ${url}`,
+    );
+  }
+});
+
 test('first HTTP 458 opens an account circuit immediately and repeated failures back off', async () => {
   const policyPath = path.join(
     root,
@@ -171,7 +202,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*42/);
+  assert.match(edge, /version:\s*43/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
 });
 
@@ -425,9 +456,10 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 80/);
+  assert.match(gateway, /const GATEWAY_VERSION = 81/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
-  assert.match(playback, /version:\s*42/);
+  assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
+  assert.match(playback, /version:\s*43/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
   assert.match(cloud, /version:\s*24/);

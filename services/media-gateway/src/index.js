@@ -9,8 +9,15 @@ const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
+    isProxyAuthenticationFailure,
     shouldRetryProviderStatus,
 } = require('./providerFailure');
+const {
+    parseProviderProxyUrls,
+    providerAccountAffinityKey,
+    providerAccountAffinityKeyFromCredentials,
+    stableProxySlotIndex,
+} = require('./providerProxyPool');
 
 const app = express();
 
@@ -21,60 +28,47 @@ const app = express();
 //
 //   PROVIDER_PROXY_URLS  comma/space/newline-separated list of proxy URLs
 //                        (e.g. http://user:pass@host:port). Used as a POOL.
-//   PROVIDER_PROXY_URL   single URL (back-compat). Merged into the pool.
+//   PROVIDER_PROXY_URL   single URL (back-compat fallback when the plural is absent).
 //
-// Each provider ACCOUNT is pinned to ONE pool IP (sticky by a stable key — the Norva
-// user id, or host+username from the stream URL). Stickiness matters: a single account
+// Each provider ACCOUNT is pinned to ONE pool IP (sticky by the canonical provider
+// host+username identity). The Norva user id is deliberately never part of proxy affinity:
+// the same provider credentials must use the same egress on raw, metadata and FFmpeg lanes.
+// Stickiness matters: a single account
 // hitting from many IPs looks like a proxy and gets flagged; one stable residential IP
 // per account looks normal. Across many users the pool spreads load over the IPs (less
 // density per IP, more aggregate bandwidth). undici is only loaded when a proxy is set.
 // Secrets live in env only — never commit them.
-const providerProxyUrls = ((process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '')
-    .split(/[\s,]+/).map((s) => s.trim()).filter(Boolean));
+const providerProxyUrls = parseProviderProxyUrls(
+    process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '',
+);
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
     try {
         const { ProxyAgent } = require('undici');
         providerProxyAgents = providerProxyUrls.map((u) => new ProxyAgent(u));
-        // Node's built-in fetch ignores http_proxy env (it needs the per-request dispatcher),
-        // but spawned ffmpeg/ffprobe DO honour http_proxy/https_proxy. Set a default (first
-        // pool IP) so any spawn without an explicit per-request env still exits residential;
-        // per-request spawns override it via proxyEnvFor(). Supabase/internal fetch() stays
-        // direct (fetch ignores these env vars).
-        if (!process.env.http_proxy) process.env.http_proxy = providerProxyUrls[0];
-        if (!process.env.https_proxy) process.env.https_proxy = providerProxyUrls[0];
+        // Fetch receives an explicit dispatcher and every provider-connected child receives
+        // an explicit env. There is intentionally no process-wide "slot 1" fallback: it would
+        // silently break account affinity whenever a provider spawn forgot its routing key.
         console.log(`[media-gateway] provider proxy ENABLED — pool of ${providerProxyAgents.length} residential IP(s), sticky per account`);
     } catch (err) {
-        console.error('[media-gateway] PROVIDER_PROXY_URL(S) set but proxy could not be initialised:', (err && err.message) || err);
-        providerProxyAgents = [];
+        // Fail closed. Falling back to Railway's direct datacenter IP after a proxy
+        // configuration error can trigger provider bans and makes a 407 look like a 458.
+        const failureKind = String((err && (err.code || err.name)) || 'unknown');
+        throw new Error(`Provider proxy pool could not be initialised (${failureKind})`);
     }
 }
 // FNV-1a hash → stable index into the pool for a given key (same key → same IP).
 function poolIndexForKey(key) {
     if (providerProxyAgents.length <= 1) return 0;
-    const s = String(key || '');
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return (h >>> 0) % providerProxyAgents.length;
+    return stableProxySlotIndex(key, providerProxyAgents.length);
 }
 // Per-account sticky key from a provider stream URL: host + the username path segment
 // (Xtream: /movie|series|live/USER/PASS/ID.ext → USER), falling back to the host.
 function proxyKeyFromUrl(url) {
-    try {
-        const u = new URL(url);
-        const segs = u.pathname.split('/').filter(Boolean);
-        let username = segs.length >= 2 ? segs[1] : u.searchParams.get('username');
-        if (username) {
-            try { username = decodeURIComponent(username); } catch (_) { /* keep raw */ }
-        }
-        return u.host + (username ? '/' + username : '');
-    } catch (_) { return String(url || ''); }
+    return providerAccountAffinityKey(url);
 }
 function providerAccountKeyFromCredentials(serverUrl, username) {
-    try {
-        const u = new URL(serverUrl);
-        return u.host + (username ? '/' + String(username) : '');
-    } catch (_) { return ''; }
+    return providerAccountAffinityKeyFromCredentials(serverUrl, username);
 }
 // ── Raw byte-pipe ledger ─────────────────────────────────────────────────────
 // One playback session per provider account: pumps are tagged with their playback
@@ -514,7 +508,7 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 80;
+const GATEWAY_VERSION = 81;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -706,6 +700,8 @@ app.get('/health', (req, res) => {
         ocrLangs: OCR_ENABLED ? OCR_LANGS : '',
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
+        providerProxyAffinityProtocol: 1,
+        providerProxyAffinityKey: 'provider-account',
         transcribeQueueDepth: transcribeQueue.length,
         transcribeBusy,
         ocrQueueDepth: ocrQueue.length,
@@ -1288,6 +1284,9 @@ app.get('/raw/:token', async (req, res) => {
     if (req.headers.accept) headers.accept = req.headers.accept;
     const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
     const startupDeadlineAt = Date.now() + RAW_STARTUP_DEADLINE_MS;
+    // Resolve once for the whole byte-pipe request. Retries keep the same static
+    // egress and can never rotate this provider account to another IP.
+    const rawProxyAgent = pickProxyAgent(pumpProxyKey);
 
     // Retry only transient network/server failures and empty responses. Every 4xx,
     // especially the provider's single-account 458, is terminal on its first response
@@ -1317,14 +1316,22 @@ app.get('/raw/:token', async (req, res) => {
         const attemptGuard = createRawAttemptGuard(ac.signal, startupDeadlineAt);
         upstream = null;
         try {
-            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: attemptGuard.signal, dispatcher: pickProxyAgent(claims.uid || proxyKeyFromUrl(claims.url)) || undefined });
+            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: attemptGuard.signal, dispatcher: rawProxyAgent || undefined });
         } catch (err) {
             const hitDeadline = attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0;
             abandonRawAttempt(attemptGuard, null, 'raw_fetch_failed');
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
             if (hitDeadline) { sendRawStartupTimeout(res); return; }
+            const networkFailure = classifyProviderFetchFailure(err);
+            if (networkFailure.code === 'PROXY_AUTH_FAILED') {
+                rememberRawFailure(networkFailure.category);
+                return res.status(502).json({
+                    error: 'The media service is temporarily unavailable.',
+                    code: networkFailure.code,
+                    networkCause: networkFailure.category,
+                });
+            }
             if (providerRetryAttempts >= RAW_PROVIDER_RETRY_LIMIT || attempt >= maxAttempts) {
-                const networkFailure = classifyProviderFetchFailure(err);
                 rememberRawFailure(networkFailure.category);
                 return res.status(502).json({
                     error: 'Unable to reach the media provider',
@@ -1347,6 +1354,20 @@ app.get('/raw/:token', async (req, res) => {
             abandonRawAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
             sendRawStartupTimeout(res, status);
             return;
+        }
+        if (upstream.status === 407 && providerProxyAgents.length) {
+            const failure = classifyProviderResponseFailure(
+                upstream.status,
+                {},
+                { proxyConfigured: true },
+            );
+            abandonRawAttempt(attemptGuard, upstream.body, 'proxy_auth_failed');
+            rememberRawFailure('proxy_auth', upstream.status);
+            return res.status(failure.status).json({
+                error: failure.publicMessage,
+                code: failure.code,
+                networkCause: 'proxy_auth',
+            });
         }
         const retryable = shouldRetryProviderStatus(upstream.status);
         if (retryable && providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
@@ -1607,7 +1628,7 @@ app.get('/subtitle/:token', async (req, res) => {
     ];
 
     let child;
-    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(claims.uid || proxyKeyFromUrl(claims.url)) }); }
+    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(claims.url)) }); }
     catch (_) { return res.status(500).json({ error: 'Subtitle extraction failed' }); }
     let stderr = '';
     let clientClosed = false;
@@ -2854,7 +2875,7 @@ function extractAudioWav(
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, reportActivity);
         let stderr = '';
@@ -2942,7 +2963,7 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSe
             path.join(dir, 'chunk-%04d.wav'),
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
         let stderr = '';
@@ -3290,13 +3311,13 @@ function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOU
 // subtitle-failures audit). The transcribe, OCR and detect-language lanes each serialize
 // internally, but nothing stopped two lanes from opening two simultaneous connections on the
 // same single-slot panel account (pregen extraction + whisper-LID sweep → instant user_multi_ip
-// refusal — the 02/07 super8k failures). Keyed by the byte-pipe uid (the account whose provider
-// credentials the URL carries), falling back to the URL host key. The lock wraps only the
+// refusal — the 02/07 super8k failures). Keyed by the same canonical provider-account
+// identity as proxy affinity, regardless of which Norva user owns the source. The lock wraps only the
 // provider-connected phase (ffmpeg extraction) — whisper/tesseract are pure CPU and run outside
 // it. Viewer-interactive paths (/raw, /subtitle, playback) are NOT serialized here: they have
 // their own slot-eviction machinery and must never wait behind a long extraction.
 const accountJobLocks = new Map(); // key -> tail promise of the wait chain
-function accountJobKey(uid, url) { return String(uid || '') || proxyKeyFromUrl(url); }
+function accountJobKey(_uid, url) { return proxyKeyFromUrl(url); }
 function isAccountJobBusy(key) { return accountJobLocks.has(key); }
 async function withAccountJobLock(key, fn) {
     if (!key) return fn();
@@ -3572,7 +3593,7 @@ function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, t
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
         let stderr = '';
@@ -3903,7 +3924,7 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -3968,7 +3989,7 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
             path.join(dir, 'f_%05d.png'),
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -4286,6 +4307,15 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
             await stopSession(session);
+            // A proxy 407 is infrastructure authentication failure, never evidence that
+            // the IPTV account is active elsewhere. Keep it out of the provider 458 circuit.
+            if (isProxyAuthenticationFailure(session)) {
+                return res.status(502).json({
+                    error: 'The media service is temporarily unavailable.',
+                    code: 'PROXY_AUTH_FAILED',
+                    networkCause: 'proxy_auth',
+                });
+            }
             // Slot-busy upstream is terminal. Preserve the exact 458 so callers open
             // the account circuit instead of treating it as a retryable gateway 503.
             if (isProviderSlotBusyFailure(session)) {
@@ -4451,6 +4481,7 @@ function isProviderConcurrencyFailure(session) {
 // "Server returned 4XX Client Error, but not one of 40{0,1,3,4}" — the number 458
 // never appears — so that catch-all IS the 458 signature on the transcode lane.
 function isProviderSlotBusyFailure(session) {
+    if (isProxyAuthenticationFailure(session)) return false;
     const text = String((session && session.lastError) || '').toLowerCase();
     if (!text) return false;
     return text.includes('458')
@@ -4597,7 +4628,7 @@ function startFfmpeg(session) {
 
     appendSubtitleOutputs(args, session, postInputSeek);
 
-    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(session.userId || proxyKeyFromUrl(session.sourceUrl)) });
+    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(session.sourceUrl)) });
     session.status = 'starting';
 
     child.stderr.on('data', (chunk) => {
@@ -5220,18 +5251,31 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             ));
             return;
         }
-        const child = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(FFPROBE_PATH, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: proxyEnvFor(proxyKeyFromUrl(sourceUrl)),
+        });
         const registration = options.background === true
             ? registerAccountExtraction(backgroundKey, child)
             : null;
         const releaseRegistration = () => registration?.release?.();
-        const terminalError = (fallback) => registration?.preempted
-            ? backgroundProbeError(
-                409,
-                'viewer_preempted',
-                'Codec probe preempted by active playback',
-            )
-            : fallback;
+        const terminalError = (fallback) => {
+            if (registration?.preempted) {
+                return backgroundProbeError(
+                    409,
+                    'viewer_preempted',
+                    'Codec probe preempted by active playback',
+                );
+            }
+            if (isProxyAuthenticationFailure(fallback)) {
+                return backgroundProbeError(
+                    502,
+                    'PROXY_AUTH_FAILED',
+                    'The media service is temporarily unavailable.',
+                );
+            }
+            return fallback;
+        };
         let stdout = '';
         let stderr = '';
         let finished = false;
@@ -5688,7 +5732,9 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         const text = await response.text();
         const payload = text ? safeJson(text) : {};
         if (!response.ok) {
-            const failure = classifyProviderResponseFailure(response.status, payload);
+            const failure = classifyProviderResponseFailure(response.status, payload, {
+                proxyConfigured: providerProxyAgents.length > 0,
+            });
             const error = new Error(failure.publicMessage);
             error.status = failure.status;
             error.publicMessage = failure.publicMessage;
@@ -5967,18 +6013,9 @@ function isLocalOrigin(origin) {
 // the edge-side session/event/history writers.
 const ACCOUNT_ACTIVITY_REPORT_MS = clampInt(process.env.ACCOUNT_ACTIVITY_REPORT_MS, 60_000, 0, 300_000);
 const edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
-// The account activity key is host + '/' + username. proxyKeyFromUrl keeps the username
-// percent-ENCODED (it is the raw path segment) so the sticky proxy pool key is stable; but the
-// edge stores the DECODED username (provider_account_touch_by_source writes config_hint.username
-// raw). Decode the username part before reporting so all producers converge on the decoded form.
-function decodeAccountKey(key) {
-    const s = String(key || '');
-    const i = s.indexOf('/');
-    if (i < 0) return s;
-    let user = s.slice(i + 1);
-    try { user = decodeURIComponent(user); } catch { /* keep raw on malformed % */ }
-    return s.slice(0, i) + '/' + user;
-}
+// The account activity key is already the canonical host + '/' + logical username used by
+// proxy affinity, provider locks and the Edge. Never decode it again here: a literal `%2B`,
+// `%20` or `%2F` in a provider username must stay literal across every producer.
 function activeProviderAccountKeys() {
     const keys = new Set();
     for (const s of sessions.values()) {
@@ -5989,7 +6026,7 @@ function activeProviderAccountKeys() {
         if ([...entries].some((entry) => entry.reportActivity !== false)) keys.add(key);
     }
     keys.delete('');
-    return [...keys].map(decodeAccountKey).slice(0, 64);
+    return [...keys].slice(0, 64);
 }
 let _accountActivityLastErrorAt = 0;
 async function reportAccountActivity() {

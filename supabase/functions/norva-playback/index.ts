@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 42,
+        version: 43,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         relayTakeoverProtocol: 1,
@@ -6015,21 +6015,29 @@ async function bumpEnrichmentHeartbeat(db: SupabaseClient, userId: string) {
 // ── Provider ACCOUNT busy-lock (2026-07-10 458 incident) ────────────────────────────────────────
 // max_connections is per provider ACCOUNT (host+username), not per user or panel identity. The
 // canonical key mirrors the gateway's proxyKeyFromUrl: URL host (port kept when non-default; the
-// URL parser already lowercases hostnames) + '/' + the username path segment of an Xtream stream
-// URL (/movie|series|live/USER/PASS/...). Same form as provider_account_touch_by_source builds
+// URL parser already lowercases hostnames) + '/' + the logical Xtream username, taken from the
+// metadata query or the segment after movie|series|live. Same form as provider_account_touch_by_source builds
 // from config_hint (serverHost + username). See docs/LIVE-TV-458-SLOT-CONTENTION.md §5.4.
 function providerAccountKeyFromUrl(url: string): string {
   try {
     const u = new URL(url);
+    const queryUser = u.searchParams.get("username");
+    // URLSearchParams has already decoded the query value once. Decoding it again would mutate
+    // a literal `%2B`, `%20` or `%2F` in the provider username.
+    if (queryUser) return u.host + "/" + queryUser.trim();
+
     const segs = u.pathname.split("/").filter(Boolean);
-    if (segs.length < 2) return u.host;
+    const streamTypeIndex = segs.findIndex((segment) =>
+      ["movie", "series", "live"].includes(String(segment || "").toLowerCase())
+    );
+    if (streamTypeIndex < 0 || !segs[streamTypeIndex + 1]) return u.host;
     // DECODE the username segment: stream URLs are built with encodeURIComponent(username)
     // (xtreamStreamUrl), but provider_account_touch_by_source writes the RAW username from
     // config_hint. All producers must converge on the DECODED form or a username with a
     // URL-special char (@, +, space…) writes/reads mismatched keys and the lock goes blind.
-    let user = segs[1];
+    let user = segs[streamTypeIndex + 1];
     try { user = decodeURIComponent(user); } catch { /* keep raw on malformed % */ }
-    return u.host + "/" + user;
+    return u.host + "/" + user.trim();
   } catch {
     return "";
   }

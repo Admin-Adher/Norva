@@ -6,6 +6,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const providerFailure = require('../services/media-gateway/src/providerFailure.js');
 
 const root = path.join(__dirname, '..');
 const gateway = fs.readFileSync(
@@ -72,6 +73,10 @@ function makeHarness() {
       const segments = parsed.pathname.split('/').filter(Boolean);
       return `${parsed.host}/${segments[1] || ''}`;
     },
+    proxyEnvFor() {
+      return undefined;
+    },
+    isProxyAuthenticationFailure: providerFailure.isProxyAuthenticationFailure,
     sanitizeLog(value) {
       return String(value || '');
     },
@@ -266,13 +271,18 @@ test('/probe-audio exposes the typed background backpressure contract', () => {
 });
 
 test('metadata uses the same decoded provider-account key and is viewer-preemptible', () => {
+  const affinity = require('../services/media-gateway/src/providerProxyPool.js');
   const keyHelpers = sourceBetween(
     'function proxyKeyFromUrl',
     '// \u2500\u2500 Raw byte-pipe ledger',
   );
   const helpers = vm.runInNewContext(
     `(() => { ${keyHelpers}; return { proxyKeyFromUrl, providerAccountKeyFromCredentials }; })()`,
-    { URL },
+    {
+      URL,
+      providerAccountAffinityKey: affinity.providerAccountAffinityKey,
+      providerAccountAffinityKeyFromCredentials: affinity.providerAccountAffinityKeyFromCredentials,
+    },
   );
   assert.equal(
     helpers.proxyKeyFromUrl(

@@ -310,19 +310,19 @@ une supposition. Le garde-fou `onError`→gateway fait que **la lecture n'est ja
 Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le navigateur en `direct` sort par l'IP résidentielle de l'utilisateur → OK. Le moteur passe par la gateway (IP Railway) → bloqué. Router le trafic provider de la gateway via un **proxy résidentiel** fait voir au provider une IP résidentielle.
 
 ### Implémentation (`services/media-gateway/src/index.js`, GATEWAY_VERSION ≥ 52 — **pool**)
-- Env **`PROVIDER_PROXY_URLS`** = liste (séparée par virgule/espace/retour-ligne) d'URLs proxy → **pool**. `PROVIDER_PROXY_URL` (singulier) marche toujours (fusionné, pool de 1 = comportement identique). Vide → aucun changement.
-- Chaque **compte provider** est épinglé à **UNE** IP du pool (hash FNV-1a d'une clé stable : `uid` Norva sur les routes tokenisées, sinon `host+username` extrait de l'URL). **Sticky** = un compte = toujours la même IP (anti-flag) ; sur N users la charge se répartit ~uniformément sur les IPs.
-- `dispatcher: pickProxyAgent(key)` sur les `fetch` (`/raw` + Xtream JSON) ; `env: proxyEnvFor(key)` (http_proxy/https_proxy) par-spawn pour les **ffmpeg/ffprobe** (sous-titres, extraction audio whisper, transcode), avec une IP par défaut (1ʳᵉ du pool) en filet. Le `fetch` Node ignore ces env → Supabase/interne reste direct.
+- Env **`PROVIDER_PROXY_URLS`** = liste (séparée par virgule/espace/retour-ligne) d'URLs proxy → **pool**. `PROVIDER_PROXY_URL` (singulier) reste le fallback rétro-compatible lorsque la variable plurielle est absente (pool de 1 = comportement identique). Vide → aucun changement.
+- Chaque **compte provider** est épinglé à **UNE** IP du pool (hash FNV-1a d'une clé unique `host+username`, identique pour les routes tokenisées, Xtream JSON, ffmpeg et ffprobe). L'identifiant utilisateur Norva ne participe jamais à l'affinité. **Sticky** = un compte = toujours la même IP (anti-flag) ; sur N comptes la charge se répartit ~uniformément sur les cinq slots statiques.
+- `dispatcher: pickProxyAgent(key)` sur les `fetch` (`/raw` + Xtream JSON) ; `env: proxyEnvFor(key)` (http_proxy/https_proxy) par-spawn pour les **ffmpeg/ffprobe** (sous-titres, extraction audio whisper, storyboard/OCR, transcode). Il n'existe plus de proxy global « premier slot » : chaque chemin provider doit fournir la clé canonique, tandis que Supabase/interne reste direct.
 - `undici` en dépendance (chargé seulement si le proxy est configuré).
 - `GET /health` → `providerProxy: true/false` + `providerProxyPool: <taille>`.
 
-**Config Railway (pool de 5)** : `PROVIDER_PROXY_URLS` = les 5 URLs Evomi (une par IP — le mot de passe Evomi encode l'IP cible : `user:<IP>_<secret>`), séparées par des virgules ou des retours-ligne. Vérifier `GET /health` → `providerProxyPool:5`.
+**Config Railway (pool de 5)** : `PROVIDER_PROXY_URLS` = les 5 URLs Evomi, dans un ordre de slots immuable (une par IP — le mot de passe Evomi encode l'IP cible : `user:<IP>_<secret>`), séparées par des virgules ou des retours-ligne. Le démarrage accepte soit le proxy historique unique, soit exactement cinq slots ; une configuration partielle échoue fermée. Vérifier `GET /health` → `providerProxyPool:5`, `providerProxyAffinityProtocol:1`, `providerProxyAffinityKey:"provider-account"`.
 
 ### Configurer (Railway)
 1. Acheter une **Static Residential** dédiée (chez Evomi : « Private IPs », ~$2.50/IP, **bande passante illimitée**). **Pas** de résidentiel rotatif **au Go** (vidéo = facture ruineuse), **pas** de datacenter (même blocage). Couper l'option « High Concurrency » (inutile en mono-ligne).
 2. Format Evomi `host:port:user:pass` → URL `http://user:pass@host:port`.
-3. Railway → service media-gateway → Variables → `PROVIDER_PROXY_URL = http://…`. Le redéploiement est auto.
-4. Vérifier : `GET /health` → `"version":51, "providerProxy":true`, puis lancer un mkv.
+3. Pré-valider séparément les cinq endpoints Evomi, puis Railway → service media-gateway → Variables → `PROVIDER_PROXY_URLS` avec **cinq URLs ordonnées**, une par ligne. Conserver `PROVIDER_PROXY_URL` singulier comme rollback dormant ; le redéploiement est automatique.
+4. Vérifier : `GET /health` → `"version":81`, `"providerProxy":true`, `"providerProxyPool":5`, `"providerProxyAffinityProtocol":1` et `"providerProxyAffinityKey":"provider-account"`, puis lancer un mkv et confirmer l'absence de 407.
 5. 🔐 Les identifiants proxy = **secret** : uniquement dans l'env Railway, jamais dans le code/git. Régénérer si exposés.
 
 ### ⚠️ Limites (ne pas confondre les deux contraintes)
@@ -379,7 +379,7 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
   (manifest demandé avant que le transcode ne soit prêt / session pas fraîche). Rarement atteint (l'engine
   encaisse tout ce qu'on a testé + auto-retry), mais c'est LE filet pour un flux que l'engine ne sait
   vraiment pas gérer → re-résoudre une session fraîche + retries manifest. (tâche dédiée)
-- 🔐 Régénérer le mot de passe Evomi exposé en chat, le remettre dans `PROVIDER_PROXY_URL`.
+- 🔐 En cas d'exposition, régénérer les identifiants des cinq slots Evomi et remplacer les entrées correspondantes dans `PROVIDER_PROXY_URLS` sans réordonner le pool. Pour revenir temporairement au proxy unique, supprimer la variable plurielle et conserver `PROVIDER_PROXY_URL`.
 - Optionnel : durcir le pump contre les hoquets réseau du proxy (`TypeError: Failed to fetch` transitoire → retry au lieu de remonter l'erreur).
 - Optionnel : alléger les diagnostics (walker + hex) une fois la stabilité confirmée.
 - Optionnel : optim du démarrage TS (~15 s de seek dû à la double-recherche d'extradata au load).
