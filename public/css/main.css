@@ -10011,18 +10011,19 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 .home-ecosystem-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 6px;
-  color: var(--color-text-primary);
-  font-size: 0.72rem;
-  font-weight: 700;
+  position: absolute;
+  top: 12.5%;
+  left: 8.72%;
+  display: block;
+  width: 8.72%;
+  aspect-ratio: 1;
+  margin: 0;
 }
 
 .home-ecosystem-brand img {
-  width: 24px;
-  height: 24px;
+  display: block;
+  width: 100%;
+  height: 100%;
   border-radius: var(--radius-sm);
 }
 

@@ -776,9 +776,8 @@ class HomePage {
                     <div class="home-ecosystem-tv">
                         <div class="home-ecosystem-tv-screen">
                             <div class="home-ecosystem-brand">
-                                <img src="/img/norva-app-icon-96.png?v=1" width="24" height="24"
+                                <img src="/img/norva-app-icon-96.png?v=1" width="20" height="20"
                                     alt="" aria-hidden="true" decoding="async" draggable="false">
-                                <span>Norva</span>
                             </div>
                             <span class="home-ecosystem-code-label">Pairing code</span>
                             <strong class="home-ecosystem-code">K7M 4Q9</strong>

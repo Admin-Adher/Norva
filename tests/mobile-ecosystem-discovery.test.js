@@ -26,6 +26,10 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
     home.indexOf('renderEcosystemCard('),
     home.indexOf('\n    renderSetupGate(', home.indexOf('renderEcosystemCard(')),
   );
+  const illustration = method.slice(
+    method.indexOf('<div class="home-ecosystem-visual"'),
+    method.indexOf('<div class="home-ecosystem-actions"'),
+  );
   assert.match(home, /id="home-ecosystem"/);
   assert.match(method, /isNativePhoneShell/);
   assert.match(method, /isCloudMode/);
@@ -38,6 +42,11 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
   assert.match(method, /M354 209C405 209 425 257 467 257/);
   assert.match(method, /<circle cx="435" cy="251" r="7"><\/circle>/);
   assert.match(method, /\/img\/norva-app-icon-96\.png\?v=1/);
+  assert.match(
+    illustration,
+    /<div class="home-ecosystem-brand">\s*<img[^>]+norva-app-icon-96\.png\?v=1[^>]*>\s*<\/div>/,
+  );
+  assert.doesNotMatch(illustration, /<span>Norva<\/span>/);
   assert.ok(
     fs.existsSync(path.join(root, 'public/img/norva-app-icon-96.png')),
     'the approved Norva app icon must ship with Home',
