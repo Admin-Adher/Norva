@@ -514,7 +514,7 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 83;
+const GATEWAY_VERSION = 84;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -614,6 +614,7 @@ app.get('/health', (req, res) => {
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
         exactFileCodecProfileProtocol: 1,
+        matroskaCopyHlsSplitByTime: true,
         minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
@@ -4649,7 +4650,7 @@ function startFfmpeg(session) {
         // No `append_list`: it injected a spurious leading #EXT-X-DISCONTINUITY
         // that stalled hls.js fragment indexing. `temp_file` makes each segment
         // appear in the playlist only once fully written (no partial reads).
-        '-hls_flags', 'independent_segments+temp_file',
+        '-hls_flags', hlsFlagsForSession(session, encodeVideo),
         '-hls_segment_filename', segmentPattern,
         session.playlistPath
     );
@@ -4692,6 +4693,28 @@ function startFfmpeg(session) {
         });
 
     return child;
+}
+
+function hlsFlagsForSession(session, encodeVideo) {
+    const hint = asRecord(session?.playbackHint);
+    const profile = asRecord(session?.codecProfile);
+    const container = normalizeCodecToken(hint.container || profile.container);
+    const finiteExactMatroskaVideoCopy =
+        !isLiveSession(session) &&
+        session?.fastInputProbe === true &&
+        encodeVideo === false &&
+        (container === 'mkv' || container.includes('matroska'));
+
+    // Matroska files can have very sparse video keyframes. With video copy,
+    // independent_segments waits for the next keyframe before closing the first
+    // segment, which makes a healthy VOD appear stalled. split_by_time closes the
+    // bounded first segment on schedule; temp_file still prevents the playlist
+    // from referencing a partially-written segment. Encoded video, live streams,
+    // non-Matroska inputs and profiles without the exact fast probe remain on the
+    // conservative independent-segment contract.
+    return finiteExactMatroskaVideoCopy
+        ? 'split_by_time+temp_file'
+        : 'independent_segments+temp_file';
 }
 
 function seekArgsForSession(session, encodeVideo) {

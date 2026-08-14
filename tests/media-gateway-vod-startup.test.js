@@ -207,6 +207,51 @@ test('an unknown finite MKV video fails safe to encoding while live remains copy
     }), true, 'live keeps the existing non-probing compatibility path');
 });
 
+test('finite exact Matroska video copy splits HLS by time without exposing partial segments', () => {
+    const hlsFlagsForSession = loadGatewayFunction(
+        'hlsFlagsForSession',
+        'seekArgsForSession',
+        {
+            asRecord: gatewayGlobals.asRecord,
+            normalizeCodecToken: gatewayGlobals.normalizeCodecToken,
+            isLiveSession: (session) => session?.playbackHint?.streamType === 'live',
+        },
+    );
+
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: true,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+        codecProfile: { videoCodec: 'h264' },
+    }, false), 'split_by_time+temp_file');
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: true,
+        playbackHint: { streamType: 'movie' },
+        codecProfile: { container: 'matroska', videoCodec: 'h264' },
+    }, false), 'split_by_time+temp_file');
+
+    const conservativeFlags = 'independent_segments+temp_file';
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: false,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+    }, false), conservativeFlags, 'an unproven MKV keeps the existing segment contract');
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: true,
+        playbackHint: { streamType: 'movie', container: 'mkv' },
+    }, true), conservativeFlags, 'video transcode keeps independent segments');
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: true,
+        playbackHint: { streamType: 'live', container: 'mkv' },
+    }, false), conservativeFlags, 'live playback never enters the finite Matroska shortcut');
+    assert.strictEqual(hlsFlagsForSession({
+        fastInputProbe: true,
+        playbackHint: { streamType: 'movie', container: 'mp4' },
+    }, false), conservativeFlags, 'non-Matroska VOD remains unchanged');
+
+    const source = readGateway();
+    assert.match(source, /'-hls_flags', hlsFlagsForSession\(session, encodeVideo\)/);
+    assert.match(source, /matroskaCopyHlsSplitByTime:\s*true/);
+});
+
 test('the first provider 458 seen by ffprobe is terminal while proxy 407 stays infrastructure', () => {
     const isFfprobeProviderBusyFailure = loadGatewayFunction(
         'isFfprobeProviderBusyFailure',
