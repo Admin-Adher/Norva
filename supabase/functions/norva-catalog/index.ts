@@ -65,7 +65,14 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
 
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-catalog", version: 5, liveContract: "norva.live.logical.v1", materializedLive: true });
+      return json(req, {
+        ok: true,
+        service: "norva-catalog",
+        version: 6,
+        liveContract: "norva.live.logical.v1",
+        materializedLive: true,
+        flatCodecProfileProtocol: 1,
+      });
     }
 
     // Background catalog-enrichment progress for the header bar: how many of the user's
@@ -2712,9 +2719,20 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
   }
 }
 
+function flatMediaVariantKey(row: Record<string, any>): string | null {
+  const mediaItemId = stringOrNull(row.media_item_id ?? row.mediaItemId ?? row.id);
+  const sourceId = stringOrNull(row.source_id ?? row.sourceId);
+  const externalId = stringOrNull(row.external_id ?? row.externalId);
+  if (!mediaItemId || !sourceId || !externalId) return null;
+  // JSON encoding keeps arbitrary provider ids unambiguous without inventing a
+  // delimiter that could itself occur in an external id.
+  return JSON.stringify([mediaItemId, sourceId, externalId]);
+}
+
 // The flat media-items grid returns cloud_media_items rather than title variants.
-// Join those owned rows back to their exact movie variants, then attach only the
-// tenant-local language SET. No stream index is manufactured here.
+// Join those owned rows back to their exact movie variants, then attach exact-file
+// codec/playback facts plus the tenant-local language SET. No sibling fallback and
+// no stream index is manufactured here.
 async function attachFlatMediaFileLanguages(
   items: Array<Record<string, any>>,
   userId: string,
@@ -2724,26 +2742,43 @@ async function attachFlatMediaFileLanguages(
   try {
     const mediaIds = [...new Set(items.map((item) => String(item.id ?? "")).filter(Boolean))];
     if (!mediaIds.length) return;
-    const variantByMediaId = new Map<string, JsonRecord>();
+    const variantByExactFile = new Map<string, JsonRecord>();
     for (let index = 0; index < mediaIds.length; index += 500) {
       const { data, error } = await db.from("cloud_title_variants")
-        .select("id,media_item_id,external_id")
+        .select("id,user_id,source_id,media_item_id,item_type,external_id,playback_hint,codec_profile")
         .eq("user_id", userId)
         .eq("item_type", "movie")
         .in("media_item_id", mediaIds.slice(index, index + 500));
       if (error) throw error;
       for (const variant of (data ?? []) as JsonRecord[]) {
-        const mediaId = String(variant.media_item_id ?? "");
-        if (mediaId) variantByMediaId.set(mediaId, variant);
+        const exactFileKey = flatMediaVariantKey(variant);
+        if (exactFileKey) variantByExactFile.set(exactFileKey, variant);
       }
     }
     const observations = await fileLanguageObservationsByVariant(
-      [...variantByMediaId.values()].map((variant) => String(variant.id ?? "")),
+      [...variantByExactFile.values()].map((variant) => String(variant.id ?? "")),
       userId,
     );
     for (const item of items) {
-      const variant = variantByMediaId.get(String(item.id ?? ""));
-      if (!variant || String(variant.external_id ?? "") !== String(item.external_id ?? "")) continue;
+      const exactFileKey = flatMediaVariantKey(item);
+      const variant = exactFileKey ? variantByExactFile.get(exactFileKey) : null;
+      if (!variant) continue;
+
+      // Gateway probes persist these facts on cloud_title_variants. Project them
+      // back onto the exact cloud_media_items row so the next launch can route
+      // from known codecs instead of paying another gateway probe/transcode.
+      const codecProfile = recordOrEmpty(variant.codec_profile);
+      if (Object.keys(codecProfile).length) {
+        item.codec_profile = codecProfile;
+        item.codecProfile = codecProfile;
+      }
+      const variantPlaybackHint = recordOrEmpty(variant.playback_hint);
+      if (Object.keys(variantPlaybackHint).length) {
+        const mergedPlaybackHint = { ...recordOrEmpty(item.playback_hint ?? item.playbackHint), ...variantPlaybackHint };
+        item.playback_hint = mergedPlaybackHint;
+        item.playbackHint = mergedPlaybackHint;
+      }
+
       attachFileLanguageObservation(variant, observations.get(String(variant.id ?? "")));
       if (variant.__file_audio_observed === true) {
         const verified = Boolean(variant.__file_audio_verified_at);

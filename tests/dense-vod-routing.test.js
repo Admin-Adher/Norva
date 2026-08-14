@@ -349,7 +349,7 @@ function memoryStorage(seed = {}) {
     };
 }
 
-function loadCloudApi({ native = false } = {}) {
+function loadCloudApi({ native = false, createSessionError = null } = {}) {
     const calls = [];
     const localStorage = memoryStorage({
         'norva-cloud-session': JSON.stringify({
@@ -360,6 +360,7 @@ function loadCloudApi({ native = false } = {}) {
     const sessionStorage = memoryStorage();
     const createSession = async (request) => {
         calls.push(request);
+        if (createSessionError) throw createSessionError;
         const url = request.mode === 'transcode'
             ? 'https://gateway.test/sessions/test/playlist.m3u8'
             : request.mode === 'direct'
@@ -498,14 +499,57 @@ test('dense but browser-safe MP4 keeps the normal relay path', async () => {
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
 });
 
-test('unknown-codec MP4 chooses one gateway session instead of an engine-to-gateway prompt', async () => {
+test('unknown-codec MP4-family VOD opens one engine lane and never pre-opens Gateway', async () => {
+    for (const container of ['mp4', 'm4v', 'mov']) {
+        const { API, calls } = loadCloudApi();
+        const result = await API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            `unknown-${container}`,
+            'movie',
+            container,
+            {}
+        );
+
+        assert.strictEqual(result.mode, 'engine', `${container} must use the bounded browser engine`);
+        assert.strictEqual(calls.length, 1, `${container} must open exactly one upstream lane`);
+        assert.strictEqual(calls[0].mode, 'relay');
+        assert.strictEqual(calls[0].requiresTranscode, undefined);
+        assert.strictEqual(calls[0].enginePipe, true);
+        assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
+    }
+});
+
+test('an engine-lane HTTP 458 is terminal and never opens a Gateway session', async () => {
+    const providerBusy = Object.assign(new Error('provider busy'), {
+        status: 458,
+        code: 'PROVIDER_BUSY'
+    });
+    const { API, calls } = loadCloudApi({ createSessionError: providerBusy });
+
+    await assert.rejects(
+        API.proxy.xtream.getStreamUrl(
+            '00000000-0000-4000-8000-000000000001',
+            'busy-unknown-mp4',
+            'movie',
+            'mp4',
+            {}
+        ),
+        (error) => error === providerBusy
+    );
+
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+});
+
+test('explicit conversion of an unknown-codec MP4 opens exactly one Gateway lane', async () => {
     const { API, calls } = loadCloudApi();
     const result = await API.proxy.xtream.getStreamUrl(
         '00000000-0000-4000-8000-000000000001',
-        'unknown-mp4',
+        'convert-unknown-mp4',
         'movie',
         'mp4',
-        {}
+        { mode: 'transcode', gatewayMode: 'remux' }
     );
 
     assert.strictEqual(result.mode, 'transcode');
@@ -513,7 +557,6 @@ test('unknown-codec MP4 chooses one gateway session instead of an engine-to-gate
     assert.strictEqual(calls[0].mode, 'transcode');
     assert.strictEqual(calls[0].requiresTranscode, true);
     assert.strictEqual(calls[0].enginePipe, undefined);
-    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
 });
 
 test('dense VOD remains direct on a native player', async () => {

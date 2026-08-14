@@ -1244,16 +1244,6 @@ const CloudAdapter = (() => {
         return ENGINE_DEMUXABLE_CONTAINERS.has(c);
     }
 
-    function shouldUnknownCodecVodUseGateway(container, playbackHint = {}) {
-        const c = String(container || '').split('?')[0].split('#')[0].toLowerCase();
-        if (!['mp4', 'm4v', 'mov'].includes(c)) return false;
-        // An unknown MP4 profile used to open an engine relay first and, when
-        // libav/MSE rejected it, ask for a second explicit Gateway session.
-        // Choose the single server-owned session up front; the Gateway probes
-        // the exact file and can still stream-copy a browser-safe profile.
-        return !normalizeCodecToken(playbackHint.videoCodec);
-    }
-
     function normalizeCodecToken(value) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
     }
@@ -1728,8 +1718,10 @@ const CloudAdapter = (() => {
                 // (series episodes arrive from norva-series-info without the codec_profile that
                 // norva-catalog attaches to movies) defaults through here and DEAD-ENDS on the
                 // native <video> element when it's actually HEVC. When the codec is unknown and the
-                // container is engine-demuxable, prefer the in-browser engine (plays H.264 AND HEVC,
-                // and fails over to the gateway transcode on error) over gambling on native.
+                // container is engine-demuxable, prefer one bounded in-browser engine lane (plays
+                // H.264 AND HEVC) over gambling on native or paying the Gateway probe/HLS startup.
+                // If that lane proves incompatible, the player may offer server conversion as a
+                // fresh explicit user action; it must never open a second lane automatically.
                 // Known-H.264 keeps the fast native/relay path; nativePlayer (hardware HEVC) is
                 // handled earlier in the mode ternary and is unaffected.
                 const videoCodecKnown = Boolean(normalizeCodecToken(playbackHint.videoCodec));
@@ -1748,7 +1740,6 @@ const CloudAdapter = (() => {
                     && !nativePlayer
                     && !denseTrackVod
                     && !browserSafeVod
-                    && !shouldUnknownCodecVodUseGateway(container, playbackHint)
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
                     && Boolean(window.NorvaEngine);

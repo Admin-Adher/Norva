@@ -1659,13 +1659,25 @@ class WatchPage {
                 this.showPlaybackError(errorText, { immediate: true });
                 return;
             }
-            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            // A cloud resolver can finish after Back/navigation invalidated this
+            // attempt. The response already owns a provider session, so capture
+            // and expire that exact session before discarding the late result.
+            // Otherwise its Gateway process can stay alive until the 15-minute
+            // lease expires even though no player is left to consume it.
+            const resolvedPlaybackMetadata = this.playbackMetadataFromResult({ ...playback, ...resolved });
+            const resolvedSessionId = resolvedPlaybackMetadata.sessionId
+                || resolvedPlaybackMetadata.cloudPlaybackSessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+                await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
+                return;
+            }
             if (!resolved || !resolved.url) {
+                await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
                 this.showPlaybackError('This title could not be started. Please try again.', { immediate: true });
                 return;
             }
             streamUrl = resolved.url;
-            playbackMetadata = this.playbackMetadataFromResult({ ...playback, ...resolved });
+            playbackMetadata = resolvedPlaybackMetadata;
             this._resumePlaybackMetadata = playbackMetadata;
             const resolvedStartOffset = Number(
                 playbackMetadata.actualStartOffset ??
@@ -1676,7 +1688,6 @@ class WatchPage {
             if (Number.isFinite(resolvedStartOffset) && resolvedStartOffset >= 0) {
                 loadSeekOffset = resolvedStartOffset;
             }
-            const resolvedSessionId = playbackMetadata.sessionId || playbackMetadata.cloudPlaybackSessionId;
             if (resolvedSessionId) {
                 cloudPlaybackSessionId = resolvedSessionId;
                 content.cloudPlaybackSessionId = resolvedSessionId;
@@ -2340,8 +2351,13 @@ class WatchPage {
     async cleanupStaleCloudPlaybackSession(sessionId) {
         const id = sessionId ? String(sessionId).trim() : '';
         if (!id) return;
+        const cloud = window.NorvaCloud;
+        const playbackApi = cloud?.token
+            ? cloud.playback
+            : (cloud?.deviceToken ? cloud.device?.playback : null);
+        if (typeof playbackApi?.expireSession !== 'function') return;
         try {
-            await window.NorvaCloud?.playback?.expireSession?.(id);
+            await playbackApi.expireSession(id);
         } catch (error) {
             console.warn('[WatchPage] Could not expire stale cloud playback session:', error?.message || error);
         }
@@ -2906,15 +2922,18 @@ class WatchPage {
 
         if (!sessionIds.size) return;
 
+        const cloud = window.NorvaCloud;
+        const playbackApi = cloud?.token
+            ? cloud.playback
+            : (cloud?.deviceToken ? cloud.device?.playback : null);
+        if (typeof playbackApi?.expireSession !== 'function') return;
+
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds.clear();
 
-        const expireSession = window.NorvaCloud?.playback?.expireSession;
-        if (typeof expireSession !== 'function') return;
-
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
-            await expireSession(sessionId, options);
+            await playbackApi.expireSession(sessionId, options);
         })).then(results => {
             results.forEach(result => {
                 if (result.status === 'rejected') {
