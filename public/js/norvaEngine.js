@@ -658,7 +658,11 @@
       }
       const remaining = this._startupRemainingMs();
       if (remaining <= 0) throw this._startupTimeoutError('cache-retry');
-      await new Promise((resolve) => setTimeout(resolve, Math.min(delayMs, remaining)));
+      if (delayMs >= remaining) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+        throw this._startupTimeoutError('cache-retry');
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
       this._assertStartupDeadline('cache-retry');
     }
 
