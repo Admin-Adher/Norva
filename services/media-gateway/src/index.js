@@ -475,16 +475,22 @@ const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_D
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
 const VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.VOD_INPUT_PROBE_SIZE_BYTES, 8_000_000, 64_000, 30_000_000);
-// Once an exact Matroska profile is already known (from the catalogue or the
+// Once an exact VOD profile is already known (from the catalogue or the
 // gateway's own ffprobe just above session startup), asking FFmpeg to analyse
 // another 8 seconds / 8 MB delays the first segment without discovering
-// anything useful. Keep the conservative budget for unknown files and use the
-// same bounded footprint that successfully produced the exact profile for the
+// anything useful. Keep the conservative budget for unknown/partial files and
+// use the same bounded footprint that produced the exact profile for the
 // known-file fast path.
 const KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED =
     (process.env.KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED || 'true') !== 'false';
 const KNOWN_VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.KNOWN_VOD_INPUT_ANALYZE_DURATION_US, 2_000_000, 250_000, 8_000_000);
 const KNOWN_VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.KNOWN_VOD_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 8_000_000);
+// A playlist file can be created before it contains enough media to advance a
+// browser. In particular, a short leading fragment (~100 ms) can produce an
+// invalid/near-zero HLS target duration and leave hls.js at readyState=1. Do
+// not advertise a session until the playlist references a finalized segment
+// with a small but meaningful startup buffer.
+const MIN_HLS_STARTUP_BUFFER_SECONDS = clampInt(process.env.MIN_HLS_STARTUP_BUFFER_SECONDS, 2, 1, 10);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 2_500, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
@@ -508,7 +514,7 @@ const RAW_PREFIX_SNIFF_BYTES = 512;
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 81;
+const GATEWAY_VERSION = 82;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -607,6 +613,7 @@ app.get('/health', (req, res) => {
         knownVodInputProbeFastPathEnabled: KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED,
         knownVodInputAnalyzeDurationUs: KNOWN_VOD_INPUT_ANALYZE_DURATION_US,
         knownVodInputProbeSizeBytes: KNOWN_VOD_INPUT_PROBE_SIZE_BYTES,
+        minHlsStartupBufferSeconds: MIN_HLS_STARTUP_BUFFER_SECONDS,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
         rawStreamHealth: {
@@ -4239,11 +4246,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         );
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
+        const requestCodecProfileReliable = hasReliableVodCodecProfile(normalizedCodecProfile);
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
         const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
         const codecProfileStartedAt = Date.now();
         let codecProfileProbeRan = false;
-        if ((!codecProfileSource || shouldCompleteProfile) && shouldProbe) {
+        if ((!codecProfileSource || !requestCodecProfileReliable || shouldCompleteProfile) && shouldProbe) {
             codecProfileProbeRan = true;
             try {
                 const probedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
@@ -4292,6 +4300,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 codecProfileMs,
                 codecProfileProbeRan,
                 ffmpegReadyMs: null,
+                playlistSegmentCount: 0,
+                playlistBufferSeconds: 0,
+                firstSegmentBytes: 0,
                 startOffsetProbeMs: null,
                 totalMs: null
             }
@@ -4778,23 +4789,10 @@ function knownVodInputProbeEligible(session) {
         || profileSource.includes('gateway_probe');
     if (!detailedProfileSource) return false;
     const container = normalizeCodecToken(hint.container || profile.container).split(',')[0];
-    if (!['mkv', 'matroska', 'webm'].includes(container)) return false;
-
-    // First rollout is deliberately scoped to the dense exact-file route that
-    // motivated it. These compact counts only exist when MediaUtils proved
-    // file-level track scope; title-level language unions never populate them.
-    const audioTrackCount = nullableInt(
-        hint.audioTrackCount ?? hint.audio_track_count
-    );
-    const subtitleTrackCount = nullableInt(
-        hint.subtitleTrackCount ?? hint.subtitle_track_count
-    );
-    if (
-        !Number.isInteger(audioTrackCount) ||
-        audioTrackCount < 20 ||
-        !Number.isInteger(subtitleTrackCount) ||
-        subtitleTrackCount < 30
-    ) return false;
+    // This is a VOD demux optimization, never a live-stream shortcut. Restrict
+    // it to finite file containers for which the full-budget fallback below is
+    // safe when an allegedly exact profile turns out to be stale.
+    if (!['mp4', 'm4v', 'mov', 'mkv', 'matroska', 'webm', 'avi'].includes(container)) return false;
 
     const videoCodec = stringOrNull(
         session.videoCodec ||
@@ -4805,10 +4803,15 @@ function knownVodInputProbeEligible(session) {
     const audioTracks = Array.isArray(profile.audioTracks)
         ? profile.audioTracks
         : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
-    if (!audioTracks.length) return false;
+    const requestedAudioIndex = nullableInt(session.audioStreamIndex);
+    if (
+        Number.isInteger(requestedAudioIndex) &&
+        audioTracks.length > 0 &&
+        !audioTracks.some((track) => nullableInt(track?.index) === requestedAudioIndex)
+    ) return false;
     const selectedAudio = selectedAudioTrackForSession(session);
     const selectedAudioIndex = nullableInt(
-        selectedAudio?.index ?? session.audioStreamIndex
+        requestedAudioIndex ?? selectedAudio?.index
     );
     const audioCodec = stringOrNull(
         selectedAudio?.codec ||
@@ -4817,7 +4820,13 @@ function knownVodInputProbeEligible(session) {
         profile.audio_codec ||
         profile.audio
     );
-    return Boolean(videoCodec && audioCodec && Number.isInteger(selectedAudioIndex));
+    // An explicit/default absolute map is ideal. When the exact profile proves
+    // an audio codec but carries no track array, strict `0:a:0` is still a
+    // deterministic map and avoids discovering the same MP4 twice.
+    const deterministicAudioMap = Number.isInteger(selectedAudioIndex) || (
+        audioTracks.length === 0 && Boolean(audioCodec)
+    );
+    return Boolean(videoCodec && audioCodec && deterministicAudioMap);
 }
 
 function isInsufficientInputProbeFailure(session) {
@@ -4966,13 +4975,13 @@ function selectedAudioTrackForSession(session) {
 function isKnownBrowserSafeAudio(codec, profile) {
     const joined = `${codec} ${profile}`;
     if (hasHeAacMarker(joined)) return false;
-    return (
-        codec.includes('aac') ||
-        codec.includes('mp4a.40.2') ||
-        codec.includes('mp3') ||
-        codec.includes('opus') ||
-        codec.includes('vorbis')
-    );
+    // This predicate is for the Gateway's MPEG-TS HLS output, not for a
+    // browser opening the original MP4 directly. Chrome/hls.js can accept MP3,
+    // Opus or Vorbis in other containers yet fail to append that copied audio
+    // from MPEG-TS, leaving the video at HAVE_METADATA (~0.1 s). AAC-LC stereo
+    // is the only copy path we can advertise reliably here; every other codec
+    // is normalized to the AAC-LC fallback above.
+    return codec.includes('aac') || codec.includes('mp4a.40.2');
 }
 
 function isKnownUnsafeAudio(codec, profile) {
@@ -5323,6 +5332,23 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
     });
 }
 
+function hasReliableVodCodecProfile(profile) {
+    const record = asRecord(profile);
+    const videoCodec = stringOrNull(
+        record.videoCodec || record.video_codec || record.video
+    );
+    const audioTracks = Array.isArray(record.audioTracks)
+        ? record.audioTracks
+        : (Array.isArray(record.audio_tracks) ? record.audio_tracks : []);
+    const audioCodec = stringOrNull(
+        record.audioCodec ||
+        record.audio_codec ||
+        record.audio ||
+        audioTracks.find((track) => stringOrNull(track?.codec))?.codec
+    );
+    return Boolean(videoCodec && audioCodec);
+}
+
 function hasUsefulCodecProfile(profile) {
     const record = asRecord(profile);
     return Boolean(
@@ -5406,11 +5432,69 @@ function shouldProbeCodecProfile(playbackHint, sourceUrl) {
     }
 }
 
+function inspectHlsStartupPlaylist(playlist) {
+    const lines = String(playlist || '').split(/\r?\n/);
+    let durationSeconds = 0;
+    let segmentCount = 0;
+    let firstSegment = null;
+    let pendingDuration = null;
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        if (line.startsWith('#EXTINF:')) {
+            const duration = Number.parseFloat(line.slice('#EXTINF:'.length).split(',')[0]);
+            pendingDuration = Number.isFinite(duration) && duration >= 0 ? duration : 0;
+            continue;
+        }
+        if (line.startsWith('#') || pendingDuration === null) continue;
+        const segment = path.basename(line.split(/[?#]/, 1)[0]);
+        if (!segment) {
+            pendingDuration = null;
+            continue;
+        }
+        if (!firstSegment) firstSegment = segment;
+        segmentCount += 1;
+        durationSeconds += pendingDuration;
+        pendingDuration = null;
+    }
+
+    durationSeconds = Number(durationSeconds.toFixed(3));
+    if (!segmentCount || !firstSegment) {
+        return { ready: false, reason: 'no_segments', segmentCount: 0, durationSeconds: 0, firstSegment: null };
+    }
+    if (durationSeconds < MIN_HLS_STARTUP_BUFFER_SECONDS) {
+        return { ready: false, reason: 'insufficient_duration', segmentCount, durationSeconds, firstSegment };
+    }
+    return { ready: true, reason: 'ready', segmentCount, durationSeconds, firstSegment };
+}
+
 async function waitForPlaylist(session, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (session.lastError) throw new Error(session.lastError);
-        if (fs.existsSync(session.playlistPath)) return;
+        if (fs.existsSync(session.playlistPath)) {
+            try {
+                const playlist = await fsp.readFile(session.playlistPath, 'utf8');
+                const inspection = inspectHlsStartupPlaylist(playlist);
+                if (inspection.ready) {
+                    const segmentPath = path.resolve(session.outputDir, inspection.firstSegment);
+                    if (isWithin(session.outputDir, segmentPath)) {
+                        const stat = await fsp.stat(segmentPath);
+                        if (stat.isFile() && stat.size > 0) {
+                            session.startupTimings = session.startupTimings || {};
+                            session.startupTimings.playlistSegmentCount = inspection.segmentCount;
+                            session.startupTimings.playlistBufferSeconds = inspection.durationSeconds;
+                            session.startupTimings.firstSegmentBytes = stat.size;
+                            return;
+                        }
+                    }
+                }
+            } catch (error) {
+                // FFmpeg updates HLS artifacts atomically. A rename/read/stat
+                // race means "not ready yet", not a terminal provider failure.
+            }
+        }
         await sleep(250);
     }
     throw new Error('Playlist timeout');

@@ -55,9 +55,13 @@
   // (even with gateway retries that's slow), so fetch large windows and serve
   // libav's small block reads from memory — sequential playback then uses ~1
   // upstream connection per window instead of one per ~64 KB block.
-  const RA_WINDOW = 4 * 1024 * 1024;        // bytes fetched per steady-state window
-  const RA_FIRST_WINDOW = 2 * 1024 * 1024;  // smaller first window → faster startup
-  const RA_WINDOWS = 4;                      // windows kept (header + cues + playhead)
+  const RA_WINDOW = 4 * 1024 * 1024;          // bytes fetched per steady-state window
+  const RA_INITIAL_WINDOW = 512 * 1024;       // minimum container head needed to start demuxing
+  const RA_STARTUP_WINDOW_MAX = 1024 * 1024;  // cap ranges until the first usable media append
+  const RA_SEEK_WINDOW = 2 * 1024 * 1024;     // preserve established cue/seek coverage after startup
+  const RA_WINDOWS = 4;                        // windows kept (header + cues + playhead)
+  const STARTUP_DEADLINE_MS = 15000;           // engine budget through first usable media append
+  const FETCH_TIMEOUT_MS = 60000;              // steady-state timeout; startup is clamped below
 
   const AAC_SAMPLE_RATE = 48000;
   const AAC_CHANNEL_LAYOUT = 3; // stereo
@@ -112,6 +116,11 @@
     try { const j = JSON.stringify(e); if (j && j !== '{}') return j; } catch (_) {}
     try { const k = Object.keys(e); if (k.length) return k.map((x) => x + '=' + String(e[x])).join(' '); } catch (_) {}
     return Object.prototype.toString.call(e);
+  }
+
+  function isProviderBusyError(e) {
+    const text = errStr(e);
+    return /(?:^|[^A-Z0-9])(?:BLOCK|PROBE)_HTTP_458(?:$|[^0-9])|(?:^|[^0-9])HTTP[ _]?458(?:$|[^0-9])|PROVIDER_(?:ACCOUNT_)?BUSY|max connections?/i.test(text);
   }
 
   // Walk the top-level ISO-BMFF/fMP4 boxes in a chunk so a rejected append can be
@@ -270,7 +279,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 45;
+  const ENGINE_VERSION = 46;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -346,6 +355,16 @@
       this._raCache = [];         // read-ahead windows (filled before _openInput)
       this.timings = {};          // per-stage startup timings (ms)
       this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
+      this._fetchAttemptCount = 0;
+      this._fetchWindows = [];    // bounded range timings; never contains the media URL
+      this._startupFetchWindows = [];
+      this._startupActive = false;
+      this._startupDeadlineAt = 0;
+      this._startupDeadlineTimer = null;
+      this._startupOutcomePromise = null;
+      this._startupOutcomeResolve = null;
+      this._startupOutcomeReject = null;
+      this._startupOutcomeSettled = true;
       this.decCtx = null; this.decPkt = null; this.decFrame = null;
       this.encCtx = null; this.encFrame = null; this.encPkt = null; this.frameSize = 0; this.encCodecpar = null;
       // Audio transcode output is clocked from one exact 48 kHz sample counter.
@@ -424,33 +443,55 @@
       this._wantAudioIndex = Number.isInteger(audioStreamIndex) ? audioStreamIndex : null;
       const t0 = performance.now();
       this.loadStartedAt = t0;
+      this._startupActive = true;
+      this._startupDeadlineAt = t0 + STARTUP_DEADLINE_MS;
+      this._startupFetchWindows = [];
+      this._fetchWindows = [];
+      this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
+      this._fetchAttemptCount = 0;
+      this.timings = {
+        startupDeadlineMs: STARTUP_DEADLINE_MS,
+        initialWindowKB: Math.round(RA_INITIAL_WINDOW / 1024),
+        startupWindowMaxKB: Math.round(RA_STARTUP_WINDOW_MAX / 1024),
+      };
+      this._createStartupOutcome();
+      this._armStartupDeadline();
       // Kick off wasm AND the initial network at the same time: the wasm compile
       // (~3 MB) overlaps the single first-window fetch (which also yields the
       // file size), so _openInput's demuxer reads hit the cache, not the net.
       const factoryP = loadLibavFactory();
       const prefetchP = this._prefetchStart();
-      const factory = await factoryP;
+      const factory = await this._withStartupDeadline(factoryP, 'wasm-loader');
+      this._assertStartupDeadline('wasm-loader');
       const LibAV = factory.LibAV || factory.default.LibAV;
       // Pin every layer of the generated runtime to this engine revision. Busting
       // only norvaEngine.js is insufficient: browsers can otherwise retain the old
       // worker helper that ignored av_interleaved_write_frame failures.
-      this.lib = await LibAV({
+      this.lib = await this._withStartupDeadline(LibAV({
         base: LIBAV_BASE,
         toImport: LIBAV_RUNTIME,
         wasmurl: LIBAV_WASM,
-      });
+      }), 'wasm-runtime');
+      this._assertStartupDeadline('wasm-runtime');
       // Quiet libav at the source before any demuxing (see _verbose above). The
       // call proxies into the worker, so it governs the thread that does the work.
       // FATAL (not ERROR) for the normal path: MPEG-TS sources emit ERROR-level
       // "Invalid timestamps" per packet (a benign source quirk libav clamps), which
       // floods the console with hundreds of lines and buries real diagnostics. The
       // engine surfaces genuine failures via telemetry + engineSnapshot, not libav logs.
-      try { await this.lib.av_log_set_level(this._verbose ? this.lib.AV_LOG_VERBOSE : this.lib.AV_LOG_FATAL); } catch (_) {}
+      try {
+        await this._withStartupDeadline(
+          this.lib.av_log_set_level(this._verbose ? this.lib.AV_LOG_VERBOSE : this.lib.AV_LOG_FATAL),
+          'log-config');
+      } catch (e) {
+        if (e && e.code === 'ENGINE_STARTUP_TIMEOUT') throw e;
+      }
       this.timings.wasmMs = Math.round(performance.now() - t0);
       this.log(`libav prêt (${this.lib.libavjsMode}) en ${(this.timings.wasmMs / 1000).toFixed(1)}s`);
 
       let m = performance.now();
-      await prefetchP;
+      await this._withStartupDeadline(prefetchP, 'prefetch');
+      this._assertStartupDeadline('prefetch');
       if (!this.size) {
         // The first-window fetch already failed. If it was a provider slot/auth block
         // (401/403/429/458), do NOT open a SECOND connection to re-probe the size: it
@@ -459,28 +500,35 @@
         // and let the player's retry wait for the slot, then try cleanly.
         const pe = this._prefetchError;
         if (pe && /_(401|403|429|458)\b/.test(String((pe && pe.message) || pe))) throw pe;
-        this.size = await this._probeSize(url);
+        this.size = await this._withStartupDeadline(this._probeSize(url), 'probe');
       }
+      this._assertStartupDeadline('probe');
       this.timings.probeMs = Math.round(performance.now() - m);
-      m = performance.now(); await this._openInput(); this.timings.openInputMs = Math.round(performance.now() - m);
-      m = performance.now(); await this._detectStreams(); await this._ensureVideoExtradata(); this.mime = await this._chooseMime(); this.timings.detectMimeMs = Math.round(performance.now() - m);
-      m = performance.now(); await this._attachMediaSource(); this.timings.mediaSourceMs = Math.round(performance.now() - m);
-      m = performance.now(); if (this.copyAudio === false && this.aS) await this._initEncoder(); this.timings.encoderMs = Math.round(performance.now() - m);
-      m = performance.now(); await this._initMuxer(); this.timings.muxerMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._withStartupDeadline(this._openInput(), 'demux-open'); this.timings.openInputMs = Math.round(performance.now() - m);
+      m = performance.now();
+      await this._withStartupDeadline(this._detectStreams(), 'stream-detect');
+      await this._withStartupDeadline(this._ensureVideoExtradata(), 'video-extradata');
+      this.mime = await this._withStartupDeadline(this._chooseMime(), 'mime-select');
+      this.timings.detectMimeMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._withStartupDeadline(this._attachMediaSource(), 'media-source'); this.timings.mediaSourceMs = Math.round(performance.now() - m);
+      m = performance.now(); if (this.copyAudio === false && this.aS) await this._withStartupDeadline(this._initEncoder(), 'audio-encoder'); this.timings.encoderMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._withStartupDeadline(this._initMuxer(), 'muxer'); this.timings.muxerMs = Math.round(performance.now() - m);
       m = performance.now();
       if (startTime > 0.25) {
         // Resume: anchor the SB to the resume point (refined to the real keyframe
         // PTS by _setVideoDts) so data lands at startTime, not at 0.
         this._tsAnchor = startTime; this._firstVpktPending = true; this._nudgeDone = false;
-        await this._seekDemuxer(startTime);
+        await this._withStartupDeadline(this._seekDemuxer(startTime), 'resume-seek');
         // We've positioned the demuxer/pump; ignore the seeking event this fires.
         this._skipSeekTo = startTime;
         setTimeout(() => { if (this._skipSeekTo === startTime) this._skipSeekTo = null; }, 5000);
         try { this.video.currentTime = startTime; } catch (_) {}
       }
+      this._assertStartupDeadline('pump-start');
       this.timings.seekMs = Math.round(performance.now() - m);
       this.timings.loadTotalMs = Math.round(performance.now() - t0);
       this.timings.fetches = this._fetchCount;
+      this.timings.fetchAttempts = this._fetchAttemptCount;
       this.timings.fetchMB = Math.round((this._fetchBytes / 1048576) * 10) / 10;
       this.timings.fetchMs = Math.round(this._fetchMs);
       this.timings.audio = this.copyAudio ? 'copy' : 'aac';
@@ -493,9 +541,180 @@
       this.video.addEventListener('seeking', this._onSeeking);
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();
+      await this._withStartupDeadline(this._startupOutcomePromise, 'first-usable-append');
       // Build the cue index in the background (enables prefetch-on-scrub). Delayed
       // so it never competes with the first frame's fetches on the single-slot link.
       setTimeout(() => { if (!this.destroyed) this._buildCueIndex(); }, 2500);
+    }
+
+    _startupTimeoutError(stage) {
+      const error = new Error(`ENGINE_STARTUP_TIMEOUT:${stage}:${STARTUP_DEADLINE_MS}`);
+      error.code = 'ENGINE_STARTUP_TIMEOUT';
+      return error;
+    }
+
+    _startupRemainingMs() {
+      if (!this._startupActive || !Number.isFinite(this._startupDeadlineAt)) return Infinity;
+      return Math.max(0, this._startupDeadlineAt - performance.now());
+    }
+
+    _assertStartupDeadline(stage) {
+      if (this._startupRemainingMs() > 0) return;
+      throw this._startupTimeoutError(stage);
+    }
+
+    _createStartupOutcome() {
+      this._startupOutcomeSettled = false;
+      this._startupOutcomePromise = new Promise((resolve, reject) => {
+        this._startupOutcomeResolve = resolve;
+        this._startupOutcomeReject = reject;
+      });
+      // load() consumes this promise, but the watchdog can reject it while load()
+      // is still inside another worker RPC. Attach a handler now so that race is
+      // never reported as an unhandled rejection by the browser.
+      this._startupOutcomePromise.catch(() => {});
+      return this._startupOutcomePromise;
+    }
+
+    _settleStartupOutcome(error = null) {
+      if (this._startupOutcomeSettled || !this._startupOutcomePromise) return false;
+      this._startupOutcomeSettled = true;
+      const resolve = this._startupOutcomeResolve;
+      const reject = this._startupOutcomeReject;
+      this._startupOutcomeResolve = null;
+      this._startupOutcomeReject = null;
+      if (error) reject(error);
+      else resolve(true);
+      return true;
+    }
+
+    async _withStartupDeadline(work, stage) {
+      this._assertStartupDeadline(stage);
+      if (!this._startupActive || !this._startupOutcomePromise) return await work;
+      // The independently armed watchdog rejects _startupOutcomePromise at the
+      // absolute deadline. Racing every worker/network await against that one
+      // promise makes the 15 s budget truly global, even if an RPC never settles.
+      const watchdog = this._startupOutcomePromise.then(
+        () => new Promise(() => {}),
+        (error) => Promise.reject(error),
+      );
+      return await Promise.race([Promise.resolve(work), watchdog]);
+    }
+
+    _clearStartupDeadlineTimer() {
+      if (this._startupDeadlineTimer) clearTimeout(this._startupDeadlineTimer);
+      this._startupDeadlineTimer = null;
+    }
+
+    _armStartupDeadline() {
+      this._clearStartupDeadlineTimer();
+      const remaining = this._startupRemainingMs();
+      if (!Number.isFinite(remaining)) return;
+      this._startupDeadlineTimer = setTimeout(() => {
+        this._startupDeadlineTimer = null;
+        if (this._startupActive && !this.destroyed) this._signalStartupTimeout('global');
+      }, Math.max(1, Math.ceil(remaining)));
+    }
+
+    _markStartupUsableFromBuffer() {
+      if (!this._startupActive || this._stopRequested || this._startupOutcomeSettled || !this.sb) return false;
+      let usable = false;
+      try {
+        for (let i = 0; i < this.sb.buffered.length; i++) {
+          if (this.sb.buffered.end(i) > this.sb.buffered.start(i)) { usable = true; break; }
+        }
+      } catch (_) { return false; }
+      if (!usable) return false;
+
+      const usableMs = Number.isFinite(this.loadStartedAt)
+        ? Math.max(0, Math.round(performance.now() - this.loadStartedAt))
+        : null;
+      this.timings.firstUsableAppendMs = usableMs;
+      // Retain the firstMediaAppend name for existing telemetry consumers; this
+      // timestamp now means the append completed and produced a real time range.
+      this.timings.firstMediaAppendMs = usableMs;
+      this.timings.firstMediaAppendFetches = this._fetchAttemptCount;
+      this.timings.firstMediaAppendSuccessfulFetches = this._fetchCount;
+      this.timings.firstMediaAppendFetchKB = Math.round(this._fetchBytes / 1024);
+      this.timings.startupFetchWindows = Array.isArray(this._startupFetchWindows)
+        ? this._startupFetchWindows.slice()
+        : [];
+      this._startupActive = false;
+      this._startupDeadlineAt = 0;
+      this._clearStartupDeadlineTimer();
+      this._settleStartupOutcome();
+      this.log('first usable append ' + JSON.stringify({
+        ms: this.timings.firstUsableAppendMs,
+        fetches: this.timings.firstMediaAppendFetches,
+        fetchKB: this.timings.firstMediaAppendFetchKB,
+      }));
+      return true;
+    }
+
+    async _waitForRangeRetry(delayMs) {
+      if (!this._startupActive) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return;
+      }
+      const remaining = this._startupRemainingMs();
+      if (remaining <= 0) throw this._startupTimeoutError('cache-retry');
+      await new Promise((resolve) => setTimeout(resolve, Math.min(delayMs, remaining)));
+      this._assertStartupDeadline('cache-retry');
+    }
+
+    _beginFetchWindow(start, end, startup) {
+      const rec = { start, requestedBytes: end - start, bytes: 0, ms: 0, outcome: 'pending' };
+      if (!Array.isArray(this._fetchWindows)) this._fetchWindows = [];
+      if (!Array.isArray(this._startupFetchWindows)) this._startupFetchWindows = [];
+      if (!this.timings || typeof this.timings !== 'object') this.timings = {};
+      this._fetchAttemptCount = (this._fetchAttemptCount || 0) + 1;
+      this._fetchWindows.push(rec);
+      if (this._fetchWindows.length > 12) this._fetchWindows.shift();
+      this.timings.fetchWindows = this._fetchWindows.slice();
+      this.timings.fetchAttempts = this._fetchAttemptCount;
+      if (startup) {
+        this._startupFetchWindows.push(rec);
+        if (this._startupFetchWindows.length > 12) this._startupFetchWindows.shift();
+        this.timings.startupFetchWindows = this._startupFetchWindows.slice();
+      }
+      return rec;
+    }
+
+    _finishFetchWindow(rec, bytes, elapsedMs, error = null) {
+      if (!rec) return;
+      rec.bytes = Number(bytes) || 0;
+      rec.ms = Math.max(0, Math.round(elapsedMs));
+      if (!error) rec.outcome = 'ok';
+      else {
+        const msg = String((error && error.message) || error);
+        const http = /BLOCK_HTTP_(\d{3})/i.exec(msg);
+        rec.outcome = http ? 'http_' + http[1]
+          : /ENGINE_STARTUP_TIMEOUT/i.test(msg) ? 'timeout'
+            : /BLOCK_SHORT_READ/i.test(msg) ? 'short_read'
+              : /BLOCK_RANGE_MISMATCH/i.test(msg) ? 'range_mismatch'
+                : /RANGE_UNSUPPORTED/i.test(msg) ? 'range_unsupported'
+                  : 'network_error';
+      }
+      this.timings.fetchWindows = this._fetchWindows.slice();
+      this.timings.startupFetchWindows = this._startupFetchWindows.slice();
+    }
+
+    _signalStartupTimeout(stage) {
+      const error = this._startupTimeoutError(stage);
+      this._stopRequested = true;
+      this._clearStartupDeadlineTimer();
+      try { this._ac.abort(); } catch (_) {}
+      try { this.report({ stage: 'startup:' + stage, message: error.message }); } catch (_) {}
+      const routedToLoad = this._settleStartupOutcome(error);
+      if (!routedToLoad && !this._fatalSignaled) {
+        this._fatalSignaled = true;
+        queueMicrotask(() => {
+          if (!this.destroyed) {
+            try { this.onFatal(error); } catch (_) {}
+          }
+        });
+      }
+      return error;
     }
 
     // Fetch file size + first window (+ MKV tail for cues) up front so they're
@@ -507,7 +726,7 @@
         // via Content-Range (no separate probe), and a single connection avoids
         // the parallel collision on the single-slot provider. The MKV tail (cues)
         // is fetched lazily on the first seek — the demuxer doesn't need it to open.
-        await this._cacheWindow(0, RA_FIRST_WINDOW);
+        await this._cacheWindow(0, RA_INITIAL_WINDOW);
         this._prefetchError = null;
       } catch (e) { this._prefetchError = e; /* load() decides: re-probe, or surface a slot/auth block */ }
     }
@@ -563,7 +782,7 @@
       for (const w of this._raCache) if (off >= w.start && off < w.end) return; // already warm
       this._prefetching = true;
       try {
-        await this._cacheWindow(off, Math.min(RA_FIRST_WINDOW, this.size - off));
+        await this._cacheWindow(off, Math.min(RA_SEEK_WINDOW, this.size - off));
         this.log(`prefetch t=${t.toFixed(0)}s off=${off}`);
       } catch (_) { /* a real seek will fetch it */ } finally { this._prefetching = false; }
     }
@@ -613,6 +832,12 @@
       this._discardPendingVideoPacket();
       this.destroyed = true;
       this._stopRequested = true;
+      this._clearStartupDeadlineTimer();
+      if (this._startupActive && !this._startupOutcomeSettled) {
+        const error = new Error('ENGINE_STARTUP_ABORTED');
+        error.code = 'ENGINE_STARTUP_ABORTED';
+        this._settleStartupOutcome(error);
+      }
       // Invalidate an in-flight ff_write_multi result before terminating its
       // worker. Any delayed onwrite/reply from this mux generation is stale.
       this._muxGeneration += 1;
@@ -648,14 +873,20 @@
     async _probeSize(url) {
       // Bound the probe so a stalled gateway/provider can't hang the engine; also abort
       // it if the engine is destroyed (so the slot is released immediately).
+      this._assertStartupDeadline('probe');
       const ac = new AbortController();
       const onAbort = () => { try { ac.abort(); } catch (_) {} };
       this._ac.signal.addEventListener('abort', onAbort, { once: true });
-      const to = setTimeout(onAbort, 30000);
+      const startup = this._startupActive;
+      const remaining = this._startupRemainingMs();
+      const timeoutMs = Math.max(1, Math.min(30000, Number.isFinite(remaining) ? Math.ceil(remaining) : 30000));
+      let timedOut = false;
+      const to = setTimeout(() => { timedOut = true; onAbort(); }, timeoutMs);
       let r;
       try {
         r = await fetch(url, { headers: { Range: 'bytes=0-1' }, signal: ac.signal });
       } catch (e) {
+        if (timedOut && startup) throw this._startupTimeoutError('probe');
         throw new Error('PROBE_FETCH:' + String((e && e.message) || e));
       } finally {
         clearTimeout(to);
@@ -770,8 +1001,26 @@
       for (const w of this._raCache) {
         if (pos >= w.start && end <= w.end) { this._raTouch(w); return w.buf.subarray(pos - w.start, end - w.start); }
       }
+      // During startup, libav may ask for more than the 512 KiB head already in
+      // cache. Its block reader accepts a short positive read, so consume those
+      // bytes first; the next call continues at the cache boundary instead of
+      // reopening the same provider range from byte zero.
+      if (this._startupActive) {
+        for (const w of this._raCache) {
+          if (pos >= w.start && pos < w.end) {
+            this._raTouch(w);
+            return w.buf.subarray(pos - w.start, w.end - w.start);
+          }
+        }
+      }
       const small = this._smallNextRead; this._smallNextRead = false;
-      const winEnd = Math.min(pos + Math.max(small ? RA_FIRST_WINDOW : RA_WINDOW, len), this.size);
+      const targetWindow = small ? RA_SEEK_WINDOW : (this._startupActive ? RA_STARTUP_WINDOW_MAX : RA_WINDOW);
+      let windowLen = Math.max(targetWindow, len);
+      // libav can request a large block while opening a container. Returning a
+      // partial block is supported by its block reader and lets it ask for the
+      // remainder without one multi-megabyte request monopolising the provider.
+      if (this._startupActive) windowLen = Math.min(windowLen, RA_STARTUP_WINDOW_MAX);
+      const winEnd = Math.min(pos + windowLen, this.size);
       const w = await this._cacheWindow(pos, winEnd - pos);
       const sliceEnd = Math.min(end, w.end);
       return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
@@ -784,7 +1033,9 @@
     // use to open the per-account circuit before any second connection exists.
     async _cacheWindow(start, len) {
       let lastErr = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      const maxAttempts = this._startupActive ? 2 : 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        this._assertStartupDeadline('cache-fetch');
         try {
           const buf = await this._fetchRange(start, start + len);
           const w = { start, end: start + buf.length, buf };
@@ -795,8 +1046,9 @@
           lastErr = e;
           if (this._ac.signal.aborted) throw e;
           const msg = String((e && e.message) || e);
+          if (e && e.code === 'ENGINE_STARTUP_TIMEOUT') throw e;
           if (!/BLOCK_SHORT_READ|BLOCK_RANGE_MISMATCH|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|502|503)/i.test(msg)) throw e;
-          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+          if (attempt + 1 < maxAttempts) await this._waitForRangeRetry(700 * (attempt + 1));
         }
       }
       throw lastErr;
@@ -813,7 +1065,7 @@
     async _buildCueIndex() {
       try {
         if (!this.size || this._cueIndex) return;
-        const head = await this._readRange(0, Math.min(RA_FIRST_WINDOW, this.size));
+        const head = await this._readRange(0, Math.min(RA_SEEK_WINDOW, this.size));
         const segStart = this._findSegmentDataStart(head);
         if (segStart < 0) return;
         const { scaleNs, cuesPos } = this._scanSegmentHead(head, segStart);
@@ -931,11 +1183,18 @@
 
     // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.
     async _fetchRange(start, end) {
+      this._assertStartupDeadline('fetch');
       const ac = new AbortController();
       const onAbort = () => { try { ac.abort(); } catch (_) {} };
       this._ac.signal.addEventListener('abort', onAbort, { once: true });
-      const to = setTimeout(onAbort, 60000);
+      const startup = this._startupActive;
+      const remaining = this._startupRemainingMs();
+      const timeoutMs = Math.max(1, Math.min(FETCH_TIMEOUT_MS,
+        Number.isFinite(remaining) ? Math.ceil(remaining) : FETCH_TIMEOUT_MS));
+      let timedOut = false;
+      const to = setTimeout(() => { timedOut = true; onAbort(); }, timeoutMs);
       const ft0 = performance.now();
+      const fetchWindow = this._beginFetchWindow(start, end, startup);
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
         // 200 without Content-Range → provider ignored Range and would stream the
@@ -969,8 +1228,14 @@
         if (out.length < expected && (!this.size || start + out.length < this.size)) {
           throw new Error('BLOCK_SHORT_READ:' + out.length + '/' + expected);
         }
-        this._fetchCount += 1; this._fetchBytes += out.length; this._fetchMs += performance.now() - ft0;
+        const elapsedMs = performance.now() - ft0;
+        this._fetchCount += 1; this._fetchBytes += out.length; this._fetchMs += elapsedMs;
+        this._finishFetchWindow(fetchWindow, out.length, elapsedMs);
         return out;
+      } catch (e) {
+        const error = timedOut && startup ? this._startupTimeoutError('fetch') : e;
+        this._finishFetchWindow(fetchWindow, 0, performance.now() - ft0, error);
+        throw error;
       } finally {
         clearTimeout(to);
         try { this._ac.signal.removeEventListener('abort', onAbort); } catch (_) {}
@@ -1221,13 +1486,21 @@
       let lastErr = null;
       for (let attempt = 0; attempt < 2 && !this.destroyed; attempt++) {
         try {
+          this._assertStartupDeadline('media-source');
           if (this._objectUrl) { try { URL.revokeObjectURL(this._objectUrl); } catch (_) {} this._objectUrl = null; }
           this.ms = new MediaSource();
           this._objectUrl = URL.createObjectURL(this.ms);
           this.video.src = this._objectUrl;
           try { this.video.load(); } catch (_) {}
           await new Promise((res, rej) => {
-            const to = setTimeout(() => rej(new Error('SOURCEOPEN_TIMEOUT')), attempt === 0 ? 8000 : 15000);
+            const normalTimeoutMs = attempt === 0 ? 8000 : 15000;
+            const remaining = this._startupRemainingMs();
+            const deadlineBound = Number.isFinite(remaining) && remaining <= normalTimeoutMs;
+            const timeoutMs = Math.max(1, Math.min(normalTimeoutMs,
+              Number.isFinite(remaining) ? Math.ceil(remaining) : normalTimeoutMs));
+            const to = setTimeout(() => rej(deadlineBound
+              ? this._startupTimeoutError('media-source')
+              : new Error('SOURCEOPEN_TIMEOUT')), timeoutMs);
             this.ms.addEventListener('sourceopen', () => { clearTimeout(to); res(); }, { once: true });
           });
           lastErr = null;
@@ -1235,17 +1508,34 @@
         } catch (e) {
           lastErr = e;
           this.log('attachMediaSource try ' + (attempt + 1) + ' failed: ' + (e && e.message));
+          if (e && e.code === 'ENGINE_STARTUP_TIMEOUT') break;
         }
       }
       if (lastErr) throw lastErr;
       this.sb = this.ms.addSourceBuffer(this.mime);
       this.sb.mode = 'segments';
       if (this.durationSec > 0) { try { this.ms.duration = this.durationSec; } catch (_) {} }
-      this.sb.addEventListener('updateend', () => this._drain());
+      this.sb.addEventListener('updateend', () => {
+        // appendBuffer() returning only means bytes entered MSE. Keep the global
+        // startup budget armed until Chromium has accepted them into a real
+        // buffered time range; init-only/partial fragments cannot disarm it.
+        this._markStartupUsableFromBuffer();
+        this._drain();
+      });
       this.sb.addEventListener('error', () => {
         this._diag.sbErrorEvents++;
         try { this.log('SourceBuffer error — snapshot ' + JSON.stringify(this.engineSnapshot())); }
         catch (_) { this.log('SourceBuffer error'); }
+        if (this._startupActive) {
+          const error = new Error('SOURCEBUFFER_STARTUP_ERROR');
+          error.code = 'SOURCEBUFFER_STARTUP_ERROR';
+          this._stopRequested = true;
+          this._clearStartupDeadlineTimer();
+          try { this._ac.abort(); } catch (_) {}
+          if (this._settleStartupOutcome(error)) {
+            try { this.report({ stage: 'sourcebuffer:startup', message: error.message }); } catch (_) {}
+          }
+        }
       });
     }
 
@@ -1619,7 +1909,7 @@
       const lib = this.lib;
       let off = this._offsetForTime(t);
       if (off == null && this.size > 0 && this.durationSec > 0) {
-        off = Math.max(0, Math.floor((t / this.durationSec) * this.size) - RA_FIRST_WINDOW);
+        off = Math.max(0, Math.floor((t / this.durationSec) * this.size) - RA_SEEK_WINDOW);
       }
       if (off == null || !(off >= 0) || (this.size && off >= this.size)) {
         throw new Error('no byte index available for fallback seek');
@@ -1677,14 +1967,32 @@
         if (this.destroyed) return;
         const code = e && typeof e.code === 'string' ? e.code : '';
         const isAudioTimelineFailure = code.startsWith('AUDIO_');
-        if (isAudioTimelineFailure && this._fatalSignaled) return;
-        this.report({ stage: 'pump', message: errStr(e) });
+        const isStartupTimeout = code === 'ENGINE_STARTUP_TIMEOUT';
+        const isProviderBusy = isProviderBusyError(e);
+        // Before the first usable SourceBuffer range, load() is still waiting on
+        // the startup outcome. Reject that promise with the ORIGINAL error so its
+        // existing catch can make HTTP 458 terminal. Routing a startup 458 through
+        // runtime onFatal would incorrectly reopen the engine once.
+        if (this._startupActive && this._settleStartupOutcome(e)) {
+          this._stopRequested = true;
+          this._clearStartupDeadlineTimer();
+          try { this._ac.abort(); } catch (_) {}
+          this.report({ stage: 'pump:startup', message: errStr(e) });
+          return;
+        }
+        if ((isProviderBusy || isAudioTimelineFailure || isStartupTimeout) && this._fatalSignaled) return;
+        this.report({ stage: isProviderBusy ? 'pump:provider-busy' : 'pump', message: errStr(e) });
         // A typed audio-clock failure cannot recover inside the same mux
         // generation. Escalate once so WatchPage can use its bounded engine ->
         // gateway fallback instead of leaving a permanently spinning player.
-        if (isAudioTimelineFailure) {
+        // A provider 458 is different: after startup it remains terminal and must
+        // reach WatchPage once, where it opens the account circuit instead of the
+        // engine/Gateway recovery ladder.
+        if (isProviderBusy || isAudioTimelineFailure || isStartupTimeout) {
           this._fatalSignaled = true;
           this._stopRequested = true;
+          if (this._gate) { this._gate(); this._gate = null; }
+          try { this._ac.abort(); } catch (_) {}
           try { this.onFatal(e); } catch (_) {}
         }
       }).finally(() => { this._pumpRunning = false; });
@@ -1702,6 +2010,7 @@
       let res, guard = 0;
       do {
         if (this._stopRequested || this.destroyed) return;
+        this._assertStartupDeadline('pump');
         if (this._bufferedAhead() > BUFFER_AHEAD_MAX) { await this._waitForDrain(); continue; }
         let packets;
         [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
@@ -2394,9 +2703,19 @@
       if (this.queue.length) {
         const chunk = this.queue.shift();
         const d = this._diag;
+        if (this._startupActive && this._startupRemainingMs() <= 0) {
+          this._signalStartupTimeout('append');
+          return;
+        }
         try {
           sb.appendBuffer(chunk);
           d.appendCount++; d.appendBytes += chunk.length;
+          const appendMs = Number.isFinite(this.loadStartedAt)
+            ? Math.max(0, Math.round(performance.now() - this.loadStartedAt))
+            : null;
+          if (!Number.isFinite(this.timings.firstAppendMs) && appendMs !== null) {
+            this.timings.firstAppendMs = appendMs;
+          }
           // Keep the box layout of the last few appends. The fatal
           // CHUNK_DEMUXER_ERROR_APPEND_FAILED is reported asynchronously on the
           // element (not thrown here), so the chunk that broke the parser is the most

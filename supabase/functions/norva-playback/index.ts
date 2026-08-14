@@ -160,10 +160,11 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 43,
+        version: 44,
         nativeHeartbeatProtocol: 1,
         providerCircuitProtocol: 1,
         relayTakeoverProtocol: 1,
+        engineTrackProbeBlocking: false,
         lidBenchmarkProtocol: 2,
         lidDetectOnlyProtocol: 1,
         lidCascadeProtocol: 2,
@@ -903,7 +904,10 @@ async function createPlaybackSession(
         }
       }
 
-      if (!haveAudio || !haveSub) {
+      // Provider track discovery belongs to the enrichment fleet. It must not
+      // consume the account's only connection before the viewer's first range.
+      const shouldBlockPlaybackForTrackEnrichment = false;
+      if (shouldBlockPlaybackForTrackEnrichment && (!haveAudio || !haveSub)) {
         let probed = { audioTracks: [] as Array<{ index: number; lang: string | null }>, subtitleTracks: [] as JsonRecord[] };
         try { probed = await probeEngineTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
         const probeOk = probed.audioTracks.length > 0; // every video has audio → audio present == parse ok

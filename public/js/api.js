@@ -1244,6 +1244,16 @@ const CloudAdapter = (() => {
         return ENGINE_DEMUXABLE_CONTAINERS.has(c);
     }
 
+    function shouldUnknownCodecVodUseGateway(container, playbackHint = {}) {
+        const c = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        if (!['mp4', 'm4v', 'mov'].includes(c)) return false;
+        // An unknown MP4 profile used to open an engine relay first and, when
+        // libav/MSE rejected it, ask for a second explicit Gateway session.
+        // Choose the single server-owned session up front; the Gateway probes
+        // the exact file and can still stream-copy a browser-safe profile.
+        return !normalizeCodecToken(playbackHint.videoCodec);
+    }
+
     function normalizeCodecToken(value) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
     }
@@ -1738,6 +1748,7 @@ const CloudAdapter = (() => {
                     && !nativePlayer
                     && !denseTrackVod
                     && !browserSafeVod
+                    && !shouldUnknownCodecVodUseGateway(container, playbackHint)
                     && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
                     && Boolean(window.NorvaEngine);

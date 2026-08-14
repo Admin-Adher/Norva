@@ -215,8 +215,8 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
   assert.match(gateway, /upstream\.status === 407 && providerProxyAgents\.length/);
 });
 
-test('gateway v81 advertises the provider-account affinity protocol without secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 81;/);
+test('gateway v82 advertises the provider-account affinity protocol without secrets', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 82;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.doesNotMatch(gateway, /providerProxyUrls[\s\S]{0,100}res\.json/);

@@ -187,6 +187,11 @@ class WatchPage {
         this.playbackTelemetry = null;
         this._playRequestedAt = 0;
         this._firstFrameReported = false;
+        this._firstFrameCallbackId = null;
+        this._firstFrameObserverAttemptId = null;
+        this._firstFrameObserverAvailable = null;
+        this._deferredEngineTrackEnrichment = null;
+        this._deferredEngineTrackEnrichmentTimer = null;
         this._playStartedReported = false;
         this._playbackEnded = false;
         this._lastPauseTelemetryAt = 0;
@@ -332,7 +337,6 @@ class WatchPage {
             this.restorePendingAudioPreference();
             this.restorePendingSubtitlePreference();
             this.applyPendingLocalSeek();
-            this.markPlaybackUsable();
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
         });
@@ -351,7 +355,7 @@ class WatchPage {
         });
         this.video?.addEventListener('durationchange', () => this.updateDurationState());
         this.video?.addEventListener('play', () => this.onPlay());
-        this.video?.addEventListener('playing', () => this.markPlaybackUsable());
+        this.video?.addEventListener('playing', () => this.markPlaybackUsable({ allowFirstFrameFallback: true }));
         this.video?.addEventListener('pause', () => this.onPause());
         this.video?.addEventListener('ended', () => this.onEnded());
         this.setupMediaSessionHandlers();
@@ -1424,6 +1428,13 @@ class WatchPage {
      * @param {Object} playback - Cloud playback metadata
      */
     async play(content, streamUrl, playback = {}) {
+        // TTFF starts at the user's playback intention, before resume lookup,
+        // previous-media teardown or cloud-session resolution. Keep the timestamp
+        // local until the incoming content identity is assigned so play_requested
+        // can never be attributed to the outgoing title during an episode handoff.
+        const playbackRequestedAt = Date.now();
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
         const replacingActiveWatch = this.app?.currentPage === 'watch'
             && this.content
             && (
@@ -1472,6 +1483,9 @@ class WatchPage {
 
         this.content = content;
         this.contentType = content.type;
+        this.beginPlaybackTelemetry(cloudPlaybackSessionId, playbackAttemptId, {
+            requestedAt: playbackRequestedAt,
+        });
         this.audioLanguageValidationStatus = String(
             playbackMetadata.audioLanguageValidationStatus ||
             playbackMetadata.audio_language_validation_status ||
@@ -1519,6 +1533,7 @@ class WatchPage {
                 console.log(`[WatchPage] Resume from stored position: ${stored}s`);
             }
         }
+        this.recordPlaybackStartupPhase('resumeResolved');
         this.resumeTime = Number.isFinite(requestedResumeTime) && requestedResumeTime > 0 ? Math.floor(requestedResumeTime) : 0;
         const sessionStartOffset = Number(
             playbackMetadata.seekOffset ??
@@ -1665,6 +1680,7 @@ class WatchPage {
             if (resolvedSessionId) {
                 cloudPlaybackSessionId = resolvedSessionId;
                 content.cloudPlaybackSessionId = resolvedSessionId;
+                this.updatePlaybackTelemetrySession(resolvedSessionId, playbackAttemptId);
             }
             const resolvedAudioTracks = Array.isArray(playbackMetadata.audioTracks)
                 ? playbackMetadata.audioTracks
@@ -1688,6 +1704,7 @@ class WatchPage {
             this.subtitleEl.textContent = content.subtitle || '';
             this.renderDetails();
         }
+        this.recordPlaybackStartupPhase('sessionResolved');
 
         // Load video
         await this.loadVideo(streamUrl, {
@@ -2330,11 +2347,15 @@ class WatchPage {
         }
     }
 
-    beginPlaybackTelemetry(sessionId, playbackAttemptId) {
+    beginPlaybackTelemetry(sessionId, playbackAttemptId, options = {}) {
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
+        const requestedAt = Number(options.requestedAt);
         this.playbackTelemetry = {
             playbackAttemptId,
             sessionId: sessionId || null,
-            requestedAt: Date.now(),
+            requestedAt: Number.isFinite(requestedAt) && requestedAt > 0 ? requestedAt : Date.now(),
+            startupPhases: {},
             firstFrameReported: false,
             playStartedReported: false,
             ended: false,
@@ -2345,6 +2366,131 @@ class WatchPage {
         this._playStartedReported = false;
         this._playbackEnded = false;
         this.sendPlaybackEvent('play_requested');
+    }
+
+    updatePlaybackTelemetrySession(sessionId, playbackAttemptId = this._playbackAttemptId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id || !this.playbackTelemetry) return;
+        if (this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return;
+        this.playbackTelemetry.sessionId = id;
+    }
+
+    recordPlaybackStartupPhase(name, playbackAttemptId = this._playbackAttemptId) {
+        if (!name || !this.playbackTelemetry || this._firstFrameReported) return;
+        if (this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return;
+        const requestedAt = Number(this.playbackTelemetry.requestedAt) || Date.now();
+        this.playbackTelemetry.startupPhases ||= {};
+        if (!Number.isFinite(this.playbackTelemetry.startupPhases[name])) {
+            this.playbackTelemetry.startupPhases[name] = Math.max(0, Date.now() - requestedAt);
+        }
+    }
+
+    cancelFirstFrameTelemetryObserver() {
+        if (this._firstFrameCallbackId !== null
+            && this._firstFrameCallbackId !== undefined
+            && typeof this.video?.cancelVideoFrameCallback === 'function') {
+            try { this.video.cancelVideoFrameCallback(this._firstFrameCallbackId); } catch (_) {}
+        }
+        this._firstFrameCallbackId = null;
+        this._firstFrameObserverAttemptId = null;
+        this._firstFrameObserverAvailable = null;
+    }
+
+    armFirstFrameTelemetry(playbackAttemptId = this._playbackAttemptId) {
+        this.cancelFirstFrameTelemetryObserver();
+        const video = this.video;
+        if (!video || this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (typeof video.requestVideoFrameCallback !== 'function') {
+            this._firstFrameObserverAvailable = false;
+            return false;
+        }
+
+        this._firstFrameObserverAttemptId = playbackAttemptId;
+        try {
+            this._firstFrameCallbackId = video.requestVideoFrameCallback((_now, metadata = {}) => {
+                this._firstFrameCallbackId = null;
+                if (this._firstFrameObserverAttemptId !== playbackAttemptId
+                    || this.isStalePlaybackAttempt(playbackAttemptId)
+                    || this._firstFrameReported) return;
+                const reported = this.reportFirstRenderedFrame(
+                    playbackAttemptId,
+                    'video-frame-callback',
+                    metadata
+                );
+                if (reported) {
+                    this.markPlaybackUsable();
+                } else {
+                    // A callback may race a source replacement. Keep waiting for a
+                    // frame belonging to the active media/attempt instead of using
+                    // metadata readiness as a false positive.
+                    this.armFirstFrameTelemetry(playbackAttemptId);
+                }
+            });
+            this._firstFrameObserverAvailable = true;
+            return true;
+        } catch (_) {
+            this._firstFrameCallbackId = null;
+            this._firstFrameObserverAvailable = false;
+            return false;
+        }
+    }
+
+    reportFirstRenderedFrame(playbackAttemptId, frameEvidence, frameMetadata = {}) {
+        if (this._firstFrameReported || this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (!this.playbackTelemetry || this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return false;
+        const video = this.video;
+        if (!video || video.error || video.ended) return false;
+        if (video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return false;
+        if (!video.currentSrc && !video.src) return false;
+
+        this.recordPlaybackStartupPhase('firstFrame', playbackAttemptId);
+        this._firstFrameReported = true;
+        this.playbackTelemetry.firstFrameReported = true;
+        const requestedAt = this.playbackTelemetry.requestedAt || this._playRequestedAt || Date.now();
+        const engineTimings = this.norvaEngine?.timings;
+        const presentedFrames = Number(frameMetadata?.presentedFrames);
+        const mediaTime = Number(frameMetadata?.mediaTime);
+        this.sendPlaybackEvent('first_frame', {
+            timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt),
+            metadata: {
+                frameEvidence,
+                ...(Number.isFinite(presentedFrames) ? { presentedFrames } : {}),
+                ...(Number.isFinite(mediaTime) ? { mediaTime } : {}),
+                startupPhases: { ...(this.playbackTelemetry.startupPhases || {}) },
+                ...(engineTimings ? { engineTimings } : {})
+            }
+        });
+        this.flushDeferredEngineTrackEnrichment(playbackAttemptId);
+        return true;
+    }
+
+    cancelDeferredEngineTrackEnrichment() {
+        if (this._deferredEngineTrackEnrichmentTimer) {
+            clearTimeout(this._deferredEngineTrackEnrichmentTimer);
+        }
+        this._deferredEngineTrackEnrichmentTimer = null;
+        this._deferredEngineTrackEnrichment = null;
+    }
+
+    deferEngineTrackEnrichment(url, playbackAttemptId = this._playbackAttemptId) {
+        this.cancelDeferredEngineTrackEnrichment();
+        if (!url || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        this._deferredEngineTrackEnrichment = { url, playbackAttemptId };
+    }
+
+    flushDeferredEngineTrackEnrichment(playbackAttemptId = this._playbackAttemptId) {
+        const deferred = this._deferredEngineTrackEnrichment;
+        if (!this._firstFrameReported || !deferred) return;
+        if (deferred.playbackAttemptId !== playbackAttemptId || this.isStalePlaybackAttempt(playbackAttemptId)) {
+            this.cancelDeferredEngineTrackEnrichment();
+            return;
+        }
+        this._deferredEngineTrackEnrichment = null;
+        this._deferredEngineTrackEnrichmentTimer = setTimeout(() => {
+            this._deferredEngineTrackEnrichmentTimer = null;
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || !this.norvaEngine) return;
+            Promise.resolve(this.enrichCloudPlaybackTracks(deferred.url)).catch(() => {});
+        }, 1200);
     }
 
     getTelemetrySourceId() {
@@ -3482,7 +3628,6 @@ class WatchPage {
                     if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
                 } catch (_) { /* best-effort */ }
                 try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
-                try { this.hideLoading(); } catch (_) {}
                 this.video.play().catch((e) => this.handleAutoplayError(e));
                 this.setVolumeFromStorage();
                 return;
@@ -3705,6 +3850,16 @@ class WatchPage {
                 ? this.directAudioStreamIndex
                 : (Number.isInteger(this.selectedAudioStreamIndex) ? this.selectedAudioStreamIndex : null);
             const reason = String(error?.message || error || 'ENGINE_RUNTIME_FAILURE');
+
+            // HTTP 458 remains terminal even after the first usable buffer. Stop
+            // the active engine and force the established provider-busy path to
+            // release the lane and show its explicit error. Never reopen the
+            // engine or mint a Gateway session for the same playback intention.
+            if (this.isProviderBusyError(reason)) {
+                this.destroyEngine();
+                await this.handlePlaybackFailure(reason, { forceTerminal: true });
+                return true;
+            }
 
             if (!options.alreadyReported) {
                 this.reportEngineFailure({
@@ -4062,11 +4217,14 @@ class WatchPage {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
             return;
         }
+        this.recordPlaybackStartupPhase('teardownComplete', playbackAttemptId);
         this.registerCloudPlaybackSession(options.cloudPlaybackSessionId);
+        this.updatePlaybackTelemetrySession(options.cloudPlaybackSessionId, playbackAttemptId);
         if (this.video) {
             this.video.dataset.playbackAttemptId = String(playbackAttemptId);
         }
-        this.beginPlaybackTelemetry(options.cloudPlaybackSessionId, playbackAttemptId);
+        this.recordPlaybackStartupPhase('mediaAttach', playbackAttemptId);
+        this.armFirstFrameTelemetry(playbackAttemptId);
         this.baseStreamUrl = url;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
@@ -4154,8 +4312,15 @@ class WatchPage {
             const sessionAudioTracks = Array.isArray(options.audioTracks) ? options.audioTracks : null;
             if (sessionAudioTracks && sessionAudioTracks.length) {
                 try { this.applyCloudMultiAudioTracks({ audioTracks: sessionAudioTracks }); } catch (_) { /* best-effort */ }
+            } else if (this.getContentAudioTracks().length) {
+                // A file-scoped cached map is synchronous and provider-free, so it
+                // can still select the preferred language before the engine opens.
+                Promise.resolve(this.enrichCloudPlaybackTracks(url)).catch(() => {});
             } else {
-                try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
+                // A live /vod-info + /probe-audio request is useful metadata, but it
+                // must not block TTFF or contend with a single-connection provider.
+                // Start it only after a real frame has reached the compositor.
+                this.deferEngineTrackEnrichment(url, playbackAttemptId);
             }
             // Multi-audio files often default (file order) to an UNTAGGED track —
             // opening on it lands the user on a hidden "Audio N" entry. When the
@@ -4660,6 +4825,8 @@ class WatchPage {
     }
 
     stop() {
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
         // Warm the storyboard cache now, BEFORE teardown clears content/duration — the
         // viewer is releasing the provider slot, so generation won't fight playback.
         this.enqueueStoryboardForCache();
@@ -5733,13 +5900,16 @@ class WatchPage {
      * dubs or burned-in subtitles, so they are never switched automatically.
      */
     async handlePlaybackFailure(message) {
+        const options = arguments[1] && typeof arguments[1] === 'object' ? arguments[1] : {};
+        const forceProviderBusyTerminal = options.forceTerminal === true
+            && this.isProviderBusyError(message);
         const playbackAttemptId = this._playbackAttemptId;
         if (this._handlingPlaybackFailure) {
             console.warn('[WatchPage] Ignoring duplicate playback failure while retry is already running:', message);
             return;
         }
 
-        if (this.hasCurrentMedia()) {
+        if (this.hasCurrentMedia() && !forceProviderBusyTerminal) {
             console.warn('[WatchPage] Ignoring stale playback failure because media is active:', message);
             this.hidePlaybackError();
             this.hideLoading();
@@ -6156,6 +6326,7 @@ class WatchPage {
      * there is no content to retry against).
      */
     async retryPlaybackInPlace(positionOverride = null) {
+        const playbackRequestedAt = Date.now();
         if (this._inPlaceRetryRunning) return;
         if (!this.content?.sourceId || !this.content?.id) {
             window.location.reload();
@@ -6167,6 +6338,9 @@ class WatchPage {
             : Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
         this._inPlaceRetryRunning = true;
         const playbackAttemptId = this.beginPlaybackAttempt();
+        this.beginPlaybackTelemetry(null, playbackAttemptId, {
+            requestedAt: playbackRequestedAt,
+        });
         try {
             this.hidePlaybackError();
             this.showLoading();
@@ -6290,22 +6464,27 @@ class WatchPage {
         return hasMedia && !video.ended && Boolean(video.currentSrc || video.src);
     }
 
-    markPlaybackUsable() {
+    markPlaybackUsable(options = {}) {
         if (!this.hasCurrentMedia()) return;
+        const allowFirstFrameFallback = options.allowFirstFrameFallback === true;
+        const fallbackHasRenderedFrame = allowFirstFrameFallback
+            && this._firstFrameObserverAvailable !== true
+            && !this.video.paused
+            && this.video.readyState >= 2
+            && this.video.videoWidth > 0
+            && this.video.videoHeight > 0;
+        if (!this._firstFrameReported && fallbackHasRenderedFrame) {
+            this.reportFirstRenderedFrame(
+                this._playbackAttemptId,
+                'playing-ready-state'
+            );
+        }
+        // loadeddata/canplay/timeupdate prove decoded data, not compositor
+        // presentation. Keep loading/error state until rVFC (or the strict
+        // playing fallback on browsers without rVFC) confirms a visible frame.
+        if (!this._firstFrameReported) return;
         this.hideLoading();
         this.hidePlaybackError();
-        if (!this._firstFrameReported) {
-            this._firstFrameReported = true;
-            if (this.playbackTelemetry) this.playbackTelemetry.firstFrameReported = true;
-            const requestedAt = this.playbackTelemetry?.requestedAt || this._playRequestedAt || Date.now();
-            // Attach the in-browser engine's per-stage startup timings so we can
-            // see exactly where launch time goes (wasm vs probe vs demux vs ...).
-            const engineTimings = this.norvaEngine?.timings;
-            this.sendPlaybackEvent('first_frame', {
-                timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt),
-                ...(engineTimings ? { metadata: { engineTimings } } : {})
-            });
-        }
         if (!this._playbackStatusOkReported) {
             this._playbackStatusOkReported = true;
             this.reportPlaybackStatus('ok').catch(() => { });

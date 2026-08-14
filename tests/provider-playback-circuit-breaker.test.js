@@ -202,7 +202,7 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
   assert.match(edge, /open_provider_playback_circuit/);
   assert.match(edge, /PROVIDER_ACCOUNT_BUSY/);
-  assert.match(edge, /version:\s*43/);
+  assert.match(edge, /version:\s*44/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
 });
 
@@ -456,10 +456,10 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 81/);
+  assert.match(gateway, /const GATEWAY_VERSION = 82/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
-  assert.match(playback, /version:\s*43/);
+  assert.match(playback, /version:\s*44/);
   assert.match(playback, /providerCircuitProtocol:\s*1/);
   assert.match(playback, /relayTakeoverProtocol:\s*1/);
   assert.match(cloud, /version:\s*24/);
@@ -467,6 +467,8 @@ test('production rollout proves the provider circuit protocol on every runtime',
   assert.match(cloud, /relayTakeoverProtocol:\s*1/);
 
   assert.match(deploy, /verify_function_protocol "\$service"/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=44/);
+  assert.match(deploy, /EXPECTED_ENGINE_TRACK_PROBE_BLOCKING=false/);
   assert.match(deploy, /sha256sum "\$path" \| awk/);
   assert.match(deploy, /http:\/\/\$\{container_ip\}:9000\/\$\{function_name\}\/health/);
   assert.match(deploy, /function_health_in_service "\$service" norva-playback/);

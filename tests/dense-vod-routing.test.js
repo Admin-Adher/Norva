@@ -180,7 +180,7 @@ test('only an exact zero subtitle count suppresses the cold Gateway track probe'
     );
 });
 
-test('known exact Matroska codecs select the bounded FFmpeg input probe fast path', () => {
+test('known exact VOD codecs select the bounded FFmpeg input probe fast path', () => {
     const knownVodInputProbeEligible = loadGatewayFunction(
         'knownVodInputProbeEligible',
         'isInsufficientInputProbeFailure',
@@ -228,7 +228,7 @@ test('known exact Matroska codecs select the bounded FFmpeg input probe fast pat
             videoCodec: 'h264',
             audioTracks: [{ index: 1, codec: 'aac' }]
         }
-    }), false, 'the first rollout is intentionally limited to Matroska/WebM');
+    }), true, 'an exact MP4 profile must not pay the full FFmpeg discovery budget again');
     assert.strictEqual(knownVodInputProbeEligible({
         codecProfileSource: 'gateway_probe',
         playbackHint: {
@@ -240,7 +240,7 @@ test('known exact Matroska codecs select the bounded FFmpeg input probe fast pat
             videoCodec: 'h264',
             audioTracks: [{ index: 1, codec: 'aac' }]
         }
-    }), false, 'ordinary files must stay on the conservative probe during rollout');
+    }), true, 'an ordinary exact-file profile is as useful as a dense-file profile');
     assert.strictEqual(knownVodInputProbeEligible({
         codecProfileSource: 'request_flat',
         audioStreamIndex: 1,
@@ -496,6 +496,24 @@ test('dense but browser-safe MP4 keeps the normal relay path', async () => {
     assert.strictEqual(calls[0].mode, 'relay');
     assert.strictEqual(calls[0].enginePipe, undefined);
     assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 8);
+});
+
+test('unknown-codec MP4 chooses one gateway session instead of an engine-to-gateway prompt', async () => {
+    const { API, calls } = loadCloudApi();
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001',
+        'unknown-mp4',
+        'movie',
+        'mp4',
+        {}
+    );
+
+    assert.strictEqual(result.mode, 'transcode');
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].requiresTranscode, true);
+    assert.strictEqual(calls[0].enginePipe, undefined);
+    assert.strictEqual(calls[0].playbackHint.gatewayMode, 'remux');
 });
 
 test('dense VOD remains direct on a native player', async () => {
