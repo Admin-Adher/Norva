@@ -27,13 +27,31 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
     home.indexOf('\n    renderSetupGate(', home.indexOf('renderEcosystemCard(')),
   );
   assert.match(home, /id="home-ecosystem"/);
-  assert.match(method, /NorvaTV-AndroidPhone/);
+  assert.match(method, /isNativePhoneShell/);
   assert.match(method, /isCloudMode/);
   assert.match(method, /isCatalogReady/);
   assert.match(method, /norva-ecosystem-card-dismissed-v1/);
-  assert.match(method, /norva-multi-device\.svg/);
+  assert.match(method, /TV setup · about a minute/);
+  assert.match(method, /Ready for the big screen\?/);
+  assert.match(method, /Open Norva on your TV, enter the code, and keep watching with the same account\./);
+  assert.match(method, /class="home-ecosystem-visual" aria-hidden="true"/);
+  assert.match(method, /M354 209C405 209 425 257 467 257/);
+  assert.match(method, /<circle cx="435" cy="251" r="7"><\/circle>/);
+  assert.match(method, /\/img\/norva-app-icon-96\.png\?v=1/);
+  assert.ok(
+    fs.existsSync(path.join(root, 'public/img/norva-app-icon-96.png')),
+    'the approved Norva app icon must ship with Home',
+  );
+  assert.doesNotMatch(method, /norva-multi-device\.svg/);
   assert.match(method, /play\.google\.com\/store\/apps\/details\?id=tv\.norva\.tv/);
   assert.match(method, /data-ecosystem-pair/);
+  assert.match(method, /class="btn btn-primary" data-ecosystem-pair>Pair a TV<\/button>/);
+  assert.ok(
+    method.indexOf('data-ecosystem-pair') < method.indexOf('play.google.com/store/apps/details?id=tv.norva.tv'),
+    'Pair a TV must remain the primary action before the install link',
+  );
+  assert.match(method, /<span>Need the TV app\?<\/span><strong>Get it on Google Play<\/strong>/);
+  assert.match(method, /aria-label="Dismiss TV setup tip"/);
   assert.match(method, /Enable notifications/);
 });
 

@@ -195,7 +195,8 @@ class HomePage {
 
                 <section class="home-hero-section hidden" id="home-hero"></section>
 
-                <section id="home-ecosystem" class="dashboard-section home-ecosystem-card hidden"></section>
+                <section id="home-ecosystem" class="dashboard-section home-ecosystem-card hidden"
+                    aria-labelledby="home-ecosystem-title"></section>
 
                 <section class="dashboard-section hidden" id="continue-watching-section">
                     <div class="section-header">
@@ -734,7 +735,7 @@ class HomePage {
         const container = document.getElementById('home-ecosystem');
         if (!container) return;
 
-        const isPhoneApp = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
+        const isPhoneApp = Boolean(this.app?.isNativePhoneShell?.());
         const isCloud = Boolean(this.app?.currentUser?.cloud || window.API?.isCloudMode?.());
         const ready = Boolean(this.app?.isCatalogReady?.(summary));
         let dismissed = false;
@@ -759,20 +760,59 @@ class HomePage {
             : '';
 
         container.innerHTML = `
-            <button type="button" class="home-ecosystem-dismiss" data-ecosystem-dismiss aria-label="Dismiss multi-device tip">&times;</button>
-            <img class="home-ecosystem-visual" src="/assets/landing/norva-multi-device.svg"
-                alt="Norva on a TV, laptop, tablet and phone">
-            <div class="home-ecosystem-copy">
-                <span class="home-ecosystem-kicker">One account. Every screen.</span>
-                <h2>Norva, everywhere you watch</h2>
-                <p>Your profiles, favorites and playback progress stay in sync across web, phone, tablet and TV.</p>
-                <div class="home-ecosystem-actions">
-                    <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=tv.norva.tv"
-                        target="_blank" rel="noopener noreferrer">Install Android TV</a>
-                    <button type="button" class="btn btn-secondary" data-ecosystem-pair>Pair a TV</button>
+            <div class="home-ecosystem-surface">
+                <button type="button" class="home-ecosystem-dismiss" data-ecosystem-dismiss
+                    aria-label="Dismiss TV setup tip">
+                    <img src="/img/icons/norva-close-simple.svg?v=1" alt="" aria-hidden="true">
+                </button>
+
+                <div class="home-ecosystem-copy">
+                    <span class="home-ecosystem-kicker">TV setup · about a minute</span>
+                    <h2 id="home-ecosystem-title">Ready for the big screen?</h2>
+                    <p>Open Norva on your TV, enter the code, and keep watching with the same account.</p>
                 </div>
-                ${notificationPrompt}
+
+                <div class="home-ecosystem-visual" aria-hidden="true">
+                    <div class="home-ecosystem-tv">
+                        <div class="home-ecosystem-tv-screen">
+                            <div class="home-ecosystem-brand">
+                                <img src="/img/norva-app-icon-96.png?v=1" width="24" height="24"
+                                    alt="" aria-hidden="true" decoding="async" draggable="false">
+                                <span>Norva</span>
+                            </div>
+                            <span class="home-ecosystem-code-label">Pairing code</span>
+                            <strong class="home-ecosystem-code">K7M 4Q9</strong>
+                            <small>Enter this code on your phone</small>
+                        </div>
+                        <span class="home-ecosystem-tv-stand"></span>
+                    </div>
+                    <svg class="home-ecosystem-connection" viewBox="0 0 640 420"
+                        preserveAspectRatio="none" aria-hidden="true">
+                        <path d="M354 209C405 209 425 257 467 257"></path>
+                        <circle cx="435" cy="251" r="7"></circle>
+                    </svg>
+                    <div class="home-ecosystem-phone">
+                        <span class="home-ecosystem-phone-camera"></span>
+                        <div class="home-ecosystem-phone-status">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="m7.5 12.5 3 3 6-7"></path>
+                            </svg>
+                            <strong>TV connected</strong>
+                            <small>Ready to watch</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="home-ecosystem-actions">
+                    <button type="button" class="btn btn-primary" data-ecosystem-pair>Pair a TV</button>
+                    <a class="home-ecosystem-install"
+                        href="https://play.google.com/store/apps/details?id=tv.norva.tv"
+                        target="_blank" rel="noopener noreferrer">
+                        <span>Need the TV app?</span><strong>Get it on Google Play</strong>
+                    </a>
+                </div>
             </div>
+            ${notificationPrompt}
         `;
         container.classList.remove('hidden');
     }
