@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Audit a Media Catalog Before Cleanup | Norva Blog</title>
+  <meta name="description" content="Audit a media catalog before cleanup by recording sources, categories, filters, versions, languages, duplicates, unavailable items, profiles, and recovery.">
+  <link rel="canonical" href="https://norva.tv/blog/audit-library-before-cleanup/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Audit a Media Catalog Before Cleanup | Norva Blog">
+  <meta property="og:description" content="Audit a media catalog before cleanup by recording sources, categories, filters, versions, languages, duplicates, unavailable items, profiles, and recovery.">
+  <meta property="og:url" content="https://norva.tv/blog/audit-library-before-cleanup/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Audit a Media Catalog Before Cleanup | Norva Blog">
+  <meta name="twitter:description" content="Audit a media catalog before cleanup by recording sources, categories, filters, versions, languages, duplicates, unavailable items, profiles, and recovery.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "What to Audit Before Cleaning a Media Catalog",
+  "description": "Audit a media catalog before cleanup by recording sources, categories, filters, versions, languages, duplicates, unavailable items, profiles, and recovery.",
+  "inLanguage": "en",
+  "datePublished": "2026-08-14T06:00:00+02:00",
+  "dateModified": "2026-08-14T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/audit-library-before-cleanup/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "What to Audit Before Cleaning a Media Catalog",
+      "item": "https://norva.tv/blog/audit-library-before-cleanup/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">What to Audit Before Cleaning a Media Catalog</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Catalog Cleanup</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-08-14T06:00:00+02:00">14 August 2026</time>
+        <span class="dot">·</span>
+        <span>6 min read</span>
+      </div>
+      <h1>What to Audit Before Cleaning a Media Catalog</h1>
+      <p class="lede">A pre-cleanup audit records the current catalogue state without editing it, creating the baseline needed to plan, reconcile, and reverse later changes.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#freeze-the-observation-window">Freeze the observation window</a></li><li><a href="#inventory-sources-and-collection-groups">Inventory sources and collection groups</a></li><li><a href="#record-categories-and-filters">Record categories and filters</a></li><li><a href="#sample-edge-cases">Sample edge cases</a></li><li><a href="#audit-personal-and-shared-state-separately">Audit personal and shared state separately</a></li><li><a href="#review-recovery-readiness">Review recovery readiness</a></li><li><a href="#original-evidence-audit-baseline-sheet">Original evidence: audit baseline sheet</a></li><li><a href="#distinguish-observation-from-diagnosis">Distinguish observation from diagnosis</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Freeze edits and record the current state: authorised sources and owners, collection groups, category counts, active filters, uncategorised items, empty categories, duplicate candidates, versions, language metadata, unavailable items, profile-specific state, and recovery options. Audit first; do not rename, merge, or delete while building the baseline.</blockquote>
+<p>An audit turns “the catalogue feels messy” into a bounded set of observable problems. It also provides the counts and examples needed to prove that later batches did not silently lose context.</p>
+<h2 id="freeze-the-observation-window">Freeze the observation window</h2>
+<p>Choose a date and short period during which no one performs broad catalogue edits. Record:</p>
+<ul><li>devices and app or browser versions used;</li><li>account and profiles inspected;</li><li>source labels;</li><li>filters cleared or intentionally retained;</li><li>audit start and end time;</li><li>people conducting the audit.</li></ul>
+<p>A live source can still change. The time stamp makes that limitation visible.</p>
+<h2 id="inventory-sources-and-collection-groups">Inventory sources and collection groups</h2>
+<p>Create one row per authorised source or major collection group. Include owner, access status, media types, broad scale, metadata strengths, known dependencies, and authorisation review state.</p>
+<p>NARA inventory guidance describes an inventory as a descriptive listing of groups or systems, not necessarily every item. Its requirements apply to records, but the group-first approach prevents a personal audit from becoming an unplanned item-level cleanup.</p>
+<h2 id="record-categories-and-filters">Record categories and filters</h2>
+<p>For each visible category, note:</p>
+<ul><li>exact label;</li><li>source or system that defines it;</li><li>displayed item count;</li><li>clear household meaning;</li><li>overlap with another category;</li><li>last known use;</li><li>whether active filters affect the count;</li><li>whether unavailable or archived items may be hidden.</li></ul>
+<p>Do not remove an apparently empty category yet. Follow the empty category verification guide after the baseline.</p>
+<h2 id="sample-edge-cases">Sample edge cases</h2>
+<p>Choose representative items:</p>
+<ul><li>normal complete item;</li><li>uncategorised item;</li><li>possible duplicate;</li><li>multi-version title;</li><li>multilingual item;</li><li>episode with incomplete metadata;</li><li>unavailable item;</li><li>archive candidate;</li><li>item visible on one device but not another.</li></ul>
+<p>Record the source, version, category, language labels, availability, and profile context. The sample identifies rule needs; it does not prove the frequency of each issue.</p>
+<h2 id="audit-personal-and-shared-state-separately">Audit personal and shared state separately</h2>
+<p>Do not mix shared catalogue structure with:</p>
+<ul><li>playback progress;</li><li>viewing history;</li><li>favourites;</li><li>language preferences;</li><li>profile-specific discovery.</li></ul>
+<p>Record only the minimum personal evidence needed for cleanup planning and protect privacy. A category cleanup should not clear another person's profile state.</p>
+<h2 id="review-recovery-readiness">Review recovery readiness</h2>
+<p>Document:</p>
+<ul><li>supported catalogue export or snapshot;</li><li>what the export contains;</li><li>date of last successful creation;</li><li>rollback or restoration test;</li><li>source recovery owner;</li><li>changes that cannot be reversed through the tool;</li><li>approval needed before destructive work.</li></ul>
+<p>Use the reversible cleanup guide to turn this into a change-control process. Do not call an untested export a backup.</p>
+<h2 id="original-evidence-audit-baseline-sheet">Original evidence: audit baseline sheet</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Area</th><th>Count/state</th><th>Observation method</th><th>Example</th><th>Risk/question</th></tr></thead>
+<tbody><tr><td>Sources</td><td></td><td></td><td></td><td></td></tr><tr><td>Categories</td><td></td><td></td><td></td><td></td></tr><tr><td>Uncategorised</td><td></td><td></td><td></td><td></td></tr><tr><td>Empty categories</td><td></td><td></td><td></td><td></td></tr><tr><td>Duplicate candidates</td><td></td><td></td><td></td><td></td></tr><tr><td>Version groups</td><td></td><td></td><td></td><td></td></tr><tr><td>Unavailable items</td><td></td><td></td><td></td><td></td></tr><tr><td>Recovery</td><td></td><td></td><td></td><td></td></tr></tbody>
+</table></div>
+<p>Add audit date and filters. Feed the results into <a href="/blog/catalog-cleanup-master-plan/">the complete cleanup plan</a> and route uncertain items through the uncategorised triage method.</p>
+<h2 id="distinguish-observation-from-diagnosis">Distinguish observation from diagnosis</h2>
+<p>“Category has zero visible items with filters cleared” is an observation. “The category is safe to delete” is a decision requiring source and dependency checks. Keep those stages separate.</p>
+<p>Likewise, matching titles are duplicate candidates, not proven duplicates. Missing language metadata does not prove a track is absent.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Editing while auditing.</li><li>Recording counts with unknown filters.</li><li>Listing every item before collection groups.</li><li>Treating title matches as confirmed duplicates.</li><li>Ignoring profile state.</li><li>Calling an untested export a recovery path.</li><li>Inferring cause from one screenshot.</li><li>Auditing only the maintainer's preferred device.</li></ul>
+<p>Source data may change during or after the audit. Preserve time, device, and source context.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="must-every-item-be-audited">Must every item be audited?</h3>
+<p>No. Inventory source and category groups, then sample edge cases. Item-level review is needed only for decisions such as duplicate merging or metadata correction.</p>
+<h3 id="can-cleanup-begin-while-the-audit-continues">Can cleanup begin while the audit continues?</h3>
+<p>Avoid overlapping broad work. Complete and approve a baseline for the current scope so later changes can be reconciled.</p>
+<h3 id="what-is-the-most-important-audit-output">What is the most important audit output?</h3>
+<p>A dated baseline that another person can understand: what was included, how it was observed, which filters applied, and which issues remain questions.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's catalog features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">National Archives: Records inventory introduction</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/" target="_blank" rel="noopener">Library of Congress: Inventory and custody</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Catalog Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/inventory-intro</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/knowing</a></li><li><a href="https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/" target="_blank" rel="noopener">https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
