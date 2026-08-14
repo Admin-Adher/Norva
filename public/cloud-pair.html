@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#06080d">
+    <meta name="theme-color" content="#080B12">
     <title>Pair with Norva</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <script>
@@ -15,40 +15,85 @@
         })();
     </script>
     <style>
+        @font-face {
+            font-family: "Inter";
+            src: url("/fonts/inter-latin.woff2") format("woff2");
+            font-style: normal;
+            font-weight: 100 900;
+            font-display: swap;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
-            --bg: #06080d;
-            --surface: #11151d;
-            --line: #273142;
-            --text: #f8fafc;
-            --muted: #a1a1aa;
-            --quiet: #667085;
-            --accent: #4f7df3;
-            --cyan: #21d4fd;
-            --success: #34d399;
-            --danger: #fb7185;
+            --color-bg-primary: #080B12;
+            --color-bg-secondary: #12121a;
+            --color-bg-tertiary: #1a1a25;
+            --color-accent: #3B82F6;
+            --color-accent-hover: #60A5FA;
+            --color-accent-dim: rgba(59, 130, 246, 0.2);
+            --color-success: #10b981;
+            --color-error: #ef4444;
+            --color-error-text: #FECACA;
+            --color-text-primary: #F8FAFC;
+            --color-text-secondary: #94A3B8;
+            --color-text-muted: #71717a;
+            --color-border: #27272a;
+            --color-border-light: #3f3f46;
+            --color-qr-surface: #FFFFFF;
+        }
+        html,
+        body {
+            width: 100%;
+            min-height: 100%;
         }
         html.tv-pairing-mode,
         html.tv-pairing-mode body {
-            width: 100%;
             height: 100%;
             overflow: hidden;
             overscroll-behavior: none;
         }
         body {
             min-height: 100vh;
-            background:
-                radial-gradient(circle at 50% 0%, rgba(79, 125, 243, 0.18), transparent 42%),
-                var(--bg);
-            color: var(--text);
+            min-height: 100dvh;
+            overflow-x: hidden;
+            background: var(--color-bg-primary);
+            color: var(--color-text-primary);
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            display: grid;
-            place-items: center;
-            padding: 32px;
         }
+        button,
+        a { font: inherit; }
+        [hidden] { display: none !important; }
         .screen {
-            width: min(880px, 100%);
-            text-align: center;
+            position: relative;
+            isolation: isolate;
+            width: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+            padding:
+                max(28px, env(safe-area-inset-top))
+                max(48px, env(safe-area-inset-right))
+                max(26px, env(safe-area-inset-bottom))
+                max(48px, env(safe-area-inset-left));
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            gap: 18px;
+            overflow: hidden;
+            background:
+                radial-gradient(ellipse 42% 58% at 77% 47%, rgba(59, 130, 246, .13), transparent 68%),
+                var(--color-bg-primary);
+        }
+        .screen::before {
+            content: "";
+            position: absolute;
+            z-index: -1;
+            inset: 0;
+            opacity: .7;
+            pointer-events: none;
+            background:
+                linear-gradient(90deg, rgba(255,255,255,.026) 1px, transparent 1px),
+                linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px);
+            background-size: 64px 64px;
+            -webkit-mask-image: linear-gradient(to right, transparent, #000 45%, #000 85%, transparent);
+            mask-image: linear-gradient(to right, transparent, #000 45%, #000 85%, transparent);
         }
         .pair-launch-screen { display: none; }
         html.tv-pairing-mode:not(.tv-pairing-ready) .screen { display: none; }
@@ -63,18 +108,16 @@
             overflow: hidden;
             text-align: center;
             background:
-                radial-gradient(circle at 50% 38%, rgba(90, 125, 255, .34), transparent 0 22%, transparent 48%),
-                radial-gradient(circle at 18% 12%, rgba(33, 212, 253, .18), transparent 0 26%, transparent 46%),
-                radial-gradient(circle at 82% 78%, rgba(199, 92, 255, .22), transparent 0 24%, transparent 48%),
-                linear-gradient(135deg, #05070d 0%, #09111f 48%, #03050a 100%);
+                radial-gradient(circle at 50% 38%, rgba(59, 130, 246, .3), transparent 48%),
+                var(--color-bg-primary);
         }
         html.tv-pairing-mode:not(.tv-pairing-ready) .pair-launch-screen::before {
             content: "";
             position: absolute;
             inset: -20%;
             background:
-                linear-gradient(115deg, transparent 0 38%, rgba(255, 255, 255, .08) 48%, transparent 58% 100%),
-                repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 1px, transparent 1px 86px);
+                linear-gradient(115deg, transparent 38%, rgba(255,255,255,.07) 48%, transparent 58%),
+                repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0 1px, transparent 1px 86px);
             animation: pairLaunchDrift 6s ease-in-out infinite alternate;
             pointer-events: none;
         }
@@ -88,38 +131,37 @@
         .pair-launch-orb span {
             position: absolute;
             inset: 0;
+            border: 1px solid rgba(96, 165, 250, .24);
             border-radius: 999px;
-            border: 1px solid rgba(173, 196, 255, .22);
-            box-shadow: 0 0 70px rgba(79, 125, 243, .35), inset 0 0 34px rgba(255,255,255,.05);
+            box-shadow: 0 0 70px rgba(59, 130, 246, .28), inset 0 0 34px rgba(255,255,255,.05);
             animation: pairLaunchPulse 2.4s ease-in-out infinite;
         }
-        .pair-launch-orb span:nth-child(2) { inset: 12%; animation-delay: .22s; border-color: rgba(33, 212, 253, .28); }
-        .pair-launch-orb span:nth-child(3) { inset: 24%; animation-delay: .44s; border-color: rgba(199, 92, 255, .28); }
+        .pair-launch-orb span:nth-child(2) { inset: 12%; animation-delay: .22s; }
+        .pair-launch-orb span:nth-child(3) { inset: 24%; animation-delay: .44s; }
         .pair-launch-orb img {
             position: relative;
             width: 44%;
             height: 44%;
-            border-radius: 18px;
+            border-radius: 16px;
             box-shadow: 0 18px 46px rgba(0,0,0,.38);
         }
         .pair-launch-copy { position: relative; max-width: 720px; padding: 0 28px; }
         .pair-launch-kicker {
-            margin: 0 0 8px;
-            color: #93c5fd;
+            margin-bottom: 8px;
+            color: var(--color-accent-hover);
             font-size: clamp(12px, 2.5vh, 15px);
-            font-weight: 900;
-            letter-spacing: .32em;
+            font-weight: 800;
+            letter-spacing: .24em;
             text-transform: uppercase;
         }
         .pair-launch-copy h1 {
-            margin: 0;
             font-size: clamp(34px, 8vh, 64px);
             line-height: .98;
             letter-spacing: -.05em;
         }
         .pair-launch-copy p:not(.pair-launch-kicker) {
             margin: 14px auto 0;
-            color: rgba(226, 232, 240, .76);
+            color: var(--color-text-secondary);
             font-size: clamp(14px, 3vh, 20px);
         }
         .pair-launch-progress {
@@ -135,7 +177,7 @@
             inset: 0 auto 0 0;
             width: 42%;
             border-radius: inherit;
-            background: linear-gradient(90deg, #21d4fd, #4f7df3, #c75cff);
+            background: var(--color-accent-hover);
             animation: pairLaunchBar 1.45s cubic-bezier(.65,0,.35,1) infinite;
         }
         @keyframes pairLaunchPulse {
@@ -150,202 +192,355 @@
             from { transform: translate3d(-1.5%, -1%, 0) rotate(-1deg); }
             to { transform: translate3d(1.5%, 1%, 0) rotate(1deg); }
         }
-        .logo {
-            width: 74px;
-            height: 74px;
-            border-radius: 8px;
+        .pair-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            min-width: 0;
+        }
+        .pair-brand {
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            flex: 0 0 auto;
+        }
+        .pair-brand img {
+            width: clamp(36px, 3.28125vw, 63px);
+            height: clamp(36px, 3.28125vw, 63px);
+            border-radius: clamp(9px, .86vw, 16px);
             object-fit: cover;
-            margin-bottom: 20px;
         }
-        h1 {
-            font-size: clamp(30px, 5vw, 54px);
-            line-height: 1.05;
-            margin-bottom: 12px;
-        }
-        .subtitle {
-            color: var(--muted);
-            font-size: clamp(15px, 2vw, 20px);
-            line-height: 1.6;
-            max-width: 680px;
-            margin: 0 auto 30px;
-        }
-        .code-box {
-            background: rgba(17, 21, 29, 0.92);
-            border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 8px;
-            padding: clamp(24px, 5vw, 42px);
-            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
-        }
-        .steps {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+        .pair-brand-copy {
+            display: flex;
+            align-items: baseline;
             gap: 10px;
-            margin: 0 auto 18px;
-            max-width: 760px;
+        }
+        .pair-brand-name {
+            font-size: clamp(17px, 1.484375vw, 28px);
+            font-weight: 750;
+            letter-spacing: -.01em;
+        }
+        .pair-brand-mode {
+            color: var(--color-text-muted);
+            font-size: clamp(11px, .9375vw, 18px);
+            letter-spacing: .15em;
+            text-transform: uppercase;
+        }
+        .status {
+            min-height: clamp(32px, 2.8125vw, 54px);
+            max-width: min(55vw, 580px);
+            padding: 7px 15px;
+            border: 1px solid rgba(96, 165, 250, .28);
+            border-radius: 999px;
+            background: rgba(59, 130, 246, .07);
+            color: #bfdbfe;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: clamp(12px, 1.015625vw, 19px);
+            font-weight: 650;
+            line-height: 1.25;
             text-align: left;
         }
+        .status::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: var(--color-accent-hover);
+            box-shadow: 0 0 0 5px rgba(96, 165, 250, .1);
+        }
+        .status.loading::before { animation: statusPulse 1.4s ease-in-out infinite; }
+        .status.success {
+            border-color: rgba(16, 185, 129, .35);
+            background: rgba(16, 185, 129, .08);
+            color: #a7f3d0;
+        }
+        .status.success::before { background: var(--color-success); box-shadow: 0 0 0 5px rgba(16,185,129,.1); }
+        .status.error {
+            border-color: rgba(239, 68, 68, .38);
+            background: rgba(239, 68, 68, .09);
+            color: var(--color-error-text);
+        }
+        .status.error::before { background: var(--color-error); box-shadow: 0 0 0 5px rgba(239,68,68,.1); }
+        @keyframes statusPulse { 50% { opacity: .45; } }
+        .pair-main {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) clamp(270px, 27.03125vw, 520px);
+            gap: clamp(42px, 5.625vw, 108px);
+            align-items: center;
+            min-height: 0;
+        }
+        .pair-copy {
+            align-self: center;
+            max-width: min(57.03125vw, 1095px);
+            min-width: 0;
+        }
+        .eyebrow {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--color-accent-hover);
+            font-size: clamp(11px, .9375vw, 18px);
+            font-weight: 750;
+            letter-spacing: .16em;
+            text-transform: uppercase;
+        }
+        .eyebrow::before {
+            content: "";
+            width: clamp(24px, 2.109375vw, 40px);
+            height: 1px;
+            background: var(--color-accent-hover);
+        }
+        .pair-title {
+            max-width: clamp(680px, 57.03125vw, 1095px);
+            margin: clamp(12px, 1.40625vw, 27px) 0 clamp(10px, 1.328125vw, 26px);
+            font-size: clamp(46px, 4.765625vw, 92px);
+            line-height: .98;
+            letter-spacing: -.045em;
+            font-weight: 780;
+        }
+        .pair-title span { display: block; }
+        .pair-subtitle {
+            max-width: clamp(620px, 48.4375vw, 930px);
+            color: var(--color-text-secondary);
+            font-size: clamp(16px, 1.484375vw, 29px);
+            line-height: 1.5;
+        }
+        .code-label {
+            margin-top: clamp(16px, 2.34375vw, 45px);
+            color: var(--color-text-muted);
+            font-size: clamp(10px, .859375vw, 16px);
+            font-weight: 750;
+            letter-spacing: .18em;
+            text-transform: uppercase;
+        }
+        .code-row {
+            display: flex;
+            align-items: center;
+            gap: clamp(14px, 1.5625vw, 30px);
+            margin-top: clamp(5px, .625vw, 12px);
+        }
+        .code {
+            color: var(--color-text-primary);
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: clamp(53px, 5.546875vw, 107px);
+            font-weight: 780;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: .09em;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        .timer {
+            min-height: 40px;
+            padding-left: clamp(14px, 1.5625vw, 30px);
+            border-left: 1px solid var(--color-border-light);
+            color: var(--color-text-muted);
+            display: flex;
+            align-items: center;
+            font-size: clamp(11px, 1.015625vw, 19px);
+            line-height: 1.35;
+            white-space: nowrap;
+        }
+        .steps {
+            max-width: clamp(730px, 57.03125vw, 1095px);
+            margin-top: clamp(16px, 2.1875vw, 42px);
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: clamp(12px, 1.71875vw, 33px);
+        }
         .step {
-            background: rgba(17, 21, 29, 0.62);
-            border: 1px solid rgba(148, 163, 184, 0.16);
+            display: grid;
+            grid-template-columns: clamp(26px, 2.1875vw, 42px) minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            min-width: 0;
+        }
+        .step-number {
+            width: clamp(26px, 2.1875vw, 42px);
+            height: clamp(26px, 2.1875vw, 42px);
+            border: 1px solid var(--color-border-light);
             border-radius: 8px;
-            padding: 14px;
-            color: var(--muted);
-            font-size: 14px;
-            line-height: 1.45;
+            background: rgba(18, 18, 26, .72);
+            color: var(--color-accent-hover);
+            display: grid;
+            place-items: center;
+            font-size: clamp(11px, .9375vw, 18px);
+            font-weight: 800;
         }
         .step strong {
             display: block;
-            color: var(--text);
-            font-size: 15px;
-            margin-bottom: 4px;
-        }
-        .code {
-            min-height: 96px;
-            display: grid;
-            place-items: center;
-            font-size: clamp(48px, 12vw, 104px);
-            font-weight: 900;
-            letter-spacing: 10px;
-            color: white;
-            text-shadow: 0 0 30px rgba(33, 212, 253, 0.32);
-        }
-        .url {
-            color: #bfdbfe;
-            font-size: clamp(14px, 2vw, 18px);
-            overflow-wrap: anywhere;
-            margin-top: 14px;
-        }
-        .status {
-            margin: 22px auto 0;
-            color: var(--muted);
-            font-size: 15px;
-            line-height: 1.5;
-            min-height: 24px;
-        }
-        .status.success { color: var(--success); }
-        .status.error { color: var(--danger); }
-        .actions {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 24px;
-            flex-wrap: wrap;
-        }
-        .btn {
-            min-height: 44px;
-            border-radius: 8px;
-            border: 1px solid var(--line);
-            padding: 0 16px;
-            color: var(--text);
-            background: #252b37;
-            font-weight: 800;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-        }
-        .btn.primary {
-            border: 0;
-            background: linear-gradient(135deg, #4f7df3, #6d5dfc 60%, #c75cff);
-        }
-        .timer {
-            color: var(--quiet);
-            font-size: 13px;
-            margin-top: 12px;
-        }
-        .qr-wrap {
-            display: grid;
-            place-items: center;
-            gap: 12px;
-            margin-bottom: 6px;
-        }
-        .qr {
-            width: clamp(168px, 26vw, 248px);
-            aspect-ratio: 1 / 1;
-            background: #fff;
-            padding: 12px;
-            border-radius: 14px;
-            box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
-        }
-        .qr:empty { display: none; }
-        .qr svg { width: 100%; height: 100%; display: block; }
-        .qr-caption {
-            color: var(--text);
-            font-size: clamp(15px, 2vw, 20px);
-            font-weight: 800;
-        }
-        .code-alt { color: var(--muted); font-size: 14px; }
-        .code-divider {
-            color: var(--quiet);
-            font-size: 12px;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            margin: 20px 0 4px;
-        }
-        html.tv-pairing-mode body {
-            min-height: 100%;
-            padding: clamp(10px, 2.1vh, 18px) clamp(18px, 3vw, 34px);
-        }
-        html.tv-pairing-mode .screen {
-            width: min(96vw, 1160px);
-            height: 100%;
-            display: grid;
-            grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
-            align-content: center;
-            gap: clamp(6px, 1.3vh, 12px);
-        }
-        html.tv-pairing-mode .logo {
-            width: clamp(42px, 8vh, 62px);
-            height: clamp(42px, 8vh, 62px);
-            margin: 0 auto;
-        }
-        html.tv-pairing-mode h1 {
-            font-size: clamp(25px, 6.6vh, 42px);
-            margin: 0;
-        }
-        html.tv-pairing-mode .subtitle {
-            font-size: clamp(13px, 2.8vh, 18px);
-            line-height: 1.35;
-            max-width: 820px;
-            margin: 0 auto;
-        }
-        html.tv-pairing-mode .steps {
-            gap: clamp(7px, 1.4vw, 12px);
-            margin: 0 auto;
-            max-width: 900px;
-        }
-        html.tv-pairing-mode .step {
-            padding: clamp(8px, 1.8vh, 12px);
-            font-size: clamp(11px, 2.4vh, 14px);
+            margin: 1px 0 4px;
+            color: var(--color-text-primary);
+            font-size: clamp(13px, 1.09375vw, 21px);
             line-height: 1.25;
         }
-        html.tv-pairing-mode .step strong {
-            font-size: clamp(12px, 2.6vh, 15px);
-            margin-bottom: 2px;
+        .step span {
+            display: block;
+            color: var(--color-text-muted);
+            font-size: clamp(11px, .9375vw, 18px);
+            line-height: 1.35;
         }
-        html.tv-pairing-mode .code-box {
-            align-self: stretch;
+        .qr-panel {
+            width: 100%;
+            height: 100%;
+            max-height: 37.890625vw;
+            min-height: 0;
+            padding-left: clamp(36px, 3.75vw, 72px);
+            border-left: 1px solid var(--color-border);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .qr-shell {
+            position: relative;
+            width: clamp(216px, 22.5vw, 432px);
+            aspect-ratio: 1 / 1;
+            padding: clamp(14px, 1.40625vw, 27px);
+            border-radius: clamp(16px, 1.5625vw, 30px);
+            background: var(--color-qr-surface);
+            color: var(--color-bg-primary);
             display: grid;
             place-items: center;
-            padding: clamp(10px, 2.6vh, 22px) clamp(16px, 3vw, 32px);
+            box-shadow: 0 26px 70px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.12);
+        }
+        .qr { width: 100%; height: 100%; }
+        .qr:empty { display: none; }
+        .qr svg { width: 100%; height: 100%; display: block; }
+        .qr:not(:empty) + .qr-loading { display: none; }
+        .qr-loading {
+            color: var(--color-bg-primary);
+            font-size: 15px;
+            font-weight: 750;
+        }
+        .qr-caption {
+            margin-top: clamp(14px, 1.5625vw, 30px);
+            color: var(--color-text-primary);
+            font-size: clamp(15px, 1.328125vw, 25px);
+            font-weight: 700;
+        }
+        .scan-copy {
+            margin-top: 5px;
+            color: var(--color-text-muted);
+            font-size: clamp(11px, 1.015625vw, 19px);
+            line-height: 1.45;
+        }
+        .qr-fallback {
+            width: min(100%, 320px);
+            padding: 24px;
+            border: 1px solid var(--color-border-light);
+            border-radius: 16px;
+            background: var(--color-bg-secondary);
+        }
+        .qr-fallback strong { display: block; margin-bottom: 8px; }
+        .url {
+            color: #bfdbfe;
+            display: block;
+            margin-top: 12px;
+            font-size: 13px;
+            overflow-wrap: anywhere;
+        }
+        .pair-footer {
+            min-height: clamp(62px, 4.84375vw, 93px);
+            padding-top: clamp(14px, 1.40625vw, 27px);
+            border-top: 1px solid var(--color-border);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+        }
+        .pair-helper {
+            min-height: 48px;
+            color: var(--color-text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: clamp(11px, 1.015625vw, 19px);
+        }
+        .pair-helper img { width: 20px; height: 20px; flex: 0 0 auto; }
+        .actions { display: flex; gap: 12px; flex: 0 0 auto; }
+        .btn {
+            min-height: clamp(48px, 3.4375vw, 66px);
+            padding: 0 clamp(16px, 1.40625vw, 27px);
+            border: 1px solid var(--color-border-light);
+            border-radius: 10px;
+            background: var(--color-bg-secondary);
+            color: #d9e1ee;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: clamp(13px, 1.015625vw, 19px);
+            font-weight: 700;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .btn img { width: 18px; height: 18px; flex: 0 0 auto; }
+        .btn.primary {
+            border-color: var(--color-text-primary);
+            background: var(--color-text-primary);
+            color: var(--color-bg-primary);
+        }
+        .btn.primary img { filter: brightness(0); }
+        .btn:hover { background: var(--color-bg-tertiary); }
+        .btn.primary:hover { background: #e2e8f0; }
+        .btn:disabled { cursor: wait; opacity: .56; }
+        .btn:focus { outline: none; }
+        .btn:focus-visible {
+            outline: 3px solid #bfdbfe;
+            outline-offset: 3px;
+        }
+        html.tv-pairing-mode body { padding: 0; }
+        html.tv-pairing-mode .screen {
+            width: 100vw;
+            height: 100vh;
             min-height: 0;
+            padding:
+                max(clamp(28.5px, 2.96875vw, 57px), env(safe-area-inset-top))
+                max(clamp(48px, 5vw, 96px), env(safe-area-inset-right))
+                max(clamp(25.5px, 2.65625vw, 51px), env(safe-area-inset-bottom))
+                max(clamp(48px, 5vw, 96px), env(safe-area-inset-left));
+            grid-template-rows: clamp(40px, 3.75vw, 72px) minmax(0, 1fr) clamp(62px, 4.84375vw, 93px);
+            gap: clamp(16.5px, 1.71875vw, 33px);
         }
-        html.tv-pairing-mode .qr-wrap { gap: clamp(5px, 1.2vh, 9px); margin: 0; }
-        html.tv-pairing-mode .qr { width: clamp(118px, 29vh, 178px); padding: 8px; }
-        html.tv-pairing-mode .qr-caption { font-size: clamp(13px, 2.7vh, 17px); }
-        html.tv-pairing-mode .code-alt { font-size: clamp(10px, 2.2vh, 13px); }
-        html.tv-pairing-mode .code-divider { margin: clamp(8px, 1.6vh, 12px) 0 0; }
-        html.tv-pairing-mode .code {
-            min-height: clamp(42px, 9vh, 72px);
-            font-size: clamp(36px, 12.5vh, 70px);
-            letter-spacing: clamp(5px, 1.6vw, 10px);
+        @media (max-height: 600px) {
+            html.tv-pairing-mode .pair-title { font-size: clamp(42px, 4.765625vw, 61px); }
+            html.tv-pairing-mode .pair-subtitle { font-size: clamp(14px, 1.484375vw, 19px); line-height: 1.4; }
+            html.tv-pairing-mode .code-label { margin-top: 15px; }
+            html.tv-pairing-mode .steps { margin-top: 15px; }
+            html.tv-pairing-mode .qr-caption { margin-top: 12px; }
         }
-        html.tv-pairing-mode .status { margin-top: 0; min-height: 20px; font-size: clamp(12px, 2.5vh, 15px); }
-        html.tv-pairing-mode .actions { margin-top: 0; }
-        html.tv-pairing-mode .btn { min-height: clamp(36px, 7vh, 44px); }
-        @media (max-width: 720px) {
-            body { padding: 24px; }
-            .steps { grid-template-columns: 1fr; }
+        @media (max-width: 820px) {
+            html:not(.tv-pairing-mode) .screen {
+                min-height: 100dvh;
+                height: auto;
+                overflow: visible;
+                padding: 24px;
+            }
+            html:not(.tv-pairing-mode) .pair-top { align-items: flex-start; }
+            html:not(.tv-pairing-mode) .pair-brand-copy { display: block; }
+            html:not(.tv-pairing-mode) .pair-brand-mode { display: block; margin-top: 3px; }
+            html:not(.tv-pairing-mode) .pair-main { grid-template-columns: 1fr; gap: 32px; }
+            html:not(.tv-pairing-mode) .pair-copy { max-width: none; }
+            html:not(.tv-pairing-mode) .pair-title { font-size: clamp(42px, 11vw, 60px); }
+            html:not(.tv-pairing-mode) .pair-subtitle { font-size: 16px; }
+            html:not(.tv-pairing-mode) .steps { grid-template-columns: 1fr; }
+            html:not(.tv-pairing-mode) .qr-panel { border-left: 0; border-top: 1px solid var(--color-border); padding: 32px 0 0; }
+            html:not(.tv-pairing-mode) .pair-footer { align-items: stretch; flex-direction: column; }
+            html:not(.tv-pairing-mode) .actions { width: 100%; flex-direction: column; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                scroll-behavior: auto !important;
+                animation-duration: .01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .01ms !important;
+            }
         }
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
@@ -365,33 +560,61 @@
         </div>
         <div class="pair-launch-progress" aria-hidden="true"><span></span></div>
     </div>
-    <main class="screen" id="pairing-screen">
-        <img class="logo" src="/img/norva-app-icon.png" alt="Norva">
-        <h1 id="page-title">Connect this TV to Norva</h1>
-        <p class="subtitle" id="page-subtitle">Use your phone or computer to sign in or create your Norva Account. This TV will open the Norva app automatically after approval.</p>
-
-        <section class="steps" aria-label="Pairing steps">
-            <div class="step"><strong>1. Open Norva Account</strong>Use your phone, tablet or computer.</div>
-            <div class="step"><strong>2. Scan or enter the code</strong>Scan the QR with your phone camera, or enter the code in your account.</div>
-            <div class="step"><strong>3. Start watching</strong>The TV opens Norva Watch with your cloud library.</div>
-        </section>
-
-        <section class="code-box" aria-live="polite">
-            <div class="qr-wrap">
-                <div class="qr" id="qr" aria-hidden="true"></div>
-                <div class="qr-caption">Scan with your phone camera to sign in</div>
-                <div class="code-alt">Or open <span class="url" id="pair-url"></span> and enter the code below</div>
+    <main class="screen" id="pairing-screen" aria-labelledby="page-title" aria-describedby="page-subtitle" data-pairing-phase="loading">
+        <header class="pair-top">
+            <div class="pair-brand">
+                <img src="/img/norva-app-icon-96.png?v=1" alt="Norva">
+                <div class="pair-brand-copy">
+                    <span class="pair-brand-name">Norva</span>
+                    <span class="pair-brand-mode">TV setup</span>
+                </div>
             </div>
-            <div class="code-divider">Pairing code</div>
-            <div class="code" id="code">...</div>
-            <div class="timer" id="timer"></div>
-        </section>
+            <div class="status loading" id="status" role="status" aria-live="polite" aria-atomic="true">Creating secure pairing code</div>
+        </header>
 
-        <div class="status" id="status">Creating pairing code...</div>
-        <div class="actions">
-            <button class="btn primary" id="restart-button" type="button">New code</button>
-            <a class="btn" id="account-link" href="/cloud.html">Open Norva Account</a>
+        <div class="pair-main">
+            <section class="pair-copy">
+                <p class="eyebrow">One minute setup</p>
+                <h1 class="pair-title" id="page-title"><span>Connect this TV</span><span>to your account.</span></h1>
+                <p class="pair-subtitle" id="page-subtitle">Scan the QR code with your phone, or enter the pairing code in Norva. Your library and profiles will appear here automatically.</p>
+
+                <p class="code-label">Pairing code</p>
+                <div class="code-row">
+                    <div class="code" id="code" aria-label="Pairing code loading">... ...</div>
+                    <div class="timer" id="timer">Creating code...</div>
+                </div>
+
+                <section class="steps" aria-label="Pairing steps">
+                    <div class="step"><div class="step-number" aria-hidden="true">1</div><div><strong>Open Norva</strong><span>On your phone or tablet</span></div></div>
+                    <div class="step"><div class="step-number" aria-hidden="true">2</div><div><strong>Scan or enter</strong><span>Use the code shown here</span></div></div>
+                    <div class="step"><div class="step-number" aria-hidden="true">3</div><div><strong>Approve this TV</strong><span>Watching starts automatically</span></div></div>
+                </section>
+            </section>
+
+            <aside class="qr-panel" id="qr-panel" aria-labelledby="qr-caption">
+                <div class="qr-shell" id="qr-shell">
+                    <div class="qr" id="qr" aria-hidden="true"></div>
+                    <span class="qr-loading" id="qr-state-label" aria-hidden="true">Creating QR...</span>
+                </div>
+                <div class="qr-fallback" id="qr-fallback" hidden>
+                    <strong id="qr-fallback-title">Enter the code in Norva</strong>
+                    <span>No camera is required. Open Norva Account on your phone and use the pairing code.</span>
+                    <span class="url" id="pair-url"></span>
+                </div>
+                <div class="qr-guidance" id="qr-guidance">
+                    <div class="qr-caption" id="qr-caption">Scan with your phone camera</div>
+                    <div class="scan-copy">No TV keyboard needed.<br>Approval happens on your phone.</div>
+                </div>
+            </aside>
         </div>
+
+        <footer class="pair-footer">
+            <div class="pair-helper"><img src="/img/icons/norva-check-circle-simple.svg?v=1" alt="">Code is temporary and works only for this TV.</div>
+            <div class="actions">
+                <button class="btn" id="restart-button" type="button"><img src="/img/icons/norva-refresh-simple.svg?v=1" alt="">New code</button>
+                <a class="btn primary" id="account-link" href="/cloud.html" aria-label="Pair manually on this TV"><img src="/img/icons/norva-account.svg?v=1" alt="">Pair on this TV</a>
+            </div>
+        </footer>
     </main>
 
     <script src="/js/cloudApi.js?v=50"></script>
@@ -400,22 +623,43 @@
         const params = new URLSearchParams(location.search);
         const codeEl = document.getElementById('code');
         const qrEl = document.getElementById('qr');
+        const qrShellEl = document.getElementById('qr-shell');
+        const qrFallbackEl = document.getElementById('qr-fallback');
+        const qrGuidanceEl = document.getElementById('qr-guidance');
+        const qrPanelEl = document.getElementById('qr-panel');
+        const qrStateLabelEl = document.getElementById('qr-state-label');
         const pairUrlEl = document.getElementById('pair-url');
         const pairingScreenEl = document.getElementById('pairing-screen');
         const pairLaunchEl = document.getElementById('pair-launch-screen');
+        const restartButton = document.getElementById('restart-button');
 
         // Render a scannable QR of the approval URL (CSP-safe inline SVG, no data: URI).
-        // Falls back silently to the code + URL if the vendored encoder didn't load.
+        // Falls back to the code + URL if the vendored encoder didn't load.
+        function setQrState(state) {
+            const showFallback = state === 'fallback';
+            if (qrShellEl) qrShellEl.hidden = showFallback;
+            if (qrFallbackEl) qrFallbackEl.hidden = !showFallback;
+            if (qrGuidanceEl) qrGuidanceEl.hidden = showFallback;
+            if (qrPanelEl) qrPanelEl.setAttribute('aria-labelledby', showFallback ? 'qr-fallback-title' : 'qr-caption');
+        }
+
         function renderQr(url) {
-            if (!qrEl) return;
-            if (typeof qrcode !== 'function') { qrEl.innerHTML = ''; return; }
+            if (!qrEl || typeof qrcode !== 'function') {
+                if (qrEl) qrEl.innerHTML = '';
+                setQrState('fallback');
+                return false;
+            }
             try {
                 const qr = qrcode(0, 'M');
                 qr.addData(url);
                 qr.make();
                 qrEl.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 1, scalable: true });
+                setQrState('ready');
+                return true;
             } catch (_) {
                 qrEl.innerHTML = '';
+                setQrState('fallback');
+                return false;
             }
         }
         const timerEl = document.getElementById('timer');
@@ -427,6 +671,9 @@
         let pollHandle = 0;
         let timerHandle = 0;
         let commandHandle = 0;
+        let pairingStartPromise = null;
+        let remoteNavHasFocus = false;
+        let restoreRestartFocus = false;
         let pollFailStreak = 0;   // consecutive poll errors — don't flash red on a single blip
         let autoRegenCount = 0;   // codes auto-refreshed on expiry (capped, see handleExpiry)
         const MAX_AUTO_REGEN = 6; // ~1h at 10-min TTL, then require a deliberate "New code"
@@ -440,7 +687,7 @@
 
         // "New code" is a deliberate user action: reset the auto-refresh budget so a
         // fresh hour of hands-off refreshing starts from here.
-        document.getElementById('restart-button').addEventListener('click', () => {
+        restartButton.addEventListener('click', () => {
             autoRegenCount = 0;
             startPairing();
         });
@@ -448,24 +695,43 @@
         initRemoteNav();
 
         // Android TV D-pad: this standalone page carries no spatial-nav engine, so give
-        // the remote explicit movement between the two actions ("New code" / "Open Norva
-        // Account") and Enter to activate. The happy path is scanning the QR with a phone
+        // the remote explicit movement between the two actions ("New code" / "Pair on this
+        // TV") and Enter to activate. The happy path is scanning the QR with a phone
         // (no remote needed), but an expired code or the account link must still be
         // reachable from the couch. No-op off Android TV.
+        function remoteItems() {
+            return [restartButton, accountLink].filter((item) => item && !item.disabled && !item.hidden && item.getAttribute('aria-hidden') !== 'true');
+        }
+
+        function focusInitialRemoteAction() {
+            if (remoteNavHasFocus || !/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) return;
+            if (!restartButton.disabled) {
+                try {
+                    restartButton.focus({ preventScroll: true });
+                    remoteNavHasFocus = true;
+                } catch (_) { /* noop */ }
+            }
+        }
+
         function initRemoteNav() {
             if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) return;
-            const items = () => [document.getElementById('restart-button'), document.getElementById('account-link')].filter(Boolean);
-            try { items()[0]?.focus(); } catch (_) { /* noop */ } // give the remote a starting point
+            focusInitialRemoteAction();
             document.addEventListener('keydown', (e) => {
-                const list = items();
+                const list = remoteItems();
                 if (!list.length) return;
                 const i = Math.max(0, list.indexOf(document.activeElement));
                 if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-                    e.preventDefault(); list[(i + 1) % list.length].focus();
+                    e.preventDefault();
+                    remoteNavHasFocus = true;
+                    list[(i + 1) % list.length].focus();
                 } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                    e.preventDefault(); list[(i - 1 + list.length) % list.length].focus();
+                    e.preventDefault();
+                    remoteNavHasFocus = true;
+                    list[(i - 1 + list.length) % list.length].focus();
                 } else if ((e.key === 'Enter' || e.key === 'NavigateEnter') && list.includes(document.activeElement)) {
-                    e.preventDefault(); document.activeElement.click();
+                    e.preventDefault();
+                    remoteNavHasFocus = true;
+                    document.activeElement.click();
                 }
             });
         }
@@ -509,7 +775,35 @@
             startPairing();
         }
 
-        async function startPairing() {
+        function setRestartPending(isPending) {
+            if (isPending) restoreRestartFocus = document.activeElement === restartButton;
+            restartButton.disabled = isPending;
+            restartButton.setAttribute('aria-busy', String(isPending));
+            if (!isPending && restoreRestartFocus) {
+                try { restartButton.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+                remoteNavHasFocus = true;
+                restoreRestartFocus = false;
+            } else if (!isPending) {
+                focusInitialRemoteAction();
+            }
+        }
+
+        function formatDisplayCode(code) {
+            const normalized = String(code || '').replace(/\s+/g, '');
+            return normalized.length === 6 ? normalized.slice(0, 3) + ' ' + normalized.slice(3) : normalized;
+        }
+
+        function startPairing() {
+            if (pairingStartPromise) return pairingStartPromise;
+            setRestartPending(true);
+            pairingStartPromise = startPairingOnce().finally(() => {
+                pairingStartPromise = null;
+                setRestartPending(false);
+            });
+            return pairingStartPromise;
+        }
+
+        async function startPairingOnce() {
             revealPairingScreen();
             clearInterval(pollHandle);
             clearInterval(timerHandle);
@@ -518,11 +812,14 @@
             expiresAt = 0;
             pollFailStreak = 0;
             clearInterval(commandHandle);
-            codeEl.textContent = '...';
+            codeEl.textContent = '... ...';
+            codeEl.setAttribute('aria-label', 'Pairing code loading');
             pairUrlEl.textContent = '';
             if (qrEl) qrEl.innerHTML = '';
-            timerEl.textContent = '';
-            setStatus('', 'Creating pairing code...');
+            setQrState('loading');
+            qrStateLabelEl.textContent = 'Creating QR...';
+            timerEl.textContent = 'Creating code...';
+            setStatus('loading', 'Creating secure pairing code');
 
             try {
                 const deviceType = params.get('device') || inferDeviceType();
@@ -540,15 +837,18 @@
                 expiresAt = new Date(result.expiresAt).getTime();
                 const pairPath = '/cloud.html?pair=' + encodeURIComponent(currentCode);
                 const pairUrl = location.origin + pairPath;
-                codeEl.textContent = currentCode;
+                codeEl.textContent = formatDisplayCode(currentCode);
+                codeEl.setAttribute('aria-label', 'Pairing code ' + currentCode.split('').join(' '));
                 pairUrlEl.textContent = pairUrl;
                 accountLink.href = pairPath;
                 renderQr(pairUrl);
-                setStatus('', 'Waiting for approval...');
+                setStatus('pending', 'Waiting for your phone');
                 updateTimer();
                 pollHandle = setInterval(pollPairing, 2500);
                 timerHandle = setInterval(updateTimer, 1000);
             } catch (error) {
+                qrStateLabelEl.textContent = 'QR unavailable';
+                timerEl.textContent = 'Select New code to retry';
                 setStatus('error', 'Unable to create a pairing code. Check your connection and try again.');
             }
         }
@@ -573,7 +873,7 @@
                     handleExpiry();
                 } else if (statusEl.classList.contains('error')) {
                     // Still pending after a transient blip — clear the stale red message.
-                    setStatus('', 'Waiting for approval...');
+                    setStatus('pending', 'Waiting for your phone');
                 }
             } catch (error) {
                 // A single dropped poll (Wi-Fi hiccup) must not paint a permanent red
@@ -647,13 +947,17 @@
             const seconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
             const minutes = Math.floor(seconds / 60);
             const rest = String(seconds % 60).padStart(2, '0');
-            timerEl.textContent = seconds ? `Expires in ${minutes}:${rest}` : 'Refreshing code…';
+            timerEl.textContent = seconds ? `Refreshes in ${String(minutes).padStart(2, '0')}:${rest}` : 'Refreshing code...';
             if (!seconds) handleExpiry();
         }
 
         function setStatus(type, message) {
-            statusEl.className = type ? 'status ' + type : 'status';
+            const normalizedType = type || 'pending';
+            statusEl.className = 'status ' + normalizedType;
             statusEl.textContent = message;
+            statusEl.setAttribute('role', normalizedType === 'error' ? 'alert' : 'status');
+            statusEl.setAttribute('aria-live', normalizedType === 'error' ? 'assertive' : 'polite');
+            pairingScreenEl.dataset.pairingPhase = normalizedType;
         }
 
         function inferDeviceType() {

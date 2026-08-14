@@ -68,3 +68,55 @@ Findings and correction history:
 ## Result
 
 Passed. The implementation and visual comparisons were completed locally; production deployment is not claimed by this report.
+
+---
+
+# Android TV pairing — Panorama scindé A
+
+Date: 2026-08-14
+
+## Source and implementation
+
+- Approved source: `C:\Users\AdrienHernandez\Documents\Norva repo\.superdesign\tmp\superdesign-tv-pairing-a.png`
+- Production implementation capture: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-tv-pairing-a-implementation-1280x720-crop.png`
+- Side-by-side comparison, approved source left and implementation right: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-tv-pairing-a-comparison-1280x720.png`
+- Compact Android TV WebView capture: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-tv-pairing-a-implementation-960x540.png`
+- Compact D-pad focus capture: `C:\Users\AdrienHernandez\AppData\Local\Temp\norva-tv-pairing-a-focus-960x540.png`
+- Reference and primary comparison viewport: 1280 × 720 CSS px.
+- Compact APK WebView viewport: 960 × 540 CSS px.
+- State: pending approval with a real scannable QR, a short-lived pairing code and the APK's initial `New code` D-pad focus; no authenticated account data is displayed.
+- Comparison scope: full visible pairing document including header status, split content, QR, steps and fixed action rail.
+
+## Findings and correction history
+
+- Replaced the centered 1160 px card-like composition with the approved full-bleed split panorama and a 5% TV safe zone.
+- Matched the approved header, two-line title, grouped six-character code, three steps, 288 px QR at 720p and fixed bottom rail.
+- Replaced the prototype's illustrative QR drawing with the actual vendored QR encoder output. The denser pattern is an intentional functional difference.
+- The implementation comparison includes the required initial D-pad focus ring; the static approved source did not depict a focused action.
+- Kept the approved hierarchy while raising both TV actions from 44 px to a minimum 48 px target.
+- Reused the official Norva app mark, account/check assets, local Inter variable font and canonical Norva color tokens. The refresh glyph is the library-backed Heroicons arrow-path asset.
+- Removed the one-second timer from the live region; only the bounded status pill announces asynchronous changes.
+- Added explicit loading, pending, success and sanitized error presentations, a QR-unavailable fallback, reduced-motion handling and visible D-pad focus.
+- Made pairing creation single-flight and restored the initial `New code` focus after its temporary disabled state.
+- Preserved the existing pairing payload, TTL, secret handling, polling cadence, device-token storage, safe return path and command loop.
+- Kept the same-origin manual fallback but renamed it to the honest `Pair on this TV`: it opens `/cloud.html?pair=<code>` inside the TV WebView; the QR remains the preferred phone-first route.
+- Added `no-store` for `cloud-pair.html`; the APK also retains its per-launch shell cache bust.
+
+## Runtime measurements
+
+- 960 × 540: document and body exactly 960 × 540; QR 216 px; actions end at y=515.5.
+- 1280 × 720: document and body exactly 1280 × 720; QR 288 px; actions end at y=691.
+- 1920 × 1080: document and body exactly 1920 × 1080; QR 432 px; actions end at y=1030.
+- No horizontal or vertical scroll was produced at any tested TV viewport.
+- D-pad order passed at all sizes: `New code → Pair on this TV → New code`, including Up/Down looping.
+- Loading, pending, creation failure, four-poll failure, recovery, expiry pause, QR fallback and success states remained inside the viewport with sanitized copy.
+
+## Verification
+
+- Focused TV pairing/navigation/player/sanitization/billing suite: 81 passed, 0 failed.
+- Full repository suite: 1648 tests, 1647 passed, 0 failed, 1 skipped.
+- `git diff --check`: passed.
+- Existing Android TV emulator verified the native shell as full-screen at 1920 × 1080. The installed APK was not rebuilt or modified during this QA.
+- Post-deployment gate remains distinct: scan and approve the production QR from a phone, then confirm the automatic APK redirect.
+
+final result: passed

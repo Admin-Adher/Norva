@@ -8,7 +8,7 @@
 /*
   Cache-Control: public, max-age=0, must-revalidate
 
-# App SPA shell — served to the Android phone/TV WebViews, which DELIBERATELY skip the
+# App and pairing shells — served to the Android phone/TV WebViews, which DELIBERATELY skip the
 # service worker (app.html: `if (/NorvaTV-Android/i.test(navigator.userAgent)) return;`)
 # and therefore rely 100% on the WebView HTTP cache. `must-revalidate` above was not
 # enough: a shell copy pinned "fresh" (a past long-TTL response, or a WebView that skips
@@ -22,6 +22,8 @@
 /app
   Cache-Control: no-store
 /app.html
+  Cache-Control: no-store
+/cloud-pair.html
   Cache-Control: no-store
 
 # Versioned JS/CSS (every reference carries ?v=<hash>, rewritten on each deploy by
